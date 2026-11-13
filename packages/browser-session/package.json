@@ -1,0 +1,10 @@
+{
+  "name": "@ubc2026/browser-session",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./session.mjs",
+  "scripts": { "test": "node --test session.test.mjs" },
+  "dependencies": { "@ubc2026/browser-search": "0.1.0" },
+  "engines": { "node": ">=20" }
+}

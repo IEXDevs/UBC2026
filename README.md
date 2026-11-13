@@ -15,13 +15,14 @@ Agents hold budgets and guardrails, pay for APIs/data over **x402** on Solana **
 
 Official guide: [Hackathon Guide UBC 26](https://docs.google.com/document/d/1QaySCo7u3VxMVNdk3C5Ab3ewc2E46AuLntti-Uzx5EY/edit?usp=sharing)
 
-Agentic track requirements covered so far in libraries:
+Library scaffolds (not product-complete) cover pieces of:
 
-1. Agents can prepare onchain payment challenges (x402 v2 / Solana devnet)
-2. Spending controls: bot types, caps / FRQ, kill switch, over-budget approve-once / raise-limit, mandatory approval digests
-3. Decision loop documented below; safety limits enforced in pure modules before any signing path
+1. x402 v2 Solana **devnet** payment challenges / feed helpers
+2. Bot types, caps / FRQ, kill switch, over-budget approve-once / raise-limit, approval digests
+3. Verify-agent consensus loop + digests; trust-score confirmation gate
+4. Owner-bound browser sessions, per-bot concurrency, agent search/browser tools
 
-Still required for a complete submission: working frontend + Cloudflare agent runtime, live x402 settle path, on-chain program IDs in README, ElevenLabs demo with audio, Grok Bot on X chat export, 2–3 minute demo video.
+Still required for a complete submission: working frontend + Cloudflare agent runtime with DO checkpoints, live x402 settle path, on-chain program IDs in README, ElevenLabs demo with audio, Grok Bot on X chat export, 2–3 minute demo video.
 
 ## Agent decision loop
 
@@ -40,13 +41,14 @@ goal → research (browser/search)
 
 | Package | Role |
 | --- | --- |
-| `packages/browser-search` | Brave search + Cloudflare Browser Run live view |
+| `packages/browser-search` | Brave search + Cloudflare Browser Run adapters |
+| `packages/browser-session` | Owner-bound sessions, per-bot concurrency, agent search/browser tools |
 | `packages/bot-policy` | Bot types, caps, kill switch, mandatory approvals |
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate |
 | `packages/x402` | x402 v2 Solana devnet challenge / signature / feed helpers |
 
-None of these modules sign or broadcast. Durable accounting and authenticated owner endpoints must enforce their decisions.
+These are library scaffolds, not a shipping app. None sign or broadcast. Persist sessions/approvals/budgets in a Durable Object or transactional DB; queues are transport only.
 
 ## Hosting split (planned)
 
