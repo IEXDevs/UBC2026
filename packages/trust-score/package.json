@@ -1,0 +1,9 @@
+{
+  "name": "@ubc2026/trust-score",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./trust.mjs",
+  "scripts": { "test": "node --test trust.test.mjs" },
+  "engines": { "node": ">=20" }
+}

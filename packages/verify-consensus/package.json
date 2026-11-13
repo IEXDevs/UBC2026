@@ -1,0 +1,9 @@
+{
+  "name": "@ubc2026/verify-consensus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./consensus.mjs",
+  "scripts": { "test": "node --test consensus.test.mjs" },
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@ubc2026/x402",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./x402.mjs",
+  "scripts": { "test": "node --test x402.test.mjs" },
+  "engines": { "node": ">=20" }
+}
