@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runDecisionGate } from './loop.mjs';
+import { memoFromDecision } from '@ubc2026/verify-consensus';
+
+function assertDecisionMemo(result) {
+  const memo = JSON.parse(result.memo);
+  assert.equal(result.memo, memoFromDecision(result.consensus.decisionRecord));
+  assert.equal(memo.r, result.digests.decision);
+  assert.equal(memo.d, result.digests.facts);
+  assert.match(memo.r, /^[a-f0-9]{64}$/);
+}
 
 const wallet = {
   id: 'w_main',
@@ -65,6 +74,7 @@ test('ask mode requires approval after trust + verify pass', async () => {
   assert.equal(result.state, 'approval-needed');
   assert.equal(result.trust.state, 'allowed');
   assert.equal(result.consensus.state, 'consensus');
+  assertDecisionMemo(result);
 });
 
 test('fully automatic mode can become ready-to-execute', async () => {
@@ -79,6 +89,7 @@ test('fully automatic mode can become ready-to-execute', async () => {
     now: Date.now(),
   });
   assert.equal(result.state, 'ready-to-execute');
+  assertDecisionMemo(result);
 });
 
 test('low trust score pauses before verify', async () => {
@@ -94,6 +105,21 @@ test('low trust score pauses before verify', async () => {
     now: Date.now(),
   });
   assert.equal(result.state, 'trust-confirmation-required');
+});
+
+test('verify mismatch does not attach a memo', async () => {
+  const result = await runDecisionGate({
+    bot,
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '800',
+    mainFn: async () => facts,
+    verifyFn: async () => ({ ...facts, price: '1' }),
+    now: Date.now(),
+  });
+  assert.equal(result.state, 'verify-mismatch');
+  assert.equal(result.memo, undefined);
 });
 
 test('frozen wallet blocks the loop', async () => {

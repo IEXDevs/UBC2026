@@ -29,8 +29,50 @@ export function normalizeFacts(facts) {
   };
 }
 
+function sha256Hex(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 export function factsDigest(facts) {
-  return createHash('sha256').update(JSON.stringify(normalizeFacts(facts))).digest('hex');
+  return sha256Hex(JSON.stringify(normalizeFacts(facts)));
+}
+
+function canonicalMismatches(mismatches) {
+  if (!Array.isArray(mismatches)) fail('Mismatch history is required');
+  return mismatches.map(entry => {
+    if (!entry || !Number.isSafeInteger(entry.attempt) || entry.attempt < 1 || entry.attempt > MAX_ATTEMPTS) fail('Invalid mismatch history');
+    if (typeof entry.field !== 'string' || entry.field.length < 1 || entry.field.length > 64) fail('Invalid mismatch history');
+    return { attempt: entry.attempt, field: entry.field };
+  });
+}
+
+/** Canonical verifier decision record. The hash binds asset, price, trust score, amount, and the reasoning summary. */
+function canonicalDecisionPayload({ facts, attemptCount, mismatches, outcome, version }) {
+  const normalized = normalizeFacts(facts);
+  if (version !== 1) fail('Unsupported decision record version');
+  if (!['consensus', 'manual-review'].includes(outcome)) fail('Invalid decision outcome');
+  if (!Number.isSafeInteger(attemptCount) || attemptCount < 1 || attemptCount > MAX_ATTEMPTS) fail('Attempt history is required');
+  return {
+    version,
+    outcome,
+    attemptCount,
+    mismatches: canonicalMismatches(mismatches),
+    facts: normalized,
+    finalDigest: factsDigest(normalized),
+  };
+}
+
+/** SHA-256 of the canonical decision record. A digest is not a signature. */
+export function hashDecisionRecord(record) {
+  if (!record || typeof record !== 'object') fail('Invalid decision record');
+  const payload = canonicalDecisionPayload({
+    facts: record.facts,
+    attemptCount: record.attemptCount,
+    mismatches: record.mismatches,
+    outcome: record.outcome,
+    version: record.version,
+  });
+  return { payload, recordDigest: sha256Hex(JSON.stringify(payload)) };
 }
 
 export function compareFacts(main, verified) {
@@ -84,23 +126,30 @@ export async function reachConsensus({ mainFn, verifyFn, maxAttempts = MAX_ATTEM
 }
 
 export function buildDecisionRecord({ facts, attempts, outcome }) {
-  const normalized = normalizeFacts(facts);
   if (!Array.isArray(attempts) || attempts.length < 1) fail('Attempt history is required');
-  if (!['consensus', 'manual-review'].includes(outcome)) fail('Invalid decision outcome');
-  const payload = {
+  const mismatches = attempts.flatMap(entry => {
+    if (!entry || !Array.isArray(entry.mismatches)) fail('Attempt history is required');
+    return entry.mismatches.map(field => ({ attempt: entry.attempt, field }));
+  });
+  const { payload, recordDigest } = hashDecisionRecord({
     version: 1,
     outcome,
     attemptCount: attempts.length,
-    mismatches: attempts.flatMap(entry => entry.mismatches.map(field => ({ attempt: entry.attempt, field }))),
-    facts: normalized,
-    finalDigest: factsDigest(normalized),
-  };
-  return { ...payload, recordDigest: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
+    mismatches,
+    facts,
+  });
+  return { ...payload, recordDigest };
 }
 
-/** Compact memo payload for attaching beside a Solana transaction. Not a signature. */
+/**
+ * Compact memo string whose `r` field is the SHA-256 of the verifier-approved decision record.
+ * Recomputes the digest from the record; a caller-supplied digest that does not match is rejected.
+ * Not a signature, and not an on-chain memo submission.
+ */
 export function memoFromDecision(record) {
   if (!record || !required(record.recordDigest) || !required(record.finalDigest) || !['consensus', 'manual-review'].includes(record.outcome)) fail('Invalid decision record');
   if (record.outcome !== 'consensus') fail('Only consensus decisions may be attached as transaction memos');
-  return JSON.stringify({ v: 1, o: 'c', d: record.finalDigest, r: record.recordDigest });
+  const { payload, recordDigest } = hashDecisionRecord(record);
+  if (record.recordDigest !== recordDigest || record.finalDigest !== payload.finalDigest) fail('Decision record digest does not match the hashed record');
+  return JSON.stringify({ v: 1, o: 'c', d: payload.finalDigest, r: recordDigest });
 }

@@ -1,10 +1,11 @@
 /**
  * Pure decision-loop orchestration:
  * trust-score gate → verify-consensus → wallet freeze → bot-policy.
- * Does not sign, broadcast, or talk to networks.
+ * A passing gate includes a memo whose hash is the verifier decision record.
+ * Does not sign, broadcast, submit a memo, or talk to networks.
  */
 import { evaluateTrust } from '@ubc2026/trust-score';
-import { reachConsensus, factsDigest } from '@ubc2026/verify-consensus';
+import { reachConsensus, factsDigest, memoFromDecision } from '@ubc2026/verify-consensus';
 import { evaluateProposal, proposalDigest } from '@ubc2026/bot-policy';
 import { assertSpendAllowed } from '@ubc2026/wallets';
 
@@ -85,14 +86,17 @@ export async function runDecisionGate({
     policy,
   );
 
+  const memo = memoFromDecision(consensus.decisionRecord);
   return {
     state: approvalNeeded ? 'approval-needed' : 'ready-to-execute',
     trust,
     consensus,
     policy,
+    memo,
     digests: {
       facts: consensus.digest ?? factsDigest(consensus.facts ?? consensus.attempts?.at(-1)?.main),
       proposal: policy.digest ?? proposalDigest(proposal),
+      decision: consensus.decisionRecord.recordDigest,
     },
   };
 }
