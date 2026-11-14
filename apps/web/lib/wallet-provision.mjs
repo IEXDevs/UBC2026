@@ -24,6 +24,7 @@ const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /**
  * Build display wallets from the Privy client user when POST /api/wallets fails.
+ * Include every Solana linked wallet (embedded Privy + connected external).
  * createOnLogin often has an address before a server wallet id exists.
  */
 export function walletsFromPrivyUser(user, ownerId) {
@@ -34,24 +35,52 @@ export function walletsFromPrivyUser(user, ownerId) {
     : (Array.isArray(user.linked_accounts) ? user.linked_accounts : []);
   const out = [];
   const seen = new Set();
-  for (const account of accounts) {
-    if (!account || account.type !== 'wallet') continue;
-    const chain = account.chainType ?? account.chain_type;
-    const client = account.walletClientType ?? account.wallet_client_type;
-    const address = typeof account.address === 'string' ? account.address.trim() : '';
-    if (chain !== 'solana' || client !== 'privy' || !BASE58.test(address) || seen.has(address)) continue;
-    seen.add(address);
-    const id = typeof account.id === 'string' && account.id.trim() ? account.id.trim() : `client_${address.slice(0, 8)}`;
+
+  function pushSolana(address, idHint, clientHint) {
+    const addressText = typeof address === 'string' ? address.trim() : '';
+    if (!BASE58.test(addressText) || seen.has(addressText)) return;
+    seen.add(addressText);
+    const client = typeof clientHint === 'string' && clientHint.trim() ? clientHint.trim() : 'privy';
+    const id = typeof idHint === 'string' && idHint.trim()
+      ? idHint.trim()
+      : `client_${addressText.slice(0, 8)}`;
     out.push({
       id,
       ownerId: owner,
       kind: out.length === 0 ? 'main' : 'additional',
-      label: out.length === 0 ? 'Main' : `Additional ${out.length}`,
-      address,
+      label: out.length === 0
+        ? (client === 'privy' ? 'Main' : `Main (${client})`)
+        : `Additional ${out.length}`,
+      address: addressText,
       frozen: false,
       provider: 'privy',
+      walletClientType: client,
     });
   }
+
+  for (const account of accounts) {
+    if (!account || account.type !== 'wallet') continue;
+    const chain = account.chainType ?? account.chain_type;
+    const address = typeof account.address === 'string' ? account.address.trim() : '';
+    if (!BASE58.test(address) || address.startsWith('0x')) continue;
+    // Keep Solana rows; skip known non-Solana chains.
+    if (typeof chain === 'string' && chain && chain !== 'solana') continue;
+    pushSolana(
+      address,
+      account.id,
+      account.walletClientType ?? account.wallet_client_type,
+    );
+  }
+
+  // Top-level wallet field on some Privy user payloads.
+  if (user.wallet && typeof user.wallet === 'object') {
+    const chain = user.wallet.chainType ?? user.wallet.chain_type ?? user.wallet.chain;
+    const address = user.wallet.address;
+    if (!chain || chain === 'solana') {
+      pushSolana(address, user.wallet.id, user.wallet.walletClientType ?? user.wallet.wallet_client_type);
+    }
+  }
+
   return out;
 }
 
