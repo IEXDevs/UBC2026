@@ -94,12 +94,14 @@ test('health reports signing and supabase readiness flags', async () => {
   const incomplete = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
     transferClient: { ok: true },
     SUPABASE_SERVICE_ROLE_KEY: 'service',
+    SUPABASE_URL: '',
   }));
   const incompleteBody = await incomplete.json();
   assert.equal(incompleteBody.signing, true);
   assert.equal(incompleteBody.supabase, false);
-  assert.equal(incompleteBody.secrets.SUPABASE_SERVICE_ROLE_KEY, true);
-  assert.equal(incompleteBody.secrets.SUPABASE_URL, false);
+  assert.equal(incompleteBody.secrets.SUPABASE_SERVICE_ROLE_KEY.set, true);
+  assert.equal(incompleteBody.secrets.SUPABASE_URL.bound, true);
+  assert.equal(incompleteBody.secrets.SUPABASE_URL.set, false);
 
   const res = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
     transferClient: { ok: true },
@@ -109,5 +111,5 @@ test('health reports signing and supabase readiness flags', async () => {
   const body = await res.json();
   assert.equal(body.signing, true);
   assert.equal(body.supabase, true);
-  assert.equal(body.secrets.SUPABASE_URL, true);
+  assert.equal(body.secrets.SUPABASE_URL.set, true);
 });

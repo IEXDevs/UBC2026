@@ -45,8 +45,10 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname === '/health') {
-      // Presence only — never echo secret values. Helps debug dashboard vs .env mixups.
-      const has = (name) => typeof rawEnv?.[name] === 'string' && rawEnv[name].trim() !== '';
+      // Presence only — never echo secret values. bound=name exists; set=non-empty.
+      const bound = (name) => rawEnv?.[name] != null && rawEnv[name] !== undefined;
+      const set = (name) => typeof rawEnv?.[name] === 'string' && rawEnv[name].trim() !== '';
+      const flag = (name) => ({ bound: bound(name), set: set(name) });
       const sb = supabaseConfig(rawEnv);
       return json({
         ok: true,
@@ -55,12 +57,12 @@ const worker = {
         signing: Boolean(env.transferClient),
         supabase: Boolean(sb),
         secrets: {
-          PRIVY_APP_ID: has('PRIVY_APP_ID'),
-          PRIVY_APP_SECRET: has('PRIVY_APP_SECRET'),
-          QUICKNODE_DEVNET_RPC_URL: has('QUICKNODE_DEVNET_RPC_URL'),
-          SUPABASE_URL: has('SUPABASE_URL'),
-          SUPABASE_ANON_KEY: has('SUPABASE_ANON_KEY'),
-          SUPABASE_SERVICE_ROLE_KEY: has('SUPABASE_SERVICE_ROLE_KEY'),
+          PRIVY_APP_ID: flag('PRIVY_APP_ID'),
+          PRIVY_APP_SECRET: flag('PRIVY_APP_SECRET'),
+          QUICKNODE_DEVNET_RPC_URL: flag('QUICKNODE_DEVNET_RPC_URL'),
+          SUPABASE_URL: flag('SUPABASE_URL'),
+          SUPABASE_ANON_KEY: flag('SUPABASE_ANON_KEY'),
+          SUPABASE_SERVICE_ROLE_KEY: flag('SUPABASE_SERVICE_ROLE_KEY'),
         },
       });
     }
