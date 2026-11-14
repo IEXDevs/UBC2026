@@ -19,6 +19,7 @@ import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 import { handleApiData } from './api-data.mjs';
+import { supabaseConfig } from './supabase-rest.mjs';
 
 export { BotDurableObject };
 
@@ -44,12 +45,23 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname === '/health') {
+      // Presence only — never echo secret values. Helps debug dashboard vs .env mixups.
+      const has = (name) => typeof rawEnv?.[name] === 'string' && rawEnv[name].trim() !== '';
+      const sb = supabaseConfig(rawEnv);
       return json({
         ok: true,
         product: env.PRODUCT ?? 'Maelstrom',
         cluster: env.CLUSTER ?? 'devnet',
         signing: Boolean(env.transferClient),
-        supabase: Boolean(env.ledgerApi || env.SUPABASE_SERVICE_ROLE_KEY),
+        supabase: Boolean(sb),
+        secrets: {
+          PRIVY_APP_ID: has('PRIVY_APP_ID'),
+          PRIVY_APP_SECRET: has('PRIVY_APP_SECRET'),
+          QUICKNODE_DEVNET_RPC_URL: has('QUICKNODE_DEVNET_RPC_URL'),
+          SUPABASE_URL: has('SUPABASE_URL'),
+          SUPABASE_ANON_KEY: has('SUPABASE_ANON_KEY'),
+          SUPABASE_SERVICE_ROLE_KEY: has('SUPABASE_SERVICE_ROLE_KEY'),
+        },
       });
     }
 

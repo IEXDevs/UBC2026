@@ -91,11 +91,23 @@ test('supabase mappers turn rows into bot/wallet/ledger records', () => {
 });
 
 test('health reports signing and supabase readiness flags', async () => {
+  const incomplete = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
+    transferClient: { ok: true },
+    SUPABASE_SERVICE_ROLE_KEY: 'service',
+  }));
+  const incompleteBody = await incomplete.json();
+  assert.equal(incompleteBody.signing, true);
+  assert.equal(incompleteBody.supabase, false);
+  assert.equal(incompleteBody.secrets.SUPABASE_SERVICE_ROLE_KEY, true);
+  assert.equal(incompleteBody.secrets.SUPABASE_URL, false);
+
   const res = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
     transferClient: { ok: true },
+    SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service',
   }));
   const body = await res.json();
   assert.equal(body.signing, true);
   assert.equal(body.supabase, true);
+  assert.equal(body.secrets.SUPABASE_URL, true);
 });
