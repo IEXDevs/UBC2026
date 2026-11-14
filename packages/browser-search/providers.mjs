@@ -91,6 +91,25 @@ export function createScrape({ apiKey, fetcher = fetch, baseUrl = 'https://api.f
 }
 
 const LIVE_VIEW_TTL_MS = 300000;
+const SESSION_ID = /^[a-zA-Z0-9-]{1,128}$/;
+const TARGET_ID = /^[a-zA-Z0-9_-]{1,128}$/;
+
+/** Public http(s) page URL only — no credentials, javascript:, or data:. */
+export function assertPublicHttpUrl(value) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 2000) {
+    throw new ProviderError('invalid_navigate', 400);
+  }
+  let target;
+  try {
+    target = new URL(value.trim());
+  } catch {
+    throw new ProviderError('invalid_navigate', 400);
+  }
+  if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password) {
+    throw new ProviderError('invalid_navigate', 400);
+  }
+  return target;
+}
 
 export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) {
   // Browser Run REST API. The older `/browser-rendering/` prefix is not the Live View API.
@@ -112,13 +131,36 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) 
       const result = await call('?keep_alive=600000&targets=true', { body: {} });
       if (typeof result.sessionId !== 'string' || !result.sessionId) throw new ProviderError('invalid_provider_response');
       // Do not return provider CDP URLs or privileged default viewer links to the frontend.
+      // New sessions start on about:blank until openTab navigates.
       return { sessionId: result.sessionId };
     },
-    async readonlyView(sessionId) {
-      if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9-]{1,128}$/.test(sessionId)) throw new ProviderError('invalid_session', 400);
-      const result = await call(`/${encodeURIComponent(sessionId)}/live_view`, {
-        body: { mode: 'tab', expiresInMs: LIVE_VIEW_TTL_MS, guardrails: { mode: 'readonly' } },
-      });
+    /**
+     * Open a tab and navigate. Sessions otherwise stay on about:blank.
+     * CDP: PUT /devtools/browser/{sessionId}/json/new?url=
+     */
+    async openTab(sessionId, url) {
+      if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
+      const target = assertPublicHttpUrl(url);
+      const result = await call(
+        `/${encodeURIComponent(sessionId)}/json/new?url=${encodeURIComponent(target.href)}`,
+        { method: 'PUT' },
+      );
+      const targetId = typeof result.id === 'string' ? result.id : '';
+      if (!TARGET_ID.test(targetId)) throw new ProviderError('invalid_provider_response');
+      const pageUrl = typeof result.url === 'string' && result.url.startsWith('http')
+        ? result.url
+        : target.href;
+      return {
+        targetId,
+        url: pageUrl,
+        title: typeof result.title === 'string' ? result.title.slice(0, 200) : '',
+      };
+    },
+    async readonlyView(sessionId, { targetId } = {}) {
+      if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
+      const body = { mode: 'tab', expiresInMs: LIVE_VIEW_TTL_MS, guardrails: { mode: 'readonly' } };
+      if (typeof targetId === 'string' && TARGET_ID.test(targetId)) body.targetId = targetId;
+      const result = await call(`/${encodeURIComponent(sessionId)}/live_view`, { body });
       let url;
       try { url = new URL(result.devtoolsFrontendUrl); } catch { throw new ProviderError('invalid_provider_response'); }
       if (url.protocol !== 'https:' || url.hostname !== 'live.browser.run' || url.username || url.password) throw new ProviderError('invalid_provider_response');
@@ -126,7 +168,7 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) 
       return { viewerUrl: url.href, connectBefore: new Date(Date.now() + LIVE_VIEW_TTL_MS).toISOString(), mode: 'readonly' };
     },
     async closeSession(sessionId) {
-      if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9-]{1,128}$/.test(sessionId)) throw new ProviderError('invalid_session', 400);
+      if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
       const result = await call(`/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
       return { status: typeof result.status === 'string' ? result.status : 'closing' };
     },

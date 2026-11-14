@@ -21,7 +21,7 @@ function service(overrides = {}) {
 test('agent tools cover search, scrape, and owned browser lifecycle', () => {
   assert.deepEqual(
     agentTools.map(tool => tool.name),
-    ['web_search', 'web_scrape', 'browser_open', 'browser_live_view', 'browser_release'],
+    ['web_search', 'web_scrape', 'browser_open', 'browser_navigate', 'browser_live_view', 'browser_release'],
   );
 });
 
@@ -44,9 +44,46 @@ test('sessions are bound to owner/bot and hide provider ids from open response',
   const opened = await svc.openSession({ ownerId: 'u1', botId: 'b1', purpose: 'checkout' });
   assert.equal(opened.sessionRecordId, 'rec-1');
   assert.equal(opened.providerSessionId, undefined);
+  assert.equal(opened.url, null);
+  assert.match(opened.note, /about:blank/);
   const listed = await svc.listOpenSessions({ ownerId: 'u1', botId: 'b1' });
   assert.equal(listed.sessions.length, 1);
   await assert.rejects(svc.liveView({ ownerId: 'other', botId: 'b1', sessionRecordId: 'rec-1' }), SessionError);
+});
+
+test('openSession and navigateSession load https urls via openTab', async () => {
+  const tabs = [];
+  const svc = service({
+    browsers: {
+      createSession: async () => ({ sessionId: 'prov-1' }),
+      openTab: async (sessionId, url) => {
+        tabs.push({ sessionId, url });
+        return { targetId: 'T1', url, title: 'Google' };
+      },
+      readonlyView: async (sessionId, opts = {}) => {
+        assert.equal(sessionId, 'prov-1');
+        assert.equal(opts.targetId, 'T1');
+        return { viewerUrl: 'https://live.browser.run/ui/view?jwt=test', connectBefore: 't', mode: 'readonly' };
+      },
+    },
+  });
+  const opened = await svc.openSession({
+    ownerId: 'u1',
+    botId: 'b1',
+    url: 'https://www.google.com/',
+  });
+  assert.equal(opened.url, 'https://www.google.com/');
+  assert.equal(opened.note, undefined);
+  assert.deepEqual(tabs[0], { sessionId: 'prov-1', url: 'https://www.google.com/' });
+  const view = await svc.liveView({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1' });
+  assert.equal(view.pageUrl, 'https://www.google.com/');
+  const navigated = await svc.invokeTool(
+    'browser_navigate',
+    { sessionRecordId: 'rec-1', url: 'https://example.com/' },
+    { ownerId: 'u1', botId: 'b1' },
+  );
+  assert.equal(navigated.url, 'https://example.com/');
+  assert.equal(tabs[1].url, 'https://example.com/');
 });
 
 test('per-bot concurrency limit is enforced', async () => {

@@ -36,15 +36,45 @@ test('createChatToolInvoker opens browser via Worker when runtime is set', async
     },
     runtimeBase: 'https://runtime.example',
     fetcher: async (url, options) => {
-      calls.push({ url: String(url), method: options.method, owner: options.headers['x-owner-id'] });
-      return Response.json({ sessionRecordId: 'bs_abc', purpose: 'browse', status: 'open' });
+      calls.push({
+        url: String(url),
+        method: options.method,
+        owner: options.headers['x-owner-id'],
+        body: options.body ? JSON.parse(options.body) : null,
+      });
+      return Response.json({
+        sessionRecordId: 'bs_abc',
+        purpose: 'browse',
+        status: 'open',
+        url: 'https://www.google.com/',
+      });
     },
   });
-  const opened = await invoke('browser_open', { purpose: 'shop' });
+  const opened = await invoke('browser_open', { purpose: 'shop', url: 'https://www.google.com/' });
   assert.equal(opened.sessionRecordId, 'bs_abc');
+  assert.equal(opened.url, 'https://www.google.com/');
   assert.equal(calls[0].method, 'POST');
   assert.match(calls[0].url, /\/bots\/bot_1\/browser\/sessions$/);
   assert.equal(calls[0].owner, 'did:privy:owner1');
+  assert.equal(calls[0].body.url, 'https://www.google.com/');
+});
+
+test('createChatToolInvoker navigates via Worker', async () => {
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (url, options) => {
+      assert.match(String(url), /\/sessions\/bs_1\/navigate$/);
+      assert.deepEqual(JSON.parse(options.body), { url: 'https://example.com/' });
+      return Response.json({ sessionRecordId: 'bs_1', url: 'https://example.com/', title: 'Example' });
+    },
+  });
+  const navigated = await invoke('browser_navigate', {
+    sessionRecordId: 'bs_1',
+    url: 'https://example.com/',
+  });
+  assert.equal(navigated.url, 'https://example.com/');
 });
 
 test('createChatToolInvoker redacts live-view viewer URLs from Worker', async () => {

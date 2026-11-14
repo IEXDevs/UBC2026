@@ -30,9 +30,11 @@ export function openAiAgentTools(tools = agentTools) {
 
 export function chatToolsInstruction() {
   return [
-    'You have tools: web_search, web_scrape, browser_open, browser_live_view, and browser_release.',
+    'You have tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, and browser_release.',
     'When the owner asks you to look something up, browse, or open a page, call those tools.',
     'Do not claim you lack a browser or web access while these tools are available.',
+    'browser_open without url starts on about:blank. Always pass url as a full https link (e.g. https://www.google.com) when the owner should see a page.',
+    'Never claim a site loaded unless the tool result includes that url. Use browser_navigate on an existing sessionRecordId to change pages.',
     'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
     'After browser_open or browser_live_view, tell the owner to use Show live view on the Live View panel — not Open browser session again (that hits concurrency_limit).',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
@@ -109,13 +111,30 @@ export function createChatToolInvoker({
       return local.invokeTool(name, args, identity);
     }
     if (name === 'browser_open') {
-      const opened = await workerJson(fetcher, openUrl, ownerId, 'POST', {
+      const body = {
         purpose: typeof args.purpose === 'string' ? args.purpose : 'browse',
-      });
+      };
+      if (typeof args.url === 'string' && args.url.trim()) body.url = args.url.trim();
+      const opened = await workerJson(fetcher, openUrl, ownerId, 'POST', body);
       return {
         sessionRecordId: opened.sessionRecordId,
         purpose: opened.purpose,
         status: opened.status || 'open',
+        url: opened.url ?? null,
+        title: opened.title ?? '',
+        note: opened.note,
+      };
+    }
+    if (name === 'browser_navigate') {
+      const sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
+      const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'navigate' });
+      const navigated = await workerJson(fetcher, url, ownerId, 'POST', {
+        url: typeof args.url === 'string' ? args.url : '',
+      });
+      return {
+        sessionRecordId: navigated.sessionRecordId || sessionRecordId,
+        url: navigated.url,
+        title: navigated.title,
       };
     }
     if (name === 'browser_live_view') {
@@ -129,7 +148,10 @@ export function createChatToolInvoker({
         connectBefore: view.connectBefore,
         embedVerified: view.embedVerified,
         fallback: view.fallback,
-        note: 'Live View is ready for the owner UI. The viewer URL is not returned to chat.',
+        pageUrl: view.pageUrl ?? null,
+        note: view.pageUrl
+          ? 'Live View is ready for the owner UI. The viewer URL is not returned to chat.'
+          : 'Live View is ready, but the session is still on about:blank — call browser_navigate with an https url.',
       };
     }
     if (name === 'browser_release') {
@@ -149,7 +171,12 @@ export function createChatToolInvoker({
       if (name === 'web_search' || name === 'web_scrape') {
         return await local.invokeTool(name, args, identity);
       }
-      if (name === 'browser_open' || name === 'browser_live_view' || name === 'browser_release') {
+      if (
+        name === 'browser_open'
+        || name === 'browser_navigate'
+        || name === 'browser_live_view'
+        || name === 'browser_release'
+      ) {
         return await invokeBrowser(name, args);
       }
       return await local.invokeTool(name, args, identity);

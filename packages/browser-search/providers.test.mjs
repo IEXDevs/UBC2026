@@ -93,14 +93,39 @@ test('viewer always requests readonly permissions and a five-minute connect dead
     fetcher: async (url, options) => {
       assert.equal(url, 'https://api.cloudflare.com/client/v4/accounts/a/browser-run/devtools/browser/abc/live_view');
       assert.equal(options.method, 'POST');
-      assert.deepEqual(JSON.parse(options.body), { mode: 'tab', expiresInMs: 300000, guardrails: { mode: 'readonly' } });
+      assert.deepEqual(JSON.parse(options.body), {
+        mode: 'tab',
+        expiresInMs: 300000,
+        guardrails: { mode: 'readonly' },
+        targetId: 'TARGET1',
+      });
       return Response.json({ result: { devtoolsFrontendUrl: 'https://live.browser.run/ui/view?jwt=test' } });
     },
   });
-  const view = await provider.readonlyView('abc');
+  const view = await provider.readonlyView('abc', { targetId: 'TARGET1' });
   assert.equal(view.mode, 'readonly');
   assert.match(view.viewerUrl, /^https:\/\/live\.browser\.run\/ui\/view\?/);
   await assert.rejects(provider.readonlyView('../other'), { code: 'invalid_session' });
+});
+
+test('openTab navigates with PUT json/new and rejects unsafe urls', async () => {
+  const provider = createBrowserProvider({
+    accountId: 'a',
+    apiToken: 'b',
+    fetcher: async (url, options) => {
+      assert.equal(options.method, 'PUT');
+      assert.match(url, /\/browser\/abc\/json\/new\?url=https%3A%2F%2Fwww\.google\.com%2F$/);
+      return Response.json({
+        id: 'TAB123',
+        type: 'page',
+        url: 'https://www.google.com/',
+        title: 'Google',
+      });
+    },
+  });
+  const tab = await provider.openTab('abc', 'https://www.google.com/');
+  assert.deepEqual(tab, { targetId: 'TAB123', url: 'https://www.google.com/', title: 'Google' });
+  await assert.rejects(provider.openTab('abc', 'javascript:alert(1)'), { code: 'invalid_navigate' });
 });
 
 test('close deletes the Browser Run session and create uses the browser-run path', async () => {
