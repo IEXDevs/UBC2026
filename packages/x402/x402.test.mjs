@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  NETWORKS, DEVNET_USDC_MINT, buildPaymentRequired, parsePaymentSignature, buildPaymentResponse, paymentFeedEntry,
+  NETWORKS, DEVNET_USDC_MINT, buildPaymentRequired, parsePaymentSignature, buildPaymentSignature, buildPaymentResponse, paymentFeedEntry,
   createSandboxStoreClient,
 } from './x402.mjs';
 
@@ -31,6 +31,16 @@ test('mainnet challenges and malformed amounts are rejected', () => {
   }));
   assert.throws(() => buildPaymentRequired({
     resourceUrl: 'https://api.example.com/x', description: 'x', amount: '1.5', payTo, feePayer,
+  }));
+});
+
+test('payment signature header round-trips on devnet and rejects mainnet', () => {
+  const accepted = { scheme: 'exact', network: NETWORKS.devnet, amount: '10000', asset: DEVNET_USDC_MINT, payTo };
+  const header = buildPaymentSignature({ accepted, signature: 'sig' });
+  assert.equal(parsePaymentSignature(header).payload.signature, 'sig');
+  assert.throws(() => buildPaymentSignature({
+    accepted: { ...accepted, network: NETWORKS.mainnet },
+    signature: 'sig',
   }));
 });
 
