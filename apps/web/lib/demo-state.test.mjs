@@ -10,7 +10,9 @@ test('demo shell exposes locked panes and three builtin templates', () => {
   assert.equal(state.bots.length, 3);
   assert.equal(state.templates.length, 3);
   assert.ok(state.templates.every(t => t.deletable === false));
-  for (const name of state.panes) {
+  assert.deepEqual(panePlaceholder('Overview'), { title: 'Overview', body: 'Owner metrics.' });
+  assert.deepEqual(panePlaceholder('Security'), { title: 'Security', body: 'Kill switch and freezes.' });
+  for (const name of ['Payments', 'Positions', 'Wallets']) {
     assert.deepEqual(panePlaceholder(name), { title: name, body: 'Empty.' });
   }
 });
