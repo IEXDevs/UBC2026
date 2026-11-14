@@ -18,7 +18,9 @@
     "@solana-program/system": "^0.8.1",
     "@solana-program/token": "^0.6.0",
     "@solana/kit": "^3.0.3",
+    "@ubc2026/bot-creation": "0.1.0",
     "@ubc2026/contracts": "0.1.0",
+    "@ubc2026/wallets": "0.1.0",
     "next": "^15.5.29",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

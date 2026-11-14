@@ -48,6 +48,7 @@ goal → research (browser/search)
 | `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
 | `packages/browser-session` | Owner-bound Cloudflare browser sessions, per-bot concurrency, Live View URLs |
 | `packages/bot-policy` | Bot types, caps, approval modes, kill switch, Supabase ledger reserve |
+| `packages/bot-creation` | Locked templates, user templates, and the draft creation flow |
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
 | `packages/prices` | DexScreener mainnet price reads (paper PnL) |
@@ -55,7 +56,7 @@ goal → research (browser/search)
 | `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object checkpoints |
 | `apps/web` | Next.js glass UI shell (Cloudflare-hosted) |
-| `supabase/schema.sql` | Postgres schema: foundations migration plus `20261114020000_policy_ledger.sql` (atomic reserve, approval modes, kill switch) |
+| `supabase/schema.sql` | Postgres schema: foundations, `20261114020000_policy_ledger.sql` (atomic reserve, approval modes, kill switch), and `20261114040000_bot_templates.sql` (locked templates, user templates, draft create / enable) |
 
 These are library scaffolds, not a shipping app. Bot spends and owner USDC moves are signed by Privy and broadcast on Solana devnet only; deposits are signed by a Wallet Adapter and sent through the same devnet genesis check. Persist sessions/approvals/budgets in a Durable Object or transactional DB; queues are transport only.
 

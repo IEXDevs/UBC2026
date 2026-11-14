@@ -5,10 +5,14 @@ import { readFileSync } from 'node:fs';
 const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 const foundations = readFileSync(new URL('./migrations/20261114000000_foundations.sql', import.meta.url), 'utf8');
 const policy = readFileSync(new URL('./migrations/20261114020000_policy_ledger.sql', import.meta.url), 'utf8');
+const templates = readFileSync(new URL('./migrations/20261114040000_bot_templates.sql', import.meta.url), 'utf8');
 
-test('schema.sql is foundations plus the policy ledger migration', () => {
-  const expected = foundations.endsWith('\n') ? foundations + policy : `${foundations}\n${policy}`;
-  assert.equal(schema, expected);
+function concat(parts) {
+  return parts.reduce((sql, part) => (sql.endsWith('\n') ? sql + part : `${sql}\n${part}`));
+}
+
+test('schema.sql is foundations, the policy ledger, and bot templates', () => {
+  assert.equal(schema, concat([foundations, policy, templates]));
 });
 
 test('schema covers phase 1 tables, caps, RLS, and realtime', () => {
@@ -23,6 +27,7 @@ test('schema covers phase 1 tables, caps, RLS, and realtime', () => {
     'timeline_events',
     'payments',
     'metrics',
+    'bot_templates',
   ]) {
     assert.match(schema, new RegExp(`\\b${name}\\b`));
   }
@@ -35,6 +40,10 @@ test('schema covers phase 1 tables, caps, RLS, and realtime', () => {
   assert.match(schema, /policy_reserve_budget/);
   assert.match(schema, /policy_stop_all/);
   assert.match(schema, /policy_freeze_wallet/);
+  assert.match(schema, /create_bot_draft/);
+  assert.match(schema, /enable_bot/);
+  assert.match(schema, /list_templates/);
+  assert.match(schema, /Locked templates cannot be deleted or hidden/);
   assert.match(schema, /budget_reservations/);
   assert.match(schema, /for update/);
   assert.match(schema, /idempotency_key/);

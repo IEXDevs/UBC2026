@@ -78,7 +78,18 @@ button {
   background: transparent;
   color: var(--text);
   border: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
   transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.bot-select {
+  text-align: left;
+  padding: 0;
+  background: transparent;
+  color: inherit;
 }
 
 .bot-item:hover,
@@ -300,9 +311,89 @@ button {
   white-space: nowrap;
 }
 
-.empty-pane p {
+.empty-pane p,
+.hint {
   margin: 0;
   color: var(--muted);
+}
+
+.create-panel {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.create-form,
+.field,
+.template-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.field {
+  font-size: 0.92rem;
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: rgba(4, 16, 24, 0.45);
+  color: var(--text);
+  font: inherit;
+}
+
+.choice-row,
+.row-actions,
+.template-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.template-row {
+  justify-content: space-between;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid rgba(186, 220, 255, 0.12);
+}
+
+.template-row strong { display: block; font-family: var(--font-display); }
+.template-row small { color: var(--muted); }
+
+fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+
+legend {
+  font-family: var(--font-display);
+  padding: 0;
+}
+
+.choice {
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--stroke);
+}
+
+.choice[aria-pressed='true'] {
+  color: #042029;
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.form-error {
+  margin: 0;
+  color: var(--danger);
 }
 
 .pill {
