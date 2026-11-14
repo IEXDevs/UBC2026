@@ -110,6 +110,27 @@ test('missing server-signing names throw before any request', () => {
   );
 });
 
+test('login recovers owner id from JWT sub when users/me omits id', async () => {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
+  const token = `${header}.${body}.sig`;
+  const { fetcher, calls } = mockFetch([
+    { match: url => url.endsWith('/api/v1/users/me'), body: { linked_accounts: [] } },
+    { match: url => url.includes('/v1/wallets?'), body: { data: [] } },
+    {
+      match: (url, reqBody) => url.endsWith('/v1/wallets') && reqBody?.display_name === 'Main',
+      body: { id: walletId, address, chain_type: 'solana' },
+    },
+  ]);
+  const result = await client({ fetcher }).acceptLogin({
+    accessToken: token,
+    origin: 'http://localhost:3000',
+  });
+  assert.equal(result.created, true);
+  assert.equal(result.main.ownerId, privyUserId);
+  assert.equal(calls[2].body.owner.user_id, privyUserId);
+});
+
 test('login creates the main Solana wallet when Privy has none', async () => {
   const { fetcher, calls } = mockFetch([
     { match: url => url.endsWith('/api/v1/users/me'), body: userWith([]) },
@@ -122,6 +143,7 @@ test('login creates the main Solana wallet when Privy has none', async () => {
   const result = await client({ fetcher, authorizationKey }).acceptLogin({
     accessToken,
     ownerId: 'user_1',
+    origin: 'http://localhost:3000',
   });
   assert.equal(result.created, true);
   assert.equal(result.main.kind, 'main');
@@ -134,6 +156,7 @@ test('login creates the main Solana wallet when Privy has none', async () => {
   const login = calls[0];
   assert.equal(login.url, 'https://auth.privy.io/api/v1/users/me');
   assert.equal(login.init.headers.Authorization, `Bearer ${accessToken}`);
+  assert.equal(login.init.headers.Origin, 'http://localhost:3000');
   assert.equal(login.url.includes(accessToken), false);
   assert.equal(login.init.headers.Authorization.includes(appSecret), false);
 
@@ -185,7 +208,11 @@ test('login recovers when createOnLogin linked a Solana wallet with null server 
       body: { data: [{ id: walletId, address, chain_type: 'solana' }] },
     },
   ]);
-  const result = await client({ fetcher }).acceptLogin({ accessToken, ownerId: 'user_1' });
+  const result = await client({ fetcher }).acceptLogin({
+    accessToken,
+    ownerId: 'user_1',
+    origin: 'http://localhost:3000',
+  });
   assert.equal(result.created, false);
   assert.equal(result.main.privyWalletId, walletId);
   assert.equal(result.main.address, address);
@@ -211,7 +238,11 @@ test('login retries list after create fails when a server wallet already exists'
     }
     return new Response(JSON.stringify({ error: 'unmocked' }), { status: 500 });
   };
-  const result = await client({ fetcher: dynamic }).acceptLogin({ accessToken, ownerId: 'user_1' });
+  const result = await client({ fetcher: dynamic }).acceptLogin({
+    accessToken,
+    ownerId: 'user_1',
+    origin: 'http://localhost:3000',
+  });
   assert.equal(result.created, false);
   assert.equal(result.main.privyWalletId, walletId);
   assert.equal(listCount, 2);
@@ -229,7 +260,11 @@ test('login keeps an existing main wallet and maps later embedded wallets as add
       ]),
     },
   ]);
-  const result = await client({ fetcher }).acceptLogin({ accessToken, ownerId: 'user_1' });
+  const result = await client({ fetcher }).acceptLogin({
+    accessToken,
+    ownerId: 'user_1',
+    origin: 'http://localhost:3000',
+  });
   assert.equal(result.created, false);
   assert.equal(result.main.id, walletId);
   assert.equal(result.main.kind, 'main');

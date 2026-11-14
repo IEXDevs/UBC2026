@@ -29,7 +29,7 @@ const REQUEST_TTL_MS = 60_000;
 const MAX_TX_BYTES = 1232;
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const privyWalletIdPattern = /^[A-Za-z0-9_-]{10,128}$/;
-const ownerIdPattern = /^[a-zA-Z0-9:_-]{1,128}$/;
+const ownerIdPattern = /^[a-zA-Z0-9:_.-]{1,256}$/;
 
 const fail = (message, code = 'wallet_error') => {
   throw new WalletError(message, code);
@@ -105,8 +105,39 @@ function basicAuth(appId, appSecret) {
 }
 
 function safePrivyCode(payload) {
-  const code = payload && (payload.error ?? payload.code);
-  return typeof code === 'string' && /^[a-z0-9_]{1,64}$/.test(code) ? code : '';
+  if (!payload || typeof payload !== 'object') return '';
+  for (const raw of [payload.error, payload.code, payload.error_code, payload.message]) {
+    if (typeof raw !== 'string') continue;
+    const normalized = raw.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    if (/^[a-z0-9_]{1,64}$/.test(normalized)) return normalized;
+  }
+  return '';
+}
+
+function safePrivyPath(url) {
+  try {
+    const path = new URL(url).pathname;
+    if (path.includes('/users/me')) return 'users/me';
+    if (path.includes('/v1/wallets') && !path.includes('/rpc')) return 'wallets';
+    if (path.includes('/v1/users/')) return 'users';
+    return 'privy';
+  } catch {
+    return 'privy';
+  }
+}
+
+/** Browser Origin for auth.privy.io /users/me (required; 403 must_specify_origin without it). */
+export function sanitizeOrigin(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 256 || /[\r\n]/.test(trimmed)) return '';
+  try {
+    const url = new URL(trimmed);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
 }
 
 function decodeBase64(value, label) {
@@ -161,8 +192,40 @@ function assertPrivyWalletId(id) {
 }
 
 function assertOwnerId(ownerId) {
-  if (typeof ownerId !== 'string' || !ownerIdPattern.test(ownerId)) fail('Wallet owner is required', 'invalid_owner');
+  if (typeof ownerId !== 'string' || !ownerIdPattern.test(ownerId)) {
+    const kind = ownerId == null ? 'missing' : typeof ownerId;
+    fail(`Wallet owner is required (${kind})`, 'invalid_owner');
+  }
   return ownerId;
+}
+
+function readPrivyUserPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  if (typeof payload.id === 'string' && payload.id.trim()) return payload;
+  if (payload.user && typeof payload.user === 'object' && typeof payload.user.id === 'string') return payload.user;
+  if (payload.data && typeof payload.data === 'object' && typeof payload.data.id === 'string') return payload.data;
+  return payload;
+}
+
+function jwtSub(accessToken) {
+  try {
+    const part = String(accessToken).split('.')[1];
+    if (!part) return '';
+    const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+    const json = Buffer.from(`${normalized}${pad}`, 'base64').toString('utf8');
+    const payload = JSON.parse(json);
+    return typeof payload?.sub === 'string' ? payload.sub.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+function resolvePrivyUserId(user, accessToken, ownerId) {
+  for (const candidate of [user?.id, user?.user_id, user?.userId, ownerId, jwtSub(accessToken)]) {
+    if (typeof candidate === 'string' && ownerIdPattern.test(candidate.trim())) return candidate.trim();
+  }
+  return '';
 }
 
 function recordsFromEmbedded(embedded, ownerId, privyUserId) {
@@ -204,10 +267,22 @@ export function createPrivyWalletClient({
 } = {}) {
   const id = assertHeaderSafe(appId, 'Privy app id');
   const secret = assertHeaderSafe(appSecret, 'Privy app secret');
-  const quicknode = assertHttps(rpcUrl, 'QuickNode devnet RPC');
+  // RPC is required for broadcast/signing; acceptLogin / wallet create can omit it.
+  const quicknode = rpcUrl == null || rpcUrl === '' ? null : assertHttps(rpcUrl, 'QuickNode devnet RPC');
   const privyApi = assertHttps(apiBase, 'Privy API');
   const privyAuth = assertHttps(authBase, 'Privy auth API');
   const authKey = authorizationKey == null || authorizationKey === '' ? null : authorizationKey;
+
+  function abortAfter(ms) {
+    // OpenNext Cloudflare for Dev / workerd may lack AbortSignal.timeout.
+    if (typeof AbortSignal === 'function' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    if (typeof timer?.unref === 'function') timer.unref();
+    return controller.signal;
+  }
 
   async function fetchJson(url, { method, headers, body }, code) {
     let response;
@@ -217,10 +292,12 @@ export function createPrivyWalletClient({
         headers,
         body: body == null ? undefined : JSON.stringify(body),
         redirect: 'error',
-        signal: AbortSignal.timeout(15000),
+        signal: abortAfter(15000),
       });
-    } catch {
-      fail(code === 'rpc_failed' ? 'QuickNode devnet RPC failed' : 'Privy request failed', code);
+    } catch (error) {
+      const aborted = error?.name === 'AbortError' || error?.name === 'TimeoutError';
+      const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
+      fail(`${target} request ${aborted ? 'timed out' : 'failed'}`, code);
     }
     const text = await response.text();
     let payload = null;
@@ -229,8 +306,11 @@ export function createPrivyWalletClient({
     }
     if (!response.ok) {
       const detail = safePrivyCode(payload);
-      const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
-      fail(`${target} request failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
+      if (code === 'rpc_failed') {
+        fail(`QuickNode devnet RPC request failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
+      }
+      const step = safePrivyPath(url);
+      fail(`Privy ${step} failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
     }
     if (payload == null) fail(code === 'rpc_failed' ? 'QuickNode devnet RPC failed' : 'Privy request failed', code);
     return payload;
@@ -243,7 +323,9 @@ export function createPrivyWalletClient({
       'Content-Type': 'application/json',
     };
     if (idempotency) headers['privy-idempotency-key'] = idempotency;
-    if (authKey && method !== 'GET') {
+    // Sign every method when an authorization key is configured — apps that
+    // require signatures reject unsigned wallet list/create with 403.
+    if (authKey) {
       const expiresAt = now() + REQUEST_TTL_MS;
       headers['privy-request-expiry'] = String(expiresAt);
       headers['privy-authorization-signature'] = privyAuthorizationSignature({
@@ -251,7 +333,7 @@ export function createPrivyWalletClient({
         authorizationKey: authKey,
         method,
         url,
-        body,
+        body: method === 'GET' || method === 'HEAD' ? undefined : body,
         idempotencyKey: idempotency,
         expiresAt,
       });
@@ -283,25 +365,32 @@ export function createPrivyWalletClient({
     return { ...built, privyWalletId: walletId, privyUserId };
   }
 
-  async function listSolanaWallets(privyUserId) {
+  async function listSolanaWallets(privyUserId, { required = true } = {}) {
     const query = new URLSearchParams({
       user_id: privyUserId,
       chain_type: 'solana',
       limit: '50',
     });
-    const payload = await privy('GET', `/v1/wallets?${query}`);
-    const rows = Array.isArray(payload?.data) ? payload.data : [];
-    return rows
-      .filter(wallet => wallet
-        && wallet.chain_type === 'solana'
-        && typeof wallet.address === 'string'
-        && base58.test(wallet.address)
-        && privyWalletIdPattern.test(wallet.id))
-      .map(wallet => ({
-        id: wallet.id,
-        address: wallet.address,
-        walletIndex: 0,
-      }));
+    try {
+      const payload = await privy('GET', `/v1/wallets?${query}`);
+      const rows = Array.isArray(payload?.data) ? payload.data : [];
+      return rows
+        .filter(wallet => wallet
+          && wallet.chain_type === 'solana'
+          && typeof wallet.address === 'string'
+          && base58.test(wallet.address)
+          && privyWalletIdPattern.test(wallet.id))
+        .map(wallet => ({
+          id: wallet.id,
+          address: wallet.address,
+          walletIndex: 0,
+        }));
+    } catch (error) {
+      if (!required && error instanceof WalletError && (error.code === 'privy_failed')) {
+        return [];
+      }
+      throw error;
+    }
   }
 
   function recordsFromServerWallets(wallets, ownerId, privyUserId) {
@@ -309,15 +398,17 @@ export function createPrivyWalletClient({
     return recordsFromEmbedded(wallets, ownerId, privyUserId);
   }
 
-  async function syncWallets(user, ownerId) {
-    const privyUserId = assertOwnerId(user?.id);
-    const owner = assertOwnerId(ownerId);
+  async function syncWallets(user, ownerId, accessToken = '') {
+    const resolved = resolvePrivyUserId(user, accessToken, ownerId);
+    const privyUserId = assertOwnerId(resolved || user?.id);
+    const owner = assertOwnerId(ownerId || resolved || user?.id);
     const embedded = solanaEmbedded(user);
     const existing = recordsFromEmbedded(embedded, owner, privyUserId);
     if (existing) return { privyUserId, ...existing, created: false };
 
     // createOnLogin may have linked a wallet with id:null — recover via Wallet API.
-    const listed = await listSolanaWallets(privyUserId);
+    // List is best-effort: a 403 here (auth signature / permissions) must not block create.
+    const listed = await listSolanaWallets(privyUserId, { required: false });
     const fromList = recordsFromServerWallets(listed, owner, privyUserId);
     if (fromList) return { privyUserId, ...fromList, created: false };
 
@@ -334,13 +425,29 @@ export function createPrivyWalletClient({
         created: true,
       };
     } catch (error) {
-      const retry = recordsFromServerWallets(await listSolanaWallets(privyUserId), owner, privyUserId);
+      const retry = recordsFromServerWallets(
+        await listSolanaWallets(privyUserId, { required: false }),
+        owner,
+        privyUserId,
+      );
       if (retry) return { privyUserId, ...retry, created: false };
+      if (
+        error instanceof WalletError
+        && error.code === 'privy_failed'
+        && /403/.test(error.message)
+        && !authKey
+      ) {
+        fail(
+          'Privy wallets failed (403). Set PRIVY_AUTHORIZATION_KEY from Privy → Authorization keys (wallet-auth private key), or disable required authorization signatures.',
+          'privy_failed',
+        );
+      }
       throw error;
     }
   }
 
   async function rpc(method, params) {
+    if (!quicknode) fail('QuickNode devnet RPC is required', 'missing_config');
     return fetchJson(quicknode, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -350,6 +457,7 @@ export function createPrivyWalletClient({
 
   /** Genesis gate shared by signing, owner sweeps, deposits, and devnet reads. */
   async function assertDevnet() {
+    if (!quicknode) fail('QuickNode devnet RPC is required', 'missing_config');
     const genesis = await rpc('getGenesisHash');
     if (genesis.result !== DEVNET_GENESIS_HASH) {
       fail('Refusing to broadcast outside Solana devnet', 'wrong_cluster');
@@ -396,16 +504,31 @@ export function createPrivyWalletClient({
   }
 
   return {
-    async acceptLogin({ accessToken, ownerId } = {}) {
+    async acceptLogin({ accessToken, ownerId, origin } = {}) {
       const token = assertHeaderSafe(accessToken, 'Privy access token');
-      const user = await fetchJson(`${privyAuth}/api/v1/users/me`, {
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'privy-app-id': id,
+      };
+      const safeOrigin = sanitizeOrigin(origin);
+      if (!safeOrigin) {
+        fail('Privy users/me requires Origin (e.g. http://localhost:3000)', 'missing_origin');
+      }
+      headers.Origin = safeOrigin;
+      headers.Referer = `${safeOrigin}/`;
+      const payload = await fetchJson(`${privyAuth}/api/v1/users/me`, {
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'privy-app-id': id,
-        },
+        headers,
       }, 'privy_failed');
-      return syncWallets(user, ownerId ?? user?.id);
+      const user = readPrivyUserPayload(payload) || {};
+      const resolvedId = resolvePrivyUserId(user, token, ownerId);
+      if (resolvedId && !user.id) user.id = resolvedId;
+      // Prefer server user lookup when /users/me omitted id but JWT sub is present.
+      const hydrated = resolvedId && !Array.isArray(user.linked_accounts) && !Array.isArray(user.linkedAccounts)
+        ? await loadUser(resolvedId).catch(() => user)
+        : user;
+      if (resolvedId && !hydrated.id) hydrated.id = resolvedId;
+      return syncWallets(hydrated, ownerId || resolvedId || hydrated.id, token);
     },
 
     ensureMainWallet({ privyUserId, ownerId } = {}) {

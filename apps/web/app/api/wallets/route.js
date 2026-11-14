@@ -1,7 +1,18 @@
-import { WalletError } from '@ubc2026/wallets';
-import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
+export const runtime = 'nodejs';
+
+import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { missingWalletSecrets, resolvePrivyAppId } from '../../../lib/wallet-provision.mjs';
+
+function requestOrigin(request) {
+  const fromOrigin = sanitizeOrigin(request.headers.get('origin'));
+  if (fromOrigin) return fromOrigin;
+  const referer = request.headers.get('referer');
+  if (typeof referer === 'string' && referer.trim()) {
+    try { return sanitizeOrigin(new URL(referer.trim()).origin); } catch { /* ignore */ }
+  }
+  return 'http://localhost:3000';
+}
 
 function publicWallet(wallet) {
   return {
@@ -25,6 +36,29 @@ function rootWalletEnv() {
   };
 }
 
+/** Prefer duck-typing — `instanceof` fails when the wallets package is duplicated. */
+function walletErrorFields(error) {
+  if (!error || typeof error !== 'object') return null;
+  if (error.name !== 'WalletError' && error.constructor?.name !== 'WalletError') return null;
+  const code = typeof error.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code) ? error.code : 'wallet_failed';
+  const detail = typeof error.message === 'string'
+    ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
+    : undefined;
+  return { code, detail };
+}
+
+/** Config presence only — no secret values. */
+export async function GET() {
+  const env = rootWalletEnv();
+  return Response.json({
+    hasAppId: Boolean(resolvePrivyAppId(env)),
+    hasAppSecret: Boolean(env.PRIVY_APP_SECRET),
+    hasRpc: Boolean(env.QUICKNODE_DEVNET_RPC_URL),
+    hasAuthorizationKey: Boolean(env.PRIVY_AUTHORIZATION_KEY),
+    missing: missingWalletSecrets(env),
+  }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
 export async function POST(request) {
   const header = request.headers.get('authorization') ?? '';
   const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
@@ -45,23 +79,28 @@ export async function POST(request) {
     const client = createPrivyWalletClient({
       appId: resolvePrivyAppId(env),
       appSecret: env.PRIVY_APP_SECRET,
-      rpcUrl: env.QUICKNODE_DEVNET_RPC_URL,
+      // acceptLogin does not call RPC; allow empty and require it only for signing routes.
+      rpcUrl: env.QUICKNODE_DEVNET_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
     });
-    const result = await client.acceptLogin({ accessToken });
+    const ownerHeader = request.headers.get('x-owner-id');
+    const result = await client.acceptLogin({
+      accessToken,
+      origin: requestOrigin(request),
+      ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
+    });
     return Response.json({
       created: result.created === true,
       wallets: [result.main, ...result.additional].filter(Boolean).map(publicWallet),
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
-    const code = error instanceof WalletError ? error.code : 'wallet_failed';
-    const status = code === 'missing_config' || code === 'invalid_rpc' ? 503 : 502;
-    const detail = error instanceof WalletError && typeof error.message === 'string'
-      ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
-      : undefined;
-    return Response.json(
-      detail ? { error: code, detail } : { error: code },
-      { status, headers: { 'Cache-Control': 'no-store' } },
-    );
+    const fields = walletErrorFields(error);
+    const code = fields?.code || 'wallet_failed';
+    const status = code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin' ? 503 : 502;
+    const detail = fields?.detail
+      || (typeof error?.message === 'string' ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180) : undefined);
+    const payload = detail ? { error: code, detail } : { error: code };
+    console.error('[api/wallets]', payload);
+    return Response.json(payload, { status, headers: { 'Cache-Control': 'no-store' } });
   }
 }
