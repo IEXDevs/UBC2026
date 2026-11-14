@@ -105,8 +105,25 @@ function basicAuth(appId, appSecret) {
 }
 
 function safePrivyCode(payload) {
-  const code = payload && (payload.error ?? payload.code);
-  return typeof code === 'string' && /^[a-z0-9_]{1,64}$/.test(code) ? code : '';
+  if (!payload || typeof payload !== 'object') return '';
+  for (const raw of [payload.error, payload.code, payload.error_code, payload.message]) {
+    if (typeof raw !== 'string') continue;
+    const normalized = raw.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    if (/^[a-z0-9_]{1,64}$/.test(normalized)) return normalized;
+  }
+  return '';
+}
+
+function safePrivyPath(url) {
+  try {
+    const path = new URL(url).pathname;
+    if (path.includes('/users/me')) return 'users/me';
+    if (path.includes('/v1/wallets') && !path.includes('/rpc')) return 'wallets';
+    if (path.includes('/v1/users/')) return 'users';
+    return 'privy';
+  } catch {
+    return 'privy';
+  }
 }
 
 function decodeBase64(value, label) {
@@ -243,8 +260,11 @@ export function createPrivyWalletClient({
     }
     if (!response.ok) {
       const detail = safePrivyCode(payload);
-      const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
-      fail(`${target} request failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
+      if (code === 'rpc_failed') {
+        fail(`QuickNode devnet RPC request failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
+      }
+      const step = safePrivyPath(url);
+      fail(`Privy ${step} failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
     }
     if (payload == null) fail(code === 'rpc_failed' ? 'QuickNode devnet RPC failed' : 'Privy request failed', code);
     return payload;

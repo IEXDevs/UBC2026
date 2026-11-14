@@ -83,6 +83,12 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
   }
   if (code === 'privy_failed') {
     const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
+    if (/403/i.test(detail) && /insufficient_app_secret_permissions|permission/i.test(detail)) {
+      return 'PRIVY_APP_SECRET is read-only. In Privy → App settings → API keys, create a full-access secret, put it in root .env.local, restart Next, and sign in again.';
+    }
+    if (/403/i.test(detail)) {
+      return 'Privy returned 403. Use a full-access PRIVY_APP_SECRET (not read-only) for the same app as NEXT_PUBLIC_PRIVY_APP_ID.';
+    }
     if (detail && detail.length <= 180 && !/[\r\n]/.test(detail)) {
       return `Privy wallet create failed: ${detail}. Check PRIVY_APP_SECRET, Solana wallets in the dashboard, and optional PRIVY_AUTHORIZATION_KEY.`;
     }
