@@ -39,11 +39,8 @@ test('delete bot URL stays on the runtime origin', () => {
   assert.equal(deleteBotUrl('', 'bot_1'), null);
 });
 
-test('bot chat URL stays on the runtime origin', () => {
-  assert.equal(
-    botChatUrl('https://runtime.example/agent/', 'bot_1'),
-    'https://runtime.example/agent/api/bots/bot_1/chat',
-  );
+test('bot chat URL uses the same-origin Next route', () => {
+  assert.equal(botChatUrl('https://runtime.example/agent/', 'bot_1'), '/api/bots/bot_1/chat');
+  assert.equal(botChatUrl('', 'bot_1'), '/api/bots/bot_1/chat');
   assert.equal(botChatUrl('https://runtime.example', '../evil'), null);
-  assert.equal(botChatUrl('', 'bot_1'), null);
 });

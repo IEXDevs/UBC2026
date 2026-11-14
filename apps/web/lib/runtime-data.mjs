@@ -97,14 +97,17 @@ export async function deleteOwnerBot(ownerId, botId, runtimeBase = runtimeBaseUr
   }
 }
 
-export function botChatUrl(runtimeBase, botId) {
-  const root = runtimeBaseUrl(runtimeBase);
-  if (!root || typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) return null;
-  return `${root}/api/bots/${encodeURIComponent(botId)}/chat`;
+/**
+ * Same-origin Next route — works without redeploying the agent-runtime Worker.
+ * (Worker also exposes the same path after deploy; the shell prefers Next.)
+ */
+export function botChatUrl(_runtimeBase, botId) {
+  if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) return null;
+  return `/api/bots/${encodeURIComponent(botId)}/chat`;
 }
 
 /**
- * Owner text chat with a bot via the Worker OpenRouter path.
+ * Owner text chat with a bot via the Next OpenRouter path.
  * history: prior bubble lines ({ role, text }) — agent/assistant both map server-side.
  */
 export async function sendBotChat({

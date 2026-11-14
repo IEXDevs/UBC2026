@@ -527,10 +527,10 @@ function voiceFailureNote(error) {
 }
 
 function chatFailureNote(code) {
-  if (code === 'openrouter_not_configured') return 'Text chat is not configured on the Worker (missing OpenRouter).';
+  if (code === 'openrouter_not_configured') return 'Add OPENROUTER_API_KEY to the root .env.local and restart Next.';
   if (code === 'openrouter_unauthorized' || code === 'openrouter_failed') return 'The model refused this turn. Try again in a moment.';
-  if (code === 'not_found') return 'This bot was not found for your account.';
-  if (code === 'invalid_request') return 'Set NEXT_PUBLIC_AGENT_RUNTIME_URL and sign in to chat.';
-  if (code === 'network') return 'Could not reach the Worker for a reply.';
+  if (code === 'not_found' || code === 'bot_not_found') return 'This bot was not found for your account.';
+  if (code === 'invalid_request') return 'Sign in to chat with this bot.';
+  if (code === 'network') return 'Could not reach the chat API for a reply.';
   return 'I could not reply just now.';
 }
