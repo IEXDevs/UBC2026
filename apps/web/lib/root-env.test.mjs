@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { findEnvRoot, parseEnvFile, readRootEnv } from './root-env.mjs';
+import { applyRootPublicEnv, findEnvRoot, parseEnvFile, readRootEnv } from './root-env.mjs';
 
 test('root env reads a named value and ignores blanks', () => {
   const env = { ELEVENLABS_API_KEY: '  server-key  ', ELEVENLABS_AGENT_ID: '' };
@@ -22,4 +22,19 @@ test('root env reads a named value and ignores blanks', () => {
     ELEVENLABS_API_KEY: 'server-key',
     SKIP: '1',
   });
+});
+
+test('applyRootPublicEnv copies only unset NEXT_PUBLIC_ values', () => {
+  const source = {
+    NEXT_PUBLIC_PRIVY_APP_ID: ' from-root ',
+    NEXT_PUBLIC_PRIVY_CLIENT_ID: '',
+    PRIVY_APP_SECRET: 'secret',
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://runtime.example',
+  };
+  const target = { NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://already.set' };
+  assert.deepEqual(applyRootPublicEnv(target, source), ['NEXT_PUBLIC_PRIVY_APP_ID']);
+  assert.equal(target.NEXT_PUBLIC_PRIVY_APP_ID, 'from-root');
+  assert.equal(target.NEXT_PUBLIC_AGENT_RUNTIME_URL, 'https://already.set');
+  assert.equal(target.PRIVY_APP_SECRET, undefined);
+  assert.equal(Object.hasOwn(target, 'NEXT_PUBLIC_PRIVY_CLIENT_ID'), false);
 });

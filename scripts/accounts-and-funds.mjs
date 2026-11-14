@@ -75,8 +75,10 @@ export const ACCOUNT_VENDORS = Object.freeze([
     ]),
     steps: Object.freeze([
       'Create a Privy app at the dashboard.',
+      'Enable Email login and Solana embedded wallets. Under Domains, allowlist http://localhost:3000 (with port) for local web.',
       'Put the app id in PRIVY_APP_ID and the app secret in PRIVY_APP_SECRET.',
-      'Put the public app id in NEXT_PUBLIC_PRIVY_APP_ID and the client id in NEXT_PUBLIC_PRIVY_CLIENT_ID.',
+      'Put the same public app id in NEXT_PUBLIC_PRIVY_APP_ID in the repo root .env.local.',
+      'Leave NEXT_PUBLIC_PRIVY_CLIENT_ID empty unless you created an App client and need that client id. A wrong client id makes email login show Something went wrong.',
       'Optional: store the server authorization private key as PRIVY_AUTHORIZATION_KEY (the wallet-auth value from the Privy dashboard). Leave it empty when the app secret alone can sign. Do not commit it.',
       'Leave every value empty in git. The NEXT_PUBLIC_ names are still not committed.',
     ]),

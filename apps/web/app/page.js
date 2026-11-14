@@ -23,6 +23,7 @@ import { applyLooks } from '../lib/bot-look.mjs';
 import { mergeRoster, reorderIds } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
 import { withAssignedWallet } from '../lib/wallet-assign.mjs';
+import { walletProvisionNote } from '../lib/wallet-provision.mjs';
 
 const base = getDemoShellState();
 const LOOK_KEY = 'maelstrom.botLooks';
@@ -69,14 +70,15 @@ function AuthedShell() {
         });
         const body = await response.json().catch(() => ({}));
         if (stopped) return;
-        if (!response.ok || !Array.isArray(body.wallets) || body.wallets.length === 0) {
-          setWalletNote('The main wallet was not created. Sign in again and retry.');
+        const ok = response.ok && Array.isArray(body.wallets) && body.wallets.length > 0;
+        if (!ok) {
+          setWalletNote(walletProvisionNote(body, { ok: false }));
           return;
         }
         setLiveWallets(body.wallets);
-        setWalletNote(body.created ? 'Main wallet created and assigned to these agents.' : 'Main wallet assigned to these agents.');
+        setWalletNote(walletProvisionNote(body, { ok: true }));
       } catch {
-        if (!stopped) setWalletNote('The main wallet was not created. Sign in again and retry.');
+        if (!stopped) setWalletNote(walletProvisionNote({}, { ok: false }));
       }
     })();
     return () => { stopped = true; };
