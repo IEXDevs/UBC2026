@@ -1,0 +1,9 @@
+{
+  "name": "@ubc2026/prices",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./prices.mjs",
+  "scripts": { "test": "node --test prices.test.mjs" },
+  "engines": { "node": ">=20" }
+}

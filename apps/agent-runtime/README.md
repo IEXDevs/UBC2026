@@ -3,6 +3,7 @@
 Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 
 - `POST /bots/:id/wake` — start or continue research step
+- `POST /bots/:id/decide` — trust → verify → policy gate (pauses on approval)
 - `POST /bots/:id/pause|resume|advance`
 - `GET /bots/:id/status`
 - `POST /webhooks/quicknode` — Streams wake path

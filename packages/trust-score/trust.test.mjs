@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateTrust, createTrustScoreProvider, normalizeScore } from './trust.mjs';
+import {
+  evaluateTrust,
+  createTrustScoreProvider,
+  createJupiterTrustProvider,
+  scoreFromJupiterToken,
+  normalizeScore,
+} from './trust.mjs';
 
 const mint = 'So11111111111111111111111111111111111111112';
 
@@ -72,4 +78,44 @@ test('rate limits and network failures do not leak secrets', async () => {
     })(mint),
     { message: 'provider_unavailable' },
   );
+});
+
+test('Jupiter organic score maps to 0-1000 with audit ceilings', () => {
+  assert.equal(scoreFromJupiterToken({ organicScore: 80, isVerified: true, audit: {} }), '800');
+  assert.equal(
+    scoreFromJupiterToken({
+      organicScore: 90,
+      isVerified: false,
+      audit: { isSus: true },
+    }),
+    '100',
+  );
+  assert.equal(
+    scoreFromJupiterToken({
+      organicScore: 95,
+      isVerified: false,
+      audit: { mintAuthorityDisabled: false },
+    }),
+    '250',
+  );
+});
+
+test('Jupiter trust provider searches by mint and returns gate decision', async () => {
+  const lookup = createJupiterTrustProvider({
+    apiKey: 'jup-key',
+    fetcher: async (url, options) => {
+      assert.match(url, /\/search\?query=/);
+      assert.equal(options.headers['x-api-key'], 'jup-key');
+      return Response.json([{
+        id: mint,
+        organicScore: 70,
+        isVerified: true,
+        audit: { mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
+      }]);
+    },
+  });
+  const result = await lookup(mint);
+  assert.equal(result.score, '700');
+  assert.equal(result.source, 'jupiter-tokens-v2');
+  assert.equal(result.decision.state, 'allowed');
 });
