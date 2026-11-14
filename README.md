@@ -22,7 +22,7 @@ Library scaffolds (not product-complete) cover pieces of:
 3. Verify-agent consensus loop + digests; trust-score confirmation gate
 4. Owner-bound browser sessions, per-bot concurrency, agent search/browser tools
 
-Still required for a complete submission: working frontend, x402 sandbox shopping, on-chain settlement confirmation, on-chain program IDs in README, ElevenLabs demo with audio, Grok Bot on X chat export, 2–3 minute demo video. The per-bot loop is checkpointed in the Durable Object.
+Still required for a complete submission: working frontend, x402 sandbox shopping, on-chain settlement confirmation, on-chain program IDs in README, ElevenLabs demo with audio, attaching a Grok Bot chat export to the submission, 2–3 minute demo video. The per-bot loop is checkpointed in the Durable Object. Grok Bot drafts for notable devnet events stay off X until a credential exists; `packages/grok-bot` builds the payload and the export.
 
 ## Agent decision loop
 
@@ -52,6 +52,7 @@ goal → research (browser/search)
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
 | `packages/prices` | DexScreener mainnet price reads (paper PnL) |
+| `packages/grok-bot` | Offline Grok Bot post drafts for notable devnet events, plus chat export |
 | `packages/x402` | x402 v2 Solana devnet helpers + sandbox store client |
 | `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object. `POST /bots/:id/loop` runs research → decide → trust → verify → policy → approval → execute → memo → monitor, checkpointed per step. Models use OpenRouter and a locked platform prompt |
