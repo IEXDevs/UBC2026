@@ -9,7 +9,7 @@ Covers:
 - Spend ledger, decision records, hash-chained timeline events, x402 payments, metrics
 - API route list (`API_ROUTES`, `matchApiRoute`) shared by the Worker
 - Secret and public config **names** (`SECRET_NAMES`, `readConfig`) — values are never stored here
-- Locked builtin templates (trading / shopping / position-management)
+- Locked builtin templates (trading / shopping / position-management). User templates and the creation flow live in `@ubc2026/bot-creation`.
 
 Pure validators only. No I/O, signing, or secrets.
 

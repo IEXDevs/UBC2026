@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
+import { enableBot } from '@ubc2026/bot-creation';
+import BotCreation from '../components/BotCreation';
 import TalkStub from '../components/TalkStub';
 import LiveViewPanel from '../components/LiveViewPanel';
 import { getDemoShellState, panePlaceholder } from '../lib/demo-state.mjs';
@@ -48,10 +50,29 @@ function AuthedShell() {
 }
 
 function Shell({ ownerId, account }) {
+  const owner = ownerId ?? 'demo_owner';
+  const [bots, setBots] = useState(state.bots);
+  const [userTemplates, setUserTemplates] = useState([]);
+  const [creating, setCreating] = useState(false);
   const [activeBot, setActiveBot] = useState(state.bots[0].id);
   const [pane, setPane] = useState(state.panes[0]);
-  const bot = state.bots.find(item => item.id === activeBot) ?? state.bots[0];
+  const bot = bots.find(item => item.id === activeBot) ?? bots[0];
   const placeholder = panePlaceholder(pane);
+
+  function addDraft(draft) {
+    setBots(current => [
+      ...current.filter(item => item.id !== draft.id),
+      { id: draft.id, name: draft.name, type: draft.type, status: 'draft', goal: draft.goal, record: draft },
+    ]);
+    setActiveBot(draft.id);
+  }
+
+  function enableDraft(record) {
+    const next = enableBot(record);
+    setBots(current => current.map(item => (
+      item.id === record.id ? { ...item, status: 'enabled', record: next } : item
+    )));
+  }
 
   return (
     <div className="shell">
@@ -60,20 +81,26 @@ function Shell({ ownerId, account }) {
           Mael<span>strom</span>
         </div>
         <div className="bot-list" role="list">
-          {state.bots.map(item => (
-            <button
+          {bots.map(item => (
+            <div
               key={item.id}
               className="bot-item"
               role="listitem"
               aria-current={item.id === activeBot ? 'true' : undefined}
-              onClick={() => setActiveBot(item.id)}
             >
-              <strong>{item.name}</strong>
-              <small>{item.type} · {item.status}</small>
-            </button>
+              <button type="button" className="bot-select" onClick={() => setActiveBot(item.id)}>
+                <strong>{item.name}</strong>
+                <small>{item.type} · {item.status}</small>
+              </button>
+              {item.record && item.record.enabled === false ? (
+                <button type="button" className="ghost" onClick={() => enableDraft(item.record)}>Enable</button>
+              ) : null}
+            </div>
           ))}
         </div>
-        <button className="cta" type="button" disabled title="Bot creation is a later chunk">Create bot</button>
+        <button className="cta" type="button" aria-expanded={creating} onClick={() => setCreating(open => !open)}>
+          {creating ? 'Close creation' : 'Create bot'}
+        </button>
       </aside>
 
       <main className="main">
@@ -102,6 +129,15 @@ function Shell({ ownerId, account }) {
               and Phantom-style approvals before every spend.
             </p>
           </div>
+
+          {creating ? (
+            <BotCreation
+              ownerId={owner}
+              userTemplates={userTemplates}
+              onTemplatesChange={setUserTemplates}
+              onDraft={addDraft}
+            />
+          ) : null}
 
           <section className="panel empty-pane" aria-label={placeholder.title}>
             <h2>{placeholder.title}</h2>
