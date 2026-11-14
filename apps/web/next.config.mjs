@@ -13,7 +13,13 @@ applyRootPublicEnv();
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ['@ubc2026/bot-creation', '@ubc2026/contracts', '@ubc2026/wallets'],
+  transpilePackages: [
+    '@ubc2026/bot-creation',
+    '@ubc2026/browser-search',
+    '@ubc2026/browser-session',
+    '@ubc2026/contracts',
+    '@ubc2026/wallets',
+  ],
   webpack: (config) => {
     // Privy is hoisted to the repo root, while the Solana peers it imports
     // stay in this app because the root already has a newer @solana/kit.

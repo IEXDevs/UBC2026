@@ -1,8 +1,26 @@
 import { readRootEnv } from '../../../../../lib/root-env.mjs';
+import {
+  chatToolsInstruction,
+  createChatToolInvoker,
+  openAiAgentTools,
+  serializeToolResult,
+} from '../../../../../lib/chat-tools.mjs';
 import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
+
+function chatToolEnv() {
+  return {
+    FIRECRAWL_API_KEY: readRootEnv('FIRECRAWL_API_KEY'),
+    CLOUDFLARE_ACCOUNT_ID: readRootEnv('CLOUDFLARE_ACCOUNT_ID'),
+    CLOUDFLARE_API_TOKEN: readRootEnv('CLOUDFLARE_API_TOKEN'),
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL')
+      || (typeof process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL === 'string'
+        ? process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL.trim()
+        : ''),
+  };
+}
 
 export async function POST(request, context) {
   const params = await context?.params;
@@ -15,6 +33,7 @@ export async function POST(request, context) {
   if (typeof ownerHeader !== 'string' || !OWNER.test(ownerHeader.trim())) {
     return Response.json({ error: 'owner_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
+  const ownerId = ownerHeader.trim();
 
   let body = {};
   try {
@@ -27,6 +46,14 @@ export async function POST(request, context) {
     return Response.json({ error: 'message_required' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
   }
 
+  const env = chatToolEnv();
+  const invokeRaw = createChatToolInvoker({
+    ownerId,
+    botId,
+    env,
+    runtimeBase: env.NEXT_PUBLIC_AGENT_RUNTIME_URL,
+  });
+
   try {
     const reply = await completeTextChat({
       modelApiKey: readRootEnv('MODEL_API_KEY'),
@@ -37,9 +64,19 @@ export async function POST(request, context) {
       history: Array.isArray(body.history) ? body.history : [],
       message,
       model: readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined,
+      tools: openAiAgentTools(),
+      toolsInstruction: chatToolsInstruction(),
+      invokeTool: async (name, args) => serializeToolResult(await invokeRaw(name, args)),
     });
     return Response.json(
-      { ok: true, botId, reply: reply.text, model: reply.model, provider: reply.provider },
+      {
+        ok: true,
+        botId,
+        reply: reply.text,
+        model: reply.model,
+        provider: reply.provider,
+        toolRounds: reply.toolRounds ?? 0,
+      },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (error) {
