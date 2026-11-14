@@ -13,6 +13,26 @@ export function browserSessionUrl(runtimeBase, botId, { sessionRecordId, action 
 }
 
 /**
+ * Prefer the newest open session from GET /bots/:id/browser/sessions.
+ * Chat and the Live View panel share the Worker store — the panel must adopt
+ * sessions the model already opened instead of creating another slot.
+ */
+export function pickOpenSession(payload) {
+  const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+  const open = sessions.filter(row => row
+    && typeof row.sessionRecordId === 'string'
+    && row.sessionRecordId
+    && row.status !== 'closed');
+  if (open.length === 0) return null;
+  open.sort((a, b) => {
+    const aAt = Number(a.updatedAt ?? a.createdAt ?? 0);
+    const bAt = Number(b.updatedAt ?? b.createdAt ?? 0);
+    return bAt - aAt;
+  });
+  return open[0];
+}
+
+/**
  * Decide how the owner UI should show a Live View URL.
  * The URL is a bearer credential: callers may set iframe src or an href, never text.
  */

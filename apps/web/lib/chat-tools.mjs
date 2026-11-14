@@ -34,6 +34,7 @@ export function chatToolsInstruction() {
     'When the owner asks you to look something up, browse, or open a page, call those tools.',
     'Do not claim you lack a browser or web access while these tools are available.',
     'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
+    'After browser_open or browser_live_view, tell the owner to use Show live view on the Live View panel — not Open browser session again (that hits concurrency_limit).',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
   ].join('\n');
 }

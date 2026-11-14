@@ -13,10 +13,20 @@ test('browser status explains missing runtime and secrets', () => {
     }),
     /CLOUDFLARE_ACCOUNT_ID/,
   );
+  assert.match(
+    browserStatusNote({
+      ownerId: 'did:privy:x',
+      runtimeBase: 'https://runtime.example',
+      sessionUrl: 'https://runtime.example/bots/b1/browser/sessions',
+      sessionRecordId: 'bs_1',
+    }),
+    /Show live view/,
+  );
 });
 
 test('browser errors map Worker codes to setup hints', () => {
   assert.match(browserErrorNote('browser_not_configured'), /CLOUDFLARE_API_TOKEN/);
   assert.match(browserErrorNote('search_not_configured'), /FIRECRAWL/);
   assert.match(browserErrorNote('not_found'), /not found/i);
+  assert.match(browserErrorNote('concurrency_limit'), /Release/);
 });
