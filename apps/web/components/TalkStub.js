@@ -86,7 +86,10 @@ export default function TalkStub({
         </p>
       ) : null}
       {!agentId ? (
-        <p className="hint">Blocked on 8A: set <code>NEXT_PUBLIC_ELEVENLABS_AGENT_ID</code> to mount the live orb.</p>
+        <p className="hint">
+          Set <code>NEXT_PUBLIC_ELEVENLABS_AGENT_ID</code> after creating the ElevenLabs agent from the
+          runtime <code>/voice/agent</code> spec (Alex / 8A). Client tools and live transcript work now.
+        </p>
       ) : null}
     </section>
   );
