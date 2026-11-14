@@ -94,16 +94,25 @@ function Detail({ label, value }) {
 function Wallets({ state, signedIn, onSignIn, note }) {
   if (!signedIn) return <SignedOutNote onSignIn={onSignIn} />;
   const rows = describeWallets(state.wallets || [], state.bots || []);
+  const status = typeof note === 'string' ? note.trim() : '';
   return (
     <section className="panel" aria-label="Wallets">
       <h2>Wallets</h2>
-      {note ? <p className="preview-note">{note}</p> : null}
+      {status ? (
+        <p className="preview-note" role="status">{status}</p>
+      ) : null}
       {rows.length === 0 ? (
-        <p className="preview-note">
-          No Solana wallets in the shell yet. Confirm root <code>.env.local</code> has
-          {' '}<code>PRIVY_APP_SECRET</code> (and usually <code>PRIVY_AUTHORIZATION_KEY</code>),
-          restart Next, then sign out and back in. Wallets that only exist as Ethereum in the
-          Privy dashboard will not appear here.
+        <p className="preview-note" role={status ? undefined : 'status'}>
+          {status
+            ? 'No Solana wallets listed yet. Ethereum-only Privy wallets stay out of this list.'
+            : (
+              <>
+                No Solana wallets in the shell yet. Confirm root <code>.env.local</code> has
+                {' '}<code>PRIVY_APP_SECRET</code> (and usually <code>PRIVY_AUTHORIZATION_KEY</code>),
+                restart Next, then sign out and back in. Wallets that only exist as Ethereum in the
+                Privy dashboard will not appear here.
+              </>
+            )}
         </p>
       ) : (
         <AnimatedList

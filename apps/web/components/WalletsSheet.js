@@ -34,8 +34,7 @@ export default function WalletsSheet({ open, onClose, state, note = '', signedIn
             <X size={18} strokeWidth={1.75} />
           </button>
         </div>
-        {note ? <p className="preview-note">{note}</p> : null}
-        <MoneyPane pane="wallets" state={state} signedIn={signedIn} onSignIn={onSignIn} />
+        <MoneyPane pane="wallets" state={state} signedIn={signedIn} onSignIn={onSignIn} note={note} />
       </section>
     </div>
   );

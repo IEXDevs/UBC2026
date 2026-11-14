@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { browserErrorNote, browserStatusNote } from '../lib/browser-status.mjs';
 import { browserSessionUrl, liveViewFrame } from '../lib/live-view.mjs';
 import GlassSurface from './GlassSurface';
 
@@ -33,6 +34,8 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
   const [frame, setFrame] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const sessionUrl = browserSessionUrl(runtimeBase, botId);
+  const status = browserStatusNote({ ownerId, runtimeBase, sessionUrl });
 
   async function run(action) {
     setError('');
@@ -56,26 +59,19 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
       setSessionRecordId(null);
       setFrame(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'browser_request_failed');
+      const code = caught instanceof Error ? caught.message : 'browser_request_failed';
+      setError(browserErrorNote(code));
     } finally {
       setBusy(false);
     }
   }
 
-  const ready = Boolean(ownerId) && Boolean(browserSessionUrl(runtimeBase, botId));
+  const ready = Boolean(ownerId) && Boolean(sessionUrl);
 
   return (
     <div className="live-view">
       <h3>Live View</h3>
-      {!ownerId && (
-        <p>Connect with Privy to open an owner-bound Cloudflare browser session.</p>
-      )}
-      {ownerId && !browserSessionUrl(runtimeBase, botId) && (
-        <p>Set NEXT_PUBLIC_AGENT_RUNTIME_URL to the agent runtime that owns browser sessions.</p>
-      )}
-      {ownerId && browserSessionUrl(runtimeBase, botId) && (
-        <p>Read-only Live View for this agent. A separate tab is there if the frame does not load.</p>
-      )}
+      <p className="preview-note" role="status">{status}</p>
       <div className="live-actions">
         <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
           Open browser session
@@ -87,7 +83,7 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
           Release session
         </button>
       </div>
-      {error && <p role="alert">{error}</p>}
+      {error ? <p className="preview-note" role="alert">{error}</p> : null}
       {frame?.embed && frame.src && (
         <GlassSurface
           className="live-glass"

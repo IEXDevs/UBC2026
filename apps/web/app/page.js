@@ -25,7 +25,7 @@ import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { buildBotStats } from '../lib/overview.mjs';
-import { walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
+import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
 import {
   deleteOwnerBot,
   emptyMoneyState,
@@ -57,11 +57,41 @@ export default function HomePage() {
   return <AuthedShell />;
 }
 
+function linkedAccountsKey(user) {
+  if (!user) return '';
+  const accounts = Array.isArray(user.linkedAccounts)
+    ? user.linkedAccounts
+    : (Array.isArray(user.linked_accounts) ? user.linked_accounts : []);
+  return accounts
+    .map((account) => {
+      if (!account || typeof account !== 'object') return '';
+      const chain = account.chainType ?? account.chain_type ?? '';
+      const address = typeof account.address === 'string' ? account.address : '';
+      return `${account.type || ''}:${chain}:${address}`;
+    })
+    .filter(Boolean)
+    .join('|');
+}
+
+function applyWalletFallback(user, body, setLiveWallets, setWalletNote) {
+  const ownerId = ownerIdFromPrivyUser(user, true);
+  const fallback = walletsFromPrivyUser(user, ownerId);
+  const note = walletProvisionNote(body || {}, { ok: false });
+  if (fallback.length > 0) {
+    setLiveWallets(fallback);
+    setWalletNote(`${note} Showing the Privy client wallet until server create succeeds.`);
+    return;
+  }
+  setLiveWallets([]);
+  setWalletNote(note);
+}
+
 function AuthedShell() {
   const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
   const signedIn = ready && authenticated;
   const [liveWallets, setLiveWallets] = useState(null);
   const [walletNote, setWalletNote] = useState('');
+  const accountsKey = linkedAccountsKey(user);
 
   useEffect(() => {
     if (!signedIn) {
@@ -70,10 +100,25 @@ function AuthedShell() {
       return undefined;
     }
     let stopped = false;
+    setWalletNote('Provisioning Solana wallets…');
     (async () => {
       try {
+        const configResponse = await fetch('/api/wallets', { method: 'GET', cache: 'no-store' });
+        const config = await configResponse.json().catch(() => ({}));
+        if (stopped) return;
+        const configNote = walletConfigNote(config);
+        if (configNote && Array.isArray(config.missing) && config.missing.length > 0) {
+          applyWalletFallback(user, { error: 'missing_config', missing: config.missing }, setLiveWallets, setWalletNote);
+          return;
+        }
+
         const token = await getAccessToken();
-        if (!token || stopped) return;
+        if (stopped) return;
+        if (!token) {
+          applyWalletFallback(user, { error: 'token_missing' }, setLiveWallets, setWalletNote);
+          return;
+        }
+
         const response = await fetch('/api/wallets', {
           method: 'POST',
           headers: {
@@ -90,35 +135,22 @@ function AuthedShell() {
             detail: body.detail,
             missing: body.missing,
           });
-          const ownerId = ownerIdFromPrivyUser(user, true);
-          const fallback = walletsFromPrivyUser(user, ownerId);
-          if (fallback.length > 0) {
-            setLiveWallets(fallback);
-            setWalletNote(`${walletProvisionNote(body, { ok: false })} Showing the Privy client wallet until server create succeeds.`);
-            return;
+          applyWalletFallback(user, body, setLiveWallets, setWalletNote);
+          if (configNote && !body.error) {
+            setWalletNote(current => (current ? `${current} ${configNote}` : configNote));
           }
-          setLiveWallets([]);
-          setWalletNote(walletProvisionNote(body, { ok: false }));
           return;
         }
         setLiveWallets(body.wallets);
         setWalletNote(walletProvisionNote(body, { ok: true }));
       } catch {
         if (!stopped) {
-          const ownerId = ownerIdFromPrivyUser(user, true);
-          const fallback = walletsFromPrivyUser(user, ownerId);
-          if (fallback.length > 0) {
-            setLiveWallets(fallback);
-            setWalletNote(`${walletProvisionNote({}, { ok: false })} Showing the Privy client wallet until server create succeeds.`);
-          } else {
-            setLiveWallets([]);
-            setWalletNote(walletProvisionNote({}, { ok: false }));
-          }
+          applyWalletFallback(user, {}, setLiveWallets, setWalletNote);
         }
       }
     })();
     return () => { stopped = true; };
-  }, [signedIn, user?.id, getAccessToken]);
+  }, [signedIn, user, user?.id, accountsKey, getAccessToken]);
 
   return (
     <Shell
