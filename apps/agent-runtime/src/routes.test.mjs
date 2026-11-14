@@ -32,6 +32,26 @@ test('route catalog lists live data routes and ownerless data calls require auth
   assert.equal(sign.status, 401);
 });
 
+test('localhost Origin gets CORS on preflight and /api/events', async () => {
+  const env = fakeEnv();
+  const preflight = await worker.fetch(new Request('https://runtime/api/events?botId=bot_meteora', {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'http://localhost:3000',
+      'Access-Control-Request-Method': 'GET',
+      'Access-Control-Request-Headers': 'x-owner-id',
+    },
+  }), env);
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), 'http://localhost:3000');
+  assert.match(preflight.headers.get('Access-Control-Allow-Headers') || '', /x-owner-id/i);
+
+  const events = await worker.fetch(new Request('https://runtime/api/events?botId=bot_meteora', {
+    headers: { Origin: 'http://localhost:3000', 'x-owner-id': 'did:privy:user1' },
+  }), env);
+  assert.equal(events.headers.get('Access-Control-Allow-Origin'), 'http://localhost:3000');
+});
+
 test('owner browser routes are forwarded with the bot id kept on the object path', async () => {
   const env = fakeEnv();
   const live = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions/rec_1/live-view', {

@@ -11,18 +11,17 @@ const props = privyProviderProps({
 
 export default function PrivyRoot({ children }) {
   if (!props) return children;
-  return (
-    <PrivyProvider
-      appId={props.appId}
-      clientId={props.clientId}
-      config={{
-        ...props.config,
-        externalWallets: {
-          solana: { connectors: toSolanaWalletConnectors() },
-        },
-      }}
-    >
-      {children}
-    </PrivyProvider>
-  );
+  // Omit clientId unless set — a wrong App Client id makes email login show
+  // "Something went wrong" (often invalid_origin against that client's allowlist).
+  const providerProps = {
+    appId: props.appId,
+    config: {
+      ...props.config,
+      externalWallets: {
+        solana: { connectors: toSolanaWalletConnectors() },
+      },
+    },
+  };
+  if (props.clientId) providerProps.clientId = props.clientId;
+  return <PrivyProvider {...providerProps}>{children}</PrivyProvider>;
 }
