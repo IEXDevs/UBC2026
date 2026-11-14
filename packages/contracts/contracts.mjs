@@ -6,7 +6,7 @@
 export class ContractError extends Error {}
 const fail = message => { throw new ContractError(message); };
 
-const idOk = value => typeof value === 'string' && value.length > 0 && value.length <= 128 && /^[a-zA-Z0-9:_-]+$/.test(value);
+const idOk = value => typeof value === 'string' && value.length > 0 && value.length <= 256 && /^[a-zA-Z0-9:_.-]+$/.test(value);
 const text = (value, max = 256) => typeof value === 'string' && value.length > 0 && value.length <= max;
 const amount = value => {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(value)) fail('Amounts must be unsigned integer strings in base units');

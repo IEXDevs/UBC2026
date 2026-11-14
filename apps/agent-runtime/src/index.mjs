@@ -21,6 +21,7 @@ import { enrichEnv } from './runtime-env.mjs';
 import { handleApiData } from './api-data.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
 import { supabaseConfig } from './supabase-rest.mjs';
+import { corsPreflightResponse, withCors } from './cors.mjs';
 
 export { BotDurableObject };
 
@@ -43,6 +44,19 @@ function botStub(env, botId) {
 const routed = {
   async fetch(request, rawEnv) {
     const env = enrichEnv(rawEnv);
+    if (request.method === 'OPTIONS') {
+      return corsPreflightResponse(request, env);
+    }
+    const response = await dispatch(request, env, rawEnv);
+    return withCors(request, response, env);
+  },
+
+  async scheduled(controller, rawEnv, ctx) {
+    return runScheduled(controller, rawEnv, ctx);
+  },
+};
+
+async function dispatch(request, env, rawEnv = env) {
     const url = new URL(request.url);
 
     if (url.pathname === '/health') {
@@ -136,9 +150,9 @@ const routed = {
     }
 
     return json({ error: 'not_found' }, 404);
-  },
+}
 
-  async scheduled(controller, rawEnv, ctx) {
+async function runScheduled(controller, rawEnv, ctx) {
     const env = enrichEnv(rawEnv);
     const cron = typeof controller?.cron === 'string' && controller.cron ? controller.cron : HOURLY_CRON;
     const now = Number.isSafeInteger(controller?.scheduledTime) ? controller.scheduledTime : Date.now();
@@ -180,8 +194,7 @@ const routed = {
       }));
     }
     logCron(env, ctx, { cron, bots: bots.map(bot => bot.id).slice(0, 50), streamDropped: true });
-  },
-};
+}
 
 const worker = {
   async fetch(request, rawEnv, ctx) {

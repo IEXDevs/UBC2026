@@ -123,7 +123,7 @@ The product in this repo is **ElevenLabs Agents**, not ElevenCreative. `@elevenl
 - `GET /voice/agent` returns the agent spec. The custom LLM is Grok (`x-ai/grok-4.7`, or `OPENROUTER_MODEL_VOICE` when that value is an `x-ai/grok` id) via `POST /voice/llm/chat/completions`. The OpenRouter key stays on the Worker and is not part of the spec.
 - `POST /voice/tools/:name` is the webhook tool route. Each tool calls the same bot, event, wallet, metric, payment, or browser route as the UI, with the same `x-owner-id`. Live View URLs are removed before the model sees the result. The route requires `ELEVENLABS_WEBHOOK_SECRET`. Without it the handler returns `elevenlabs_webhook_not_configured` and does not call ElevenLabs.
 - The system prompt tells the agent to name the bot, to call a tool instead of inventing balances, and to refuse sends, approvals, limit raises, and freezes.
-- `apps/web/components/TalkStub.js` lists client tools (open bot, Live View, confirm, read-back). "Start voice session" stays disabled until `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` is set, and it has no session handler. Pushing live events into the conversation is still open.
+- Sid’s composer / Talk path mounts when `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` is set and the Worker has `ELEVENLABS_*` secrets. Client tools (open bot, Live View, confirm, read-back) share the same permissioned routes as the UI.
 
 `ELEVENLABS_API_KEY` and `ELEVENLABS_AGENT_ID` are secret names only.
 
@@ -170,7 +170,25 @@ npm test
 
 Node 20 or newer. Tests use injected clients and do not read secret values.
 
-Copy `.env.example` to `.env` (gitignored) or set Worker secrets with `npx wrangler secret put <NAME>` from `apps/agent-runtime`. The command below prints the Privy, Supabase, Cloudflare, OpenRouter, Firecrawl, QuickNode, and ElevenLabs names, plus devnet SOL and USDC faucet steps. It does not read secret values or call a faucet.
+### Env files vs Worker secrets
+
+| Where | Used by |
+| --- | --- |
+| Root `.env` / `.env.local` (from `.env.example`) | Next.js web (`NEXT_PUBLIC_*` + server routes) |
+| `apps/agent-runtime/.dev.vars` | `wrangler dev` only |
+| `npx wrangler secret put` from `apps/agent-runtime` | **Deployed** Worker — `.env.local` is not uploaded automatically |
+
+Pipe secrets after `source`ing your local file:
+
+```bash
+cd apps/agent-runtime
+set -a && source ../../.env.local && set +a
+printf %s "$SUPABASE_URL" | npx wrangler secret put SUPABASE_URL
+# …repeat for each name in .env.example (skip empty / NEXT_PUBLIC_*)
+curl https://<runtime-host>/health   # secrets.*.set should be true; signing + supabase true
+```
+
+Apply SQL to the **hosted** project (`npx supabase db push --remote`, or the files under `supabase/migrations/` in the SQL editor). Local Docker is optional (`supabase start`).
 
 ```bash
 node scripts/accounts-and-funds.mjs --address <SOLANA_PUBKEY>
@@ -178,11 +196,11 @@ node scripts/accounts-and-funds.mjs --address <SOLANA_PUBKEY>
 
 Devnet SOL: [faucet.solana.com](https://faucet.solana.com/). Devnet USDC: [Circle faucet](https://faucet.circle.com/?chain=SOL), mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`.
 
-Worker config (do not deploy from a docs change): `apps/agent-runtime/wrangler.jsonc`. UI config: `apps/web/wrangler.jsonc`.
+Worker config: `apps/agent-runtime/wrangler.jsonc`. UI config: `apps/web/wrangler.jsonc`.
 
 ```bash
 npm run dev -w @ubc2026/web
 npm test -w @ubc2026/agent-runtime
 ```
 
-The web app reads `NEXT_PUBLIC_PRIVY_APP_ID` (optional `NEXT_PUBLIC_PRIVY_CLIENT_ID`) and `NEXT_PUBLIC_AGENT_RUNTIME_URL`. Those public ids are not secret values. Leave every secret in `.env.example` empty.
+Web needs `NEXT_PUBLIC_PRIVY_APP_ID` in the **root** `.env.local` (Next loads root `NEXT_PUBLIC_*` via `apps/web/next.config.mjs`), `NEXT_PUBLIC_AGENT_RUNTIME_URL` pointing at the **Worker** URL (not `localhost:3000`), and optionally `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`. Leave `NEXT_PUBLIC_PRIVY_CLIENT_ID` empty unless you use a Privy App client. For email login, allowlist `http://localhost:3000` under Privy → Domains and enable Email + Solana embedded wallets — see `apps/web/README.md`. After login, main-wallet create also needs `PRIVY_APP_SECRET` and `QUICKNODE_DEVNET_RPC_URL` in that same root file (preview `PreviewMain111…` rows mean that call failed). Leave every secret value in `.env.example` empty.

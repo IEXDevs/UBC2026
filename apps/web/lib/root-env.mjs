@@ -69,3 +69,21 @@ export function readRootEnv(name, env = rootEnv()) {
   const value = env?.[name];
   return typeof value === 'string' ? value.trim() : '';
 }
+
+/**
+ * Copy root `.env.local` NEXT_PUBLIC_* into `process.env` when unset.
+ * Next only auto-loads `apps/web/.env*`; the monorepo keeps secrets at the repo root.
+ */
+export function applyRootPublicEnv(target = process.env, env = rootEnv()) {
+  const applied = [];
+  for (const [name, raw] of Object.entries(env || {})) {
+    if (!name.startsWith('NEXT_PUBLIC_')) continue;
+    const value = typeof raw === 'string' ? raw.trim() : '';
+    if (!value) continue;
+    const existing = typeof target[name] === 'string' ? target[name].trim() : '';
+    if (existing) continue;
+    target[name] = value;
+    applied.push(name);
+  }
+  return applied;
+}

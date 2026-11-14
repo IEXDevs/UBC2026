@@ -26,6 +26,7 @@ import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../
 import { withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { buildBotStats } from '../lib/overview.mjs';
+import { walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
 
 const base = getDemoShellState();
 const LOOK_KEY = 'maelstrom.botLooks';
@@ -68,18 +69,43 @@ function AuthedShell() {
         if (!token || stopped) return;
         const response = await fetch('/api/wallets', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(user?.id ? { 'x-owner-id': user.id } : {}),
+          },
         });
         const body = await response.json().catch(() => ({}));
         if (stopped) return;
-        if (!response.ok || !Array.isArray(body.wallets) || body.wallets.length === 0) {
-          setWalletNote('The main wallet was not created. Sign in again and retry.');
+        const ok = response.ok && Array.isArray(body.wallets) && body.wallets.length > 0;
+        if (!ok) {
+          console.error('[wallets] provision failed', response.status, {
+            error: body.error,
+            detail: body.detail,
+            missing: body.missing,
+          });
+          const ownerId = ownerIdFromPrivyUser(user, true);
+          const fallback = walletsFromPrivyUser(user, ownerId);
+          if (fallback.length > 0) {
+            setLiveWallets(fallback);
+            setWalletNote(`${walletProvisionNote(body, { ok: false })} Showing the Privy client wallet until server create succeeds.`);
+            return;
+          }
+          setWalletNote(walletProvisionNote(body, { ok: false }));
           return;
         }
         setLiveWallets(body.wallets);
-        setWalletNote(body.created ? 'Main wallet created and assigned to these agents.' : 'Main wallet assigned to these agents.');
+        setWalletNote(walletProvisionNote(body, { ok: true }));
       } catch {
-        if (!stopped) setWalletNote('The main wallet was not created. Sign in again and retry.');
+        if (!stopped) {
+          const ownerId = ownerIdFromPrivyUser(user, true);
+          const fallback = walletsFromPrivyUser(user, ownerId);
+          if (fallback.length > 0) {
+            setLiveWallets(fallback);
+            setWalletNote(`${walletProvisionNote({}, { ok: false })} Showing the Privy client wallet until server create succeeds.`);
+          } else {
+            setWalletNote(walletProvisionNote({}, { ok: false }));
+          }
+        }
       }
     })();
     return () => { stopped = true; };
