@@ -37,6 +37,18 @@ function walletErrorFields(error) {
   return { code, detail };
 }
 
+/** Config presence only — no secret values. */
+export async function GET() {
+  const env = rootWalletEnv();
+  return Response.json({
+    hasAppId: Boolean(resolvePrivyAppId(env)),
+    hasAppSecret: Boolean(env.PRIVY_APP_SECRET),
+    hasRpc: Boolean(env.QUICKNODE_DEVNET_RPC_URL),
+    hasAuthorizationKey: Boolean(env.PRIVY_AUTHORIZATION_KEY),
+    missing: missingWalletSecrets(env),
+  }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
 export async function POST(request) {
   const header = request.headers.get('authorization') ?? '';
   const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
@@ -72,9 +84,8 @@ export async function POST(request) {
     const status = code === 'missing_config' || code === 'invalid_rpc' ? 503 : 502;
     const detail = fields?.detail
       || (typeof error?.message === 'string' ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180) : undefined);
-    return Response.json(
-      detail ? { error: code, detail } : { error: code },
-      { status, headers: { 'Cache-Control': 'no-store' } },
-    );
+    const payload = detail ? { error: code, detail } : { error: code };
+    console.error('[api/wallets]', payload);
+    return Response.json(payload, { status, headers: { 'Cache-Control': 'no-store' } });
   }
 }

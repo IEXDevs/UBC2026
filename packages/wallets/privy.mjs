@@ -210,6 +210,17 @@ export function createPrivyWalletClient({
   const privyAuth = assertHttps(authBase, 'Privy auth API');
   const authKey = authorizationKey == null || authorizationKey === '' ? null : authorizationKey;
 
+  function abortAfter(ms) {
+    // OpenNext Cloudflare for Dev / workerd may lack AbortSignal.timeout.
+    if (typeof AbortSignal === 'function' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    if (typeof timer?.unref === 'function') timer.unref();
+    return controller.signal;
+  }
+
   async function fetchJson(url, { method, headers, body }, code) {
     let response;
     try {
@@ -218,10 +229,12 @@ export function createPrivyWalletClient({
         headers,
         body: body == null ? undefined : JSON.stringify(body),
         redirect: 'error',
-        signal: AbortSignal.timeout(15000),
+        signal: abortAfter(15000),
       });
-    } catch {
-      fail(code === 'rpc_failed' ? 'QuickNode devnet RPC failed' : 'Privy request failed', code);
+    } catch (error) {
+      const aborted = error?.name === 'AbortError' || error?.name === 'TimeoutError';
+      const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
+      fail(`${target} request ${aborted ? 'timed out' : 'failed'}`, code);
     }
     const text = await response.text();
     let payload = null;

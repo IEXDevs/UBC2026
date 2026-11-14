@@ -72,6 +72,11 @@ function AuthedShell() {
         if (stopped) return;
         const ok = response.ok && Array.isArray(body.wallets) && body.wallets.length > 0;
         if (!ok) {
+          console.error('[wallets] provision failed', response.status, {
+            error: body.error,
+            detail: body.detail,
+            missing: body.missing,
+          });
           const ownerId = ownerIdFromPrivyUser(user, true);
           const fallback = walletsFromPrivyUser(user, ownerId);
           if (fallback.length > 0) {
