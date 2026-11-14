@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { buildOverview, metricsUrl, pickOwnerRollup } from '../lib/overview.mjs';
+import AnimatedList from './AnimatedList';
+import { listLook } from './listLook';
 
 const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
@@ -62,14 +64,15 @@ export default function OverviewPanel({ bots, ownerId = null }) {
 
       <section className="panel" aria-label="Bots">
         <h2>{overview.botCount} bots</h2>
-        <ul className="overview-bots">
-          {overview.bots.map((bot) => (
-            <li key={bot.id}>
-              <strong>{bot.name}</strong>
-              <span>{bot.type} · {bot.status}</span>
-            </li>
-          ))}
-        </ul>
+        <AnimatedList
+          {...listLook({ maxHeight: 360 })}
+          items={overview.bots.map((bot) => ({
+            id: bot.id,
+            title: bot.name,
+            description: bot.type,
+            meta: bot.status,
+          }))}
+        />
       </section>
     </div>
   );

@@ -14,7 +14,7 @@ test('voice settings keep a known voice and a stepped speed', () => {
   assert.equal(VOICES.length, 10);
   assert.equal(SPEED_MIN, 0.5);
   assert.equal(SPEED_MAX, 2);
-  assert.equal(clampSpeed('nope'), 1);
+  assert.equal(clampSpeed('nope'), 0.9);
   assert.equal(clampSpeed(0.2), 0.5);
   assert.equal(clampSpeed(0.5), 0.5);
   assert.equal(clampSpeed(2), 2);
@@ -22,7 +22,7 @@ test('voice settings keep a known voice and a stepped speed', () => {
   assert.equal(clampSpeed(0.73), 0.75);
 
   const fallback = parseVoiceSettings(null);
-  assert.deepEqual(fallback, { voiceId: DEFAULT_VOICE_SETTINGS.voiceId, speed: 1 });
+  assert.deepEqual(fallback, { voiceId: DEFAULT_VOICE_SETTINGS.voiceId, speed: 0.9 });
 
   const adam = VOICES.find(voice => voice.name === 'Adam');
   const parsed = parseVoiceSettings({ voiceId: adam.id, speed: 1.17 });

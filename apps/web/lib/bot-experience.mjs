@@ -45,6 +45,15 @@ function redact(summary) {
   return summary.replace(SECRETISH, '[hidden]').replace(/\s+/g, ' ').trim();
 }
 
+export function logsUrl(runtimeBase) {
+  if (typeof runtimeBase !== 'string' || runtimeBase === '') return null;
+  let base;
+  try { base = new URL(runtimeBase); } catch { return null; }
+  if (base.protocol !== 'https:' && base.protocol !== 'http:') return null;
+  const root = `${base.origin}${base.pathname.replace(/\/$/, '')}`;
+  return `${root}/api/logs`;
+}
+
 export function eventsUrl(runtimeBase, botId) {
   if (typeof runtimeBase !== 'string' || runtimeBase === '' || typeof botId !== 'string' || botId === '') return null;
   let base;

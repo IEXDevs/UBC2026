@@ -19,6 +19,10 @@ import {
   requireConfig,
   API_ROUTES,
   matchApiRoute,
+  privyAvatarUrl,
+  normalizeHandle,
+  parseRecipient,
+  profileInitials,
 } from './contracts.mjs';
 
 const wallet = {
@@ -161,7 +165,7 @@ test('config reader reports missing secret names and never invents values', () =
   for (const name of [...SECRET_NAMES, ...PUBLIC_CONFIG_NAMES]) {
     assert.match(example, new RegExp(`^${name}=$`, 'm'));
   }
-  const assignments = example.split('\n').filter(line => /^[A-Z0-9_]+=/.test(line));
+  const assignments = example.replaceAll('\r', '').split('\n').filter(line => /^[A-Z0-9_]+=/.test(line));
   assert.ok(assignments.every(line => /= $/.test(line) === false && line.endsWith('=')));
 });
 
@@ -185,6 +189,23 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.equal(matchApiRoute('CRON', '0 * * * *'), null);
   assert.ok(API_ROUTES.some(route => route.id === 'cron.hourly' && route.status === 'live' && route.path === '0 * * * *'));
   assert.ok(API_ROUTES.some(route => route.id === 'cron.stream-fallback' && route.status === 'live' && route.path === '5,20,35,50 * * * *'));
+});
+
+test('profile pictures, handles, and SNS recipients stay separate', () => {
+  const user = {
+    twitter: { profilePictureUrl: 'https://images.example/alex.png' },
+    google: { picture: 'javascript:alert(1)' },
+    linkedAccounts: [{ profilePictureUrl: 'http://insecure.example/a.png' }],
+  };
+  assert.equal(privyAvatarUrl(user), 'https://images.example/alex.png');
+  assert.equal(privyAvatarUrl({ farcaster: { pfp: 'https://images.example/f.png' } }), 'https://images.example/f.png');
+  assert.equal(privyAvatarUrl({ wallet: { address: 'So11111111111111111111111111111111111111112' } }), null);
+  assert.equal(normalizeHandle('@Alex'), 'alex');
+  assert.equal(normalizeHandle('richclub.sol'), null);
+  assert.deepEqual(parseRecipient('@Alex'), { kind: 'handle', handle: 'alex' });
+  assert.deepEqual(parseRecipient('@richclub.sol'), { kind: 'sns', domain: 'richclub.sol' });
+  assert.equal(parseRecipient('not a handle'), null);
+  assert.equal(profileInitials('Alex Rivera'), 'AR');
 });
 
 test('builtin templates are locked and non-deletable', () => {

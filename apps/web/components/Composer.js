@@ -5,8 +5,10 @@ import { createPortal } from 'react-dom';
 import { AudioLines, Mic, MicOff, Minimize2, Plus, Settings, Square } from 'lucide-react';
 import ChatBubbles from './ChatBubbles';
 import CrystalizedBall from './CrystalizedBall';
+import SlingButton from './SlingButton';
 import Stepper, { Step } from './Stepper';
 import { clampFloat, FLOAT_SIZE, FLOAT_STORAGE_KEY } from '../lib/voice-float.mjs';
+import { mentionIn, recipientHint } from '../lib/profile.mjs';
 import {
   DEFAULT_VOICE_SETTINGS,
   SPEED_MAX,
@@ -19,7 +21,7 @@ import {
 
 const LEAVE_MS = 760;
 
-export default function Composer({ botName, lines = [], onLine, hidden = false }) {
+export default function Composer({ botName, lines = [], onLine, onThinking, hidden = false, resolveMention = null }) {
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
   const [note, setNote] = useState('');
@@ -28,6 +30,9 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
   const [warm, setWarm] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_VOICE_SETTINGS);
+  const [draft, setDraft] = useState('');
+  const [mention, setMention] = useState('');
+  const [thinking, setThinking] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
   const [stage, setStage] = useState(null);
   const [body, setBody] = useState(null);
@@ -36,9 +41,12 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
   const settingsRef = useRef(settings);
   const presenceRef = useRef('off');
   const sessionRef = useRef(null);
+  const modeRef = useRef('listening');
+  const vadRef = useRef(0);
   const connectingRef = useRef(false);
   const placeRef = useRef(place);
   const leaveTimer = useRef(0);
+  const thinkTimer = useRef(0);
   settingsRef.current = settings;
   placeRef.current = place;
 
@@ -89,9 +97,42 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
 
   useEffect(() => () => {
     window.clearTimeout(leaveTimer.current);
+    window.clearTimeout(thinkTimer.current);
+    onThinking?.(false);
     sessionRef.current?.endSession?.().catch(() => {});
     sessionRef.current = null;
   }, []);
+
+  useEffect(() => {
+    const token = mentionIn(draft);
+    if (!token || typeof resolveMention !== 'function') {
+      setMention('');
+      return undefined;
+    }
+    let stop = false;
+    resolveMention(token).then((recipient) => {
+      if (!stop) setMention(recipientHint(recipient));
+    }).catch(() => {
+      if (!stop) setMention('');
+    });
+    return () => { stop = true; };
+  }, [draft, resolveMention]);
+
+  function sendMessage() {
+    const text = draft.trim();
+    if (!text) return;
+    pushLine('user', text);
+    if (mention) pushLine('assistant', mention);
+    setDraft('');
+    setMention('');
+    setThinking(true);
+    onThinking?.(true);
+    window.clearTimeout(thinkTimer.current);
+    thinkTimer.current = window.setTimeout(() => {
+      setThinking(false);
+      onThinking?.(false);
+    }, 1400);
+  }
 
   function pushLine(role, text) {
     const spoken = typeof text === 'string' ? text.trim() : '';
@@ -157,12 +198,20 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
           if (sessionRef.current !== live) return;
           pushLine(role === 'user' ? 'user' : 'agent', message);
         },
+        onModeChange: ({ mode }) => {
+          if (sessionRef.current === live) modeRef.current = mode;
+        },
+        onVadScore: ({ vadScore }) => {
+          if (sessionRef.current === live) vadRef.current = vadScore;
+        },
         onError: () => {
           if (sessionRef.current === live) setNote('The voice session hit an error.');
         },
         onDisconnect: () => {
           if (sessionRef.current !== live) return;
           sessionRef.current = null;
+          modeRef.current = 'listening';
+          vadRef.current = 0;
           closeStage();
         },
       });
@@ -213,10 +262,10 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
   const stageNode = live && stage ? createPortal(
     <div className={`voice-stage${stageOpen ? ' is-open' : ''}`} role="dialog" aria-hidden={!stageOpen} aria-label={`Talk with ${botName}`}>
       <div className="voice-orb">
-        {mode === 'full' ? <CrystalizedBall preset="eclipse" color="#f4f4f5" size={0.78} theme="dark" interactive /> : null}
+        {mode === 'full' ? <TalkOrb sessionRef={sessionRef} modeRef={modeRef} vadRef={vadRef} size={0.78} interactive /> : null}
       </div>
       <div className="voice-script" aria-live="polite">
-        <ChatBubbles lines={lines} botName={botName} />
+        <ChatBubbles lines={lines} botName={botName} thinking={thinking} />
         {note ? <p className="voice-note">{note}</p> : null}
       </div>
       {settingsOpen && stageOpen ? (
@@ -234,7 +283,7 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
         <button type="button" className="icon-btn" aria-label="Minimize voice" onClick={() => { setSettingsOpen(false); setMode('mini'); }}>
           <Minimize2 size={16} strokeWidth={1.75} />
         </button>
-        <button type="button" className="icon-btn" aria-label="End voice" onClick={() => closeStage()}>
+        <button type="button" className="icon-btn is-stop" aria-label="Stop voice" onClick={() => closeStage()}>
           <Square size={16} strokeWidth={1.75} />
         </button>
       </div>
@@ -285,7 +334,7 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
         aria-label={`Voice with ${botName}. Drag to move, click for full view.`}
         onPointerDown={onOrbPointerDown}
       >
-        {mode === 'mini' ? <CrystalizedBall preset="eclipse" color="#f4f4f5" size={0.42} theme="dark" interactive={false} /> : null}
+        {mode === 'mini' ? <TalkOrb sessionRef={sessionRef} modeRef={modeRef} vadRef={vadRef} size={0.42} interactive={false} /> : null}
       </button>
     </div>,
     body,
@@ -296,15 +345,37 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
       {stageNode}
       {floatNode}
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
-      <form className="composer" aria-label="Voice session" onSubmit={event => event.preventDefault()}>
+      {mention ? <p className="mention-hint" role="status">{mention}</p> : null}
+      <form className="composer" aria-label="Message the agent" onSubmit={event => { event.preventDefault(); sendMessage(); }}>
         <button type="button" className="icon-btn" aria-label="Add" disabled title="Attachments are not wired yet">
           <Plus size={18} strokeWidth={1.75} />
         </button>
         <input
           aria-label={`Message ${botName}`}
           placeholder={`Message ${botName}`}
-          readOnly
-          title="Chat sends through the same approval path. This field is not live yet."
+          value={draft}
+          onChange={event => setDraft(event.target.value)}
+        />
+        <SlingButton
+          onSend={sendMessage}
+          padColor="#f5f5f5"
+          iconColor="#18181b"
+          accentColor="#f5f5f5"
+          wellColor="#27272a"
+          bandColor="#52525b"
+          size={48}
+          strokeWidth={3}
+          armAt={40}
+          maxPull={120}
+          launchSpeed={2600}
+          recoil={0.2}
+          flight={90}
+          particles={14}
+          spread={60}
+          axis="any"
+          tapSends
+          disabled={!draft.trim()}
+          ariaLabel="Send"
         />
         <button
           type="button"
@@ -317,6 +388,48 @@ export default function Composer({ botName, lines = [], onLine, hidden = false }
         </button>
       </form>
     </div>
+  );
+}
+
+function TalkOrb({ sessionRef, modeRef, vadRef, size, interactive }) {
+  const [talk, setTalk] = useState({ side: 'idle', level: 0 });
+
+  useEffect(() => {
+    let frame = 0;
+    let last = 0;
+    const tick = now => {
+      frame = requestAnimationFrame(tick);
+      if (now - last < 70) return;
+      last = now;
+      const session = sessionRef.current;
+      const mode = modeRef.current;
+      const vad = Math.max(0, Math.min(1, Number(vadRef.current) || 0));
+      const output = Math.max(0, Math.min(1, Number(session?.getOutputVolume?.() ?? 0)));
+      const input = Math.max(0, Math.min(1, Number(session?.getInputVolume?.() ?? 0)));
+      const agent = Math.max(output, mode === 'speaking' ? Math.max(output, 0.62) : 0);
+      const user = Math.max(input, mode === 'listening' ? vad : 0);
+      const side = agent > 0.08 && agent >= user ? 'agent' : user > 0.08 ? 'user' : 'idle';
+      const level = side === 'idle' ? 0 : Math.max(agent, user);
+      setTalk(prev => (prev.side === side && Math.abs(prev.level - level) < 0.04 ? prev : { side, level }));
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [sessionRef, modeRef, vadRef]);
+
+  const color = talk.side === 'agent' ? '#6cb2ff' : talk.side === 'user' ? '#ff9a4a' : '#e7edf2';
+  return (
+    <CrystalizedBall
+      preset="eclipse"
+      color={color}
+      size={size}
+      theme="dark"
+      interactive={interactive}
+      speed={0.42 + talk.level * 2.8}
+      dustSpeed={0.5 + talk.level * 2.2}
+      flares={0.22 + talk.level * 0.95}
+      crackle={0.28 + talk.level * 0.75}
+      motion={talk.side === 'user' ? 'rise' : talk.side === 'agent' ? 'orbit' : 'drift'}
+    />
   );
 }
 

@@ -223,6 +223,67 @@ export function requireConfig(env, names) {
  * HTTP and cron contracts shared by the Worker and the web app.
  * status: live (implemented skeleton), guarded (calls out only when secrets exist), stub (empty until a later phase).
  */
+const HANDLE = /^[a-z0-9][a-z0-9_]{1,31}$/;
+const SNS_NAME = /^[a-z0-9][a-z0-9-]{0,62}\.sol$/;
+
+export function httpsAvatarUrl(value) {
+  if (typeof value !== 'string' || value.length > 500) return null;
+  let url;
+  try { url = new URL(value.trim()); } catch { return null; }
+  if (url.protocol !== 'https:' || url.username || url.password) return null;
+  return url.href;
+}
+
+export function privyAvatarUrl(user) {
+  const linked = Array.isArray(user?.linkedAccounts) ? user.linkedAccounts : [];
+  const candidates = [
+    user?.twitter?.profilePictureUrl,
+    user?.farcaster?.pfp,
+    user?.farcaster?.profilePictureUrl,
+    user?.google?.picture,
+    user?.github?.profilePictureUrl,
+    ...linked.map(account => account?.profilePictureUrl || account?.pfp || account?.picture),
+  ];
+  for (const candidate of candidates) {
+    const url = httpsAvatarUrl(candidate);
+    if (url) return url;
+  }
+  return null;
+}
+
+export function normalizeDisplayName(value) {
+  if (typeof value !== 'string') return null;
+  const name = value.trim().replace(/\s+/g, ' ');
+  if (name.length < 1 || name.length > 64 || /[\r\n]/.test(name)) return null;
+  return name;
+}
+
+export function normalizeHandle(value) {
+  if (typeof value !== 'string') return null;
+  const handle = value.trim().replace(/^@/, '').toLowerCase();
+  if (!HANDLE.test(handle)) return null;
+  return handle;
+}
+
+/** `@alex` is a Maelstrom handle. `@richclub.sol` is an SNS name. */
+export function parseRecipient(value) {
+  if (typeof value !== 'string') return null;
+  const token = value.trim().replace(/^@/, '');
+  if (!token || token.length > 80) return null;
+  if (SNS_NAME.test(token.toLowerCase())) return { kind: 'sns', domain: token.toLowerCase() };
+  const handle = normalizeHandle(token);
+  if (handle) return { kind: 'handle', handle };
+  return null;
+}
+
+export function profileInitials(label) {
+  const text = typeof label === 'string' ? label.trim().replace(/^@/, '') : '';
+  if (!text) return '?';
+  const parts = text.split(/[\s@.]+/).filter(Boolean);
+  const letters = `${parts[0]?.[0] || ''}${parts[1]?.[0] || ''}`;
+  return (letters || text[0]).toUpperCase();
+}
+
 export const API_ROUTES = Object.freeze([
   { id: 'health', method: 'GET', path: '/health', phase: 1, auth: 'none', status: 'live' },
   { id: 'routes.list', method: 'GET', path: '/api/routes', phase: 0, auth: 'none', status: 'live' },
@@ -250,9 +311,13 @@ export const API_ROUTES = Object.freeze([
   { id: 'bots.sns.send', method: 'POST', path: '/bots/:botId/sns/send', phase: 6, auth: 'owner', status: 'live' },
   { id: 'security.grab-back', method: 'POST', path: '/security/grab-back', phase: 6, auth: 'owner', status: 'live' },
   { id: 'events.list', method: 'GET', path: '/api/events', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'logs.list', method: 'GET', path: '/api/logs', phase: 1, auth: 'privy', status: 'live' },
   { id: 'decisions.list', method: 'GET', path: '/api/decisions', phase: 1, auth: 'privy', status: 'live' },
   { id: 'payments.list', method: 'GET', path: '/api/payments', phase: 1, auth: 'privy', status: 'live' },
   { id: 'metrics.get', method: 'GET', path: '/api/metrics', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'profiles.me', method: 'GET', path: '/api/profiles/me', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'profiles.update', method: 'PUT', path: '/api/profiles/me', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'profiles.lookup', method: 'GET', path: '/api/profiles/lookup', phase: 1, auth: 'privy', status: 'live' },
   { id: 'quicknode.webhook', method: 'POST', path: '/webhooks/quicknode', phase: 1, auth: 'webhook', status: 'live' },
   { id: 'voice.agent', method: 'GET', path: '/voice/agent', phase: 8, auth: 'none', status: 'live' },
   { id: 'voice.tools', method: 'POST', path: '/voice/tools/:name', phase: 8, auth: 'webhook', status: 'live' },

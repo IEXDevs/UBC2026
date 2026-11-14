@@ -90,6 +90,52 @@ test('supabase mappers turn rows into bot/wallet/ledger records', () => {
   });
 });
 
+test('activity logs require an owner and stay empty without Supabase', async () => {
+  const env = fakeEnv();
+  const denied = await worker.fetch(new Request('https://runtime/api/logs'), env);
+  assert.equal(denied.status, 401);
+  const empty = await worker.fetch(new Request('https://runtime/api/logs', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  assert.equal(empty.status, 200);
+  const body = await empty.json();
+  assert.equal(body.source, 'unconfigured');
+  assert.deepEqual(body.items, []);
+});
+
+test('profile lookup sends a handle to its owner and a .sol name through SNS', async () => {
+  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const fetcher = async (url) => {
+    const href = String(url);
+    if (href.includes('profiles?handle=eq.alex')) {
+      return Response.json([{ owner_id: 'user_2', handle: 'alex', display_name: 'Alex', avatar_url: null }]);
+    }
+    if (href.includes('wallets?')) return Response.json([{ address }]);
+    return new Response('[]', { status: 201, headers: { 'content-type': 'application/json' } });
+  };
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: fetcher,
+    SNS_DEMO_MAP: { 'richclub.sol': address },
+  });
+  const handle = await worker.fetch(new Request('https://runtime/api/profiles/lookup?q=%40Alex', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  const handleBody = await handle.json();
+  assert.equal(handleBody.recipient.kind, 'handle');
+  assert.equal(handleBody.recipient.displayName, 'Alex');
+  assert.equal(handleBody.recipient.address, address);
+
+  const sns = await worker.fetch(new Request('https://runtime/api/profiles/lookup?q=%40richclub.sol', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  const snsBody = await sns.json();
+  assert.equal(snsBody.recipient.kind, 'sns');
+  assert.equal(snsBody.recipient.domain, 'richclub.sol');
+  assert.equal(snsBody.recipient.address, address);
+});
+
 test('health reports signing and supabase readiness flags', async () => {
   const incomplete = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
     transferClient: { ok: true },
@@ -107,6 +153,7 @@ test('health reports signing and supabase readiness flags', async () => {
     transferClient: { ok: true },
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service',
+    fetch: async () => new Response('[]', { status: 201, headers: { 'content-type': 'application/json' } }),
   }));
   const body = await res.json();
   assert.equal(body.signing, true);

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { browserSessionUrl, liveViewFrame } from '../lib/live-view.mjs';
+import GlassSurface from './GlassSurface';
 
 const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
@@ -88,12 +89,26 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
       </div>
       {error && <p role="alert">{error}</p>}
       {frame?.embed && frame.src && (
-        <iframe
-          className="live-frame"
-          title="Browser live view"
-          src={frame.src}
-          referrerPolicy={frame.referrerPolicy}
-        />
+        <GlassSurface
+          className="live-glass"
+          width="100%"
+          height={280}
+          borderRadius={18}
+          borderWidth={0.08}
+          brightness={48}
+          opacity={0.94}
+          blur={10}
+          backgroundOpacity={0.18}
+          saturation={1.4}
+          distortionScale={-36}
+        >
+          <iframe
+            className="live-frame"
+            title="Browser live view"
+            src={frame.src}
+            referrerPolicy={frame.referrerPolicy}
+          />
+        </GlassSurface>
       )}
       {frame?.src && (
         <a href={frame.src} target="_blank" rel="noopener noreferrer">Open in tab</a>

@@ -1,15 +1,35 @@
 'use client';
 
-import { useState } from 'react';
+import Dock from './Dock';
+import AnimatedList from './AnimatedList';
 import BotMark from './BotMark';
+import { listLook } from './listLook';
 
-const STRIDE = 76;
+function statusMark(status) {
+  const known = status === 'watching' || status === 'idle' || status === 'paused' || status === 'draft';
+  const kind = known ? status : 'idle';
+  const label = typeof status === 'string' && status ? status : 'idle';
+  return (
+    <span className={`agent-status is-${kind}`} title={label} aria-label={label}>
+      {kind === 'paused' ? <span className="agent-pause" aria-hidden="true" /> : null}
+    </span>
+  );
+}
 
-export default function BotRail({ bots, activeId, canDrag, onSelect, onReorder, onCreate }) {
-  const [drag, setDrag] = useState(null);
-  const activeIndex = Math.max(0, bots.findIndex(bot => bot.id === activeId));
+function agentIcon(bot, size) {
+  return (
+    <span className="agent-mark" style={{ width: size, height: size }}>
+      <BotMark shape={bot.shape} color={bot.color} size={size} />
+      {statusMark(bot.status)}
+    </span>
+  );
+}
+
+export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, onReorder, onCreate }) {
+  const activeIndex = bots.findIndex(bot => bot.id === activeId);
 
   if (bots.length === 0) {
+    if (collapsed) return null;
     return (
       <button type="button" className="empty-rail" onClick={onCreate}>
         Make your first Agent!
@@ -17,73 +37,71 @@ export default function BotRail({ bots, activeId, canDrag, onSelect, onReorder, 
     );
   }
 
-  function visualIndex(index) {
-    if (!drag) return index;
-    if (index === drag.from) return drag.over;
-    if (drag.from < drag.over && index > drag.from && index <= drag.over) return index - 1;
-    if (drag.from > drag.over && index < drag.from && index >= drag.over) return index + 1;
-    return index;
-  }
+  if (collapsed) {
+    const items = bots.map((bot, index) => ({
+      icon: agentIcon(bot, 54),
+      label: bot.name,
+      active: bot.id === activeId,
+      onClick: () => onSelect(bot.id),
+      menu: canDrag
+        ? [
+            {
+              label: 'Move up',
+              disabled: index === 0,
+              onClick: () => onReorder(bot.id, bots[index - 1].id),
+            },
+            {
+              label: 'Move down',
+              disabled: index === bots.length - 1,
+              onClick: () => onReorder(bot.id, bots[index + 1].id),
+            },
+          ]
+        : undefined,
+    }));
 
-  function startDrag(event, index) {
-    if (!canDrag || event.button !== 0) return;
-    const origin = event.clientY;
-    const from = index;
-    let over = from;
-    let active = false;
-    function move(e) {
-      const dy = e.clientY - origin;
-      if (!active) {
-        if (Math.abs(dy) < 6) return;
-        active = true;
-      }
-      e.preventDefault();
-      over = Math.max(0, Math.min(bots.length - 1, from + Math.round(dy / STRIDE)));
-      setDrag({ from, over, dy });
-    }
-    function end() {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-      setDrag(null);
-      if (active && over !== from) onReorder(bots[from].id, bots[over].id);
-    }
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
+    return (
+      <div className="rail rail-squares" role="navigation" aria-label="Agents">
+        <Dock
+          className="agent-dock"
+          items={items}
+          position="left"
+          theme="dark"
+          baseItemSize={64}
+          magnification={64}
+          distance={160}
+          panelHeight={76}
+          gap={10}
+          roundness={0.42}
+          tiles={false}
+          showLabels
+          showIndicators
+          accentColor="#f4f4f5"
+        />
+      </div>
+    );
   }
 
   return (
-    <div className="rail" role="listbox" aria-label="Agents" aria-activedescendant={activeId ? `bot-${activeId}` : undefined}>
-      <div className="rail-glide" style={{ transform: `translateY(${visualIndex(activeIndex) * STRIDE}px)` }} />
-      {bots.map((bot, index) => {
-        const dragged = drag?.from === index;
-        const shift = visualIndex(index) - index;
-        const y = dragged ? drag.dy : shift * STRIDE;
-        return (
-          <div
-            key={bot.id}
-            id={`bot-${bot.id}`}
-            role="option"
-            aria-selected={bot.id === activeId}
-            className={`rail-row ${dragged ? 'is-dragging' : ''}`}
-            style={{ transform: `translateY(${y}px)${dragged ? ' scale(1.03)' : ''}` }}
-          >
-            <button
-              type="button"
-              className="rail-hit"
-              onPointerDown={event => startDrag(event, index)}
-              onClick={() => { if (!drag) onSelect(bot.id); }}
-            >
-              <BotMark shape={bot.shape} color={bot.color} />
-              <span className="rail-copy">
-                <strong>{bot.name}</strong>
-                <small>{bot.goal}</small>
-              </span>
-            </button>
-          </div>
-        );
-      })}
+    <div className="rail" role="navigation" aria-label="Agents">
+      <AnimatedList
+        key={bots.map(bot => bot.id).join('|')}
+        {...listLook({
+          width: '100%',
+          maxHeight: 'none',
+          frame: false,
+          selectOnHover: false,
+          initialSelectedIndex: activeIndex,
+        })}
+        selectedIndex={activeIndex}
+        className="rail-list"
+        items={bots.map(bot => ({
+          id: bot.id,
+          icon: agentIcon(bot, 60),
+          title: bot.name,
+          description: bot.goal,
+        }))}
+        onItemSelect={item => onSelect(item.id)}
+      />
     </div>
   );
 }

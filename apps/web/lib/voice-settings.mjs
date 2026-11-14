@@ -25,7 +25,7 @@ export const VOICES = Object.freeze([
 
 export const DEFAULT_VOICE_SETTINGS = Object.freeze({
   voiceId: VOICES[0].id,
-  speed: 1,
+  speed: 0.9,
 });
 
 export function clampSpeed(value) {

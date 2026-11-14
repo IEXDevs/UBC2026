@@ -19,6 +19,7 @@ import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 import { handleApiData } from './api-data.mjs';
+import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
 import { supabaseConfig } from './supabase-rest.mjs';
 
 export { BotDurableObject };
@@ -39,7 +40,7 @@ function botStub(env, botId) {
  * position check. A second cron re-checks devnet USDC when the stream is stale.
  * ElevenLabs webhook tools and the Grok custom LLM live under /voice and call these same routes.
  */
-const worker = {
+const routed = {
   async fetch(request, rawEnv) {
     const env = enrichEnv(rawEnv);
     const url = new URL(request.url);
@@ -113,9 +114,13 @@ const worker = {
       'wallets.sign',
       'bots.list',
       'events.list',
+      'logs.list',
       'decisions.list',
       'payments.list',
       'metrics.get',
+      'profiles.me',
+      'profiles.update',
+      'profiles.lookup',
     ].includes(matched.route.id)) {
       const response = await handleApiData(request, env, matched);
       if (response) return response;
@@ -140,7 +145,10 @@ const worker = {
     const bots = typeof env.listScheduledBots === 'function'
       ? await env.listScheduledBots()
       : await listScheduledBotsFromSupabase(env, env.fetch ?? fetch);
-    if (!Array.isArray(bots) || bots.length === 0) return;
+    if (!Array.isArray(bots) || bots.length === 0) {
+      logCron(env, ctx, { cron, bots: [] });
+      return;
+    }
 
     const health = typeof env.readStreamHealth === 'function'
       ? await env.readStreamHealth(now)
@@ -154,7 +162,10 @@ const worker = {
       ctx.waitUntil(deliverCheck(env, bot, { reason: 'cron-hourly', quotes, balance: null, now }));
     }
 
-    if (!plan.streamDropped) return;
+    if (!plan.streamDropped) {
+      logCron(env, ctx, { cron, bots: bots.map(bot => bot.id).slice(0, 50), streamDropped: false });
+      return;
+    }
     const balances = new Map();
     for (const wallet of plan.walletRechecks) {
       balances.set(wallet.address, await readBalance(env, wallet.address));
@@ -168,8 +179,50 @@ const worker = {
         now,
       }));
     }
+    logCron(env, ctx, { cron, bots: bots.map(bot => bot.id).slice(0, 50), streamDropped: true });
   },
 };
+
+const worker = {
+  async fetch(request, rawEnv, ctx) {
+    const env = enrichEnv(rawEnv);
+    const started = Date.now();
+    const logging = Boolean(supabaseConfig(env));
+    let captured = null;
+    if (logging) {
+      try {
+        captured = await captureRequest(request);
+      } catch {
+        captured = null;
+      }
+    }
+    let response;
+    try {
+      response = await routed.fetch(request, rawEnv);
+    } catch {
+      response = json({ error: 'internal' }, 500);
+    }
+    if (logging) {
+      const pending = persistHttpActivity(env, { captured, response, started }).catch(() => {});
+      if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(pending);
+      else await pending;
+    }
+    return response;
+  },
+
+  scheduled(controller, rawEnv, ctx) {
+    return routed.scheduled(controller, rawEnv, ctx);
+  },
+};
+
+function logCron(env, ctx, detail) {
+  if (!supabaseConfig(env) || typeof ctx?.waitUntil !== 'function') return;
+  ctx.waitUntil(persistActivity(env, {
+    source: 'cron',
+    action: `cron ${detail.cron ?? 'scheduled'}`,
+    detail,
+  }).catch(() => {}));
+}
 
 export default worker;
 

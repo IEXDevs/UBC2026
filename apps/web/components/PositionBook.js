@@ -270,6 +270,7 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
       if (!alive) return;
 
       const home = { x: 0, y: 0, z: HOME_Z };
+      const focus = { x: home.x, y: home.y, z: home.z };
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(40, 1, 1, 20000);
       camera.position.set(home.x, home.y, home.z);
@@ -616,13 +617,18 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
         return THREE.MathUtils.clamp(Math.max(distH, distW) * 1.18, 700, 12000);
       }
 
-      function applyHome() {
+      function applyHome(snap = true) {
         const frame = bookFrame(book);
         home.x = frame.x;
         home.y = frame.y;
         home.z = framedDistance();
-        camera.position.set(home.x, home.y, home.z);
-        aim();
+        focus.x = home.x;
+        focus.y = home.y;
+        focus.z = home.z;
+        if (snap) {
+          camera.position.set(home.x, home.y, home.z);
+          aim();
+        }
       }
 
       function noteDrift() {
@@ -641,7 +647,23 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
         labels.setSize(width, height);
       }
 
+      let lastFrame = performance.now();
+
       function render(now) {
+        const dt = Math.min(48, Math.max(0, now - lastFrame));
+        lastFrame = now;
+        if (!dragging && !(gesture && gesture.moved)) {
+          const k = 1 - Math.exp(-dt / 88);
+          const dx = focus.x - camera.position.x;
+          const dy = focus.y - camera.position.y;
+          const dz = focus.z - camera.position.z;
+          if (dx * dx + dy * dy + dz * dz > 0.04) {
+            camera.position.x += dx * k;
+            camera.position.y += dy * k;
+            camera.position.z += dz * k;
+            aim();
+          }
+        }
         linkMaterial.uniforms.uTime.value = now * 0.001;
         for (const [id, state] of tiltState) {
           const lifting = gesture && gesture.id === id && gesture.moved;
@@ -708,8 +730,10 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
         }
         if (!dragging) return;
         const scale = worldPerPixel();
-        camera.position.x -= (event.clientX - lastX) * scale;
-        camera.position.y += (event.clientY - lastY) * scale;
+        focus.x -= (event.clientX - lastX) * scale;
+        focus.y += (event.clientY - lastY) * scale;
+        camera.position.x = focus.x;
+        camera.position.y = focus.y;
         lastX = event.clientX;
         lastY = event.clientY;
         aim();
@@ -749,20 +773,29 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
         return camera.position.clone().add(direction.multiplyScalar(distance));
       }
 
+      function wheelDelta(event) {
+        let delta = event.deltaY;
+        if (event.deltaMode === 1) delta *= 16;
+        else if (event.deltaMode === 2) delta *= mount.clientHeight || 800;
+        return Math.max(-120, Math.min(120, delta));
+      }
+
       function wheel(event) {
         event.preventDefault();
         const before = planePoint(event);
-        const next = THREE.MathUtils.clamp(camera.position.z * (event.deltaY > 0 ? 1.08 : 0.92), 560, 12000);
-        camera.position.z = next;
+        const savedZ = camera.position.z;
+        focus.z = THREE.MathUtils.clamp(focus.z * Math.exp(wheelDelta(event) * 0.00135), 560, 12000);
+        camera.position.z = focus.z;
         aim();
         const after = planePoint(event);
-        camera.position.x += before.x - after.x;
-        camera.position.y += before.y - after.y;
+        focus.x += before.x - after.x;
+        focus.y += before.y - after.y;
+        camera.position.z = savedZ;
         aim();
         noteDrift();
       }
 
-      cameraRef.current = { camera, aim, applyHome };
+      cameraRef.current = { camera, aim, applyHome, focus };
       fit();
       const observer = new ResizeObserver(fit);
       observer.observe(mount);
@@ -802,7 +835,7 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
   function reset() {
     const view = cameraRef.current;
     if (!view) return;
-    view.applyHome();
+    view.applyHome(false);
     driftedRef.current = false;
     setDrifted(false);
   }
@@ -810,8 +843,7 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
   function zoomBy(factor) {
     const view = cameraRef.current;
     if (!view) return;
-    view.camera.position.z = Math.min(12000, Math.max(560, view.camera.position.z * factor));
-    view.aim();
+    view.focus.z = Math.min(12000, Math.max(560, view.focus.z * factor));
     driftedRef.current = true;
     setDrifted(true);
   }

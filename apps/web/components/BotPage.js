@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import ApprovalPreview from './ApprovalPreview';
 import BotTimeline from './BotTimeline';
-import LiveViewPanel from './LiveViewPanel';
 import ShoppingPanel from './ShoppingPanel';
 import WhyView from './WhyView';
 import { buildBotPage, eventsUrl } from '../lib/bot-experience.mjs';
@@ -61,10 +60,6 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
   return (
     <div className="bot-page">
       <ApprovalPreview preview={approval} botType={bot.type} />
-      <header className="bot-heading">
-        <div className="pill">● {bot.name} · {bot.type} · {bot.status}</div>
-        <h1>{bot.goal}</h1>
-      </header>
       <ShoppingPanel bot={bot} ownerId={ownerId} onEvent={note} />
       <BotTimeline
         entries={entries}
@@ -74,10 +69,7 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
           if (entry?.summary) note({ kind: entry.kind || 'timeline', summary: entry.summary });
         }}
       />
-      <section className="panel" aria-label="Live View">
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} />
-      </section>
-      <WhyView why={why} />
+      {focus ? <WhyView why={why} /> : null}
     </div>
   );
 }

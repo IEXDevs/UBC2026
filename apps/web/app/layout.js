@@ -1,5 +1,12 @@
+import { Figtree } from 'next/font/google';
 import './globals.css';
 import PrivyRoot from '../components/PrivyRoot';
+
+const chatFont = Figtree({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-chat',
+});
 
 export const metadata = {
   title: 'Maelstrom',
@@ -9,7 +16,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>
+      <body className={chatFont.variable}>
         <PrivyRoot>{children}</PrivyRoot>
       </body>
     </html>

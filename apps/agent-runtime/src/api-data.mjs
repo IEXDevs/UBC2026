@@ -3,7 +3,14 @@
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
 import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
-import { ConfigError } from '@ubc2026/contracts';
+import {
+  ConfigError,
+  httpsAvatarUrl,
+  normalizeDisplayName,
+  normalizeHandle,
+  parseRecipient,
+} from '@ubc2026/contracts';
+import { createSnsResolver, SnsError } from '@ubc2026/sns';
 import { WalletError } from '@ubc2026/wallets';
 import {
   amountText,
@@ -214,6 +221,36 @@ export async function handleApiData(request, env, matched) {
     });
   }
 
+  if (routeId === 'logs.list') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
+    const url = new URL(request.url);
+    const botId = url.searchParams.get('botId');
+    const requested = Number(url.searchParams.get('limit'));
+    const limit = Number.isInteger(requested) && requested >= 1 && requested <= 100 ? requested : 100;
+    let path = `activity_logs?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=created_at.desc&limit=${limit}`;
+    if (botId && /^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
+      path += `&bot_id=eq.${encodeURIComponent(botId)}`;
+    }
+    const result = await supabaseGet(env, path, fetcher);
+    return json({
+      ok: true,
+      source: 'supabase',
+      items: (result.rows || []).map((row) => ({
+        id: row.id,
+        ownerId: row.owner_id,
+        botId: row.bot_id,
+        source: row.source,
+        action: row.action,
+        status: row.status,
+        detail: row.detail ?? {},
+        at: row.created_at,
+      })),
+    });
+  }
+
   if (routeId === 'events.list') {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);
@@ -340,6 +377,122 @@ export async function handleApiData(request, env, matched) {
         pnlMicroUsdc: amountText(row.pnl_micro_usdc),
         updatedAt: row.updated_at,
       })),
+    });
+  }
+
+  if (routeId === 'profiles.me' && request.method === 'GET') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', profile: null });
+    const result = await supabaseGet(
+      env,
+      `profiles?owner_id=eq.${encodeURIComponent(ownerId)}&select=handle,display_name,avatar_url`,
+      fetcher,
+    );
+    const row = result.rows?.[0];
+    return json({
+      ok: true,
+      source: 'supabase',
+      profile: row ? {
+        handle: row.handle,
+        displayName: row.display_name,
+        avatarUrl: row.avatar_url || null,
+      } : null,
+    });
+  }
+
+  if (routeId === 'profiles.update') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const body = await request.json().catch(() => ({}));
+    const handle = normalizeHandle(body.handle);
+    const displayName = normalizeDisplayName(body.displayName);
+    const avatarUrl = body.avatarUrl == null || body.avatarUrl === '' ? null : httpsAvatarUrl(body.avatarUrl);
+    if (!handle || !displayName) return json({ error: 'invalid_profile' }, 400);
+    if (body.avatarUrl && !avatarUrl) return json({ error: 'invalid_avatar' }, 400);
+    if (!supabaseConfig(env)) {
+      return json({ ok: true, source: 'unconfigured', profile: { handle, displayName, avatarUrl } });
+    }
+    await supabaseWrite(env, {
+      path: 'users',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: { id: ownerId, privy_user_id: ownerId },
+      fetcher,
+    });
+    const saved = await supabaseWrite(env, {
+      path: 'profiles?on_conflict=owner_id',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=representation',
+      body: {
+        owner_id: ownerId,
+        handle,
+        display_name: displayName,
+        avatar_url: avatarUrl,
+        updated_at: new Date().toISOString(),
+      },
+      fetcher,
+    });
+    if (saved.status === 409) return json({ error: 'handle_taken' }, 409);
+    if (saved.ok === false) return json({ error: 'profile_save_failed' }, 502);
+    return json({ ok: true, source: 'supabase', profile: { handle, displayName, avatarUrl } });
+  }
+
+  if (routeId === 'profiles.lookup') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const query = new URL(request.url).searchParams.get('q') || '';
+    const parsed = parseRecipient(query);
+    if (!parsed) return json({ error: 'invalid_recipient' }, 400);
+    if (parsed.kind === 'sns') {
+      try {
+        const resolver = createSnsResolver({
+          resolveFn: typeof env.resolveSns === 'function'
+            ? env.resolveSns
+            : async (domain) => {
+              const demo = env.SNS_DEMO_MAP && typeof env.SNS_DEMO_MAP === 'object' ? env.SNS_DEMO_MAP : {};
+              if (demo[domain]) return demo[domain];
+              throw new SnsError('sns_not_found');
+            },
+        });
+        const resolved = await resolver(parsed.domain);
+        return json({
+          ok: true,
+          recipient: { kind: 'sns', domain: resolved.domain, address: resolved.address },
+        });
+      } catch (err) {
+        const code = err instanceof SnsError ? 'sns_not_found' : 'sns_failed';
+        return json({ error: code, recipient: { kind: 'sns', domain: parsed.domain } }, 404);
+      }
+    }
+    if (!supabaseConfig(env)) {
+      return json({ ok: true, source: 'unconfigured', recipient: { kind: 'handle', handle: parsed.handle, missing: true } });
+    }
+    const found = await supabaseGet(
+      env,
+      `profiles?handle=eq.${encodeURIComponent(parsed.handle)}&select=owner_id,handle,display_name,avatar_url`,
+      fetcher,
+    );
+    const row = found.rows?.[0];
+    if (!row) return json({ ok: true, source: 'supabase', recipient: { kind: 'handle', handle: parsed.handle, missing: true } });
+    const wallet = await supabaseGet(
+      env,
+      `wallets?owner_id=eq.${encodeURIComponent(row.owner_id)}&kind=eq.main&select=address&limit=1`,
+      fetcher,
+    );
+    return json({
+      ok: true,
+      source: 'supabase',
+      recipient: {
+        kind: 'handle',
+        handle: row.handle,
+        displayName: row.display_name,
+        avatarUrl: row.avatar_url || null,
+        address: wallet.rows?.[0]?.address || null,
+      },
     });
   }
 

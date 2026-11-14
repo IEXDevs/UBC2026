@@ -2,16 +2,17 @@
 
 import { useEffect, useRef } from 'react';
 import { withHeads } from '../lib/voice-float.mjs';
+import ThinkingDots from './ThinkingDots';
 
-export default function ChatBubbles({ lines, botName, className = '' }) {
+export default function ChatBubbles({ lines, botName, className = '', thinking = false }) {
   const tailRef = useRef(null);
   const rows = withHeads(lines);
 
   useEffect(() => {
     tailRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  }, [lines]);
+  }, [lines, thinking]);
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !thinking) return null;
 
   return (
     <div className={`chat-log${className ? ` ${className}` : ''}`}>
@@ -26,6 +27,14 @@ export default function ChatBubbles({ lines, botName, className = '' }) {
           </div>
         </div>
       ))}
+      {thinking ? (
+        <div className="chat-row">
+          <div className="chat-bubble is-think">
+            <small>{botName}</small>
+            <ThinkingDots />
+          </div>
+        </div>
+      ) : null}
       <span ref={tailRef} />
     </div>
   );

@@ -6,6 +6,8 @@ import {
   buildSecurityPage,
   pauseAllUrl,
 } from '../lib/security.mjs';
+import AnimatedList from './AnimatedList';
+import { listLook } from './listLook';
 
 const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
@@ -129,27 +131,23 @@ export default function SecurityPanel({
 
       <section className="panel" aria-label="Bot freezes">
         <h2>Bot freezes</h2>
-        <ul className="overview-bots">
-          {page.bots.map((bot) => (
-            <li key={bot.id}>
-              <strong>{bot.name}</strong>
-              <span>
-                {bot.status}
-                {bot.frozen ? ' · frozen' : ''}
-                {!bot.enabled ? ' · disabled' : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <AnimatedList
+          {...listLook({ maxHeight: 320 })}
+          items={page.bots.map((bot) => ({
+            id: bot.id,
+            title: bot.name,
+            description: bot.status,
+            meta: bot.frozen ? 'Frozen' : bot.enabled ? 'Enabled' : 'Disabled',
+          }))}
+        />
       </section>
 
       <section className="panel" aria-label="Notes">
         <h2>Guarantees</h2>
-        <ul className="security-notes">
-          {page.notes.map((note) => (
-            <li key={note}>{note}</li>
-          ))}
-        </ul>
+        <AnimatedList
+          {...listLook({ maxHeight: 280, selectOnHover: false })}
+          items={page.notes.map((note, index) => ({ id: index, title: note }))}
+        />
       </section>
     </div>
   );

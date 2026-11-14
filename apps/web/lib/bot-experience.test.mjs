@@ -11,6 +11,7 @@ import {
   eventsUrl,
   formatBaseUnits,
   raisedCap,
+  logsUrl,
   timelineEntries,
   whyExplanation,
 } from './bot-experience.mjs';
@@ -114,6 +115,8 @@ test('event polling stays on the runtime origin', () => {
   );
   assert.equal(eventsUrl('javascript:alert(1)', 'bot_meteora'), null);
   assert.equal(eventsUrl('', 'bot_meteora'), null);
+  assert.equal(logsUrl('https://runtime.example/agent/'), 'https://runtime.example/agent/api/logs');
+  assert.equal(logsUrl('javascript:alert(1)'), null);
 });
 
 test('demo shell bots carry a bot page and money panes stay empty placeholders', () => {
@@ -128,7 +131,8 @@ test('demo shell bots carry a bot page and money panes stay empty placeholders',
   const page = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../app/page.js'), 'utf8');
   assert.match(page, /pane === 'Main'/);
   assert.match(page, /BotPage/);
-  assert.match(page, /OverviewPanel/);
+  assert.match(page, /aria-label="Stats"/);
+  assert.equal(page.includes('OverviewPanel'), false);
   assert.match(page, /SecurityPanel/);
   assert.match(page, /PositionBook|MoneyPane/);
   assert.equal(page.includes('Payments feed'), false);

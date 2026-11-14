@@ -67,7 +67,7 @@ test('.env.example keeps every listed name empty', () => {
   const example = readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
   const names = new Set(ACCOUNT_VENDORS.flatMap(vendor => vendor.names));
   for (const name of names) assert.match(example, new RegExp(`^${name}=$`, 'm'));
-  const assignments = example.split('\n').filter(line => /^[A-Z0-9_]+=/.test(line));
+  const assignments = example.replaceAll('\r', '').split('\n').filter(line => /^[A-Z0-9_]+=/.test(line));
   assert.ok(assignments.every(line => line.endsWith('=')));
   assert.equal(example.includes(SECRET_VALUE), false);
 });

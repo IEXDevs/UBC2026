@@ -1,15 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plug, Plus, Search, Wallet } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Plus, Search, Wallet } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import LiveViewPanel from '../components/LiveViewPanel';
 import MoneyPane from '../components/MoneyPane';
 import ConnectorsPane from '../components/ConnectorsPane';
 import BotRail from '../components/BotRail';
 import BotPage from '../components/BotPage';
-import OverviewPanel from '../components/OverviewPanel';
 import SecurityPanel from '../components/SecurityPanel';
+import LogsPanel from '../components/LogsPanel';
+import AccountMenu from '../components/AccountMenu';
 import ShoppingPanel from '../components/ShoppingPanel';
 import PaneDock from '../components/PaneDock';
 import ChatBubbles from '../components/ChatBubbles';
@@ -23,6 +24,8 @@ import { applyLooks } from '../lib/bot-look.mjs';
 import { mergeRoster, reorderIds } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
 import { withAssignedWallet } from '../lib/wallet-assign.mjs';
+import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
+import { buildBotStats } from '../lib/overview.mjs';
 
 const base = getDemoShellState();
 const LOOK_KEY = 'maelstrom.botLooks';
@@ -85,6 +88,7 @@ function AuthedShell() {
   return (
     <Shell
       ownerId={ownerIdFromPrivyUser(user, signedIn)}
+      user={signedIn ? user : null}
       accountLabel={signedIn ? privyAccountLabel(user) : 'You'}
       signedIn={signedIn}
       loginDisabled={!ready}
@@ -96,11 +100,16 @@ function AuthedShell() {
   );
 }
 
-function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '' }) {
+function profileKey(ownerId) {
+  return ownerId ? `maelstrom.profile.${ownerId}` : '';
+}
+
+function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '' }) {
   const [looks, setLooks] = useState({});
   const [roster, setRoster] = useState({ order: base.bots.map(bot => bot.id), extra: [] });
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState('');
+  const [railCollapsed, setRailCollapsed] = useState(false);
   const [activeBot, setActiveBot] = useState(base.bots[0].id);
   const [pane, setPane] = useState('Main');
   const [slide, setSlide] = useState('right');
@@ -108,7 +117,10 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
   const [profileOpen, setProfileOpen] = useState(false);
   const [walletsOpen, setWalletsOpen] = useState(false);
   const [talks, setTalks] = useState({});
+  const [thinkingBot, setThinkingBot] = useState(null);
   const [botRecords, setBotRecords] = useState(base.bots);
+  const [profile, setProfile] = useState(null);
+  const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
@@ -119,7 +131,7 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
     }));
   }, []);
   const dockPanes = useMemo(
-    () => [...base.panes.filter((name) => name !== 'Plugins'), 'Overview', 'Security'],
+    () => base.panes.filter((name) => name !== 'Plugins'),
     [],
   );
 
@@ -150,6 +162,85 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
     localStorage.setItem(LOOK_KEY, JSON.stringify(looks));
     localStorage.setItem(ROSTER_KEY, JSON.stringify(roster));
   }, [looks, roster, ready]);
+
+  useEffect(() => {
+    const key = profileKey(ownerId);
+    if (!key) {
+      setProfile(null);
+      return undefined;
+    }
+    try {
+      const raw = localStorage.getItem(key);
+      const local = raw ? JSON.parse(raw) : null;
+      if (local?.handle && local?.displayName) setProfile(local);
+    } catch {
+      setProfile(null);
+    }
+    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+    if (!runtimeBase) return undefined;
+    let stop = false;
+    (async () => {
+      try {
+        const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/profiles/me`, {
+          headers: { 'x-owner-id': ownerId },
+          cache: 'no-store',
+        });
+        const body = await response.json();
+        if (!stop && body.profile?.handle) {
+          setProfile(body.profile);
+          localStorage.setItem(key, JSON.stringify(body.profile));
+        }
+      } catch {
+        // Keep the profile stored on this device.
+      }
+    })();
+    return () => { stop = true; };
+  }, [ownerId]);
+
+  const saveProfile = useCallback(async (next) => {
+    const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
+    const key = profileKey(ownerId);
+    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+    if (runtimeBase && ownerId) {
+      const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/profiles/me`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'x-owner-id': ownerId },
+        body: JSON.stringify(stored),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 409) return { error: 'handle_taken' };
+      if (!response.ok) throw new Error('profile_save_failed');
+      setProfile(stored);
+      if (key) localStorage.setItem(key, JSON.stringify(stored));
+      return body;
+    }
+    setProfile(stored);
+    if (key) localStorage.setItem(key, JSON.stringify(stored));
+    return { ok: true, source: 'local' };
+  }, [ownerId, user]);
+
+  const resolveMention = useCallback(async (token) => {
+    const parsed = parseRecipient(token);
+    if (!parsed) return null;
+    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+    if (runtimeBase && ownerId) {
+      try {
+        const url = new URL(`${runtimeBase.replace(/\/$/, '')}/api/profiles/lookup`);
+        url.searchParams.set('q', token);
+        const response = await fetch(url, { headers: { 'x-owner-id': ownerId }, cache: 'no-store' });
+        const body = await response.json().catch(() => ({}));
+        if (body.recipient) return body.recipient;
+        if (parsed.kind === 'sns') return { ...parsed, error: body.error || 'sns_not_found' };
+      } catch {
+        // Fall through to the profile stored on this device.
+      }
+    }
+    if (parsed.kind === 'handle' && profile?.handle === parsed.handle) {
+      return { kind: 'handle', handle: profile.handle, displayName: profile.displayName, self: true };
+    }
+    if (parsed.kind === 'sns') return parsed;
+    return { kind: 'handle', handle: parsed.handle, missing: true };
+  }, [ownerId, profile]);
 
   const seedBots = useMemo(() => {
     const byId = new Map(botRecords.map((bot) => [bot.id, bot]));
@@ -203,10 +294,40 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
     setRoster(current => ({ ...current, order: reorderIds(current.order, fromId, toId) }));
   }
 
+  function onAccount(id) {
+    setCreateOpen(false);
+    if (id === 'profile') {
+      setWalletsOpen(false);
+      setProfileOpen(true);
+      return;
+    }
+    if (id === 'wallet') {
+      setProfileOpen(false);
+      setWalletsOpen(true);
+      return;
+    }
+    setProfileOpen(false);
+    setWalletsOpen(false);
+    if (id === 'plugins') choosePane('Plugins', 'right');
+    if (id === 'security') choosePane('Security', 'right');
+    if (id === 'logs') choosePane('Logs', 'right');
+  }
+
   return (
-    <div className="shell">
-      <aside className="side">
+    <div className={`shell${railCollapsed ? ' is-collapsed' : ''}`}>
+      <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
         <div className="side-tools">
+          <button
+            type="button"
+            className="icon-btn rail-toggle"
+            aria-pressed={railCollapsed}
+            aria-label={railCollapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+            onClick={() => setRailCollapsed(current => !current)}
+          >
+            {railCollapsed
+              ? <PanelLeftOpen size={16} strokeWidth={1.75} />
+              : <PanelLeftClose size={16} strokeWidth={1.75} />}
+          </button>
           <label className="search">
             <Search size={16} strokeWidth={1.75} />
             <input
@@ -216,45 +337,26 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
               onChange={event => setQuery(event.target.value)}
             />
           </label>
-          <button type="button" className="add-agent" onClick={() => { setProfileOpen(false); setCreateOpen(true); }}>
+          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
-            Add agent
           </button>
         </div>
         <BotRail
           bots={visible}
           activeId={bot?.id}
           canDrag={!query.trim()}
+          collapsed={railCollapsed}
           onSelect={openChat}
           onReorder={onReorder}
           onCreate={() => setCreateOpen(true)}
         />
         <footer className="you">
-          <div className="you-actions">
-            <button
-              type="button"
-              className="you-link"
-              onClick={() => { setWalletsOpen(false); setProfileOpen(false); choosePane('Plugins', 'right'); }}
-            >
-              <Plug size={15} strokeWidth={1.75} />
-              Plugins
-            </button>
-            <button
-              type="button"
-              className="you-link"
-              onClick={() => { setCreateOpen(false); setProfileOpen(false); setWalletsOpen(true); }}
-            >
-              <Wallet size={15} strokeWidth={1.75} />
-              Wallets
-            </button>
-          </div>
-          <button type="button" className="you-btn" onClick={() => { setCreateOpen(false); setWalletsOpen(false); setProfileOpen(true); }}>
-            <span className="you-mark" aria-hidden="true">{accountLabel.slice(0, 1)}</span>
-            <span className="you-copy">
-              <strong>{accountLabel}</strong>
-              <small>Account</small>
-            </span>
-          </button>
+          <AccountMenu
+            accountLabel={profile?.displayName || accountLabel}
+            hint={profile?.handle ? `@${profile.handle}` : 'Account'}
+            avatarUrl={avatarUrl}
+            onPick={onAccount}
+          />
         </footer>
       </aside>
 
@@ -272,7 +374,7 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
           </button>
         </header>
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}`}>
-          <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}`} aria-label={pane}>
+          <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}${pane === 'Plugins' ? ' is-plugins' : ''}`} aria-label={pane}>
             {pane === 'Main' ? (
               bot ? (
                 <>
@@ -281,10 +383,21 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
                     <span>{bot.type} · {bot.status}</span>
                   </header>
                   <h1>{bot.goal}</h1>
+                  <section className="panel" aria-label="Stats">
+                    <h2>Stats</h2>
+                    <dl className="overview-metrics">
+                      {buildBotStats(bot).cards.map(card => (
+                        <div key={card.key}>
+                          <dt>{card.label}</dt>
+                          <dd>{card.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
                   <LiveViewPanel botId={bot.id} ownerId={ownerId} />
                   {bot.experience ? <BotPage bot={bot} ownerId={ownerId} /> : null}
                   {bot.type === 'shopping' ? <ShoppingPanel bot={bot} ownerId={ownerId} /> : null}
-                  <ChatBubbles botName={bot.name} lines={talks[bot.id] ?? []} />
+                  <ChatBubbles botName={bot.name} lines={talks[bot.id] ?? []} thinking={thinkingBot === bot.id} />
                 </>
               ) : (
                 <>
@@ -296,7 +409,7 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
             ) : null}
             {money ? <MoneyPane pane={money} state={{ ...base, bots, wallets }} /> : null}
             {pane === 'Plugins' ? <ConnectorsPane connectors={base.connectors} bots={bots} /> : null}
-            {pane === 'Overview' ? <OverviewPanel bots={bots} ownerId={ownerId} /> : null}
+            {pane === 'Logs' ? <LogsPanel bots={bots} /> : null}
             {pane === 'Security' ? (
               <SecurityPanel
                 bots={bots}
@@ -314,6 +427,8 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
             botName={bot.name}
             lines={talks[bot.id] ?? []}
             onLine={line => appendTalk(bot.id, line)}
+            onThinking={on => setThinkingBot(on ? bot.id : null)}
+            resolveMention={resolveMention}
           />
         ) : pane === 'Positions' ? null : <div className="composer-gap" />}
       </section>
@@ -322,13 +437,16 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
       <ProfileSheet
         open={profileOpen}
         onClose={closeProfile}
-        accountLabel={accountLabel}
+        accountLabel={profile?.displayName || accountLabel}
+        avatarUrl={avatarUrl}
+        profile={profile}
         glance={glance}
         wallets={wallets}
         signedIn={signedIn}
         loginDisabled={loginDisabled}
         onLogin={onLogin}
         onLogout={onLogout}
+        onSave={saveProfile}
       />
     </div>
   );

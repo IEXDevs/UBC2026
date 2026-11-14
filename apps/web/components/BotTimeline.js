@@ -1,5 +1,8 @@
 'use client';
 
+import AnimatedList from './AnimatedList';
+import { listLook } from './listLook';
+
 const KIND_LABELS = {
   'tool.call': 'Tool',
   'trust.gate': 'Trust',
@@ -20,25 +23,25 @@ function formatWhen(at) {
 }
 
 export default function BotTimeline({ entries, live, onWhy }) {
+  const items = entries.map(entry => ({
+    id: entry.id,
+    title: KIND_LABELS[entry.kind] ?? entry.kind,
+    description: entry.summary,
+    meta: formatWhen(entry.at),
+  }));
+
   return (
     <section className="panel" aria-label="Live timeline">
       <h2>Live timeline</h2>
       <p className="hint">{live ? 'Updating from the agent runtime.' : 'Showing the latest stored tool events.'}</p>
-      {entries.length === 0 ? (
+      {items.length === 0 ? (
         <p>No tool events yet.</p>
       ) : (
-        <ol className="timeline">
-          {entries.map(entry => (
-            <li key={entry.id}>
-              <time dateTime={new Date(entry.at).toISOString()}>{formatWhen(entry.at)}</time>
-              <strong>{KIND_LABELS[entry.kind] ?? entry.kind}</strong>
-              <span>{entry.summary}</span>
-              <button type="button" className="ghost timeline-why" onClick={() => onWhy(entry)}>
-                Why did it do this?
-              </button>
-            </li>
-          ))}
-        </ol>
+        <AnimatedList
+          {...listLook()}
+          items={items}
+          onItemSelect={(_item, index) => onWhy(entries[index])}
+        />
       )}
     </section>
   );

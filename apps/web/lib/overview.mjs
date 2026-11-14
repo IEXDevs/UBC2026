@@ -78,6 +78,38 @@ export function pickOwnerRollup(payload, ownerId) {
   return null;
 }
 
+function tallyBot(bot, metric) {
+  const preview = bot?.experience?.preview;
+  if (preview?.state === 'approval-needed') {
+    metric.approvalsRequested += 1;
+    metric.decisions += 1;
+  }
+  const events = bot?.experience?.events ?? [];
+  for (const event of events) {
+    if (event?.kind === 'tx.confirmed') metric.transactionsExecuted += 1;
+    if (event?.kind === 'verify.mismatch') metric.mismatchesCaught += 1;
+    if (event?.kind === 'payment.x402') metric.x402Payments += 1;
+    if (event?.kind === 'approval.granted') metric.approvalsGranted += 1;
+    if (event?.kind === 'tool.call' || event?.kind === 'run.checkpoint') metric.decisions += 1;
+  }
+  return metric;
+}
+
+/** Stats for one bot, from its own preview and timeline. */
+export function buildBotStats(bot) {
+  const metric = tallyBot(bot, emptyMetric(bot?.id ?? 'bot'));
+  return {
+    name: bot?.name ?? '',
+    status: bot?.status ?? '',
+    type: bot?.type ?? '',
+    cards: OVERVIEW_METRIC_KEYS.map((key) => ({
+      key,
+      label: LABELS[key],
+      value: metric[key] ?? 0,
+    })),
+  };
+}
+
 export function formatPnlMicroUsdc(pnlMicroUsdc) {
   if (typeof pnlMicroUsdc !== 'string' || !/^-?(0|[1-9][0-9]{0,39})$/.test(pnlMicroUsdc)) return '—';
   const negative = pnlMicroUsdc.startsWith('-');
@@ -104,21 +136,7 @@ export function buildOverview({ bots = [], ownerId = 'demo_owner', remoteMetric 
   let metric = remoteMetric;
   if (!metric) {
     metric = emptyMetric(ownerId);
-    for (const bot of list) {
-      const preview = bot.experience?.preview;
-      if (preview?.state === 'approval-needed') {
-        metric.approvalsRequested += 1;
-        metric.decisions += 1;
-      }
-      const events = bot.experience?.events ?? [];
-      for (const event of events) {
-        if (event?.kind === 'tx.confirmed') metric.transactionsExecuted += 1;
-        if (event?.kind === 'verify.mismatch') metric.mismatchesCaught += 1;
-        if (event?.kind === 'payment.x402') metric.x402Payments += 1;
-        if (event?.kind === 'approval.granted') metric.approvalsGranted += 1;
-        if (event?.kind === 'tool.call' || event?.kind === 'run.checkpoint') metric.decisions += 1;
-      }
-    }
+    for (const bot of list) tallyBot(bot, metric);
   }
 
   const cards = OVERVIEW_METRIC_KEYS.map((key) => ({

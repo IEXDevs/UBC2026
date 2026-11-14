@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildBotStats,
   buildOverview,
   emptyMetric,
   formatPnlMicroUsdc,
@@ -21,6 +22,16 @@ test('overview builds owner cards from demo bots', () => {
   assert.equal(overview.cards.length, 7);
   assert.equal(overview.source, 'local');
   assert.ok(overview.cards.every((c) => typeof c.value === 'number'));
+});
+
+test('each bot carries its own stats', () => {
+  const state = getDemoShellState();
+  const meteora = buildBotStats(state.bots[0]);
+  const guard = buildBotStats(state.bots[2]);
+  assert.equal(meteora.name, state.bots[0].name);
+  assert.equal(meteora.cards.length, 7);
+  assert.equal(meteora.cards.find((card) => card.key === 'decisions').value, 2);
+  assert.equal(guard.cards.find((card) => card.key === 'mismatchesCaught').value, 1);
 });
 
 test('pickOwnerRollup validates remote payload and formats pnl', () => {

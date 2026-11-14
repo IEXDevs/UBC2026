@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { DOCK_EXPAND_MS, dockCollapseDelay, dockShouldStayOpen } from '../lib/dock-hold.mjs';
 import GlassSurface from './GlassSurface';
 import GooeyNav from './GooeyNav';
 
@@ -18,12 +19,20 @@ export default function PaneDock({ panes, pane, onChange }) {
   const [pill, setPill] = useState(mid);
   const [box, setBox] = useState({ width: 148, height: 48 });
   const wait = useRef(null);
+  const settle = useRef(null);
   const hold = useRef(false);
   const closed = useRef(true);
+  const expanded = useRef(false);
+  const openedAt = useRef(0);
   const wasOpen = useRef(false);
+  const openState = useRef(false);
+  const rootRef = useRef(null);
   const measureRef = useRef(null);
+  const pointer = useRef({ x: -1, y: -1, forced: false });
+  const syncRef = useRef(() => {});
   const paneRef = useRef(pane);
   paneRef.current = pane;
+  openState.current = open;
 
   useEffect(() => {
     const stayedClosed = !open && !wasOpen.current;
@@ -49,32 +58,97 @@ export default function PaneDock({ panes, pane, onChange }) {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => () => clearTimeout(wait.current), []);
+  useEffect(() => () => {
+    clearTimeout(wait.current);
+    clearTimeout(settle.current);
+  }, []);
+
+  useEffect(() => {
+    function track(event) {
+      pointer.current.x = event.clientX;
+      pointer.current.y = event.clientY;
+      if (expanded.current || openState.current) syncRef.current();
+    }
+    window.addEventListener('pointermove', track, { passive: true });
+    return () => window.removeEventListener('pointermove', track);
+  }, []);
 
   const items = useMemo(() => order.map(name => ({ label: name })), [order]);
 
-  function enter() {
-    clearTimeout(wait.current);
-    hold.current = true;
-    if (!open && closed.current) {
-      setOrder(centered(panes, paneRef.current));
-      setPill(mid);
-    }
-    requestAnimationFrame(() => {
-      if (hold.current) setOpen(true);
-    });
+  function expandMs() {
+    const raw = rootRef.current ? getComputedStyle(rootRef.current).getPropertyValue('--dock-expand') : '';
+    const ms = Number.parseFloat(raw);
+    return Number.isFinite(ms) && ms > 0 ? ms : DOCK_EXPAND_MS;
   }
 
-  function leave() {
-    hold.current = false;
+  function containsPointer() {
+    if (pointer.current.forced) return true;
+    const node = rootRef.current;
+    if (!node || pointer.current.x < 0) return false;
+    const rect = node.getBoundingClientRect();
+    const pad = 12;
+    const { x, y } = pointer.current;
+    return x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad;
+  }
+
+  function collapse() {
+    expanded.current = false;
+    openedAt.current = 0;
     closed.current = false;
+    hold.current = false;
     setOpen(false);
     clearTimeout(wait.current);
-    wait.current = setTimeout(() => {
+    clearTimeout(settle.current);
+    settle.current = setTimeout(() => {
       closed.current = true;
       setOrder(centered(panes, paneRef.current));
       setPill(mid);
-    }, 560);
+    }, expandMs() + 40);
+  }
+
+  function sync() {
+    const inside = containsPointer();
+    const duration = expandMs();
+    const elapsed = expanded.current ? performance.now() - openedAt.current : duration;
+    const stay = expanded.current && dockShouldStayOpen(inside, elapsed, duration);
+    if (inside || stay) {
+      clearTimeout(wait.current);
+      hold.current = true;
+      if (!expanded.current) {
+        if (closed.current) {
+          setOrder(centered(panes, paneRef.current));
+          setPill(mid);
+        }
+        openedAt.current = performance.now();
+        expanded.current = true;
+      }
+      if (!openState.current) setOpen(true);
+      if (!inside) {
+        wait.current = setTimeout(() => syncRef.current(), dockCollapseDelay(performance.now(), openedAt.current, duration));
+      }
+      return;
+    }
+    if (expanded.current || openState.current) collapse();
+  }
+
+  syncRef.current = sync;
+
+  function pointFrom(event) {
+    if (event?.clientX == null) return;
+    pointer.current.x = event.clientX;
+    pointer.current.y = event.clientY;
+  }
+
+  function enter(event) {
+    pointFrom(event);
+    pointer.current.forced = true;
+    sync();
+    pointer.current.forced = false;
+  }
+
+  function leave(event) {
+    pointFrom(event);
+    sync();
   }
 
   function pick(index, item) {
@@ -85,6 +159,7 @@ export default function PaneDock({ panes, pane, onChange }) {
 
   return (
     <div
+      ref={rootRef}
       className={`dock-slot${open ? ' is-open' : ''}`}
       onMouseEnter={enter}
       onMouseLeave={leave}
@@ -115,6 +190,7 @@ export default function PaneDock({ panes, pane, onChange }) {
           <GooeyNav
             key={order.join('|')}
             className="pane-nav"
+            frame={false}
             items={items}
             activeIndex={pill}
             theme="dark"
