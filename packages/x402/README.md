@@ -13,7 +13,9 @@ const challenge = buildPaymentRequired({
 });
 ```
 
-This package does not sign, broadcast, or verify on-chain transfers. Pair it with `@ubc2026/bot-policy` (budgets / approvals) and `@ubc2026/verify-consensus` before creating a challenge the user can approve. Facilitator verify/settle calls and Durable Object accounting belong to the service layer.
+`buildPaymentSignature` turns those accepted terms plus a devnet transaction signature into a `PAYMENT-SIGNATURE` header.
+
+This package does not sign, broadcast, or verify on-chain transfers. Pair it with `@ubc2026/bot-policy` (budgets / approvals) and `@ubc2026/verify-consensus` before creating a challenge the user can approve. The devnet price/trust Worker and the bot-wallet payer live in `apps/x402-service`. Facilitator RPC confirmation stays outside this package.
 
 Protocol references:
 - https://solana.com/docs/payments/agentic-payments/x402

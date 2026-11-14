@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "maelstrom-x402-price-trust",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "CLUSTER": "devnet",
+    "X402_PRICE_AMOUNT": "10000",
+    "X402_TRUST_AMOUNT": "5000"
+    // X402_PAY_TO and X402_FEE_PAYER are devnet pubkeys. Not secrets. Leave them unset in git.
+    // Bind env.confirmDevnetPayment to accept a payment. This worker does not call RPC.
+  }
+}
