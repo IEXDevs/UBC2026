@@ -1,12 +1,13 @@
 /**
  * Privy Solana wallet path for Maelstrom.
  * Login provisioning (main wallet at sign-up, additional wallets) and
- * server signing. The signed transaction is broadcast on Solana devnet
- * through QUICKNODE_DEVNET_RPC_URL. Key material stays in Privy and in
+ * server signing. Bot spends, owner sweeps, and wallet-adapter deposits
+ * broadcast on Solana devnet through QUICKNODE_DEVNET_RPC_URL.
+ * Key material stays in Privy and in
  * environment variables; this module never returns a private key.
  */
 import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
-import { SECRET_GROUPS, requireConfig } from '@ubc2026/contracts';
+import { SECRET_GROUPS, requireConfig, validateWallet, ContractError } from '@ubc2026/contracts';
 import {
   WalletError,
   assertSpendAllowed,
@@ -18,6 +19,9 @@ export { WalletError };
 
 /** Solana devnet genesis hash. Also the CAIP-2 reference for solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1. */
 export const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
+
+/** Circle USDC mint on Solana devnet. Mainnet USDC is never queried or transferred here. */
+export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
 const PRIVY_API_BASE = 'https://api.privy.io';
 const PRIVY_AUTH_BASE = 'https://auth.privy.io';
@@ -279,6 +283,61 @@ export function createPrivyWalletClient({
     };
   }
 
+  async function rpc(method, params) {
+    return fetchJson(quicknode, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { jsonrpc: '2.0', id: 1, method, params },
+    }, 'rpc_failed');
+  }
+
+  /** Genesis gate shared by signing, owner sweeps, deposits, and devnet reads. */
+  async function assertDevnet() {
+    const genesis = await rpc('getGenesisHash');
+    if (genesis.result !== DEVNET_GENESIS_HASH) {
+      fail('Refusing to broadcast outside Solana devnet', 'wrong_cluster');
+    }
+    return { cluster: 'devnet' };
+  }
+
+  async function signWithPrivy(walletId, transaction) {
+    const unsigned = decodeBase64(transaction, 'Transaction');
+    if (unsigned.length > MAX_TX_BYTES) fail('Transaction exceeds the Solana packet limit', 'invalid_transaction');
+    const url = `${privyApi}/v1/wallets/${encodeURIComponent(walletId)}/rpc`;
+    const body = {
+      method: 'signTransaction',
+      params: { transaction, encoding: 'base64' },
+    };
+    const signedBody = await fetchJson(url, {
+      method: 'POST',
+      headers: privyHeaders({ method: 'POST', url, body }),
+      body,
+    }, 'privy_failed');
+    return signedBody?.data?.signed_transaction;
+  }
+
+  async function sendSigned(signedTransaction, { privy = false } = {}) {
+    const signed = decodeBase64(signedTransaction, 'Signed transaction');
+    if (signed.length <= 64) {
+      fail(
+        privy
+          ? 'Privy returned a raw signature, not a serialized transaction'
+          : 'Signed transaction is not a serialized Solana transaction',
+        'invalid_signature',
+      );
+    }
+    if (signed.length > MAX_TX_BYTES) fail('Signed transaction exceeds the Solana packet limit', 'invalid_transaction');
+    await assertDevnet();
+    const sent = await rpc('sendTransaction', [
+      signedTransaction,
+      { encoding: 'base64', preflightCommitment: 'confirmed' },
+    ]);
+    if (typeof sent.result !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(sent.result)) {
+      fail('Devnet broadcast did not return a signature', 'rpc_rejected');
+    }
+    return sent.result;
+  }
+
   return {
     async acceptLogin({ accessToken, ownerId } = {}) {
       const token = assertHeaderSafe(accessToken, 'Privy access token');
@@ -312,53 +371,84 @@ export function createPrivyWalletClient({
       return createdRecord(created, owner, user.id, 'additional', label);
     },
 
+    async assertDevnetCluster() {
+      return assertDevnet();
+    },
+
     async signAndBroadcastDevnet({ bot, wallet, transaction } = {}) {
       assertSpendAllowed({ bot, wallet });
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
-      const unsigned = decodeBase64(transaction, 'Transaction');
-      if (unsigned.length > MAX_TX_BYTES) fail('Transaction exceeds the Solana packet limit', 'invalid_transaction');
-      const url = `${privyApi}/v1/wallets/${encodeURIComponent(walletId)}/rpc`;
-      const body = {
-        method: 'signTransaction',
-        params: { transaction, encoding: 'base64' },
-      };
-      const signedBody = await fetchJson(url, {
-        method: 'POST',
-        headers: privyHeaders({ method: 'POST', url, body }),
-        body,
-      }, 'privy_failed');
-      const signedTransaction = signedBody?.data?.signed_transaction;
-      const signed = decodeBase64(signedTransaction, 'Signed transaction');
-      if (signed.length <= 64) fail('Privy returned a raw signature, not a serialized transaction', 'invalid_signature');
-      if (signed.length > MAX_TX_BYTES) fail('Signed transaction exceeds the Solana packet limit', 'invalid_transaction');
-
-      const genesis = await fetchJson(quicknode, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: { jsonrpc: '2.0', id: 1, method: 'getGenesisHash' },
-      }, 'rpc_failed');
-      if (genesis.result !== DEVNET_GENESIS_HASH) {
-        fail('Refusing to broadcast outside Solana devnet', 'wrong_cluster');
-      }
-      const sent = await fetchJson(quicknode, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: {
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'sendTransaction',
-          params: [signedTransaction, { encoding: 'base64', preflightCommitment: 'confirmed' }],
-        },
-      }, 'rpc_failed');
-      if (typeof sent.result !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(sent.result)) {
-        fail('Devnet broadcast did not return a signature', 'rpc_rejected');
-      }
+      const signedTransaction = await signWithPrivy(walletId, transaction);
+      const signature = await sendSigned(signedTransaction, { privy: true });
       return {
         cluster: 'devnet',
-        signature: sent.result,
+        signature,
         privyWalletId: walletId,
         botId: bot.id,
       };
+    },
+
+    /**
+     * Owner sweep / withdraw / wallet-to-wallet move.
+     * Bot freeze does not apply: Stop All grab-back must still move a frozen wallet.
+     * Broadcast still refuses any cluster whose genesis hash is not devnet.
+     */
+    async signAndBroadcastOwnerDevnet({ ownerId, wallet, transaction } = {}) {
+      const owner = assertOwnerId(ownerId);
+      try {
+        validateWallet(wallet);
+      } catch (error) {
+        if (error instanceof ContractError) fail(error.message, 'invalid_wallet');
+        throw error;
+      }
+      if (wallet.ownerId !== owner) fail('Wallet owner must match', 'owner_mismatch');
+      const walletId = assertPrivyWalletId(wallet.privyWalletId);
+      const signedTransaction = await signWithPrivy(walletId, transaction);
+      const signature = await sendSigned(signedTransaction, { privy: true });
+      return { cluster: 'devnet', signature, privyWalletId: walletId };
+    },
+
+    /** Broadcast a transaction the Wallet Adapter already signed. No Privy call. */
+    async broadcastSignedDevnet({ signedTransaction } = {}) {
+      const signature = await sendSigned(signedTransaction, { privy: false });
+      return { cluster: 'devnet', signature };
+    },
+
+    async getDevnetBlockhash() {
+      await assertDevnet();
+      const latest = await rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]);
+      const blockhash = latest.result?.value?.blockhash;
+      const lastValidBlockHeight = latest.result?.value?.lastValidBlockHeight;
+      if (typeof blockhash !== 'string' || !base58.test(blockhash)) fail('Devnet blockhash was not returned', 'rpc_rejected');
+      if (!Number.isSafeInteger(lastValidBlockHeight) || lastValidBlockHeight < 0) {
+        fail('Devnet blockhash was not returned', 'rpc_rejected');
+      }
+      return { cluster: 'devnet', blockhash, lastValidBlockHeight };
+    },
+
+    async getDevnetUsdcBalance({ address: owner } = {}) {
+      if (typeof owner !== 'string' || !base58.test(owner)) fail('Wallet address is required', 'invalid_address');
+      await assertDevnet();
+      const listed = await rpc('getTokenAccountsByOwner', [
+        owner,
+        { mint: DEVNET_USDC_MINT },
+        { encoding: 'jsonParsed' },
+      ]);
+      const accounts = listed.result?.value;
+      if (!Array.isArray(accounts)) fail('Devnet USDC balance was not returned', 'rpc_rejected');
+      let total = 0n;
+      for (const account of accounts) {
+        const info = account?.account?.data?.parsed?.info;
+        const tokenAmount = info?.tokenAmount;
+        if (!info || info.mint !== DEVNET_USDC_MINT || tokenAmount?.decimals !== 6) {
+          fail('Devnet USDC balance was not returned', 'rpc_rejected');
+        }
+        if (typeof tokenAmount.amount !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(tokenAmount.amount)) {
+          fail('Devnet USDC balance was not returned', 'rpc_rejected');
+        }
+        total += BigInt(tokenAmount.amount);
+      }
+      return { cluster: 'devnet', mint: DEVNET_USDC_MINT, address: owner, amount: total.toString() };
     },
   };
 }

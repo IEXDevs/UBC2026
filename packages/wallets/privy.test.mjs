@@ -342,3 +342,97 @@ test('freeze and provider failures do not reveal secrets or broadcast', async ()
     error => error instanceof WalletError && error.code === 'privy_failed' && !error.message.includes('quicknode-secret-path'),
   );
 });
+
+test('devnet reads and owner sweeps stay off the public client surface and off mainnet', async () => {
+  const live = client();
+  assert.equal(live.rpc, undefined);
+  assert.equal(live.sendSigned, undefined);
+  assert.equal(live.signWithPrivy, undefined);
+
+  const owner = 'So11111111111111111111111111111111111111112';
+  const blockhash = '3'.repeat(32);
+  const mainnet = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+  const wallet = {
+    ...createMainWallet({ ownerId: 'user_1', address, id: walletId }),
+    privyWalletId: walletId,
+    frozen: true,
+  };
+
+  const blocked = mockFetch([
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: mainnet } },
+  ]);
+  const blockedClient = client({ fetcher: blocked.fetcher });
+  await assert.rejects(
+    () => blockedClient.getDevnetBlockhash(),
+    error => error instanceof WalletError && error.code === 'wrong_cluster',
+  );
+  await assert.rejects(
+    () => blockedClient.getDevnetUsdcBalance({ address: owner }),
+    error => error instanceof WalletError && error.code === 'wrong_cluster',
+  );
+  await assert.rejects(
+    () => blockedClient.broadcastSignedDevnet({ signedTransaction: signedTx() }),
+    error => error instanceof WalletError && error.code === 'wrong_cluster',
+  );
+  assert.equal(blocked.calls.some(call => call.body?.method === 'getLatestBlockhash'), false);
+  assert.equal(blocked.calls.some(call => call.body?.method === 'getTokenAccountsByOwner'), false);
+  assert.equal(blocked.calls.some(call => call.body?.method === 'sendTransaction'), false);
+
+  const read = mockFetch([
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: DEVNET_GENESIS_HASH } },
+    {
+      match: (url, body) => url === rpcUrl && body?.method === 'getLatestBlockhash',
+      body: { result: { value: { blockhash, lastValidBlockHeight: 42 } } },
+    },
+    {
+      match: (url, body) => url === rpcUrl && body?.method === 'getTokenAccountsByOwner',
+      body: {
+        result: {
+          value: [
+            { account: { data: { parsed: { info: { mint: address, tokenAmount: { amount: '1000', decimals: 6 } } } } } },
+            { account: { data: { parsed: { info: { mint: address, tokenAmount: { amount: '2500', decimals: 6 } } } } } },
+          ],
+        },
+      },
+    },
+  ]);
+  const reader = client({ fetcher: read.fetcher });
+  const hash = await reader.getDevnetBlockhash();
+  assert.equal(hash.cluster, 'devnet');
+  assert.equal(hash.blockhash, blockhash);
+  const balance = await reader.getDevnetUsdcBalance({ address: owner });
+  assert.equal(balance.amount, '3500');
+  assert.equal(balance.mint, address);
+  const balanceCall = read.calls.find(call => call.body?.method === 'getTokenAccountsByOwner');
+  assert.deepEqual(balanceCall.body.params[1], { mint: address });
+  assert.equal(balanceCall.body.params[0], owner);
+
+  const mismatch = mockFetch([]);
+  await assert.rejects(
+    () => client({ fetcher: mismatch.fetcher }).signAndBroadcastOwnerDevnet({
+      ownerId: 'user_2',
+      wallet,
+      transaction: unsignedTx(),
+    }),
+    error => error instanceof WalletError && error.code === 'owner_mismatch',
+  );
+  assert.equal(mismatch.calls.length, 0);
+
+  const sweep = mockFetch([
+    {
+      match: (url, body) => url.endsWith('/rpc') && body?.method === 'signTransaction',
+      body: { data: { signed_transaction: signedTx() } },
+    },
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: DEVNET_GENESIS_HASH } },
+    { match: (url, body) => url === rpcUrl && body?.method === 'sendTransaction', body: { result: txSignature } },
+  ]);
+  const swept = await client({ fetcher: sweep.fetcher }).signAndBroadcastOwnerDevnet({
+    ownerId: 'user_1',
+    wallet,
+    transaction: unsignedTx(),
+  });
+  assert.equal(swept.signature, txSignature);
+  assert.equal(swept.botId, undefined);
+  assert.equal(wallet.frozen, true);
+  assert.equal(sweep.calls.at(-1).body.method, 'sendTransaction');
+});

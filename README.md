@@ -43,6 +43,7 @@ goal → research (browser/search)
 | --- | --- |
 | `packages/contracts` | Shared bot / wallet / event / payment / metric validators and API route list |
 | `packages/wallets` | Privy login provisioning, wallet assignment, freeze gates, and devnet server signing |
+| `packages/transfers` | Devnet USDC transfer with memo, wallet-adapter deposit, withdraw, wallet moves, and grab-back to main |
 | `packages/agent-loop` | Trust → verify → policy decision gate orchestrator |
 | `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
 | `packages/browser-session` | Owner-bound Cloudflare browser sessions, per-bot concurrency, Live View URLs |
@@ -55,7 +56,7 @@ goal → research (browser/search)
 | `apps/web` | Next.js glass UI shell (Cloudflare-hosted) |
 | `supabase/schema.sql` | Postgres schema: foundations migration plus `20261114020000_policy_ledger.sql` (atomic reserve, approval modes, kill switch) |
 
-These are library scaffolds, not a shipping app. None sign or broadcast. Persist sessions/approvals/budgets in a Durable Object or transactional DB; queues are transport only.
+These are library scaffolds, not a shipping app. Bot spends and owner USDC moves are signed by Privy and broadcast on Solana devnet only; deposits are signed by a Wallet Adapter and sent through the same devnet genesis check. Persist sessions/approvals/budgets in a Durable Object or transactional DB; queues are transport only.
 
 ## Hosting (locked)
 
