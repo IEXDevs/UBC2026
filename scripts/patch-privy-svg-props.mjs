@@ -5,6 +5,10 @@
  * installed bundle to the camelCase props React expects.
  *
  * The DOM output stays `fill-rule` / `clip-rule`. Only the React prop keys change.
+ *
+ * The same pass drops two login-console warnings that are not failures:
+ * Privy logs AbortError when React Strict Mode cancels the first app-config
+ * fetch, and Turnstile warns when Privy calls execute() on a render-mode widget.
  */
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -15,13 +19,22 @@ const SVG_PROP_REWRITES = Object.freeze([
   [/"clip-rule"\s*:/g, 'clipRule:'],
 ]);
 
+const APP_CONFIG_WARN = 'p(t),console.warn("Error generating app config: ",t)';
+const APP_CONFIG_WARN_FIXED = 'p(t);if(t.name!=="AbortError")console.warn("Error generating app config: ",t)';
+
+const TURNSTILE_EXECUTE_WARN = 'console.warn(`Execution mode is not set to "execute"`)';
+
 export function rewriteSvgDomProps(source) {
   let next = String(source);
   for (const [pattern, replacement] of SVG_PROP_REWRITES) {
     pattern.lastIndex = 0;
     next = next.replace(pattern, replacement);
   }
-  return next;
+  return next.replaceAll(APP_CONFIG_WARN, APP_CONFIG_WARN_FIXED);
+}
+
+export function silenceTurnstileExecuteWarning(source) {
+  return String(source).replaceAll(TURNSTILE_EXECUTE_WARN, 'void 0');
 }
 
 function walkJsFiles(dir, out) {
@@ -44,18 +57,35 @@ function walkJsFiles(dir, out) {
   return out;
 }
 
-export function patchPrivySvgProps(repoRoot) {
-  const dist = path.join(repoRoot, 'node_modules', '@privy-io', 'react-auth', 'dist');
-  const files = walkJsFiles(dist, []);
+function patchTree(dir, rewrite) {
+  const files = walkJsFiles(dir, []);
   let patched = 0;
   for (const file of files) {
     const source = readFileSync(file, 'utf8');
-    const next = rewriteSvgDomProps(source);
+    const next = rewrite(source);
     if (next === source) continue;
     writeFileSync(file, next);
     patched += 1;
   }
-  return { dist, scanned: files.length, patched };
+  return { dir, scanned: files.length, patched };
+}
+
+export function patchPrivySvgProps(repoRoot) {
+  const privy = patchTree(
+    path.join(repoRoot, 'node_modules', '@privy-io', 'react-auth', 'dist'),
+    rewriteSvgDomProps,
+  );
+  const turnstile = patchTree(
+    path.join(repoRoot, 'node_modules', '@marsidev', 'react-turnstile'),
+    silenceTurnstileExecuteWarning,
+  );
+  return {
+    dist: privy.dir,
+    scanned: privy.scanned + turnstile.scanned,
+    patched: privy.patched + turnstile.patched,
+    privy,
+    turnstile,
+  };
 }
 
 function isDirectRun() {
