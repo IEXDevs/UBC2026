@@ -14,7 +14,7 @@ test('Privy provider props stay public and Solana-only', () => {
   assert.equal(props.clientId, 'client-1');
   assert.equal(props.config.appearance.walletChainType, 'solana-only');
   assert.equal(props.config.embeddedWallets.solana.createOnLogin, 'users-without-wallets');
-  assert.deepEqual(props.config.loginMethods, ['email', 'wallet']);
+  assert.deepEqual(props.config.loginMethods, ['email', 'google', 'github', 'discord', 'wallet']);
 
   const withoutClient = privyProviderProps({ appId: 'cl-app' });
   assert.equal(withoutClient.clientId, undefined);
@@ -30,5 +30,14 @@ test('owner id comes from an authenticated Privy user', () => {
   assert.equal(ownerIdFromPrivyUser({ id: 'did:privy:abc' }, false), null);
   assert.equal(ownerIdFromPrivyUser(null, true), null);
   assert.equal(privyAccountLabel({ email: { address: 'a@example.com' }, id: 'did:privy:abc' }), 'a@example.com');
+  assert.equal(privyAccountLabel({ google: { email: 'g@example.com' } }), 'g@example.com');
+  assert.equal(privyAccountLabel({ github: { username: 'octocat' } }), '@octocat');
+  assert.equal(privyAccountLabel({ discord: { username: 'mage#1234' } }), 'mage#1234');
+  assert.equal(
+    privyAccountLabel({
+      linkedAccounts: [{ type: 'github_oauth', username: 'linked-gh' }],
+    }),
+    '@linked-gh',
+  );
   assert.equal(privyAccountLabel({ wallet: { address: 'So11111111111111111111111111111111111111112' } }), 'So11…1112');
 });

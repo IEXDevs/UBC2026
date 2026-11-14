@@ -11,7 +11,7 @@ const props = privyProviderProps({
 
 export default function PrivyRoot({ children }) {
   if (!props) return children;
-  // Omit clientId unless set — a wrong App Client id makes email login show
+  // Omit clientId unless set — a wrong App Client id makes login show
   // "Something went wrong" (often invalid_origin against that client's allowlist).
   const providerProps = {
     appId: props.appId,
