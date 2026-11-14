@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { voiceToolDefinitions } from '../lib/voice-client-tools.mjs';
+import TalkSession from './TalkSession';
 
 /**
  * ElevenAgents Talk surface (Isaac / 8B).
- * Client tools + live conversation transcript. Full conversation SDK mount
- * requires NEXT_PUBLIC_ELEVENLABS_AGENT_ID from 8A.
+ * Client tools + live transcript always; live orb when NEXT_PUBLIC_ELEVENLABS_AGENT_ID is set.
+ * Webhook tools live on the Worker (/voice/tools) from Alex / 8A.
  */
 export default function TalkStub({
   botName = 'agent',
@@ -18,7 +19,6 @@ export default function TalkStub({
   const [transcript, setTranscript] = useState(() => conversation?.entries?.() ?? []);
   const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || '';
   const defs = useMemo(() => voiceToolDefinitions(), []);
-  const ready = Boolean(clientTools) && Boolean(agentId);
 
   useEffect(() => {
     if (!conversation?.subscribe) return undefined;
@@ -42,9 +42,9 @@ export default function TalkStub({
     <section className="panel talk-panel" aria-label="Voice talk">
       <h2>Talk</h2>
       <p className="hint">
-        ElevenAgents client tools for <strong>{botName}</strong>: open bot, Live View,
-        confirm, read-back. Live timeline/security events stream into this transcript.
-        Spend still goes through trust → verify → policy → approval.
+        ElevenAgents for <strong>{botName}</strong>: client tools navigate the glass shell;
+        Worker webhook tools (8A) hit the same APIs as the UI. Spend still goes through
+        trust → verify → policy → approval.
       </p>
       <ul className="talk-tools" aria-label="Client tools">
         {defs.map((tool) => (
@@ -54,15 +54,28 @@ export default function TalkStub({
           </li>
         ))}
       </ul>
+
+      {agentId && clientTools ? (
+        <TalkSession
+          agentId={agentId}
+          clientTools={clientTools}
+          conversation={conversation}
+          botName={botName}
+        />
+      ) : (
+        <div className="live-actions">
+          <button
+            className="cta"
+            type="button"
+            disabled
+            title="Set NEXT_PUBLIC_ELEVENLABS_AGENT_ID from the ElevenLabs agent created via /voice/agent"
+          >
+            Start voice session
+          </button>
+        </div>
+      )}
+
       <div className="live-actions">
-        <button
-          className="cta"
-          type="button"
-          disabled={!ready}
-          title={ready ? 'Start ElevenAgents session' : 'Requires NEXT_PUBLIC_ELEVENLABS_AGENT_ID (8A) + client tools'}
-        >
-          Start voice session
-        </button>
         <button className="ghost" type="button" disabled={!clientTools} onClick={() => demoTool('read_back')}>
           Read back
         </button>
@@ -70,9 +83,10 @@ export default function TalkStub({
           Confirm demo
         </button>
       </div>
+
       <ol className="talk-transcript" aria-live="polite" aria-label="Conversation">
         {transcript.length === 0 ? (
-          <li className="hint">No live events yet. Approvals, timeline, and security actions appear here.</li>
+          <li className="hint">No live events yet. Approvals, timeline, security, and voice messages appear here.</li>
         ) : transcript.map((entry) => (
           <li key={entry.id} data-role={entry.role}>
             <strong>{entry.role}</strong>
@@ -87,8 +101,8 @@ export default function TalkStub({
       ) : null}
       {!agentId ? (
         <p className="hint">
-          Set <code>NEXT_PUBLIC_ELEVENLABS_AGENT_ID</code> after creating the ElevenLabs agent from the
-          runtime <code>/voice/agent</code> spec (Alex / 8A). Client tools and live transcript work now.
+          Create the ElevenLabs agent from runtime <code>/voice/agent</code>, then set
+          <code> NEXT_PUBLIC_ELEVENLABS_AGENT_ID</code> to mount the live orb.
         </p>
       ) : null}
     </section>

@@ -12,6 +12,7 @@ import {
 } from '@ubc2026/shopping';
 import { buildSignalOffer, settleSignalSale, CommerceError } from '@ubc2026/agent-commerce';
 import { createSnsResolver, prepareSnsSend, SnsError } from '@ubc2026/sns';
+import { grabBackToMain, TransferError } from '@ubc2026/transfers';
 import { DEVNET_USDC_MINT } from '@ubc2026/x402';
 
 function json(data, status = 200) {
@@ -25,8 +26,13 @@ function ownerId(request) {
 }
 
 function err(error) {
-  if (error instanceof ShoppingError || error instanceof CommerceError || error instanceof SnsError) {
-    return json({ error: error.message }, 400);
+  if (
+    error instanceof ShoppingError
+    || error instanceof CommerceError
+    || error instanceof SnsError
+    || error instanceof TransferError
+  ) {
+    return json({ error: error.code || error.message }, 400);
   }
   throw error;
 }
@@ -47,15 +53,35 @@ function defaultResolver(env) {
   });
 }
 
+function shoppingBotFrom(body, botId, owner) {
+  if (body.bot?.id) return body.bot;
+  return {
+    id: botId,
+    ownerId: owner || body.ownerId || 'owner',
+    name: body.name || botId,
+    goal: body.goal || 'Compare x402 sandbox catalog and wait for approval before buy',
+    type: 'shopping',
+    enabled: true,
+    frozen: false,
+    policyVersion: 1,
+    approvalMode: 'ask',
+    walletId: body.walletId || 'wallet_demo',
+    cap: body.cap || { mode: 'limited', asset: 'USDC', maxOutflow: '20000000', maxPerTransaction: '10000000' },
+  };
+}
+
 /** POST /bots/:botId/shopping/prepare */
 export async function handleShoppingPrepare(request, env, botId) {
-  if (!ownerId(request)) return json({ error: 'owner_required' }, 401);
+  const owner = ownerId(request);
+  if (!owner) return json({ error: 'owner_required' }, 401);
   const body = await readBody(request);
+  const bot = shoppingBotFrom(body, botId, owner);
+  const ledger = body.ledger || { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
   try {
     if (body.provider === 'laso') {
       const result = await prepareLasoTinyCardPurchase({
-        bot: body.bot,
-        ledger: body.ledger,
+        bot,
+        ledger,
         amountUsd: body.amountUsd,
         fetcher: env.fetch || fetch,
         baseUrl: env.LASO_BASE_URL,
@@ -63,9 +89,9 @@ export async function handleShoppingPrepare(request, env, botId) {
       return json({ ok: true, botId, ...result });
     }
     const result = await prepareSandboxPurchase({
-      bot: body.bot,
-      ledger: body.ledger,
-      recipient: body.recipient,
+      bot,
+      ledger,
+      recipient: body.recipient || env.SANDBOX_PAY_TO || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
       storeClient: env.sandboxStoreClient || null,
       fetcher: env.fetch || fetch,
       baseUrl: env.X402_SANDBOX_BASE_URL,
@@ -209,8 +235,47 @@ export async function handleSnsSend(request, env, botId) {
   }
 }
 
-/** Route dispatcher for commerce/shopping/sns paths under /bots/:botId/... */
+/** POST /security/grab-back — owner sweep additional wallets to main (Alex transfers helper). */
+export async function handleGrabBack(request, env) {
+  const owner = ownerId(request);
+  if (!owner) return json({ error: 'owner_required' }, 401);
+  const body = await readBody(request);
+  if (!body.mainWallet || !Array.isArray(body.wallets)) {
+    return json({ error: 'wallets_required' }, 400);
+  }
+  if (!env.transferClient && !body.dryRun) {
+    return json({ error: 'signer_not_configured' }, 503);
+  }
+  try {
+    if (body.dryRun) {
+      return json({
+        ok: true,
+        dryRun: true,
+        kind: 'grab-back',
+        cluster: 'devnet',
+        memo: 'funds.grabbed',
+        moves: body.wallets
+          .filter((w) => w.kind === 'additional')
+          .map((w) => ({ from: w.address, to: body.mainWallet.address, status: 'planned' })),
+      });
+    }
+    const result = await grabBackToMain({
+      client: env.transferClient,
+      ownerId: owner,
+      mainWallet: body.mainWallet,
+      wallets: body.wallets,
+      balances: body.balances || null,
+      recentBlockhash: body.recentBlockhash,
+    });
+    return json({ ok: true, ...result });
+  } catch (error) {
+    return err(error);
+  }
+}
+
+/** Route dispatcher for commerce/shopping/sns/security paths. */
 export function matchCommerceRoute(method, pathname) {
+  if (pathname === '/security/grab-back' && method === 'POST') return { kind: 'grab-back' };
   const shopPrep = pathname.match(/^\/bots\/([^/]+)\/shopping\/prepare$/);
   if (shopPrep && method === 'POST') return { kind: 'shopping-prepare', botId: decodeURIComponent(shopPrep[1]) };
   const shopSettle = pathname.match(/^\/bots\/([^/]+)\/shopping\/settle$/);
@@ -235,6 +300,7 @@ export async function dispatchCommerceRoute(request, env, matched) {
     case 'signal-offer': return handleSignalOffer(request, env, matched.botId, matched.signalId);
     case 'signal-settle': return handleSignalSettle(request, env, matched.botId, matched.signalId);
     case 'sns-send': return handleSnsSend(request, env, matched.botId);
+    case 'grab-back': return handleGrabBack(request, env);
     default: return json({ error: 'not_found' }, 404);
   }
 }

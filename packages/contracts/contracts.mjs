@@ -248,6 +248,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'bots.commerce.signal', method: 'GET', path: '/bots/:botId/commerce/signals/:signalId', phase: 6, auth: 'none', status: 'live' },
   { id: 'bots.commerce.signal.settle', method: 'POST', path: '/bots/:botId/commerce/signals/:signalId/settle', phase: 6, auth: 'none', status: 'live' },
   { id: 'bots.sns.send', method: 'POST', path: '/bots/:botId/sns/send', phase: 6, auth: 'owner', status: 'live' },
+  { id: 'security.grab-back', method: 'POST', path: '/security/grab-back', phase: 6, auth: 'owner', status: 'live' },
   { id: 'events.list', method: 'GET', path: '/api/events', phase: 1, auth: 'privy', status: 'stub' },
   { id: 'decisions.list', method: 'GET', path: '/api/decisions', phase: 1, auth: 'privy', status: 'stub' },
   { id: 'payments.list', method: 'GET', path: '/api/payments', phase: 1, auth: 'privy', status: 'stub' },
