@@ -15,6 +15,7 @@ import {
   readStreamHealthFromSupabase,
   walletAddress,
 } from './schedules.mjs';
+import { handleVoiceRequest } from './voice.mjs';
 
 export { BotDurableObject };
 
@@ -32,13 +33,21 @@ function botStub(env, botId) {
  * Routes wake/pause/resume/status, the checkpointed bot loop, and owner-bound browser sessions to a per-bot Durable Object.
  * QuickNode Streams wake bots through /wake. Hourly cron records a paper
  * position check. A second cron re-checks devnet USDC when the stream is stale.
+ * ElevenLabs webhook tools and the Grok custom LLM live under /voice and call these same routes.
  */
-export default {
+const worker = {
   async fetch(request, env) {
     const url = new URL(request.url);
 
     if (url.pathname === '/health') {
       return json({ ok: true, product: env.PRODUCT ?? 'Maelstrom', cluster: env.CLUSTER ?? 'devnet' });
+    }
+
+    if (url.pathname === '/voice/agent' || url.pathname.startsWith('/voice/')) {
+      return handleVoiceRequest(request, env, {
+        fetchApi: (inner, sameEnv) => worker.fetch(inner, sameEnv ?? env),
+        fetcher: typeof env.voiceFetcher === 'function' ? env.voiceFetcher : fetch,
+      });
     }
 
     // QuickNode Streams (Isaac / 5A): HMAC → dedupe → persist → wake → loop.
@@ -122,6 +131,8 @@ export default {
     }
   },
 };
+
+export default worker;
 
 function priceLookup(env) {
   if (env.lookupPrice === null) return null;

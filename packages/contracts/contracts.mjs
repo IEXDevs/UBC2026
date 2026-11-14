@@ -170,6 +170,7 @@ export const SECRET_NAMES = Object.freeze([
   'QUICKNODE_WEBHOOK_SECRET',
   'ELEVENLABS_API_KEY',
   'ELEVENLABS_AGENT_ID',
+  'ELEVENLABS_WEBHOOK_SECRET',
 ]);
 
 export const PUBLIC_CONFIG_NAMES = Object.freeze([
@@ -187,7 +188,7 @@ export const SECRET_GROUPS = Object.freeze({
   firecrawl: Object.freeze(['FIRECRAWL_API_KEY']),
   quicknode: Object.freeze(['QUICKNODE_DEVNET_RPC_URL']),
   quicknodeWebhook: Object.freeze(['QUICKNODE_WEBHOOK_SECRET']),
-  elevenlabs: Object.freeze(['ELEVENLABS_API_KEY', 'ELEVENLABS_AGENT_ID']),
+  elevenlabs: Object.freeze(['ELEVENLABS_API_KEY', 'ELEVENLABS_AGENT_ID', 'ELEVENLABS_WEBHOOK_SECRET']),
   serverSigning: Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']),
 });
 
@@ -247,6 +248,9 @@ export const API_ROUTES = Object.freeze([
   { id: 'payments.list', method: 'GET', path: '/api/payments', phase: 1, auth: 'privy', status: 'stub' },
   { id: 'metrics.get', method: 'GET', path: '/api/metrics', phase: 1, auth: 'privy', status: 'stub' },
   { id: 'quicknode.webhook', method: 'POST', path: '/webhooks/quicknode', phase: 1, auth: 'webhook', status: 'live' },
+  { id: 'voice.agent', method: 'GET', path: '/voice/agent', phase: 8, auth: 'none', status: 'live' },
+  { id: 'voice.tools', method: 'POST', path: '/voice/tools/:name', phase: 8, auth: 'webhook', status: 'live' },
+  { id: 'voice.llm', method: 'POST', path: '/voice/llm/chat/completions', phase: 8, auth: 'webhook', status: 'live' },
   { id: 'cron.hourly', method: 'CRON', path: '0 * * * *', phase: 5, auth: 'platform', status: 'live' },
   { id: 'cron.stream-fallback', method: 'CRON', path: '5,20,35,50 * * * *', phase: 5, auth: 'platform', status: 'live' },
 ]);
