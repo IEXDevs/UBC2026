@@ -1,7 +1,7 @@
 /**
  * QuickNode Streams helpers for Maelstrom (Isaac / chunk 5A).
- * HMAC verify → normalize → dedupe by tx signature → wallet KV sync plan → wake intent.
- * No network I/O except via injected stores/writers.
+ * HMAC verify → normalize → dedupe → Supabase persist → wallet→bot wake → KV sync → backfill.
+ * Network I/O only via injected stores / fetch.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
@@ -15,7 +15,8 @@ export class StreamsError extends Error {
 
 const fail = (code, status = 400) => { throw new StreamsError(code, status); };
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const EVENT_TYPES = Object.freeze(['deposit', 'withdrawal', 'x402-in', 'x402-out', 'memo', 'swap', 'unknown']);
+export const EVENT_TYPES = Object.freeze(['deposit', 'withdrawal', 'x402-in', 'x402-out', 'memo', 'swap', 'unknown']);
+const QN_KV_BASE = 'https://api.quicknode.com/kv/rest/v1';
 
 /** In-memory dedupe / KV for tests. Production: Cloudflare KV or Supabase. */
 export function createMemoryDedupeStore() {
@@ -164,7 +165,10 @@ export function planBackfill({ wallets, fromSlot, toSlot }) {
 
 /**
  * Full webhook handling without Cloudflare bindings:
- * verify → parse → dedupe → optional persist → wake targets.
+ * verify → parse → dedupe → optional persist → wake targets (+ optional 4A loop kick).
+ *
+ * resolveBotIds(event) may return string ids or { botId, ownerId, ... } objects.
+ * afterWake({ botId, ownerId, event, reason }) runs after each wake is queued (runtime uses this for DO /wake+/loop).
  */
 export async function handleQuickNodeWebhook({
   secret,
@@ -173,6 +177,7 @@ export async function handleQuickNodeWebhook({
   dedupeStore,
   persistEvent = null,
   resolveBotIds = async (event) => (event.botId ? [event.botId] : []),
+  afterWake = null,
   nowSeconds = Math.floor(Date.now() / 1000),
 }) {
   const nonce = headers?.['x-qn-nonce'] ?? headers?.['X-QN-Nonce'];
@@ -195,16 +200,244 @@ export async function handleQuickNodeWebhook({
     if (typeof persistEvent === 'function') {
       await persistEvent(event);
     }
-    const botIds = await resolveBotIds(event);
-    for (const botId of botIds) {
-      if (typeof botId === 'string' && botId) {
-        wakes.push({ botId, reason: 'quicknode-stream', event });
+    const resolved = await resolveBotIds(event);
+    for (const entry of resolved || []) {
+      const botId = typeof entry === 'string' ? entry : entry?.botId;
+      const ownerId = typeof entry === 'string' ? null : (entry?.ownerId ?? null);
+      if (!botId || typeof botId !== 'string') continue;
+      const wake = { botId, ownerId, reason: 'quicknode-stream', event, bot: typeof entry === 'object' ? entry : null };
+      if (typeof afterWake === 'function') {
+        wake.after = await afterWake(wake);
       }
+      wakes.push(wake);
     }
     accepted.push(event);
   }
 
   return { ok: true, accepted, duplicates, wakes };
+}
+
+/**
+ * QuickNode Key-Value Store list client (Streams filter membership).
+ * Docs: POST/PATCH/DELETE under https://api.quicknode.com/kv/rest/v1/lists/{key}
+ */
+export function createQuickNodeKvClient({ apiKey, listKey, fetchImpl = fetch, baseUrl = QN_KV_BASE } = {}) {
+  if (!apiKey || typeof apiKey !== 'string') fail('missing_qn_api_key', 500);
+  if (!listKey || typeof listKey !== 'string') fail('missing_qn_list_key', 500);
+  const headers = { 'content-type': 'application/json', 'x-api-key': apiKey };
+
+  async function req(method, path, body) {
+    const res = await fetchImpl(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
+    if (!res.ok) fail(`qn_kv_${res.status}`, res.status >= 500 ? 502 : 400);
+    return json;
+  }
+
+  return {
+    listKey,
+    async list() {
+      const data = await req('GET', `/lists/${encodeURIComponent(listKey)}`);
+      const items = Array.isArray(data) ? data : data?.data ?? data?.items ?? [];
+      return items.map(String);
+    },
+    async add(address) {
+      if (!base58.test(address)) fail('invalid_wallet');
+      await req('POST', `/lists/${encodeURIComponent(listKey)}/items`, { item: address });
+      return { address, synced: true };
+    },
+    async remove(address) {
+      await req('DELETE', `/lists/${encodeURIComponent(listKey)}/items/${encodeURIComponent(address)}`);
+      return { address, removed: true };
+    },
+    async patch({ addItems = [], removeItems = [] } = {}) {
+      for (const a of addItems) if (!base58.test(a)) fail('invalid_wallet');
+      if (!addItems.length && !removeItems.length) return { added: 0, removed: 0 };
+      await req('PATCH', `/lists/${encodeURIComponent(listKey)}`, { addItems, removeItems });
+      return { added: addItems.length, removed: removeItems.length };
+    },
+  };
+}
+
+/** Apply a wallet set to memory or QuickNode KV (uses planWalletKvSync). */
+export async function syncWalletsToKv({ wallets, walletKv, existing } = {}) {
+  if (!walletKv) fail('missing_wallet_kv', 500);
+  const current = existing ?? (await walletKv.list());
+  const plan = planWalletKvSync({ wallets, existing: current });
+  if (typeof walletKv.patch === 'function' && (plan.add.length || plan.remove.length)) {
+    await walletKv.patch({ addItems: plan.add, removeItems: plan.remove });
+  } else {
+    for (const a of plan.add) await walletKv.add(a);
+    for (const a of plan.remove) await walletKv.remove(a);
+  }
+  return { ...plan, synced: true };
+}
+
+/**
+ * Supabase-backed stream store (PostgREST via fetch).
+ * Tables: stream_events, wallets, bots, timeline_events.
+ */
+export function createSupabaseStreamStore({ url, serviceKey, fetchImpl = fetch } = {}) {
+  if (!url || !serviceKey) fail('missing_supabase', 500);
+  const base = String(url).replace(/\/$/, '');
+  const headers = {
+    apikey: serviceKey,
+    authorization: `Bearer ${serviceKey}`,
+    'content-type': 'application/json',
+    prefer: 'return=representation',
+  };
+
+  async function rest(path, { method = 'GET', body, prefer } = {}) {
+    const res = await fetchImpl(`${base}/rest/v1/${path}`, {
+      method,
+      headers: prefer ? { ...headers, prefer } : headers,
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+    if (!res.ok) fail(`supabase_${res.status}`, res.status >= 500 ? 502 : 400);
+    return json;
+  }
+
+  return {
+    async has(signature) {
+      const rows = await rest(`stream_events?signature=eq.${encodeURIComponent(signature)}&select=signature`);
+      return Array.isArray(rows) && rows.length > 0;
+    },
+    async put(signature, meta) {
+      return { signature, ...meta };
+    },
+    async persistEvent(event) {
+      await rest('stream_events', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=representation',
+        body: {
+          signature: event.signature,
+          wallet: event.wallet,
+          bot_id: event.botId || null,
+          owner_id: event.ownerId || null,
+          event_type: event.type,
+          amount: event.amount,
+          token: event.token,
+          slot: event.slot,
+          cluster: event.cluster || 'devnet',
+          raw: event,
+        },
+      });
+      return { persisted: true };
+    },
+    async resolveBotsForWallet(eventOrWallet) {
+      const wallet = typeof eventOrWallet === 'string' ? eventOrWallet : eventOrWallet?.wallet;
+      if (!wallet) return [];
+      const wallets = await rest(
+        `wallets?address=eq.${encodeURIComponent(wallet)}&select=id,owner_id,address,frozen`,
+      );
+      if (!Array.isArray(wallets) || !wallets.length) {
+        const botId = typeof eventOrWallet === 'object' ? eventOrWallet?.botId : null;
+        return botId ? [{ botId, ownerId: null }] : [];
+      }
+      const out = [];
+      for (const w of wallets) {
+        if (w.frozen) continue;
+        const bots = await rest(
+          `bots?wallet_id=eq.${encodeURIComponent(w.id)}&enabled=eq.true&frozen=eq.false&select=id,owner_id,name,type,goal,wallet_id,approval_mode,policy_version,cap`,
+        );
+        for (const b of bots || []) {
+          out.push({
+            botId: b.id,
+            ownerId: b.owner_id,
+            walletId: w.id,
+            walletAddress: w.address,
+            name: b.name,
+            type: b.type,
+            goal: b.goal,
+            approvalMode: b.approval_mode,
+            policyVersion: b.policy_version,
+            cap: b.cap,
+          });
+        }
+      }
+      return out;
+    },
+    async listWalletAddresses() {
+      const rows = await rest('wallets?select=address&frozen=eq.false');
+      return (rows || []).map((r) => r.address).filter(Boolean);
+    },
+    async appendTimeline(event, bot) {
+      if (!bot?.botId || !bot?.ownerId) return null;
+      return rest('timeline_events', {
+        method: 'POST',
+        body: {
+          id: `stream:${event.signature}`,
+          bot_id: bot.botId,
+          owner_id: bot.ownerId,
+          kind: 'tx.confirmed',
+          summary: `Stream ${event.type} · ${event.wallet.slice(0, 8)}…`,
+          at: new Date().toISOString(),
+        },
+      });
+    },
+  };
+}
+
+/**
+ * Replay historical rows through normalize → dedupe → persist → wake (no HMAC).
+ * Use after planBackfill / RPC fetch when Stream 1 missed a window.
+ */
+export async function runStreamBackfill({
+  rows = [],
+  dedupeStore,
+  persistEvent = null,
+  resolveBotIds = async (event) => (event.botId ? [event.botId] : []),
+  afterWake = null,
+} = {}) {
+  if (!dedupeStore) fail('missing_dedupe', 500);
+  const events = Array.isArray(rows) ? rows.map(normalizeStreamEvent) : [];
+  const accepted = [];
+  const duplicates = [];
+  const wakes = [];
+
+  for (const event of events) {
+    if (await dedupeStore.has(event.signature)) {
+      duplicates.push(event.signature);
+      continue;
+    }
+    await dedupeStore.put(event.signature, { at: Date.now(), wallet: event.wallet, type: event.type, backfill: true });
+    if (typeof persistEvent === 'function') await persistEvent(event);
+    const resolved = await resolveBotIds(event);
+    for (const entry of resolved || []) {
+      const botId = typeof entry === 'string' ? entry : entry?.botId;
+      const ownerId = typeof entry === 'string' ? null : (entry?.ownerId ?? null);
+      if (!botId) continue;
+      const wake = { botId, ownerId, reason: 'quicknode-backfill', event, bot: typeof entry === 'object' ? entry : null };
+      if (typeof afterWake === 'function') wake.after = await afterWake(wake);
+      wakes.push(wake);
+    }
+    accepted.push(event);
+  }
+
+  return { ok: true, accepted, duplicates, wakes, planHint: 'Same path as live webhook after planBackfill + RPC/Stream export' };
+}
+
+/** Cloudflare KV → dedupe store adapter (`has` / `put`). */
+export function createKvDedupeStore(ns, { ttlSeconds = 60 * 60 * 24 * 14, prefix = 'sig:' } = {}) {
+  if (!ns) fail('missing_kv', 500);
+  return {
+    async has(signature) {
+      return (await ns.get(`${prefix}${signature}`)) != null;
+    },
+    async put(signature, meta) {
+      await ns.put(`${prefix}${signature}`, JSON.stringify(meta ?? { at: Date.now() }), {
+        expirationTtl: ttlSeconds,
+      });
+    },
+  };
 }
 
 /** README snippet for the QuickNode Streams bounty. */
@@ -216,6 +449,8 @@ export function streamsReadmeSection() {
     '- **Dataset:** Block (or Programs + Logs) filtered to Privy bot wallets',
     '- **Filter logic:** Keep transactions touching addresses in the QuickNode Key-Value Store wallet set; emit compact `{signature, wallet, type, amount, token, slot}`',
     '- **Destination:** Cloudflare Worker `POST /webhooks/quicknode` (HMAC via `X-QN-Nonce` / `X-QN-Timestamp` / `X-QN-Signature`)',
+    '- **KV sync:** `syncWalletsToKv` / `POST /internal/streams/sync-wallets` pushes Privy wallet addresses into the QN list (no Stream redeploy)',
+    '- **Backfill:** `planBackfill` + `runStreamBackfill` / `POST /internal/streams/backfill` replays missed slots through the same normalize→dedupe→persist→wake→loop path',
     '- **Why:** Core wake path for deposits, x402 settlement, grab-back, and spend-ledger cross-checks — not a bolt-on poller. Hourly Cron is the fallback only.',
   ].join('\n');
 }

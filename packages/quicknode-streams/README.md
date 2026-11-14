@@ -1,11 +1,15 @@
 # `@ubc2026/quicknode-streams`
 
-Isaac / chunk **5A**: QuickNode Streams webhook verify, dedupe, wallet KV sync plans, and backfill plans.
+Isaac / chunk **5A**: QuickNode Streams webhook verify, dedupe, Supabase persist helpers, QuickNode KV wallet sync, and backfill.
 
 ```js
 import {
   handleQuickNodeWebhook,
   createMemoryDedupeStore,
+  createQuickNodeKvClient,
+  createSupabaseStreamStore,
+  syncWalletsToKv,
+  runStreamBackfill,
   planWalletKvSync,
   streamsReadmeSection,
 } from '@ubc2026/quicknode-streams';

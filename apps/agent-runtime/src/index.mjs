@@ -1,6 +1,10 @@
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
 import { BotDurableObject } from './bot-do.mjs';
-import { processQuickNodeWebhook } from './quicknode-webhook.mjs';
+import {
+  processQuickNodeWebhook,
+  processStreamWalletSync,
+  processStreamBackfill,
+} from './quicknode-webhook.mjs';
 
 export { BotDurableObject };
 
@@ -26,9 +30,15 @@ export default {
       return json({ ok: true, product: env.PRODUCT ?? 'Maelstrom', cluster: env.CLUSTER ?? 'devnet' });
     }
 
-    // QuickNode Streams webhook (Isaac / 5A): HMAC → dedupe → persist → wake bots.
+    // QuickNode Streams (Isaac / 5A): HMAC → dedupe → persist → wake → loop.
     if (url.pathname === '/webhooks/quicknode' && request.method === 'POST') {
       return processQuickNodeWebhook(request, env, botStub);
+    }
+    if (url.pathname === '/internal/streams/sync-wallets' && request.method === 'POST') {
+      return processStreamWalletSync(request, env);
+    }
+    if (url.pathname === '/internal/streams/backfill' && request.method === 'POST') {
+      return processStreamBackfill(request, env, botStub);
     }
 
     if (url.pathname === '/api/routes' && request.method === 'GET') {

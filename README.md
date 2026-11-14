@@ -96,6 +96,8 @@ Worker deploy target (do not deploy from this change): `apps/agent-runtime/wrang
 - **Dataset:** Block (or Programs + Logs) filtered to Privy bot wallets
 - **Filter logic:** Keep transactions touching addresses in the QuickNode Key-Value Store wallet set; emit compact `{signature, wallet, type, amount, token, slot}`
 - **Destination:** Cloudflare Worker `POST /webhooks/quicknode` (HMAC via `X-QN-Nonce` / `X-QN-Timestamp` / `X-QN-Signature`, secret `QUICKNODE_WEBHOOK_SECRET`)
+- **KV sync:** `POST /internal/streams/sync-wallets` (owner) pushes Privy wallet addresses into the QuickNode KV list (`QUICKNODE_API_KEY` + `QUICKNODE_WALLET_LIST_KEY`)
+- **Backfill:** `POST /internal/streams/backfill` (owner) replays missed rows through the same persist → wake → loop path
 - **Why:** Core wake path for deposits, x402 settlement, grab-back, and spend-ledger cross-checks. Hourly Cron is fallback only.
 
-Helpers live in `packages/quicknode-streams`; the Worker wires verify → dedupe → optional Supabase persist → bot DO wake.
+Helpers live in `packages/quicknode-streams`; the Worker wires verify → dedupe → Supabase `stream_events` persist → wallet→bot resolve → DO `/wake` → 4A `/loop` when loop context is available.

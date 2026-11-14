@@ -11,7 +11,9 @@ Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 - `GET /bots/:id/browser/sessions` — list that owner's open sessions
 - `POST /bots/:id/browser/sessions/:sessionRecordId/live-view` — readonly Live View URL, `Cache-Control: no-store`
 - `POST /bots/:id/browser/sessions/:sessionRecordId/release` — close the Browser Run session
-- `POST /webhooks/quicknode` — Streams wake path
+- `POST /webhooks/quicknode` — Streams HMAC → dedupe → Supabase persist → wake → optional `/loop`
+- `POST /internal/streams/sync-wallets` — owner push of wallet addresses into QuickNode KV list (`x-owner-id`)
+- `POST /internal/streams/backfill` — owner replay of missed Stream rows (`x-owner-id`)
 - `GET /api/routes` — contract route list and secret names (no values)
 - `GET /api/me`, `/api/wallets`, `/api/bots`, `/api/events`, `/api/decisions`, `/api/payments`, `/api/metrics` — stubs from `API_ROUTES`
 - `POST /api/wallets` and `POST /api/wallets/:walletId/sign` — stubs until wallet signing lands

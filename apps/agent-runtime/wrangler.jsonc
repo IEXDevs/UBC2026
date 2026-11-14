@@ -18,11 +18,15 @@
   "vars": {
     "CLUSTER": "devnet",
     "PRODUCT": "Maelstrom"
-  }
+  },
+  // Optional Streams dedupe cache when Supabase stream_events is unavailable.
+  // Create the namespace once: wrangler kv namespace create STREAM_DEDUPE
+  // "kv_namespaces": [{ "binding": "STREAM_DEDUPE", "id": "<namespace-id>" }]
   // Secret names only (wrangler secret put). Values are never committed.
   // PRIVY_APP_ID, PRIVY_APP_SECRET, PRIVY_AUTHORIZATION_KEY (optional),
   // SUPABASE_URL, SUPABASE_ANON_KEY,
   // SUPABASE_SERVICE_ROLE_KEY, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN,
   // OPENROUTER_API_KEY, FIRECRAWL_API_KEY, QUICKNODE_DEVNET_RPC_URL,
-  // QUICKNODE_WEBHOOK_SECRET, ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID
+  // QUICKNODE_WEBHOOK_SECRET, QUICKNODE_API_KEY, QUICKNODE_WALLET_LIST_KEY,
+  // ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID
 }
