@@ -10,6 +10,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@ubc2026/agent-commerce": "0.1.0",
     "@ubc2026/agent-loop": "0.1.0",
     "@ubc2026/bot-policy": "0.1.0",
     "@ubc2026/browser-search": "0.1.0",
@@ -18,6 +19,7 @@
     "@ubc2026/prices": "0.1.0",
     "@ubc2026/quicknode-streams": "0.1.0",
     "@ubc2026/shopping": "0.1.0",
+    "@ubc2026/sns": "0.1.0",
     "@ubc2026/transfers": "0.1.0",
     "@ubc2026/trust-score": "0.1.0",
     "@ubc2026/verify-consensus": "0.1.0",

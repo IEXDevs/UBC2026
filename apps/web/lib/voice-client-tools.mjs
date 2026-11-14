@@ -88,6 +88,7 @@ export function createVoiceClientTools({
   focusLiveView,
   confirm = (prompt) => (typeof window !== 'undefined' ? window.confirm(prompt) : false),
   pushEvent = null,
+  conversation = null,
 } = {}) {
   return {
     async open_bot(params = {}) {
@@ -125,6 +126,8 @@ export function createVoiceClientTools({
         text = 'Security pane: pause every bot, freeze, or request grab-back. Keys stay in Privy.';
       } else if (topic === 'timeline') {
         text = 'Timeline shows recent tool and trust events for the active bot.';
+      } else if (topic === 'conversation' && conversation?.recentText) {
+        text = conversation.recentText() || 'Conversation is empty.';
       } else if (topic === 'overview') {
         text = `Overview across ${bots.length} bots. Open a bot for approvals and Live View.`;
       } else {
@@ -132,6 +135,10 @@ export function createVoiceClientTools({
         text = bot
           ? `${bot.name} is ${bot.status}. Goal: ${bot.goal}`
           : 'No bots yet. Create one from the sidebar.';
+      }
+      if (conversation?.recentText && topic !== 'conversation') {
+        const recent = conversation.recentText(3);
+        if (recent) text = `${text} Recent: ${recent.replace(/\n/g, ' / ')}`;
       }
       if (typeof pushEvent === 'function') pushEvent({ kind: 'client.read_back', topic, text });
       return { ok: true, text };

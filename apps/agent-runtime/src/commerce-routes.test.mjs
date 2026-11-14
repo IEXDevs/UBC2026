@@ -1,0 +1,137 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { buildPaymentSignature, NETWORKS } from '@ubc2026/x402';
+import {
+  matchCommerceRoute,
+  dispatchCommerceRoute,
+} from './commerce-routes.mjs';
+
+const bot = {
+  id: 'bot_shop',
+  ownerId: 'own_1',
+  name: 'Shop',
+  goal: 'Buy the cheapest sandbox sticker',
+  type: 'shopping',
+  enabled: true,
+  frozen: false,
+  policyVersion: 1,
+  approvalMode: 'ask',
+  walletId: 'wal_1',
+  cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
+};
+const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
+const payTo = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const feePayer = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+
+test('shopping prepare + settle through worker routes', async () => {
+  assert.equal(matchCommerceRoute('POST', '/bots/bot_shop/shopping/prepare').kind, 'shopping-prepare');
+  const env = {
+    sandboxStoreClient: {
+      listCatalog: async () => [{ id: 'sku_lo', name: 'Sticker', price: '1000' }],
+      buy: async ({ paymentSignature }) => {
+        if (!paymentSignature) {
+          return {
+            state: 'payment-required',
+            status: 402,
+            paymentRequired: 'dGVzdA==',
+            body: {
+              accepts: [{
+                scheme: 'exact',
+                network: NETWORKS.devnet,
+                amount: '1000',
+                asset: payTo,
+                payTo,
+                maxTimeoutSeconds: 60,
+                extra: { feePayer },
+              }],
+            },
+          };
+        }
+        return { state: 'ordered', orderId: 'ord_9', itemId: 'sku_lo' };
+      },
+    },
+    signShoppingPayment: async () => 'sig_route_1',
+  };
+
+  const prep = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_shop/shopping/prepare', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'own_1' },
+    body: JSON.stringify({ bot, ledger, recipient: payTo }),
+  }), env, { kind: 'shopping-prepare', botId: 'bot_shop' });
+  assert.equal(prep.status, 200);
+  const prepBody = await prep.json();
+  assert.equal(prepBody.provider, 'sandbox');
+  assert.equal(prepBody.pick.item.id, 'sku_lo');
+
+  const settle = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_shop/shopping/settle', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'own_1' },
+    body: JSON.stringify({
+      bot,
+      itemId: 'sku_lo',
+      accepted: {
+        scheme: 'exact',
+        network: NETWORKS.devnet,
+        amount: '1000',
+        asset: payTo,
+        payTo,
+        maxTimeoutSeconds: 60,
+        extra: { feePayer },
+      },
+    }),
+  }), env, { kind: 'shopping-settle', botId: 'bot_shop' });
+  assert.equal(settle.status, 200);
+  const settled = await settle.json();
+  assert.equal(settled.next, 'settled');
+});
+
+test('signal sell returns 402 and settle releases payload', async () => {
+  const offers = new Map();
+  const env = {
+    SIGNAL_PAY_TO: payTo,
+    SIGNAL_FEE_PAYER: feePayer,
+    signalOffers: {
+      put: async (k, v) => offers.set(k, v),
+      get: async (k) => offers.get(k) ?? null,
+    },
+  };
+  const offerRes = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_1/commerce/signals/apy-1', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ amount: '25000' }),
+  }), env, { kind: 'signal-offer', botId: 'bot_1', signalId: 'apy-1' });
+  assert.equal(offerRes.status, 402);
+  const challenge = await offerRes.json();
+  const header = buildPaymentSignature({
+    accepted: challenge.accepts[0],
+    signature: 'buyer_sig',
+  });
+  const settle = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_1/commerce/signals/apy-1/settle', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'payment-signature': header },
+    body: JSON.stringify({ signalPayload: { tip: 'rotate LP' }, buyer: feePayer }),
+  }), env, { kind: 'signal-settle', botId: 'bot_1', signalId: 'apy-1' });
+  assert.equal(settle.status, 200);
+  const body = await settle.json();
+  assert.equal(body.next, 'released');
+  assert.equal(body.payload.tip, 'rotate LP');
+});
+
+test('sns send builds unsigned intent from demo resolver', async () => {
+  const dest = 'So11111111111111111111111111111111111111112';
+  const res = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_1/sns/send', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'own_1' },
+    body: JSON.stringify({
+      from: payTo,
+      domain: 'alex.sol',
+      amount: '1000',
+    }),
+  }), {
+    SNS_DEMO_MAP: { 'alex.sol': dest },
+  }, { kind: 'sns-send', botId: 'bot_1' });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.intent.to, dest);
+  assert.equal(body.next, 'await-owner-or-signer');
+});

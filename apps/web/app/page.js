@@ -11,6 +11,7 @@ import TalkStub from '../components/TalkStub';
 import { getDemoShellState, panePlaceholder } from '../lib/demo-state.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
 import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
+import { createConversationLog } from '../lib/voice-conversation.mjs';
 
 const state = getDemoShellState();
 const privyConfigured = privyProviderProps({
@@ -60,6 +61,7 @@ function Shell({ ownerId, account, accountLabel = null }) {
   const [creating, setCreating] = useState(false);
   const [activeBot, setActiveBot] = useState(state.bots[0].id);
   const [pane, setPane] = useState('Agents');
+  const conversation = useMemo(() => createConversationLog(), []);
   const bot = bots.find(item => item.id === activeBot) ?? bots[0];
   const placeholder = panePlaceholder(pane);
   const showHero = pane !== 'Agents' && pane !== 'Overview' && pane !== 'Security';
@@ -67,10 +69,32 @@ function Shell({ ownerId, account, accountLabel = null }) {
     bots,
     activeBotId: activeBot,
     pane,
-    setActiveBotId: setActiveBot,
-    setPane,
-    focusLiveView: () => setPane('Agents'),
-  }), [bots, activeBot, pane]);
+    setActiveBotId: (id) => {
+      setActiveBot(id);
+      const named = bots.find((item) => item.id === id);
+      conversation.push({ kind: 'open_bot', text: `Opened ${named?.name || id}`, botId: id });
+    },
+    setPane: (name) => {
+      setPane(name);
+      conversation.push({ kind: 'pane', text: `Switched to ${name}` });
+    },
+    focusLiveView: () => {
+      setPane('Agents');
+      conversation.push({ kind: 'live_view', text: `Live View focused for ${bot.name}`, botId: bot.id });
+    },
+    pushEvent: (event) => {
+      if (event?.kind === 'client.confirm') {
+        conversation.push({
+          kind: 'confirm',
+          text: event.accepted ? `Confirmed ${event.actionId || 'action'}` : `Rejected ${event.actionId || 'action'}`,
+        });
+      }
+    },
+    approvalSummary: bot.experience?.preview?.state === 'approval-needed'
+      ? `${bot.name} waits for approval.`
+      : null,
+    conversation,
+  }), [bots, activeBot, pane, conversation, bot.name, bot.id, bot.experience?.preview?.state]);
 
   function addDraft(draft) {
     setBots(current => [
@@ -163,7 +187,10 @@ function Shell({ ownerId, account, accountLabel = null }) {
               bots={bots}
               ownerId={ownerId}
               accountLabel={accountLabel}
-              onBotsChange={setBots}
+              onBotsChange={(next) => {
+                setBots(next);
+                conversation.push({ kind: 'security', text: 'Security action applied to bots' });
+              }}
             />
           ) : (
             <section className="panel empty-pane" aria-label={placeholder.title}>
@@ -171,7 +198,7 @@ function Shell({ ownerId, account, accountLabel = null }) {
               <p>{placeholder.body}</p>
             </section>
           )}
-          <TalkStub botName={bot.name} clientTools={clientTools} />
+          <TalkStub botName={bot.name} clientTools={clientTools} conversation={conversation} />
         </section>
       </main>
     </div>
