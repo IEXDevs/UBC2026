@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2, Wallet } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Plus, Search, Wallet } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import LiveViewPanel from '../components/LiveViewPanel';
 import MoneyPane from '../components/MoneyPane';
@@ -543,15 +543,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                   <header className="bubble-head">
                     <strong>{bot.name}</strong>
                     <span>{bot.type} · {bot.status}</span>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      aria-label={`Delete ${bot.name}`}
-                      title="Delete agent"
-                      onClick={() => onDeleteBot(bot.id)}
-                    >
-                      <Trash2 size={16} strokeWidth={1.75} />
-                    </button>
                   </header>
                   <h1>{bot.goal}</h1>
                   <section className="panel" aria-label="Stats">
