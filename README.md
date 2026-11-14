@@ -52,6 +52,7 @@ goal → research (browser/search)
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
 | `packages/prices` | DexScreener mainnet price reads (paper PnL) |
+| `packages/paper-positions` | Trading-bot paper lots and position-bot mark-to-market. Mainnet prices, devnet execution, no live trades |
 | `packages/x402` | x402 v2 Solana devnet helpers + sandbox store client |
 | `packages/quicknode-streams` | Streams HMAC verify, dedupe, wallet KV sync / backfill plans (Isaac / 5A) |
 | `packages/shopping` | x402 sandbox catalog → proposal → policy → 402 buy (Isaac / 6B) |

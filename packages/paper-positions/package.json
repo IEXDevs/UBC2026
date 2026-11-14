@@ -1,0 +1,13 @@
+{
+  "name": "@ubc2026/paper-positions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./positions.mjs",
+  "scripts": { "test": "node --test positions.test.mjs" },
+  "dependencies": {
+    "@ubc2026/bot-policy": "0.1.0",
+    "@ubc2026/prices": "0.1.0"
+  },
+  "engines": { "node": ">=20" }
+}
