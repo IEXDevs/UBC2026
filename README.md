@@ -43,6 +43,7 @@ goal → research (browser/search)
 | --- | --- |
 | `packages/contracts` | Shared bot / wallet / event / decision validators |
 | `packages/wallets` | Privy wallet assignment + freeze gates |
+| `packages/agent-loop` | Trust → verify → policy decision gate orchestrator |
 | `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
 | `packages/browser-session` | Owner-bound sessions, per-bot concurrency, agent search/scrape/browser tools |
 | `packages/bot-policy` | Bot types, caps, kill switch, mandatory approvals |
