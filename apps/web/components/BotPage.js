@@ -10,15 +10,19 @@ import { buildBotPage, eventsUrl } from '../lib/bot-experience.mjs';
 const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
 export default function BotPage({ bot, ownerId = null, onConversationEvent = null }) {
-  const [remoteEvents, setRemoteEvents] = useState(null);
+  const [remoteEvents, setRemoteEvents] = useState([]);
   const [focus, setFocus] = useState(null);
-  const experience = bot.experience ?? { preview: null, events: [], decision: null };
+  const [eventsNote, setEventsNote] = useState('');
 
   useEffect(() => {
     setFocus(null);
-    setRemoteEvents(null);
+    setRemoteEvents([]);
+    setEventsNote('');
     const url = eventsUrl(runtimeBase, bot.id);
-    if (!url || !ownerId) return undefined;
+    if (!url || !ownerId) {
+      setEventsNote(ownerId ? 'Set NEXT_PUBLIC_AGENT_RUNTIME_URL to load the live timeline.' : 'Sign in to load this bot’s timeline.');
+      return undefined;
+    }
     let stop = false;
     async function load() {
       try {
@@ -27,10 +31,15 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
           cache: 'no-store',
         });
         const data = await response.json();
-        if (stop || !response.ok || data.stub || !Array.isArray(data.items)) return;
+        if (stop) return;
+        if (!response.ok || !Array.isArray(data.items)) {
+          setEventsNote('Could not load events from the Worker.');
+          return;
+        }
         setRemoteEvents(data.items);
+        setEventsNote(data.source === 'unconfigured' ? 'Worker Supabase is not configured.' : '');
       } catch {
-        // Keep the stored timeline when the runtime is unreachable.
+        if (!stop) setEventsNote('Could not reach the Worker for events.');
       }
     }
     load();
@@ -43,9 +52,9 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
 
   const page = buildBotPage({
     botId: bot.id,
-    preview: experience.preview,
-    events: remoteEvents ?? experience.events,
-    decision: experience.decision,
+    preview: null,
+    events: remoteEvents,
+    decision: null,
   });
   const approval = page.sections[0].preview;
   const entries = page.sections[1].entries;
@@ -59,16 +68,20 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
 
   return (
     <div className="bot-page">
-      <ApprovalPreview preview={approval} botType={bot.type} />
-      <ShoppingPanel bot={bot} ownerId={ownerId} onEvent={note} />
+      {eventsNote ? <p className="preview-note">{eventsNote}</p> : null}
+      {approval ? <ApprovalPreview preview={approval} botType={bot.type} /> : null}
+      {bot.type === 'shopping' ? <ShoppingPanel bot={bot} ownerId={ownerId} onEvent={note} /> : null}
       <BotTimeline
         entries={entries}
-        live={remoteEvents != null}
+        live={Boolean(ownerId && runtimeBase)}
         onWhy={(entry) => {
           setFocus(entry);
           if (entry?.summary) note({ kind: entry.kind || 'timeline', summary: entry.summary });
         }}
       />
+      {entries.length === 0 && !eventsNote ? (
+        <p className="preview-note">No events yet for this bot.</p>
+      ) : null}
       {focus ? <WhyView why={why} /> : null}
     </div>
   );

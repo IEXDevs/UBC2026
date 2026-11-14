@@ -11,22 +11,31 @@ import AnimatedList from './AnimatedList';
 import PositionBook from './PositionBook';
 import { listLook } from './listLook';
 
-const PREVIEW = 'Preview rows. Live payments, wallets, and positions stay empty until the Worker API leaves stub status.';
-
-export default function MoneyPane({ pane, state }) {
-  if (pane === 'history') return <History state={state} />;
-  if (pane === 'wallets') return <Wallets state={state} />;
-  return <Positions state={state} />;
+export default function MoneyPane({ pane, state, signedIn = false, onSignIn = null, note = '' }) {
+  if (pane === 'history') return <History state={state} signedIn={signedIn} onSignIn={onSignIn} note={note} />;
+  if (pane === 'wallets') return <Wallets state={state} signedIn={signedIn} onSignIn={onSignIn} note={note} />;
+  return <Positions state={state} signedIn={signedIn} onSignIn={onSignIn} />;
 }
 
-function History({ state }) {
-  const rows = describeHistory(state.payments, state.bots);
+function SignedOutNote({ onSignIn }) {
+  return (
+    <section className="panel" aria-label="Signed out">
+      <h2>Sign in required</h2>
+      <p className="preview-note">Connect to load your own wallets, payments, and positions. This pane stays empty while you are signed out.</p>
+      {onSignIn ? <button type="button" className="solid" onClick={onSignIn}>Connect</button> : null}
+    </section>
+  );
+}
+
+function History({ state, signedIn, onSignIn, note }) {
+  if (!signedIn) return <SignedOutNote onSignIn={onSignIn} />;
+  const rows = describeHistory(state.payments || [], state.bots || []);
   const [openId, setOpenId] = useState(null);
   return (
     <section className="panel" aria-label="History">
       <h2>History</h2>
-      <p className="preview-note">{PREVIEW}</p>
-      {rows.length === 0 ? <p className="preview-note">No transactions yet.</p> : (
+      {note ? <p className="preview-note">{note}</p> : null}
+      {rows.length === 0 ? <p className="preview-note">No payments yet for your bots.</p> : (
         <>
           <AnimatedList
             {...listLook()}
@@ -82,26 +91,40 @@ function Detail({ label, value }) {
   );
 }
 
-function Wallets({ state }) {
-  const rows = describeWallets(state.wallets, state.bots);
+function Wallets({ state, signedIn, onSignIn, note }) {
+  if (!signedIn) return <SignedOutNote onSignIn={onSignIn} />;
+  const rows = describeWallets(state.wallets || [], state.bots || []);
   return (
     <section className="panel" aria-label="Wallets">
       <h2>Wallets</h2>
-      <p className="preview-note">{PREVIEW}</p>
-      <AnimatedList
-        {...listLook()}
-        items={rows.map(row => ({
-          id: row.id,
-          title: row.label,
-          description: `${row.address} · ${row.bots.length ? row.bots.join(', ') : 'No agents assigned'}`,
-          meta: row.frozen ? 'Frozen' : row.kind,
-        }))}
-      />
-      <p className="preview-note">Freeze calls the policy API when that route is live.</p>
+      {note ? <p className="preview-note">{note}</p> : null}
+      {rows.length === 0 ? (
+        <p className="preview-note">No wallets yet. Sign-in provisions the main Privy wallet when secrets are set.</p>
+      ) : (
+        <AnimatedList
+          {...listLook()}
+          items={rows.map(row => ({
+            id: row.id,
+            title: row.label,
+            description: `${row.address} · ${row.bots.length ? row.bots.join(', ') : 'No agents assigned'}`,
+            meta: row.frozen ? 'Frozen' : row.kind,
+          }))}
+        />
+      )}
     </section>
   );
 }
 
-function Positions({ state }) {
-  return <PositionBook positions={state.positions} bots={state.bots} wallets={state.wallets} />;
+function Positions({ state, signedIn, onSignIn }) {
+  if (!signedIn) return <SignedOutNote onSignIn={onSignIn} />;
+  const positions = state.positions || [];
+  if (positions.length === 0) {
+    return (
+      <section className="panel" aria-label="Positions">
+        <h2>Positions</h2>
+        <p className="preview-note">No live positions yet. Paper lots and Worker position reads will show here when bots open them.</p>
+      </section>
+    );
+  }
+  return <PositionBook positions={positions} bots={state.bots || []} wallets={state.wallets || []} />;
 }

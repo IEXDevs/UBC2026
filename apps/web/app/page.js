@@ -11,7 +11,6 @@ import BotPage from '../components/BotPage';
 import SecurityPanel from '../components/SecurityPanel';
 import LogsPanel from '../components/LogsPanel';
 import AccountMenu from '../components/AccountMenu';
-import ShoppingPanel from '../components/ShoppingPanel';
 import PaneDock from '../components/PaneDock';
 import ChatBubbles from '../components/ChatBubbles';
 import Composer from '../components/Composer';
@@ -27,8 +26,15 @@ import { withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { buildBotStats } from '../lib/overview.mjs';
 import { walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
+import {
+  emptyMoneyState,
+  fetchOwnerLists,
+  runtimeBaseUrl,
+  shellBotFromRemote,
+} from '../lib/runtime-data.mjs';
 
-const base = getDemoShellState();
+/** Catalog only — panes + connector list. Never seed bots/wallets/payments from this. */
+const catalog = getDemoShellState();
 const LOOK_KEY = 'maelstrom.botLooks';
 const ROSTER_KEY = 'maelstrom.roster';
 const privyConfigured = privyProviderProps({
@@ -90,6 +96,7 @@ function AuthedShell() {
             setWalletNote(`${walletProvisionNote(body, { ok: false })} Showing the Privy client wallet until server create succeeds.`);
             return;
           }
+          setLiveWallets([]);
           setWalletNote(walletProvisionNote(body, { ok: false }));
           return;
         }
@@ -103,6 +110,7 @@ function AuthedShell() {
             setLiveWallets(fallback);
             setWalletNote(`${walletProvisionNote({}, { ok: false })} Showing the Privy client wallet until server create succeeds.`);
           } else {
+            setLiveWallets([]);
             setWalletNote(walletProvisionNote({}, { ok: false }));
           }
         }
@@ -132,11 +140,11 @@ function profileKey(ownerId) {
 
 function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '' }) {
   const [looks, setLooks] = useState({});
-  const [roster, setRoster] = useState({ order: base.bots.map(bot => bot.id), extra: [] });
+  const [roster, setRoster] = useState({ order: [], extra: [] });
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState('');
   const [railCollapsed, setRailCollapsed] = useState(false);
-  const [activeBot, setActiveBot] = useState(base.bots[0].id);
+  const [activeBot, setActiveBot] = useState(null);
   const [pane, setPane] = useState('Main');
   const [slide, setSlide] = useState('right');
   const [createOpen, setCreateOpen] = useState(false);
@@ -144,7 +152,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [walletsOpen, setWalletsOpen] = useState(false);
   const [talks, setTalks] = useState({});
   const [thinkingBot, setThinkingBot] = useState(null);
-  const [botRecords, setBotRecords] = useState(base.bots);
+  const [remoteBots, setRemoteBots] = useState([]);
+  const [remotePayments, setRemotePayments] = useState([]);
+  const [remoteWallets, setRemoteWallets] = useState([]);
+  const [dataNote, setDataNote] = useState('');
   const [profile, setProfile] = useState(null);
   const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
@@ -157,7 +168,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     }));
   }, []);
   const dockPanes = useMemo(
-    () => base.panes.filter((name) => name !== 'Plugins'),
+    () => catalog.panes.filter((name) => name !== 'Plugins'),
     [],
   );
 
@@ -176,10 +187,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     } catch {
       savedRoster = null;
     }
-    const merged = mergeRoster(base.bots, savedRoster);
     setLooks(savedLooks);
-    setRoster({ order: merged.order, extra: merged.extra });
-    setActiveBot(merged.order[0] ?? null);
+    // Only keep locally created extras — never rehydrate the old demo bot ids.
+    const extras = savedRoster && Array.isArray(savedRoster.extra) ? savedRoster.extra : [];
+    const order = savedRoster && Array.isArray(savedRoster.order) ? savedRoster.order : [];
+    setRoster({ order, extra: extras });
+    setActiveBot(null);
     setReady(true);
   }, []);
 
@@ -188,6 +201,42 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     localStorage.setItem(LOOK_KEY, JSON.stringify(looks));
     localStorage.setItem(ROSTER_KEY, JSON.stringify(roster));
   }, [looks, roster, ready]);
+
+  useEffect(() => {
+    if (!signedIn || !ownerId) {
+      setRemoteBots([]);
+      setRemotePayments([]);
+      setRemoteWallets([]);
+      setDataNote('');
+      return undefined;
+    }
+    const runtimeBase = runtimeBaseUrl();
+    if (!runtimeBase) {
+      setDataNote('Set NEXT_PUBLIC_AGENT_RUNTIME_URL to load live bots and payments.');
+      return undefined;
+    }
+    let stop = false;
+    async function load() {
+      try {
+        const lists = await fetchOwnerLists(ownerId, runtimeBase);
+        if (stop) return;
+        setRemoteBots(lists.bots);
+        setRemotePayments(lists.payments);
+        setRemoteWallets(lists.wallets);
+        setDataNote(lists.source === 'unconfigured'
+          ? 'Worker is up but Supabase is not configured on the runtime.'
+          : '');
+      } catch {
+        if (!stop) setDataNote('Could not reach the Worker API.');
+      }
+    }
+    load();
+    const timer = setInterval(load, 8000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [signedIn, ownerId]);
 
   useEffect(() => {
     const key = profileKey(ownerId);
@@ -202,12 +251,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     } catch {
       setProfile(null);
     }
-    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+    const runtimeBase = runtimeBaseUrl();
     if (!runtimeBase) return undefined;
     let stop = false;
     (async () => {
       try {
-        const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/profiles/me`, {
+        const response = await fetch(`${runtimeBase}/api/profiles/me`, {
           headers: { 'x-owner-id': ownerId },
           cache: 'no-store',
         });
@@ -226,9 +275,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
     const key = profileKey(ownerId);
-    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+    const runtimeBase = runtimeBaseUrl();
     if (runtimeBase && ownerId) {
-      const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/profiles/me`, {
+      const response = await fetch(`${runtimeBase}/api/profiles/me`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json', 'x-owner-id': ownerId },
         body: JSON.stringify(stored),
@@ -248,10 +297,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const resolveMention = useCallback(async (token) => {
     const parsed = parseRecipient(token);
     if (!parsed) return null;
-    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+    const runtimeBase = runtimeBaseUrl();
     if (runtimeBase && ownerId) {
       try {
-        const url = new URL(`${runtimeBase.replace(/\/$/, '')}/api/profiles/lookup`);
+        const url = new URL(`${runtimeBase}/api/profiles/lookup`);
         url.searchParams.set('q', token);
         const response = await fetch(url, { headers: { 'x-owner-id': ownerId }, cache: 'no-store' });
         const body = await response.json().catch(() => ({}));
@@ -269,18 +318,42 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }, [ownerId, profile]);
 
   const seedBots = useMemo(() => {
-    const byId = new Map(botRecords.map((bot) => [bot.id, bot]));
-    return base.bots.map((bot) => ({ ...bot, ...(byId.get(bot.id) || {}) }));
-  }, [botRecords]);
-  const merged = useMemo(() => mergeRoster(seedBots, roster), [roster, seedBots]);
+    if (!signedIn) return [];
+    const fromRemote = remoteBots.map(row => shellBotFromRemote(row, looks)).filter(Boolean);
+    return fromRemote;
+  }, [signedIn, remoteBots, looks]);
+
+  const merged = useMemo(() => mergeRoster(seedBots, signedIn ? roster : { order: [], extra: [] }), [roster, seedBots, signedIn]);
   const styled = useMemo(() => applyLooks(merged.bots, looks), [merged, looks]);
-  const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
-  const bots = assigned.bots;
-  const wallets = assigned.wallets ?? base.wallets;
+  const provisioned = Array.isArray(liveWallets) ? liveWallets : null;
+  const listed = remoteWallets.length > 0 ? remoteWallets : null;
+  const assigned = useMemo(
+    () => withAssignedWallet(styled, provisioned || listed || []),
+    [styled, provisioned, listed],
+  );
+  const bots = signedIn ? assigned.bots : [];
+  const wallets = signedIn ? (assigned.wallets || provisioned || listed || []) : [];
+  const payments = signedIn ? remotePayments : [];
+  const positions = [];
+  const moneyState = signedIn
+    ? { bots, wallets, payments, positions }
+    : emptyMoneyState();
   const visible = bots.filter(bot => bot.name.toLowerCase().includes(query.trim().toLowerCase()));
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
-  const glance = walletGlance(wallets, base.positions);
+  const glance = walletGlance(wallets, positions);
+  const walletChipLabel = !signedIn
+    ? 'Sign in'
+    : (wallets.length ? glance.balanceLabel : 'No wallet');
+
+  useEffect(() => {
+    if (!signedIn) {
+      setActiveBot(null);
+      return;
+    }
+    if (activeBot && bots.some(item => item.id === activeBot)) return;
+    setActiveBot(bots[0]?.id ?? null);
+  }, [signedIn, bots, activeBot]);
 
   function choosePane(next, direction) {
     if (next === pane) return;
@@ -301,6 +374,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }
 
   function onCreate(created) {
+    if (!signedIn) {
+      onLogin?.();
+      return;
+    }
     setRoster(current => ({
       order: [created.id, ...current.order.filter(id => id !== created.id)],
       extra: [created, ...current.extra.filter(item => item.id !== created.id)],
@@ -339,6 +416,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     if (id === 'logs') choosePane('Logs', 'right');
   }
 
+  function openCreate() {
+    if (!signedIn) {
+      onLogin?.();
+      return;
+    }
+    setProfileOpen(false);
+    setCreateOpen(true);
+  }
+
   return (
     <div className={`shell${railCollapsed ? ' is-collapsed' : ''}`}>
       <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
@@ -363,7 +449,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               onChange={event => setQuery(event.target.value)}
             />
           </label>
-          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setCreateOpen(true); }}>
+          <button type="button" className="add-agent" aria-label="Add agent" onClick={openCreate}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
         </div>
@@ -374,12 +460,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           collapsed={railCollapsed}
           onSelect={openChat}
           onReorder={onReorder}
-          onCreate={() => setCreateOpen(true)}
+          onCreate={openCreate}
         />
         <footer className="you">
           <AccountMenu
             accountLabel={profile?.displayName || accountLabel}
-            hint={profile?.handle ? `@${profile.handle}` : 'Account'}
+            hint={signedIn ? (profile?.handle ? `@${profile.handle}` : 'Account') : 'Not signed in'}
             avatarUrl={avatarUrl}
             onPick={onAccount}
           />
@@ -393,16 +479,30 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           <button
             type="button"
             className="wallet-chip"
-            onClick={() => { setCreateOpen(false); setProfileOpen(false); setWalletsOpen(true); }}
+            onClick={() => {
+              if (!signedIn) {
+                onLogin?.();
+                return;
+              }
+              setCreateOpen(false);
+              setProfileOpen(false);
+              setWalletsOpen(true);
+            }}
           >
             <Wallet size={16} strokeWidth={1.75} />
-            <span>{glance.balanceLabel}</span>
+            <span>{walletChipLabel}</span>
           </button>
         </header>
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}`}>
           <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}${pane === 'Plugins' ? ' is-plugins' : ''}`} aria-label={pane}>
             {pane === 'Main' ? (
-              bot ? (
+              !signedIn ? (
+                <>
+                  <h1>Sign in to run agents</h1>
+                  <p>Connect with Privy to load your wallets, bots, and live Worker data. Nothing here is a preview of someone else’s account.</p>
+                  <button type="button" className="solid" disabled={loginDisabled} onClick={onLogin}>Connect</button>
+                </>
+              ) : bot ? (
                 <>
                   <header className="bubble-head">
                     <strong>{bot.name}</strong>
@@ -421,27 +521,46 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                     </dl>
                   </section>
                   <LiveViewPanel botId={bot.id} ownerId={ownerId} />
-                  {bot.experience ? <BotPage bot={bot} ownerId={ownerId} /> : null}
-                  {bot.type === 'shopping' ? <ShoppingPanel bot={bot} ownerId={ownerId} /> : null}
+                  <BotPage bot={bot} ownerId={ownerId} />
                   <ChatBubbles botName={bot.name} lines={talks[bot.id] ?? []} thinking={thinkingBot === bot.id} />
                 </>
               ) : (
                 <>
                   <h1>Make your first Agent!</h1>
-                  <p>The list stays empty until you create one.</p>
-                  <button type="button" className="solid" onClick={() => setCreateOpen(true)}>Create</button>
+                  <p>{dataNote || 'Your bot list is empty. Create one or wait for the Worker to return bots from Supabase.'}</p>
+                  <button type="button" className="solid" onClick={openCreate}>Create</button>
                 </>
               )
             ) : null}
-            {money ? <MoneyPane pane={money} state={{ ...base, bots, wallets }} /> : null}
-            {pane === 'Plugins' ? <ConnectorsPane connectors={base.connectors} bots={bots} /> : null}
-            {pane === 'Logs' ? <LogsPanel bots={bots} /> : null}
+            {money ? (
+              <MoneyPane
+                pane={money}
+                state={moneyState}
+                signedIn={signedIn}
+                onSignIn={onLogin}
+                note={signedIn ? (walletNote || dataNote) : ''}
+              />
+            ) : null}
+            {pane === 'Plugins' ? <ConnectorsPane connectors={catalog.connectors} bots={bots} /> : null}
+            {pane === 'Logs' ? <LogsPanel bots={bots} ownerId={ownerId} /> : null}
             {pane === 'Security' ? (
               <SecurityPanel
                 bots={bots}
                 ownerId={ownerId}
                 accountLabel={accountLabel}
-                onBotsChange={(next) => setBotRecords(next)}
+                wallets={wallets}
+                onBotsChange={(next) => {
+                  // Local status toggles only — remote list refreshes on the next poll.
+                  setRemoteBots(current => current.map(row => {
+                    const updated = next.find(bot => bot.id === row.id);
+                    if (!updated) return row;
+                    return {
+                      ...row,
+                      enabled: updated.status !== 'paused' && updated.enabled !== false,
+                      frozen: updated.status === 'paused' || updated.frozen === true,
+                    };
+                  }));
+                }}
               />
             ) : null}
           </article>
@@ -459,7 +578,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         ) : pane === 'Positions' ? null : <div className="composer-gap" />}
       </section>
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
-      <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ ...base, bots, wallets }} note={walletNote} />
+      <WalletsSheet
+        open={walletsOpen}
+        onClose={closeWallets}
+        state={moneyState}
+        note={signedIn ? walletNote : 'Sign in to provision and list your Privy wallets.'}
+        signedIn={signedIn}
+        onSignIn={onLogin}
+      />
       <ProfileSheet
         open={profileOpen}
         onClose={closeProfile}
