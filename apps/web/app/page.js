@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { enableBot } from '@ubc2026/bot-creation';
 import BotCreation from '../components/BotCreation';
@@ -10,6 +10,7 @@ import SecurityPanel from '../components/SecurityPanel';
 import TalkStub from '../components/TalkStub';
 import { getDemoShellState, panePlaceholder } from '../lib/demo-state.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
+import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 
 const state = getDemoShellState();
 const privyConfigured = privyProviderProps({
@@ -62,6 +63,14 @@ function Shell({ ownerId, account, accountLabel = null }) {
   const bot = bots.find(item => item.id === activeBot) ?? bots[0];
   const placeholder = panePlaceholder(pane);
   const showHero = pane !== 'Agents' && pane !== 'Overview' && pane !== 'Security';
+  const clientTools = useMemo(() => createVoiceClientTools({
+    bots,
+    activeBotId: activeBot,
+    pane,
+    setActiveBotId: setActiveBot,
+    setPane,
+    focusLiveView: () => setPane('Agents'),
+  }), [bots, activeBot, pane]);
 
   function addDraft(draft) {
     setBots(current => [
@@ -162,7 +171,7 @@ function Shell({ ownerId, account, accountLabel = null }) {
               <p>{placeholder.body}</p>
             </section>
           )}
-          <TalkStub botName={bot.name} />
+          <TalkStub botName={bot.name} clientTools={clientTools} />
         </section>
       </main>
     </div>

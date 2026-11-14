@@ -364,6 +364,28 @@ button {
 
 .security-actions .live-actions { margin-top: 0.55rem; }
 
+.talk-panel .talk-tools {
+  list-style: none;
+  margin: 0 0 0.85rem;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.talk-tools li {
+  display: grid;
+  gap: 0.15rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid rgba(186, 220, 255, 0.12);
+}
+
+.talk-tools li:last-child { border-bottom: 0; padding-bottom: 0; }
+.talk-tools code {
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+.talk-tools span { color: var(--muted); font-size: 0.85rem; }
+
 .live-view {
   margin-top: 0.9rem;
   display: grid;
