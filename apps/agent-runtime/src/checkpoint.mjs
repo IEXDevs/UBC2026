@@ -27,6 +27,7 @@ export function createEmptyRun({ runId, botId, goal, now }) {
     step: 'idle',
     paused: false,
     attempts: { verify: 0 },
+    checkpoints: {},
     lastEventAt: now,
     events: [],
   };

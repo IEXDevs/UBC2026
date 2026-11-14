@@ -14,7 +14,7 @@ function botStub(env, botId) {
 
 /**
  * Maelstrom agent runtime Worker.
- * Routes wake/pause/resume/status and owner-bound browser sessions to a per-bot Durable Object.
+ * Routes wake/pause/resume/status, the checkpointed bot loop, and owner-bound browser sessions to a per-bot Durable Object.
  * QuickNode Streams and hourly cron wake bots through the same /wake path.
  */
 export default {
@@ -64,7 +64,7 @@ export default {
       return json({ ok: true, stub: true, route: matched.route.id, items: [] });
     }
 
-    const botMatch = url.pathname.match(/^\/bots\/([^/]+)(?:\/(status|wake|pause|resume|advance|decide))?$/);
+    const botMatch = url.pathname.match(/^\/bots\/([^/]+)(?:\/(status|wake|pause|resume|advance|decide|loop))?$/);
     if (botMatch) {
       const botId = decodeURIComponent(botMatch[1]);
       const action = botMatch[2] ?? 'status';
