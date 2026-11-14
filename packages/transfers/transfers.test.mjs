@@ -1,0 +1,386 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { Keypair, Transaction } from '@solana/web3.js';
+import { assignBotWallet, createAdditionalWallet, createMainWallet } from '@ubc2026/wallets';
+import {
+  DEVNET_GENESIS_HASH,
+  WalletError,
+  createPrivyWalletClient,
+} from '@ubc2026/wallets/privy';
+import { DEVNET_USDC_MINT } from '@ubc2026/x402';
+import {
+  ASSOCIATED_TOKEN_PROGRAM,
+  DEVNET_USDC_DECIMALS,
+  MAINNET_USDC_MINT,
+  MEMO_PROGRAM_ID,
+  SPL_TOKEN_PROGRAM_ID,
+  TransferError,
+  buildDevnetUsdcTransaction,
+  depositFromWalletAdapter,
+  grabBackToMain,
+  moveBetweenWallets,
+  transferDevnetUsdc,
+  withdrawToWalletAdapter,
+} from './transfers.mjs';
+
+const appId = 'app_test';
+const appSecret = 'app-secret-value';
+const rpcUrl = 'https://example.invalid/quicknode-secret-path';
+const walletId = 'fmfdj6yqly31huorjqzq38zc';
+const tradingId = 'cm5addwallet1234567890abcd';
+const vaultId = 'dm6addwallet1234567890abcd';
+const txSignature = '5'.repeat(88);
+const mainnetGenesis = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+
+const source = Keypair.generate();
+const extra = Keypair.generate();
+const vault = Keypair.generate();
+const external = Keypair.generate();
+const recipient = Keypair.generate();
+const blockhash = Keypair.generate().publicKey.toBase58();
+
+function walletRecord(ownerAddress, id, kind, label) {
+  const base = kind === 'main'
+    ? createMainWallet({ ownerId: 'user_1', address: ownerAddress, id })
+    : createAdditionalWallet({ ownerId: 'user_1', address: ownerAddress, id, label });
+  return { ...base, privyWalletId: id, privyUserId: 'did:privy:user1' };
+}
+
+const mainWallet = walletRecord(source.publicKey.toBase58(), walletId, 'main');
+const tradingWallet = walletRecord(extra.publicKey.toBase58(), tradingId, 'additional', 'Trading');
+const vaultWallet = walletRecord(vault.publicKey.toBase58(), vaultId, 'additional', 'Vault');
+
+const bot = assignBotWallet({
+  id: 'bot_1',
+  ownerId: 'user_1',
+  name: 'APY hunter',
+  goal: 'Find yield',
+  type: 'trading',
+  approvalMode: 'ask',
+  walletId: mainWallet.id,
+  enabled: true,
+  frozen: false,
+  policyVersion: 1,
+  cap: { mode: 'limited', asset: 'USDC', maxOutflow: '100000000', maxPerTransaction: '50000000' },
+}, mainWallet);
+
+function mockFetch(routes) {
+  const calls = [];
+  const fetcher = async (url, init) => {
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ url, body });
+    const match = routes.find(route => route.match(url, body, init));
+    if (!match) return new Response(JSON.stringify({ error: 'unmocked' }), { status: 500 });
+    return new Response(JSON.stringify(match.body), { status: match.status ?? 200 });
+  };
+  return { calls, fetcher };
+}
+
+function client(fetcher, routes) {
+  const mocked = routes ? mockFetch(routes) : { fetcher, calls: [] };
+  return {
+    calls: mocked.calls,
+    client: createPrivyWalletClient({
+      appId,
+      appSecret,
+      rpcUrl,
+      fetcher: mocked.fetcher,
+      now: () => 1_700_000_000_000,
+    }),
+  };
+}
+
+function devnetRoutes({ sign = true } = {}) {
+  const routes = [
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: DEVNET_GENESIS_HASH } },
+    { match: (url, body) => url === rpcUrl && body?.method === 'sendTransaction', body: { result: txSignature } },
+  ];
+  if (sign) {
+    routes.unshift({
+      match: (url, body) => String(url).endsWith('/rpc') && body?.method === 'signTransaction',
+      body: { data: { signed_transaction: Buffer.alloc(180, 4).toString('base64') } },
+    });
+  }
+  return routes;
+}
+
+function decode(base64) {
+  return Transaction.from(Buffer.from(base64, 'base64'));
+}
+
+function assertMoveThenMemo(base64, { payer, amount, memo }) {
+  const tx = decode(base64);
+  assert.equal(tx.feePayer.toBase58(), payer);
+  assert.equal(tx.recentBlockhash, blockhash);
+  assert.equal(tx.signatures[0].signature, null);
+  const [ata, transfer, note] = tx.instructions;
+  assert.equal(ata.programId.toBase58(), ASSOCIATED_TOKEN_PROGRAM);
+  assert.equal(ata.data[0], 1);
+  assert.equal(transfer.programId.toBase58(), SPL_TOKEN_PROGRAM_ID);
+  assert.equal(transfer.data[0], 12);
+  assert.equal(transfer.data.readBigUInt64LE(1), BigInt(amount));
+  assert.equal(transfer.data[9], DEVNET_USDC_DECIMALS);
+  assert.equal(note.programId.toBase58(), MEMO_PROGRAM_ID);
+  assert.equal(note.data.toString('utf8'), memo);
+  assert.equal(tx.instructions.some(ix => ix.programId.toBase58() === MAINNET_USDC_MINT), false);
+  const mintKey = transfer.keys[1].pubkey.toBase58();
+  assert.equal(mintKey, DEVNET_USDC_MINT);
+  assert.notEqual(mintKey, MAINNET_USDC_MINT);
+  return tx;
+}
+
+test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', async () => {
+  const memo = 'decision:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const { client: signer, calls } = client(null, devnetRoutes());
+  const moved = await transferDevnetUsdc({
+    client: signer,
+    bot,
+    wallet: mainWallet,
+    destination: recipient.publicKey.toBase58(),
+    amount: '2500000',
+    memo,
+    recentBlockhash: blockhash,
+  });
+  assert.equal(moved.kind, 'transfer');
+  assert.equal(moved.cluster, 'devnet');
+  assert.equal(moved.signature, txSignature);
+  assert.equal(moved.mint, DEVNET_USDC_MINT);
+  const sign = calls.find(call => call.body?.method === 'signTransaction');
+  assertMoveThenMemo(sign.body.params.transaction, {
+    payer: mainWallet.address,
+    amount: '2500000',
+    memo,
+  });
+  assert.equal(calls.filter(call => call.body?.method === 'sendTransaction').length, 1);
+  assert.equal(calls.filter(call => call.body?.method === 'sendTransaction').every(call => call.url === rpcUrl), true);
+  assert.equal(JSON.stringify(moved).includes(appSecret), false);
+  assert.equal(JSON.stringify(moved).includes('quicknode-secret-path'), false);
+  assert.equal(JSON.stringify(sign.body).includes(appSecret), false);
+});
+
+test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', async () => {
+  const calls = [];
+  const signer = {
+    async signAndBroadcastDevnet() {
+      calls.push('sign');
+      return { cluster: 'mainnet', signature: txSignature };
+    },
+    async getDevnetBlockhash() {
+      calls.push('hash');
+      return { cluster: 'devnet', blockhash };
+    },
+  };
+  assert.throws(
+    () => buildDevnetUsdcTransaction({
+      feePayer: mainWallet.address,
+      sourceOwner: mainWallet.address,
+      destinationOwner: recipient.publicKey.toBase58(),
+      amount: '1',
+      memo: 'memo',
+      recentBlockhash: blockhash,
+      cluster: 'mainnet',
+    }),
+    error => error instanceof TransferError && error.code === 'wrong_cluster',
+  );
+  await assert.rejects(
+    () => transferDevnetUsdc({
+      client: signer,
+      bot,
+      wallet: { ...mainWallet, frozen: true },
+      destination: recipient.publicKey.toBase58(),
+      amount: '1',
+      memo: 'memo',
+      recentBlockhash: blockhash,
+    }),
+    error => error instanceof WalletError,
+  );
+  const { client: live, calls: rpc } = client(null, [
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: mainnetGenesis } },
+    {
+      match: (url, body) => String(url).endsWith('/rpc') && body?.method === 'signTransaction',
+      body: { data: { signed_transaction: Buffer.alloc(180, 4).toString('base64') } },
+    },
+  ]);
+  await assert.rejects(
+    () => transferDevnetUsdc({
+      client: live,
+      bot,
+      wallet: mainWallet,
+      destination: recipient.publicKey.toBase58(),
+      amount: '1',
+      memo: 'memo',
+      recentBlockhash: blockhash,
+    }),
+    error => error instanceof WalletError && error.code === 'wrong_cluster',
+  );
+  assert.equal(rpc.some(call => call.body?.method === 'sendTransaction'), false);
+  assert.deepEqual(calls, []);
+});
+
+test('wallet adapter deposit signs locally and broadcasts only on devnet', async () => {
+  let signed = 0;
+  let adapterSent = 0;
+  const adapter = {
+    publicKey: external.publicKey,
+    sendTransaction() {
+      adapterSent += 1;
+      throw new Error('adapter must not broadcast');
+    },
+    async signTransaction(tx) {
+      signed += 1;
+      tx.partialSign(external);
+      return tx;
+    },
+  };
+  const { client: signer, calls } = client(null, devnetRoutes({ sign: false }));
+  const deposited = await depositFromWalletAdapter({
+    client: signer,
+    adapter,
+    mainWallet,
+    ownerId: 'user_1',
+    amount: '1000000',
+    memo: 'deposit',
+    recentBlockhash: blockhash,
+  });
+  assert.equal(deposited.kind, 'deposit');
+  assert.equal(deposited.source, external.publicKey.toBase58());
+  assert.equal(deposited.destination, mainWallet.address);
+  assert.equal(deposited.signature, txSignature);
+  assert.equal(signed, 1);
+  assert.equal(adapterSent, 0);
+  assert.equal(calls.some(call => String(call.url).includes('api.privy.io')), false);
+  const sent = calls.find(call => call.body?.method === 'sendTransaction');
+  const tx = decode(sent.body.params[0]);
+  assert.equal(tx.instructions[1].data[0], 12);
+  assert.equal(tx.instructions[2].data.toString('utf8'), 'deposit');
+  assert.equal(tx.feePayer.toBase58(), external.publicKey.toBase58());
+
+  signed = 0;
+  const blocked = client(null, [
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: mainnetGenesis } },
+  ]);
+  await assert.rejects(
+    () => depositFromWalletAdapter({
+      client: blocked.client,
+      adapter,
+      mainWallet,
+      ownerId: 'user_1',
+      amount: '1000000',
+      memo: 'deposit',
+      recentBlockhash: blockhash,
+    }),
+    error => error instanceof WalletError && error.code === 'wrong_cluster',
+  );
+  assert.equal(signed, 0);
+  assert.equal(blocked.calls.some(call => call.body?.method === 'sendTransaction'), false);
+});
+
+test('withdraw, wallet moves, and grab-back return USDC to the main wallet', async () => {
+  let adapterSigned = 0;
+  const adapter = {
+    publicKey: external.publicKey,
+    sendTransaction() { throw new Error('adapter must not broadcast'); },
+    async signTransaction() { adapterSigned += 1; },
+  };
+  const { client: signer, calls } = client(null, devnetRoutes());
+  const withdrawn = await withdrawToWalletAdapter({
+    client: signer,
+    ownerId: 'user_1',
+    mainWallet,
+    adapter,
+    amount: '4000000',
+    memo: 'withdraw',
+    recentBlockhash: blockhash,
+  });
+  assert.equal(withdrawn.kind, 'withdraw');
+  assert.equal(withdrawn.destination, external.publicKey.toBase58());
+  assert.equal(adapterSigned, 0);
+
+  const moved = await moveBetweenWallets({
+    client: signer,
+    ownerId: 'user_1',
+    fromWallet: mainWallet,
+    toWallet: tradingWallet,
+    amount: '500000',
+    recentBlockhash: blockhash,
+  });
+  assert.equal(moved.kind, 'move');
+  assert.equal(moved.memo, 'wallet.move');
+  assert.equal(moved.destination, tradingWallet.address);
+
+  const frozenTrading = { ...tradingWallet, frozen: true };
+  const grabbed = await grabBackToMain({
+    client: signer,
+    ownerId: 'user_1',
+    mainWallet,
+    wallets: [frozenTrading, vaultWallet],
+    balances: { [tradingId]: '900000', [vaultId]: '0' },
+    recentBlockhash: blockhash,
+  });
+  assert.equal(grabbed.moves.length, 1);
+  assert.equal(grabbed.moves[0].kind, 'grab-back');
+  assert.equal(grabbed.moves[0].amount, '900000');
+  assert.equal(grabbed.moves[0].destination, mainWallet.address);
+  assert.equal(grabbed.moves[0].memo, 'funds.grabbed');
+  assert.equal(frozenTrading.frozen, true);
+
+  const signCalls = calls.filter(call => call.body?.method === 'signTransaction');
+  assert.equal(signCalls.length, 3);
+  assertMoveThenMemo(signCalls[2].body.params.transaction, {
+    payer: tradingWallet.address,
+    amount: '900000',
+    memo: 'funds.grabbed',
+  });
+  assert.equal(calls.filter(call => call.body?.method === 'sendTransaction').length, 3);
+});
+
+test('grab-back can read devnet balances and keeps earlier sweeps when a later one fails', async () => {
+  const routes = devnetRoutes();
+  routes.push({
+    match: (url, body) => url === rpcUrl && body?.method === 'getTokenAccountsByOwner',
+    body: {
+      result: {
+        value: [{
+          account: {
+            data: { parsed: { info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
+          },
+        }],
+      },
+    },
+  });
+  const { client: signer, calls } = client(null, routes);
+  const grabbed = await grabBackToMain({
+    client: signer,
+    ownerId: 'user_1',
+    mainWallet,
+    wallets: [tradingWallet],
+    recentBlockhash: blockhash,
+  });
+  assert.equal(grabbed.moves[0].amount, '42');
+  const balanceCall = calls.find(call => call.body?.method === 'getTokenAccountsByOwner');
+  assert.deepEqual(balanceCall.body.params[1], { mint: DEVNET_USDC_MINT });
+  assert.notEqual(DEVNET_USDC_MINT, MAINNET_USDC_MINT);
+
+  let attempts = 0;
+  const failing = {
+    async signAndBroadcastOwnerDevnet() {
+      attempts += 1;
+      if (attempts === 2) {
+        const error = new WalletError('Devnet broadcast did not return a signature', 'rpc_rejected');
+        throw error;
+      }
+      return { cluster: 'devnet', signature: txSignature };
+    },
+  };
+  await assert.rejects(
+    () => grabBackToMain({
+      client: failing,
+      ownerId: 'user_1',
+      mainWallet,
+      wallets: [tradingWallet, vaultWallet],
+      balances: { [tradingId]: '5', [vaultId]: '6' },
+      recentBlockhash: blockhash,
+    }),
+    error => error instanceof TransferError && error.code === 'rpc_rejected' && error.completed.length === 1,
+  );
+});
