@@ -136,6 +136,7 @@ export const ACCOUNT_VENDORS = Object.freeze([
     steps: Object.freeze([
       'Create an API key and store it as ELEVENLABS_API_KEY.',
       'When an ElevenAgents agent exists, store its id as ELEVENLABS_AGENT_ID.',
+      'Create a shared secret and store it as ELEVENLABS_WEBHOOK_SECRET. ElevenLabs sends it on webhook tool calls and on the custom LLM. The Worker uses it only to authenticate those calls. Tests use a stand-in and do not call ElevenLabs.',
     ]),
   },
 ]);

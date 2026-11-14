@@ -60,7 +60,7 @@ goal → research (browser/search)
 | `packages/sns` | SNS `.sol` resolve + unsigned transfer intents (Isaac / 6C) |
 | `packages/agent-commerce` | Bots sell signals over x402 on devnet (Isaac / 6C) |
 | `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
-| `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object. `POST /bots/:id/loop` runs research → decide → trust → verify → policy → approval → execute → memo → monitor, checkpointed per step. Models use OpenRouter and a locked platform prompt. Hourly Cron checks paper positions. A second Cron re-checks devnet USDC when the QuickNode stream has been silent for an hour |
+| `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object. `POST /bots/:id/loop` runs research → decide → trust → verify → policy → approval → execute → memo → monitor, checkpointed per step. Models use OpenRouter and a locked platform prompt. Hourly Cron checks paper positions. A second Cron re-checks devnet USDC when the QuickNode stream has been silent for an hour. The ElevenLabs voice agent uses Grok as its custom LLM on this Worker, and its webhook tools call the same bot, event, and browser routes as the UI |
 | `apps/web` | Next.js glass UI shell (Cloudflare-hosted) |
 | `supabase/schema.sql` | Postgres schema: foundations, `20261114020000_policy_ledger.sql` (atomic reserve, approval modes, kill switch), and `20261114040000_bot_templates.sql` (locked templates, user templates, draft create / enable) |
 
