@@ -277,7 +277,9 @@ export function createPrivyWalletClient({
       'Content-Type': 'application/json',
     };
     if (idempotency) headers['privy-idempotency-key'] = idempotency;
-    if (authKey && method !== 'GET') {
+    // Sign every method when an authorization key is configured — apps that
+    // require signatures reject unsigned wallet list/create with 403.
+    if (authKey) {
       const expiresAt = now() + REQUEST_TTL_MS;
       headers['privy-request-expiry'] = String(expiresAt);
       headers['privy-authorization-signature'] = privyAuthorizationSignature({
@@ -285,7 +287,7 @@ export function createPrivyWalletClient({
         authorizationKey: authKey,
         method,
         url,
-        body,
+        body: method === 'GET' || method === 'HEAD' ? undefined : body,
         idempotencyKey: idempotency,
         expiresAt,
       });
@@ -317,25 +319,32 @@ export function createPrivyWalletClient({
     return { ...built, privyWalletId: walletId, privyUserId };
   }
 
-  async function listSolanaWallets(privyUserId) {
+  async function listSolanaWallets(privyUserId, { required = true } = {}) {
     const query = new URLSearchParams({
       user_id: privyUserId,
       chain_type: 'solana',
       limit: '50',
     });
-    const payload = await privy('GET', `/v1/wallets?${query}`);
-    const rows = Array.isArray(payload?.data) ? payload.data : [];
-    return rows
-      .filter(wallet => wallet
-        && wallet.chain_type === 'solana'
-        && typeof wallet.address === 'string'
-        && base58.test(wallet.address)
-        && privyWalletIdPattern.test(wallet.id))
-      .map(wallet => ({
-        id: wallet.id,
-        address: wallet.address,
-        walletIndex: 0,
-      }));
+    try {
+      const payload = await privy('GET', `/v1/wallets?${query}`);
+      const rows = Array.isArray(payload?.data) ? payload.data : [];
+      return rows
+        .filter(wallet => wallet
+          && wallet.chain_type === 'solana'
+          && typeof wallet.address === 'string'
+          && base58.test(wallet.address)
+          && privyWalletIdPattern.test(wallet.id))
+        .map(wallet => ({
+          id: wallet.id,
+          address: wallet.address,
+          walletIndex: 0,
+        }));
+    } catch (error) {
+      if (!required && error instanceof WalletError && (error.code === 'privy_failed')) {
+        return [];
+      }
+      throw error;
+    }
   }
 
   function recordsFromServerWallets(wallets, ownerId, privyUserId) {
@@ -351,7 +360,8 @@ export function createPrivyWalletClient({
     if (existing) return { privyUserId, ...existing, created: false };
 
     // createOnLogin may have linked a wallet with id:null — recover via Wallet API.
-    const listed = await listSolanaWallets(privyUserId);
+    // List is best-effort: a 403 here (auth signature / permissions) must not block create.
+    const listed = await listSolanaWallets(privyUserId, { required: false });
     const fromList = recordsFromServerWallets(listed, owner, privyUserId);
     if (fromList) return { privyUserId, ...fromList, created: false };
 
@@ -368,8 +378,23 @@ export function createPrivyWalletClient({
         created: true,
       };
     } catch (error) {
-      const retry = recordsFromServerWallets(await listSolanaWallets(privyUserId), owner, privyUserId);
+      const retry = recordsFromServerWallets(
+        await listSolanaWallets(privyUserId, { required: false }),
+        owner,
+        privyUserId,
+      );
       if (retry) return { privyUserId, ...retry, created: false };
+      if (
+        error instanceof WalletError
+        && error.code === 'privy_failed'
+        && /403/.test(error.message)
+        && !authKey
+      ) {
+        fail(
+          'Privy wallets failed (403). Set PRIVY_AUTHORIZATION_KEY from Privy → Authorization keys (wallet-auth private key), or disable required authorization signatures.',
+          'privy_failed',
+        );
+      }
       throw error;
     }
   }

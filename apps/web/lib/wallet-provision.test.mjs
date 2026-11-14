@@ -61,6 +61,13 @@ test('wallet provision notes stay actionable and secret-free', () => {
     }),
     /full-access/,
   );
+  assert.match(
+    walletProvisionNote({
+      error: 'privy_failed',
+      detail: 'Privy wallets failed (403). Set PRIVY_AUTHORIZATION_KEY from Privy',
+    }),
+    /PRIVY_AUTHORIZATION_KEY/,
+  );
   assert.equal(
     walletProvisionNote({ created: true, wallets: [{ id: 'w1' }] }, { ok: true }),
     'Main wallet created and assigned to these agents.',

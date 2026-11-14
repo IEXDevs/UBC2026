@@ -83,11 +83,14 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
   }
   if (code === 'privy_failed') {
     const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
-    if (/403/i.test(detail) && /insufficient_app_secret_permissions|permission/i.test(detail)) {
+    if (/403/i.test(detail) && /insufficient_app_secret_permissions/i.test(detail)) {
       return 'PRIVY_APP_SECRET is read-only. In Privy → App settings → API keys, create a full-access secret, put it in root .env.local, restart Next, and sign in again.';
     }
+    if (/403/i.test(detail) && /PRIVY_AUTHORIZATION_KEY|authorization/i.test(detail)) {
+      return 'Privy returned 403 without an authorization signature. Add PRIVY_AUTHORIZATION_KEY (wallet-auth private key from Privy → Authorization keys) to root .env.local, restart Next, and sign in again.';
+    }
     if (/403/i.test(detail)) {
-      return 'Privy returned 403. Use a full-access PRIVY_APP_SECRET (not read-only) for the same app as NEXT_PUBLIC_PRIVY_APP_ID.';
+      return 'Privy returned 403. If the app secret is full-access, set PRIVY_AUTHORIZATION_KEY from Privy → Authorization keys (or turn off required authorization signatures).';
     }
     if (detail && detail.length <= 180 && !/[\r\n]/.test(detail)) {
       return `Privy wallet create failed: ${detail}. Check PRIVY_APP_SECRET, Solana wallets in the dashboard, and optional PRIVY_AUTHORIZATION_KEY.`;
