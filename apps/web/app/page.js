@@ -605,7 +605,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           <Composer
             key={bot.id}
             hidden={pane !== 'Main'}
+            botId={bot.id}
             botName={bot.name}
+            botGoal={bot.goal}
+            botType={bot.type}
+            ownerId={ownerId}
             lines={talks[bot.id] ?? []}
             onLine={line => appendTalk(bot.id, line)}
             onThinking={on => setThinkingBot(on ? bot.id : null)}

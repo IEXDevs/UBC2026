@@ -136,6 +136,58 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   assert.equal(snsBody.recipient.address, address);
 });
 
+test('bot text chat requires owner and OpenRouter', async () => {
+  const denied = await worker.fetch(new Request('https://runtime/api/bots/bot_1/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message: 'hi' }),
+  }), fakeEnv());
+  assert.equal(denied.status, 401);
+
+  const missingKey = await worker.fetch(new Request('https://runtime/api/bots/bot_1/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ message: 'hi', name: 'Nova', goal: 'watch' }),
+  }), fakeEnv());
+  assert.equal(missingKey.status, 503);
+  assert.equal((await missingKey.json()).error, 'openrouter_not_configured');
+});
+
+test('bot text chat returns an OpenRouter reply for the owner', async () => {
+  const env = fakeEnv({
+    openRouter: {
+      chat: async ({ message, botName }) => ({
+        model: 'x-ai/grok-4-fast',
+        text: `${botName} heard: ${message}`,
+      }),
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/bots/bot_1/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({
+      message: 'status?',
+      name: 'Nova',
+      goal: 'Watch SOL',
+      history: [{ role: 'user', text: 'hi' }, { role: 'agent', text: 'hello' }],
+    }),
+  }), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.reply, 'Nova heard: status?');
+  assert.equal(body.botId, 'bot_1');
+});
+
+test('bot delete is dispatched when Supabase is unconfigured', async () => {
+  const res = await worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers: { 'x-owner-id': 'user_1' },
+  }), fakeEnv());
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'unconfigured');
+});
+
 test('health reports signing and supabase readiness flags', async () => {
   const incomplete = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
     transferClient: { ok: true },

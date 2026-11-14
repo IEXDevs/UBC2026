@@ -175,6 +175,8 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.equal(matchApiRoute('POST', '/api/wallets/wal_1/sign').params.walletId, 'wal_1');
   assert.equal(matchApiRoute('DELETE', '/api/bots/bot_1').route.id, 'bots.delete');
   assert.equal(matchApiRoute('DELETE', '/api/bots/bot_1').params.botId, 'bot_1');
+  assert.equal(matchApiRoute('POST', '/api/bots/bot_1/chat').route.id, 'bots.chat');
+  assert.equal(matchApiRoute('POST', '/api/bots/bot_1/chat').params.botId, 'bot_1');
   assert.equal(matchApiRoute('GET', '/bots/bot_1').route.action, 'status');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/wake').route.id, 'bots.wake');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/loop').route.id, 'bots.loop');
