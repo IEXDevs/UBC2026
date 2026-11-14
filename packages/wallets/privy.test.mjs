@@ -110,6 +110,27 @@ test('missing server-signing names throw before any request', () => {
   );
 });
 
+test('login recovers owner id from JWT sub when users/me omits id', async () => {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
+  const token = `${header}.${body}.sig`;
+  const { fetcher, calls } = mockFetch([
+    { match: url => url.endsWith('/api/v1/users/me'), body: { linked_accounts: [] } },
+    { match: url => url.includes('/v1/wallets?'), body: { data: [] } },
+    {
+      match: (url, reqBody) => url.endsWith('/v1/wallets') && reqBody?.display_name === 'Main',
+      body: { id: walletId, address, chain_type: 'solana' },
+    },
+  ]);
+  const result = await client({ fetcher }).acceptLogin({
+    accessToken: token,
+    origin: 'http://localhost:3000',
+  });
+  assert.equal(result.created, true);
+  assert.equal(result.main.ownerId, privyUserId);
+  assert.equal(calls[2].body.owner.user_id, privyUserId);
+});
+
 test('login creates the main Solana wallet when Privy has none', async () => {
   const { fetcher, calls } = mockFetch([
     { match: url => url.endsWith('/api/v1/users/me'), body: userWith([]) },

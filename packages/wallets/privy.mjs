@@ -29,7 +29,7 @@ const REQUEST_TTL_MS = 60_000;
 const MAX_TX_BYTES = 1232;
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const privyWalletIdPattern = /^[A-Za-z0-9_-]{10,128}$/;
-const ownerIdPattern = /^[a-zA-Z0-9:_-]{1,128}$/;
+const ownerIdPattern = /^[a-zA-Z0-9:_.-]{1,256}$/;
 
 const fail = (message, code = 'wallet_error') => {
   throw new WalletError(message, code);
@@ -192,8 +192,40 @@ function assertPrivyWalletId(id) {
 }
 
 function assertOwnerId(ownerId) {
-  if (typeof ownerId !== 'string' || !ownerIdPattern.test(ownerId)) fail('Wallet owner is required', 'invalid_owner');
+  if (typeof ownerId !== 'string' || !ownerIdPattern.test(ownerId)) {
+    const kind = ownerId == null ? 'missing' : typeof ownerId;
+    fail(`Wallet owner is required (${kind})`, 'invalid_owner');
+  }
   return ownerId;
+}
+
+function readPrivyUserPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  if (typeof payload.id === 'string' && payload.id.trim()) return payload;
+  if (payload.user && typeof payload.user === 'object' && typeof payload.user.id === 'string') return payload.user;
+  if (payload.data && typeof payload.data === 'object' && typeof payload.data.id === 'string') return payload.data;
+  return payload;
+}
+
+function jwtSub(accessToken) {
+  try {
+    const part = String(accessToken).split('.')[1];
+    if (!part) return '';
+    const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+    const json = Buffer.from(`${normalized}${pad}`, 'base64').toString('utf8');
+    const payload = JSON.parse(json);
+    return typeof payload?.sub === 'string' ? payload.sub.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+function resolvePrivyUserId(user, accessToken, ownerId) {
+  for (const candidate of [user?.id, user?.user_id, user?.userId, ownerId, jwtSub(accessToken)]) {
+    if (typeof candidate === 'string' && ownerIdPattern.test(candidate.trim())) return candidate.trim();
+  }
+  return '';
 }
 
 function recordsFromEmbedded(embedded, ownerId, privyUserId) {
@@ -366,9 +398,10 @@ export function createPrivyWalletClient({
     return recordsFromEmbedded(wallets, ownerId, privyUserId);
   }
 
-  async function syncWallets(user, ownerId) {
-    const privyUserId = assertOwnerId(user?.id);
-    const owner = assertOwnerId(ownerId);
+  async function syncWallets(user, ownerId, accessToken = '') {
+    const resolved = resolvePrivyUserId(user, accessToken, ownerId);
+    const privyUserId = assertOwnerId(resolved || user?.id);
+    const owner = assertOwnerId(ownerId || resolved || user?.id);
     const embedded = solanaEmbedded(user);
     const existing = recordsFromEmbedded(embedded, owner, privyUserId);
     if (existing) return { privyUserId, ...existing, created: false };
@@ -483,11 +516,19 @@ export function createPrivyWalletClient({
       }
       headers.Origin = safeOrigin;
       headers.Referer = `${safeOrigin}/`;
-      const user = await fetchJson(`${privyAuth}/api/v1/users/me`, {
+      const payload = await fetchJson(`${privyAuth}/api/v1/users/me`, {
         method: 'GET',
         headers,
       }, 'privy_failed');
-      return syncWallets(user, ownerId ?? user?.id);
+      const user = readPrivyUserPayload(payload) || {};
+      const resolvedId = resolvePrivyUserId(user, token, ownerId);
+      if (resolvedId && !user.id) user.id = resolvedId;
+      // Prefer server user lookup when /users/me omitted id but JWT sub is present.
+      const hydrated = resolvedId && !Array.isArray(user.linked_accounts) && !Array.isArray(user.linkedAccounts)
+        ? await loadUser(resolvedId).catch(() => user)
+        : user;
+      if (resolvedId && !hydrated.id) hydrated.id = resolvedId;
+      return syncWallets(hydrated, ownerId || resolvedId || hydrated.id, token);
     },
 
     ensureMainWallet({ privyUserId, ownerId } = {}) {

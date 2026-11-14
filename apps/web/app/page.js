@@ -66,7 +66,10 @@ function AuthedShell() {
         if (!token || stopped) return;
         const response = await fetch('/api/wallets', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(user?.id ? { 'x-owner-id': user.id } : {}),
+          },
         });
         const body = await response.json().catch(() => ({}));
         if (stopped) return;

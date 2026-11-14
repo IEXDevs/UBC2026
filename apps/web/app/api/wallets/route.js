@@ -83,9 +83,11 @@ export async function POST(request) {
       rpcUrl: env.QUICKNODE_DEVNET_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
     });
+    const ownerHeader = request.headers.get('x-owner-id');
     const result = await client.acceptLogin({
       accessToken,
       origin: requestOrigin(request),
+      ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
     });
     return Response.json({
       created: result.created === true,
