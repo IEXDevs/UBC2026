@@ -52,6 +52,7 @@ goal → research (browser/search)
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
 | `packages/prices` | DexScreener mainnet price reads (paper PnL) |
+| `packages/paper-positions` | Trading-bot paper lots and position-bot mark-to-market. Mainnet prices, devnet execution, no live trades |
 | `packages/x402` | x402 v2 Solana devnet helpers + sandbox store client |
 | `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object. `POST /bots/:id/loop` runs research → decide → trust → verify → policy → approval → execute → memo → monitor, checkpointed per step. Models use OpenRouter and a locked platform prompt |
