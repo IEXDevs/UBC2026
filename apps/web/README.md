@@ -14,6 +14,8 @@ If Connect → email shows **Something went wrong**, fix the Privy dashboard (no
 4. Enable **Solana** embedded wallets (create on login) so the shell can mint the main wallet after OTP.
 5. Restart `npm run dev -w @ubc2026/web` after any `.env.local` change. In DevTools → Network, a failing init call often returns `invalid_origin`.
 
+After login the shell calls `POST /api/wallets`. That needs **server** names in the same root `.env.local`: `PRIVY_APP_SECRET` and `QUICKNODE_DEVNET_RPC_URL` (https Solana **devnet** endpoint). `PRIVY_APP_ID` can match `NEXT_PUBLIC_PRIVY_APP_ID`. Until that succeeds you still see preview wallet rows (`PreviewMain111…`). The on-screen note lists any missing names — fix those, restart Next, sign in again.
+
 Set `NEXT_PUBLIC_AGENT_RUNTIME_URL` to the deployed agent-runtime origin (for example `https://maelstrom-agent-runtime.<subdomain>.workers.dev`). That is not the Next dev server on port 3000.
 
 The Main pane leads with Live View plus chat and the voice composer. Overview and Security stay available in the dock. Shopping bots get a prepare panel for sandbox/Laso. Talk uses `@elevenlabs/client` when `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` (and the Worker `ELEVENLABS_*` secrets) are set.
