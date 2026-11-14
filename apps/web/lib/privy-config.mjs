@@ -78,6 +78,15 @@ export function ownerIdFromPrivyUser(user, authenticated) {
   return id;
 }
 
+/**
+ * Wallet provisioning calls getAccessToken(). Privy can wipe the session from
+ * that call when terms are still unaccepted, so the terms POST then has no bearer.
+ */
+export function sessionReadyForWallets(signedIn, user) {
+  if (signedIn !== true || !user) return false;
+  return user.hasAcceptedTerms !== false;
+}
+
 export function privyAccountLabel(user) {
   const email = user?.email?.address;
   if (typeof email === 'string' && email.trim()) return email.trim();

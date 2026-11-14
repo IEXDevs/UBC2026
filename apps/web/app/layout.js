@@ -1,5 +1,6 @@
 import { Figtree } from 'next/font/google';
 import './globals.css';
+import AcceptTermsAuth from '../components/AcceptTermsAuth';
 import PrivyRoot from '../components/PrivyRoot';
 
 const chatFont = Figtree({
@@ -17,6 +18,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={chatFont.variable}>
+        <AcceptTermsAuth />
         <PrivyRoot>{children}</PrivyRoot>
       </body>
     </html>

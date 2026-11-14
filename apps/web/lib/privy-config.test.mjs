@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from './privy-config.mjs';
+import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from './privy-config.mjs';
 
 test('Privy provider props stay public and Solana-only', () => {
   assert.equal(privyProviderProps({ appId: '  ' }), null);
@@ -23,6 +23,15 @@ test('Privy provider props stay public and Solana-only', () => {
   assert.equal(serialized.includes('PRIVY_APP_SECRET'), false);
   assert.equal(serialized.includes('QUICKNODE'), false);
   assert.equal(serialized.includes('http'), false);
+});
+
+test('wallet provisioning waits until Privy terms are accepted', () => {
+  const user = { id: 'did:privy:abc', hasAcceptedTerms: false };
+  assert.equal(sessionReadyForWallets(false, user), false);
+  assert.equal(sessionReadyForWallets(true, null), false);
+  assert.equal(sessionReadyForWallets(true, user), false);
+  assert.equal(sessionReadyForWallets(true, { ...user, hasAcceptedTerms: true }), true);
+  assert.equal(sessionReadyForWallets(true, { id: 'did:privy:abc' }), true);
 });
 
 test('owner id comes from an authenticated Privy user', () => {
