@@ -1,0 +1,25 @@
+{
+  "name": "@ubc2026/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "test": "node --test src/*.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@ubc2026/bot-policy": "0.1.0",
+    "@ubc2026/browser-session": "0.1.0",
+    "@ubc2026/contracts": "0.1.0",
+    "@ubc2026/trust-score": "0.1.0",
+    "@ubc2026/verify-consensus": "0.1.0",
+    "@ubc2026/wallets": "0.1.0",
+    "@ubc2026/x402": "0.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  },
+  "engines": { "node": ">=20" }
+}

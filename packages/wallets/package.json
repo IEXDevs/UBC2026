@@ -1,0 +1,10 @@
+{
+  "name": "@ubc2026/wallets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./wallets.mjs",
+  "scripts": { "test": "node --test wallets.test.mjs" },
+  "dependencies": { "@ubc2026/contracts": "0.1.0" },
+  "engines": { "node": ">=20" }
+}

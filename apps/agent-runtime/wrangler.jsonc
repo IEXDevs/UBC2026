@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "maelstrom-agent-runtime",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "BOT", "class_name": "BotDurableObject" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_classes": ["BotDurableObject"] }
+  ],
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+  "vars": {
+    "CLUSTER": "devnet",
+    "PRODUCT": "Maelstrom"
+  }
+  // Secrets (wrangler secret put): FIRECRAWL_API_KEY, PRIVY_APP_SECRET,
+  // CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, QUICKNODE_WEBHOOK_SECRET,
+  // OPENROUTER_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+}

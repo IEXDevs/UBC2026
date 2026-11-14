@@ -1,0 +1,15 @@
+{
+  "name": "@ubc2026/agent-loop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./loop.mjs",
+  "scripts": { "test": "node --test loop.test.mjs" },
+  "dependencies": {
+    "@ubc2026/bot-policy": "0.1.0",
+    "@ubc2026/trust-score": "0.1.0",
+    "@ubc2026/verify-consensus": "0.1.0",
+    "@ubc2026/wallets": "0.1.0"
+  },
+  "engines": { "node": ">=20" }
+}
