@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { enableBot } from '@ubc2026/bot-creation';
 import BotCreation from '../components/BotCreation';
+import BotPage from '../components/BotPage';
 import TalkStub from '../components/TalkStub';
-import LiveViewPanel from '../components/LiveViewPanel';
 import { getDemoShellState, panePlaceholder } from '../lib/demo-state.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
 
@@ -55,7 +55,7 @@ function Shell({ ownerId, account }) {
   const [userTemplates, setUserTemplates] = useState([]);
   const [creating, setCreating] = useState(false);
   const [activeBot, setActiveBot] = useState(state.bots[0].id);
-  const [pane, setPane] = useState(state.panes[0]);
+  const [pane, setPane] = useState('Agents');
   const bot = bots.find(item => item.id === activeBot) ?? bots[0];
   const placeholder = panePlaceholder(pane);
 
@@ -88,7 +88,7 @@ function Shell({ ownerId, account }) {
               role="listitem"
               aria-current={item.id === activeBot ? 'true' : undefined}
             >
-              <button type="button" className="bot-select" onClick={() => setActiveBot(item.id)}>
+              <button type="button" className="bot-select" onClick={() => { setActiveBot(item.id); setPane('Agents'); }}>
                 <strong>{item.name}</strong>
                 <small>{item.type} · {item.status}</small>
               </button>
@@ -121,14 +121,16 @@ function Shell({ ownerId, account }) {
         </header>
 
         <section className="content">
-          <div className="hero-panel">
-            <div className="pill">● {pane} · {bot.name}</div>
-            <h1>{bot.goal}</h1>
-            <p>
-              Budget-aware Solana agents with trust gates, independent verification,
-              and Phantom-style approvals before every spend.
-            </p>
-          </div>
+          {pane !== 'Agents' && (
+            <div className="hero-panel">
+              <div className="pill">● {pane} · {bot.name}</div>
+              <h1>{bot.goal}</h1>
+              <p>
+                Budget-aware Solana agents with trust gates, independent verification,
+                and Phantom-style approvals before every spend.
+              </p>
+            </div>
+          )}
 
           {creating ? (
             <BotCreation
@@ -139,14 +141,14 @@ function Shell({ ownerId, account }) {
             />
           ) : null}
 
-          <section className="panel empty-pane" aria-label={placeholder.title}>
-            <h2>{placeholder.title}</h2>
-            <p>{placeholder.body}</p>
-          </section>
-
-          <section className="panel" aria-label="Live View">
-            <LiveViewPanel botId={bot.id} ownerId={ownerId} />
-          </section>
+          {pane === 'Agents' ? (
+            <BotPage bot={bot} ownerId={ownerId} />
+          ) : (
+            <section className="panel empty-pane" aria-label={placeholder.title}>
+              <h2>{placeholder.title}</h2>
+              <p>{placeholder.body}</p>
+            </section>
+          )}
           <TalkStub botName={bot.name} />
         </section>
       </main>

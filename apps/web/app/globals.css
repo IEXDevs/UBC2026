@@ -249,6 +249,48 @@ button {
 
 .timeline li:last-child { border-bottom: 0; padding-bottom: 0; }
 .timeline time { color: var(--muted); font-size: 0.82rem; }
+.timeline strong { font-family: var(--font-display); }
+.timeline-why { padding: 0.35rem 0.7rem; font-size: 0.85rem; }
+
+.bot-page { display: grid; gap: 1rem; }
+.bot-heading h1 {
+  margin: 0.35rem 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+  line-height: 1.1;
+  max-width: 22ch;
+}
+
+.approval-amount {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+}
+
+.approval-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.approval-facts div { display: grid; gap: 0.15rem; }
+.approval-facts dt { color: var(--muted); font-size: 0.8rem; }
+.approval-facts dd { margin: 0; overflow-wrap: anywhere; }
+.approval-facts code, .memo code {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.raise-form { display: grid; gap: 0.7rem; }
+.raise-form small { color: var(--muted); }
+
+.why-related {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
 
 .live-view {
   margin-top: 0.9rem;
