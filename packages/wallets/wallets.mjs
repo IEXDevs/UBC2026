@@ -81,10 +81,5 @@ export function assertSpendAllowed({ bot, wallet }) {
   return { allowed: true };
 }
 
-export {
-  createPrivyWalletClient,
-  createPrivyWalletClientFromEnv,
-  canonicalizeJson,
-  privyAuthorizationSignature,
-  DEVNET_GENESIS_HASH,
-} from './privy.mjs';
+// Privy HTTP + node:crypto signing live in `./privy.mjs`.
+// Import `@ubc2026/wallets/privy` from Workers/Node only — never from the Next.js client bundle.
