@@ -1,8 +1,10 @@
 import { createBuiltinTemplates } from '@ubc2026/contracts';
 import { demoBotExperiences } from './bot-experience.mjs';
 
-/** Placeholder shell chrome. Money panes stay empty; the Agents pane is the bot page. */
+/** Placeholder shell chrome. Money panes stay empty; Agents/Overview/Security are real panes. */
 export function panePlaceholder(name) {
+  if (name === 'Overview') return { title: 'Overview', body: 'Owner metrics.' };
+  if (name === 'Security') return { title: 'Security', body: 'Kill switch and freezes.' };
   return { title: name, body: 'Empty.' };
 }
 

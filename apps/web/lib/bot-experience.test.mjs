@@ -128,6 +128,8 @@ test('demo shell bots carry a bot page and money panes stay empty placeholders',
   const page = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../app/page.js'), 'utf8');
   assert.match(page, /pane === 'Agents'/);
   assert.match(page, /BotPage/);
+  assert.match(page, /OverviewPanel/);
+  assert.match(page, /SecurityPanel/);
   assert.match(page, /panePlaceholder\(pane\)/);
   assert.equal(page.includes('Payments feed'), false);
   assert.equal(page.includes('Wallet page'), false);
