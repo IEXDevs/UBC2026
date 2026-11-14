@@ -68,3 +68,69 @@ export function createTrustScoreProvider({ endpoint, apiKey, fetcher = fetch, th
     };
   };
 }
+
+/**
+ * Map Jupiter Tokens API V2 signals onto our 0–1000 score.
+ * organicScore is 0–100; we scale ×10 then apply audit penalties.
+ */
+export function scoreFromJupiterToken(token) {
+  if (!token || typeof token !== 'object') fail('Jupiter token payload is required');
+  const organic = typeof token.organicScore === 'number' && Number.isFinite(token.organicScore)
+    ? Math.max(0, Math.min(100, token.organicScore))
+    : 0;
+  let score = Math.round(organic * 10);
+  const audit = token.audit && typeof token.audit === 'object' ? token.audit : {};
+  if (audit.isSus === true) score = Math.min(score, 100);
+  if (audit.mintAuthorityDisabled === false) score = Math.min(score, 250);
+  if (audit.freezeAuthorityDisabled === false) score = Math.min(score, 300);
+  if (typeof audit.topHoldersPercentage === 'number' && audit.topHoldersPercentage >= 50) {
+    score = Math.min(score, 350);
+  }
+  // Unverified tokens get a soft ceiling so blue-chip verified assets clear the default gate more easily.
+  if (token.isVerified !== true) score = Math.min(score, 450);
+  return normalizeScore(score);
+}
+
+/**
+ * Jupiter Tokens API V2 search-by-mint adapter.
+ * Optional `apiKey` is sent as `x-api-key` when present (free tier works without it).
+ */
+export function createJupiterTrustProvider({
+  fetcher = fetch,
+  threshold = '400',
+  apiKey = null,
+  baseUrl = 'https://api.jup.ag/tokens/v2',
+} = {}) {
+  return async function lookupTrust(mint) {
+    if (!required(mint) || !mintPattern.test(mint)) throw new ProviderError('invalid_mint', 400);
+    const url = `${baseUrl}/search?query=${encodeURIComponent(mint)}`;
+    const headers = { Accept: 'application/json' };
+    if (apiKey) headers['x-api-key'] = apiKey;
+    let response;
+    try {
+      response = await fetcher(url, { headers, signal: AbortSignal.timeout(15000) });
+    } catch {
+      throw new ProviderError('provider_unavailable');
+    }
+    if (!response.ok) {
+      throw new ProviderError(response.status === 429 ? 'provider_rate_limited' : 'provider_failed', response.status === 429 ? 429 : 502);
+    }
+    let data;
+    try { data = await response.json(); } catch { throw new ProviderError('invalid_provider_response'); }
+    if (!Array.isArray(data) || data.length < 1) throw new ProviderError('invalid_provider_response');
+    const token = data.find(entry => entry && entry.id === mint) ?? data[0];
+    if (!token || token.id !== mint) throw new ProviderError('invalid_provider_response');
+    let score;
+    try { score = scoreFromJupiterToken(token); } catch { throw new ProviderError('invalid_provider_response'); }
+    const decision = evaluateTrust({ score, threshold, confirmed: false });
+    return {
+      mint,
+      score,
+      source: 'jupiter-tokens-v2',
+      isVerified: token.isVerified === true,
+      organicScore: typeof token.organicScore === 'number' ? token.organicScore : null,
+      fetchedAt: new Date().toISOString(),
+      decision,
+    };
+  };
+}
