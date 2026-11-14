@@ -45,9 +45,10 @@ test('rate limits and network failures have sanitized errors', async () => {
 });
 
 test('scrape returns truncated markdown for a safe http(s) URL', async () => {
+  const markdown = 'a'.repeat(600);
   const scrape = createScrape({
     apiKey: 'fc-test',
-    maxMarkdownChars: 20,
+    maxMarkdownChars: 500,
     fetcher: async (url, options) => {
       assert.equal(url, 'https://api.firecrawl.dev/v1/scrape');
       assert.deepEqual(JSON.parse(options.body), {
@@ -58,7 +59,7 @@ test('scrape returns truncated markdown for a safe http(s) URL', async () => {
       return Response.json({
         success: true,
         data: {
-          markdown: 'abcdefghijklmnopqrstuvwxyz',
+          markdown,
           metadata: { title: 'Page' },
         },
       });
@@ -66,7 +67,7 @@ test('scrape returns truncated markdown for a safe http(s) URL', async () => {
   });
   const page = await scrape('https://example.com/page');
   assert.equal(page.title, 'Page');
-  assert.equal(page.markdown, 'abcdefghijklmnopqrst');
+  assert.equal(page.markdown, markdown.slice(0, 500));
   assert.equal(page.truncated, true);
 });
 
