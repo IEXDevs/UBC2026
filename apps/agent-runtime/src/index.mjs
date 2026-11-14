@@ -1,5 +1,6 @@
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
 import { BotDurableObject } from './bot-do.mjs';
+import { processQuickNodeWebhook } from './quicknode-webhook.mjs';
 
 export { BotDurableObject };
 
@@ -25,21 +26,9 @@ export default {
       return json({ ok: true, product: env.PRODUCT ?? 'Maelstrom', cluster: env.CLUSTER ?? 'devnet' });
     }
 
-    // QuickNode Streams webhook → wake the assigned bot.
+    // QuickNode Streams webhook (Isaac / 5A): HMAC → dedupe → persist → wake bots.
     if (url.pathname === '/webhooks/quicknode' && request.method === 'POST') {
-      const secret = request.headers.get('x-quicknode-signature') ?? request.headers.get('authorization');
-      if (env.QUICKNODE_WEBHOOK_SECRET && secret !== env.QUICKNODE_WEBHOOK_SECRET) {
-        return json({ error: 'unauthorized' }, 401);
-      }
-      const body = await request.json().catch(() => ({}));
-      const botId = String(body.botId ?? body.metadata?.botId ?? '');
-      if (!botId) return json({ error: 'botId_required' }, 400);
-      const stub = botStub(env, botId);
-      return stub.fetch(new Request('https://bot/wake', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ botId, reason: 'quicknode-stream', goal: body.goal ?? '' }),
-      }));
+      return processQuickNodeWebhook(request, env, botStub);
     }
 
     if (url.pathname === '/api/routes' && request.method === 'GET') {
