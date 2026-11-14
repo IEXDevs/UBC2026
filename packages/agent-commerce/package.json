@@ -1,0 +1,12 @@
+{
+  "name": "@ubc2026/agent-commerce",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./commerce.mjs",
+  "scripts": { "test": "node --test commerce.test.mjs" },
+  "dependencies": {
+    "@ubc2026/x402": "0.1.0"
+  },
+  "engines": { "node": ">=20" }
+}

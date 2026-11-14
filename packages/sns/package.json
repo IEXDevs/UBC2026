@@ -1,0 +1,9 @@
+{
+  "name": "@ubc2026/sns",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./sns.mjs",
+  "scripts": { "test": "node --test sns.test.mjs" },
+  "engines": { "node": ">=20" }
+}

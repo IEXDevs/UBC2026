@@ -53,6 +53,10 @@ goal → research (browser/search)
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
 | `packages/prices` | DexScreener mainnet price reads (paper PnL) |
 | `packages/x402` | x402 v2 Solana devnet helpers + sandbox store client |
+| `packages/quicknode-streams` | Streams HMAC verify, dedupe, wallet KV sync / backfill plans (Isaac / 5A) |
+| `packages/shopping` | x402 sandbox catalog → proposal → policy → 402 buy (Isaac / 6B) |
+| `packages/sns` | SNS `.sol` resolve + unsigned transfer intents (Isaac / 6C) |
+| `packages/agent-commerce` | Bots sell signals over x402 on devnet (Isaac / 6C) |
 | `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object. `POST /bots/:id/loop` runs research → decide → trust → verify → policy → approval → execute → memo → monitor, checkpointed per step. Models use OpenRouter and a locked platform prompt |
 | `apps/web` | Next.js glass UI shell (Cloudflare-hosted) |
@@ -85,3 +89,15 @@ node scripts/accounts-and-funds.mjs --address <SOLANA_PUBKEY>
 Devnet SOL: [faucet.solana.com](https://faucet.solana.com/). The public RPC faucet returns HTTP 410, so `solana airdrop --url devnet` is not the path. Devnet USDC: [Circle faucet](https://faucet.circle.com/?chain=SOL), mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`.
 
 Worker deploy target (do not deploy from this change): `apps/agent-runtime/wrangler.jsonc`. The Next.js UI deploy target is Cloudflare via OpenNext: `apps/web/wrangler.jsonc`.
+
+## QuickNode Streams (Stream 1) — Isaac / 5A
+
+- **Network:** `solana-devnet`
+- **Dataset:** Block (or Programs + Logs) filtered to Privy bot wallets
+- **Filter logic:** Keep transactions touching addresses in the QuickNode Key-Value Store wallet set; emit compact `{signature, wallet, type, amount, token, slot}`
+- **Destination:** Cloudflare Worker `POST /webhooks/quicknode` (HMAC via `X-QN-Nonce` / `X-QN-Timestamp` / `X-QN-Signature`, secret `QUICKNODE_WEBHOOK_SECRET`)
+- **KV sync:** `POST /internal/streams/sync-wallets` (owner) pushes Privy wallet addresses into the QuickNode KV list (`QUICKNODE_API_KEY` + `QUICKNODE_WALLET_LIST_KEY`)
+- **Backfill:** `POST /internal/streams/backfill` (owner) replays missed rows through the same persist → wake → loop path
+- **Why:** Core wake path for deposits, x402 settlement, grab-back, and spend-ledger cross-checks. Hourly Cron is fallback only.
+
+Helpers live in `packages/quicknode-streams`; the Worker wires verify → dedupe → Supabase `stream_events` persist → wallet→bot resolve → DO `/wake` → 4A `/loop` when loop context is available.

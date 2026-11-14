@@ -1,0 +1,13 @@
+{
+  "name": "@ubc2026/shopping",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./shopping.mjs",
+  "scripts": { "test": "node --test shopping.test.mjs" },
+  "dependencies": {
+    "@ubc2026/bot-policy": "0.1.0",
+    "@ubc2026/x402": "0.1.0"
+  },
+  "engines": { "node": ">=20" }
+}

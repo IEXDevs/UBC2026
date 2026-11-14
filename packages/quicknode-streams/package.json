@@ -1,0 +1,9 @@
+{
+  "name": "@ubc2026/quicknode-streams",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./streams.mjs",
+  "scripts": { "test": "node --test streams.test.mjs" },
+  "engines": { "node": ">=20" }
+}
