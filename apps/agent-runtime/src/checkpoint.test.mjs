@@ -107,6 +107,9 @@ test('decide path pauses for approval in ask mode', async () => {
   assert.equal(result.gate.state, 'approval-needed');
   assert.equal(result.run.paused, true);
   assert.equal(result.run.step, 'approval');
+  const memo = JSON.parse(result.gate.memo);
+  assert.equal(memo.r, result.gate.digests.decision);
+  assert.match(memo.r, /^[a-f0-9]{64}$/);
 });
 
 test('BotStateMachine /decide stores gate outcome', async () => {

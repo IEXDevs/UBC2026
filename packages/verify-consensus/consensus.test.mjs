@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeFacts, compareFacts, factsDigest, reachConsensus, memoFromDecision } from './consensus.mjs';
+import { normalizeFacts, compareFacts, factsDigest, reachConsensus, hashDecisionRecord, memoFromDecision } from './consensus.mjs';
 
 const base = {
   asset: 'SOL',
@@ -51,6 +51,33 @@ test('backend re-checks until main agent corrects itself', async () => {
   assert.equal(result.attempts.length, 3);
   assert.deepEqual(result.attempts[0].mismatches, ['amount']);
   assert.equal(result.facts.amount, '1000000');
+});
+
+test('memo hash is recomputed from the decision record', async () => {
+  const result = await reachConsensus({
+    mainFn: async () => base,
+    verifyFn: async ({ main }) => ({ ...main }),
+  });
+  const memo = JSON.parse(memoFromDecision(result.decisionRecord));
+  assert.equal(memo.v, 1);
+  assert.equal(memo.o, 'c');
+  assert.equal(memo.d, factsDigest(base));
+  assert.equal(memo.r, result.decisionRecord.recordDigest);
+  assert.equal(memo.r, hashDecisionRecord(result.decisionRecord).recordDigest);
+
+  const changed = await reachConsensus({
+    mainFn: async () => ({ ...base, reasonSummary: 'Different reasoning summary' }),
+    verifyFn: async ({ main }) => ({ ...main }),
+  });
+  assert.notEqual(JSON.parse(memoFromDecision(changed.decisionRecord)).r, memo.r);
+  assert.throws(() => memoFromDecision({
+    ...result.decisionRecord,
+    facts: { ...result.decisionRecord.facts, amount: '2' },
+  }));
+  assert.throws(() => memoFromDecision({
+    ...result.decisionRecord,
+    recordDigest: 'b'.repeat(64),
+  }));
 });
 
 test('five exhausted mismatches surface manual review without a memo', async () => {
