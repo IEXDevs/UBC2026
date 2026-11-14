@@ -98,6 +98,20 @@ export const VOICE_TOOLS = Object.freeze([
     call('GET', '/api/bots'),
     call('POST', '/bots/:botId/pause'),
   ]),
+  tool('prepare_shopping', 'Prepare an x402 sandbox (or Laso) shopping purchase for a shopping bot. Same route as the shopping panel. Does not sign.', ['botId'], {
+    botId: botIdProp,
+    provider: { type: 'string', description: 'sandbox or laso' },
+  }, [
+    call('POST', '/bots/:botId/shopping/prepare', { body: ['provider'] }),
+  ]),
+  tool('sns_send', 'Resolve a .sol name and build a send intent. Same route as SNS send. Does not sign unless the Worker has an injected executor.', ['botId'], {
+    botId: botIdProp,
+    domain: { type: 'string', description: 'SNS domain like alex.sol' },
+    amount: { type: 'string', description: 'Base-unit amount string' },
+    from: { type: 'string', description: 'Sender pubkey' },
+  }, [
+    call('POST', '/bots/:botId/sns/send', { body: ['domain', 'amount', 'from'] }),
+  ]),
 ]);
 
 function tool(name, description, required, properties, calls) {
@@ -364,6 +378,18 @@ function validateParameters(toolDef, parameters) {
   }
   if (toolDef.properties.purpose && parameters.purpose != null && (typeof parameters.purpose !== 'string' || parameters.purpose.length > 64)) return false;
   if (toolDef.properties.goal && parameters.goal != null && typeof parameters.goal !== 'string') return false;
+  if (toolDef.properties.provider && parameters.provider != null) {
+    if (parameters.provider !== 'sandbox' && parameters.provider !== 'laso') return false;
+  }
+  if (toolDef.properties.domain && parameters.domain != null) {
+    if (typeof parameters.domain !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}\.sol$/i.test(parameters.domain)) return false;
+  }
+  if (toolDef.properties.amount && parameters.amount != null) {
+    if (typeof parameters.amount !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(parameters.amount)) return false;
+  }
+  if (toolDef.properties.from && parameters.from != null) {
+    if (typeof parameters.from !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.from)) return false;
+  }
   return true;
 }
 

@@ -18,6 +18,7 @@ Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 - `GET|POST /bots/:id/commerce/signals/:signalId` — bot sells a signal over x402 (402 challenge)
 - `POST /bots/:id/commerce/signals/:signalId/settle` — release signal after PAYMENT-SIGNATURE
 - `POST /bots/:id/sns/send` — resolve `.sol` and build/execute unsigned send intent (`x-owner-id`)
+- `POST /security/grab-back` — owner sweep additional wallets to main (`x-owner-id`); dry-run without transfer client
 - `GET /voice/agent` — ElevenLabs agent spec. Custom LLM is Grok (`x-ai/grok-4.7`, override with `OPENROUTER_MODEL_VOICE`) via `POST /voice/llm/chat/completions`, which streams OpenRouter chat completions. The OpenRouter key is not part of the spec.
 - `POST /voice/tools/:name` — ElevenLabs webhook tools. Each tool calls the same bot, event, wallet, metric, payment, or browser route as the UI, with the same `x-owner-id` header. Live View URLs are removed before the model sees the result. Requires `ELEVENLABS_WEBHOOK_SECRET` and `x-owner-id`. Without the secret the route returns `elevenlabs_webhook_not_configured` and does not call ElevenLabs.
 - `GET /api/routes` — contract route list and secret names (no values)

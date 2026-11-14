@@ -8,7 +8,7 @@ Privy mounts when `NEXT_PUBLIC_PRIVY_APP_ID` is set (`NEXT_PUBLIC_PRIVY_CLIENT_I
 
 The Agents pane is the bot page. It leads with an approval preview (approve, approve once, or raise limit) and does not sign. Under that is a live tool timeline, the owner Live View, and a "Why did it do this?" record built from decision digests. Live View and the timeline call the agent runtime when `NEXT_PUBLIC_AGENT_RUNTIME_URL` is set and a Privy user id is present.
 
-Overview shows owner rollup metrics (and polls `/api/metrics` when the runtime is up). Security is the kill switch / freeze page — pause-all hits each bot DO when possible; grab-back stays an intent until wallet routes sign. Payments, wallets, and positions stay empty for Sid.
+Overview shows owner rollup metrics (and polls `/api/metrics` when the runtime is up). Security is the kill switch / freeze page — pause-all hits each bot DO when possible; grab-back calls `POST /security/grab-back` (dry-run until a transfer client is injected). Shopping bots get a prepare panel for sandbox/Laso. Talk mounts `@elevenlabs/react` when `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` is set. Payments, wallets, and positions stay empty for Sid.
 
 Hosting is OpenNext on Cloudflare Workers (`wrangler.jsonc`, `open-next.config.ts`). This package does not deploy by itself.
 

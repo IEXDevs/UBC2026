@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react';
 import ApprovalPreview from './ApprovalPreview';
 import BotTimeline from './BotTimeline';
 import LiveViewPanel from './LiveViewPanel';
+import ShoppingPanel from './ShoppingPanel';
 import WhyView from './WhyView';
 import { buildBotPage, eventsUrl } from '../lib/bot-experience.mjs';
 
 const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
-export default function BotPage({ bot, ownerId = null }) {
+export default function BotPage({ bot, ownerId = null, onConversationEvent = null }) {
   const [remoteEvents, setRemoteEvents] = useState(null);
   const [focus, setFocus] = useState(null);
   const experience = bot.experience ?? { preview: null, events: [], decision: null };
@@ -53,6 +54,10 @@ export default function BotPage({ bot, ownerId = null }) {
     ? { ...page.sections[3].why, focus: { id: focus.id, summary: focus.summary } }
     : page.sections[3].why;
 
+  function note(event) {
+    onConversationEvent?.(event);
+  }
+
   return (
     <div className="bot-page">
       <ApprovalPreview preview={approval} botType={bot.type} />
@@ -60,7 +65,15 @@ export default function BotPage({ bot, ownerId = null }) {
         <div className="pill">● {bot.name} · {bot.type} · {bot.status}</div>
         <h1>{bot.goal}</h1>
       </header>
-      <BotTimeline entries={entries} live={remoteEvents != null} onWhy={setFocus} />
+      <ShoppingPanel bot={bot} ownerId={ownerId} onEvent={note} />
+      <BotTimeline
+        entries={entries}
+        live={remoteEvents != null}
+        onWhy={(entry) => {
+          setFocus(entry);
+          if (entry?.summary) note({ kind: entry.kind || 'timeline', summary: entry.summary });
+        }}
+      />
       <section className="panel" aria-label="Live View">
         <LiveViewPanel botId={bot.id} ownerId={ownerId} />
       </section>

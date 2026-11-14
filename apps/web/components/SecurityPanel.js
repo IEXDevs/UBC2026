@@ -14,6 +14,7 @@ export default function SecurityPanel({
   ownerId = null,
   accountLabel = null,
   onBotsChange,
+  wallets = null,
 }) {
   const [pending, setPending] = useState(null);
   const [message, setMessage] = useState(null);
@@ -46,7 +47,33 @@ export default function SecurityPanel({
       }
       setMessage(`Pause requested for ${results.length} bot(s).`);
     } else if (action.id === 'request-grab-back') {
-      setMessage('Grab-back intent recorded locally. Worker signing lands with wallet routes.');
+      if (ownerId && runtimeBase) {
+        try {
+          const list = Array.isArray(wallets) ? wallets : [];
+          const mainWallet = list.find((w) => w.kind === 'main') || null;
+          const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/security/grab-back`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-owner-id': ownerId,
+            },
+            body: JSON.stringify({
+              dryRun: !mainWallet,
+              mainWallet: mainWallet || { id: 'main_demo', ownerId, label: 'main', kind: 'main', address: '11111111111111111111111111111111', frozen: false, provider: 'privy' },
+              wallets: list.filter((w) => w.kind === 'additional'),
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) setMessage(`Grab-back: ${data.error || response.status}`);
+          else setMessage(data.dryRun
+            ? `Grab-back planned for ${data.moves?.length ?? 0} wallet(s). Connect wallets to sign.`
+            : `Grab-back submitted: ${data.moves?.length ?? 0} move(s).`);
+        } catch (err) {
+          setMessage(`Grab-back failed: ${err?.message || 'network'}`);
+        }
+      } else {
+        setMessage('Grab-back needs runtime URL and sign-in.');
+      }
     } else if (action.id === 'freeze-all-bots') {
       setMessage('Bots frozen in this session. Persist freeze via bot policy when API is live.');
     }

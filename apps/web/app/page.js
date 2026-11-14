@@ -179,7 +179,19 @@ function Shell({ ownerId, account, accountLabel = null }) {
           ) : null}
 
           {pane === 'Agents' ? (
-            <BotPage bot={bot} ownerId={ownerId} />
+            <BotPage
+              bot={bot}
+              ownerId={ownerId}
+              onConversationEvent={(event) => {
+                if (event?.summary) {
+                  conversation.push({
+                    kind: event.kind || 'timeline',
+                    text: event.summary,
+                    botId: bot.id,
+                  });
+                }
+              }}
+            />
           ) : pane === 'Overview' ? (
             <OverviewPanel bots={bots} ownerId={ownerId} />
           ) : pane === 'Security' ? (

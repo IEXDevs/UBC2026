@@ -117,6 +117,28 @@ test('signal sell returns 402 and settle releases payload', async () => {
   assert.equal(body.payload.tip, 'rotate LP');
 });
 
+test('grab-back dry-run plans additional wallet sweeps', async () => {
+  const res = await dispatchCommerceRoute(new Request('https://runtime/security/grab-back', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'own_1' },
+    body: JSON.stringify({
+      dryRun: true,
+      mainWallet: {
+        id: 'main_1', ownerId: 'own_1', label: 'main', kind: 'main',
+        address: payTo, frozen: false, provider: 'privy',
+      },
+      wallets: [{
+        id: 'add_1', ownerId: 'own_1', label: 'bot', kind: 'additional',
+        address: feePayer, frozen: false, provider: 'privy',
+      }],
+    }),
+  }), {}, { kind: 'grab-back' });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.dryRun, true);
+  assert.equal(body.moves.length, 1);
+});
+
 test('sns send builds unsigned intent from demo resolver', async () => {
   const dest = 'So11111111111111111111111111111111111111112';
   const res = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_1/sns/send', {
