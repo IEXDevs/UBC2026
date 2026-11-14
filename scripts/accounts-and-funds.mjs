@@ -71,11 +71,13 @@ export const ACCOUNT_VENDORS = Object.freeze([
       ...SECRET_GROUPS.privy,
       ...SECRET_GROUPS.privyClient,
       'NEXT_PUBLIC_PRIVY_CLIENT_ID',
+      'PRIVY_AUTHORIZATION_KEY',
     ]),
     steps: Object.freeze([
       'Create a Privy app at the dashboard.',
       'Put the app id in PRIVY_APP_ID and the app secret in PRIVY_APP_SECRET.',
       'Put the public app id in NEXT_PUBLIC_PRIVY_APP_ID and the client id in NEXT_PUBLIC_PRIVY_CLIENT_ID.',
+      'Optional: store the server authorization private key as PRIVY_AUTHORIZATION_KEY (the wallet-auth value from the Privy dashboard). Leave it empty when the app secret alone can sign. Do not commit it.',
       'Leave every value empty in git. The NEXT_PUBLIC_ names are still not committed.',
     ]),
   },
