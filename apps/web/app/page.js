@@ -1,13 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Plug, Plus, Search, Wallet } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
-import TalkStub from '../components/TalkStub';
 import LiveViewPanel from '../components/LiveViewPanel';
-import { getDemoShellState, panePlaceholder } from '../lib/demo-state.mjs';
+import MoneyPane from '../components/MoneyPane';
+import ConnectorsPane from '../components/ConnectorsPane';
+import BotRail from '../components/BotRail';
+import PaneDock from '../components/PaneDock';
+import Composer from '../components/Composer';
+import CreateBotDialog from '../components/CreateBotDialog';
+import ProfileSheet from '../components/ProfileSheet';
+import WalletsSheet from '../components/WalletsSheet';
+import { getDemoShellState } from '../lib/demo-state.mjs';
+import { moneyPane, walletGlance } from '../lib/money-views.mjs';
+import { applyLooks } from '../lib/bot-look.mjs';
+import { mergeRoster, reorderIds } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
+import { withAssignedWallet } from '../lib/wallet-assign.mjs';
 
-const state = getDemoShellState();
+const base = getDemoShellState();
+const LOOK_KEY = 'maelstrom.botLooks';
+const ROSTER_KEY = 'maelstrom.roster';
 const privyConfigured = privyProviderProps({
   appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
   clientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
@@ -18,12 +32,9 @@ export default function HomePage() {
     return (
       <Shell
         ownerId={null}
-        account={(
-          <div className="account">
-            <span className="account-id">Set NEXT_PUBLIC_PRIVY_APP_ID</span>
-            <button className="cta" type="button" disabled>Connect with Privy</button>
-          </div>
-        )}
+        accountLabel="You"
+        signedIn={false}
+        loginDisabled
       />
     );
   }
@@ -31,89 +42,253 @@ export default function HomePage() {
 }
 
 function AuthedShell() {
-  const { ready, authenticated, user, login, logout } = usePrivy();
+  const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
   const signedIn = ready && authenticated;
-  const ownerId = ownerIdFromPrivyUser(user, signedIn);
-  const account = !ready ? (
-    <button className="cta" type="button" disabled>Connect with Privy</button>
-  ) : signedIn ? (
-    <div className="account">
-      <span className="account-id">{privyAccountLabel(user)}</span>
-      <button className="ghost" type="button" onClick={() => logout()}>Log out</button>
-    </div>
-  ) : (
-    <button className="cta" type="button" onClick={() => login()}>Connect with Privy</button>
+  const [liveWallets, setLiveWallets] = useState(null);
+  const [walletNote, setWalletNote] = useState('');
+
+  useEffect(() => {
+    if (!signedIn) {
+      setLiveWallets(null);
+      setWalletNote('');
+      return undefined;
+    }
+    let stopped = false;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token || stopped) return;
+        const response = await fetch('/api/wallets', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const body = await response.json().catch(() => ({}));
+        if (stopped) return;
+        if (!response.ok || !Array.isArray(body.wallets) || body.wallets.length === 0) {
+          setWalletNote('The main wallet was not created. Sign in again and retry.');
+          return;
+        }
+        setLiveWallets(body.wallets);
+        setWalletNote(body.created ? 'Main wallet created and assigned to these agents.' : 'Main wallet assigned to these agents.');
+      } catch {
+        if (!stopped) setWalletNote('The main wallet was not created. Sign in again and retry.');
+      }
+    })();
+    return () => { stopped = true; };
+  }, [signedIn, user?.id, getAccessToken]);
+
+  return (
+    <Shell
+      ownerId={ownerIdFromPrivyUser(user, signedIn)}
+      accountLabel={signedIn ? privyAccountLabel(user) : 'You'}
+      signedIn={signedIn}
+      loginDisabled={!ready}
+      onLogin={login}
+      onLogout={logout}
+      liveWallets={liveWallets}
+      walletNote={walletNote}
+    />
   );
-  return <Shell ownerId={ownerId} account={account} />;
 }
 
-function Shell({ ownerId, account }) {
-  const [activeBot, setActiveBot] = useState(state.bots[0].id);
-  const [pane, setPane] = useState(state.panes[0]);
-  const bot = state.bots.find(item => item.id === activeBot) ?? state.bots[0];
-  const placeholder = panePlaceholder(pane);
+function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '' }) {
+  const [looks, setLooks] = useState({});
+  const [roster, setRoster] = useState({ order: base.bots.map(bot => bot.id), extra: [] });
+  const [ready, setReady] = useState(false);
+  const [query, setQuery] = useState('');
+  const [activeBot, setActiveBot] = useState(base.bots[0].id);
+  const [pane, setPane] = useState('Main');
+  const [slide, setSlide] = useState('right');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [walletsOpen, setWalletsOpen] = useState(false);
+  const closeCreate = useCallback(() => setCreateOpen(false), []);
+  const closeProfile = useCallback(() => setProfileOpen(false), []);
+  const closeWallets = useCallback(() => setWalletsOpen(false), []);
+
+  useEffect(() => {
+    let savedLooks = {};
+    let savedRoster = null;
+    try {
+      const rawLooks = localStorage.getItem(LOOK_KEY);
+      if (rawLooks) savedLooks = JSON.parse(rawLooks);
+    } catch {
+      savedLooks = {};
+    }
+    try {
+      const rawRoster = localStorage.getItem(ROSTER_KEY);
+      if (rawRoster) savedRoster = JSON.parse(rawRoster);
+    } catch {
+      savedRoster = null;
+    }
+    const merged = mergeRoster(base.bots, savedRoster);
+    setLooks(savedLooks);
+    setRoster({ order: merged.order, extra: merged.extra });
+    setActiveBot(merged.order[0] ?? null);
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    localStorage.setItem(LOOK_KEY, JSON.stringify(looks));
+    localStorage.setItem(ROSTER_KEY, JSON.stringify(roster));
+  }, [looks, roster, ready]);
+
+  const merged = useMemo(() => mergeRoster(base.bots, roster), [roster]);
+  const styled = useMemo(() => applyLooks(merged.bots, looks), [merged, looks]);
+  const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
+  const bots = assigned.bots;
+  const wallets = assigned.wallets ?? base.wallets;
+  const visible = bots.filter(bot => bot.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const bot = bots.find(item => item.id === activeBot) ?? null;
+  const money = moneyPane(pane);
+  const glance = walletGlance(wallets, base.positions);
+
+  function choosePane(next, direction) {
+    if (next === pane) return;
+    setSlide(direction);
+    setPane(next);
+    if (next === 'Main') setActiveBot(current => current ?? bots[0]?.id ?? null);
+  }
+
+  function openChat(id) {
+    setCreateOpen(false);
+    setWalletsOpen(false);
+    setProfileOpen(false);
+    setActiveBot(id);
+    if (pane !== 'Main') {
+      setSlide('left');
+      setPane('Main');
+    }
+  }
+
+  function onCreate(created) {
+    setRoster(current => ({
+      order: [created.id, ...current.order.filter(id => id !== created.id)],
+      extra: [created, ...current.extra.filter(item => item.id !== created.id)],
+    }));
+    setLooks(current => ({
+      ...current,
+      [created.id]: { name: created.name, shape: created.shape, color: created.color },
+    }));
+    setActiveBot(created.id);
+    setQuery('');
+    setSlide('right');
+    setPane('Main');
+    setCreateOpen(false);
+  }
+
+  function onReorder(fromId, toId) {
+    setRoster(current => ({ ...current, order: reorderIds(current.order, fromId, toId) }));
+  }
 
   return (
     <div className="shell">
-      <aside className="bots">
-        <div className="brand">
-          Mael<span>strom</span>
+      <aside className="side">
+        <div className="side-tools">
+          <label className="search">
+            <Search size={16} strokeWidth={1.75} />
+            <input
+              value={query}
+              placeholder="Search agents"
+              aria-label="Search agents"
+              onChange={event => setQuery(event.target.value)}
+            />
+          </label>
+          <button type="button" className="add-agent" onClick={() => { setProfileOpen(false); setCreateOpen(true); }}>
+            <Plus size={16} strokeWidth={1.75} />
+            Add agent
+          </button>
         </div>
-        <div className="bot-list" role="list">
-          {state.bots.map(item => (
+        <BotRail
+          bots={visible}
+          activeId={bot?.id}
+          canDrag={!query.trim()}
+          onSelect={openChat}
+          onReorder={onReorder}
+          onCreate={() => setCreateOpen(true)}
+        />
+        <footer className="you">
+          <div className="you-actions">
             <button
-              key={item.id}
-              className="bot-item"
-              role="listitem"
-              aria-current={item.id === activeBot ? 'true' : undefined}
-              onClick={() => setActiveBot(item.id)}
+              type="button"
+              className="you-link"
+              onClick={() => { setWalletsOpen(false); setProfileOpen(false); choosePane('Plugins', 'right'); }}
             >
-              <strong>{item.name}</strong>
-              <small>{item.type} · {item.status}</small>
+              <Plug size={15} strokeWidth={1.75} />
+              Plugins
             </button>
-          ))}
-        </div>
-        <button className="cta" type="button" disabled title="Bot creation is a later chunk">Create bot</button>
+            <button
+              type="button"
+              className="you-link"
+              onClick={() => { setCreateOpen(false); setProfileOpen(false); setWalletsOpen(true); }}
+            >
+              <Wallet size={15} strokeWidth={1.75} />
+              Wallets
+            </button>
+          </div>
+          <button type="button" className="you-btn" onClick={() => { setCreateOpen(false); setWalletsOpen(false); setProfileOpen(true); }}>
+            <span className="you-mark" aria-hidden="true">{accountLabel.slice(0, 1)}</span>
+            <span className="you-copy">
+              <strong>{accountLabel}</strong>
+              <small>Account</small>
+            </span>
+          </button>
+        </footer>
       </aside>
 
-      <main className="main">
-        <header className="top">
-          <nav className="panes" aria-label="Panes">
-            {state.panes.map(name => (
-              <button
-                key={name}
-                className="pane-tab"
-                aria-current={pane === name ? 'true' : undefined}
-                onClick={() => setPane(name)}
-              >
-                {name}
-              </button>
-            ))}
-          </nav>
-          {account}
+      <section className="stage">
+        <header className="topbar">
+          <span className="topbar-side" />
+          <PaneDock panes={base.panes} pane={pane} onChange={choosePane} />
+          <button
+            type="button"
+            className="wallet-chip"
+            onClick={() => { setCreateOpen(false); setProfileOpen(false); setWalletsOpen(true); }}
+          >
+            <Wallet size={16} strokeWidth={1.75} />
+            <span>{glance.balanceLabel}</span>
+          </button>
         </header>
-
-        <section className="content">
-          <div className="hero-panel">
-            <div className="pill">● {pane} · {bot.name}</div>
-            <h1>{bot.goal}</h1>
-            <p>
-              Budget-aware Solana agents with trust gates, independent verification,
-              and Phantom-style approvals before every spend.
-            </p>
-          </div>
-
-          <section className="panel empty-pane" aria-label={placeholder.title}>
-            <h2>{placeholder.title}</h2>
-            <p>{placeholder.body}</p>
-          </section>
-
-          <section className="panel" aria-label="Live View">
-            <LiveViewPanel botId={bot.id} ownerId={ownerId} />
-          </section>
-          <TalkStub botName={bot.name} />
-        </section>
-      </main>
+        <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}`}>
+          <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}`} aria-label={pane}>
+            {pane === 'Main' ? (
+              bot ? (
+                <>
+                  <header className="bubble-head">
+                    <strong>{bot.name}</strong>
+                    <span>{bot.type} · {bot.status}</span>
+                  </header>
+                  <h1>{bot.goal}</h1>
+                  <LiveViewPanel botId={bot.id} ownerId={ownerId} />
+                </>
+              ) : (
+                <>
+                  <h1>Make your first Agent!</h1>
+                  <p>The list stays empty until you create one.</p>
+                  <button type="button" className="solid" onClick={() => setCreateOpen(true)}>Create</button>
+                </>
+              )
+            ) : null}
+            {money ? <MoneyPane pane={money} state={{ ...base, bots, wallets }} /> : null}
+            {pane === 'Plugins' ? <ConnectorsPane connectors={base.connectors} bots={bots} /> : null}
+          </article>
+        </div>
+        {pane === 'Main' && bot ? <Composer botName={bot.name} /> : pane === 'Positions' ? null : <div className="composer-gap" />}
+      </section>
+      <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
+      <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ ...base, bots, wallets }} note={walletNote} />
+      <ProfileSheet
+        open={profileOpen}
+        onClose={closeProfile}
+        accountLabel={accountLabel}
+        glance={glance}
+        wallets={wallets}
+        signedIn={signedIn}
+        loginDisabled={loginDisabled}
+        onLogin={onLogin}
+        onLogout={onLogout}
+      />
     </div>
   );
 }

@@ -12,6 +12,7 @@
     "test": "node --test lib/*.test.mjs"
   },
   "dependencies": {
+    "@elevenlabs/client": "^1.36.1",
     "@opennextjs/cloudflare": "^1.20.17",
     "@privy-io/react-auth": "^3.51.4",
     "@solana-program/memo": "^0.8.0",
@@ -19,9 +20,12 @@
     "@solana-program/token": "^0.6.0",
     "@solana/kit": "^3.0.3",
     "@ubc2026/contracts": "0.1.0",
+    "@ubc2026/wallets": "0.1.0",
+    "lucide-react": "^0.554.0",
     "next": "^15.5.29",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "wrangler": "^4.162.0"
