@@ -1,5 +1,6 @@
 'use client';
 
+import { Trash2 } from 'lucide-react';
 import Dock from './Dock';
 import AnimatedList from './AnimatedList';
 import BotMark from './BotMark';
@@ -109,6 +110,21 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
           icon: agentIcon(bot, 60),
           title: bot.name,
           description: bot.goal,
+          meta: typeof onDelete === 'function' ? (
+            <button
+              type="button"
+              className="icon-btn rail-delete"
+              aria-label={`Delete ${bot.name}`}
+              title="Delete agent"
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                onDelete(bot.id);
+              }}
+            >
+              <Trash2 size={15} strokeWidth={1.75} />
+            </button>
+          ) : null,
         }))}
         onItemSelect={item => onSelect(item.id)}
       />

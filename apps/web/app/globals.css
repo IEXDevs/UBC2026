@@ -1038,7 +1038,7 @@ button:focus-visible, input:focus-visible {
 
 .bubble-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
   color: var(--muted);
   margin-bottom: 18px;
@@ -1046,8 +1046,13 @@ button:focus-visible, input:focus-visible {
 
 .bubble-head strong { color: var(--text); }
 
-.bubble-head .icon-btn {
-  margin-left: auto;
+.rail-delete {
+  opacity: 0.55;
+}
+
+.rail-delete:hover,
+.rail-delete:focus-visible {
+  opacity: 1;
 }
 
 .bubble h1 {
