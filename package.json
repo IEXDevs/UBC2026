@@ -3,5 +3,6 @@
   "private": true,
   "workspaces": ["packages/*", "apps/*"],
   "scripts": { "test": "npm test --workspaces --if-present && node --test supabase/*.test.mjs" },
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=20" },
+  "devDependencies": { "@electric-sql/pglite": "^0.5.16" }
 }
