@@ -4,7 +4,15 @@ Glassmorphic shell (Sid): agent rail, positions book, plugins, history, Privy lo
 
 Create bot asks for a type, a wallet, caps, and an approval mode. The three built-in templates are locked. User templates can be saved and deleted in the page. Create stores a draft; Enable turns it on. The wallet list is built with the wallet helpers (main, additional, and a frozen wallet that cannot be assigned). Nothing here signs or reads secret values.
 
-Privy mounts when `NEXT_PUBLIC_PRIVY_APP_ID` is set (`NEXT_PUBLIC_PRIVY_CLIENT_ID` is optional). Put the same app id in root `.env.local`. Login is Solana-only and creates an embedded wallet for users who do not have one. `PRIVY_APP_SECRET` stays on the Worker / `.env.local` server routes — never in `NEXT_PUBLIC_*`.
+Privy mounts when `NEXT_PUBLIC_PRIVY_APP_ID` is set. Put that value (and the matching `PRIVY_APP_ID`) in the **repo root** `.env.local` — `next.config.mjs` loads root `NEXT_PUBLIC_*` into the Next process. Login is Solana-only and creates an embedded wallet for users who do not have one. `PRIVY_APP_SECRET` stays on the Worker / root `.env.local` server routes — never in `NEXT_PUBLIC_*`.
+
+If Connect → email shows **Something went wrong**, fix the Privy dashboard (not the Next env file):
+
+1. [Authentication](https://dashboard.privy.io) → enable **Email**.
+2. Configuration → App settings → **Domains** → Allowed origins → add exactly `http://localhost:3000` (include the port). Add your deployed web origin the same way when you host it.
+3. Leave `NEXT_PUBLIC_PRIVY_CLIENT_ID` **empty** unless you created an App client and copied that client’s id. A wrong client id uses a different allowlist and fails email with the same generic error.
+4. Enable **Solana** embedded wallets (create on login) so the shell can mint the main wallet after OTP.
+5. Restart `npm run dev -w @ubc2026/web` after any `.env.local` change. In DevTools → Network, a failing init call often returns `invalid_origin`.
 
 Set `NEXT_PUBLIC_AGENT_RUNTIME_URL` to the deployed agent-runtime origin (for example `https://maelstrom-agent-runtime.<subdomain>.workers.dev`). That is not the Next dev server on port 3000.
 

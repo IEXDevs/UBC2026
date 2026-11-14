@@ -203,4 +203,4 @@ npm run dev -w @ubc2026/web
 npm test -w @ubc2026/agent-runtime
 ```
 
-Web needs `NEXT_PUBLIC_PRIVY_APP_ID` (optional `NEXT_PUBLIC_PRIVY_CLIENT_ID`), `NEXT_PUBLIC_AGENT_RUNTIME_URL` pointing at the **Worker** URL (not `localhost:3000`), and optionally `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`. Leave every secret value in `.env.example` empty.
+Web needs `NEXT_PUBLIC_PRIVY_APP_ID` in the **root** `.env.local` (Next loads root `NEXT_PUBLIC_*` via `apps/web/next.config.mjs`), `NEXT_PUBLIC_AGENT_RUNTIME_URL` pointing at the **Worker** URL (not `localhost:3000`), and optionally `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`. Leave `NEXT_PUBLIC_PRIVY_CLIENT_ID` empty unless you use a Privy App client. For email login, allowlist `http://localhost:3000` under Privy → Domains and enable Email + Solana embedded wallets — see `apps/web/README.md`. Leave every secret value in `.env.example` empty.
