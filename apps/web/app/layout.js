@@ -1,4 +1,5 @@
 import './globals.css';
+import PrivyRoot from '../components/PrivyRoot';
 
 export const metadata = {
   title: 'Maelstrom',
@@ -8,7 +9,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <PrivyRoot>{children}</PrivyRoot>
+      </body>
     </html>
   );
 }

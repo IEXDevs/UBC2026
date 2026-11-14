@@ -146,6 +146,12 @@ button {
 }
 
 .cta:hover { transform: translateY(-1px); filter: brightness(1.05); }
+.cta:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
 
 .content {
   padding: 1.5rem;
@@ -276,6 +282,27 @@ button {
   border: 1px solid var(--stroke);
   border-radius: 14px;
   background: #041018;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.account-id {
+  color: var(--muted);
+  font-size: 0.85rem;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-pane p {
+  margin: 0;
+  color: var(--muted);
 }
 
 .pill {

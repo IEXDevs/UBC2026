@@ -1,16 +1,57 @@
 'use client';
 
 import { useState } from 'react';
+import { usePrivy } from '@privy-io/react-auth';
 import TalkStub from '../components/TalkStub';
 import LiveViewPanel from '../components/LiveViewPanel';
-import { getDemoShellState } from '../lib/demo-state.mjs';
+import { getDemoShellState, panePlaceholder } from '../lib/demo-state.mjs';
+import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
 
 const state = getDemoShellState();
+const privyConfigured = privyProviderProps({
+  appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
+  clientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
+}) !== null;
 
 export default function HomePage() {
+  if (!privyConfigured) {
+    return (
+      <Shell
+        ownerId={null}
+        account={(
+          <div className="account">
+            <span className="account-id">Set NEXT_PUBLIC_PRIVY_APP_ID</span>
+            <button className="cta" type="button" disabled>Connect with Privy</button>
+          </div>
+        )}
+      />
+    );
+  }
+  return <AuthedShell />;
+}
+
+function AuthedShell() {
+  const { ready, authenticated, user, login, logout } = usePrivy();
+  const signedIn = ready && authenticated;
+  const ownerId = ownerIdFromPrivyUser(user, signedIn);
+  const account = !ready ? (
+    <button className="cta" type="button" disabled>Connect with Privy</button>
+  ) : signedIn ? (
+    <div className="account">
+      <span className="account-id">{privyAccountLabel(user)}</span>
+      <button className="ghost" type="button" onClick={() => logout()}>Log out</button>
+    </div>
+  ) : (
+    <button className="cta" type="button" onClick={() => login()}>Connect with Privy</button>
+  );
+  return <Shell ownerId={ownerId} account={account} />;
+}
+
+function Shell({ ownerId, account }) {
   const [activeBot, setActiveBot] = useState(state.bots[0].id);
-  const [pane, setPane] = useState('Overview');
+  const [pane, setPane] = useState(state.panes[0]);
   const bot = state.bots.find(item => item.id === activeBot) ?? state.bots[0];
+  const placeholder = panePlaceholder(pane);
 
   return (
     <div className="shell">
@@ -32,7 +73,7 @@ export default function HomePage() {
             </button>
           ))}
         </div>
-        <button className="cta" type="button">Create bot</button>
+        <button className="cta" type="button" disabled title="Bot creation is a later chunk">Create bot</button>
       </aside>
 
       <main className="main">
@@ -49,7 +90,7 @@ export default function HomePage() {
               </button>
             ))}
           </nav>
-          <button className="cta" type="button">Connect with Privy</button>
+          {account}
         </header>
 
         <section className="content">
@@ -62,33 +103,14 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="grid">
-            <section className="panel" aria-label="Live timeline">
-              <h2>Live timeline</h2>
-              <ul className="timeline">
-                {state.timeline.map(event => (
-                  <li key={event.at + event.summary}>
-                    <time>{event.at}</time>
-                    <span>{event.summary}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
+          <section className="panel empty-pane" aria-label={placeholder.title}>
+            <h2>{placeholder.title}</h2>
+            <p>{placeholder.body}</p>
+          </section>
 
-            <section className="panel" aria-label="Approvals">
-              <h2>Approvals</h2>
-              <ul className="timeline">
-                {state.approvals.map(item => (
-                  <li key={item.id}>
-                    <strong>{item.title}</strong>
-                    <span>{item.state}</span>
-                  </li>
-                ))}
-              </ul>
-              <LiveViewPanel botId={bot.id} ownerId={state.ownerId} />
-            </section>
-          </div>
-
+          <section className="panel" aria-label="Live View">
+            <LiveViewPanel botId={bot.id} ownerId={ownerId} />
+          </section>
           <TalkStub botName={bot.name} />
         </section>
       </main>

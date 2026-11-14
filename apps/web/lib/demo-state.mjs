@@ -1,6 +1,10 @@
 import { createBuiltinTemplates } from '@ubc2026/contracts';
 
-/** Placeholder UI state until Privy + Supabase are wired. */
+/** Placeholder shell chrome. Pane bodies stay empty until later bot features. */
+export function panePlaceholder(name) {
+  return { title: name, body: 'Empty.' };
+}
+
 export function getDemoShellState() {
   const templates = createBuiltinTemplates();
   return {
