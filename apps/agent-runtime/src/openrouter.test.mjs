@@ -22,10 +22,11 @@ test('locked platform prompt is first and caller system messages are dropped', (
   assert.match(messages[1].content, /Bot goal/);
 });
 
-test('OpenRouter calls use the role model and never put the key in the body', async () => {
+test('model calls use Muse Spark and never put the key in the body', async () => {
   const seen = [];
   const client = createOpenRouter({
     apiKey: API_KEY,
+    provider: 'meta',
     secrets: [API_KEY, 'privy-app-secret-value'],
     fetcher: async (url, options) => {
       seen.push({ url, options, body: JSON.parse(options.body) });
@@ -42,8 +43,10 @@ test('OpenRouter calls use the role model and never put the key in the body', as
   assert.equal(seen[0].options.headers.Authorization, `Bearer ${API_KEY}`);
   assert.equal(JSON.stringify(seen[0].body).includes(API_KEY), false);
   assert.equal(JSON.stringify(seen[0].body).includes('privy-app-secret-value'), false);
-  assert.equal(seen[0].body.model, 'meta/muse-spark-1.3-contributor');
+  assert.equal(seen[0].body.model, 'muse-spark-1.3-contributor');
+  assert.equal(seen[0].body.messages[0].role, 'developer');
   assert.match(seen[0].body.messages[1].content, /\[redacted\]/);
+  assert.match(seen[0].url, /api\.meta\.ai/);
 });
 
 test('decide uses the strong model and vision uses the image model', async () => {
@@ -101,10 +104,11 @@ test('text chat keeps platform rules first and maps agent history', () => {
   assert.match(messages.at(-1).content, /\[redacted\]/);
 });
 
-test('chat completion uses the fast model and returns a reply', async () => {
+test('chat completion uses Muse Spark and returns a reply', async () => {
   const seen = [];
   const client = createOpenRouter({
     apiKey: API_KEY,
+    provider: 'meta',
     fetcher: async (_url, options) => {
       seen.push(JSON.parse(options.body));
       return Response.json({ choices: [{ message: { content: 'watching the book' } }] });
@@ -117,5 +121,7 @@ test('chat completion uses the fast model and returns a reply', async () => {
   });
   assert.equal(result.text, 'watching the book');
   assert.equal(seen[0].model, MODEL_ROLES.research);
+  assert.equal(seen[0].messages[0].role, 'developer');
   assert.equal(seen[0].messages[0].content, PLATFORM_PROMPT);
+  assert.equal(seen[0].reasoning_effort, 'minimal');
 });

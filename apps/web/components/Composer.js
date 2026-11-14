@@ -527,8 +527,16 @@ function voiceFailureNote(error) {
 }
 
 function chatFailureNote(code) {
-  if (code === 'openrouter_not_configured') return 'Add OPENROUTER_API_KEY to the root .env.local and restart Next.';
-  if (code === 'openrouter_unauthorized' || code === 'openrouter_failed') return 'The model refused this turn. Try again in a moment.';
+  if (code === 'openrouter_not_configured') {
+    return 'Add MODEL_API_KEY=LLM_… (Meta Model API) to the root .env.local and restart Next.';
+  }
+  if (code === 'openrouter_unauthorized') {
+    return 'Meta Model API rejected the key. Check MODEL_API_KEY in root .env.local (should start with LLM_).';
+  }
+  if (code === 'openrouter_bad_request') return 'The model request was invalid. Try a shorter message.';
+  if (code === 'openrouter_failed' || code === 'openrouter_unavailable') {
+    return 'The model call failed. Try again in a moment.';
+  }
   if (code === 'not_found' || code === 'bot_not_found') return 'This bot was not found for your account.';
   if (code === 'invalid_request') return 'Sign in to chat with this bot.';
   if (code === 'network') return 'Could not reach the chat API for a reply.';

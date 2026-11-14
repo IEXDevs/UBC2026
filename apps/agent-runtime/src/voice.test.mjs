@@ -49,7 +49,7 @@ function toolRequest(name, { headers = {}, body = {} } = {}) {
 
 test('the agent spec uses Muse Spark as the custom LLM and includes no secret values', async () => {
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/agent`), env({
-    OPENROUTER_API_KEY: OPENROUTER,
+    MODEL_API_KEY: 'LLM_test_secret_value_here',
     ELEVENLABS_API_KEY: ELEVEN,
     OPENROUTER_MODEL_VOICE: 'not a model',
   }));
@@ -57,8 +57,8 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   const spec = await response.json();
   assert.equal(spec.llm.provider, 'custom-llm');
   assert.equal(spec.llm.modelId, GROK_VOICE_MODEL);
-  assert.equal(spec.llm.modelId, 'meta/muse-spark-1.3-contributor');
-  assert.equal(spec.llm.upstream, OPENROUTER_CHAT_COMPLETIONS);
+  assert.equal(spec.llm.modelId, 'muse-spark-1.3-contributor');
+  assert.equal(spec.llm.upstream, 'https://api.meta.ai/v1/chat/completions');
   assert.equal(spec.llm.streaming, true);
   assert.equal(spec.llm.apiKeyIncluded, false);
   const prompt = spec.elevenlabs.conversation_config.agent.prompt;
@@ -228,9 +228,9 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.equal(sse.includes(OPENROUTER), false);
   assert.match(sse, /hello \[hidden\]/);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, OPENROUTER_CHAT_COMPLETIONS);
+  assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(calls[0].init.headers.Authorization, `Bearer ${OPENROUTER}`);
-  assert.equal(calls[0].body.model, GROK_VOICE_MODEL);
+  assert.equal(calls[0].body.model, 'meta/muse-spark-1.3-contributor');
   assert.equal(calls[0].body.stream, true);
   assert.equal(calls[0].body.messages[0].content.includes(OPENROUTER), false);
 
@@ -239,16 +239,17 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
     body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
-  }), env({ OPENROUTER_API_KEY: OPENROUTER, OPENROUTER_MODEL_VOICE: 'meta/muse-spark-1.3' }), {
+  }), env({ MODEL_API_KEY: 'LLM_test_secret_value_here', OPENROUTER_MODEL_VOICE: 'muse-spark-1.3' }), {
     fetcher: async (url, init) => {
-      calls.push(JSON.parse(init.body));
+      calls.push({ url, body: JSON.parse(init.body) });
       return new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
         headers: { 'content-type': 'text/event-stream' },
       });
     },
   });
   assert.equal(await stream.text(), 'data: {"ok":true}\n\ndata: [DONE]\n\n');
-  assert.equal(calls[0].model, 'meta/muse-spark-1.3');
+  assert.equal(calls[0].url, 'https://api.meta.ai/v1/chat/completions');
+  assert.equal(calls[0].body.model, 'muse-spark-1.3');
 
   const blocked = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',

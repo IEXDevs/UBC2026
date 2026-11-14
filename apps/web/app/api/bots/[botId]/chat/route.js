@@ -29,7 +29,8 @@ export async function POST(request, context) {
 
   try {
     const reply = await completeTextChat({
-      apiKey: readRootEnv('OPENROUTER_API_KEY'),
+      modelApiKey: readRootEnv('MODEL_API_KEY'),
+      openrouterApiKey: readRootEnv('OPENROUTER_API_KEY'),
       botName: typeof body.name === 'string' ? body.name : 'Agent',
       botGoal: typeof body.goal === 'string' ? body.goal : '',
       botType: typeof body.type === 'string' ? body.type : 'trading',
@@ -38,12 +39,14 @@ export async function POST(request, context) {
       model: readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined,
     });
     return Response.json(
-      { ok: true, botId, reply: reply.text, model: reply.model },
+      { ok: true, botId, reply: reply.text, model: reply.model, provider: reply.provider },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (error) {
     const code = error instanceof TextChatError ? error.code : 'chat_failed';
     const status = error instanceof TextChatError ? error.status : 502;
-    return Response.json({ error: code }, { status, headers: { 'Cache-Control': 'no-store' } });
+    const payload = { error: code };
+    if (error instanceof TextChatError && error.detail) payload.detail = error.detail;
+    return Response.json(payload, { status, headers: { 'Cache-Control': 'no-store' } });
   }
 }

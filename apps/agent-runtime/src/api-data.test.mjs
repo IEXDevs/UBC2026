@@ -157,7 +157,7 @@ test('bot text chat returns an OpenRouter reply for the owner', async () => {
   const env = fakeEnv({
     openRouter: {
       chat: async ({ message, botName }) => ({
-        model: 'meta/muse-spark-1.3-contributor',
+        model: 'muse-spark-1.3-contributor',
         text: `${botName} heard: ${message}`,
       }),
     },

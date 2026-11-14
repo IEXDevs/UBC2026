@@ -1,21 +1,22 @@
 /**
  * ElevenLabs voice agent.
- * Custom LLM is Meta Muse Spark 1.3 Contributor via OpenRouter: ElevenLabs calls
- * this Worker, and the Worker streams chat completions. The OpenRouter key stays here.
+ * Custom LLM is Meta Muse Spark 1.3 Contributor via Meta Model API (or OpenRouter
+ * fallback). ElevenLabs calls this Worker; the Worker streams chat completions.
  * Webhook tools call the same bot, event, wallet, and browser routes as the UI.
  * No secret values are written into the agent payload.
  */
 import { timingSafeEqual } from 'node:crypto';
 import { SECRET_NAMES } from '@ubc2026/contracts';
+import { META_SPARK_MODEL, resolveModelProvider } from './openrouter.mjs';
 
-export const DEFAULT_VOICE_MODEL = 'meta/muse-spark-1.3-contributor';
+export const DEFAULT_VOICE_MODEL = META_SPARK_MODEL;
 /** @deprecated Prefer DEFAULT_VOICE_MODEL — kept for older imports. */
 export const GROK_VOICE_MODEL = DEFAULT_VOICE_MODEL;
-export const OPENROUTER_CHAT_COMPLETIONS = 'https://openrouter.ai/api/v1/chat/completions';
+export const OPENROUTER_CHAT_COMPLETIONS = 'https://api.meta.ai/v1/chat/completions';
 const WEBHOOK_HEADER = 'x-elevenlabs-webhook-secret';
 const SECRET_PLACEHOLDER = '{{ELEVENLABS_WEBHOOK_SECRET}}';
 const ID = /^[a-zA-Z0-9:_-]{1,128}$/;
-const OPENROUTER_MODEL_ID = /^[a-z0-9][a-z0-9._-]{0,63}\/[a-z0-9][a-z0-9._:-]{0,127}$/i;
+const MODEL_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
 export const VOICE_SYSTEM_PROMPT = [
   'You are the voice remote for this user\'s Maelstrom Solana agent dashboard.',
@@ -126,8 +127,17 @@ function call(method, path, extra = {}) {
 
 export function grokVoiceModel(env = {}) {
   const override = typeof env.OPENROUTER_MODEL_VOICE === 'string' ? env.OPENROUTER_MODEL_VOICE.trim() : '';
-  if (OPENROUTER_MODEL_ID.test(override) && override.length <= 128) return override;
-  return DEFAULT_VOICE_MODEL;
+  if (MODEL_ID.test(override) && override.length <= 128) return override;
+  return resolveModelProvider(env).defaultModel || DEFAULT_VOICE_MODEL;
+}
+
+export function voiceChatCompletionsUrl(env = {}) {
+  const resolved = resolveModelProvider(env);
+  return `${resolved.baseUrl}/chat/completions`;
+}
+
+function modelApiKey(env = {}) {
+  return resolveModelProvider(env).apiKey;
 }
 
 function webhookHeaders() {
@@ -182,7 +192,7 @@ export function voiceAgentSpec(request, env = {}) {
     llm: {
       provider: 'custom-llm',
       modelId,
-      upstream: OPENROUTER_CHAT_COMPLETIONS,
+      upstream: voiceChatCompletionsUrl(env),
       streaming: true,
       apiKeyIncluded: false,
     },
@@ -487,7 +497,8 @@ function sanitizeTools(tools, secrets) {
 async function handleCustomLlm(request, env, fetcher) {
   const denied = authorize(request, env);
   if (denied) return denied;
-  const apiKey = typeof env.OPENROUTER_API_KEY === 'string' ? env.OPENROUTER_API_KEY.trim() : '';
+  const resolved = resolveModelProvider(env);
+  const apiKey = modelApiKey(env);
   if (!apiKey) return json({ error: 'openrouter_not_configured' }, 503);
   const secrets = knownSecrets(env);
   const incoming = await request.json().catch(() => null);
@@ -495,16 +506,20 @@ async function handleCustomLlm(request, env, fetcher) {
   const messages = sanitizeMessages(incoming.messages, secrets);
   const tools = sanitizeTools(incoming.tools, secrets);
   if (!messages || tools === null) return json({ error: 'invalid_body' }, 400);
+  const adapted = resolved.provider === 'meta'
+    ? messages.map(item => (item?.role === 'system' ? { ...item, role: 'developer' } : item))
+    : messages;
   const payload = {
     model: grokVoiceModel(env),
-    messages,
+    messages: adapted,
     stream: true,
-    temperature: 0.4,
   };
+  if (resolved.provider !== 'meta') payload.temperature = 0.4;
+  else payload.reasoning_effort = 'minimal';
   if (tools) payload.tools = tools;
   let response;
   try {
-    response = await fetcher(OPENROUTER_CHAT_COMPLETIONS, {
+    response = await fetcher(voiceChatCompletionsUrl(env), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,

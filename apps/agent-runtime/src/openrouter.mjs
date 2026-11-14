@@ -1,6 +1,8 @@
 /**
- * OpenRouter chat client for the bot loop.
- * The API key is sent only as an Authorization header. It is never written into the prompt.
+ * Model chat client for the bot loop (Meta Model API by default).
+ * Keys are Authorization headers only — never written into the prompt.
+ * Prefers MODEL_API_KEY (LLM_…) → https://api.meta.ai/v1.
+ * Falls back to OPENROUTER_API_KEY (sk-or-…) → OpenRouter.
  * Tests inject `fetcher` and pass without a live key.
  */
 import { SECRET_NAMES } from '@ubc2026/contracts';
@@ -15,13 +17,21 @@ export class OpenRouterError extends Error {
   }
 }
 
-/** OpenRouter slugs. Default is Meta Muse Spark 1.3 Contributor for all roles. */
+export const META_MODEL_BASE = 'https://api.meta.ai/v1';
+export const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+
+/** Meta Model API id (Contributor tier). */
+export const META_SPARK_MODEL = 'muse-spark-1.3-contributor';
+/** OpenRouter slug for the same checkpoint, if falling back. */
+export const OPENROUTER_SPARK_MODEL = 'meta/muse-spark-1.3-contributor';
+
+/** Default model per loop role. */
 export const MODEL_ROLES = Object.freeze({
-  research: 'meta/muse-spark-1.3-contributor',
-  decide: 'meta/muse-spark-1.3-contributor',
-  verify: 'meta/muse-spark-1.3-contributor',
-  monitor: 'meta/muse-spark-1.3-contributor',
-  vision: 'meta/muse-spark-1.3-contributor',
+  research: META_SPARK_MODEL,
+  decide: META_SPARK_MODEL,
+  verify: META_SPARK_MODEL,
+  monitor: META_SPARK_MODEL,
+  vision: META_SPARK_MODEL,
 });
 
 const ROLE_ENV = Object.freeze({
@@ -47,10 +57,56 @@ function redact(value, secrets) {
   return text;
 }
 
-function modelFor(role, overrides = {}) {
+function modelFor(role, overrides = {}, fallback = META_SPARK_MODEL) {
   const override = overrides[role];
   if (typeof override === 'string' && override.trim() && override.length <= 128) return override.trim();
-  return MODEL_ROLES[role];
+  return fallback;
+}
+
+function trimKey(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Resolve Meta vs OpenRouter from env.
+ * LLM_-prefixed keys always go to Meta even if stored as OPENROUTER_API_KEY.
+ */
+export function resolveModelProvider(env = {}) {
+  const modelKey = trimKey(env.MODEL_API_KEY);
+  const openrouterKey = trimKey(env.OPENROUTER_API_KEY);
+  const llmAsOpenrouter = openrouterKey.startsWith('LLM_') ? openrouterKey : '';
+  const metaKey = modelKey || llmAsOpenrouter;
+  if (metaKey) {
+    return {
+      provider: 'meta',
+      apiKey: metaKey,
+      baseUrl: META_MODEL_BASE,
+      defaultModel: META_SPARK_MODEL,
+    };
+  }
+  if (openrouterKey) {
+    return {
+      provider: 'openrouter',
+      apiKey: openrouterKey,
+      baseUrl: OPENROUTER_BASE,
+      defaultModel: OPENROUTER_SPARK_MODEL,
+    };
+  }
+  return {
+    provider: 'none',
+    apiKey: '',
+    baseUrl: META_MODEL_BASE,
+    defaultModel: META_SPARK_MODEL,
+  };
+}
+
+/** Meta prefers developer over system; keep user/assistant as-is. */
+export function adaptMessagesForProvider(messages, provider) {
+  if (provider !== 'meta' || !Array.isArray(messages)) return messages;
+  return messages.map(message => {
+    if (!message || message.role !== 'system') return message;
+    return { ...message, role: 'developer' };
+  });
 }
 
 /**
@@ -135,24 +191,98 @@ function messageText(message) {
   return '';
 }
 
+async function postChat({
+  apiKey,
+  baseUrl,
+  provider,
+  fetcher,
+  payload,
+  hidden,
+  timeoutMs = 60000,
+}) {
+  if (typeof apiKey !== 'string' || apiKey.trim() === '') throw new OpenRouterError('openrouter_not_configured', 503);
+  const body = {
+    ...payload,
+    messages: adaptMessagesForProvider(payload.messages, provider),
+  };
+  if (provider === 'meta') {
+    // Muse Spark is tuned for default temperature; omit unless explicitly set.
+    if (body.temperature == null) delete body.temperature;
+    if (body.reasoning_effort == null) body.reasoning_effort = 'minimal';
+  }
+  let response;
+  try {
+    response = await fetcher(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Title': 'Maelstrom',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    throw new OpenRouterError('openrouter_unavailable');
+  }
+  if (!response?.ok) {
+    let detail = '';
+    try {
+      const errBody = await response.json();
+      detail = typeof errBody?.error?.message === 'string'
+        ? errBody.error.message
+        : typeof errBody?.error === 'string'
+          ? errBody.error
+          : '';
+    } catch {
+      detail = '';
+    }
+    const status = response?.status === 401 || response?.status === 403
+      ? 401
+      : response?.status === 400
+        ? 400
+        : 502;
+    const code = status === 401
+      ? 'openrouter_unauthorized'
+      : status === 400
+        ? 'openrouter_bad_request'
+        : 'openrouter_failed';
+    const error = new OpenRouterError(code, status);
+    if (detail && detail.length <= 240) error.detail = detail;
+    throw error;
+  }
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new OpenRouterError('openrouter_invalid_response');
+  }
+  const text = messageText(data?.choices?.[0]?.message).trim();
+  if (!text) throw new OpenRouterError('openrouter_invalid_response');
+  return { model: body.model, text: redact(text, hidden), provider };
+}
+
 export function createOpenRouter({
   apiKey = '',
   fetcher = fetch,
-  baseUrl = 'https://openrouter.ai/api/v1',
+  baseUrl = META_MODEL_BASE,
+  provider = 'meta',
   models = {},
+  defaultModel = META_SPARK_MODEL,
   secrets = [],
 } = {}) {
   const hidden = [apiKey, ...secrets].filter(value => typeof value === 'string' && value.length >= 8);
   return {
+    provider,
     modelFor(role) {
       if (!ROLES.includes(role)) throw new OpenRouterError('unknown_model_role', 400);
-      return modelFor(role, models);
+      return modelFor(role, models, defaultModel);
     },
     async complete({ role, goal = '', task = '', untrusted = [], images = [] }) {
-      if (typeof apiKey !== 'string' || apiKey.trim() === '') throw new OpenRouterError('openrouter_not_configured', 503);
       const resolved = role === 'research' && images.length > 0 ? 'vision' : role;
       if (!ROLES.includes(resolved)) throw new OpenRouterError('unknown_model_role', 400);
-      const model = modelFor(resolved, models);
+      const model = modelFor(resolved, models, defaultModel);
       const messages = buildModelMessages({ goal, task, untrusted, secrets: hidden });
       if (images.length > 0) {
         if (images.length > 3) throw new OpenRouterError('invalid_image', 400);
@@ -166,45 +296,25 @@ export function createOpenRouter({
       }
       const payload = {
         model,
-        temperature: resolved === 'decide' || resolved === 'verify' ? 0 : undefined,
         messages,
       };
-      if (payload.temperature == null) delete payload.temperature;
-      let response;
-      try {
-        response = await fetcher(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-Title': 'Maelstrom',
-          },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(30000),
-        });
-      } catch {
-        throw new OpenRouterError('openrouter_unavailable');
+      if (provider !== 'meta' && (resolved === 'decide' || resolved === 'verify')) {
+        payload.temperature = 0;
       }
-      if (!response?.ok) {
-        const status = response?.status === 401 ? 401 : 502;
-        throw new OpenRouterError(response?.status === 401 ? 'openrouter_unauthorized' : 'openrouter_failed', status);
-      }
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        throw new OpenRouterError('openrouter_invalid_response');
-      }
-      const text = messageText(data?.choices?.[0]?.message).trim();
-      if (!text) throw new OpenRouterError('openrouter_invalid_response');
-      return { role: resolved, model, text: redact(text, hidden) };
+      const result = await postChat({
+        apiKey,
+        baseUrl,
+        provider,
+        fetcher,
+        payload,
+        hidden,
+      });
+      return { role: resolved, model: result.model, text: result.text };
     },
     async chat({ botName, botGoal, botType, history = [], message = '' } = {}) {
-      if (typeof apiKey !== 'string' || apiKey.trim() === '') throw new OpenRouterError('openrouter_not_configured', 503);
       const latest = typeof message === 'string' ? message.trim() : '';
       if (!latest) throw new OpenRouterError('message_required', 400);
-      const model = modelFor('research', models);
+      const model = modelFor('research', models, defaultModel);
       const messages = buildChatMessages({
         botName,
         botGoal,
@@ -213,52 +323,33 @@ export function createOpenRouter({
         message: latest,
         secrets: hidden,
       });
-      let response;
-      try {
-        response = await fetcher(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-Title': 'Maelstrom',
-          },
-          body: JSON.stringify({
-            model,
-            temperature: 0.5,
-            messages,
-          }),
-          signal: AbortSignal.timeout(30000),
-        });
-      } catch {
-        throw new OpenRouterError('openrouter_unavailable');
-      }
-      if (!response?.ok) {
-        const status = response?.status === 401 ? 401 : 502;
-        throw new OpenRouterError(response?.status === 401 ? 'openrouter_unauthorized' : 'openrouter_failed', status);
-      }
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        throw new OpenRouterError('openrouter_invalid_response');
-      }
-      const text = messageText(data?.choices?.[0]?.message).trim();
-      if (!text) throw new OpenRouterError('openrouter_invalid_response');
-      return { model, text: redact(text, hidden) };
+      const payload = { model, messages };
+      if (provider !== 'meta') payload.temperature = 0.5;
+      return postChat({
+        apiKey,
+        baseUrl,
+        provider,
+        fetcher,
+        payload,
+        hidden,
+      });
     },
   };
 }
 
 export function createOpenRouterFromEnv(env = {}, fetcher = fetch) {
+  const resolved = resolveModelProvider(env);
   const models = {};
   for (const [role, name] of Object.entries(ROLE_ENV)) {
     if (typeof env[name] === 'string' && env[name].trim()) models[role] = env[name].trim();
   }
   return createOpenRouter({
-    apiKey: typeof env.OPENROUTER_API_KEY === 'string' ? env.OPENROUTER_API_KEY : '',
+    apiKey: resolved.apiKey,
     fetcher,
+    baseUrl: resolved.baseUrl,
+    provider: resolved.provider === 'none' ? 'meta' : resolved.provider,
     models,
+    defaultModel: resolved.defaultModel,
     secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string'),
   });
 }
