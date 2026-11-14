@@ -41,7 +41,7 @@ goal → research (browser/search)
 
 | Package / app | Role |
 | --- | --- |
-| `packages/contracts` | Shared bot / wallet / event / decision validators |
+| `packages/contracts` | Shared bot / wallet / event / payment / metric validators and API route list |
 | `packages/wallets` | Privy wallet assignment + freeze gates |
 | `packages/agent-loop` | Trust → verify → policy decision gate orchestrator |
 | `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
@@ -53,7 +53,7 @@ goal → research (browser/search)
 | `packages/x402` | x402 v2 Solana devnet helpers + sandbox store client |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object checkpoints |
 | `apps/web` | Next.js glass UI shell (Cloudflare-hosted) |
-| `supabase/schema.sql` | Postgres schema for bots, wallets, ledger, approvals |
+| `supabase/schema.sql` | Postgres schema (same SQL as `supabase/migrations/20261114000000_foundations.sql`): bots, wallets, ledger, approvals, metrics, RLS, realtime |
 
 These are library scaffolds, not a shipping app. None sign or broadcast. Persist sessions/approvals/budgets in a Durable Object or transactional DB; queues are transport only.
 
@@ -69,4 +69,6 @@ These are library scaffolds, not a shipping app. None sign or broadcast. Persist
 npm test
 ```
 
-Cloudflare, Firecrawl (`FIRECRAWL_API_KEY`), Privy, QuickNode, and trust-score credentials are required for live integration; mocked tests need no secrets.
+Secret names live in `.env.example` and `SECRET_NAMES`. Leave the values empty. Cloudflare, Firecrawl (`FIRECRAWL_API_KEY`), Privy, QuickNode (`QUICKNODE_DEVNET_RPC_URL`), and trust-score credentials are required for live integration; mocked tests need no secrets.
+
+Worker deploy target (do not deploy from this change): `apps/agent-runtime/wrangler.jsonc`. The Next.js UI deploy target is Cloudflare; OpenNext hosting is still the frontend shell's job.

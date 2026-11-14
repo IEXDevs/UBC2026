@@ -1,3 +1,4 @@
+import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
 import { BotDurableObject } from './bot-do.mjs';
 
 export { BotDurableObject };
@@ -41,6 +42,23 @@ export default {
       }));
     }
 
+    if (url.pathname === '/api/routes' && request.method === 'GET') {
+      return json({ routes: API_ROUTES, secretNames: SECRET_NAMES });
+    }
+
+    const matched = matchApiRoute(request.method, url.pathname);
+    if (matched?.route.action && matched.params.botId) {
+      const stub = botStub(env, matched.params.botId);
+      const target = new URL(`https://bot/${matched.route.action}`);
+      return stub.fetch(new Request(target, request));
+    }
+
+    // Contract routes that are not the live bot DO yet. Signing and database
+    // reads stay stubs until later chunks. No secret values are read here.
+    if (matched && (matched.route.status === 'stub' || matched.route.status === 'guarded')) {
+      return json({ ok: true, stub: true, route: matched.route.id, items: [] });
+    }
+
     const botMatch = url.pathname.match(/^\/bots\/([^/]+)(?:\/(status|wake|pause|resume|advance|decide))?$/);
     if (botMatch) {
       const botId = decodeURIComponent(botMatch[1]);
@@ -54,8 +72,8 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Hourly cron fallback: wake bots that opted into scheduled monitoring.
-    // Real implementation will query Supabase for enabled bots with schedules.
+    // Stub hourly cron (API_ROUTES cron.hourly). Wakes only bots the caller
+    // lists. Position checks and Supabase schedule queries are a later chunk.
     const listed = typeof env.listScheduledBots === 'function'
       ? await env.listScheduledBots()
       : [];

@@ -2,6 +2,6 @@
   "name": "ubc2026",
   "private": true,
   "workspaces": ["packages/*", "apps/*"],
-  "scripts": { "test": "npm test --workspaces --if-present" },
+  "scripts": { "test": "npm test --workspaces --if-present && node --test supabase/*.test.mjs" },
   "engines": { "node": ">=20" }
 }
