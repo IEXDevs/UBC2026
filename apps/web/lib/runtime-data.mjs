@@ -71,3 +71,28 @@ export async function fetchOwnerLists(ownerId, runtimeBase = runtimeBaseUrl()) {
 export function emptyMoneyState() {
   return { bots: [], wallets: [], payments: [], positions: [] };
 }
+
+export function deleteBotUrl(runtimeBase, botId) {
+  const root = runtimeBaseUrl(runtimeBase);
+  if (!root || typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) return null;
+  return `${root}/api/bots/${encodeURIComponent(botId)}`;
+}
+
+export async function deleteOwnerBot(ownerId, botId, runtimeBase = runtimeBaseUrl()) {
+  const url = deleteBotUrl(runtimeBase, botId);
+  if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
+    return { ok: false, error: 'invalid_request' };
+  }
+  try {
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'x-owner-id': ownerId },
+      cache: 'no-store',
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
+    return { ok: true, deleted: body.deleted || botId };
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+}

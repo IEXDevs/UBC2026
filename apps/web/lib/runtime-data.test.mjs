@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyMoneyState, runtimeBaseUrl, shellBotFromRemote } from './runtime-data.mjs';
+import { deleteBotUrl, emptyMoneyState, runtimeBaseUrl, shellBotFromRemote } from './runtime-data.mjs';
 
 test('runtime base rejects junk and keeps origin', () => {
   assert.equal(runtimeBaseUrl(''), '');
@@ -28,4 +28,13 @@ test('shell bot mapping never invents preview experience', () => {
 
 test('empty money state has no fake rows', () => {
   assert.deepEqual(emptyMoneyState(), { bots: [], wallets: [], payments: [], positions: [] });
+});
+
+test('delete bot URL stays on the runtime origin', () => {
+  assert.equal(
+    deleteBotUrl('https://runtime.example/agent/', 'bot_1'),
+    'https://runtime.example/agent/api/bots/bot_1',
+  );
+  assert.equal(deleteBotUrl('https://runtime.example', '../evil'), null);
+  assert.equal(deleteBotUrl('', 'bot_1'), null);
 });

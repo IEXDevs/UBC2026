@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { draftBot, mergeRoster, reorderIds } from './roster.mjs';
+import { draftBot, mergeRoster, removeBotFromRoster, reorderIds } from './roster.mjs';
 
 test('a bot draft needs a name, a known shape, and a hex color', () => {
   assert.equal(draftBot({ name: '  ', shape: 'circle', color: '#7c5cff' }), null);
@@ -25,4 +25,14 @@ test('an empty saved order shows no bots, and a missing order keeps the seed', (
   const created = draftBot({ name: 'Ada', shape: 'circle', color: '#7c5cff', id: 'bot_ada' });
   const merged = mergeRoster(seed, { order: ['bot_ada', 'bot_meteora'], extra: [created] });
   assert.deepEqual(merged.bots.map(bot => bot.id), ['bot_ada', 'bot_meteora']);
+});
+
+test('removeBotFromRoster drops order and extra entries', () => {
+  const created = draftBot({ name: 'Ada', shape: 'circle', color: '#7c5cff', id: 'bot_ada' });
+  const next = removeBotFromRoster({
+    order: ['bot_ada', 'bot_meteora'],
+    extra: [created],
+  }, 'bot_ada');
+  assert.deepEqual(next.order, ['bot_meteora']);
+  assert.deepEqual(next.extra, []);
 });
