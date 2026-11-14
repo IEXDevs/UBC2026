@@ -41,7 +41,7 @@ export default {
       }));
     }
 
-    const botMatch = url.pathname.match(/^\/bots\/([^/]+)(?:\/(status|wake|pause|resume|advance))?$/);
+    const botMatch = url.pathname.match(/^\/bots\/([^/]+)(?:\/(status|wake|pause|resume|advance|decide))?$/);
     if (botMatch) {
       const botId = decodeURIComponent(botMatch[1]);
       const action = botMatch[2] ?? 'status';

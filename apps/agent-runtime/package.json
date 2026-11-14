@@ -10,6 +10,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@ubc2026/agent-loop": "0.1.0",
     "@ubc2026/bot-policy": "0.1.0",
     "@ubc2026/browser-session": "0.1.0",
     "@ubc2026/contracts": "0.1.0",

@@ -48,8 +48,9 @@ goal → research (browser/search)
 | `packages/browser-session` | Owner-bound sessions, per-bot concurrency, agent search/scrape/browser tools |
 | `packages/bot-policy` | Bot types, caps, kill switch, mandatory approvals |
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
-| `packages/trust-score` | Low trust-score confirmation gate |
-| `packages/x402` | x402 v2 Solana devnet challenge / signature / feed helpers |
+| `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
+| `packages/prices` | DexScreener mainnet price reads (paper PnL) |
+| `packages/x402` | x402 v2 Solana devnet helpers + sandbox store client |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object checkpoints |
 | `apps/web` | Next.js glass UI shell (Cloudflare-hosted) |
 | `supabase/schema.sql` | Postgres schema for bots, wallets, ledger, approvals |

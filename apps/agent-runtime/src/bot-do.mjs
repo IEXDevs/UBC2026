@@ -1,4 +1,5 @@
 import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mjs';
+import { decideFromCheckpoint } from './decide.mjs';
 
 /**
  * Per-bot Durable Object. Holds live run checkpoints only.
@@ -75,6 +76,35 @@ export class BotStateMachine {
       }
       await this.put('run', run);
       return Response.json({ ok: true, run });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/decide') {
+      const body = await request.json().catch(() => ({}));
+      let run = await this.get('run');
+      if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
+      if (!body.bot || !body.wallet || !body.ledger || !body.proposal || !body.facts) {
+        return Response.json({ error: 'decide_payload_incomplete' }, { status: 400 });
+      }
+      const facts = body.facts;
+      try {
+        const result = await decideFromCheckpoint({
+          run,
+          bot: body.bot,
+          wallet: body.wallet,
+          ledger: body.ledger,
+          proposal: body.proposal,
+          trustScore: body.trustScore ?? facts.trustScore,
+          trustConfirmed: body.trustConfirmed === true,
+          mainFn: async () => facts,
+          verifyFn: async () => body.verifyFacts ?? facts,
+          now,
+        });
+        await this.put('run', result.run);
+        await this.put('lastGate', { at: now, gate: result.gate });
+        return Response.json({ ok: true, run: result.run, gate: result.gate });
+      } catch (error) {
+        return Response.json({ error: error.message }, { status: 409 });
+      }
     }
 
     return Response.json({ error: 'not_found' }, { status: 404 });
