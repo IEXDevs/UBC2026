@@ -8,6 +8,7 @@ export const NETWORKS = Object.freeze({
 
 // Hackathon execution stays on Solana devnet; mainnet reads remain separate.
 export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+export const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const amount = value => {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(value)) fail('Amounts must be unsigned integer strings in base units');

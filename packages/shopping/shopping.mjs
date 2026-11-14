@@ -1,13 +1,24 @@
 /**
  * Shopping bot helpers (Isaac / chunk 6B).
- * Compare sandbox catalog → propose best → require approval → 402 buy challenge.
- * Does not sign payments; pairs with bot-policy + verify + owner approval.
+ * Sandbox catalog → proposal → approval → settle 402 buy.
+ * Laso: tiny mainnet USDC card challenge (owner settles — Worker never auto-signs mainnet).
  */
-import { createSandboxStoreClient, DEVNET_USDC_MINT } from '@ubc2026/x402';
+import {
+  createSandboxStoreClient,
+  DEVNET_USDC_MINT,
+  MAINNET_USDC_MINT,
+  NETWORKS,
+  buildPaymentSignature,
+  paymentFeedEntry,
+} from '@ubc2026/x402';
 import { evaluateProposal, proposalDigest } from '@ubc2026/bot-policy';
 
 export class ShoppingError extends Error {}
 const fail = message => { throw new ShoppingError(message); };
+
+export const LASO_BASE_URL = 'https://laso.finance';
+/** Tiny Laso prepaid card face value in USD (API minimum is $5). */
+export const LASO_TINY_CARD_USD = 5;
 
 export function rankCatalogItems(items, { preferCheapest = true } = {}) {
   if (!Array.isArray(items) || items.length < 1) fail('Catalog items are required');
@@ -84,5 +95,176 @@ export async function prepareSandboxPurchase({
       : policy.state === 'blocked'
         ? 'blocked'
         : 'ready-for-payment-signature',
+  };
+}
+
+/**
+ * After owner approval + bot-policy reserve, settle the sandbox 402 with a PAYMENT-SIGNATURE.
+ * `signPayment` must return a Solana tx signature string (Privy/devnet transfer outside this package).
+ */
+export async function settleSandboxPurchase({
+  bot,
+  itemId,
+  accepted,
+  signPayment,
+  storeClient = null,
+  fetcher = fetch,
+  baseUrl,
+  paymentId = `pay_${bot?.id}_${itemId}`,
+  now = Date.now(),
+} = {}) {
+  if (!bot?.id) fail('Bot is required');
+  if (!itemId) fail('itemId is required');
+  if (!accepted || accepted.scheme !== 'exact') fail('Accepted sandbox payment terms are required');
+  if (accepted.network && accepted.network !== NETWORKS.devnet) fail('Sandbox settlement must stay on Solana devnet');
+  if (typeof signPayment !== 'function') fail('signPayment is required');
+
+  const signature = await signPayment({
+    amount: String(accepted.amount),
+    payTo: accepted.payTo,
+    asset: accepted.asset || DEVNET_USDC_MINT,
+    memo: `maelstrom:shop:${itemId}`,
+  });
+  if (typeof signature !== 'string' || !signature) fail('Payment signature is required');
+
+  const paymentSignature = buildPaymentSignature({ accepted, signature });
+  const client = storeClient ?? createSandboxStoreClient({ baseUrl, fetcher });
+  const order = await client.buy({ itemId, paymentSignature });
+  if (order.state !== 'ordered') fail('Sandbox buy did not confirm an order');
+
+  return {
+    order,
+    payment: paymentFeedEntry({
+      id: paymentId,
+      botId: bot.id,
+      recipient: accepted.payTo,
+      amount: String(accepted.amount),
+      asset: accepted.asset || DEVNET_USDC_MINT,
+      resourceUrl: `sandbox:buy:${itemId}`,
+      transaction: signature,
+      status: 'paid',
+      createdAt: now,
+    }),
+    next: 'settled',
+  };
+}
+
+function decodePaymentRequiredHeader(header) {
+  if (typeof header !== 'string' || !header.trim()) return null;
+  try {
+    return JSON.parse(Buffer.from(header, 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Laso Finance tiny-card challenge on Solana mainnet USDC.
+ * Returns a proposal for owner approval. Does not sign or broadcast —
+ * mainnet settlement stays with the owner / managed Laso agent wallet.
+ */
+export async function prepareLasoTinyCardPurchase({
+  bot,
+  ledger,
+  amountUsd = LASO_TINY_CARD_USD,
+  fetcher = fetch,
+  baseUrl = LASO_BASE_URL,
+  now = Date.now(),
+} = {}) {
+  if (!bot?.id) fail('Bot is required');
+  const usd = Number(amountUsd);
+  if (!Number.isFinite(usd) || usd < 5 || usd > 1000) fail('Laso card amount must be $5–$1000');
+
+  const url = new URL('/get-card', baseUrl);
+  url.searchParams.set('amount', String(Math.floor(usd)));
+
+  let response;
+  try {
+    response = await fetcher(url.href, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch {
+    fail('Laso get-card unavailable');
+  }
+
+  if (response.status !== 402) {
+    fail(`Laso get-card expected 402, got ${response.status}`);
+  }
+
+  const header = response.headers.get('PAYMENT-REQUIRED')
+    ?? response.headers.get('payment-required');
+  const body = await response.json().catch(() => null);
+  const decoded = decodePaymentRequiredHeader(header) || body;
+  const accepts = decoded?.accepts || decoded?.body?.accepts || [];
+  const solana = accepts.find((a) => String(a.network || '').includes('solana') || a.network === NETWORKS.mainnet)
+    || accepts[0];
+  if (!solana) fail('Laso 402 missing payment accepts');
+
+  const outflow = String(solana.amount ?? Math.floor(usd * 1_000_000));
+  const recipient = solana.payTo || solana.pay_to;
+  if (!recipient) fail('Laso 402 missing payTo');
+
+  const proposal = {
+    id: `prop_${bot.id}_laso_${Math.floor(usd)}`,
+    botId: bot.id,
+    cluster: 'mainnet-read',
+    asset: 'USDC',
+    recipient,
+    quoteId: `laso:get-card:${Math.floor(usd)}`,
+    outflow,
+    expectedReceive: '1',
+    expectedReceiveAsset: `laso:card:${Math.floor(usd)}`,
+    maxFee: '0',
+    expiresAt: now + 120_000,
+    network: NETWORKS.mainnet,
+    mint: MAINNET_USDC_MINT,
+    executionNote: 'Owner-approved mainnet USDC only; Worker does not auto-sign mainnet',
+  };
+
+  // Bot-policy rejects mainnet clusters. Laso is an explicit owner-gated mainnet path.
+  const policy = {
+    state: 'approval-needed',
+    reason: 'laso-mainnet-owner-gate',
+    cluster: 'mainnet',
+    outflow,
+  };
+  if (bot.frozen === true) {
+    policy.state = 'blocked';
+    policy.reason = 'bot-frozen';
+  } else if (bot.enabled === false) {
+    policy.state = 'blocked';
+    policy.reason = 'bot-disabled';
+  } else if (ledger && bot.cap?.mode === 'limited' && bot.cap.maxPerTransaction) {
+    try {
+      if (BigInt(outflow) > BigInt(bot.cap.maxPerTransaction)) {
+        policy.state = 'blocked';
+        policy.reason = 'over-per-tx-cap';
+      }
+    } catch {
+      policy.state = 'blocked';
+      policy.reason = 'invalid-amount';
+    }
+  }
+
+  return {
+    provider: 'laso',
+    amountUsd: Math.floor(usd),
+    proposal,
+    digest: proposalDigest({
+      ...proposal,
+      cluster: 'devnet',
+      expectedReceiveAsset: proposal.expectedReceiveAsset,
+    }),
+    policy,
+    challenge: {
+      state: 'payment-required',
+      status: 402,
+      paymentRequired: header,
+      body: decoded,
+      accepted: solana,
+    },
+    next: policy.state === 'blocked' ? 'blocked' : 'await-owner-mainnet-approval',
   };
 }

@@ -386,6 +386,34 @@ button {
 }
 .talk-tools span { color: var(--muted); font-size: 0.85rem; }
 
+.talk-transcript {
+  list-style: none;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.talk-transcript li {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  background: rgba(7, 19, 31, 0.35);
+  border: 1px solid rgba(186, 220, 255, 0.1);
+}
+
+.talk-transcript strong {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.talk-transcript span { color: var(--muted); font-size: 0.88rem; }
+
 .live-view {
   margin-top: 0.9rem;
   display: grid;

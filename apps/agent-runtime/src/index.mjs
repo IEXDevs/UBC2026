@@ -16,6 +16,7 @@ import {
   walletAddress,
 } from './schedules.mjs';
 import { handleVoiceRequest } from './voice.mjs';
+import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 
 export { BotDurableObject };
 
@@ -60,6 +61,10 @@ const worker = {
     if (url.pathname === '/internal/streams/backfill' && request.method === 'POST') {
       return processStreamBackfill(request, env, botStub);
     }
+
+    // Isaac / 6B+6C: shopping, signal sell, SNS send
+    const commerce = matchCommerceRoute(request.method, url.pathname);
+    if (commerce) return dispatchCommerceRoute(request, env, commerce);
 
     if (url.pathname === '/api/routes' && request.method === 'GET') {
       return json({ routes: API_ROUTES, secretNames: SECRET_NAMES });

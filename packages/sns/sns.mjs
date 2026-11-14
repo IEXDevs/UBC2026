@@ -49,3 +49,45 @@ export function buildSnsTransferIntent({
     status: 'unsigned',
   };
 }
+
+/**
+ * Resolve a .sol name and build an unsigned intent, then optionally execute via injected signer.
+ * `executeTransfer({ to, amount, asset, memo })` should return `{ signature, cluster: 'devnet' }`.
+ */
+export async function prepareSnsSend({
+  from,
+  domain,
+  amount,
+  asset = 'USDC',
+  botId,
+  resolver,
+  executeTransfer = null,
+  memo,
+} = {}) {
+  if (!resolver) fail('SNS resolver is required');
+  const resolved = await resolver(domain);
+  const intent = buildSnsTransferIntent({
+    from,
+    domain: resolved.domain,
+    to: resolved.address,
+    amount,
+    asset,
+    botId,
+    memo,
+  });
+  if (typeof executeTransfer !== 'function') {
+    return { resolved, intent, next: 'await-owner-or-signer' };
+  }
+  const result = await executeTransfer({
+    to: intent.to,
+    amount: intent.amount,
+    asset: intent.asset,
+    memo: intent.memo,
+  });
+  if (!result?.signature || result.cluster !== 'devnet') fail('SNS execute must confirm a devnet signature');
+  return {
+    resolved,
+    intent: { ...intent, status: 'submitted', signature: result.signature },
+    next: 'submitted',
+  };
+}

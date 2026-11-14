@@ -14,6 +14,10 @@ Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 - `POST /webhooks/quicknode` — Streams HMAC → dedupe → Supabase persist → wake → optional `/loop`
 - `POST /internal/streams/sync-wallets` — owner push of wallet addresses into QuickNode KV list (`x-owner-id`)
 - `POST /internal/streams/backfill` — owner replay of missed Stream rows (`x-owner-id`)
+- `POST /bots/:id/shopping/prepare|settle` — x402 sandbox (and Laso prepare) shopping path (`x-owner-id`)
+- `GET|POST /bots/:id/commerce/signals/:signalId` — bot sells a signal over x402 (402 challenge)
+- `POST /bots/:id/commerce/signals/:signalId/settle` — release signal after PAYMENT-SIGNATURE
+- `POST /bots/:id/sns/send` — resolve `.sol` and build/execute unsigned send intent (`x-owner-id`)
 - `GET /voice/agent` — ElevenLabs agent spec. Custom LLM is Grok (`x-ai/grok-4.7`, override with `OPENROUTER_MODEL_VOICE`) via `POST /voice/llm/chat/completions`, which streams OpenRouter chat completions. The OpenRouter key is not part of the spec.
 - `POST /voice/tools/:name` — ElevenLabs webhook tools. Each tool calls the same bot, event, wallet, metric, payment, or browser route as the UI, with the same `x-owner-id` header. Live View URLs are removed before the model sees the result. Requires `ELEVENLABS_WEBHOOK_SECRET` and `x-owner-id`. Without the secret the route returns `elevenlabs_webhook_not_configured` and does not call ElevenLabs.
 - `GET /api/routes` — contract route list and secret names (no values)
