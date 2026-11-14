@@ -21,7 +21,7 @@ import { getDemoShellState } from '../lib/demo-state.mjs';
 import { moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
 import { mergeRoster, removeBotFromRoster, reorderIds } from '../lib/roster.mjs';
-import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
+import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { buildBotStats } from '../lib/overview.mjs';
@@ -99,6 +99,8 @@ function AuthedShell() {
       setWalletNote('');
       return undefined;
     }
+    // getAccessToken() can erase the Privy session while the terms screen is open.
+    if (!sessionReadyForWallets(signedIn, user)) return undefined;
     let stopped = false;
     setWalletNote('Provisioning Solana wallets…');
     (async () => {
@@ -150,7 +152,7 @@ function AuthedShell() {
       }
     })();
     return () => { stopped = true; };
-  }, [signedIn, user, user?.id, accountsKey, getAccessToken]);
+  }, [signedIn, user, user?.id, user?.hasAcceptedTerms, accountsKey, getAccessToken]);
 
   return (
     <Shell
