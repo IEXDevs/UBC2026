@@ -82,6 +82,14 @@ export function parsePaymentSignature(header) {
   return payload;
 }
 
+/** PAYMENT-SIGNATURE header for a devnet exact-scheme challenge. Does not sign or broadcast. */
+export function buildPaymentSignature({ accepted, signature } = {}) {
+  if (!accepted || typeof accepted !== 'object') fail('Accepted payment terms are required');
+  const header = encode({ x402Version: 2, accepted, payload: { signature } });
+  parsePaymentSignature(header);
+  return header;
+}
+
 export function buildPaymentResponse({ success, transaction, network = NETWORKS.devnet, errorMessage }) {
   if (typeof success !== 'boolean') fail('Settlement success flag is required');
   if (network !== NETWORKS.devnet) fail('Hackathon settlements must report Solana devnet');

@@ -22,7 +22,7 @@ Library scaffolds (not product-complete) cover pieces of:
 3. Verify-agent consensus loop + digests; trust-score confirmation gate
 4. Owner-bound browser sessions, per-bot concurrency, agent search/browser tools
 
-Still required for a complete submission: working frontend, deployed runtime, live x402 settle path, on-chain program IDs in README, ElevenLabs demo with audio, Grok Bot on X chat export, 2–3 minute demo video. The per-bot loop itself is checkpointed in the Durable Object.
+Still required for a complete submission: working frontend, x402 sandbox shopping, on-chain settlement confirmation, on-chain program IDs in README, ElevenLabs demo with audio, Grok Bot on X chat export, 2–3 minute demo video. The per-bot loop is checkpointed in the Durable Object.
 
 ## Agent decision loop
 
@@ -48,13 +48,15 @@ goal → research (browser/search)
 | `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
 | `packages/browser-session` | Owner-bound Cloudflare browser sessions, per-bot concurrency, Live View URLs |
 | `packages/bot-policy` | Bot types, caps, approval modes, kill switch, Supabase ledger reserve |
+| `packages/bot-creation` | Locked templates, user templates, and the draft creation flow |
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
 | `packages/prices` | DexScreener mainnet price reads (paper PnL) |
 | `packages/x402` | x402 v2 Solana devnet helpers + sandbox store client |
+| `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object. `POST /bots/:id/loop` runs research → decide → trust → verify → policy → approval → execute → memo → monitor, checkpointed per step. Models use OpenRouter and a locked platform prompt |
 | `apps/web` | Next.js glass UI shell (Cloudflare-hosted) |
-| `supabase/schema.sql` | Postgres schema: foundations migration plus `20261114020000_policy_ledger.sql` (atomic reserve, approval modes, kill switch) |
+| `supabase/schema.sql` | Postgres schema: foundations, `20261114020000_policy_ledger.sql` (atomic reserve, approval modes, kill switch), and `20261114040000_bot_templates.sql` (locked templates, user templates, draft create / enable) |
 
 These are library scaffolds, not a shipping app. Bot spends and owner USDC moves are signed by Privy and broadcast on Solana devnet only; deposits are signed by a Wallet Adapter and sent through the same devnet genesis check. Persist sessions/approvals/budgets in a Durable Object or transactional DB; queues are transport only.
 

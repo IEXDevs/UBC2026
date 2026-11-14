@@ -1,0 +1,13 @@
+{
+  "name": "@ubc2026/bot-creation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./creation.mjs",
+  "scripts": { "test": "node --test creation.test.mjs" },
+  "dependencies": {
+    "@ubc2026/contracts": "0.1.0",
+    "@ubc2026/wallets": "0.1.0"
+  },
+  "engines": { "node": ">=20" }
+}
