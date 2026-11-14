@@ -17,7 +17,7 @@ Agents hold budgets and guardrails, pay for APIs/data over **x402** on Solana **
 
 Official guide: [Hackathon Guide UBC 26](https://docs.google.com/document/d/1QaySCo7u3VxMVNdk3C5Ab3ewc2E46AuLntti-Uzx5EY/edit?usp=sharing)
 
-Backend routes are live when local secrets are set (Privy signing, Supabase data APIs, ledger reserve, shopping/SNS/grab-back). Still open for a complete submission: a hosted Worker + OpenNext deploy, applying Supabase migrations to a hosted project, a live ElevenLabs agent id in the web app, posting Grok Bot drafts to X, and the 2–3 minute demo video. This repo does not deploy its own Solana program. The program IDs below are the existing programs the transfer builder calls.
+Backend routes are live when local secrets are set (Privy signing, Supabase data APIs, ledger reserve, shopping/SNS/grab-back). The agent-runtime Worker is hosted at `https://maelstrom-agent-runtime.sidchevvan-f3a.workers.dev` (health + CORS live; `/api/*` returns `source: supabase`). Hosted Supabase is up. Still open for a complete submission: OpenNext web deploy, a live ElevenLabs agent id in the web app, posting Grok Bot drafts to X, and the 2–3 minute demo video. This repo does not deploy its own Solana program. The program IDs below are the existing programs the transfer builder calls.
 
 ## Architecture
 
