@@ -113,18 +113,27 @@ export default function ProfileSheet({
         </div>
         <div className="profile-settings">
           <p className="plugin-kicker">Wallet</p>
-          <p className="profile-balance">{glance.balanceLabel}</p>
-          <p className="quiet">{glance.label}</p>
-          <p className="profile-address">{glance.address || 'No wallet yet'}</p>
-          <p className="quiet">Preview balance. A live wallet read is not connected yet.</p>
-          <ul className="profile-wallets">
-            {wallets.map(wallet => (
-              <li key={wallet.id}>
-                <strong>{wallet.label}</strong>
-                <span>{wallet.address}</span>
-              </li>
-            ))}
-          </ul>
+          {signedIn ? (
+            <>
+              <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>
+              <p className="quiet">{wallets?.length ? glance.label : 'Sign-in provisions the main Privy wallet'}</p>
+              <p className="profile-address">{glance.address || 'No wallet yet'}</p>
+              <p className="quiet">Balance is from live positions when bots open them — not a preview ledger.</p>
+              <ul className="profile-wallets">
+                {(wallets || []).map(wallet => (
+                  <li key={wallet.id}>
+                    <strong>{wallet.label}</strong>
+                    <span>{wallet.address}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <>
+              <p className="profile-balance">Not signed in</p>
+              <p className="quiet">Connect to see your Privy wallets. No preview rows are shown while signed out.</p>
+            </>
+          )}
           {signedIn ? (
             <button type="button" className="ghost" onClick={onLogout}>Log out</button>
           ) : null}

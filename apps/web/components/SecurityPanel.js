@@ -53,6 +53,11 @@ export default function SecurityPanel({
         try {
           const list = Array.isArray(wallets) ? wallets : [];
           const mainWallet = list.find((w) => w.kind === 'main') || null;
+          if (!mainWallet) {
+            setMessage('Grab-back needs a provisioned main wallet.');
+            setPending(null);
+            return;
+          }
           const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/security/grab-back`, {
             method: 'POST',
             headers: {
@@ -60,8 +65,8 @@ export default function SecurityPanel({
               'x-owner-id': ownerId,
             },
             body: JSON.stringify({
-              dryRun: !mainWallet,
-              mainWallet: mainWallet || { id: 'main_demo', ownerId, label: 'main', kind: 'main', address: '11111111111111111111111111111111', frozen: false, provider: 'privy' },
+              dryRun: false,
+              mainWallet,
               wallets: list.filter((w) => w.kind === 'additional'),
             }),
           });
@@ -89,7 +94,7 @@ export default function SecurityPanel({
   return (
     <div className="security-page">
       <header className="bot-heading">
-        <div className="pill">● Security · {page.signedIn ? 'owner' : 'demo'}</div>
+        <div className="pill">● Security · {page.signedIn ? 'owner' : 'signed out'}</div>
         <h1>{page.subtitle}</h1>
       </header>
 

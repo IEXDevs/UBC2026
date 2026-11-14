@@ -1,0 +1,73 @@
+/**
+ * Live Worker list helpers for the glass shell.
+ * Never invent PreviewMain / demo bots — empty arrays when unsigned or unconfigured.
+ */
+
+const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
+
+export function runtimeBaseUrl(value = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return '';
+    return `${url.origin}${url.pathname.replace(/\/$/, '')}`;
+  } catch {
+    return '';
+  }
+}
+
+export function shellBotFromRemote(row, looks = {}) {
+  if (!row || typeof row.id !== 'string') return null;
+  const look = looks[row.id] && typeof looks[row.id] === 'object' ? looks[row.id] : {};
+  const frozen = row.frozen === true;
+  const enabled = row.enabled !== false;
+  return {
+    id: row.id,
+    name: typeof look.name === 'string' && look.name.trim()
+      ? look.name.trim()
+      : (typeof row.name === 'string' && row.name.trim() ? row.name.trim() : row.id),
+    shape: look.shape || 'circle',
+    color: look.color || '#3dd6c6',
+    type: row.type || 'trading',
+    status: frozen ? 'paused' : (enabled ? 'watching' : 'idle'),
+    goal: typeof row.goal === 'string' && row.goal.trim() ? row.goal.trim() : 'Waiting for a goal.',
+    walletId: row.walletId || null,
+    ownerId: row.ownerId || null,
+    approvalMode: row.approvalMode,
+    enabled,
+    frozen,
+    record: row,
+  };
+}
+
+async function getJson(url, ownerId) {
+  const response = await fetch(url, {
+    headers: { 'x-owner-id': ownerId },
+    cache: 'no-store',
+  });
+  const body = await response.json().catch(() => ({}));
+  return { ok: response.ok, body };
+}
+
+export async function fetchOwnerLists(ownerId, runtimeBase = runtimeBaseUrl()) {
+  if (typeof ownerId !== 'string' || !OWNER.test(ownerId) || !runtimeBase) {
+    return { bots: [], wallets: [], payments: [], source: 'unsigned' };
+  }
+  const root = runtimeBase.replace(/\/$/, '');
+  const [botsRes, walletsRes, paymentsRes] = await Promise.all([
+    getJson(`${root}/api/bots`, ownerId),
+    getJson(`${root}/api/wallets`, ownerId),
+    getJson(`${root}/api/payments`, ownerId),
+  ]);
+  const source = botsRes.body?.source || walletsRes.body?.source || 'unknown';
+  return {
+    source,
+    bots: botsRes.ok && Array.isArray(botsRes.body?.items) ? botsRes.body.items : [],
+    wallets: walletsRes.ok && Array.isArray(walletsRes.body?.items) ? walletsRes.body.items : [],
+    payments: paymentsRes.ok && Array.isArray(paymentsRes.body?.items) ? paymentsRes.body.items : [],
+  };
+}
+
+export function emptyMoneyState() {
+  return { bots: [], wallets: [], payments: [], positions: [] };
+}

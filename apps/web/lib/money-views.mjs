@@ -1,4 +1,4 @@
-/** Chunk 7B view models. Preview rows until the Worker /api routes leave stub status. */
+/** Money pane view models from live Worker / Privy rows (no preview seeds). */
 
 export const MONEY_PANES = Object.freeze({
   History: 'history',

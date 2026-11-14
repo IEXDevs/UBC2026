@@ -24,6 +24,11 @@ export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
         setError(runtimeBase ? 'Sign in to prepare a purchase' : 'Set NEXT_PUBLIC_AGENT_RUNTIME_URL');
         return;
       }
+      const walletId = bot.record?.walletId || bot.walletId || '';
+      if (!walletId) {
+        setError('Assign a provisioned wallet to this bot before shopping.');
+        return;
+      }
       const url = new URL(`${runtimeBase.replace(/\/$/, '')}/bots/${encodeURIComponent(bot.id)}/shopping/prepare`);
       const body = provider === 'laso'
         ? {
@@ -39,7 +44,7 @@ export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
             frozen: false,
             policyVersion: 1,
             approvalMode: 'ask',
-            walletId: bot.record?.walletId || 'wallet_demo',
+            walletId,
             cap: bot.record?.cap || { mode: 'limited', asset: 'USDC', maxOutflow: '20000000', maxPerTransaction: '10000000' },
           },
           ledger: { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },
@@ -55,7 +60,7 @@ export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
             frozen: false,
             policyVersion: 1,
             approvalMode: 'ask',
-            walletId: bot.record?.walletId || 'wallet_demo',
+            walletId,
             cap: bot.record?.cap || { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
           },
           ledger: { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },

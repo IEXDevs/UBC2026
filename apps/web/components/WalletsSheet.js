@@ -5,7 +5,7 @@ import { X } from 'lucide-react';
 import MoneyPane from './MoneyPane';
 import { usePresence } from './usePresence';
 
-export default function WalletsSheet({ open, onClose, state, note = '' }) {
+export default function WalletsSheet({ open, onClose, state, note = '', signedIn = false, onSignIn = null }) {
   const { mounted, leaving } = usePresence(open);
 
   useEffect(() => {
@@ -35,7 +35,7 @@ export default function WalletsSheet({ open, onClose, state, note = '' }) {
           </button>
         </div>
         {note ? <p className="preview-note">{note}</p> : null}
-        <MoneyPane pane="wallets" state={state} />
+        <MoneyPane pane="wallets" state={state} signedIn={signedIn} onSignIn={onSignIn} />
       </section>
     </div>
   );
