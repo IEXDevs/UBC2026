@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   NETWORKS, DEVNET_USDC_MINT, buildPaymentRequired, parsePaymentSignature, buildPaymentResponse, paymentFeedEntry,
+  createSandboxStoreClient,
 } from './x402.mjs';
 
 const payTo = 'So11111111111111111111111111111111111111112';
@@ -58,4 +59,25 @@ test('settlement response and payment feed stay on devnet', () => {
     id: 'p1', botId: 'b1', recipient: payTo, amount: '10000', resourceUrl: 'https://api.example.com/x',
     status: 'unknown', createdAt: 1,
   }));
+});
+
+test('sandbox store client lists catalog and surfaces 402 buy challenges', async () => {
+  const client = createSandboxStoreClient({
+    fetcher: async (url, options) => {
+      if (String(url).endsWith('/store/catalog')) {
+        return Response.json({ items: [{ id: 'sku_1', name: 'Sticker', price: '10000', description: 'demo' }] });
+      }
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers['PAYMENT-SIGNATURE'], undefined);
+      return new Response(JSON.stringify({ error: 'payment required' }), {
+        status: 402,
+        headers: { 'PAYMENT-REQUIRED': 'dGVzdA==', 'Content-Type': 'application/json' },
+      });
+    },
+  });
+  const items = await client.listCatalog();
+  assert.equal(items[0].id, 'sku_1');
+  const challenge = await client.buy({ itemId: 'sku_1' });
+  assert.equal(challenge.state, 'payment-required');
+  assert.equal(challenge.paymentRequired, 'dGVzdA==');
 });

@@ -107,3 +107,94 @@ export function paymentFeedEntry({
     status, createdAt, network: NETWORKS.devnet, protocol: 'x402-v2',
   };
 }
+
+/**
+ * x402 agent sandbox shopping client (devnet).
+ * Catalog/buy helpers only — signing/settlement stay outside this package.
+ * Default base: https://x402-agent-sandbox.vercel.app (override when the team confirms the live host).
+ */
+export function createSandboxStoreClient({
+  baseUrl = 'https://x402-agent-sandbox.vercel.app',
+  fetcher = fetch,
+} = {}) {
+  let catalogUrl;
+  let buyUrl;
+  try {
+    catalogUrl = new URL('/store/catalog', baseUrl);
+    buyUrl = new URL('/store/buy', baseUrl);
+  } catch {
+    fail('Sandbox base URL must be absolute');
+  }
+  if (!['https:', 'http:'].includes(catalogUrl.protocol)) fail('Sandbox base URL must be http(s)');
+
+  async function readJson(response) {
+    if (response.status === 402) {
+      const paymentRequired = response.headers.get('PAYMENT-REQUIRED') ?? response.headers.get('payment-required');
+      let body = null;
+      try { body = await response.json(); } catch { body = null; }
+      return { status: 402, paymentRequired, body };
+    }
+    if (!response.ok) fail(`Sandbox request failed with status ${response.status}`);
+    try { return await response.json(); } catch { fail('Invalid sandbox JSON response'); }
+  }
+
+  return {
+    async listCatalog() {
+      let response;
+      try {
+        response = await fetcher(catalogUrl.href, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch {
+        fail('Sandbox catalog unavailable');
+      }
+      const data = await readJson(response);
+      if (!data || !Array.isArray(data.items ?? data)) fail('Sandbox catalog must include items');
+      const items = Array.isArray(data.items) ? data.items : data;
+      return items.map(item => {
+        if (!item || !required(item.id) || !required(item.name)) fail('Invalid catalog item');
+        return {
+          id: item.id,
+          name: item.name,
+          price: amount(String(item.price ?? item.amount ?? '')),
+          description: typeof item.description === 'string' ? item.description.slice(0, 500) : '',
+        };
+      });
+    },
+
+    /**
+     * Start a buy. Without a PAYMENT-SIGNATURE this should return a 402 challenge.
+     * Pass `paymentSignature` only after bot-policy + verify-consensus + owner approval.
+     */
+    async buy({ itemId, paymentSignature = null }) {
+      if (!required(itemId)) fail('itemId is required');
+      const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
+      if (paymentSignature) headers['PAYMENT-SIGNATURE'] = paymentSignature;
+      let response;
+      try {
+        response = await fetcher(buyUrl.href, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ itemId }),
+          signal: AbortSignal.timeout(20000),
+        });
+      } catch {
+        fail('Sandbox buy unavailable');
+      }
+      if (response.status === 402) {
+        const challenge = await readJson(response);
+        return { state: 'payment-required', ...challenge };
+      }
+      const order = await readJson(response);
+      if (!order || !required(order.orderId ?? order.id)) fail('Sandbox buy must return an order id');
+      return {
+        state: 'ordered',
+        orderId: order.orderId ?? order.id,
+        itemId,
+        confirmation: typeof order.confirmation === 'string' ? order.confirmation : null,
+        raw: order,
+      };
+    },
+  };
+}
