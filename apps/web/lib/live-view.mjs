@@ -1,0 +1,36 @@
+const LIVE_VIEW_PATHS = new Set(['/ui/view', '/ui/inspector']);
+
+export function browserSessionUrl(runtimeBase, botId, { sessionRecordId, action } = {}) {
+  if (typeof runtimeBase !== 'string' || runtimeBase === '' || typeof botId !== 'string' || botId === '') return null;
+  let base;
+  try { base = new URL(runtimeBase); } catch { return null; }
+  if (base.protocol !== 'https:' && base.protocol !== 'http:') return null;
+  const root = `${base.origin}${base.pathname.replace(/\/$/, '')}`;
+  const bot = encodeURIComponent(botId);
+  if (!sessionRecordId) return `${root}/bots/${bot}/browser/sessions`;
+  if (action !== 'live-view' && action !== 'release') return null;
+  return `${root}/bots/${bot}/browser/sessions/${encodeURIComponent(sessionRecordId)}/${action}`;
+}
+
+/**
+ * Decide how the owner UI should show a Live View URL.
+ * The URL is a bearer credential: callers may set iframe src or an href, never text.
+ */
+export function liveViewFrame(view) {
+  const hidden = { embed: false, fallback: 'open-viewer-in-separate-tab', src: null, referrerPolicy: 'no-referrer' };
+  if (!view || typeof view.viewerUrl !== 'string') return hidden;
+  let url;
+  try { url = new URL(view.viewerUrl); } catch { return hidden; }
+  const allowed = url.protocol === 'https:'
+    && url.hostname === 'live.browser.run'
+    && LIVE_VIEW_PATHS.has(url.pathname)
+    && !url.username
+    && !url.password;
+  if (!allowed) return hidden;
+  return {
+    embed: view.embedVerified === true,
+    fallback: view.fallback === 'open-viewer-in-separate-tab' ? view.fallback : 'open-viewer-in-separate-tab',
+    src: url.href,
+    referrerPolicy: 'no-referrer',
+  };
+}

@@ -2,7 +2,7 @@
 
 Glassmorphic UI shell for bots, panes, timeline, and approvals.
 
-Privy login, Live View, and ElevenAgents Talk are stubbed until the agent-runtime APIs are live. Hosting target is Cloudflare (OpenNext), not Vercel.
+Privy login and ElevenAgents Talk are stubbed. Live View calls the agent runtime when `NEXT_PUBLIC_AGENT_RUNTIME_URL` is set and an owner id is present; until Privy login, the panel stays closed. Hosting target is Cloudflare (OpenNext), not Vercel.
 
 ```bash
 npm run dev -w @ubc2026/web

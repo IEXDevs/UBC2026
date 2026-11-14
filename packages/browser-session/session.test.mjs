@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createMemoryStore, createBrowserSessionService, agentTools, SessionError } from './session.mjs';
+import { createMemoryStore, createBrowserSessionService, agentTools, describeLiveViewEmbed, SessionError } from './session.mjs';
 
 function service(overrides = {}) {
   const store = createMemoryStore();
@@ -62,13 +62,43 @@ test('per-bot concurrency limit is enforced', async () => {
   await svc.openSession({ ownerId: 'u1', botId: 'b2' });
 });
 
-test('live view is owner-only, no-store, and marks Vercel embed unverified', async () => {
+test('live view is owner-only, no-store, and embeds the verified Live View host', async () => {
   const svc = service();
   await svc.openSession({ ownerId: 'u1', botId: 'b1' });
   const view = await svc.liveView({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1' });
   assert.equal(view.headers['Cache-Control'], 'no-store');
-  assert.equal(view.embedVerified, false);
-  assert.match(view.viewerUrl, /^https:\/\/live\.browser\.run\//);
+  assert.equal(view.embedVerified, true);
+  assert.equal(view.fallback, 'open-viewer-in-separate-tab');
+  assert.equal(view.event.viewerUrl, undefined);
+  assert.match(view.viewerUrl, /^https:\/\/live\.browser\.run\/ui\/view/);
+  const redacted = await svc.invokeTool('browser_live_view', { sessionRecordId: 'rec-1' }, { ownerId: 'u1', botId: 'b1' });
+  assert.equal(redacted.viewerUrl, undefined);
+  assert.equal(JSON.stringify(redacted).includes('jwt'), false);
+});
+
+test('only the checked live.browser.run UI paths are embeddable', () => {
+  assert.equal(describeLiveViewEmbed('https://live.browser.run/ui/view?jwt=1').embedVerified, true);
+  assert.equal(describeLiveViewEmbed('https://live.browser.run/ui/inspector?wss=1').embedVerified, true);
+  assert.equal(describeLiveViewEmbed('http://live.browser.run/ui/view').embedVerified, false);
+  assert.equal(describeLiveViewEmbed('https://evil.example/ui/view').embedVerified, false);
+  assert.equal(describeLiveViewEmbed('https://live.browser.run/other').embedVerified, false);
+});
+
+test('release closes the provider session and frees a slot', async () => {
+  const closed = [];
+  let n = 0;
+  const svc = service({
+    idFactory: () => `rec-${n}`,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${++n}` }),
+      readonlyView: async () => ({}),
+      closeSession: async sessionId => { closed.push(sessionId); },
+    },
+  });
+  await svc.openSession({ ownerId: 'u1', botId: 'b1' });
+  await svc.releaseSession({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1' });
+  assert.deepEqual(closed, ['prov-1']);
+  await svc.openSession({ ownerId: 'u1', botId: 'b1' });
 });
 
 test('release frees a concurrency slot and invokeTool rejects unknown tools', async () => {

@@ -171,6 +171,11 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.equal(matchApiRoute('POST', '/api/wallets/wal_1/sign').params.walletId, 'wal_1');
   assert.equal(matchApiRoute('GET', '/bots/bot_1').route.action, 'status');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/wake').route.id, 'bots.wake');
+  const liveView = matchApiRoute('POST', '/bots/bot_1/browser/sessions/rec_1/live-view');
+  assert.equal(liveView.route.id, 'bots.browser.liveView');
+  assert.equal(liveView.params.sessionRecordId, 'rec_1');
+  assert.equal(matchApiRoute('GET', '/bots/bot_1/browser/sessions').route.id, 'bots.browser.list');
+  assert.equal(matchApiRoute('POST', '/bots/bot_1/browser/sessions/rec_1/release').route.id, 'bots.browser.release');
   assert.equal(matchApiRoute('CRON', '0 * * * *'), null);
   assert.ok(API_ROUTES.some(route => route.id === 'cron.hourly' && route.status === 'stub'));
 });

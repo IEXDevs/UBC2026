@@ -1,0 +1,103 @@
+'use client';
+
+import { useState } from 'react';
+import { browserSessionUrl, liveViewFrame } from '../lib/live-view.mjs';
+
+const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+
+async function ownerFetch(url, ownerId, method, body) {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      'content-type': 'application/json',
+      'x-owner-id': ownerId,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: 'no-store',
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const code = typeof data.error === 'string' ? data.error : 'browser_request_failed';
+    throw new Error(code);
+  }
+  return data;
+}
+
+/**
+ * Owner Live View. The viewer URL is a bearer credential: it is an iframe src
+ * or a link href, never copied into the timeline or button text.
+ */
+export default function LiveViewPanel({ botId, ownerId = null }) {
+  const [sessionRecordId, setSessionRecordId] = useState(null);
+  const [frame, setFrame] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function run(action) {
+    setError('');
+    setBusy(true);
+    try {
+      if (action === 'open') {
+        const url = browserSessionUrl(runtimeBase, botId);
+        const opened = await ownerFetch(url, ownerId, 'POST', { purpose: 'browse' });
+        setSessionRecordId(opened.sessionRecordId);
+        setFrame(null);
+        return;
+      }
+      if (action === 'view') {
+        const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId, action: 'live-view' });
+        const view = await ownerFetch(url, ownerId, 'POST', {});
+        setFrame(liveViewFrame(view));
+        return;
+      }
+      const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId, action: 'release' });
+      await ownerFetch(url, ownerId, 'POST', {});
+      setSessionRecordId(null);
+      setFrame(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'browser_request_failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = Boolean(ownerId) && Boolean(browserSessionUrl(runtimeBase, botId));
+
+  return (
+    <div className="live-view">
+      <h3>Live View</h3>
+      {!ownerId && (
+        <p>Connect with Privy to open an owner-bound Cloudflare browser session.</p>
+      )}
+      {ownerId && !browserSessionUrl(runtimeBase, botId) && (
+        <p>Set NEXT_PUBLIC_AGENT_RUNTIME_URL to the agent runtime that owns browser sessions.</p>
+      )}
+      {ownerId && browserSessionUrl(runtimeBase, botId) && (
+        <p>Read-only Live View for this bot. A separate tab is there if the frame does not load.</p>
+      )}
+      <div className="live-actions">
+        <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
+          Open browser session
+        </button>
+        <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('view')}>
+          Show live view
+        </button>
+        <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('release')}>
+          Release session
+        </button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+      {frame?.embed && frame.src && (
+        <iframe
+          className="live-frame"
+          title="Browser live view"
+          src={frame.src}
+          referrerPolicy={frame.referrerPolicy}
+        />
+      )}
+      {frame?.src && (
+        <a href={frame.src} target="_blank" rel="noopener noreferrer">Open in tab</a>
+      )}
+    </div>
+  );
+}

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import TalkStub from '../components/TalkStub';
+import LiveViewPanel from '../components/LiveViewPanel';
 import { getDemoShellState } from '../lib/demo-state.mjs';
 
 const state = getDemoShellState();
@@ -84,9 +85,7 @@ export default function HomePage() {
                   </li>
                 ))}
               </ul>
-              <p style={{ color: 'var(--muted)', marginBottom: 0 }}>
-                Live View wires in once Browser Rendering sessions are live.
-              </p>
+              <LiveViewPanel botId={bot.id} ownerId={state.ownerId} />
             </section>
           </div>
 

@@ -1,8 +1,91 @@
 import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mjs';
 import { decideFromCheckpoint } from './decide.mjs';
+import { createBrowserSessionService, createDefaultBrowserSessionService, ProviderError, SessionError } from '@ubc2026/browser-session';
+
+const OWNER_HEADER = 'x-owner-id';
+
+function noStore(data, status = 200) {
+  return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
+}
+
+function browserFailure(error) {
+  if (error instanceof SessionError || error instanceof ProviderError) {
+    return noStore({ error: error.code }, error.status);
+  }
+  return noStore({ error: 'browser_failed' }, 500);
+}
+
+function ownerFrom(request) {
+  const ownerId = request.headers.get(OWNER_HEADER);
+  if (typeof ownerId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(ownerId)) return null;
+  return ownerId;
+}
 
 /**
- * Per-bot Durable Object. Holds live run checkpoints only.
+ * Adapter over Durable Object storage. `list` pages so closed session rows are not dropped.
+ * `start` is treated as exclusive, matching Workers KV/DO list.
+ */
+export function createDurableStore(storage) {
+  return {
+    async get(key) {
+      const value = await storage.get(key);
+      return value == null ? null : structuredClone(value);
+    },
+    async put(key, value) {
+      await storage.put(key, structuredClone(value));
+    },
+    async delete(key) {
+      await storage.delete(key);
+    },
+    async list(prefix) {
+      const values = [];
+      const seen = new Set();
+      let start;
+      for (;;) {
+        const page = await storage.list({ prefix, start, limit: 100 });
+        let added = 0;
+        let last;
+        for (const [key, value] of page) {
+          last = key;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          added += 1;
+          values.push(structuredClone(value));
+        }
+        if (!last || added === 0 || page.size < 100) break;
+        start = last;
+      }
+      return values;
+    },
+  };
+}
+
+function storeForMachine(machine) {
+  return {
+    get: key => machine.get(key),
+    put: (key, value) => machine.put(key, value),
+    delete: key => machine.delete(key),
+    list: prefix => machine.list(prefix),
+  };
+}
+
+function browserService(machine, env) {
+  const store = storeForMachine(machine);
+  if (env.browserSessionService) return env.browserSessionService;
+  if (env.browsers) {
+    return createBrowserSessionService({
+      store,
+      browsers: env.browsers,
+      search: null,
+      scrape: null,
+      maxSessionsPerBot: env.MAX_BROWSER_SESSIONS_PER_BOT ?? 2,
+    });
+  }
+  return createDefaultBrowserSessionService(env, store);
+}
+
+/**
+ * Per-bot Durable Object. Holds live run checkpoints and owner-bound browser session records.
  * Durable business records (ledger, approvals, wallets) live in Supabase.
  *
  * This module is structured so unit tests can drive the same state machine
@@ -19,6 +102,17 @@ export class BotStateMachine {
 
   async put(key, value) {
     this.storage.set(key, structuredClone(value));
+  }
+
+  async delete(key) {
+    this.storage.delete(key);
+  }
+
+  async list(prefix) {
+    if (!(this.storage instanceof Map)) return [];
+    return [...this.storage.entries()]
+      .filter(([key]) => typeof key === 'string' && key.startsWith(prefix))
+      .map(([, value]) => structuredClone(value));
   }
 
   async handle(request, env = {}) {
@@ -107,8 +201,78 @@ export class BotStateMachine {
       }
     }
 
+    const browserPath = url.pathname.match(/^\/id\/([^/]+)\/browser\/sessions(?:\/([^/]+)\/(live-view|release))?$/);
+    if (browserPath) {
+      return this.handleBrowser(request, env, {
+        botId: decodeURIComponent(browserPath[1]),
+        sessionRecordId: browserPath[2] ? decodeURIComponent(browserPath[2]) : null,
+        leaf: browserPath[3] ?? null,
+      });
+    }
+
     return Response.json({ error: 'not_found' }, { status: 404 });
   }
+
+  async handleBrowser(request, env, { botId, sessionRecordId, leaf }) {
+    try {
+      const ownerId = ownerFrom(request);
+      if (!ownerId) return noStore({ error: 'owner_required' }, 401);
+      const service = browserService(this, env);
+      if (!leaf && request.method === 'GET') {
+        return noStore(await service.listOpenSessions({ ownerId, botId }));
+      }
+      if (!leaf && request.method === 'POST') {
+        const body = await readBrowserBody(request);
+        const opened = await service.openSession({ ownerId, botId, purpose: body.purpose ?? 'browse' });
+        return noStore({
+          sessionRecordId: opened.sessionRecordId,
+          purpose: opened.purpose,
+          status: opened.status,
+          event: opened.event,
+        });
+      }
+      if (leaf === 'live-view' && request.method === 'POST') {
+        await readBrowserBody(request);
+        const view = await service.liveView({ ownerId, botId, sessionRecordId });
+        return noStore({
+          sessionRecordId: view.sessionRecordId,
+          viewerUrl: view.viewerUrl,
+          connectBefore: view.connectBefore,
+          mode: view.mode,
+          embedVerified: view.embedVerified,
+          fallback: view.fallback,
+          event: view.event,
+        });
+      }
+      if (leaf === 'release' && request.method === 'POST') {
+        await readBrowserBody(request);
+        const closed = await service.releaseSession({ ownerId, botId, sessionRecordId });
+        return noStore({
+          sessionRecordId: closed.sessionRecordId,
+          status: closed.status,
+          event: closed.event,
+        });
+      }
+      return noStore({ error: 'method_not_allowed' }, 405);
+    } catch (error) {
+      return browserFailure(error);
+    }
+  }
+}
+
+async function readBrowserBody(request) {
+  const text = await request.text();
+  if (!text) return {};
+  let body;
+  try { body = JSON.parse(text); } catch { throw new SessionError('invalid_json', 400); }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new SessionError('invalid_json', 400);
+  if (body.sessionId != null || body.providerSessionId != null || body.viewerUrl != null) {
+    throw new SessionError('provider_session_forbidden', 400);
+  }
+  if (body.ownerId != null && body.ownerId !== request.headers.get(OWNER_HEADER)) {
+    throw new SessionError('owner_mismatch', 400);
+  }
+  return body;
 }
 
 /** Cloudflare Durable Object export. */
@@ -127,15 +291,11 @@ export class BotDurableObject {
 
   async #machine() {
     if (this._ready) return this.machine;
-    const storage = this.state.storage;
-    this.machine = new BotStateMachine({
-      has: async () => false,
-      get: async () => undefined,
-      set: async () => {},
-    });
-    // Patch instance methods to use DO storage.
-    this.machine.get = async key => (await storage.get(key)) ?? null;
-    this.machine.put = async (key, value) => { await storage.put(key, value); };
+    const store = createDurableStore(this.state.storage);
+    this.machine.get = key => store.get(key);
+    this.machine.put = (key, value) => store.put(key, value);
+    this.machine.delete = key => store.delete(key);
+    this.machine.list = prefix => store.list(prefix);
     this._ready = true;
     return this.machine;
   }
