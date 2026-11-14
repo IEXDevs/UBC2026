@@ -1,13 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { enableBot } from '@ubc2026/bot-creation';
 import BotCreation from '../components/BotCreation';
 import BotPage from '../components/BotPage';
+import OverviewPanel from '../components/OverviewPanel';
+import SecurityPanel from '../components/SecurityPanel';
 import TalkStub from '../components/TalkStub';
 import { getDemoShellState, panePlaceholder } from '../lib/demo-state.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
+import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 
 const state = getDemoShellState();
 const privyConfigured = privyProviderProps({
@@ -36,20 +39,21 @@ function AuthedShell() {
   const { ready, authenticated, user, login, logout } = usePrivy();
   const signedIn = ready && authenticated;
   const ownerId = ownerIdFromPrivyUser(user, signedIn);
+  const label = signedIn ? privyAccountLabel(user) : null;
   const account = !ready ? (
     <button className="cta" type="button" disabled>Connect with Privy</button>
   ) : signedIn ? (
     <div className="account">
-      <span className="account-id">{privyAccountLabel(user)}</span>
+      <span className="account-id">{label}</span>
       <button className="ghost" type="button" onClick={() => logout()}>Log out</button>
     </div>
   ) : (
     <button className="cta" type="button" onClick={() => login()}>Connect with Privy</button>
   );
-  return <Shell ownerId={ownerId} account={account} />;
+  return <Shell ownerId={ownerId} account={account} accountLabel={label} />;
 }
 
-function Shell({ ownerId, account }) {
+function Shell({ ownerId, account, accountLabel = null }) {
   const owner = ownerId ?? 'demo_owner';
   const [bots, setBots] = useState(state.bots);
   const [userTemplates, setUserTemplates] = useState([]);
@@ -58,6 +62,15 @@ function Shell({ ownerId, account }) {
   const [pane, setPane] = useState('Agents');
   const bot = bots.find(item => item.id === activeBot) ?? bots[0];
   const placeholder = panePlaceholder(pane);
+  const showHero = pane !== 'Agents' && pane !== 'Overview' && pane !== 'Security';
+  const clientTools = useMemo(() => createVoiceClientTools({
+    bots,
+    activeBotId: activeBot,
+    pane,
+    setActiveBotId: setActiveBot,
+    setPane,
+    focusLiveView: () => setPane('Agents'),
+  }), [bots, activeBot, pane]);
 
   function addDraft(draft) {
     setBots(current => [
@@ -121,7 +134,7 @@ function Shell({ ownerId, account }) {
         </header>
 
         <section className="content">
-          {pane !== 'Agents' && (
+          {showHero && (
             <div className="hero-panel">
               <div className="pill">● {pane} · {bot.name}</div>
               <h1>{bot.goal}</h1>
@@ -143,13 +156,22 @@ function Shell({ ownerId, account }) {
 
           {pane === 'Agents' ? (
             <BotPage bot={bot} ownerId={ownerId} />
+          ) : pane === 'Overview' ? (
+            <OverviewPanel bots={bots} ownerId={ownerId} />
+          ) : pane === 'Security' ? (
+            <SecurityPanel
+              bots={bots}
+              ownerId={ownerId}
+              accountLabel={accountLabel}
+              onBotsChange={setBots}
+            />
           ) : (
             <section className="panel empty-pane" aria-label={placeholder.title}>
               <h2>{placeholder.title}</h2>
               <p>{placeholder.body}</p>
             </section>
           )}
-          <TalkStub botName={bot.name} />
+          <TalkStub botName={bot.name} clientTools={clientTools} />
         </section>
       </main>
     </div>

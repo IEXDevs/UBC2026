@@ -1,0 +1,148 @@
+/**
+ * ElevenAgents client tools for the glass app (Isaac / 8B).
+ * These run in the browser and only navigate/confirm — spend still goes through
+ * the same trust → verify → policy → approval path as the UI.
+ */
+
+export const VOICE_CLIENT_TOOLS = Object.freeze([
+  'open_bot',
+  'show_live_view',
+  'confirm_dialog',
+  'read_back',
+]);
+
+export function voiceToolDefinitions() {
+  return [
+    {
+      name: 'open_bot',
+      description: 'Open a bot in the Agents pane by id or name.',
+      parameters: {
+        type: 'object',
+        properties: {
+          botId: { type: 'string', description: 'Bot id when known' },
+          name: { type: 'string', description: 'Bot display name fallback' },
+        },
+      },
+    },
+    {
+      name: 'show_live_view',
+      description: 'Focus the Live View for the active bot.',
+      parameters: {
+        type: 'object',
+        properties: {
+          botId: { type: 'string' },
+        },
+      },
+    },
+    {
+      name: 'confirm_dialog',
+      description: 'Ask the owner to confirm a spoken action before it runs.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string' },
+          actionId: { type: 'string' },
+        },
+        required: ['prompt'],
+      },
+    },
+    {
+      name: 'read_back',
+      description: 'Return a short spoken summary of the current pane or approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: 'overview | approval | timeline | security' },
+        },
+      },
+    },
+  ];
+}
+
+function findBot(bots, { botId, name } = {}) {
+  const list = Array.isArray(bots) ? bots : [];
+  if (botId) {
+    const byId = list.find((b) => b.id === botId);
+    if (byId) return byId;
+  }
+  if (name) {
+    const needle = String(name).trim().toLowerCase();
+    return list.find((b) => String(b.name).toLowerCase() === needle)
+      || list.find((b) => String(b.name).toLowerCase().includes(needle))
+      || null;
+  }
+  return null;
+}
+
+/**
+ * Create client-tool handlers bound to shell setters.
+ * `confirm` should return a boolean (window.confirm or a custom modal).
+ */
+export function createVoiceClientTools({
+  bots = [],
+  activeBotId = null,
+  pane = 'Agents',
+  approvalSummary = null,
+  setActiveBotId,
+  setPane,
+  focusLiveView,
+  confirm = (prompt) => (typeof window !== 'undefined' ? window.confirm(prompt) : false),
+  pushEvent = null,
+} = {}) {
+  return {
+    async open_bot(params = {}) {
+      const bot = findBot(bots, params);
+      if (!bot) return { ok: false, error: 'bot_not_found' };
+      if (typeof setActiveBotId === 'function') setActiveBotId(bot.id);
+      if (typeof setPane === 'function') setPane('Agents');
+      if (typeof pushEvent === 'function') pushEvent({ kind: 'client.open_bot', botId: bot.id });
+      return { ok: true, botId: bot.id, name: bot.name, pane: 'Agents' };
+    },
+    async show_live_view(params = {}) {
+      const bot = findBot(bots, { botId: params.botId || activeBotId });
+      if (!bot) return { ok: false, error: 'bot_not_found' };
+      if (typeof setActiveBotId === 'function') setActiveBotId(bot.id);
+      if (typeof setPane === 'function') setPane('Agents');
+      if (typeof focusLiveView === 'function') focusLiveView(bot.id);
+      if (typeof pushEvent === 'function') pushEvent({ kind: 'client.show_live_view', botId: bot.id });
+      return { ok: true, botId: bot.id, focused: 'live-view' };
+    },
+    async confirm_dialog(params = {}) {
+      const prompt = typeof params.prompt === 'string' ? params.prompt.trim() : '';
+      if (!prompt) return { ok: false, error: 'prompt_required' };
+      const accepted = Boolean(await confirm(prompt));
+      if (typeof pushEvent === 'function') {
+        pushEvent({ kind: 'client.confirm', actionId: params.actionId || null, accepted });
+      }
+      return { ok: true, accepted, actionId: params.actionId || null };
+    },
+    async read_back(params = {}) {
+      const topic = params.topic || pane?.toLowerCase() || 'overview';
+      let text;
+      if (topic === 'approval' && approvalSummary) {
+        text = approvalSummary;
+      } else if (topic === 'security') {
+        text = 'Security pane: pause every bot, freeze, or request grab-back. Keys stay in Privy.';
+      } else if (topic === 'timeline') {
+        text = 'Timeline shows recent tool and trust events for the active bot.';
+      } else if (topic === 'overview') {
+        text = `Overview across ${bots.length} bots. Open a bot for approvals and Live View.`;
+      } else {
+        const bot = findBot(bots, { botId: activeBotId }) || bots[0];
+        text = bot
+          ? `${bot.name} is ${bot.status}. Goal: ${bot.goal}`
+          : 'No bots yet. Create one from the sidebar.';
+      }
+      if (typeof pushEvent === 'function') pushEvent({ kind: 'client.read_back', topic, text });
+      return { ok: true, text };
+    },
+  };
+}
+
+/** Dispatch a single client tool call by name. */
+export async function runVoiceClientTool(tools, name, params) {
+  if (!tools || typeof tools[name] !== 'function') {
+    return { ok: false, error: 'unknown_tool' };
+  }
+  return tools[name](params || {});
+}
