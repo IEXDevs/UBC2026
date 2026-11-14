@@ -81,4 +81,4 @@ node scripts/accounts-and-funds.mjs --address <SOLANA_PUBKEY>
 
 Devnet SOL: [faucet.solana.com](https://faucet.solana.com/). The public RPC faucet returns HTTP 410, so `solana airdrop --url devnet` is not the path. Devnet USDC: [Circle faucet](https://faucet.circle.com/?chain=SOL), mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`.
 
-Worker deploy target (do not deploy from this change): `apps/agent-runtime/wrangler.jsonc`. The Next.js UI deploy target is Cloudflare; OpenNext hosting is still the frontend shell's job.
+Worker deploy target (do not deploy from this change): `apps/agent-runtime/wrangler.jsonc`. The Next.js UI deploy target is Cloudflare via OpenNext: `apps/web/wrangler.jsonc`.
