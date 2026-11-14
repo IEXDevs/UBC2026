@@ -10,7 +10,8 @@
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_classes": ["BotDurableObject"] }
+    // Cloudflare accounts no longer accept new KV-backed DO namespaces.
+    { "tag": "v1", "new_sqlite_classes": ["BotDurableObject"] }
   ],
   "triggers": {
     "crons": ["0 * * * *", "5,20,35,50 * * * *"]
