@@ -42,7 +42,7 @@ test('OpenRouter calls use the role model and never put the key in the body', as
   assert.equal(seen[0].options.headers.Authorization, `Bearer ${API_KEY}`);
   assert.equal(JSON.stringify(seen[0].body).includes(API_KEY), false);
   assert.equal(JSON.stringify(seen[0].body).includes('privy-app-secret-value'), false);
-  assert.equal(seen[0].body.model, 'x-ai/grok-4-fast');
+  assert.equal(seen[0].body.model, 'meta/muse-spark-1.3-contributor');
   assert.match(seen[0].body.messages[1].content, /\[redacted\]/);
 });
 

@@ -47,16 +47,17 @@ function toolRequest(name, { headers = {}, body = {} } = {}) {
   });
 }
 
-test('the agent spec uses Grok as the custom LLM and includes no secret values', async () => {
+test('the agent spec uses Muse Spark as the custom LLM and includes no secret values', async () => {
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/agent`), env({
     OPENROUTER_API_KEY: OPENROUTER,
     ELEVENLABS_API_KEY: ELEVEN,
-    OPENROUTER_MODEL_VOICE: 'openai/gpt-4o',
+    OPENROUTER_MODEL_VOICE: 'not a model',
   }));
   assert.equal(response.status, 200);
   const spec = await response.json();
   assert.equal(spec.llm.provider, 'custom-llm');
   assert.equal(spec.llm.modelId, GROK_VOICE_MODEL);
+  assert.equal(spec.llm.modelId, 'meta/muse-spark-1.3-contributor');
   assert.equal(spec.llm.upstream, OPENROUTER_CHAT_COMPLETIONS);
   assert.equal(spec.llm.streaming, true);
   assert.equal(spec.llm.apiKeyIncluded, false);
@@ -238,7 +239,7 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
     body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
-  }), env({ OPENROUTER_API_KEY: OPENROUTER, OPENROUTER_MODEL_VOICE: 'x-ai/grok-4-fast' }), {
+  }), env({ OPENROUTER_API_KEY: OPENROUTER, OPENROUTER_MODEL_VOICE: 'meta/muse-spark-1.3' }), {
     fetcher: async (url, init) => {
       calls.push(JSON.parse(init.body));
       return new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
@@ -247,7 +248,7 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     },
   });
   assert.equal(await stream.text(), 'data: {"ok":true}\n\ndata: [DONE]\n\n');
-  assert.equal(calls[0].model, 'x-ai/grok-4-fast');
+  assert.equal(calls[0].model, 'meta/muse-spark-1.3');
 
   const blocked = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',

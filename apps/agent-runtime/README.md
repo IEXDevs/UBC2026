@@ -19,7 +19,7 @@ Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 - `POST /bots/:id/commerce/signals/:signalId/settle` — release signal after PAYMENT-SIGNATURE
 - `POST /bots/:id/sns/send` — resolve `.sol` and build/execute unsigned send intent (`x-owner-id`)
 - `POST /security/grab-back` — owner sweep additional wallets to main (`x-owner-id`); dry-run without transfer client
-- `GET /voice/agent` — ElevenLabs agent spec. Custom LLM is Grok (`x-ai/grok-4.7`, override with `OPENROUTER_MODEL_VOICE`) via `POST /voice/llm/chat/completions`, which streams OpenRouter chat completions. The OpenRouter key is not part of the spec.
+- `GET /voice/agent` — ElevenLabs agent spec. Custom LLM is Meta Muse Spark 1.3 Contributor (`meta/muse-spark-1.3-contributor`, override with `OPENROUTER_MODEL_VOICE`) via `POST /voice/llm/chat/completions`, which streams OpenRouter chat completions. The OpenRouter key is not part of the spec.
 - `POST /voice/tools/:name` — ElevenLabs webhook tools. Each tool calls the same bot, event, wallet, metric, payment, or browser route as the UI, with the same `x-owner-id` header. Live View URLs are removed before the model sees the result. Requires `ELEVENLABS_WEBHOOK_SECRET` and `x-owner-id`. Without the secret the route returns `elevenlabs_webhook_not_configured` and does not call ElevenLabs.
 - `GET /api/routes` — contract route list and secret names (no values)
 - `GET /api/me`, `/api/wallets`, `/api/bots`, `/api/events`, `/api/decisions`, `/api/payments`, `/api/metrics` — live Supabase reads when `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set (empty `source: unconfigured` otherwise). Pass `x-owner-id` and/or `Authorization: Bearer <privy access token>`.
@@ -29,7 +29,7 @@ Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 - Hourly cron `0 * * * *` — paper position check for trading and position-management bots. Shopping bots are skipped. The check is stored on the bot Durable Object and does not start a research or spend loop. Prices use `lookupPrice` when a bot has positions; otherwise DexScreener (no key). With `lookupPrice: null`, marks are left unpriced.
 - Stream-fallback cron `5,20,35,50 * * * *` — if Supabase `stream_events` has no delivery in the last hour (or Supabase is not configured), re-read each bot wallet's devnet USDC with `QUICKNODE_DEVNET_RPC_URL`. The RPC URL is not written into the check. A non-devnet genesis hash is refused. The same re-check also runs on the hourly cron when the stream is stale.
 
-Business data (wallets, ledger, approvals) stays in Supabase. This Worker holds checkpointed run state only. Optional model id overrides, not secrets: `OPENROUTER_MODEL_RESEARCH`, `OPENROUTER_MODEL_DECIDE`, `OPENROUTER_MODEL_VERIFY`, `OPENROUTER_MODEL_MONITOR`, `OPENROUTER_MODEL_VISION`, `OPENROUTER_MODEL_VOICE`. Defaults are `x-ai/grok-4-fast` (research, monitor), `x-ai/grok-4.7` (decide, verify, voice), and `x-ai/grok-4` (vision). A voice override is used only when it is an `x-ai/grok` model id.
+Business data (wallets, ledger, approvals) stays in Supabase. This Worker holds checkpointed run state only. Optional model id overrides, not secrets: `OPENROUTER_MODEL_RESEARCH`, `OPENROUTER_MODEL_DECIDE`, `OPENROUTER_MODEL_VERIFY`, `OPENROUTER_MODEL_MONITOR`, `OPENROUTER_MODEL_VISION`, `OPENROUTER_MODEL_VOICE`. Default for every role and voice is `meta/muse-spark-1.3-contributor`.
 
 ```bash
 npm test -w @ubc2026/agent-runtime
