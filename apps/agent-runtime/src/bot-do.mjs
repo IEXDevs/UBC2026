@@ -6,6 +6,7 @@ import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mj
 import { decideFromCheckpoint } from './decide.mjs';
 import { LoopEngineError, runBotLoop } from './loop-engine.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
+import { assessPositions } from './schedules.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
 
@@ -127,7 +128,34 @@ export class BotStateMachine {
     if (request.method === 'GET' && url.pathname === '/status') {
       const run = await this.get('run');
       const meta = await this.get('meta');
-      return Response.json({ ok: true, meta, run });
+      const positionCheck = await this.get('lastPositionCheck');
+      return Response.json({ ok: true, meta, run, positionCheck });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/position-check') {
+      const body = await request.json().catch(() => ({}));
+      const botId = String(body.botId ?? '');
+      if (!botId) return Response.json({ error: 'botId_required' }, { status: 400 });
+      const stored = await this.get('positions');
+      const fromBody = Array.isArray(body.positions) ? body.positions : [];
+      const positions = fromBody.length > 0 ? fromBody : (Array.isArray(stored) ? stored : []);
+      const checkedAt = Number.isSafeInteger(body.now) ? body.now : now;
+      const check = assessPositions({
+        bot: {
+          id: botId,
+          maxLoss: body.maxLoss ?? null,
+        },
+        positions,
+        quotes: body.quotes ?? {},
+        balance: body.balance ?? null,
+        reason: body.reason,
+        now: checkedAt,
+      });
+      await this.put('lastPositionCheck', check);
+      const history = await this.get('positionCheckHistory');
+      const prior = Array.isArray(history) ? history : [];
+      await this.put('positionCheckHistory', [...prior, check].slice(-48));
+      return Response.json({ ok: true, check });
     }
 
     if (request.method === 'POST' && url.pathname === '/wake') {

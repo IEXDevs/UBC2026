@@ -58,7 +58,7 @@ goal → research (browser/search)
 | `packages/sns` | SNS `.sol` resolve + unsigned transfer intents (Isaac / 6C) |
 | `packages/agent-commerce` | Bots sell signals over x402 on devnet (Isaac / 6C) |
 | `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
-| `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object. `POST /bots/:id/loop` runs research → decide → trust → verify → policy → approval → execute → memo → monitor, checkpointed per step. Models use OpenRouter and a locked platform prompt |
+| `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object. `POST /bots/:id/loop` runs research → decide → trust → verify → policy → approval → execute → memo → monitor, checkpointed per step. Models use OpenRouter and a locked platform prompt. Hourly Cron checks paper positions. A second Cron re-checks devnet USDC when the QuickNode stream has been silent for an hour |
 | `apps/web` | Next.js glass UI shell (Cloudflare-hosted) |
 | `supabase/schema.sql` | Postgres schema: foundations, `20261114020000_policy_ledger.sql` (atomic reserve, approval modes, kill switch), and `20261114040000_bot_templates.sql` (locked templates, user templates, draft create / enable) |
 
@@ -101,3 +101,8 @@ Worker deploy target (do not deploy from this change): `apps/agent-runtime/wrang
 - **Why:** Core wake path for deposits, x402 settlement, grab-back, and spend-ledger cross-checks. Hourly Cron is fallback only.
 
 Helpers live in `packages/quicknode-streams`; the Worker wires verify → dedupe → Supabase `stream_events` persist → wallet→bot resolve → DO `/wake` → 4A `/loop` when loop context is available.
+
+## Schedules (5B)
+
+- **Hourly position check:** Cloudflare Cron `0 * * * *` records a paper mark for each enabled trading or position-management bot. The check stays on the bot Durable Object. It does not wake the spend loop.
+- **Stream-drop fallback:** Cron `5,20,35,50 * * * *` (and the hourly run, when the same condition holds) re-reads devnet USDC over `QUICKNODE_DEVNET_RPC_URL` if the newest `stream_events` row is older than one hour, or if that table cannot be read. Genesis must be devnet. The RPC URL is not stored.

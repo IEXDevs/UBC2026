@@ -1,10 +1,20 @@
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
+import { createDexScreenerPriceProvider } from '@ubc2026/prices';
 import { BotDurableObject } from './bot-do.mjs';
 import {
   processQuickNodeWebhook,
   processStreamWalletSync,
   processStreamBackfill,
 } from './quicknode-webhook.mjs';
+import {
+  HOURLY_CRON,
+  assessPositions,
+  listScheduledBotsFromSupabase,
+  planScheduledWork,
+  readDevnetUsdcBalance,
+  readStreamHealthFromSupabase,
+  walletAddress,
+} from './schedules.mjs';
 
 export { BotDurableObject };
 
@@ -20,7 +30,8 @@ function botStub(env, botId) {
 /**
  * Maelstrom agent runtime Worker.
  * Routes wake/pause/resume/status, the checkpointed bot loop, and owner-bound browser sessions to a per-bot Durable Object.
- * QuickNode Streams and hourly cron wake bots through the same /wake path.
+ * QuickNode Streams wake bots through /wake. Hourly cron records a paper
+ * position check. A second cron re-checks devnet USDC when the stream is stale.
  */
 export default {
   async fetch(request, env) {
@@ -76,19 +87,117 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Stub hourly cron (API_ROUTES cron.hourly). Wakes only bots the caller
-    // lists. Position checks and Supabase schedule queries are a later chunk.
-    const listed = typeof env.listScheduledBots === 'function'
+    const cron = typeof controller?.cron === 'string' && controller.cron ? controller.cron : HOURLY_CRON;
+    const now = Number.isSafeInteger(controller?.scheduledTime) ? controller.scheduledTime : Date.now();
+    const bots = typeof env.listScheduledBots === 'function'
       ? await env.listScheduledBots()
-      : [];
-    for (const bot of listed) {
-      ctx.waitUntil(
-        botStub(env, bot.id).fetch(new Request('https://bot/wake', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ botId: bot.id, reason: 'cron-hourly', goal: bot.goal ?? '' }),
-        })),
-      );
+      : await listScheduledBotsFromSupabase(env, env.fetch ?? fetch);
+    if (!Array.isArray(bots) || bots.length === 0) return;
+
+    const health = typeof env.readStreamHealth === 'function'
+      ? await env.readStreamHealth(now)
+      : await readStreamHealthFromSupabase(env, env.fetch ?? fetch);
+    const plan = planScheduledWork({ bots, now, cron, health });
+    const needsPrices = plan.positionChecks.some(bot => Array.isArray(bot.positions) && bot.positions.length > 0);
+    const lookup = needsPrices ? priceLookup(env) : null;
+
+    for (const bot of plan.positionChecks) {
+      const quotes = lookup ? await quotePositions(lookup, bot.positions) : {};
+      ctx.waitUntil(deliverCheck(env, bot, { reason: 'cron-hourly', quotes, balance: null, now }));
+    }
+
+    if (!plan.streamDropped) return;
+    const balances = new Map();
+    for (const wallet of plan.walletRechecks) {
+      balances.set(wallet.address, await readBalance(env, wallet.address));
+    }
+    for (const bot of plan.recheckBots) {
+      const address = walletAddress(bot);
+      ctx.waitUntil(deliverCheck(env, bot, {
+        reason: 'stream-drop-recheck',
+        quotes: {},
+        balance: address ? balances.get(address) : null,
+        now,
+      }));
     }
   },
 };
+
+function priceLookup(env) {
+  if (env.lookupPrice === null) return null;
+  if (typeof env.lookupPrice === 'function') return env.lookupPrice;
+  return createDexScreenerPriceProvider({ fetcher: env.fetch ?? fetch });
+}
+
+async function quotePositions(lookup, positions) {
+  const quotes = {};
+  for (const position of Array.isArray(positions) ? positions.slice(0, 30) : []) {
+    const mint = position?.mint;
+    if (typeof mint !== 'string' || quotes[mint]) continue;
+    try {
+      quotes[mint] = await lookup(mint);
+    } catch (error) {
+      quotes[mint] = { error: typeof error?.code === 'string' ? error.code : 'price_unavailable' };
+    }
+  }
+  return quotes;
+}
+
+async function readBalance(env, address) {
+  if (typeof env.readWalletBalance === 'function') {
+    try {
+      return await env.readWalletBalance({ address });
+    } catch {
+      return { ok: false, code: 'rpc_failed', cluster: 'devnet', address };
+    }
+  }
+  return readDevnetUsdcBalance({
+    rpcUrl: env.QUICKNODE_DEVNET_RPC_URL,
+    address,
+    fetcher: env.fetch ?? fetch,
+  });
+}
+
+function checkPayload(bot, { reason, quotes, balance, now }) {
+  return {
+    botId: bot.id,
+    goal: typeof bot.goal === 'string' ? bot.goal : '',
+    type: bot.type ?? null,
+    maxLoss: bot.maxLoss ?? bot.cap?.maxLoss ?? null,
+    positions: Array.isArray(bot.positions) ? bot.positions : [],
+    quotes: quotes ?? {},
+    balance: balance ?? null,
+    reason,
+    now,
+  };
+}
+
+function slimQuote(quote) {
+  if (!quote || typeof quote !== 'object') return {};
+  const slim = {};
+  if (typeof quote.priceUsd === 'string') slim.priceUsd = quote.priceUsd;
+  if (typeof quote.quoteSource === 'string') slim.quoteSource = quote.quoteSource.slice(0, 64);
+  if (typeof quote.error === 'string') slim.error = quote.error.slice(0, 64);
+  return slim;
+}
+
+function deliverCheck(env, bot, details) {
+  const payload = checkPayload(bot, details);
+  const recorded = assessPositions({
+    bot: { id: bot.id, maxLoss: payload.maxLoss },
+    positions: payload.positions,
+    quotes: payload.quotes,
+    balance: payload.balance,
+    reason: payload.reason,
+    now: payload.now,
+  });
+  const quotes = {};
+  for (const [mint, quote] of Object.entries(payload.quotes ?? {})) quotes[mint] = slimQuote(quote);
+  payload.quotes = quotes;
+  payload.balance = recorded.balance;
+  return botStub(env, bot.id).fetch(new Request('https://bot/position-check', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })).then(response => response, () => Response.json({ ok: false, check: recorded }));
+}

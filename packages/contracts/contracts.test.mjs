@@ -179,7 +179,8 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.equal(matchApiRoute('GET', '/bots/bot_1/browser/sessions').route.id, 'bots.browser.list');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/browser/sessions/rec_1/release').route.id, 'bots.browser.release');
   assert.equal(matchApiRoute('CRON', '0 * * * *'), null);
-  assert.ok(API_ROUTES.some(route => route.id === 'cron.hourly' && route.status === 'stub'));
+  assert.ok(API_ROUTES.some(route => route.id === 'cron.hourly' && route.status === 'live' && route.path === '0 * * * *'));
+  assert.ok(API_ROUTES.some(route => route.id === 'cron.stream-fallback' && route.status === 'live' && route.path === '5,20,35,50 * * * *'));
 });
 
 test('builtin templates are locked and non-deletable', () => {
