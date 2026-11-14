@@ -57,6 +57,21 @@ const KIND_LABEL = Object.freeze({
   'kill.stop-all': 'stop-all memo landed',
 });
 
+/** Compact rows from QuickNode Streams (`packages/quicknode-streams`). `unknown` is not posted. */
+export const STREAM_EVENT_TYPES = Object.freeze(['deposit', 'withdrawal', 'x402-in', 'x402-out', 'memo', 'swap', 'unknown']);
+
+const STREAM_LABEL = Object.freeze({
+  deposit: 'deposit landed',
+  withdrawal: 'withdrawal confirmed',
+  'x402-in': 'x402 payment received',
+  'x402-out': 'x402 payment settled',
+  memo: 'on-chain memo landed',
+  swap: 'swap confirmed',
+});
+
+const PUBKEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+
 const CLUSTERS = new Set(['devnet', 'testnet', 'mainnet']);
 const EXECUTION_CLUSTERS = new Set(['devnet', 'testnet']);
 
@@ -135,9 +150,60 @@ function skipReason(event) {
   return null;
 }
 
+function isStreamRow(event) {
+  return Boolean(event && typeof event === 'object' && event.kind == null && typeof event.type === 'string');
+}
+
+function streamAsset(token, amount) {
+  if (amount == null) return { asset: null, amount: null };
+  if (token === 'USDC' || token === DEVNET_USDC_MINT) return { asset: 'USDC', amount };
+  return { asset: null, amount: null };
+}
+
+function normalizeStreamRow(raw) {
+  if (typeof raw.signature !== 'string' || !SIG.test(raw.signature)) fail('Invalid transaction signature');
+  if (typeof raw.wallet !== 'string' || !PUBKEY.test(raw.wallet)) fail('Invalid wallet');
+  if (!STREAM_EVENT_TYPES.includes(raw.type)) fail('Unknown stream event type');
+  if (raw.amount != null && (typeof raw.amount !== 'string' || !AMOUNT.test(raw.amount))) {
+    fail('Amount must be an unsigned integer string');
+  }
+  if (raw.token != null && (typeof raw.token !== 'string' || raw.token.length < 1 || raw.token.length > 64 || /[\r\n]/.test(raw.token))) {
+    fail('Invalid token');
+  }
+  const cluster = raw.cluster ?? 'devnet';
+  if (!CLUSTERS.has(cluster)) fail('Unknown cluster');
+  if (raw.botId != null && (typeof raw.botId !== 'string' || !ID.test(raw.botId))) fail('Invalid bot id');
+  if (!STREAM_LABEL[raw.type] || !EXECUTION_CLUSTERS.has(cluster)) return null;
+  const at = Number.isSafeInteger(raw.at) && raw.at > 0
+    ? raw.at
+    : (Number.isSafeInteger(raw.slot) && raw.slot > 0 ? raw.slot : 1);
+  const id = raw.id == null ? `s_${raw.signature.slice(0, 40)}` : raw.id;
+  if (typeof id !== 'string' || !ID.test(id)) fail('Event id is required');
+  const { asset, amount } = streamAsset(raw.token, raw.amount ?? null);
+  const botName = raw.botName
+    ?? (raw.botId ? null : `${raw.wallet.slice(0, 4)}…${raw.wallet.slice(-4)}`);
+  const summary = typeof raw.summary === 'string' && raw.summary.length > 0
+    ? raw.summary
+    : `${STREAM_LABEL[raw.type]} for ${raw.wallet}`;
+  if (summary.length > 500) fail('Event summary is required and must stay short');
+  return {
+    id,
+    botId: raw.botId ?? raw.wallet,
+    botName,
+    kind: raw.type,
+    label: STREAM_LABEL[raw.type],
+    cluster,
+    signature: raw.signature,
+    summary,
+    at,
+    asset,
+    amount,
+  };
+}
+
 function draftText(event) {
   const url = explorerUrl(event.signature, event.cluster);
-  const label = KIND_LABEL[event.kind];
+  const label = event.label ?? KIND_LABEL[event.kind];
   let name = redactSecrets((event.botName ?? event.botId).trim());
   let prose = redactSecrets(event.summary).replace(/\s+/g, ' ').trim();
   let extra = moneyLabel(event);
@@ -172,9 +238,13 @@ function draftText(event) {
 export function selectNotableOnchainEvents(events) {
   if (!Array.isArray(events)) fail('Events must be an array');
   const bySignature = new Map();
-  for (const event of events) {
-    assertEvent(event);
-    if (skipReason(event)) continue;
+  for (const raw of events) {
+    const event = isStreamRow(raw) ? normalizeStreamRow(raw) : (() => {
+      assertEvent(raw);
+      if (skipReason(raw)) return null;
+      return raw;
+    })();
+    if (!event) continue;
     const previous = bySignature.get(event.signature);
     if (previous && (previous.at > event.at || (previous.at === event.at && previous.id <= event.id))) continue;
     bySignature.set(event.signature, event);

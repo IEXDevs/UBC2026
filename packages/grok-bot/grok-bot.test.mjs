@@ -108,6 +108,36 @@ test('long summaries are trimmed to the X character limit and bursts keep the ne
   assert.equal(posts.at(-1).eventId, 'evt_20');
 });
 
+test('QuickNode stream rows draft the same offline payload', () => {
+  const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const payload = prepareNotablePosts([
+    {
+      signature: '6'.repeat(88),
+      wallet,
+      type: 'deposit',
+      amount: '2500000',
+      token: 'USDC',
+      slot: 42,
+      botId: 'bot_1',
+    },
+    {
+      signature: '7'.repeat(88),
+      wallet,
+      type: 'unknown',
+      amount: null,
+      token: null,
+      slot: 43,
+    },
+  ]);
+  assert.equal(payload.networkCalls, 0);
+  assert.equal(payload.posts.length, 1);
+  assert.equal(payload.posts[0].kind, 'deposit');
+  assert.equal(payload.posts[0].botId, 'bot_1');
+  assert.match(payload.posts[0].text, /deposit landed \(2\.5 USDC\)/);
+  assert.match(payload.posts[0].text, /cluster=devnet/);
+  assert.throws(() => prepareNotablePosts([{ signature: 'nope', wallet, type: 'deposit' }]), GrokBotError);
+});
+
 test('malformed events are refused and non-execution clusters are not drafted', () => {
   assert.throws(() => prepareNotablePosts([event({ kind: 'secret.leak' })]), GrokBotError);
   assert.throws(() => prepareNotablePosts([event({ signature: 'not-a-signature' })]), GrokBotError);
