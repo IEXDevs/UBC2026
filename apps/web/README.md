@@ -14,6 +14,14 @@ If Connect shows **Something went wrong**, fix the Privy dashboard (not the Next
 4. Enable **Solana** embedded wallets (create on login) so the shell can mint the main wallet after sign-in.
 5. Restart `npm run dev -w @ubc2026/web` after any `.env.local` change. In DevTools → Network, a failing init call often returns `invalid_origin`.
 
+**Discord / GitHub / Google `invalid OAuth2 redirect_uri`:** that error comes from the provider console, not Next. Prefer Privy’s default social credentials (toggle the method on, leave custom client empty). If you pasted your own Discord/GitHub/Google app credentials into Privy → Login methods → Socials, that provider app must allow Privy’s callback **exactly**:
+
+```text
+https://auth.privy.io/api/v1/oauth/callback
+```
+
+For Discord: [Developer Portal](https://discord.com/developers/applications) → your app → OAuth2 → Redirects → add that URL → Save. Do not use `http://localhost:3000/...` as the Discord redirect — Privy owns the callback, then sends the user back to your allowed origin. Same callback URL for GitHub Authorization callback URL and Google Authorized redirect URIs.
+
 After login the shell calls `POST /api/wallets`. That needs **server** names in the same root `.env.local`: `PRIVY_APP_SECRET` and `QUICKNODE_DEVNET_RPC_URL` (https Solana **devnet** endpoint). `PRIVY_APP_ID` can match `NEXT_PUBLIC_PRIVY_APP_ID`. Until that succeeds you still see preview wallet rows (`PreviewMain111…`). The on-screen note lists any missing names — fix those, restart Next, sign in again.
 
 Set `NEXT_PUBLIC_AGENT_RUNTIME_URL` to the deployed agent-runtime origin (for example `https://maelstrom-agent-runtime.<subdomain>.workers.dev`). That is not the Next dev server on port 3000.
