@@ -35,6 +35,8 @@ Business data (wallets, ledger, approvals) stays in Supabase. This Worker holds 
 npm test -w @ubc2026/agent-runtime
 ```
 
+Browser calls from the Next shell (`http://localhost:3000`) need CORS. The Worker allowlists that origin (and `127.0.0.1:3000`) by default and answers `OPTIONS` preflights for `x-owner-id`. Add more origins with a comma-separated `CORS_ORIGINS` Worker var / secret after you deploy the web app.
+
 Deploy (after secrets):
 
 ```bash
