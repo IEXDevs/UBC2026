@@ -427,6 +427,31 @@ async function performExecute(run, ctx) {
     memo,
   });
   await ctx.persist(started);
+
+  let reservation = null;
+  if (ctx.deps.ledgerApi && typeof ctx.deps.ledgerApi.reserveBudget === 'function') {
+    try {
+      reservation = await ctx.deps.ledgerApi.reserveBudget({
+        ownerId: ctx.ownerId,
+        now: ctx.now,
+        idempotencyKey,
+        proposal,
+        approvalId: run.checkpoints.approval?.approvalId,
+      });
+      if (reservation?.state && reservation.state !== 'ready-to-reserve' && reservation.state !== 'reserved') {
+        return waitStep(started, 'execute', reservation.reason || reservation.state || 'reserve-blocked', {
+          idempotencyKey,
+          reservation,
+        }, ctx.now);
+      }
+    } catch (error) {
+      return waitStep(started, 'execute', error?.code || 'reserve-failed', {
+        idempotencyKey,
+        message: typeof error?.message === 'string' ? error.message.slice(0, 200) : undefined,
+      }, ctx.now);
+    }
+  }
+
   const result = ctx.deps.transferClient
     ? await transferDevnetUsdc({
       client: ctx.deps.transferClient,
@@ -461,6 +486,7 @@ async function performExecute(run, ctx) {
     idempotencyKey,
     cluster,
     executed: true,
+    reserved: reservation?.state === 'reserved' || reservation?.ok === true,
   }, ctx.now);
 }
 

@@ -17,23 +17,19 @@ function fakeEnv(extra = {}) {
   };
 }
 
-test('route catalog and contract stubs answer without secrets', async () => {
+test('route catalog lists live data routes and ownerless data calls require auth', async () => {
   const env = fakeEnv();
   const catalog = await worker.fetch(new Request('https://runtime/api/routes'), env);
   const listed = await catalog.json();
   assert.deepEqual(listed.secretNames, [...SECRET_NAMES]);
   assert.equal(listed.routes.length, API_ROUTES.length);
+  assert.ok(listed.routes.every(route => route.status !== 'stub'));
 
   const metrics = await worker.fetch(new Request('https://runtime/api/metrics'), env);
-  assert.equal(metrics.status, 200);
-  const metricsBody = await metrics.json();
-  assert.equal(metricsBody.stub, true);
-  assert.equal(metricsBody.route, 'metrics.get');
+  assert.equal(metrics.status, 401);
 
   const sign = await worker.fetch(new Request('https://runtime/api/wallets/wal_1/sign', { method: 'POST' }), env);
-  const signBody = await sign.json();
-  assert.equal(signBody.stub, true);
-  assert.equal(signBody.route, 'wallets.sign');
+  assert.equal(sign.status, 401);
 });
 
 test('owner browser routes are forwarded with the bot id kept on the object path', async () => {

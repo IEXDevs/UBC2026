@@ -17,7 +17,7 @@ Agents hold budgets and guardrails, pay for APIs/data over **x402** on Solana **
 
 Official guide: [Hackathon Guide UBC 26](https://docs.google.com/document/d/1QaySCo7u3VxMVNdk3C5Ab3ewc2E46AuLntti-Uzx5EY/edit?usp=sharing)
 
-Still open for a complete submission, and still unchecked on the plan: a hosted deploy, applying the Supabase migrations to a hosted project, shopping / SNS / bot-sold signals end to end, the payments / wallet / positions panes, a live `@elevenlabs/react` conversation, posting Grok Bot drafts to X, and the 2–3 minute demo video. This repo does not deploy its own Solana program. The program IDs below are the existing programs the transfer builder calls.
+Backend routes are live when local secrets are set (Privy signing, Supabase data APIs, ledger reserve, shopping/SNS/grab-back). Still open for a complete submission: a hosted Worker + OpenNext deploy, applying Supabase migrations to a hosted project, a live ElevenLabs agent id in the web app, posting Grok Bot drafts to X, and the 2–3 minute demo video. This repo does not deploy its own Solana program. The program IDs below are the existing programs the transfer builder calls.
 
 ## Architecture
 
@@ -34,7 +34,7 @@ apps/agent-runtime (Cloudflare Worker + one Durable Object per bot)
 packages: contracts, wallets, transfers, bot-policy, bot-creation,
   agent-loop, verify-consensus, trust-score, prices, paper-positions,
   x402, browser-search, browser-session, quicknode-streams, grok-bot
-  shopping, sns, agent-commerce (library scaffolds; not end-to-end)
+  shopping, sns, agent-commerce (Worker-mounted; settle when Privy secrets exist)
         │
 apps/x402-service — devnet price/trust HTTP 402 Worker
         │
@@ -160,7 +160,7 @@ Grok Bot on X watches Maelstrom's notable Solana devnet activity: confirmed tran
 | `apps/web` | Next.js glass UI (OpenNext on Cloudflare). Payments, wallets, and positions panes are not built |
 | `supabase/schema.sql` | Foundations, policy ledger, and bot templates. Stream events are the later migration `supabase/migrations/20261114050000_stream_events.sql`, not yet folded into `schema.sql` |
 
-Several `/api/*` data routes and `POST /api/wallets/:walletId/sign` are still stubs. Persist sessions, approvals, and budgets in the Durable Object or in Supabase. Do not treat a queue as the source of truth.
+`/api/*` data routes and wallet create/sign are live against Supabase + Privy when those secrets are set; otherwise they return empty `source: unconfigured`. Persist sessions, approvals, and budgets in the Durable Object or in Supabase. Do not treat a queue as the source of truth.
 
 ## Setup
 

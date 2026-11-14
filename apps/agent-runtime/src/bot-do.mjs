@@ -7,6 +7,7 @@ import { decideFromCheckpoint } from './decide.mjs';
 import { LoopEngineError, runBotLoop } from './loop-engine.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 import { assessPositions } from './schedules.mjs';
+import { enrichEnv } from './runtime-env.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
 
@@ -222,6 +223,7 @@ export class BotStateMachine {
           : null),
         transferClient: env.transferClient ?? null,
         execute: env.execute ?? null,
+        ledgerApi: env.ledgerApi ?? null,
         verifyFn: env.verifyFn,
         lookupPrice: env.lookupPrice,
         trustLookup: env.trustLookup,
@@ -381,6 +383,6 @@ export class BotDurableObject {
 
   async fetch(request) {
     const machine = await this.#machine();
-    return machine.handle(request, this.env);
+    return machine.handle(request, enrichEnv(this.env));
   }
 }

@@ -50,7 +50,7 @@ Maelstrom is a monorepo for named bots that work toward a goal under a spend pol
 - Offline Grok Bot post drafts and a chat export that redacts secret-shaped strings.
 - A Next.js glass shell: Privy login, bot creation, an approval preview, a timeline, Live View, overview metrics, and a security page.
 
-`npm test` covers this without secret values. Execute does nothing on chain unless a devnet signer is injected. Several HTTP data routes are still stubs. The shopping, SNS, and agent-commerce packages are not wired through a live checkout.
+`npm test` covers this without secret values. With local Privy + QuickNode secrets the Worker builds a transfer client and can execute, settle shopping, and grab-back on Solana devnet. With Supabase service-role secrets the `/api/*` data routes and `policy_reserve_budget` path are live. Without those secrets, routes return empty `unconfigured` payloads or pause at `signer-not-configured`.
 
 ## What problem does it solve?
 

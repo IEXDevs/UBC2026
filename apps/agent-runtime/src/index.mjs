@@ -17,6 +17,8 @@ import {
 } from './schedules.mjs';
 import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
+import { enrichEnv } from './runtime-env.mjs';
+import { handleApiData } from './api-data.mjs';
 
 export { BotDurableObject };
 
@@ -37,11 +39,18 @@ function botStub(env, botId) {
  * ElevenLabs webhook tools and the Grok custom LLM live under /voice and call these same routes.
  */
 const worker = {
-  async fetch(request, env) {
+  async fetch(request, rawEnv) {
+    const env = enrichEnv(rawEnv);
     const url = new URL(request.url);
 
     if (url.pathname === '/health') {
-      return json({ ok: true, product: env.PRODUCT ?? 'Maelstrom', cluster: env.CLUSTER ?? 'devnet' });
+      return json({
+        ok: true,
+        product: env.PRODUCT ?? 'Maelstrom',
+        cluster: env.CLUSTER ?? 'devnet',
+        signing: Boolean(env.transferClient),
+        supabase: Boolean(env.ledgerApi || env.SUPABASE_SERVICE_ROLE_KEY),
+      });
     }
 
     if (url.pathname === '/voice/agent' || url.pathname.startsWith('/voice/')) {
@@ -82,10 +91,20 @@ const worker = {
       return stub.fetch(new Request(target, request));
     }
 
-    // Contract routes that are not the live bot DO yet. Signing and database
-    // reads stay stubs until later chunks. No secret values are read here.
-    if (matched && (matched.route.status === 'stub' || matched.route.status === 'guarded')) {
-      return json({ ok: true, stub: true, route: matched.route.id, items: [] });
+    // Live data / wallet routes (Supabase + Privy when secrets exist).
+    if (matched && [
+      'me',
+      'wallets.list',
+      'wallets.create',
+      'wallets.sign',
+      'bots.list',
+      'events.list',
+      'decisions.list',
+      'payments.list',
+      'metrics.get',
+    ].includes(matched.route.id)) {
+      const response = await handleApiData(request, env, matched);
+      if (response) return response;
     }
 
     const botMatch = url.pathname.match(/^\/bots\/([^/]+)(?:\/(status|wake|pause|resume|advance|decide|loop))?$/);
@@ -100,7 +119,8 @@ const worker = {
     return json({ error: 'not_found' }, 404);
   },
 
-  async scheduled(controller, env, ctx) {
+  async scheduled(controller, rawEnv, ctx) {
+    const env = enrichEnv(rawEnv);
     const cron = typeof controller?.cron === 'string' && controller.cron ? controller.cron : HOURLY_CRON;
     const now = Number.isSafeInteger(controller?.scheduledTime) ? controller.scheduledTime : Date.now();
     const bots = typeof env.listScheduledBots === 'function'

@@ -105,17 +105,26 @@ export async function handleShoppingPrepare(request, env, botId) {
 
 /** POST /bots/:botId/shopping/settle — sandbox only (devnet). */
 export async function handleShoppingSettle(request, env, botId) {
-  if (!ownerId(request)) return json({ error: 'owner_required' }, 401);
+  const owner = ownerId(request);
+  if (!owner) return json({ error: 'owner_required' }, 401);
   const body = await readBody(request);
   try {
-    const signPayment = typeof env.signShoppingPayment === 'function'
+    const bot = body.bot || { id: botId };
+    const wallet = body.wallet || null;
+    const baseSigner = typeof env.signShoppingPayment === 'function'
       ? env.signShoppingPayment
       : body.dryRun
         ? async () => body.signature || 'dry_run_sig'
         : null;
-    if (!signPayment) return json({ error: 'signer_not_configured' }, 503);
+    if (!baseSigner) return json({ error: 'signer_not_configured' }, 503);
+    const signPayment = async (args) => baseSigner({
+      ...args,
+      bot,
+      wallet,
+      recentBlockhash: body.recentBlockhash,
+    });
     const result = await settleSandboxPurchase({
-      bot: body.bot || { id: botId },
+      bot,
       itemId: body.itemId,
       accepted: body.accepted,
       signPayment,
@@ -124,7 +133,34 @@ export async function handleShoppingSettle(request, env, botId) {
       baseUrl: env.X402_SANDBOX_BASE_URL,
       paymentId: body.paymentId,
     });
-    return json({ ok: true, botId, ...result });
+    if (result?.payment && env.ledgerApi == null && typeof env.persistPayment === 'function') {
+      await env.persistPayment(result.payment);
+    } else if (result?.payment && env.SUPABASE_SERVICE_ROLE_KEY) {
+      try {
+        const { supabaseWrite } = await import('./supabase-rest.mjs');
+        await supabaseWrite(env, {
+          path: 'payments',
+          body: {
+            id: result.payment.id,
+            bot_id: botId,
+            direction: 'paid',
+            protocol: 'x402',
+            amount: result.payment.amount,
+            asset: result.payment.asset === 'USDC' || result.payment.asset?.length < 12
+              ? 'USDC'
+              : 'USDC',
+            counterparty: result.payment.recipient || null,
+            cluster: 'devnet',
+            tx_signature: result.payment.transaction || null,
+          },
+          prefer: 'resolution=merge-duplicates,return=minimal',
+          fetcher: env.fetch || fetch,
+        });
+      } catch {
+        // Persistence is best-effort; settlement already happened.
+      }
+    }
+    return json({ ok: true, botId, ownerId: owner, ...result });
   } catch (error) {
     return err(error);
   }
@@ -216,11 +252,18 @@ export async function handleSnsSend(request, env, botId) {
   const body = await readBody(request);
   try {
     const resolver = defaultResolver(env);
+    const bot = body.bot || null;
+    const wallet = body.wallet || null;
     const executeTransfer = body.execute === true && typeof env.executeSnsTransfer === 'function'
-      ? env.executeSnsTransfer
+      ? async (args) => env.executeSnsTransfer({
+        ...args,
+        bot,
+        wallet,
+        recentBlockhash: body.recentBlockhash,
+      })
       : null;
     const result = await prepareSnsSend({
-      from: body.from,
+      from: body.from || wallet?.address,
       domain: body.domain,
       amount: body.amount,
       asset: body.asset || 'USDC',

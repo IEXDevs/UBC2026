@@ -141,8 +141,8 @@ test('pause, loop, and stop_all go through the worker routes', async () => {
     body: { parameters: { botId: 'bot_meteora' } },
   }), env());
   const activityBody = await activity.json();
-  assert.equal(activityBody.result.calls[0].body.route, 'events.list');
-  assert.equal(activityBody.result.calls[0].body.stub, true);
+  assert.equal(activityBody.result.calls[0].body.source, 'unconfigured');
+  assert.deepEqual(activityBody.result.calls[0].body.items, []);
 
   const stopped = await handleVoiceRequest(toolRequest('stop_all', { body: { parameters: {} } }), env(), {
     fetchApi: async request => {
@@ -185,7 +185,9 @@ test('tool calls fail closed without a webhook secret, owner, or known tool', as
     headers: { 'x-elevenlabs-webhook-secret': '', authorization: `Bearer ${SECRET}` },
   }), env());
   assert.equal(bearer.status, 200);
-  assert.equal((await bearer.json()).result.calls[0].body.route, 'wallets.list');
+  const walletsBody = await bearer.json();
+  assert.equal(walletsBody.result.calls[0].body.source, 'unconfigured');
+  assert.deepEqual(walletsBody.result.calls[0].body.items, []);
 
   const owner = await worker.fetch(toolRequest('list_bots', { headers: { 'x-owner-id': '' } }), env());
   assert.equal(owner.status, 400);
