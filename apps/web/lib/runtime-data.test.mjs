@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deleteBotUrl, emptyMoneyState, runtimeBaseUrl, shellBotFromRemote } from './runtime-data.mjs';
+import { botChatUrl, deleteBotUrl, emptyMoneyState, runtimeBaseUrl, shellBotFromRemote } from './runtime-data.mjs';
 
 test('runtime base rejects junk and keeps origin', () => {
   assert.equal(runtimeBaseUrl(''), '');
@@ -37,4 +37,13 @@ test('delete bot URL stays on the runtime origin', () => {
   );
   assert.equal(deleteBotUrl('https://runtime.example', '../evil'), null);
   assert.equal(deleteBotUrl('', 'bot_1'), null);
+});
+
+test('bot chat URL stays on the runtime origin', () => {
+  assert.equal(
+    botChatUrl('https://runtime.example/agent/', 'bot_1'),
+    'https://runtime.example/agent/api/bots/bot_1/chat',
+  );
+  assert.equal(botChatUrl('https://runtime.example', '../evil'), null);
+  assert.equal(botChatUrl('', 'bot_1'), null);
 });

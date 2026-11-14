@@ -20,6 +20,7 @@ import {
   supabaseGet,
   supabaseWrite,
 } from './supabase-rest.mjs';
+import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -275,6 +276,61 @@ export async function handleApiData(request, env, matched) {
       return json({ error: 'delete_failed' }, 502);
     }
     return json({ ok: true, deleted: botId, source: 'supabase' });
+  }
+
+  if (routeId === 'bots.chat') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const botId = matched?.params?.botId;
+    if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
+      return json({ error: 'invalid_bot' }, 400);
+    }
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') return json({ error: 'invalid_body' }, 400);
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    if (!message || message.length > 4000) return json({ error: 'message_required' }, 400);
+    const history = Array.isArray(body.history) ? body.history.slice(-16) : [];
+
+    let botName = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 80) : 'Agent';
+    let botGoal = typeof body.goal === 'string' && body.goal.trim() ? body.goal.trim().slice(0, 2000) : 'Waiting for a goal.';
+    let botType = typeof body.type === 'string' && body.type.trim() ? body.type.trim().slice(0, 40) : 'trading';
+
+    if (supabaseConfig(env)) {
+      const loaded = await supabaseGet(
+        env,
+        `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
+        fetcher,
+      );
+      const row = mapBotRow(loaded.rows?.[0]);
+      if (!row) return json({ error: 'not_found' }, 404);
+      botName = row.name || botName;
+      botGoal = row.goal || botGoal;
+      botType = row.type || botType;
+    }
+
+    const openrouter = typeof env.openRouter === 'object' && env.openRouter
+      ? env.openRouter
+      : createOpenRouterFromEnv(env, fetcher);
+    try {
+      const reply = await openrouter.chat({
+        botName,
+        botGoal,
+        botType,
+        history,
+        message,
+      });
+      return json({
+        ok: true,
+        botId,
+        reply: reply.text,
+        model: reply.model,
+      });
+    } catch (err) {
+      const code = err instanceof OpenRouterError ? err.code : 'chat_failed';
+      const status = err instanceof OpenRouterError ? err.status : 502;
+      return json({ error: code }, status);
+    }
   }
 
   if (routeId === 'logs.list') {

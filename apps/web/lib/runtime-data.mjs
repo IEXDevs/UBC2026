@@ -96,3 +96,65 @@ export async function deleteOwnerBot(ownerId, botId, runtimeBase = runtimeBaseUr
     return { ok: false, error: 'network' };
   }
 }
+
+export function botChatUrl(runtimeBase, botId) {
+  const root = runtimeBaseUrl(runtimeBase);
+  if (!root || typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) return null;
+  return `${root}/api/bots/${encodeURIComponent(botId)}/chat`;
+}
+
+/**
+ * Owner text chat with a bot via the Worker OpenRouter path.
+ * history: prior bubble lines ({ role, text }) — agent/assistant both map server-side.
+ */
+export async function sendBotChat({
+  ownerId,
+  botId,
+  message,
+  history = [],
+  name,
+  goal,
+  type,
+  runtimeBase = runtimeBaseUrl(),
+} = {}) {
+  const url = botChatUrl(runtimeBase, botId);
+  if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
+    return { ok: false, error: 'invalid_request' };
+  }
+  const text = typeof message === 'string' ? message.trim() : '';
+  if (!text) return { ok: false, error: 'message_required' };
+  const prior = Array.isArray(history)
+    ? history
+      .filter(line => line && (line.role === 'user' || line.role === 'agent' || line.role === 'assistant'))
+      .map(line => ({
+        role: line.role === 'user' ? 'user' : 'assistant',
+        text: typeof line.text === 'string' ? line.text : '',
+      }))
+      .filter(line => line.text.trim())
+      .slice(-16)
+    : [];
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-owner-id': ownerId,
+      },
+      body: JSON.stringify({
+        message: text,
+        history: prior,
+        ...(typeof name === 'string' && name.trim() ? { name: name.trim().slice(0, 80) } : {}),
+        ...(typeof goal === 'string' && goal.trim() ? { goal: goal.trim().slice(0, 2000) } : {}),
+        ...(typeof type === 'string' && type.trim() ? { type: type.trim().slice(0, 40) } : {}),
+      }),
+      cache: 'no-store',
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
+    const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
+    if (!reply) return { ok: false, error: 'empty_reply' };
+    return { ok: true, reply, model: body.model || null };
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+}

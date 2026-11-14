@@ -18,10 +18,22 @@ import {
   VOICES,
   parseVoiceSettings,
 } from '../lib/voice-settings.mjs';
+import { sendBotChat } from '../lib/runtime-data.mjs';
 
 const LEAVE_MS = 760;
 
-export default function Composer({ botName, lines = [], onLine, onThinking, hidden = false, resolveMention = null }) {
+export default function Composer({
+  botId = null,
+  botName,
+  botGoal = '',
+  botType = 'trading',
+  ownerId = null,
+  lines = [],
+  onLine,
+  onThinking,
+  hidden = false,
+  resolveMention = null,
+}) {
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
   const [note, setNote] = useState('');
@@ -47,6 +59,7 @@ export default function Composer({ botName, lines = [], onLine, onThinking, hidd
   const placeRef = useRef(place);
   const leaveTimer = useRef(0);
   const thinkTimer = useRef(0);
+  const sendingRef = useRef(false);
   settingsRef.current = settings;
   placeRef.current = place;
 
@@ -118,9 +131,10 @@ export default function Composer({ botName, lines = [], onLine, onThinking, hidd
     return () => { stop = true; };
   }, [draft, resolveMention]);
 
-  function sendMessage() {
+  async function sendMessage() {
     const text = draft.trim();
-    if (!text) return;
+    if (!text || sendingRef.current) return;
+    const prior = lines;
     pushLine('user', text);
     if (mention) pushLine('assistant', mention);
     setDraft('');
@@ -128,10 +142,35 @@ export default function Composer({ botName, lines = [], onLine, onThinking, hidd
     setThinking(true);
     onThinking?.(true);
     window.clearTimeout(thinkTimer.current);
-    thinkTimer.current = window.setTimeout(() => {
+    sendingRef.current = true;
+    try {
+      if (!ownerId || !botId) {
+        pushLine('agent', ownerId
+          ? 'Pick a bot before chatting.'
+          : 'Sign in to chat with this bot.');
+        return;
+      }
+      const result = await sendBotChat({
+        ownerId,
+        botId,
+        message: text,
+        history: prior,
+        name: botName,
+        goal: botGoal,
+        type: botType,
+      });
+      if (result.ok) {
+        pushLine('agent', result.reply);
+      } else {
+        pushLine('agent', chatFailureNote(result.error));
+      }
+    } catch {
+      pushLine('agent', chatFailureNote('network'));
+    } finally {
+      sendingRef.current = false;
       setThinking(false);
       onThinking?.(false);
-    }, 1400);
+    }
   }
 
   function pushLine(role, text) {
@@ -485,4 +524,13 @@ function voiceFailureNote(error) {
   if (error?.message === 'voice_rejected') return 'The voice service refused the session. Publish the agent and turn on Voice ID and Speed overrides.';
   if (error?.message === 'voice_unreachable') return 'The voice service did not respond.';
   return 'The voice session did not start.';
+}
+
+function chatFailureNote(code) {
+  if (code === 'openrouter_not_configured') return 'Text chat is not configured on the Worker (missing OpenRouter).';
+  if (code === 'openrouter_unauthorized' || code === 'openrouter_failed') return 'The model refused this turn. Try again in a moment.';
+  if (code === 'not_found') return 'This bot was not found for your account.';
+  if (code === 'invalid_request') return 'Set NEXT_PUBLIC_AGENT_RUNTIME_URL and sign in to chat.';
+  if (code === 'network') return 'Could not reach the Worker for a reply.';
+  return 'I could not reply just now.';
 }
