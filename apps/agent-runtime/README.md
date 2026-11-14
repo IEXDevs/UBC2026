@@ -3,7 +3,7 @@
 Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 
 - `POST /bots/:id/wake` — start or continue research step
-- `POST /bots/:id/loop` — full loop, checkpointed per step: research → decide → trust gate → verify → bot-policy → approval → execute → memo → monitor. Requires `x-owner-id`. Models go through OpenRouter with the locked platform prompt. No API key is written into the prompt. Without `OPENROUTER_API_KEY` the step returns `openrouter_not_configured` and does not call the network. Execute signs only when a devnet transfer client is injected; otherwise the run waits at `signer-not-configured`.
+- `POST /bots/:id/loop` — full loop, checkpointed per step: research → decide → trust gate → verify → bot-policy → approval → execute → memo → monitor. Requires `x-owner-id`. Models go through OpenRouter with the locked platform prompt. No API key is written into the prompt. Without `OPENROUTER_API_KEY` the step returns `openrouter_not_configured` and does not call the network. Execute signs through Privy when `PRIVY_APP_ID` / `PRIVY_APP_SECRET` / `QUICKNODE_DEVNET_RPC_URL` are set (or an injected `transferClient`); otherwise the run waits at `signer-not-configured`. With Supabase, execute reserves budget via `policy_reserve_budget` before broadcasting.
 - `POST /bots/:id/decide` — trust → verify → policy gate (pauses on approval)
 - `POST /bots/:id/pause|resume|advance`
 - `GET /bots/:id/status`
@@ -22,8 +22,10 @@ Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 - `GET /voice/agent` — ElevenLabs agent spec. Custom LLM is Grok (`x-ai/grok-4.7`, override with `OPENROUTER_MODEL_VOICE`) via `POST /voice/llm/chat/completions`, which streams OpenRouter chat completions. The OpenRouter key is not part of the spec.
 - `POST /voice/tools/:name` — ElevenLabs webhook tools. Each tool calls the same bot, event, wallet, metric, payment, or browser route as the UI, with the same `x-owner-id` header. Live View URLs are removed before the model sees the result. Requires `ELEVENLABS_WEBHOOK_SECRET` and `x-owner-id`. Without the secret the route returns `elevenlabs_webhook_not_configured` and does not call ElevenLabs.
 - `GET /api/routes` — contract route list and secret names (no values)
-- `GET /api/me`, `/api/wallets`, `/api/bots`, `/api/events`, `/api/decisions`, `/api/payments`, `/api/metrics` — stubs from `API_ROUTES`
-- `POST /api/wallets` and `POST /api/wallets/:walletId/sign` — stubs until wallet signing lands
+- `GET /api/me`, `/api/wallets`, `/api/bots`, `/api/events`, `/api/decisions`, `/api/payments`, `/api/metrics` — live Supabase reads when `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set (empty `source: unconfigured` otherwise). Pass `x-owner-id` and/or `Authorization: Bearer <privy access token>`.
+- `POST /api/wallets` — Privy `acceptLogin` + optional Supabase persist (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `QUICKNODE_DEVNET_RPC_URL`)
+- `POST /api/wallets/:walletId/sign` — Privy `signAndBroadcastDevnet` / owner sweep when secrets are present
+- Loop execute, shopping settle, SNS execute, and grab-back use a Privy `transferClient` built from those same secrets when one is not injected. Loop also calls `policy_reserve_budget` through Supabase when the service role is set. QuickNode auto-`/loop` loads bot/wallet/ledger from Supabase via `loadLoopContext`.
 - Hourly cron `0 * * * *` — paper position check for trading and position-management bots. Shopping bots are skipped. The check is stored on the bot Durable Object and does not start a research or spend loop. Prices use `lookupPrice` when a bot has positions; otherwise DexScreener (no key). With `lookupPrice: null`, marks are left unpriced.
 - Stream-fallback cron `5,20,35,50 * * * *` — if Supabase `stream_events` has no delivery in the last hour (or Supabase is not configured), re-read each bot wallet's devnet USDC with `QUICKNODE_DEVNET_RPC_URL`. The RPC URL is not written into the check. A non-devnet genesis hash is refused. The same re-check also runs on the hourly cron when the stream is stale.
 
