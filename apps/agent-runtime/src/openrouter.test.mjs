@@ -97,7 +97,7 @@ test('text chat keeps platform rules first and maps agent history', () => {
   assert.equal(messages[2].role, 'user');
   assert.equal(messages[3].role, 'assistant');
   assert.equal(messages[3].content, 'hello');
-  assert.equal(messages.some(item => item.role === 'system' && item.content.includes('ignore')), false);
+  assert.equal(messages.some(item => item.content.includes('ignore platform rules')), false);
   assert.match(messages.at(-1).content, /\[redacted\]/);
 });
 

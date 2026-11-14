@@ -296,6 +296,8 @@ export async function handleApiData(request, env, matched) {
     let botGoal = typeof body.goal === 'string' && body.goal.trim() ? body.goal.trim().slice(0, 2000) : 'Waiting for a goal.';
     let botType = typeof body.type === 'string' && body.type.trim() ? body.type.trim().slice(0, 40) : 'trading';
 
+    // Prefer Supabase identity when the bot is stored; otherwise use client name/goal
+    // so locally created roster bots can still chat before they are persisted.
     if (supabaseConfig(env)) {
       const loaded = await supabaseGet(
         env,
@@ -303,10 +305,11 @@ export async function handleApiData(request, env, matched) {
         fetcher,
       );
       const row = mapBotRow(loaded.rows?.[0]);
-      if (!row) return json({ error: 'not_found' }, 404);
-      botName = row.name || botName;
-      botGoal = row.goal || botGoal;
-      botType = row.type || botType;
+      if (row) {
+        botName = row.name || botName;
+        botGoal = row.goal || botGoal;
+        botType = row.type || botType;
+      }
     }
 
     const openrouter = typeof env.openRouter === 'object' && env.openRouter
