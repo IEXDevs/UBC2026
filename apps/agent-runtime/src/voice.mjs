@@ -1,19 +1,21 @@
 /**
  * ElevenLabs voice agent.
- * Grok is the custom LLM: ElevenLabs calls this Worker, and the Worker streams
- * OpenRouter chat completions with an x-ai/grok model. The OpenRouter key stays here.
+ * Custom LLM is Meta Muse Spark 1.3 Contributor via OpenRouter: ElevenLabs calls
+ * this Worker, and the Worker streams chat completions. The OpenRouter key stays here.
  * Webhook tools call the same bot, event, wallet, and browser routes as the UI.
  * No secret values are written into the agent payload.
  */
 import { timingSafeEqual } from 'node:crypto';
 import { SECRET_NAMES } from '@ubc2026/contracts';
 
-export const GROK_VOICE_MODEL = 'x-ai/grok-4.7';
+export const DEFAULT_VOICE_MODEL = 'meta/muse-spark-1.3-contributor';
+/** @deprecated Prefer DEFAULT_VOICE_MODEL — kept for older imports. */
+export const GROK_VOICE_MODEL = DEFAULT_VOICE_MODEL;
 export const OPENROUTER_CHAT_COMPLETIONS = 'https://openrouter.ai/api/v1/chat/completions';
 const WEBHOOK_HEADER = 'x-elevenlabs-webhook-secret';
 const SECRET_PLACEHOLDER = '{{ELEVENLABS_WEBHOOK_SECRET}}';
 const ID = /^[a-zA-Z0-9:_-]{1,128}$/;
-const GROK_MODEL = /^x-ai\/grok[a-z0-9._-]*$/i;
+const OPENROUTER_MODEL_ID = /^[a-z0-9][a-z0-9._-]{0,63}\/[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
 export const VOICE_SYSTEM_PROMPT = [
   'You are the voice remote for this user\'s Maelstrom Solana agent dashboard.',
@@ -124,8 +126,8 @@ function call(method, path, extra = {}) {
 
 export function grokVoiceModel(env = {}) {
   const override = typeof env.OPENROUTER_MODEL_VOICE === 'string' ? env.OPENROUTER_MODEL_VOICE.trim() : '';
-  if (GROK_MODEL.test(override)) return override;
-  return GROK_VOICE_MODEL;
+  if (OPENROUTER_MODEL_ID.test(override) && override.length <= 128) return override;
+  return DEFAULT_VOICE_MODEL;
 }
 
 function webhookHeaders() {
@@ -135,7 +137,7 @@ function webhookHeaders() {
   });
 }
 
-export function voiceAgentCreateBody({ origin, modelId = GROK_VOICE_MODEL } = {}) {
+export function voiceAgentCreateBody({ origin, modelId = DEFAULT_VOICE_MODEL } = {}) {
   const base = String(origin ?? '').replace(/\/$/, '');
   return {
     name: 'Maelstrom operator',

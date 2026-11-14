@@ -3,7 +3,7 @@
  * Keeps the platform rules first; bot identity is a second system line.
  */
 
-export const TEXT_CHAT_MODEL = 'x-ai/grok-4-fast';
+export const TEXT_CHAT_MODEL = 'meta/muse-spark-1.3-contributor';
 export const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 export class TextChatError extends Error {

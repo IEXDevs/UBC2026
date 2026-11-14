@@ -15,13 +15,13 @@ export class OpenRouterError extends Error {
   }
 }
 
-/** OpenRouter slugs. Fast model for research and monitor; strong model for decide and verify. */
+/** OpenRouter slugs. Default is Meta Muse Spark 1.3 Contributor for all roles. */
 export const MODEL_ROLES = Object.freeze({
-  research: 'x-ai/grok-4-fast',
-  decide: 'x-ai/grok-4.7',
-  verify: 'x-ai/grok-4.7',
-  monitor: 'x-ai/grok-4-fast',
-  vision: 'x-ai/grok-4',
+  research: 'meta/muse-spark-1.3-contributor',
+  decide: 'meta/muse-spark-1.3-contributor',
+  verify: 'meta/muse-spark-1.3-contributor',
+  monitor: 'meta/muse-spark-1.3-contributor',
+  vision: 'meta/muse-spark-1.3-contributor',
 });
 
 const ROLE_ENV = Object.freeze({

@@ -170,10 +170,10 @@ test('the bot loop checkpoints every step and calls OpenRouter without a live ke
   });
   assert.deepEqual(roles, ['research', 'decide', 'verify', 'monitor']);
   assert.deepEqual(models.calls.map(call => call.model), [
-    'x-ai/grok-4-fast',
-    'x-ai/grok-4.7',
-    'x-ai/grok-4.7',
-    'x-ai/grok-4-fast',
+    'meta/muse-spark-1.3-contributor',
+    'meta/muse-spark-1.3-contributor',
+    'meta/muse-spark-1.3-contributor',
+    'meta/muse-spark-1.3-contributor',
   ]);
   const memo = JSON.parse(body.run.checkpoints.memo.memo);
   assert.equal(memo.r, body.run.checkpoints.memo.digest);
