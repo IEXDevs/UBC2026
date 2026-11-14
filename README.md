@@ -42,7 +42,7 @@ goal → research (browser/search)
 | Package / app | Role |
 | --- | --- |
 | `packages/contracts` | Shared bot / wallet / event / payment / metric validators and API route list |
-| `packages/wallets` | Privy wallet assignment + freeze gates |
+| `packages/wallets` | Privy login provisioning, wallet assignment, freeze gates, and devnet server signing |
 | `packages/agent-loop` | Trust → verify → policy decision gate orchestrator |
 | `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
 | `packages/browser-session` | Owner-bound Cloudflare browser sessions, per-bot concurrency, Live View URLs |

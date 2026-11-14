@@ -1,10 +1,17 @@
 /**
- * Privy wallet assignment helpers. No signing and no key material —
- * production signing stays in Privy / Worker secrets, never in model context.
+ * Privy wallet assignment and freeze helpers.
+ * The Privy HTTP path (login provisioning and devnet server signing) lives in
+ * `privy.mjs`. Private keys stay in Privy and in environment variables.
  */
 import { validateWallet, validateBotRecord, ContractError } from '@ubc2026/contracts';
 
-export class WalletError extends Error {}
+export class WalletError extends Error {
+  constructor(message, code = 'wallet_error') {
+    super(message);
+    this.name = 'WalletError';
+    this.code = code;
+  }
+}
 const fail = message => { throw new WalletError(message); };
 
 export function createMainWallet({ ownerId, address, id = `w_main_${ownerId}` }) {
@@ -73,3 +80,11 @@ export function assertSpendAllowed({ bot, wallet }) {
   if (wallet.frozen) fail('Wallet is frozen');
   return { allowed: true };
 }
+
+export {
+  createPrivyWalletClient,
+  createPrivyWalletClientFromEnv,
+  canonicalizeJson,
+  privyAuthorizationSignature,
+  DEVNET_GENESIS_HASH,
+} from './privy.mjs';
