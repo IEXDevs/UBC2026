@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Plus, Search, Wallet } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2, Wallet } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import LiveViewPanel from '../components/LiveViewPanel';
 import MoneyPane from '../components/MoneyPane';
@@ -20,13 +20,14 @@ import WalletsSheet from '../components/WalletsSheet';
 import { getDemoShellState } from '../lib/demo-state.mjs';
 import { moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
-import { mergeRoster, reorderIds } from '../lib/roster.mjs';
+import { mergeRoster, removeBotFromRoster, reorderIds } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps } from '../lib/privy-config.mjs';
 import { withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { buildBotStats } from '../lib/overview.mjs';
 import { walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
 import {
+  deleteOwnerBot,
   emptyMoneyState,
   fetchOwnerLists,
   runtimeBaseUrl,
@@ -397,6 +398,40 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     setRoster(current => ({ ...current, order: reorderIds(current.order, fromId, toId) }));
   }
 
+  async function onDeleteBot(botId) {
+    if (!signedIn || typeof botId !== 'string' || !botId) return;
+    const target = bots.find(item => item.id === botId);
+    if (!target) return;
+    if (!window.confirm(`Delete ${target.name}? This removes the agent and its stored ledger rows.`)) return;
+
+    const isRemote = Boolean(target.record);
+    if (isRemote && ownerId) {
+      const result = await deleteOwnerBot(ownerId, botId);
+      if (!result.ok) {
+        setDataNote(`Could not delete agent (${result.error}).`);
+        return;
+      }
+      setRemoteBots(current => current.filter(row => row.id !== botId));
+      setRemotePayments(current => current.filter(row => row.botId !== botId));
+    }
+
+    setRoster(current => removeBotFromRoster(current, botId));
+    setLooks(current => {
+      if (!current || !current[botId]) return current;
+      const next = { ...current };
+      delete next[botId];
+      return next;
+    });
+    setTalks(current => {
+      if (!current || !current[botId]) return current;
+      const next = { ...current };
+      delete next[botId];
+      return next;
+    });
+    setActiveBot(current => (current === botId ? null : current));
+    setDataNote('');
+  }
+
   function onAccount(id) {
     setCreateOpen(false);
     if (id === 'profile') {
@@ -461,6 +496,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           onSelect={openChat}
           onReorder={onReorder}
           onCreate={openCreate}
+          onDelete={onDeleteBot}
         />
         <footer className="you">
           <AccountMenu
@@ -507,6 +543,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                   <header className="bubble-head">
                     <strong>{bot.name}</strong>
                     <span>{bot.type} · {bot.status}</span>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-label={`Delete ${bot.name}`}
+                      title="Delete agent"
+                      onClick={() => onDeleteBot(bot.id)}
+                    >
+                      <Trash2 size={16} strokeWidth={1.75} />
+                    </button>
                   </header>
                   <h1>{bot.goal}</h1>
                   <section className="panel" aria-label="Stats">

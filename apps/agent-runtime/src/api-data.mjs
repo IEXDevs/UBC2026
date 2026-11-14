@@ -221,6 +221,62 @@ export async function handleApiData(request, env, matched) {
     });
   }
 
+  if (routeId === 'bots.delete') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const botId = matched?.params?.botId;
+    if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
+      return json({ error: 'invalid_bot' }, 400);
+    }
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+
+    const existing = await supabaseGet(
+      env,
+      `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+      fetcher,
+    );
+    if (!Array.isArray(existing.rows) || existing.rows.length < 1) {
+      return json({ error: 'not_found' }, 404);
+    }
+
+    // Child tables reference bots(id) without ON DELETE CASCADE — clear dependents first.
+    const dependents = [
+      `budget_reservations?bot_id=eq.${encodeURIComponent(botId)}`,
+      `spend_ledgers?bot_id=eq.${encodeURIComponent(botId)}`,
+      `approvals?bot_id=eq.${encodeURIComponent(botId)}`,
+      `decision_records?bot_id=eq.${encodeURIComponent(botId)}`,
+      `timeline_events?bot_id=eq.${encodeURIComponent(botId)}`,
+      `payments?bot_id=eq.${encodeURIComponent(botId)}`,
+      `metrics?bot_id=eq.${encodeURIComponent(botId)}`,
+      `stream_events?bot_id=eq.${encodeURIComponent(botId)}`,
+      `activity_logs?bot_id=eq.${encodeURIComponent(botId)}`,
+    ];
+    for (const path of dependents) {
+      const cleared = await supabaseWrite(env, {
+        path,
+        method: 'DELETE',
+        prefer: 'return=minimal',
+        fetcher,
+      });
+      // 404 = table/row missing on older schemas; treat as already clear.
+      if (cleared.configured && cleared.status >= 400 && cleared.status !== 404) {
+        return json({ error: 'delete_failed', detail: path.split('?')[0] }, 502);
+      }
+    }
+
+    const removed = await supabaseWrite(env, {
+      path: `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}`,
+      method: 'DELETE',
+      prefer: 'return=minimal',
+      fetcher,
+    });
+    if (removed.ok === false && removed.status !== 204) {
+      return json({ error: 'delete_failed' }, 502);
+    }
+    return json({ ok: true, deleted: botId, source: 'supabase' });
+  }
+
   if (routeId === 'logs.list') {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);

@@ -49,3 +49,15 @@ export function mergeRoster(seed, saved) {
     : [...byId.keys()];
   return { order, extra, bots: order.map(id => byId.get(id)) };
 }
+
+/** Drop a bot from local order/extra (and optional looks map). */
+export function removeBotFromRoster(roster, botId) {
+  const current = roster && typeof roster === 'object' ? roster : { order: [], extra: [] };
+  if (typeof botId !== 'string' || !botId) {
+    return { order: Array.isArray(current.order) ? current.order.slice() : [], extra: Array.isArray(current.extra) ? current.extra.slice() : [] };
+  }
+  return {
+    order: (Array.isArray(current.order) ? current.order : []).filter(id => id !== botId),
+    extra: (Array.isArray(current.extra) ? current.extra : []).filter(item => item?.id !== botId),
+  };
+}

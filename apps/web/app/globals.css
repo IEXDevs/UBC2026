@@ -1038,13 +1038,17 @@ button:focus-visible, input:focus-visible {
 
 .bubble-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   color: var(--muted);
   margin-bottom: 18px;
 }
 
 .bubble-head strong { color: var(--text); }
+
+.bubble-head .icon-btn {
+  margin-left: auto;
+}
 
 .bubble h1 {
   margin: 0 0 16px;

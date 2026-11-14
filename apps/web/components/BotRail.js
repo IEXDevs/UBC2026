@@ -25,7 +25,30 @@ function agentIcon(bot, size) {
   );
 }
 
-export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, onReorder, onCreate }) {
+function botMenu({ bot, index, bots, canDrag, onReorder, onDelete }) {
+  const items = [];
+  if (canDrag) {
+    items.push({
+      label: 'Move up',
+      disabled: index === 0,
+      onClick: () => onReorder(bot.id, bots[index - 1].id),
+    });
+    items.push({
+      label: 'Move down',
+      disabled: index === bots.length - 1,
+      onClick: () => onReorder(bot.id, bots[index + 1].id),
+    });
+  }
+  if (typeof onDelete === 'function') {
+    items.push({
+      label: 'Delete',
+      onClick: () => onDelete(bot.id),
+    });
+  }
+  return items.length > 0 ? items : undefined;
+}
+
+export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, onReorder, onCreate, onDelete = null }) {
   const activeIndex = bots.findIndex(bot => bot.id === activeId);
 
   if (bots.length === 0) {
@@ -43,20 +66,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
       label: bot.name,
       active: bot.id === activeId,
       onClick: () => onSelect(bot.id),
-      menu: canDrag
-        ? [
-            {
-              label: 'Move up',
-              disabled: index === 0,
-              onClick: () => onReorder(bot.id, bots[index - 1].id),
-            },
-            {
-              label: 'Move down',
-              disabled: index === bots.length - 1,
-              onClick: () => onReorder(bot.id, bots[index + 1].id),
-            },
-          ]
-        : undefined,
+      menu: botMenu({ bot, index, bots, canDrag, onReorder, onDelete }),
     }));
 
     return (
