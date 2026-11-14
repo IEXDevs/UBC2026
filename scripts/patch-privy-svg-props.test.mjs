@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { patchPrivySvgProps, rewriteSvgDomProps } from './patch-privy-svg-props.mjs';
+import { patchPrivySvgProps, rewriteSvgDomProps, silenceTurnstileExecuteWarning } from './patch-privy-svg-props.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -16,6 +16,21 @@ test('rewrites hyphenated svg props to React camelCase', () => {
     't("path",{fillRule:"evenodd",clipRule:"evenodd",d:"M"})',
   );
   assert.equal(rewriteSvgDomProps(rewriteSvgDomProps(source)), rewriteSvgDomProps(source));
+});
+
+test('keeps Privy app-config failures and skips the strict-mode abort warning', () => {
+  const source = 'catch(e){let t=e instanceof Error?e:Error(String(e));p(t),console.warn("Error generating app config: ",t)}';
+  const next = rewriteSvgDomProps(source);
+  assert.equal(next.includes('console.warn("Error generating app config: ",t)'), true);
+  assert.match(next, /t\.name!=="AbortError"/);
+  assert.equal(rewriteSvgDomProps(next), next);
+});
+
+test('drops the Turnstile execute-mode warning', () => {
+  const source = 'd.execution===`execute`?e.execute(z.current):console.warn(`Execution mode is not set to "execute"`)';
+  const next = silenceTurnstileExecuteWarning(source);
+  assert.equal(next.includes('Execution mode is not set'), false);
+  assert.equal(silenceTurnstileExecuteWarning(next), next);
 });
 
 function walk(dir, out = []) {
@@ -57,4 +72,9 @@ test('installed Privy GitHub login icon renders without invalid DOM props', asyn
   assert.equal(errors.length, 0, errors.join('\n'));
   assert.match(html, /fill-rule="evenodd"/);
   assert.match(html, /clip-rule="evenodd"/);
+
+  const privySource = walk(dist).map((file) => readFileSync(file, 'utf8')).join('\n');
+  assert.equal(privySource.includes('p(t),console.warn("Error generating app config: ",t)'), false);
+  const turnstile = path.join(repoRoot, 'node_modules', '@marsidev', 'react-turnstile', 'dist', 'index.js');
+  assert.equal(readFileSync(turnstile, 'utf8').includes('Execution mode is not set to "execute"'), false);
 });
