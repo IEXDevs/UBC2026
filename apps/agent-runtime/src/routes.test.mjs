@@ -72,16 +72,88 @@ test('bot routes still reach the Durable Object', async () => {
   assert.equal(body.forwarded, '/wake');
 });
 
-test('stub cron does nothing unless bots are listed', async () => {
-  const waited = [];
-  await worker.scheduled({}, fakeEnv(), { waitUntil: promise => waited.push(promise) });
-  assert.equal(waited.length, 0);
+const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const now = 1_700_000_000_000;
 
-  await worker.scheduled({}, fakeEnv({
-    listScheduledBots: async () => [{ id: 'bot_9', goal: 'hourly' }],
-  }), { waitUntil: promise => waited.push(promise) });
-  assert.equal(waited.length, 1);
-  const result = await waited[0];
-  const body = await result.json();
-  assert.equal(body.forwarded, '/wake');
+function cronCtx() {
+  const waited = [];
+  return { waited, ctx: { waitUntil: promise => waited.push(promise) } };
+}
+
+async function posted(promise) {
+  const response = await promise;
+  const body = await response.json();
+  return { path: body.forwarded, payload: JSON.parse(body.body) };
+}
+
+test('hourly cron records a position check and does nothing with an empty fleet', async () => {
+  const empty = cronCtx();
+  await worker.scheduled({}, fakeEnv(), empty.ctx);
+  assert.equal(empty.waited.length, 0);
+
+  const listed = cronCtx();
+  await worker.scheduled({ cron: '0 * * * *', scheduledTime: now }, fakeEnv({
+    listScheduledBots: async () => [{ id: 'bot_9', goal: 'hourly', type: 'trading' }],
+  }), listed.ctx);
+  assert.equal(listed.waited.length, 1);
+  const check = await posted(listed.waited[0]);
+  assert.equal(check.path, '/position-check');
+  assert.equal(check.payload.reason, 'cron-hourly');
+  assert.equal(check.payload.botId, 'bot_9');
+  assert.equal(check.payload.balance, null);
+});
+
+test('a fresh stream skips the RPC re-check, and a stale stream reads devnet balances', async () => {
+  const calls = [];
+  const fresh = cronCtx();
+  await worker.scheduled({ cron: '0 * * * *', scheduledTime: now }, fakeEnv({
+    listScheduledBots: async () => [{ id: 'bot_9', type: 'trading', address: wallet, goal: 'hold' }],
+    readStreamHealth: async () => ({ lastEventAt: now - 60_000, status: 'up' }),
+    readWalletBalance: async () => { throw new Error('rpc should not run'); },
+    fetch: async () => { throw new Error('network should not run'); },
+  }), fresh.ctx);
+  assert.equal(fresh.waited.length, 1);
+  assert.equal((await posted(fresh.waited[0])).payload.reason, 'cron-hourly');
+
+  const stale = cronCtx();
+  await worker.scheduled({ cron: '5,20,35,50 * * * *', scheduledTime: now }, fakeEnv({
+    listScheduledBots: async () => [
+      { id: 'bot_9', type: 'trading', address: wallet, goal: 'hold' },
+      { id: 'shop', type: 'shopping', address: wallet, goal: 'buy' },
+    ],
+    readStreamHealth: async () => ({ lastEventAt: now - (61 * 60 * 1000), status: 'up' }),
+    readWalletBalance: async ({ address }) => {
+      calls.push(address);
+      return { ok: true, cluster: 'devnet', address, amount: '42', mint: wallet, rpcUrl: 'https://example.invalid/quicknode-secret-path' };
+    },
+    fetch: async () => { throw new Error('network should not run'); },
+  }), stale.ctx);
+  assert.equal(calls.length, 1);
+  assert.equal(stale.waited.length, 2);
+  const reasons = [];
+  for (const promise of stale.waited) {
+    const item = await posted(promise);
+    reasons.push(item.payload.reason);
+    assert.equal(item.path, '/position-check');
+    assert.equal(item.payload.balance.amount, '42');
+    assert.equal(JSON.stringify(item.payload).includes('quicknode-secret-path'), false);
+    assert.equal(JSON.stringify(item.payload).includes('rpcUrl'), false);
+  }
+  assert.deepEqual(reasons.sort(), ['stream-drop-recheck', 'stream-drop-recheck']);
+});
+
+test('shopping bots are not hourly position checks, and an unknown cron does no work', async () => {
+  const shop = cronCtx();
+  await worker.scheduled({ cron: '0 * * * *', scheduledTime: now }, fakeEnv({
+    listScheduledBots: async () => [{ id: 'shop', type: 'shopping', goal: 'buy' }],
+    readStreamHealth: async () => ({ lastEventAt: now, status: 'up' }),
+  }), shop.ctx);
+  assert.equal(shop.waited.length, 0);
+
+  const other = cronCtx();
+  await worker.scheduled({ cron: '1 2 3 4 5', scheduledTime: now }, fakeEnv({
+    listScheduledBots: async () => [{ id: 'bot_9', type: 'trading', address: wallet }],
+    readWalletBalance: async () => { throw new Error('rpc should not run'); },
+  }), other.ctx);
+  assert.equal(other.waited.length, 0);
 });

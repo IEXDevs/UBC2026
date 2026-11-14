@@ -247,7 +247,8 @@ export const API_ROUTES = Object.freeze([
   { id: 'payments.list', method: 'GET', path: '/api/payments', phase: 1, auth: 'privy', status: 'stub' },
   { id: 'metrics.get', method: 'GET', path: '/api/metrics', phase: 1, auth: 'privy', status: 'stub' },
   { id: 'quicknode.webhook', method: 'POST', path: '/webhooks/quicknode', phase: 1, auth: 'webhook', status: 'live' },
-  { id: 'cron.hourly', method: 'CRON', path: '0 * * * *', phase: 1, auth: 'platform', status: 'stub' },
+  { id: 'cron.hourly', method: 'CRON', path: '0 * * * *', phase: 5, auth: 'platform', status: 'live' },
+  { id: 'cron.stream-fallback', method: 'CRON', path: '5,20,35,50 * * * *', phase: 5, auth: 'platform', status: 'live' },
 ]);
 
 function pathRegex(path) {

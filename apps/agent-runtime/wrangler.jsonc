@@ -13,7 +13,7 @@
     { "tag": "v1", "new_classes": ["BotDurableObject"] }
   ],
   "triggers": {
-    "crons": ["0 * * * *"]
+    "crons": ["0 * * * *", "5,20,35,50 * * * *"]
   },
   "vars": {
     "CLUSTER": "devnet",
