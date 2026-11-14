@@ -1,4 +1,4 @@
-import { createSearch, createBrowserProvider, ProviderError } from '@ubc2026/browser-search';
+import { createSearch, createScrape, createBrowserProvider, ProviderError } from '@ubc2026/browser-search';
 
 export { ProviderError };
 export class SessionError extends Error {
@@ -26,7 +26,7 @@ export function createMemoryStore() {
 export const agentTools = Object.freeze([
   {
     name: 'web_search',
-    description: 'Search the public web for general research, shopping, or assistant questions. Returns titles, URLs, and snippets. Not a payment or trading authority.',
+    description: 'Search the public web via Firecrawl for general research, shopping, or assistant questions. Returns titles, URLs, and snippets. Not a payment or trading authority.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -34,6 +34,18 @@ export const agentTools = Object.freeze([
       properties: {
         query: { type: 'string', minLength: 1, maxLength: 1000 },
         limit: { type: 'integer', minimum: 1, maximum: 10, default: 5 },
+      },
+    },
+  },
+  {
+    name: 'web_scrape',
+    description: 'Scrape a public http(s) page into Markdown via Firecrawl for research. Truncated for timeline size. Not a payment or trading authority.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['url'],
+      properties: {
+        url: { type: 'string', minLength: 1, maxLength: 2000 },
       },
     },
   },
@@ -50,7 +62,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_live_view',
-    description: 'Mint a short-lived read-only Live View URL for the bot owner to watch the session. Embedding from Vercel is unverified; a separate tab is an accepted fallback.',
+    description: 'Mint a short-lived read-only Live View URL for the bot owner to watch the session. Cloudflare iframe embed is unverified; a separate tab is an accepted fallback.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -82,6 +94,7 @@ export const agentTools = Object.freeze([
 export function createBrowserSessionService({
   store,
   search = null,
+  scrape = null,
   browsers = null,
   maxSessionsPerBot = 2,
   clock = now,
@@ -116,6 +129,26 @@ export function createBrowserSessionService({
         results,
         // Concise tool event for timelines — not model chain-of-thought.
         event: { type: 'tool', name: 'web_search', status: 'ok', resultCount: results.length, at: clock() },
+      };
+    },
+
+    async scrape({ ownerId, botId, url }) {
+      if (![ownerId, botId].every(idOk)) fail('invalid_identity');
+      if (!scrape) throw new ProviderError('scrape_not_configured', 503);
+      const page = await scrape(url);
+      return {
+        ownerId,
+        botId,
+        page,
+        event: {
+          type: 'tool',
+          name: 'web_scrape',
+          status: 'ok',
+          url: page.url,
+          truncated: page.truncated,
+          chars: page.markdown.length,
+          at: clock(),
+        },
       };
     },
 
@@ -191,6 +224,8 @@ export function createBrowserSessionService({
       switch (name) {
         case 'web_search':
           return this.search({ ...identity, query: args?.query, limit: args?.limit ?? 5 });
+        case 'web_scrape':
+          return this.scrape({ ...identity, url: args?.url });
         case 'browser_open':
           return this.openSession({ ...identity, purpose: args?.purpose ?? 'browse' });
         case 'browser_live_view':
@@ -205,9 +240,11 @@ export function createBrowserSessionService({
 }
 
 export function createDefaultBrowserSessionService(env, store) {
+  const firecrawlKey = env.FIRECRAWL_API_KEY;
   return createBrowserSessionService({
     store,
-    search: createSearch({ apiKey: env.BRAVE_API_KEY, fetcher: env.fetcher }),
+    search: createSearch({ apiKey: firecrawlKey, fetcher: env.fetcher }),
+    scrape: createScrape({ apiKey: firecrawlKey, fetcher: env.fetcher }),
     browsers: createBrowserProvider({
       accountId: env.CLOUDFLARE_ACCOUNT_ID,
       apiToken: env.CLOUDFLARE_API_TOKEN,

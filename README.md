@@ -41,8 +41,9 @@ goal → research (browser/search)
 
 | Package | Role |
 | --- | --- |
-| `packages/browser-search` | Brave search + Cloudflare Browser Run adapters |
-| `packages/browser-session` | Owner-bound sessions, per-bot concurrency, agent search/browser tools |
+| `packages/contracts` | Shared bot / wallet / event / decision validators |
+| `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
+| `packages/browser-session` | Owner-bound sessions, per-bot concurrency, agent search/scrape/browser tools |
 | `packages/bot-policy` | Bot types, caps, kill switch, mandatory approvals |
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate |
@@ -50,10 +51,11 @@ goal → research (browser/search)
 
 These are library scaffolds, not a shipping app. None sign or broadcast. Persist sessions/approvals/budgets in a Durable Object or transactional DB; queues are transport only.
 
-## Hosting split (planned)
+## Hosting (locked)
 
-- **Vercel** — Next.js glassmorphic UI only
-- **Cloudflare** — Workers cron, Queues, Browser Rendering / live agent view
+- **Cloudflare** — Next.js glass UI + Workers, Durable Objects, Queues, Cron, Browser Rendering / Live View
+- **Supabase** — main Postgres (bots, wallets, ledger, approvals); DOs hold live run checkpoints only
+- **Privy** — main + additional Solana wallets; keys never enter model context
 
 ## Develop
 
@@ -61,4 +63,4 @@ These are library scaffolds, not a shipping app. None sign or broadcast. Persist
 npm test
 ```
 
-Cloudflare, Brave, and trust-score credentials are required for live integration; mocked tests need no secrets.
+Cloudflare, Firecrawl (`FIRECRAWL_API_KEY`), Privy, QuickNode, and trust-score credentials are required for live integration; mocked tests need no secrets.

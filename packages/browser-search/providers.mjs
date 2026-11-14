@@ -1,32 +1,93 @@
 // Server-only provider adapters. Supply owner-authorized session IDs from app storage.
+// Research uses Firecrawl (search + scrape). Interactive browse uses Cloudflare Browser Run.
 export class ProviderError extends Error {
   constructor(code, status = 502) { super(code); this.code = code; this.status = status; }
 }
+
 async function jsonRequest(fetcher, url, options) {
   let response;
-  try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(15000) }); }
+  try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(30000) }); }
   catch { throw new ProviderError('provider_unavailable'); }
   if (!response.ok) throw new ProviderError(response.status === 429 ? 'provider_rate_limited' : 'provider_failed', response.status === 429 ? 429 : 502);
   try { return await response.json(); } catch { throw new ProviderError('invalid_provider_response'); }
 }
-export function createSearch({ apiKey, fetcher = fetch }) {
+
+function firecrawlHeaders(apiKey) {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+}
+
+/**
+ * Firecrawl web search. Returns titles, URLs, and snippets only — no secrets.
+ * API key must come from Worker secrets (FIRECRAWL_API_KEY), never the model or client.
+ */
+export function createSearch({ apiKey, fetcher = fetch, baseUrl = 'https://api.firecrawl.dev/v1' }) {
   return async function search(query, limit = 5) {
     if (!apiKey) throw new ProviderError('search_not_configured', 503);
-    if (typeof query !== 'string' || !query.trim() || query.length > 1000 || !Number.isInteger(limit) || limit < 1 || limit > 10) throw new ProviderError('invalid_search', 400);
-    const url = new URL('https://api.search.brave.com/res/v1/web/search');
-    url.searchParams.set('q', query.trim()); url.searchParams.set('count', String(limit));
-    const data = await jsonRequest(fetcher, url, { headers: { 'X-Subscription-Token': apiKey, Accept: 'application/json' } });
-    if (!data || typeof data !== 'object' || (data.web?.results !== undefined && !Array.isArray(data.web.results))) throw new ProviderError('invalid_provider_response');
+    if (typeof query !== 'string' || !query.trim() || query.length > 1000 || !Number.isInteger(limit) || limit < 1 || limit > 10) {
+      throw new ProviderError('invalid_search', 400);
+    }
+    const data = await jsonRequest(fetcher, `${baseUrl}/search`, {
+      method: 'POST',
+      headers: firecrawlHeaders(apiKey),
+      body: JSON.stringify({ query: query.trim(), limit, ignoreInvalidURLs: true }),
+    });
+    if (!data || data.success !== true || !Array.isArray(data.data)) throw new ProviderError('invalid_provider_response');
     const fetchedAt = new Date().toISOString();
-    return (data.web?.results ?? []).flatMap(result => {
+    return data.data.flatMap(result => {
       try {
         const source = new URL(result.url);
         if (!['https:', 'http:'].includes(source.protocol)) return [];
-        return [{ title: String(result.title ?? ''), url: source.href, snippet: String(result.description ?? ''), fetchedAt }];
+        return [{
+          title: String(result.title ?? ''),
+          url: source.href,
+          snippet: String(result.description ?? ''),
+          fetchedAt,
+        }];
       } catch { return []; }
     }).slice(0, limit);
   };
 }
+
+/**
+ * Firecrawl page→Markdown scrape for research. Caps markdown size so tool events stay concise.
+ */
+export function createScrape({ apiKey, fetcher = fetch, baseUrl = 'https://api.firecrawl.dev/v1', maxMarkdownChars = 12000 }) {
+  return async function scrape(url) {
+    if (!apiKey) throw new ProviderError('scrape_not_configured', 503);
+    if (typeof url !== 'string' || !url.trim() || url.length > 2000) throw new ProviderError('invalid_scrape', 400);
+    let target;
+    try {
+      target = new URL(url.trim());
+      if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password) throw new Error('bad');
+    } catch { throw new ProviderError('invalid_scrape', 400); }
+    if (!Number.isSafeInteger(maxMarkdownChars) || maxMarkdownChars < 500 || maxMarkdownChars > 50000) {
+      throw new ProviderError('invalid_scrape', 400);
+    }
+    const data = await jsonRequest(fetcher, `${baseUrl}/scrape`, {
+      method: 'POST',
+      headers: firecrawlHeaders(apiKey),
+      body: JSON.stringify({ url: target.href, formats: ['markdown'], onlyMainContent: true }),
+    });
+    if (!data || data.success !== true || !data.data || typeof data.data !== 'object') {
+      throw new ProviderError('invalid_provider_response');
+    }
+    const markdown = typeof data.data.markdown === 'string' ? data.data.markdown : '';
+    const title = typeof data.data.metadata?.title === 'string' ? data.data.metadata.title : '';
+    const truncated = markdown.length > maxMarkdownChars;
+    return {
+      url: target.href,
+      title,
+      markdown: truncated ? markdown.slice(0, maxMarkdownChars) : markdown,
+      truncated,
+      fetchedAt: new Date().toISOString(),
+    };
+  };
+}
+
 export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) {
   const base = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-rendering/devtools/browser`;
   async function call(path, body) {

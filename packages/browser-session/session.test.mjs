@@ -12,13 +12,17 @@ function service(overrides = {}) {
     },
   };
   const search = async (query, limit) => [{ title: 'A', url: 'https://example.com', snippet: query, fetchedAt: 't' }].slice(0, limit);
+  const scrape = async url => ({ url, title: 'Page', markdown: '# hi', truncated: false, fetchedAt: 't' });
   return createBrowserSessionService({
-    store, browsers, search, maxSessionsPerBot: 2, clock: () => 1000, idFactory: () => 'rec-1', ...overrides,
+    store, browsers, search, scrape, maxSessionsPerBot: 2, clock: () => 1000, idFactory: () => 'rec-1', ...overrides,
   });
 }
 
-test('agent tools cover search and owned browser lifecycle', () => {
-  assert.deepEqual(agentTools.map(tool => tool.name), ['web_search', 'browser_open', 'browser_live_view', 'browser_release']);
+test('agent tools cover search, scrape, and owned browser lifecycle', () => {
+  assert.deepEqual(
+    agentTools.map(tool => tool.name),
+    ['web_search', 'web_scrape', 'browser_open', 'browser_live_view', 'browser_release'],
+  );
 });
 
 test('search returns concise tool events without exposing secrets', async () => {
@@ -26,6 +30,13 @@ test('search returns concise tool events without exposing secrets', async () => 
   assert.equal(result.results[0].url, 'https://example.com');
   assert.equal(result.event.name, 'web_search');
   assert.equal(result.event.resultCount, 1);
+});
+
+test('scrape returns markdown via Firecrawl tool without exposing secrets', async () => {
+  const result = await service().invokeTool('web_scrape', { url: 'https://example.com' }, { ownerId: 'u1', botId: 'b1' });
+  assert.equal(result.page.markdown, '# hi');
+  assert.equal(result.event.name, 'web_scrape');
+  assert.equal(result.event.truncated, false);
 });
 
 test('sessions are bound to owner/bot and hide provider ids from open response', async () => {
