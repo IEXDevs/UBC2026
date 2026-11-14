@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import TalkStub from '../components/TalkStub';
 import { getDemoShellState } from '../lib/demo-state.mjs';
 
 const state = getDemoShellState();
@@ -84,10 +85,12 @@ export default function HomePage() {
                 ))}
               </ul>
               <p style={{ color: 'var(--muted)', marginBottom: 0 }}>
-                Live View and ElevenAgents Talk wire in once the runtime APIs land.
+                Live View wires in once Browser Rendering sessions are live.
               </p>
             </section>
           </div>
+
+          <TalkStub botName={bot.name} />
         </section>
       </main>
     </div>
