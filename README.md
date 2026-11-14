@@ -23,8 +23,9 @@ Still open for a complete submission, and still unchecked on the plan: a hosted 
 
 ```
 apps/web (Next.js, OpenNext on Cloudflare)
+  Sid shell · positions book · plugins · voice composer
   Privy login · bot creation · approval preview · timeline · Live View
-  overview · security (pause / freeze) · Talk panel
+  overview · security (pause / freeze)
         │
 apps/agent-runtime (Cloudflare Worker + one Durable Object per bot)
   checkpointed loop · OpenRouter · ElevenLabs agent spec + webhook tools

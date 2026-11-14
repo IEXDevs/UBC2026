@@ -19,7 +19,13 @@
   ],
   "observability": {
     "enabled": true
-  }
+  },
+  "routes": [
+    {
+      "pattern": "maelstrom.iexdevs.com",
+      "custom_domain": true
+    }
+  ]
   // Public Next build names live in .env.example: NEXT_PUBLIC_PRIVY_APP_ID,
   // NEXT_PUBLIC_PRIVY_CLIENT_ID, NEXT_PUBLIC_AGENT_RUNTIME_URL.
   // Do not put PRIVY_APP_SECRET or any other secret value in this file.

@@ -73,7 +73,7 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
         <p>Set NEXT_PUBLIC_AGENT_RUNTIME_URL to the agent runtime that owns browser sessions.</p>
       )}
       {ownerId && browserSessionUrl(runtimeBase, botId) && (
-        <p>Read-only Live View for this bot. A separate tab is there if the frame does not load.</p>
+        <p>Read-only Live View for this agent. A separate tab is there if the frame does not load.</p>
       )}
       <div className="live-actions">
         <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
