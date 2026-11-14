@@ -56,6 +56,12 @@ export async function POST(request) {
   } catch (error) {
     const code = error instanceof WalletError ? error.code : 'wallet_failed';
     const status = code === 'missing_config' || code === 'invalid_rpc' ? 503 : 502;
-    return Response.json({ error: code }, { status, headers: { 'Cache-Control': 'no-store' } });
+    const detail = error instanceof WalletError && typeof error.message === 'string'
+      ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
+      : undefined;
+    return Response.json(
+      detail ? { error: code, detail } : { error: code },
+      { status, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 }

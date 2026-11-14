@@ -26,6 +26,10 @@ test('wallet provision notes stay actionable and secret-free', () => {
   );
   assert.match(walletProvisionNote({ error: 'invalid_rpc' }), /https QuickNode/);
   assert.match(walletProvisionNote({ error: 'privy_failed' }), /PRIVY_APP_SECRET/);
+  assert.match(
+    walletProvisionNote({ error: 'privy_failed', detail: 'Privy request failed (401)' }),
+    /Privy request failed \(401\)/,
+  );
   assert.equal(
     walletProvisionNote({ created: true, wallets: [{ id: 'w1' }] }, { ok: true }),
     'Main wallet created and assigned to these agents.',

@@ -46,12 +46,23 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
     return 'QUICKNODE_DEVNET_RPC_URL must be an https QuickNode Solana devnet RPC URL.';
   }
   if (code === 'privy_failed') {
+    const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
+    if (detail && detail.length <= 180 && !/[\r\n]/.test(detail)) {
+      return `Privy wallet create failed: ${detail}. Check PRIVY_APP_SECRET, Solana wallets in the dashboard, and optional PRIVY_AUTHORIZATION_KEY.`;
+    }
     return 'Privy rejected wallet create. Confirm PRIVY_APP_SECRET matches this app, Solana embedded wallets are on, and retry.';
+  }
+  if (code === 'invalid_wallet') {
+    return 'Privy returned a wallet without a server id. Enable Solana embedded wallets, then sign in again.';
   }
   if (code === 'login_required') {
     return 'Sign in again so the shell can send a Privy access token.';
   }
   if (code) {
+    const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
+    if (detail && detail.length <= 180 && !/[\r\n]/.test(detail)) {
+      return `The main wallet was not created (${code}): ${detail}`;
+    }
     return `The main wallet was not created (${code}). Sign in again and retry.`;
   }
   return 'The main wallet was not created. Sign in again and retry.';
