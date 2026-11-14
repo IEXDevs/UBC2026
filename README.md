@@ -45,7 +45,7 @@ goal → research (browser/search)
 | `packages/wallets` | Privy wallet assignment + freeze gates |
 | `packages/agent-loop` | Trust → verify → policy decision gate orchestrator |
 | `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
-| `packages/browser-session` | Owner-bound sessions, per-bot concurrency, agent search/scrape/browser tools |
+| `packages/browser-session` | Owner-bound Cloudflare browser sessions, per-bot concurrency, Live View URLs |
 | `packages/bot-policy` | Bot types, caps, approval modes, kill switch, Supabase ledger reserve |
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |

@@ -6,6 +6,10 @@ Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 - `POST /bots/:id/decide` — trust → verify → policy gate (pauses on approval)
 - `POST /bots/:id/pause|resume|advance`
 - `GET /bots/:id/status`
+- `POST /bots/:id/browser/sessions` — open an owner-bound Cloudflare browser session (`x-owner-id`)
+- `GET /bots/:id/browser/sessions` — list that owner's open sessions
+- `POST /bots/:id/browser/sessions/:sessionRecordId/live-view` — readonly Live View URL, `Cache-Control: no-store`
+- `POST /bots/:id/browser/sessions/:sessionRecordId/release` — close the Browser Run session
 - `POST /webhooks/quicknode` — Streams wake path
 - `GET /api/routes` — contract route list and secret names (no values)
 - `GET /api/me`, `/api/wallets`, `/api/bots`, `/api/events`, `/api/decisions`, `/api/payments`, `/api/metrics` — stubs from `API_ROUTES`

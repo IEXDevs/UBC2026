@@ -86,18 +86,39 @@ test('session creation does not expose privileged connection URLs', async () => 
   assert.deepEqual(await provider.createSession(), { sessionId: 'abc' });
 });
 
-test('viewer always requests readonly permissions and short lifetime', async () => {
+test('viewer always requests readonly permissions and a five-minute connect deadline', async () => {
   const provider = createBrowserProvider({
     accountId: 'a',
     apiToken: 'b',
     fetcher: async (url, options) => {
-      assert.ok(url.endsWith('/abc/live_view'));
-      assert.deepEqual(JSON.parse(options.body), { mode: 'tab', expiresInMs: 60000, guardrails: { mode: 'readonly' } });
+      assert.equal(url, 'https://api.cloudflare.com/client/v4/accounts/a/browser-run/devtools/browser/abc/live_view');
+      assert.equal(options.method, 'POST');
+      assert.deepEqual(JSON.parse(options.body), { mode: 'tab', expiresInMs: 300000, guardrails: { mode: 'readonly' } });
       return Response.json({ result: { devtoolsFrontendUrl: 'https://live.browser.run/ui/view?jwt=test' } });
     },
   });
-  assert.equal((await provider.readonlyView('abc')).mode, 'readonly');
+  const view = await provider.readonlyView('abc');
+  assert.equal(view.mode, 'readonly');
+  assert.match(view.viewerUrl, /^https:\/\/live\.browser\.run\/ui\/view\?/);
   await assert.rejects(provider.readonlyView('../other'), { code: 'invalid_session' });
+});
+
+test('close deletes the Browser Run session and create uses the browser-run path', async () => {
+  const calls = [];
+  const provider = createBrowserProvider({
+    accountId: 'acct',
+    apiToken: 'tok',
+    fetcher: async (url, options) => {
+      calls.push({ url, method: options.method });
+      if (options.method === 'DELETE') return Response.json({ status: 'closing' });
+      return Response.json({ success: true, result: { sessionId: 'sess-1', webSocketDebuggerUrl: 'wss://secret' } });
+    },
+  });
+  assert.deepEqual(await provider.createSession(), { sessionId: 'sess-1' });
+  assert.match(calls[0].url, /\/browser-run\/devtools\/browser\?keep_alive=600000&targets=true$/);
+  assert.deepEqual(await provider.closeSession('sess-1'), { status: 'closing' });
+  assert.equal(calls[1].method, 'DELETE');
+  assert.match(calls[1].url, /\/browser-run\/devtools\/browser\/sess-1$/);
 });
 
 test('viewer rejects unexpected hosts and missing config', async () => {

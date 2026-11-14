@@ -5,6 +5,7 @@ export function getDemoShellState() {
   const templates = createBuiltinTemplates();
   return {
     product: 'Maelstrom',
+    ownerId: null,
     panes: ['Overview', 'Agents', 'Payments', 'Positions', 'Wallets', 'Security'],
     bots: [
       {

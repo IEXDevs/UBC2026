@@ -14,7 +14,7 @@ function botStub(env, botId) {
 
 /**
  * Maelstrom agent runtime Worker.
- * Routes wake/pause/resume/status to a per-bot Durable Object.
+ * Routes wake/pause/resume/status and owner-bound browser sessions to a per-bot Durable Object.
  * QuickNode Streams and hourly cron wake bots through the same /wake path.
  */
 export default {
@@ -49,7 +49,12 @@ export default {
     const matched = matchApiRoute(request.method, url.pathname);
     if (matched?.route.action && matched.params.botId) {
       const stub = botStub(env, matched.params.botId);
-      const target = new URL(`https://bot/${matched.route.action}`);
+      const botId = matched.params.botId;
+      const prefix = `/bots/${encodeURIComponent(botId)}`;
+      const rest = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : '';
+      const target = rest.startsWith('/browser/')
+        ? new URL(`https://bot/id/${encodeURIComponent(botId)}${rest}`)
+        : new URL(`https://bot/${matched.route.action}`);
       return stub.fetch(new Request(target, request));
     }
 

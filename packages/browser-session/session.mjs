@@ -23,6 +23,26 @@ export function createMemoryStore() {
   };
 }
 
+const EMBEDDABLE_LIVE_VIEW_PATHS = new Set(['/ui/view', '/ui/inspector']);
+
+/**
+ * live.browser.run serves /ui/view and /ui/inspector with
+ * `content-security-policy: frame-ancestors *` and no X-Frame-Options
+ * (checked 2026-11-14). Other hosts stay unembedded.
+ */
+export function describeLiveViewEmbed(viewerUrl) {
+  let url;
+  try { url = new URL(viewerUrl); } catch {
+    return { embedVerified: false, fallback: 'open-viewer-in-separate-tab' };
+  }
+  const embedVerified = url.protocol === 'https:'
+    && url.hostname === 'live.browser.run'
+    && EMBEDDABLE_LIVE_VIEW_PATHS.has(url.pathname)
+    && !url.username
+    && !url.password;
+  return { embedVerified, fallback: 'open-viewer-in-separate-tab' };
+}
+
 export const agentTools = Object.freeze([
   {
     name: 'web_search',
@@ -62,7 +82,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_live_view',
-    description: 'Mint a short-lived read-only Live View URL for the bot owner to watch the session. Cloudflare iframe embed is unverified; a separate tab is an accepted fallback.',
+    description: 'Ask the owner UI to mint a read-only Live View for this session. The tool result never includes the viewer URL. A separate tab remains the fallback if the iframe does not load.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -183,21 +203,26 @@ export function createBrowserSessionService({
       if (!browsers) throw new ProviderError('browser_not_configured', 503);
       const record = await requireOwned(ownerId, botId, sessionRecordId);
       const view = await browsers.readonlyView(record.providerSessionId);
+      const embed = describeLiveViewEmbed(view.viewerUrl);
       // Viewer URLs contain bearer credentials: return only to the authorized owner with no-store.
+      // Do not put the URL on the tool event.
       return {
         sessionRecordId,
         viewerUrl: view.viewerUrl,
         connectBefore: view.connectBefore,
         mode: view.mode,
         headers: { 'Cache-Control': 'no-store' },
-        embedVerified: false,
-        fallback: 'open-viewer-in-separate-tab',
+        embedVerified: embed.embedVerified,
+        fallback: embed.fallback,
         event: { type: 'tool', name: 'browser_live_view', status: 'ok', sessionRecordId, at: clock() },
       };
     },
 
     async releaseSession({ ownerId, botId, sessionRecordId }) {
       const record = await requireOwned(ownerId, botId, sessionRecordId);
+      if (browsers && typeof browsers.closeSession === 'function') {
+        await browsers.closeSession(record.providerSessionId);
+      }
       const closed = { ...record, status: 'closed', updatedAt: clock(), closedAt: clock() };
       await store.put(keyFor(ownerId, botId, sessionRecordId), closed);
       return {
@@ -228,8 +253,18 @@ export function createBrowserSessionService({
           return this.scrape({ ...identity, url: args?.url });
         case 'browser_open':
           return this.openSession({ ...identity, purpose: args?.purpose ?? 'browse' });
-        case 'browser_live_view':
-          return this.liveView({ ...identity, sessionRecordId: args?.sessionRecordId });
+        case 'browser_live_view': {
+          const view = await this.liveView({ ...identity, sessionRecordId: args?.sessionRecordId });
+          // The model must not receive the bearer URL. The owner HTTP route returns it.
+          return {
+            sessionRecordId: view.sessionRecordId,
+            mode: view.mode,
+            connectBefore: view.connectBefore,
+            embedVerified: view.embedVerified,
+            fallback: view.fallback,
+            event: view.event,
+          };
+        }
         case 'browser_release':
           return this.releaseSession({ ...identity, sessionRecordId: args?.sessionRecordId });
         default:
@@ -237,6 +272,12 @@ export function createBrowserSessionService({
       }
     },
   };
+}
+
+function concurrencyLimit(value) {
+  if (value == null || value === '') return 2;
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  return parsed;
 }
 
 export function createDefaultBrowserSessionService(env, store) {
@@ -250,6 +291,6 @@ export function createDefaultBrowserSessionService(env, store) {
       apiToken: env.CLOUDFLARE_API_TOKEN,
       fetcher: env.fetcher,
     }),
-    maxSessionsPerBot: env.MAX_BROWSER_SESSIONS_PER_BOT ?? 2,
+    maxSessionsPerBot: concurrencyLimit(env.MAX_BROWSER_SESSIONS_PER_BOT),
   });
 }

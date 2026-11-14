@@ -36,6 +36,21 @@ test('route catalog and contract stubs answer without secrets', async () => {
   assert.equal(signBody.route, 'wallets.sign');
 });
 
+test('owner browser routes are forwarded with the bot id kept on the object path', async () => {
+  const env = fakeEnv();
+  const live = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions/rec_1/live-view', {
+    method: 'POST',
+    headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+    body: '{}',
+  }), env);
+  const body = await live.json();
+  assert.equal(body.forwarded, '/id/bot_1/browser/sessions/rec_1/live-view');
+
+  const open = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions', { method: 'GET' }), env);
+  const opened = await open.json();
+  assert.equal(opened.forwarded, '/id/bot_1/browser/sessions');
+});
+
 test('bot routes still reach the Durable Object', async () => {
   const env = fakeEnv();
   const wake = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {

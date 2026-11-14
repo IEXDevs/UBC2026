@@ -174,6 +174,7 @@ export const SECRET_NAMES = Object.freeze([
 
 export const PUBLIC_CONFIG_NAMES = Object.freeze([
   'NEXT_PUBLIC_PRIVY_APP_ID',
+  'NEXT_PUBLIC_AGENT_RUNTIME_URL',
 ]);
 
 export const SECRET_GROUPS = Object.freeze({
@@ -236,6 +237,10 @@ export const API_ROUTES = Object.freeze([
   { id: 'bots.resume', method: 'POST', path: '/bots/:botId/resume', phase: 1, auth: 'none', status: 'live', action: 'resume' },
   { id: 'bots.advance', method: 'POST', path: '/bots/:botId/advance', phase: 1, auth: 'none', status: 'live', action: 'advance' },
   { id: 'bots.decide', method: 'POST', path: '/bots/:botId/decide', phase: 1, auth: 'none', status: 'live', action: 'decide' },
+  { id: 'bots.browser.list', method: 'GET', path: '/bots/:botId/browser/sessions', phase: 3, auth: 'owner', status: 'live', action: 'browser/sessions' },
+  { id: 'bots.browser.open', method: 'POST', path: '/bots/:botId/browser/sessions', phase: 3, auth: 'owner', status: 'live', action: 'browser/sessions' },
+  { id: 'bots.browser.liveView', method: 'POST', path: '/bots/:botId/browser/sessions/:sessionRecordId/live-view', phase: 3, auth: 'owner', status: 'live', action: 'browser/live-view' },
+  { id: 'bots.browser.release', method: 'POST', path: '/bots/:botId/browser/sessions/:sessionRecordId/release', phase: 3, auth: 'owner', status: 'live', action: 'browser/release' },
   { id: 'events.list', method: 'GET', path: '/api/events', phase: 1, auth: 'privy', status: 'stub' },
   { id: 'decisions.list', method: 'GET', path: '/api/decisions', phase: 1, auth: 'privy', status: 'stub' },
   { id: 'payments.list', method: 'GET', path: '/api/payments', phase: 1, auth: 'privy', status: 'stub' },

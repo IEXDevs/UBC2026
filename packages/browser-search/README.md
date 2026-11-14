@@ -15,7 +15,8 @@ const browsers = createBrowserProvider({
 const hits = await search('solana usdc yield', 5);
 const page = await scrape(hits[0].url);
 const { sessionId } = await browsers.createSession();
-const view = await browsers.readonlyView(sessionId); // short-lived, readonly Live View only
+const view = await browsers.readonlyView(sessionId); // readonly Live View, 5-minute connect deadline
+await browsers.closeSession(sessionId);
 ```
 
 Keep `FIRECRAWL_API_KEY` in Worker secrets only — never in the model context or client bundle.
@@ -26,4 +27,4 @@ Run `npm test` in this directory. Tests use mocked upstream responses.
 
 - https://docs.firecrawl.dev/api-reference/v1-endpoint/search
 - https://docs.firecrawl.dev/api-reference/v1-endpoint/scrape
-- https://developers.cloudflare.com/browser-rendering/
+- https://developers.cloudflare.com/browser-run/features/live-view/

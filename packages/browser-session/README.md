@@ -25,7 +25,8 @@ const view = await service.liveView({ ownerId, botId, sessionRecordId }); // Cac
 
 - Persist session records in a Durable Object or transactional DB. Queues deliver jobs; they are not ownership or exactly-once storage.
 - Never treat a model- or client-supplied Cloudflare `sessionId` as authorization — only `sessionRecordId` values created for that owner/bot.
-- Live View URLs contain bearer credentials: return only to the owner, never log them. Cloudflare iframe embedding is still unverified; separate-tab fallback is explicit.
+- Live View URLs contain bearer credentials: the owner HTTP route returns them with `Cache-Control: no-store`. `invokeTool('browser_live_view')` redacts the URL so the model never sees it.
+- `https://live.browser.run/ui/view` and `/ui/inspector` send `content-security-policy: frame-ancestors *` (checked 2026-11-14), so the owner UI may iframe those URLs. Any other host stays a separate-tab fallback. Do not log the URL.
 - This is not a coding-agent filesystem UI. Tools are web search, scrape, and browser open/view/release only.
 - Research provider is Firecrawl (`FIRECRAWL_API_KEY` in Worker secrets). Interactive browse stays on Cloudflare Browser Rendering.
 

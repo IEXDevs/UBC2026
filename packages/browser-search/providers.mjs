@@ -9,7 +9,9 @@ async function jsonRequest(fetcher, url, options) {
   try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(30000) }); }
   catch { throw new ProviderError('provider_unavailable'); }
   if (!response.ok) throw new ProviderError(response.status === 429 ? 'provider_rate_limited' : 'provider_failed', response.status === 429 ? 429 : 502);
-  try { return await response.json(); } catch { throw new ProviderError('invalid_provider_response'); }
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
 }
 
 function firecrawlHeaders(apiKey) {
@@ -88,30 +90,45 @@ export function createScrape({ apiKey, fetcher = fetch, baseUrl = 'https://api.f
   };
 }
 
+const LIVE_VIEW_TTL_MS = 300000;
+
 export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) {
-  const base = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-rendering/devtools/browser`;
-  async function call(path, body) {
+  // Browser Run REST API. The older `/browser-rendering/` prefix is not the Live View API.
+  const base = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-run/devtools/browser`;
+  async function call(path, { method = 'POST', body } = {}) {
     if (!accountId || !apiToken) throw new ProviderError('browser_not_configured', 503);
-    const result = await jsonRequest(fetcher, base + path, {
-      method: 'POST', headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    });
-    if (result.success === false) throw new ProviderError('browser_provider_failed');
-    return result.result ?? result;
+    const headers = { Authorization: `Bearer ${apiToken}`, Accept: 'application/json' };
+    const options = { method, headers };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
+    }
+    const result = await jsonRequest(fetcher, base + path, options);
+    if (result && result.success === false) throw new ProviderError('browser_provider_failed');
+    return result?.result ?? result ?? {};
   }
   return {
     async createSession() {
-      const result = await call('?keep_alive=600000&targets=true', {});
+      const result = await call('?keep_alive=600000&targets=true', { body: {} });
       if (typeof result.sessionId !== 'string' || !result.sessionId) throw new ProviderError('invalid_provider_response');
       // Do not return provider CDP URLs or privileged default viewer links to the frontend.
       return { sessionId: result.sessionId };
     },
     async readonlyView(sessionId) {
       if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9-]{1,128}$/.test(sessionId)) throw new ProviderError('invalid_session', 400);
-      const result = await call(`/${encodeURIComponent(sessionId)}/live_view`, { mode: 'tab', expiresInMs: 60000, guardrails: { mode: 'readonly' } });
+      const result = await call(`/${encodeURIComponent(sessionId)}/live_view`, {
+        body: { mode: 'tab', expiresInMs: LIVE_VIEW_TTL_MS, guardrails: { mode: 'readonly' } },
+      });
       let url;
       try { url = new URL(result.devtoolsFrontendUrl); } catch { throw new ProviderError('invalid_provider_response'); }
       if (url.protocol !== 'https:' || url.hostname !== 'live.browser.run' || url.username || url.password) throw new ProviderError('invalid_provider_response');
-      return { viewerUrl: url.href, connectBefore: new Date(Date.now() + 60000).toISOString(), mode: 'readonly' };
+      if (url.pathname !== '/ui/view' && url.pathname !== '/ui/inspector') throw new ProviderError('invalid_provider_response');
+      return { viewerUrl: url.href, connectBefore: new Date(Date.now() + LIVE_VIEW_TTL_MS).toISOString(), mode: 'readonly' };
+    },
+    async closeSession(sessionId) {
+      if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9-]{1,128}$/.test(sessionId)) throw new ProviderError('invalid_session', 400);
+      const result = await call(`/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+      return { status: typeof result.status === 'string' ? result.status : 'closing' };
     },
   };
 }
