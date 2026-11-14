@@ -85,7 +85,7 @@ Protocol: [Solana agentic payments](https://solana.com/docs/payments/agentic-pay
 
 - **OpenRouter** (`OPENROUTER_API_KEY`) is the planned model route. It is named and unused by the current loop.
 - **Firecrawl** (`FIRECRAWL_API_KEY`) is search and scrape. Results keep source URLs. Provider errors are sanitized. The key stays in Worker secrets.
-- **ElevenLabs Agents** (`ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`) is the voice path. The UI button stays disabled until an agent id exists.
+- **ElevenLabs Agents** (`ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`) is the voice path. The composer starts a session through `POST /api/voice/token` and `@elevenlabs/client`. The button reports a clear failure when those secrets or the published agent are missing.
 
 ### Market data
 
@@ -134,7 +134,7 @@ The main agent and a separate verify function each supply asset, mint, cluster, 
 | `packages/browser-search` | `@ubc2026/browser-search` | Firecrawl search/scrape and Browser Run session create/view/close |
 | `packages/browser-session` | `@ubc2026/browser-session` | Owner-bound sessions, per-bot concurrency, tool schemas, Live View redaction |
 | `apps/agent-runtime` | `@ubc2026/agent-runtime` | Worker + per-bot Durable Object |
-| `apps/web` | `@ubc2026/web` | Glass shell: bot list, empty panes, Privy login, Live View panel, Talk stub |
+| `apps/web` | `@ubc2026/web` | Glass shell: agent list, Main / Positions / Plugins / History, Privy login, Live View, positions book, voice stage |
 | `supabase/` | | Schema, policy-ledger migration, PGlite tests |
 | `scripts/accounts-and-funds.mjs` | | Prints secret **names** and faucet steps. Does not read values or call a faucet |
 
@@ -151,7 +151,9 @@ Live today:
 - Owner browser sessions: list, open, live-view, release (`x-owner-id`)
 - `POST /webhooks/quicknode`
 
-The web shell panes are Overview, Agents, Payments, Positions, Wallets, and Security. Bodies say "Empty." Create bot is disabled. Demo bots are local placeholders, not Supabase rows. Live View calls the runtime when `NEXT_PUBLIC_AGENT_RUNTIME_URL` is set and a Privy user id is present.
+The web shell panes are Main, Positions, Plugins, and History. Main shows the agent goal, Live View, and the voice transcript as chat bubbles. Positions is a perspective book of demo wallets and venue cards: drag a node, zoom the camera, click for every field the demo row has. Plugins lists connectors. History is still a quiet pane. Agents in the rail are local demo rows plus any created in the browser. They are not Supabase rows. Live View calls the runtime when `NEXT_PUBLIC_AGENT_RUNTIME_URL` is set and a Privy user id is present.
+
+Voice is a separate surface on the right pane. Starting it fades that pane to black, shows the crystal ball, and appends each speaker's line as a bubble. Minimize drops the black screen and leaves a draggable box; hover opens mute, voice, and session steps. The same bubbles stay in the Main thread. The hostname route `maelstrom.iexdevs.com` is in `apps/web/wrangler.jsonc` and is not deployed from this branch.
 
 ## Landed chunks
 
@@ -180,8 +182,9 @@ Still open in the code, called out by those PRs:
 - Settle or release a ledger reservation when a transfer confirms or fails.
 - Connect `POST /api/wallets` and the sign route to `@ubc2026/wallets`, and replace the other `/api/*` stubs with Supabase reads.
 - Hourly cron that loads scheduled bots and runs position checks.
-- Pane bodies, bot creation, and the approval preview.
-- ElevenLabs audio and a Grok Bot on X.
+- Payments feed and a live positions read. The Positions pane on `cursor/maelstrom-web-shell` is a demo book, not chain state.
+- Approval preview. Bot creation in the shell is local only.
+- Grok Bot on X. The ElevenLabs talk screen is on `cursor/maelstrom-web-shell` (black stage, bubbles, minimized box). It is not merged to `main`.
 - Deploy of the Worker and the OpenNext app. Do not deploy unless asked.
 
 The team checklist that named these chunks lives in Notion. The Notion account connected here is Sid Chevvan’s personal space (course notes). It does not contain the Maelstrom board, so claim status above is taken from merged PRs and the code, not from that board.

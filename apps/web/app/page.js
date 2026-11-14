@@ -8,6 +8,7 @@ import MoneyPane from '../components/MoneyPane';
 import ConnectorsPane from '../components/ConnectorsPane';
 import BotRail from '../components/BotRail';
 import PaneDock from '../components/PaneDock';
+import ChatBubbles from '../components/ChatBubbles';
 import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
 import ProfileSheet from '../components/ProfileSheet';
@@ -102,9 +103,16 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
   const [createOpen, setCreateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [walletsOpen, setWalletsOpen] = useState(false);
+  const [talks, setTalks] = useState({});
   const closeCreate = useCallback(() => setCreateOpen(false), []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
+  const appendTalk = useCallback((botId, line) => {
+    setTalks(current => ({
+      ...current,
+      [botId]: [...(current[botId] ?? []), line].slice(-80),
+    }));
+  }, []);
 
   useEffect(() => {
     let savedLooks = {};
@@ -261,6 +269,7 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
                   </header>
                   <h1>{bot.goal}</h1>
                   <LiveViewPanel botId={bot.id} ownerId={ownerId} />
+                  <ChatBubbles botName={bot.name} lines={talks[bot.id] ?? []} />
                 </>
               ) : (
                 <>
@@ -274,7 +283,15 @@ function Shell({ ownerId, accountLabel, signedIn, loginDisabled, onLogin, onLogo
             {pane === 'Plugins' ? <ConnectorsPane connectors={base.connectors} bots={bots} /> : null}
           </article>
         </div>
-        {pane === 'Main' && bot ? <Composer botName={bot.name} /> : pane === 'Positions' ? null : <div className="composer-gap" />}
+        {bot ? (
+          <Composer
+            key={bot.id}
+            hidden={pane !== 'Main'}
+            botName={bot.name}
+            lines={talks[bot.id] ?? []}
+            onLine={line => appendTalk(bot.id, line)}
+          />
+        ) : pane === 'Positions' ? null : <div className="composer-gap" />}
       </section>
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
       <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ ...base, bots, wallets }} note={walletNote} />

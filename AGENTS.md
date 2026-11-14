@@ -59,6 +59,6 @@ Rules for coding agents working in Maelstrom (`UBC2026`). Read this before editi
 
 ## Claimed work
 
-Check merged PRs and the team Notion board before starting. As of PR #13, these chunks are on `main`: 0A, 0B, 1A, 1B, 1C, 1D, 2A, 2B, 3A, 3B, and the 4B memo hash (attached on the devnet USDC transfer). On the UBC Conf Notion board, unclaimed chunks are 5A, 6B, 6C, 7B, 7C, 8B, and 10B. 7B (payments, wallets, positions panes) is claimed by Sid.
+Check merged PRs and the Notion page "UBC Conference AIgent idea" before starting. As of PR #13, these chunks are on `main`: 0A, 0B, 1A, 1B, 1C, 1D, 2A, 2B, 3A, 3B, and the 4B memo hash (attached on the devnet USDC transfer). That Notion page is ahead of this list. 7B (payments, wallets, positions) is claimed by Sid and stays open: the positions book and the voice stage are on `cursor/maelstrom-web-shell`, not merged. A live payments feed and a live positions read are still open.
 
-The Notion MCP on Sid’s account is a personal course workspace. If that search does not show the Maelstrom board, ask for the board URL instead of guessing a chunk is free.
+If a Notion search does not show "UBC Conference AIgent idea", ask for the board URL instead of guessing a chunk is free.
