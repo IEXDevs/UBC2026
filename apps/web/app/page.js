@@ -22,7 +22,7 @@ import { moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
 import { mergeRoster, removeBotFromRoster, reorderIds } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
-import { withAssignedWallet } from '../lib/wallet-assign.mjs';
+import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { buildBotStats } from '../lib/overview.mjs';
 import { walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
@@ -328,14 +328,17 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
 
   const merged = useMemo(() => mergeRoster(seedBots, signedIn ? roster : { order: [], extra: [] }), [roster, seedBots, signedIn]);
   const styled = useMemo(() => applyLooks(merged.bots, looks), [merged, looks]);
-  const provisioned = Array.isArray(liveWallets) ? liveWallets : null;
-  const listed = remoteWallets.length > 0 ? remoteWallets : null;
+  // Empty arrays must not block later sources (client Privy fallback / Worker list).
+  const walletSource = useMemo(
+    () => pickWalletList(liveWallets, remoteWallets),
+    [liveWallets, remoteWallets],
+  );
   const assigned = useMemo(
-    () => withAssignedWallet(styled, provisioned || listed || []),
-    [styled, provisioned, listed],
+    () => withAssignedWallet(styled, walletSource),
+    [styled, walletSource],
   );
   const bots = signedIn ? assigned.bots : [];
-  const wallets = signedIn ? (assigned.wallets || provisioned || listed || []) : [];
+  const wallets = signedIn ? (assigned.wallets || walletSource) : [];
   const payments = signedIn ? remotePayments : [];
   const positions = [];
   const moneyState = signedIn

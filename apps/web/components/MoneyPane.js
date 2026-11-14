@@ -99,7 +99,12 @@ function Wallets({ state, signedIn, onSignIn, note }) {
       <h2>Wallets</h2>
       {note ? <p className="preview-note">{note}</p> : null}
       {rows.length === 0 ? (
-        <p className="preview-note">No wallets yet. Sign-in provisions the main Privy wallet when secrets are set.</p>
+        <p className="preview-note">
+          No Solana wallets in the shell yet. Confirm root <code>.env.local</code> has
+          {' '}<code>PRIVY_APP_SECRET</code> (and usually <code>PRIVY_AUTHORIZATION_KEY</code>),
+          restart Next, then sign out and back in. Wallets that only exist as Ethereum in the
+          Privy dashboard will not appear here.
+        </p>
       ) : (
         <AnimatedList
           {...listLook()}

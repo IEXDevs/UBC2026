@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withAssignedWallet } from './wallet-assign.mjs';
+import { pickWalletList, withAssignedWallet } from './wallet-assign.mjs';
 
 test('a live main wallet replaces the assignment on every bot', () => {
   const bots = [
@@ -17,4 +17,10 @@ test('a live main wallet replaces the assignment on every bot', () => {
   ]);
   assert.equal(live.wallets.length, 2);
   assert.deepEqual(live.bots.map(bot => bot.walletId), ['w_main_owner', 'w_main_owner']);
+});
+
+test('pickWalletList skips empty arrays so later sources can win', () => {
+  assert.deepEqual(pickWalletList([], null, [{ id: 'w1' }]), [{ id: 'w1' }]);
+  assert.deepEqual(pickWalletList([{ id: 'live' }], [{ id: 'remote' }]), [{ id: 'live' }]);
+  assert.deepEqual(pickWalletList([], []), []);
 });

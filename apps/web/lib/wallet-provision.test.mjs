@@ -43,6 +43,37 @@ test('walletsFromPrivyUser maps createOnLogin Solana embedded addresses', () => 
   assert.equal(wallets[0].ownerId, 'did:privy:user1');
 });
 
+test('walletsFromPrivyUser also keeps connected external Solana wallets', () => {
+  const embedded = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const phantom = 'So11111111111111111111111111111111111111112';
+  const wallets = walletsFromPrivyUser({
+    linkedAccounts: [
+      {
+        type: 'wallet',
+        address: embedded,
+        chainType: 'solana',
+        walletClientType: 'privy',
+      },
+      {
+        type: 'wallet',
+        address: phantom,
+        chainType: 'solana',
+        walletClientType: 'phantom',
+      },
+      {
+        type: 'wallet',
+        address: '0xabc123',
+        chainType: 'ethereum',
+        walletClientType: 'metamask',
+      },
+    ],
+  }, 'did:privy:user1');
+  assert.equal(wallets.length, 2);
+  assert.equal(wallets[0].address, embedded);
+  assert.equal(wallets[1].address, phantom);
+  assert.equal(wallets[1].walletClientType, 'phantom');
+});
+
 test('wallet provision notes stay actionable and secret-free', () => {
   assert.match(
     walletProvisionNote({ error: 'missing_config', missing: ['PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL'] }),
