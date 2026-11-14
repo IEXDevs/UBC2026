@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "exports": "./trust.mjs",
-  "scripts": { "test": "node --test trust.test.mjs" },
+  "scripts": { "test": "node --test trust.test.mjs cache.test.mjs" },
   "engines": { "node": ">=20" }
 }

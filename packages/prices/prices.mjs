@@ -65,3 +65,131 @@ export function createDexScreenerPriceProvider({
     };
   };
 }
+
+const PRICE_LABEL = 'devnet execution, mainnet pricing';
+const FALLBACK_CODES = new Set([
+  'price_not_found',
+  'provider_unavailable',
+  'provider_failed',
+  'provider_rate_limited',
+  'invalid_provider_response',
+]);
+
+/**
+ * Decimal string for a finite USD price. Rejects scientific notation and signs.
+ * Jupiter returns a JSON number; DexScreener already returns a decimal string.
+ */
+export function formatUsdPrice(value) {
+  if (typeof value === 'string') {
+    if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(value)) throw new PriceError('invalid_provider_response');
+    return value;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || Object.is(value, -0)) {
+    throw new PriceError('invalid_provider_response');
+  }
+  const raw = Object.is(value, 0) ? '0' : value.toString();
+  const plain = /e/i.test(raw) ? expandScientific(raw) : raw;
+  if (!plain || !/^(0|[1-9]\d*)(\.\d+)?$/.test(plain)) throw new PriceError('invalid_provider_response');
+  return plain;
+}
+
+function expandScientific(raw) {
+  const match = raw.match(/^(\d+(?:\.\d+)?)e([+-]?\d+)$/i);
+  if (!match) return null;
+  const exp = Number(match[2]);
+  if (!Number.isSafeInteger(exp)) return null;
+  const [whole, frac = ''] = match[1].split('.');
+  const digits = `${whole}${frac}`;
+  const point = whole.length + exp;
+  let text;
+  if (point <= 0) text = `0.${'0'.repeat(-point)}${digits}`;
+  else if (point >= digits.length) text = `${digits}${'0'.repeat(point - digits.length)}`;
+  else text = `${digits.slice(0, point)}.${digits.slice(point)}`;
+  text = text.replace(/^0+(?=\d)/, '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  if (text.startsWith('.')) text = `0${text}`;
+  return text;
+}
+
+function quoteShell(mint, priceUsd, extra) {
+  return {
+    mint,
+    priceUsd,
+    pricingCluster: 'mainnet',
+    executionCluster: 'devnet',
+    label: PRICE_LABEL,
+    pairAddress: null,
+    fetchedAt: new Date().toISOString(),
+    ...extra,
+  };
+}
+
+/**
+ * Jupiter Price API V3. Optional `apiKey` is sent as `x-api-key` (free tier works without it).
+ * Tokens with no reliable price are omitted from the body; that is `price_not_found`.
+ */
+export function createJupiterPriceProvider({
+  fetcher = fetch,
+  apiKey = null,
+  baseUrl = 'https://api.jup.ag/price/v3',
+} = {}) {
+  return async function lookupPrice(mint) {
+    assertMint(mint);
+    const headers = { Accept: 'application/json' };
+    if (apiKey) headers['x-api-key'] = apiKey;
+    let response;
+    try {
+      response = await fetcher(`${baseUrl}?ids=${encodeURIComponent(mint)}`, {
+        headers,
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch {
+      throw new PriceError('provider_unavailable');
+    }
+    if (!response.ok) {
+      throw new PriceError(response.status === 429 ? 'provider_rate_limited' : 'provider_failed', response.status === 429 ? 429 : 502);
+    }
+    let data;
+    try { data = await response.json(); } catch { throw new PriceError('invalid_provider_response'); }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new PriceError('invalid_provider_response');
+    const row = data[mint];
+    if (!row || typeof row !== 'object') throw new PriceError('price_not_found', 404);
+    const priceUsd = formatUsdPrice(row.usdPrice);
+    return quoteShell(mint, priceUsd, {
+      quoteSource: 'jupiter-price-v3',
+      liquidityUsd: typeof row.liquidity === 'number' && Number.isFinite(row.liquidity) ? row.liquidity : null,
+      blockId: Number.isInteger(row.blockId) ? row.blockId : null,
+    });
+  };
+}
+
+/**
+ * DexScreener first. Jupiter Price API V3 is used only after a provider failure
+ * (missing pair, rate limit, or bad upstream). Invalid mints are not retried.
+ */
+export function createMainnetPriceProvider({
+  fetcher = fetch,
+  apiKey = null,
+  dexBaseUrl,
+  jupiterBaseUrl,
+  primary,
+  fallback,
+} = {}) {
+  const dex = primary ?? createDexScreenerPriceProvider({
+    fetcher,
+    ...(dexBaseUrl ? { baseUrl: dexBaseUrl } : {}),
+  });
+  const jupiter = fallback ?? createJupiterPriceProvider({
+    fetcher,
+    apiKey,
+    ...(jupiterBaseUrl ? { baseUrl: jupiterBaseUrl } : {}),
+  });
+  return async function lookupPrice(mint) {
+    try {
+      return await dex(mint);
+    } catch (error) {
+      if (!(error instanceof PriceError) || !FALLBACK_CODES.has(error.code)) throw error;
+      const quote = await jupiter(mint);
+      return { ...quote, fallbackFrom: 'dexscreener' };
+    }
+  };
+}

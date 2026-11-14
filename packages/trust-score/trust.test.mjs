@@ -1,9 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   evaluateTrust,
   createTrustScoreProvider,
   createJupiterTrustProvider,
+  createFileTrustStorage,
   scoreFromJupiterToken,
   normalizeScore,
 } from './trust.mjs';
@@ -118,4 +122,84 @@ test('Jupiter trust provider searches by mint and returns gate decision', async 
   assert.equal(result.score, '700');
   assert.equal(result.source, 'jupiter-tokens-v2');
   assert.equal(result.decision.state, 'allowed');
+  assert.equal(result.cache, undefined);
+});
+
+test('Jupiter trust results stay cached per mint across provider instances', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ubc-trust-'));
+  const file = join(dir, 'tokens.json');
+  const clock = { t: 1_700_000_000_000 };
+  let calls = 0;
+  const token = {
+    id: mint,
+    organicScore: 55,
+    isVerified: true,
+    audit: { mintAuthorityDisabled: true, freezeAuthorityDisabled: true, topHoldersPercentage: 10 },
+  };
+  const fetcher = async () => {
+    calls += 1;
+    return Response.json([token]);
+  };
+  try {
+    const first = createJupiterTrustProvider({
+      apiKey: 'jup-key',
+      cacheStorage: createFileTrustStorage(file),
+      cacheTtlMs: 60_000,
+      now: () => clock.t,
+      fetcher,
+    });
+    const miss = await first(mint);
+    assert.equal(miss.cache, 'miss');
+    assert.equal(miss.score, '550');
+    assert.equal(miss.decision.state, 'allowed');
+    assert.equal(calls, 1);
+
+    const reloaded = createJupiterTrustProvider({
+      apiKey: 'other-key',
+      cacheStorage: createFileTrustStorage(file),
+      cacheTtlMs: 60_000,
+      now: () => clock.t,
+      threshold: '600',
+      fetcher: async () => { calls += 1; throw new Error('should not fetch'); },
+    });
+    const hit = await reloaded(mint);
+    assert.equal(calls, 1);
+    assert.equal(hit.cache, 'hit');
+    assert.equal(hit.score, '550');
+    assert.equal(hit.fetchedAt, miss.fetchedAt);
+    assert.equal(hit.decision.state, 'confirmation-required');
+    assert.equal(hit.decision.threshold, '600');
+
+    const body = await readFile(file, 'utf8');
+    assert.equal(body.includes('jup-key'), false);
+    assert.equal(body.includes('other-key'), false);
+
+    clock.t += 60_000;
+    const refreshed = createJupiterTrustProvider({
+      cacheStorage: createFileTrustStorage(file),
+      cacheTtlMs: 60_000,
+      now: () => clock.t,
+      fetcher,
+    });
+    const again = await refreshed(mint);
+    assert.equal(again.cache, 'miss');
+    assert.equal(calls, 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('trust cache failures do not leak storage details', async () => {
+  const lookup = createJupiterTrustProvider({
+    cacheStorage: {
+      async get() { throw new Error('/secret/trust-cache.json'); },
+      async put() {},
+    },
+    fetcher: async () => { throw new Error('unused'); },
+  });
+  await assert.rejects(lookup(mint), (error) => error.code === 'cache_unavailable' && !String(error.message).includes('secret'));
+  assert.throws(
+    () => createJupiterTrustProvider({ cacheStorage: {} }),
+    (error) => error.code === 'cache_unavailable',
+  );
 });

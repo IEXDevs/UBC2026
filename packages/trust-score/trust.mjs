@@ -1,9 +1,8 @@
-export class TrustError extends Error {}
-const fail = message => { throw new TrustError(message); };
+import { createDurableTokenCache } from './cache.mjs';
+export { TrustError, ProviderError } from './errors.mjs';
+import { TrustError, ProviderError } from './errors.mjs';
 
-export class ProviderError extends Error {
-  constructor(code, status = 502) { super(code); this.code = code; this.status = status; }
-}
+const fail = message => { throw new TrustError(message); };
 
 const mintPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const required = value => typeof value === 'string' && value.length > 0 && value.length <= 256;
@@ -100,8 +99,28 @@ export function createJupiterTrustProvider({
   threshold = '400',
   apiKey = null,
   baseUrl = 'https://api.jup.ag/tokens/v2',
+  cache = null,
+  cacheStorage = null,
+  cacheTtlMs,
+  now,
 } = {}) {
-  return async function lookupTrust(mint) {
+  let tokenCache = cache;
+  if (!tokenCache && cacheStorage) {
+    try {
+      tokenCache = createDurableTokenCache({
+        storage: cacheStorage,
+        ...(cacheTtlMs != null ? { ttlMs: cacheTtlMs } : {}),
+        ...(now ? { now } : {}),
+      });
+    } catch {
+      throw new ProviderError('cache_unavailable');
+    }
+  }
+  if (tokenCache && (typeof tokenCache.get !== 'function' || typeof tokenCache.set !== 'function')) {
+    throw new ProviderError('cache_unavailable');
+  }
+
+  async function lookupTrust(mint) {
     if (!required(mint) || !mintPattern.test(mint)) throw new ProviderError('invalid_mint', 400);
     const url = `${baseUrl}/search?query=${encodeURIComponent(mint)}`;
     const headers = { Accept: 'application/json' };
@@ -132,5 +151,51 @@ export function createJupiterTrustProvider({
       fetchedAt: new Date().toISOString(),
       decision,
     };
+  }
+
+  if (!tokenCache) return lookupTrust;
+
+  return async function lookupTrustCached(mint) {
+    if (!required(mint) || !mintPattern.test(mint)) throw new ProviderError('invalid_mint', 400);
+    let hit = null;
+    try {
+      hit = await tokenCache.get(mint);
+    } catch (error) {
+      if (error instanceof ProviderError) throw error;
+      throw new ProviderError('cache_unavailable');
+    }
+    if (hit && hit.mint === mint && hit.source === 'jupiter-tokens-v2') {
+      try {
+        const score = normalizeScore(hit.score);
+        return {
+          mint,
+          score,
+          source: hit.source,
+          isVerified: hit.isVerified === true,
+          organicScore: typeof hit.organicScore === 'number' ? hit.organicScore : null,
+          fetchedAt: typeof hit.fetchedAt === 'string' ? hit.fetchedAt : new Date().toISOString(),
+          decision: evaluateTrust({ score, threshold, confirmed: false }),
+          cache: 'hit',
+        };
+      } catch {
+        hit = null;
+      }
+    }
+    const fresh = await lookupTrust(mint);
+    try {
+      await tokenCache.set(mint, fresh);
+    } catch (error) {
+      if (error instanceof ProviderError) throw error;
+      throw new ProviderError('cache_unavailable');
+    }
+    return { ...fresh, cache: 'miss' };
   };
 }
+
+export {
+  DEFAULT_TRUST_CACHE_TTL_MS,
+  adaptCloudflareKv,
+  createDurableTokenCache,
+  createFileTrustStorage,
+  createMemoryTrustStorage,
+} from './cache.mjs';
