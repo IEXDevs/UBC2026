@@ -126,6 +126,20 @@ function safePrivyPath(url) {
   }
 }
 
+/** Browser Origin for auth.privy.io /users/me (required; 403 must_specify_origin without it). */
+export function sanitizeOrigin(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 256 || /[\r\n]/.test(trimmed)) return '';
+  try {
+    const url = new URL(trimmed);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
 function decodeBase64(value, label) {
   if (typeof value !== 'string' || value.length < 4 || value.length > 4096 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
     fail(`${label} must be base64`, 'invalid_transaction');
@@ -457,14 +471,21 @@ export function createPrivyWalletClient({
   }
 
   return {
-    async acceptLogin({ accessToken, ownerId } = {}) {
+    async acceptLogin({ accessToken, ownerId, origin } = {}) {
       const token = assertHeaderSafe(accessToken, 'Privy access token');
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'privy-app-id': id,
+      };
+      const safeOrigin = sanitizeOrigin(origin);
+      if (!safeOrigin) {
+        fail('Privy users/me requires Origin (e.g. http://localhost:3000)', 'missing_origin');
+      }
+      headers.Origin = safeOrigin;
+      headers.Referer = `${safeOrigin}/`;
       const user = await fetchJson(`${privyAuth}/api/v1/users/me`, {
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'privy-app-id': id,
-        },
+        headers,
       }, 'privy_failed');
       return syncWallets(user, ownerId ?? user?.id);
     },

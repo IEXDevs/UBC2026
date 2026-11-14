@@ -1,8 +1,18 @@
 export const runtime = 'nodejs';
 
-import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
+import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { missingWalletSecrets, resolvePrivyAppId } from '../../../lib/wallet-provision.mjs';
+
+function requestOrigin(request) {
+  const fromOrigin = sanitizeOrigin(request.headers.get('origin'));
+  if (fromOrigin) return fromOrigin;
+  const referer = request.headers.get('referer');
+  if (typeof referer === 'string' && referer.trim()) {
+    try { return sanitizeOrigin(new URL(referer.trim()).origin); } catch { /* ignore */ }
+  }
+  return 'http://localhost:3000';
+}
 
 function publicWallet(wallet) {
   return {
@@ -73,7 +83,10 @@ export async function POST(request) {
       rpcUrl: env.QUICKNODE_DEVNET_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
     });
-    const result = await client.acceptLogin({ accessToken });
+    const result = await client.acceptLogin({
+      accessToken,
+      origin: requestOrigin(request),
+    });
     return Response.json({
       created: result.created === true,
       wallets: [result.main, ...result.additional].filter(Boolean).map(publicWallet),
@@ -81,7 +94,7 @@ export async function POST(request) {
   } catch (error) {
     const fields = walletErrorFields(error);
     const code = fields?.code || 'wallet_failed';
-    const status = code === 'missing_config' || code === 'invalid_rpc' ? 503 : 502;
+    const status = code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin' ? 503 : 502;
     const detail = fields?.detail
       || (typeof error?.message === 'string' ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180) : undefined);
     const payload = detail ? { error: code, detail } : { error: code };

@@ -81,6 +81,9 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
   if (code === 'invalid_rpc') {
     return 'QUICKNODE_DEVNET_RPC_URL must be an https QuickNode Solana devnet RPC URL.';
   }
+  if (code === 'missing_origin' || (/must_specify_origin/i.test(typeof body.detail === 'string' ? body.detail : ''))) {
+    return 'Privy users/me needs Origin. Use the app from http://localhost:3000 and allowlist that origin in the Privy dashboard.';
+  }
   if (code === 'privy_failed') {
     const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
     if (/403/i.test(detail) && /insufficient_app_secret_permissions/i.test(detail)) {
@@ -88,6 +91,9 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
     }
     if (/403/i.test(detail) && /PRIVY_AUTHORIZATION_KEY|authorization/i.test(detail)) {
       return 'Privy returned 403 without an authorization signature. Add PRIVY_AUTHORIZATION_KEY (wallet-auth private key from Privy → Authorization keys) to root .env.local, restart Next, and sign in again.';
+    }
+    if (/must_specify_origin|invalid_origin/i.test(detail)) {
+      return 'Privy rejected the Origin. Allowlist http://localhost:3000 under Privy → Domains, then restart and sign in again.';
     }
     if (/403/i.test(detail)) {
       return 'Privy returned 403. If the app secret is full-access, set PRIVY_AUTHORIZATION_KEY from Privy → Authorization keys (or turn off required authorization signatures).';
