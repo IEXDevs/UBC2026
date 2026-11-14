@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runDecisionGate } from './loop.mjs';
+import { approvalRequirement, runDecisionGate } from './loop.mjs';
 import { memoFromDecision } from '@ubc2026/verify-consensus';
 
 function assertDecisionMemo(result) {
@@ -120,6 +120,21 @@ test('verify mismatch does not attach a memo', async () => {
   });
   assert.equal(result.state, 'verify-mismatch');
   assert.equal(result.memo, undefined);
+});
+
+test('approval requirement follows the bot mode and still holds over-budget', () => {
+  assert.equal(approvalRequirement(
+    { approvalMode: 'capped-automatic', autoApproveCap: '5000' },
+    { state: 'approval-needed', debit: '1000' },
+  ), false);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'fully-automatic' },
+    { state: 'over-budget', debit: '1000' },
+  ), true);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'ask' },
+    { state: 'approval-needed', debit: '1000' },
+  ), true);
 });
 
 test('frozen wallet blocks the loop', async () => {

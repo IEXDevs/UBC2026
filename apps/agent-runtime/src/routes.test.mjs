@@ -51,6 +51,17 @@ test('owner browser routes are forwarded with the bot id kept on the object path
   assert.equal(opened.forwarded, '/id/bot_1/browser/sessions');
 });
 
+test('the loop route reaches the Durable Object', async () => {
+  const env = fakeEnv();
+  const loop = await worker.fetch(new Request('https://runtime/bots/bot_1/loop', {
+    method: 'POST',
+    headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+    body: '{}',
+  }), env);
+  const body = await loop.json();
+  assert.equal(body.forwarded, '/loop');
+});
+
 test('bot routes still reach the Durable Object', async () => {
   const env = fakeEnv();
   const wake = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {

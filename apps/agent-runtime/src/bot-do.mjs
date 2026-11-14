@@ -1,6 +1,11 @@
+import { createSearch } from '@ubc2026/browser-search';
+import { createBrowserSessionService, createDefaultBrowserSessionService, ProviderError, SessionError } from '@ubc2026/browser-session';
+import { SECRET_NAMES } from '@ubc2026/contracts';
+import { TransferError } from '@ubc2026/transfers';
 import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mjs';
 import { decideFromCheckpoint } from './decide.mjs';
-import { createBrowserSessionService, createDefaultBrowserSessionService, ProviderError, SessionError } from '@ubc2026/browser-session';
+import { LoopEngineError, runBotLoop } from './loop-engine.mjs';
+import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
 
@@ -170,6 +175,52 @@ export class BotStateMachine {
       }
       await this.put('run', run);
       return Response.json({ ok: true, run });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/loop') {
+      const ownerId = ownerFrom(request);
+      if (!ownerId) return Response.json({ error: 'owner_required' }, { status: 401 });
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return Response.json({ error: 'invalid_json' }, { status: 400 });
+      }
+      const run = await this.get('run');
+      if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
+      const now = Number.isSafeInteger(body.now) ? body.now : Date.now();
+      const models = env.openRouter ?? createOpenRouterFromEnv(env, env.fetch ?? fetch);
+      const deps = {
+        search: env.search ?? (env.FIRECRAWL_API_KEY
+          ? createSearch({ apiKey: env.FIRECRAWL_API_KEY, fetcher: env.fetch ?? fetch })
+          : null),
+        transferClient: env.transferClient ?? null,
+        execute: env.execute ?? null,
+        verifyFn: env.verifyFn,
+        lookupPrice: env.lookupPrice,
+        trustLookup: env.trustLookup,
+        recentBlockhash: env.recentBlockhash,
+        secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
+      };
+      try {
+        const result = await runBotLoop({
+          run,
+          bot: body.bot,
+          wallet: body.wallet,
+          ledger: body.ledger,
+          ownerId,
+          input: body,
+          models,
+          deps,
+          now,
+          persist: async next => { await this.put('run', next); },
+        });
+        return Response.json({ ok: true, ...result });
+      } catch (error) {
+        const saved = await this.get('run');
+        if (error instanceof OpenRouterError) return Response.json({ error: error.code, run: saved }, { status: error.status });
+        if (error instanceof TransferError) return Response.json({ error: error.code, run: saved }, { status: 409 });
+        if (error instanceof LoopEngineError) return Response.json({ error: error.code, run: saved }, { status: error.status });
+        return Response.json({ error: 'loop_failed', run: saved }, { status: 500 });
+      }
     }
 
     if (request.method === 'POST' && url.pathname === '/decide') {

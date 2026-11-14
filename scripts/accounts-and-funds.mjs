@@ -107,6 +107,7 @@ export const ACCOUNT_VENDORS = Object.freeze([
     names: SECRET_GROUPS.openrouter,
     steps: Object.freeze([
       'Create an API key and store it as OPENROUTER_API_KEY.',
+      'The bot loop sends that key only as an Authorization header. Tests inject fetch and do not call OpenRouter.',
     ]),
   },
   {

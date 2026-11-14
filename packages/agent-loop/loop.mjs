@@ -24,6 +24,15 @@ function needsHumanApproval(bot, policyDecision) {
   fail('Unknown approval mode');
 }
 
+/** Whether this policy result still needs a person. Over-budget always does. */
+export function approvalRequirement(bot, policyDecision) {
+  if (!policyDecision || typeof policyDecision.state !== 'string') fail('Policy decision is required');
+  return needsHumanApproval(
+    { approvalMode: bot?.approvalMode ?? 'ask', autoApproveCap: bot?.autoApproveCap },
+    policyDecision,
+  );
+}
+
 /**
  * @param {object} args
  * @param {object} args.bot - bot-policy bot shape plus approvalMode / autoApproveCap / frozen
@@ -81,10 +90,7 @@ export async function runDecisionGate({
     return { state: 'blocked', reason: policy.reason, policy, trust, consensus };
   }
 
-  const approvalNeeded = needsHumanApproval(
-    { approvalMode: bot.approvalMode ?? 'ask', autoApproveCap: bot.autoApproveCap },
-    policy,
-  );
+  const approvalNeeded = approvalRequirement(bot, policy);
 
   const memo = memoFromDecision(consensus.decisionRecord);
   return {
