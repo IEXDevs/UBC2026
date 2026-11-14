@@ -1,9 +1,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
+import { applyRootPublicEnv } from './lib/root-env.mjs';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const fromApp = (name) => path.join(appDir, 'node_modules', name);
+
+// Root `.env.local` holds NEXT_PUBLIC_* for the monorepo; Next would otherwise
+// only read apps/web/.env*. Apply before the config object is used.
+applyRootPublicEnv();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

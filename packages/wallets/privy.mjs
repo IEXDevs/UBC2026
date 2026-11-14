@@ -120,19 +120,38 @@ function decodeBase64(value, label) {
   return bytes;
 }
 
+function accountField(account, snake, camel) {
+  if (!account || typeof account !== 'object') return undefined;
+  if (account[snake] !== undefined) return account[snake];
+  return account[camel];
+}
+
+/**
+ * Privy createOnLogin often links a Solana embedded wallet with `id: null`
+ * until it is on the server wallet stack / delegated. Only wallets with a
+ * real server wallet id can be used for acceptLogin provisioning.
+ */
 function solanaEmbedded(user) {
-  const accounts = Array.isArray(user?.linked_accounts) ? user.linked_accounts : [];
+  const accounts = Array.isArray(user?.linked_accounts)
+    ? user.linked_accounts
+    : (Array.isArray(user?.linkedAccounts) ? user.linkedAccounts : []);
   return accounts
-    .filter(account => account
-      && account.type === 'wallet'
-      && account.chain_type === 'solana'
-      && account.wallet_client_type === 'privy'
-      && account.connector_type === 'embedded')
-    .map(account => ({
-      id: account.id,
-      address: account.address,
-      walletIndex: Number.isInteger(account.wallet_index) ? account.wallet_index : 0,
-    }))
+    .filter(account => {
+      if (!account || account.type !== 'wallet') return false;
+      const chain = accountField(account, 'chain_type', 'chainType');
+      const client = accountField(account, 'wallet_client_type', 'walletClientType');
+      const connector = accountField(account, 'connector_type', 'connectorType');
+      return chain === 'solana' && client === 'privy' && connector === 'embedded';
+    })
+    .map(account => {
+      const index = accountField(account, 'wallet_index', 'walletIndex');
+      return {
+        id: account.id,
+        address: account.address,
+        walletIndex: Number.isInteger(index) ? index : 0,
+      };
+    })
+    .filter(account => privyWalletIdPattern.test(account.id) && typeof account.address === 'string' && base58.test(account.address))
     .sort((a, b) => a.walletIndex - b.walletIndex);
 }
 
@@ -185,7 +204,8 @@ export function createPrivyWalletClient({
 } = {}) {
   const id = assertHeaderSafe(appId, 'Privy app id');
   const secret = assertHeaderSafe(appSecret, 'Privy app secret');
-  const quicknode = assertHttps(rpcUrl, 'QuickNode devnet RPC');
+  // RPC is required for broadcast/signing; acceptLogin / wallet create can omit it.
+  const quicknode = rpcUrl == null || rpcUrl === '' ? null : assertHttps(rpcUrl, 'QuickNode devnet RPC');
   const privyApi = assertHttps(apiBase, 'Privy API');
   const privyAuth = assertHttps(authBase, 'Privy auth API');
   const authKey = authorizationKey == null || authorizationKey === '' ? null : authorizationKey;
@@ -264,26 +284,65 @@ export function createPrivyWalletClient({
     return { ...built, privyWalletId: walletId, privyUserId };
   }
 
+  async function listSolanaWallets(privyUserId) {
+    const query = new URLSearchParams({
+      user_id: privyUserId,
+      chain_type: 'solana',
+      limit: '50',
+    });
+    const payload = await privy('GET', `/v1/wallets?${query}`);
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    return rows
+      .filter(wallet => wallet
+        && wallet.chain_type === 'solana'
+        && typeof wallet.address === 'string'
+        && base58.test(wallet.address)
+        && privyWalletIdPattern.test(wallet.id))
+      .map(wallet => ({
+        id: wallet.id,
+        address: wallet.address,
+        walletIndex: 0,
+      }));
+  }
+
+  function recordsFromServerWallets(wallets, ownerId, privyUserId) {
+    if (!Array.isArray(wallets) || wallets.length < 1) return null;
+    return recordsFromEmbedded(wallets, ownerId, privyUserId);
+  }
+
   async function syncWallets(user, ownerId) {
     const privyUserId = assertOwnerId(user?.id);
     const owner = assertOwnerId(ownerId);
     const embedded = solanaEmbedded(user);
     const existing = recordsFromEmbedded(embedded, owner, privyUserId);
     if (existing) return { privyUserId, ...existing, created: false };
-    const created = await privy('POST', '/v1/wallets', {
-      chain_type: 'solana',
-      owner: { user_id: privyUserId },
-      display_name: 'Main',
-    }, idempotencyKey('main-solana', privyUserId));
-    return {
-      privyUserId,
-      main: createdRecord(created, owner, privyUserId, 'main'),
-      additional: [],
-      created: true,
-    };
+
+    // createOnLogin may have linked a wallet with id:null — recover via Wallet API.
+    const listed = await listSolanaWallets(privyUserId);
+    const fromList = recordsFromServerWallets(listed, owner, privyUserId);
+    if (fromList) return { privyUserId, ...fromList, created: false };
+
+    try {
+      const created = await privy('POST', '/v1/wallets', {
+        chain_type: 'solana',
+        owner: { user_id: privyUserId },
+        display_name: 'Main',
+      }, idempotencyKey('main-solana', privyUserId));
+      return {
+        privyUserId,
+        main: createdRecord(created, owner, privyUserId, 'main'),
+        additional: [],
+        created: true,
+      };
+    } catch (error) {
+      const retry = recordsFromServerWallets(await listSolanaWallets(privyUserId), owner, privyUserId);
+      if (retry) return { privyUserId, ...retry, created: false };
+      throw error;
+    }
   }
 
   async function rpc(method, params) {
+    if (!quicknode) fail('QuickNode devnet RPC is required', 'missing_config');
     return fetchJson(quicknode, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -293,6 +352,7 @@ export function createPrivyWalletClient({
 
   /** Genesis gate shared by signing, owner sweeps, deposits, and devnet reads. */
   async function assertDevnet() {
+    if (!quicknode) fail('QuickNode devnet RPC is required', 'missing_config');
     const genesis = await rpc('getGenesisHash');
     if (genesis.result !== DEVNET_GENESIS_HASH) {
       fail('Refusing to broadcast outside Solana devnet', 'wrong_cluster');
