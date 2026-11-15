@@ -1,6 +1,7 @@
 /**
  * Profile statistics. Voice time is measured on this device.
- * Spend counts come from the same owner rollup as the runtime metrics route.
+ * Token totals use the provider usage when a line has it, and estimate the rest.
+ * Spend counts come from the owner payment and transfer rows.
  */
 import { estimateTokens, formatTokens } from './context-usage.mjs';
 import { formatBaseUnits } from './money-views.mjs';
@@ -19,6 +20,12 @@ function usdcFlow(row) {
   return null;
 }
 
+function lineTokens(line) {
+  const reported = Number(line?.tokens);
+  if (Number.isSafeInteger(reported) && reported > 0) return reported;
+  return estimateTokens(line?.text);
+}
+
 function usdcLabel(amount, signed = false) {
   const negative = amount < 0n;
   const body = formatBaseUnits((negative ? -amount : amount).toString());
@@ -32,7 +39,7 @@ export function profileStats({ voiceMs = 0, talks = {}, payments = [], transfers
   ));
   const seconds = Math.floor(Math.max(0, Number(voiceMs) || 0) / 1000);
   const messages = lines.filter(line => line?.role === 'user').length;
-  const tokens = lines.reduce((sum, line) => sum + estimateTokens(line?.text), 0);
+  const tokens = lines.reduce((sum, line) => sum + lineTokens(line), 0);
   let inflow = 0n;
   let outflow = 0n;
   for (const row of [...(Array.isArray(payments) ? payments : []), ...(Array.isArray(transfers) ? transfers : [])]) {

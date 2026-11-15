@@ -26,6 +26,7 @@ import {
   LANGUAGES,
   VOICES,
   parseVoiceSettings,
+  voiceOverrides,
 } from '../lib/voice-settings.mjs';
 import { SPEND_PERMISSION_KEY, parsePermission } from '../lib/spend-permission.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
@@ -83,6 +84,7 @@ export default function Composer({
   const [place, setPlace] = useState({ x: 24, y: 24 });
   const dockRef = useRef(null);
   const settingsRef = useRef(settings);
+  const permissionRef = useRef(permission);
   const botIdRef = useRef(botId);
   const callBotRef = useRef(null);
   const presenceRef = useRef('off');
@@ -101,6 +103,7 @@ export default function Composer({
   const onVoiceSpanRef = useRef(onVoiceSpan);
   onVoiceSpanRef.current = onVoiceSpan;
   settingsRef.current = settings;
+  permissionRef.current = permission;
   botIdRef.current = botId;
   placeRef.current = place;
 
@@ -317,7 +320,7 @@ export default function Composer({
         permission,
       });
       if (result.ok) {
-        pushLine('agent', result.reply);
+        pushLine('agent', result.reply, botId, result.tokens);
       } else {
         pushLine('agent', chatFailureNote(result.error));
       }
@@ -354,7 +357,7 @@ export default function Composer({
         type: botType,
         permission,
       });
-      pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error));
+      pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error), botId, result.ok ? result.tokens : 0);
     } catch {
       pushLine('agent', chatFailureNote('network'));
     } finally {
@@ -364,10 +367,12 @@ export default function Composer({
     }
   }
 
-  function pushLine(role, text, targetId = botIdRef.current) {
+  function pushLine(role, text, targetId = botIdRef.current, tokens = 0) {
     const spoken = typeof text === 'string' ? text.trim() : '';
     if (!spoken) return;
-    onLine?.({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken }, targetId);
+    const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
+    if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
+    onLine?.(line, targetId);
   }
 
   function sealMic(live = sessionRef.current) {
@@ -450,7 +455,8 @@ export default function Composer({
       const { Conversation } = await import('@elevenlabs/client');
       const live = await Conversation.startSession({
         conversationToken: payload.token,
-        overrides: { tts: { voiceId: payload.voiceId, speed: payload.speed } },
+        overrides: payload.overrides ?? voiceOverrides(payload),
+        customLlmExtraBody: { ownerPermission: permissionRef.current },
         onMessage: ({ message, role }) => {
           if (sessionRef.current !== live) return;
           pushLine(role === 'user' ? 'user' : 'agent', message, callBotRef.current);

@@ -6,10 +6,18 @@ import {
   OPENROUTER_CHAT_COMPLETIONS,
   VOICE_TOOLS,
   handleVoiceRequest,
+  ownerPermissionNote,
   provisionVoiceAgent,
 } from './voice.mjs';
 import { eventsUrl } from '../../web/lib/bot-experience.mjs';
 import { browserSessionUrl } from '../../web/lib/live-view.mjs';
+
+test('voice permission note follows the owner chip and ignores unknown modes', () => {
+  assert.match(ownerPermissionNote('ask'), /ask every time/);
+  assert.match(ownerPermissionNote('review'), /review by AI/);
+  assert.match(ownerPermissionNote('full'), /full permission/);
+  assert.equal(ownerPermissionNote('sometimes'), '');
+});
 
 const SECRET = 'test-elevenlabs-webhook-secret';
 const OPENROUTER = 'test-openrouter-key-value';
@@ -238,7 +246,10 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   const stream = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
-    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+    body: JSON.stringify({
+      ownerPermission: 'ask',
+      messages: [{ role: 'user', content: 'hi' }],
+    }),
   }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here', OPENROUTER_MODEL_VOICE: 'muse-spark-1.3' }), {
     fetcher: async (url, init) => {
       calls.push({ url, body: JSON.parse(init.body) });
@@ -249,6 +260,8 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   });
   assert.equal(await stream.text(), 'data: {"ok":true}\n\ndata: [DONE]\n\n');
   assert.equal(calls[0].url, 'https://api.meta.ai/v1/chat/completions');
+  assert.equal(calls[0].body.messages[0].role, 'developer');
+  assert.match(calls[0].body.messages[0].content, /ask every time/);
   assert.equal(calls[0].body.model, 'muse-spark-1.3');
 
   const blocked = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {

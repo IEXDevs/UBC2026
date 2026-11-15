@@ -24,6 +24,10 @@ test('profile stats count talk seconds, messages, tokens, spend, and net flow', 
   assert.equal(rows.find(row => row.key === 'voice').value, '12s');
   assert.equal(rows.find(row => row.key === 'messages').value, '1');
   assert.equal(rows.find(row => row.key === 'tokens').value, '4');
+  const reported = profileStats({
+    talks: { bot_meteora: [{ role: 'agent', text: 'hi', tokens: 128 }] },
+  });
+  assert.equal(reported.find(row => row.key === 'tokens').value, '128');
   assert.equal(rows.find(row => row.key === 'spent').value, '10.01 USDC');
   assert.equal(rows.find(row => row.key === 'pnl').value, '−7.76 USDC');
 });

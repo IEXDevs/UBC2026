@@ -18,6 +18,19 @@ const SECRET_PLACEHOLDER = '{{ELEVENLABS_WEBHOOK_SECRET}}';
 const ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const MODEL_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
+export function ownerPermissionNote(value) {
+  if (value === 'full') {
+    return 'The owner set full permission. Research and prepare without asking. A transaction is never sent until the owner confirms the net changes.';
+  }
+  if (value === 'review') {
+    return 'The owner set review by AI. State what would change and wait before a trade or state change. A transaction is never sent until the owner confirms the net changes.';
+  }
+  if (value === 'ask') {
+    return 'The owner set ask every time. Ask before a trade, a spend, or a state change. A transaction is never sent until the owner confirms the net changes.';
+  }
+  return '';
+}
+
 export const VOICE_SYSTEM_PROMPT = [
   'You are the voice remote for this user\'s Maelstrom Solana agent dashboard.',
   'Prefer short confirmations.',
@@ -508,7 +521,14 @@ async function handleCustomLlm(request, env, fetcher) {
   if (!messages || tools === null) return json({ error: 'invalid_body' }, 400);
   const adapted = resolved.provider === 'meta'
     ? messages.map(item => (item?.role === 'system' ? { ...item, role: 'developer' } : item))
-    : messages;
+    : messages.slice();
+  const permissionNote = ownerPermissionNote(incoming.ownerPermission);
+  if (permissionNote) {
+    adapted.unshift({
+      role: resolved.provider === 'meta' ? 'developer' : 'system',
+      content: permissionNote,
+    });
+  }
   const payload = {
     model: grokVoiceModel(env),
     messages: adapted,

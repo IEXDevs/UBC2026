@@ -154,44 +154,44 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false }) {
   }
 
   const ready = Boolean(ownerId) && Boolean(sessionUrl);
-
   const driving = control === 'owner';
+  const framed = Boolean(frame?.embed && frame.src);
 
   return (
     <div className={`live-view${fill ? ' is-fill' : ''}`}>
-      {frame?.src ? null : (
-        <div className="live-row">
-          {busy ? <LatticeLoader label="Browser" /> : <p className="live-status">{status}</p>}
-          <div className="live-actions">
-            <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
-              Open browser session
-            </button>
-            <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('release')}>
-              Release session
-            </button>
-          </div>
-        </div>
-      )}
-      {error ? <p className="preview-note" role="alert">{error}</p> : null}
-      {frame?.embed && frame.src ? (
-        <div className="live-stage">
+      <div className="live-stage">
+        {framed ? (
           <iframe
             className="live-frame"
             title="Browser live view"
             src={frame.src}
             referrerPolicy={frame.referrerPolicy}
           />
-        </div>
-      ) : null}
+        ) : frame?.src ? null : (
+          <div className="live-row">
+            {busy ? <LatticeLoader label="Browser" /> : <p className="live-status">{status}</p>}
+            <div className="live-actions">
+              <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
+                Open browser session
+              </button>
+              <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('release')}>
+                Release session
+              </button>
+            </div>
+          </div>
+        )}
+        {error ? <p className="preview-note" role="alert">{error}</p> : null}
+      </div>
       {frame?.src ? (
         <div className="live-dock">
+          <span className="live-control-note">{driving ? 'You can interact' : 'Agent has control'}</span>
           <button
             className="cta"
             type="button"
             disabled={!ready || busy}
             onClick={() => run(driving ? 'agent' : 'owner')}
           >
-            {driving ? 'Resume' : 'Take control'}
+            {driving ? 'Return control' : 'Take control'}
           </button>
           <button className="ghost" type="button" disabled={!ready || busy} onClick={() => run('release')}>
             Release

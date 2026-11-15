@@ -75,5 +75,20 @@ export function parseVoiceSettings(raw) {
 export function voiceSession(settings) {
   const parsed = parseVoiceSettings(settings);
   const voice = VOICES.find(item => item.id === parsed.voiceId);
-  return { voiceId: parsed.voiceId, voiceName: voice.name, speed: parsed.speed };
+  return {
+    voiceId: parsed.voiceId,
+    voiceName: voice.name,
+    speed: parsed.speed,
+    language: parsed.language === 'auto' ? null : parsed.language,
+  };
+}
+
+/** ElevenLabs conversation overrides. Auto-detect omits language so the agent detects it. */
+export function voiceOverrides(settings) {
+  const session = voiceSession(settings);
+  const overrides = {
+    tts: { voiceId: session.voiceId, speed: session.speed },
+  };
+  if (session.language) overrides.agent = { language: session.language };
+  return overrides;
 }

@@ -282,7 +282,9 @@ export async function sendBotChat({
     if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
     const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
     if (!reply) return { ok: false, error: 'empty_reply' };
-    return { ok: true, reply, model: body.model || null };
+    const reported = Number(body.usage?.total);
+    const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
+    return { ok: true, reply, model: body.model || null, tokens };
   } catch {
     return { ok: false, error: 'network' };
   }
