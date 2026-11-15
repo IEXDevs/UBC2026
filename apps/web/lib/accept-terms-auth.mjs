@@ -1,42 +1,41 @@
 /**
- * Privy's AffirmativeConsent Accept calls getAccessToken(), which can wipe
- * localStorage and still POST accept_terms with no Authorization header.
+ * Privy stores two JWTs:
+ * - `privy:pat` is the user session (`privy_access_token`) that
+ *   auth.privy.io expects on `POST /api/v1/users/me/accept_terms`.
+ * - `privy:token` is the customer access token for our own API. Sending it
+ *   as the Accept bearer is rejected as a missing session.
  *
- * We:
- * - keep Maelstrom backups of access + refresh tokens (in memory + storage)
- * - allow Privy to clear/rotate session keys so OAuth can finish signing in
- * - keep only Maelstrom backups across localStorage.clear() (not privy:* keys)
- * - harvest tokens from auth.privy.io JSON responses into the backup cache
- * - inject a bearer on accept_terms when the header is missing
- * - restore privy:* keys from backups on boot / when accept_terms needs them
- * - expose postAcceptTerms() for a first-party Accept UI
+ * `getAccessToken()` also deletes `privy:pat` when the refresh token is
+ * missing, then posts accept_terms with no Authorization. ofetch captures
+ * `globalThis.fetch` at import, so a late fetch wrapper never sees that
+ * call. We keep the session JWT (and refresh token) in Maelstrom backups
+ * and POST accept_terms with `Authorization: Bearer <privy:pat>`.
  *
- * Do NOT block removeItem on privy session keys. That left "You're good to go"
- * stuck with authenticated=false because OAuth could not rotate tokens.
+ * Do NOT block removeItem on privy session keys. That left OAuth stuck on
+ * "You're good to go" with authenticated=false because login could not
+ * rotate tokens. Snapshot into backups, allow the delete, and rehydrate
+ * only when Accept needs a bearer.
  */
 
 export const ACCEPT_TERMS_PATH = '/api/v1/users/me/accept_terms';
+export const SESSIONS_PATH = '/api/v1/sessions';
 export const ACCEPT_TERMS_URL = `https://auth.privy.io${ACCEPT_TERMS_PATH}`;
+export const SESSIONS_URL = `https://auth.privy.io${SESSIONS_PATH}`;
 export const PRIVY_AUTH_ORIGIN = 'https://auth.privy.io';
 export const MAELSTROM_TOKEN_KEY = 'maelstrom:privy-at';
 export const MAELSTROM_REFRESH_KEY = 'maelstrom:privy-rt';
 export const PRIVY_LOGOUT_FLAG = '__maelstromAllowPrivyLogout';
+export const PRIVY_ACCESS_TOKEN_KEY = 'privy:pat';
+export const PRIVY_REFRESH_TOKEN_KEY = 'privy:refresh_token';
+export const PRIVY_CA_ID_KEY = 'privy:caid';
+/** Matches @privy-io/react-auth 3.51's `privy-client` header. */
+export const PRIVY_CLIENT_HEADER = 'react-auth:3.51.4';
 
-/** Exact keys Privy writes today, plus app-scoped variants like privy:<appId>:pat. */
-export const PRIVY_TOKEN_KEY_RE = /^privy(?::[\w-]+)?:(pat|token)$/;
-export const PRIVY_REFRESH_KEY_RE = /^privy(?::[\w-]+)?:refresh_token$/;
+/** Session key only. `privy:token` is the customer access token, not the session. */
+export const PRIVY_ACCESS_TOKEN_KEY_RE = /^privy(?::[\w-]+)?:pat$/;
+export const PRIVY_REFRESH_TOKEN_KEY_RE = /^privy(?::[\w-]+)?:refresh_token$/;
 
-// Prefer privy:token (Privy SDK) over legacy privy:pat so a stale pat backup
-// cannot shadow a freshly written OAuth token.
-export const PRIVY_TOKEN_KEYS = Object.freeze(['privy:token', 'privy:pat']);
-export const PRIVY_REFRESH_KEYS = Object.freeze(['privy:refresh_token']);
-
-// Later fields win. Prefer Privy's own access JWT over the customer `token`.
-const RESPONSE_TOKEN_FIELDS = Object.freeze([
-  'access_token',
-  'token',
-  'privy_access_token',
-]);
+export const PRIVY_TOKEN_KEYS = Object.freeze([PRIVY_ACCESS_TOKEN_KEY]);
 
 export function unwrapStoredToken(value) {
   if (typeof value !== 'string') return '';
@@ -60,106 +59,24 @@ export function isPrivyAccessToken(value) {
   return parts.length === 3 && parts.every((part) => part.length > 0);
 }
 
-export function isPrivyRefreshToken(value) {
-  const token = unwrapStoredToken(value);
-  return Boolean(token) && token.length <= 8192 && !/\s/.test(token);
-}
-
 export function isPrivyTokenStorageKey(key) {
-  return PRIVY_TOKEN_KEY_RE.test(String(key || ''));
+  return PRIVY_ACCESS_TOKEN_KEY_RE.test(String(key || ''));
 }
 
 export function isPrivyRefreshStorageKey(key) {
-  return PRIVY_REFRESH_KEY_RE.test(String(key || ''));
+  return PRIVY_REFRESH_TOKEN_KEY_RE.test(String(key || ''));
 }
 
+const CUSTOMER_TOKEN_KEY_RE = /^privy(?::[\w-]+)?:token$/;
+
+/** Keys login needs. `privy:token` is kept on disk but is not the Accept bearer. */
 export function isPrivySessionStorageKey(key) {
   const name = String(key || '');
   return isPrivyTokenStorageKey(name)
+    || CUSTOMER_TOKEN_KEY_RE.test(name)
     || isPrivyRefreshStorageKey(name)
     || name === 'privy:id_token'
     || /^privy(?::[\w-]+)?:id[_-]token$/.test(name);
-}
-
-export function isPrivyAuthOrigin(url) {
-  try {
-    return new URL(String(url)).origin === PRIVY_AUTH_ORIGIN;
-  } catch {
-    return false;
-  }
-}
-
-export function isAcceptTermsRequest(url, method = 'GET') {
-  if (String(method || 'GET').toUpperCase() !== 'POST') return false;
-  try {
-    const parsed = new URL(String(url), PRIVY_AUTH_ORIGIN);
-    return parsed.origin === PRIVY_AUTH_ORIGIN && parsed.pathname === ACCEPT_TERMS_PATH;
-  } catch {
-    return false;
-  }
-}
-
-export function authorizationNeedsToken(headers) {
-  if (!headers || typeof headers.has !== 'function') return true;
-  if (!headers.has('authorization')) return true;
-  const value = String(headers.get('authorization') || '').trim();
-  if (!value) return true;
-  const match = /^Bearer(?:\s+(.*))?$/i.exec(value);
-  if (!match) return false;
-  const token = String(match[1] || '').trim();
-  return !token || token === 'null' || token === 'undefined' || !isPrivyAccessToken(token);
-}
-
-export function rememberTokensFromPayload(auth, payload) {
-  if (!auth || !payload || typeof payload !== 'object') return;
-  for (const field of RESPONSE_TOKEN_FIELDS) {
-    const value = payload[field];
-    if (typeof value === 'string') auth.remember(value);
-  }
-  if (typeof payload.refresh_token === 'string') auth.rememberRefresh(payload.refresh_token);
-  if (payload.data && typeof payload.data === 'object') {
-    rememberTokensFromPayload(auth, payload.data);
-  }
-}
-
-function writeBackup(storage, token) {
-  if (!storage || typeof storage.setItem !== 'function' || !isPrivyAccessToken(token)) return;
-  try {
-    storage.setItem(MAELSTROM_TOKEN_KEY, token);
-  } catch {
-    /* private mode / quota */
-  }
-}
-
-function writeRefreshBackup(storage, token) {
-  if (!storage || typeof storage.setItem !== 'function' || !isPrivyRefreshToken(token)) return;
-  try {
-    storage.setItem(MAELSTROM_REFRESH_KEY, token);
-  } catch {
-    /* private mode / quota */
-  }
-}
-
-function readBackup(storage) {
-  if (!storage || typeof storage.getItem !== 'function') return '';
-  try {
-    return unwrapStoredToken(storage.getItem(MAELSTROM_TOKEN_KEY));
-  } catch {
-    return '';
-  }
-}
-
-function readRefreshBackup(storage) {
-  if (!storage || typeof storage.getItem !== 'function') return '';
-  try {
-    return unwrapStoredToken(storage.getItem(MAELSTROM_REFRESH_KEY));
-  } catch {
-    return '';
-  }
-}
-
-function encodePrivyValue(value) {
-  return JSON.stringify(String(value));
 }
 
 function logoutAllowed(target) {
@@ -180,78 +97,170 @@ export async function withPrivyLogout(target, run) {
   }
 }
 
+export function isRefreshToken(value) {
+  const token = unwrapStoredToken(value);
+  if (!token || token === 'deprecated' || token.length > 8192 || /\s/.test(token)) return '';
+  return token;
+}
+
+function jwtPayload(token) {
+  try {
+    const part = String(token).split('.')[1];
+    if (!part) return null;
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/');
+    const json = globalThis.atob(padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), '='));
+    const payload = JSON.parse(json);
+    return payload && typeof payload === 'object' ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A JWT we cannot decode is treated as usable so opaque test tokens still send. */
+export function isUnexpiredPrivyAccessToken(value, now = Date.now()) {
+  const token = unwrapStoredToken(value);
+  if (!isPrivyAccessToken(token)) return false;
+  const payload = jwtPayload(token);
+  if (!payload || typeof payload.exp !== 'number') return true;
+  return now < payload.exp * 1000;
+}
+
+export function isPrivyAuthOrigin(url) {
+  try {
+    return new URL(String(url)).origin === PRIVY_AUTH_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+export function isAcceptTermsRequest(url, method = 'GET') {
+  if (String(method || 'GET').toUpperCase() !== 'POST') return false;
+  try {
+    const parsed = new URL(String(url), PRIVY_AUTH_ORIGIN);
+    return parsed.origin === PRIVY_AUTH_ORIGIN && parsed.pathname === ACCEPT_TERMS_PATH;
+  } catch {
+    return false;
+  }
+}
+
+export function bearerFromHeaders(headers) {
+  if (!headers || typeof headers.get !== 'function') return '';
+  const value = String(headers.get('authorization') || '').trim();
+  const match = /^Bearer\s+(\S+)/i.exec(value);
+  return match ? match[1] : '';
+}
+
+export function authorizationNeedsToken(headers) {
+  if (!headers || typeof headers.has !== 'function') return true;
+  if (!headers.has('authorization')) return true;
+  const token = bearerFromHeaders(headers);
+  return !token || token === 'null' || token === 'undefined' || !isPrivyAccessToken(token);
+}
+
+export function rememberTokensFromPayload(auth, payload) {
+  if (!auth || !payload || typeof payload !== 'object') return;
+  const session = payload.privy_access_token;
+  if (typeof session === 'string') auth.remember(session);
+  const refresh = payload.refresh_token;
+  if (typeof refresh === 'string' && auth.rememberRefresh) auth.rememberRefresh(refresh);
+  if (payload.data && typeof payload.data === 'object') {
+    rememberTokensFromPayload(auth, payload.data);
+  }
+}
+
+function writeBackup(storage, key, token) {
+  if (!storage || typeof storage.setItem !== 'function' || !token) return;
+  try {
+    storage.setItem(key, token);
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function readBackup(storage, key) {
+  if (!storage || typeof storage.getItem !== 'function') return '';
+  try {
+    return unwrapStoredToken(storage.getItem(key));
+  } catch {
+    return '';
+  }
+}
+
 export function createAcceptTermsAuth() {
   let cached = '';
-  let cachedRefresh = '';
+  let refresh = '';
   return {
     remember(value, storages = []) {
       const token = unwrapStoredToken(value);
       if (!isPrivyAccessToken(token)) return;
       if (cached === token) return;
       cached = token;
-      for (const storage of storages) writeBackup(storage, token);
+      for (const storage of storages) writeBackup(storage, MAELSTROM_TOKEN_KEY, token);
     },
     rememberRefresh(value, storages = []) {
-      const token = unwrapStoredToken(value);
-      if (!isPrivyRefreshToken(token)) return;
-      if (cachedRefresh === token) return;
-      cachedRefresh = token;
-      for (const storage of storages) writeRefreshBackup(storage, token);
+      const token = isRefreshToken(value);
+      if (!token) return;
+      if (refresh === token) return;
+      refresh = token;
+      for (const storage of storages) writeBackup(storage, MAELSTROM_REFRESH_KEY, token);
     },
     clear() {
       cached = '';
-      cachedRefresh = '';
+      refresh = '';
     },
     current(storage, sessionStorage) {
       const live = readPrivyAccessToken(storage);
       if (live) {
         cached = live;
-        writeBackup(storage, live);
-        writeBackup(sessionStorage, live);
+        writeBackup(storage, MAELSTROM_TOKEN_KEY, live);
+        writeBackup(sessionStorage, MAELSTROM_TOKEN_KEY, live);
         return live;
       }
-      const localBackup = readBackup(storage);
+      const localBackup = readBackup(storage, MAELSTROM_TOKEN_KEY);
       if (isPrivyAccessToken(localBackup)) {
         cached = localBackup;
         return localBackup;
       }
-      const sessionBackup = readBackup(sessionStorage);
+      const sessionBackup = readBackup(sessionStorage, MAELSTROM_TOKEN_KEY);
       if (isPrivyAccessToken(sessionBackup)) {
         cached = sessionBackup;
         return sessionBackup;
       }
       return cached;
     },
-    currentRefresh(storage, sessionStorage) {
+    refreshToken(storage, sessionStorage) {
       const live = readPrivyRefreshToken(storage);
       if (live) {
-        cachedRefresh = live;
-        writeRefreshBackup(storage, live);
-        writeRefreshBackup(sessionStorage, live);
+        refresh = live;
+        writeBackup(storage, MAELSTROM_REFRESH_KEY, live);
+        writeBackup(sessionStorage, MAELSTROM_REFRESH_KEY, live);
         return live;
       }
-      const localBackup = readRefreshBackup(storage);
-      if (isPrivyRefreshToken(localBackup)) {
-        cachedRefresh = localBackup;
+      const localBackup = isRefreshToken(readBackup(storage, MAELSTROM_REFRESH_KEY));
+      if (localBackup) {
+        refresh = localBackup;
         return localBackup;
       }
-      const sessionBackup = readRefreshBackup(sessionStorage);
-      if (isPrivyRefreshToken(sessionBackup)) {
-        cachedRefresh = sessionBackup;
+      const sessionBackup = isRefreshToken(readBackup(sessionStorage, MAELSTROM_REFRESH_KEY));
+      if (sessionBackup) {
+        refresh = sessionBackup;
         return sessionBackup;
       }
-      return cachedRefresh;
+      return refresh;
+    },
+    currentRefresh(storage, sessionStorage) {
+      return this.refreshToken(storage, sessionStorage);
     },
   };
 }
 
-export function readPrivyAccessToken(storage) {
+function tokenFromStorage(storage, seedKeys, matches, accept) {
   if (!storage || typeof storage.getItem !== 'function') return '';
-  const keys = new Set(PRIVY_TOKEN_KEYS);
+  const keys = new Set(seedKeys);
   if (typeof storage.length === 'number' && typeof storage.key === 'function') {
     for (let i = 0; i < storage.length; i += 1) {
       const key = storage.key(i);
-      if (key && isPrivyTokenStorageKey(key)) keys.add(key);
+      if (key && matches(key)) keys.add(key);
     }
   }
   for (const key of keys) {
@@ -261,54 +270,108 @@ export function readPrivyAccessToken(storage) {
     } catch {
       value = '';
     }
-    const token = unwrapStoredToken(value);
-    if (isPrivyAccessToken(token)) return token;
+    const token = accept(value);
+    if (token) return token;
   }
   return '';
+}
+
+export function readPrivyAccessToken(storage) {
+  return tokenFromStorage(
+    storage,
+    PRIVY_TOKEN_KEYS,
+    isPrivyTokenStorageKey,
+    (value) => {
+      const token = unwrapStoredToken(value);
+      return isPrivyAccessToken(token) ? token : '';
+    },
+  );
 }
 
 export function readPrivyRefreshToken(storage) {
-  if (!storage || typeof storage.getItem !== 'function') return '';
-  const keys = new Set(PRIVY_REFRESH_KEYS);
-  if (typeof storage.length === 'number' && typeof storage.key === 'function') {
-    for (let i = 0; i < storage.length; i += 1) {
-      const key = storage.key(i);
-      if (key && isPrivyRefreshStorageKey(key)) keys.add(key);
-    }
-  }
-  for (const key of keys) {
-    let value = '';
-    try {
-      value = storage.getItem(key);
-    } catch {
-      value = '';
-    }
-    const token = unwrapStoredToken(value);
-    if (isPrivyRefreshToken(token)) return token;
-  }
-  return '';
+  return tokenFromStorage(
+    storage,
+    [PRIVY_REFRESH_TOKEN_KEY],
+    isPrivyRefreshStorageKey,
+    isRefreshToken,
+  );
 }
 
-/** Put backed-up Privy session keys back so refresh restores login. */
+/** Put backed-up session keys back so a later refresh can restore login. */
 export function restorePrivySession(storage, auth) {
   if (!storage || typeof storage.setItem !== 'function') return false;
   let restored = false;
-  const access = auth?.current?.(storage) || readBackup(storage) || readPrivyAccessToken(storage);
-  const refresh = auth?.currentRefresh?.(storage) || readRefreshBackup(storage) || readPrivyRefreshToken(storage);
+  const access = auth?.current?.(storage) || readBackup(storage, MAELSTROM_TOKEN_KEY) || readPrivyAccessToken(storage);
+  const refresh = auth?.refreshToken?.(storage)
+    || isRefreshToken(readBackup(storage, MAELSTROM_REFRESH_KEY))
+    || readPrivyRefreshToken(storage);
   try {
     if (isPrivyAccessToken(access) && !readPrivyAccessToken(storage)) {
-      // Match Privy's primary key (`privy:token`), not legacy `privy:pat`.
-      storage.setItem('privy:token', encodePrivyValue(access));
+      storage.setItem(PRIVY_ACCESS_TOKEN_KEY, JSON.stringify(unwrapStoredToken(access)));
       restored = true;
     }
-    if (isPrivyRefreshToken(refresh) && !readPrivyRefreshToken(storage)) {
-      storage.setItem('privy:refresh_token', encodePrivyValue(refresh));
+    const refreshValue = isRefreshToken(refresh);
+    if (refreshValue && !readPrivyRefreshToken(storage)) {
+      storage.setItem(PRIVY_REFRESH_TOKEN_KEY, JSON.stringify(refreshValue));
       restored = true;
     }
   } catch {
     return false;
   }
   return restored;
+}
+
+export function readPrivyCaId(storage) {
+  if (!storage || typeof storage.getItem !== 'function') return '';
+  try {
+    const value = unwrapStoredToken(storage.getItem(PRIVY_CA_ID_KEY));
+    if (!value || value.length > 128 || /\s/.test(value)) return '';
+    return value;
+  } catch {
+    return '';
+  }
+}
+
+function requestUrl(input) {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.href;
+  if (input && typeof input.url === 'string') return input.url;
+  return '';
+}
+
+function requestMethod(input, init) {
+  if (init && typeof init.method === 'string') return init.method;
+  if (input && typeof input.method === 'string') return input.method;
+  return 'GET';
+}
+
+function noteStoredValue(auth, key, value, backups) {
+  if (isPrivyTokenStorageKey(key) || key === MAELSTROM_TOKEN_KEY) {
+    auth.remember(value, backups);
+  }
+  if (isPrivyRefreshStorageKey(key) || key === MAELSTROM_REFRESH_KEY) {
+    auth.rememberRefresh(value, backups);
+  }
+}
+
+function snapshotBeforeRemove(auth, storage, key, backups) {
+  if (!isPrivyTokenStorageKey(key) && !isPrivyRefreshStorageKey(key)) return;
+  try {
+    noteStoredValue(auth, key, storage.getItem(key), backups);
+  } catch {
+    /* ignore */
+  }
+}
+
+function restoreBackups(auth, storage, backups, originalSet) {
+  const access = readBackup(storage, MAELSTROM_TOKEN_KEY) || auth.current(...backups);
+  const refresh = isRefreshToken(readBackup(storage, MAELSTROM_REFRESH_KEY)) || auth.refreshToken(...backups);
+  if (isPrivyAccessToken(access)) {
+    try { originalSet.call(storage, MAELSTROM_TOKEN_KEY, access); } catch { /* ignore */ }
+  }
+  if (refresh) {
+    try { originalSet.call(storage, MAELSTROM_REFRESH_KEY, refresh); } catch { /* ignore */ }
+  }
 }
 
 /** Must use the unpatched remove to avoid re-entering logout backup clears. */
@@ -337,60 +400,31 @@ function preserveMaelstromBackupEntries(storage) {
   return keep;
 }
 
-function requestUrl(input) {
-  if (typeof input === 'string') return input;
-  if (input instanceof URL) return input.href;
-  if (input && typeof input.url === 'string') return input.url;
-  return '';
-}
-
-function requestMethod(input, init) {
-  if (init && typeof init.method === 'string') return init.method;
-  if (input && typeof input.method === 'string') return input.method;
-  return 'GET';
-}
-
-function snapshotSessionKey(storage, auth, key, backups) {
-  if (!storage || typeof storage.getItem !== 'function') return;
-  try {
-    const value = storage.getItem(key);
-    if (isPrivyTokenStorageKey(key)) auth.remember(value, backups);
-    if (isPrivyRefreshStorageKey(key)) auth.rememberRefresh(value, backups);
-  } catch {
-    /* ignore */
-  }
-}
-
 function patchStoragePrototype(auth, localStorage, sessionStorage, target) {
   const StorageCtor = localStorage?.constructor;
   const proto = StorageCtor?.prototype;
-  // Never patch Object.prototype (test doubles) — only real Storage.
+  // Test doubles are plain objects. Patching Object.prototype breaks every object.
   if (!proto || proto === Object.prototype || proto.__maelstromAcceptTermsPatched) return;
   if (typeof StorageCtor?.name === 'string' && StorageCtor.name && StorageCtor.name !== 'Storage') return;
-  const backups = [localStorage, sessionStorage].filter(Boolean);
 
   const originalSet = proto.setItem;
   const originalRemove = proto.removeItem;
   const originalClear = proto.clear;
+  const backups = [localStorage, sessionStorage];
 
   if (typeof originalSet === 'function') {
     proto.setItem = function setItem(key, value) {
       const result = originalSet.call(this, key, value);
-      if (isPrivyTokenStorageKey(key) || key === MAELSTROM_TOKEN_KEY) {
-        auth.remember(value, backups);
-      }
-      if (isPrivyRefreshStorageKey(key) || key === MAELSTROM_REFRESH_KEY) {
-        auth.rememberRefresh(value, backups);
-      }
+      noteStoredValue(auth, key, value, backups);
       return result;
     };
   }
 
   if (typeof originalRemove === 'function') {
     proto.removeItem = function removeItem(key) {
-      // Snapshot into Maelstrom backups, then allow the delete. Blocking
-      // removeItem prevented OAuth from rotating tokens after "You're good to go".
-      snapshotSessionKey(this, auth, key, backups);
+      // Snapshot into Maelstrom backups, then allow the delete so OAuth can
+      // rotate tokens after "You're good to go".
+      snapshotBeforeRemove(auth, this, key, backups);
       const result = originalRemove.call(this, key);
       if (logoutAllowed(target) && isPrivySessionStorageKey(key)) {
         auth.clear();
@@ -409,12 +443,9 @@ function patchStoragePrototype(auth, localStorage, sessionStorage, target) {
       if (loggingOut) auth.clear();
       originalClear.call(this);
       for (const [key, value] of Object.entries(keep)) {
-        try {
-          originalSet.call(this, key, value);
-        } catch {
-          /* ignore */
-        }
+        try { originalSet.call(this, key, value); } catch { /* ignore */ }
       }
+      if (!loggingOut) restoreBackups(auth, this, backups, originalSet);
     };
   }
 
@@ -431,19 +462,14 @@ function patchStorageInstance(storage, auth, backups, target) {
     const originalSet = storage.setItem.bind(storage);
     storage.setItem = (key, value) => {
       originalSet(key, value);
-      if (isPrivyTokenStorageKey(key) || key === MAELSTROM_TOKEN_KEY) {
-        auth.remember(value, backups);
-      }
-      if (isPrivyRefreshStorageKey(key) || key === MAELSTROM_REFRESH_KEY) {
-        auth.rememberRefresh(value, backups);
-      }
+      noteStoredValue(auth, key, value, backups);
     };
   }
 
   if (typeof storage.removeItem === 'function') {
     const originalRemove = storage.removeItem.bind(storage);
     storage.removeItem = (key) => {
-      snapshotSessionKey(storage, auth, key, backups);
+      snapshotBeforeRemove(auth, storage, key, backups);
       originalRemove(key);
       if (logoutAllowed(target) && isPrivySessionStorageKey(key)) {
         auth.clear();
@@ -463,12 +489,9 @@ function patchStorageInstance(storage, auth, backups, target) {
       if (loggingOut) auth.clear();
       originalClear();
       for (const [key, value] of Object.entries(keep)) {
-        try {
-          originalSet(key, value);
-        } catch {
-          /* ignore */
-        }
+        try { originalSet(key, value); } catch { /* ignore */ }
       }
+      if (!loggingOut) restoreBackups(auth, storage, backups, originalSet);
     };
   }
 }
@@ -481,62 +504,137 @@ async function capturePrivyResponseTokens(auth, response, backups) {
     const payload = await response.clone().json();
     rememberTokensFromPayload(auth, payload);
     const token = auth.current(...backups);
-    const refresh = auth.currentRefresh(...backups);
+    const refresh = auth.refreshToken(...backups);
     for (const storage of backups) {
-      if (token) writeBackup(storage, token);
-      if (refresh) writeRefreshBackup(storage, refresh);
+      if (token) writeBackup(storage, MAELSTROM_TOKEN_KEY, token);
+      if (refresh) writeBackup(storage, MAELSTROM_REFRESH_KEY, refresh);
     }
   } catch {
     /* non-JSON or empty body */
   }
 }
 
-/**
- * POST accept_terms with an explicit bearer. Used by the first-party Accept UI
- * so we never go through Privy's getAccessToken wipe path.
- */
-export async function postAcceptTerms({
-  token,
-  appId,
-  clientId,
-  fetchImpl = globalThis.fetch.bind(globalThis),
-} = {}) {
-  const accessToken = unwrapStoredToken(token);
-  const id = typeof appId === 'string' ? appId.trim() : '';
-  if (!isPrivyAccessToken(accessToken)) {
-    return { ok: false, status: 0, error: 'token_missing' };
-  }
-  if (!id) {
-    return { ok: false, status: 0, error: 'app_id_missing' };
-  }
-
+function privyHeaders({ appId, clientId, caId, token }) {
   const headers = {
-    authorization: `Bearer ${accessToken}`,
     'content-type': 'application/json',
-    'privy-app-id': id,
-    'privy-client': 'react-auth:maelstrom-accept-terms',
+    'privy-app-id': appId,
+    'privy-client': PRIVY_CLIENT_HEADER,
+    'privy-ca-id': typeof caId === 'string' ? caId : '',
   };
   if (typeof clientId === 'string' && clientId.trim()) {
     headers['privy-client-id'] = clientId.trim();
   }
+  if (isPrivyAccessToken(token)) headers.authorization = `Bearer ${unwrapStoredToken(token)}`;
+  return headers;
+}
+
+async function readJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function mintPrivyAccessToken({
+  refreshToken,
+  appId,
+  clientId,
+  caId,
+  fetchImpl,
+}) {
+  const refresh = isRefreshToken(refreshToken);
+  const id = typeof appId === 'string' ? appId.trim() : '';
+  if (!refresh || !id) return { token: '', refresh: '', error: refresh ? 'app_id_missing' : 'refresh_missing' };
+  try {
+    const response = await fetchImpl(SESSIONS_URL, {
+      method: 'POST',
+      credentials: 'include',
+      headers: privyHeaders({ appId: id, clientId, caId }),
+      body: JSON.stringify({ refresh_token: refresh }),
+    });
+    if (!response.ok) return { token: '', refresh: '', error: 'refresh_failed' };
+    const body = await readJson(response);
+    const token = unwrapStoredToken(body?.privy_access_token);
+    const nextRefresh = isRefreshToken(body?.refresh_token) || refresh;
+    if (!isPrivyAccessToken(token)) return { token: '', refresh: nextRefresh, error: 'refresh_failed' };
+    return { token, refresh: nextRefresh, error: '' };
+  } catch {
+    return { token: '', refresh: '', error: 'network_error' };
+  }
+}
+
+function persistSession(storages, accessToken, refreshToken) {
+  for (const storage of storages || []) {
+    if (!storage || typeof storage.setItem !== 'function') continue;
+    try {
+      if (isPrivyAccessToken(accessToken)) {
+        storage.setItem(PRIVY_ACCESS_TOKEN_KEY, JSON.stringify(unwrapStoredToken(accessToken)));
+      }
+      const refresh = isRefreshToken(refreshToken);
+      if (refresh) storage.setItem(PRIVY_REFRESH_TOKEN_KEY, JSON.stringify(refresh));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * POST accept_terms with the privy access token. A customer access token is
+ * never sent. When the session JWT is missing or expired, mint one with the
+ * refresh token first.
+ */
+export async function postAcceptTerms({
+  token,
+  refreshToken,
+  appId,
+  clientId,
+  caId,
+  storages,
+  fetchImpl = globalThis.fetch.bind(globalThis),
+} = {}) {
+  const id = typeof appId === 'string' ? appId.trim() : '';
+  if (!id) return { ok: false, status: 0, error: 'app_id_missing' };
+
+  let accessToken = unwrapStoredToken(token);
+  let refresh = isRefreshToken(refreshToken);
+  if (!isUnexpiredPrivyAccessToken(accessToken) && refresh) {
+    const minted = await mintPrivyAccessToken({
+      refreshToken: refresh,
+      appId: id,
+      clientId,
+      caId,
+      fetchImpl,
+    });
+    if (minted.error === 'network_error') return { ok: false, status: 0, error: 'network_error' };
+    if (minted.token) {
+      accessToken = minted.token;
+      refresh = minted.refresh || refresh;
+    }
+  }
+  if (!isPrivyAccessToken(accessToken)) {
+    return { ok: false, status: 0, error: 'token_missing' };
+  }
+
+  persistSession(storages, accessToken, refresh);
 
   try {
     const response = await fetchImpl(ACCEPT_TERMS_URL, {
       method: 'POST',
       credentials: 'include',
-      headers,
+      headers: privyHeaders({
+        appId: id,
+        clientId,
+        caId,
+        token: accessToken,
+      }),
       body: '{}',
     });
     if (!response.ok) {
-      let detail = '';
-      try {
-        const body = await response.json();
-        detail = typeof body?.error === 'string'
-          ? body.error
-          : (typeof body?.message === 'string' ? body.message : '');
-      } catch {
-        detail = '';
-      }
+      const body = await readJson(response);
+      const detail = typeof body?.error === 'string'
+        ? body.error
+        : (typeof body?.message === 'string' ? body.message : '');
       return { ok: false, status: response.status, error: detail || 'accept_failed' };
     }
     return { ok: true, status: response.status, error: '' };
@@ -545,8 +643,17 @@ export async function postAcceptTerms({
   }
 }
 
+function applySessionBearer(headers, token) {
+  if (!isPrivyAccessToken(token)) return false;
+  if (bearerFromHeaders(headers) === unwrapStoredToken(token)) return false;
+  headers.set('authorization', `Bearer ${unwrapStoredToken(token)}`);
+  return true;
+}
+
 /**
  * Install once on a window-like target. Returns the token cache.
+ * Call this before `@privy-io/react-auth` evaluates ofetch, which freezes
+ * the fetch it will use for accept_terms.
  */
 export function installAcceptTermsAuth(target = globalThis) {
   if (!target || target.__maelstromAcceptTermsAuth) {
@@ -561,53 +668,71 @@ export function installAcceptTermsAuth(target = globalThis) {
   patchStorageInstance(localStorage, auth, backups, target);
   if (sessionStorage) patchStorageInstance(sessionStorage, auth, backups, target);
   auth.remember(readPrivyAccessToken(localStorage), backups);
-  auth.remember(readBackup(localStorage), backups);
-  auth.remember(readBackup(sessionStorage), backups);
+  auth.remember(readBackup(localStorage, MAELSTROM_TOKEN_KEY), backups);
+  auth.remember(readBackup(sessionStorage, MAELSTROM_TOKEN_KEY), backups);
   auth.rememberRefresh(readPrivyRefreshToken(localStorage), backups);
-  auth.rememberRefresh(readRefreshBackup(localStorage), backups);
-  auth.rememberRefresh(readRefreshBackup(sessionStorage), backups);
+  auth.rememberRefresh(readBackup(localStorage, MAELSTROM_REFRESH_KEY), backups);
+  auth.rememberRefresh(readBackup(sessionStorage, MAELSTROM_REFRESH_KEY), backups);
   restorePrivySession(localStorage, auth);
 
-  const originalFetch = typeof target.fetch === 'function' ? target.fetch.bind(target) : null;
+  const originalFetch = typeof target.__maelstromNativeFetch === 'function'
+    ? target.__maelstromNativeFetch
+    : (typeof target.fetch === 'function' ? target.fetch.bind(target) : null);
   const RequestImpl = target.Request ?? globalThis.Request;
   if (originalFetch && typeof RequestImpl === 'function') {
-    target.fetch = (input, init) => {
+    const hookedFetch = async (input, init) => {
       const url = requestUrl(input);
       const method = requestMethod(input, init);
-      const token = auth.current(localStorage, sessionStorage);
-      const headers = new Headers(init?.headers || input?.headers || undefined);
-
       let nextInput = input;
       let nextInit = init;
-      if (isAcceptTermsRequest(url, method) && token && authorizationNeedsToken(headers)) {
-        // Rehydrate privy:* only when Accept needs a bearer after a wipe.
-        restorePrivySession(localStorage, auth);
-        headers.set('authorization', `Bearer ${token}`);
-        if (typeof input === 'string' || input instanceof URL) {
-          nextInit = { ...init, headers };
-        } else {
-          nextInput = new RequestImpl(input, { headers });
-          nextInit = undefined;
+
+      if (isAcceptTermsRequest(url, method)) {
+        const headers = new Headers(init?.headers || input?.headers || undefined);
+        let token = auth.current(localStorage, sessionStorage);
+        if (!isUnexpiredPrivyAccessToken(token)) {
+          const minted = await mintPrivyAccessToken({
+            refreshToken: auth.refreshToken(localStorage, sessionStorage),
+            appId: headers.get('privy-app-id') || '',
+            clientId: headers.get('privy-client-id') || '',
+            caId: headers.get('privy-ca-id') || readPrivyCaId(localStorage),
+            fetchImpl: originalFetch,
+          });
+          if (minted.token) {
+            token = minted.token;
+            auth.remember(token, backups);
+            auth.rememberRefresh(minted.refresh, backups);
+            persistSession(backups, token, minted.refresh);
+          }
+        }
+        if (applySessionBearer(headers, token)) {
+          restorePrivySession(localStorage, auth);
+          if (typeof input === 'string' || input instanceof URL) {
+            nextInit = { ...init, headers };
+          } else {
+            nextInput = new RequestImpl(input, { headers });
+            nextInit = undefined;
+          }
         }
       }
 
-      return Promise.resolve(
-        nextInit === undefined ? originalFetch(nextInput) : originalFetch(nextInput, nextInit),
-      ).then(async (response) => {
-        // Cache tokens from Privy JSON, but do not force-restore privy:* keys
-        // here — that raced OAuth token rotation and blocked sign-in.
-        if (isPrivyAuthOrigin(url) || isPrivyAuthOrigin(requestUrl(nextInput))) {
-          await capturePrivyResponseTokens(auth, response, backups);
-        }
-        if (
-          isAcceptTermsRequest(url, method)
-          || isAcceptTermsRequest(requestUrl(nextInput), method)
-        ) {
-          restorePrivySession(localStorage, auth);
-        }
-        return response;
-      });
+      const response = await (
+        nextInit === undefined ? originalFetch(nextInput) : originalFetch(nextInput, nextInit)
+      );
+      // Cache tokens from Privy JSON, but do not force-restore privy:* keys
+      // after every response — that raced OAuth token rotation.
+      if (isPrivyAuthOrigin(url) || isPrivyAuthOrigin(requestUrl(nextInput))) {
+        await capturePrivyResponseTokens(auth, response, backups);
+      }
+      if (
+        isAcceptTermsRequest(url, method)
+        || isAcceptTermsRequest(requestUrl(nextInput), method)
+      ) {
+        restorePrivySession(localStorage, auth);
+      }
+      return response;
     };
+    target.__maelstromFetchHook = hookedFetch;
+    target.fetch = hookedFetch;
   }
 
   Object.defineProperty(target, '__maelstromAcceptTermsAuth', {
@@ -624,7 +749,19 @@ export function resolveAcceptTermsToken(target = globalThis) {
   }
   return (
     readPrivyAccessToken(target?.localStorage)
-    || readBackup(target?.localStorage)
-    || readBackup(target?.sessionStorage)
+    || readBackup(target?.localStorage, MAELSTROM_TOKEN_KEY)
+    || readBackup(target?.sessionStorage, MAELSTROM_TOKEN_KEY)
+  );
+}
+
+export function resolvePrivyRefreshToken(target = globalThis) {
+  const auth = target?.__maelstromAcceptTermsAuth;
+  if (auth && typeof auth.refreshToken === 'function') {
+    return auth.refreshToken(target.localStorage, target.sessionStorage);
+  }
+  return (
+    readPrivyRefreshToken(target?.localStorage)
+    || isRefreshToken(readBackup(target?.localStorage, MAELSTROM_REFRESH_KEY))
+    || isRefreshToken(readBackup(target?.sessionStorage, MAELSTROM_REFRESH_KEY))
   );
 }

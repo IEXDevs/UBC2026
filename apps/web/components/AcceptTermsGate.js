@@ -5,7 +5,9 @@ import { usePrivy } from '@privy-io/react-auth';
 import {
   installAcceptTermsAuth,
   postAcceptTerms,
+  readPrivyCaId,
   resolveAcceptTermsToken,
+  resolvePrivyRefreshToken,
   restorePrivySession,
   withPrivyLogout,
 } from '../lib/accept-terms-auth.mjs';
@@ -13,8 +15,9 @@ import {
 if (typeof window !== 'undefined') installAcceptTermsAuth(window);
 
 /**
- * Privy's built-in Accept screen posts without a bearer after getAccessToken()
- * wipes storage. Hide that modal and accept terms ourselves with a cached JWT.
+ * Privy's Accept screen posts with no session bearer: getAccessToken() drops
+ * privy:pat, and the customer token in privy:token is not a session.
+ * Hide that modal and POST accept_terms with the privy access token.
  */
 export default function AcceptTermsGate({ children }) {
   const { ready, authenticated, user, logout } = usePrivy();
@@ -43,15 +46,19 @@ export default function AcceptTermsGate({ children }) {
     const auth = window.__maelstromAcceptTermsAuth;
     if (auth) restorePrivySession(window.localStorage, auth);
     const token = resolveAcceptTermsToken(window);
-    if (!token) {
+    const refreshToken = resolvePrivyRefreshToken(window);
+    if (!token && !refreshToken) {
       setError('Session token missing. Sign out and sign in again.');
       setBusy(false);
       return;
     }
     const result = await postAcceptTerms({
       token,
+      refreshToken,
       appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
       clientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
+      caId: readPrivyCaId(window.localStorage),
+      storages: [window.localStorage, window.sessionStorage],
     });
     if (!result.ok) {
       setError(result.error === 'token_missing'
