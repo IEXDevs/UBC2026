@@ -794,4 +794,14 @@ test('a profile claim upserts the user and stays readable', async () => {
   }));
   assert.equal(failed.status, 502);
   assert.equal((await failed.json()).error, 'profile_save_failed');
+
+  const unread = await worker.fetch(new Request('https://runtime/api/profiles/me', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => Response.json({ code: '42501' }, { status: 401 }),
+  }));
+  assert.equal(unread.status, 502);
+  assert.equal((await unread.json()).error, 'profile_read_failed');
 });
