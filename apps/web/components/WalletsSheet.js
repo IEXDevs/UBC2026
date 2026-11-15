@@ -1,12 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePrivy } from '@privy-io/react-auth';
 import { useExportWallet } from '@privy-io/react-auth/solana';
 import { X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import { usePresence } from './usePresence';
 import { partyFromToken } from '../lib/party-book.mjs';
 import { describeWallets, shortAddress, walletGlance } from '../lib/money-views.mjs';
+import {
+  exportAddressForSheet,
+  exportFailureNote,
+  privyEmbeddedSolanaWallet,
+} from '../lib/privy-export.mjs';
 import TxnLog from './TxnLog';
 
 const PANES = [
@@ -130,22 +136,52 @@ function KeyPane({ signedIn, address }) {
 }
 
 function SolanaKeyExport({ address }) {
+  const { ready, authenticated, user } = usePrivy();
   const { exportWallet } = useExportWallet();
   const [note, setNote] = useState('');
+  const embedded = privyEmbeddedSolanaWallet(user);
+  const exportAddress = exportAddressForSheet(user, address);
 
   async function open() {
     setNote('');
+    if (!ready || !authenticated) {
+      setNote(exportFailureNote(new Error('not authenticated'), { hasEmbedded: Boolean(embedded) }));
+      return;
+    }
+    if (!embedded) {
+      setNote(exportFailureNote(null, { hasEmbedded: false }));
+      return;
+    }
+    if (!exportAddress) {
+      setNote(exportFailureNote(null, { hasEmbedded: true, addressMatch: false }));
+      return;
+    }
     try {
-      await exportWallet(address ? { address } : undefined);
-    } catch {
-      setNote('Privy did not open the key screen.');
+      await exportWallet({ address: exportAddress });
+    } catch (error) {
+      setNote(exportFailureNote(error, { hasEmbedded: true, addressMatch: true }));
     }
   }
 
   return (
     <>
-      <button type="button" className="wallet-export" onClick={open}>Open in Privy</button>
+      <button type="button" className="wallet-export" onClick={open} disabled={!ready}>
+        Open in Privy
+      </button>
       {note ? <p className="preview-note" role="status">{note}</p> : null}
+      {!note && embedded && exportAddress ? (
+        <p className="preview-note">Opens Privy’s secure key screen for {shortAddress(exportAddress)}.</p>
+      ) : null}
+      {!note && embedded && !exportAddress ? (
+        <p className="preview-note">
+          This sheet shows the agent wallet. Privy’s key screen only opens for your client embedded Solana wallet.
+        </p>
+      ) : null}
+      {!note && !embedded ? (
+        <p className="preview-note">
+          This login has no client embedded Solana wallet. The agent main wallet is created server-side, so this button cannot open a key screen for it.
+        </p>
+      ) : null}
     </>
   );
 }

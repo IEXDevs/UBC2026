@@ -4771,14 +4771,12 @@ legend {
   .chat-line { font-size: 16px; }
 }
 
-/* Once a session exists, Privy's Success / Accept / OAuth modal must not
-   cover the shell or keep capturing clicks. */
+/* While our custom terms gate is up, hide leftover Privy login chrome.
+   Do NOT hide Privy dialogs after sign-in — that blocks export / MFA
+   (empty FocusTrap: "There are no focusable elements inside the <FocusTrap />"). */
 body.maelstrom-terms-gate #privy-dialog,
 body.maelstrom-terms-gate #privy-modal-content,
-body.maelstrom-terms-gate [id^="headlessui-dialog"],
-body.maelstrom-session-ready #privy-dialog,
-body.maelstrom-session-ready #privy-modal-content,
-body.maelstrom-session-ready [id^="headlessui-dialog"] {
+body.maelstrom-terms-gate [id^="headlessui-dialog"] {
   display: none !important;
   pointer-events: none !important;
 }
