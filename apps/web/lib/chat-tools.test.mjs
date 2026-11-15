@@ -155,6 +155,23 @@ test('createChatToolInvoker lists bots via Worker dashboard tools', async () => 
   assert.equal(calls[0].owner, 'did:privy:owner1');
 });
 
+test('createChatToolInvoker falls back to shell bots and wallets when Worker is empty', async () => {
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_local',
+    runtimeBase: 'https://runtime.example',
+    shellBots: [{ id: 'bot_local', name: 'Local', type: 'trading', status: 'idle', goal: 'Watch' }],
+    shellWallets: [{ id: 'w_main', label: 'Main', address: 'Addr1111111111111111111111111111111111', kind: 'main' }],
+    fetcher: async () => Response.json({ ok: true, source: 'supabase', items: [] }),
+  });
+  const bots = await invoke('list_bots', {});
+  assert.equal(bots.source, 'shell');
+  assert.equal(bots.items[0].id, 'bot_local');
+  const wallets = await invoke('get_wallets', {});
+  assert.equal(wallets.source, 'shell');
+  assert.equal(wallets.items[0].id, 'w_main');
+});
+
 test('createChatToolInvoker pauses a bot via Worker', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',

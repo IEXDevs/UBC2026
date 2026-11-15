@@ -328,6 +328,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'transfers.create', method: 'POST', path: '/api/transfers', phase: 1, auth: 'privy', status: 'live' },
   { id: 'quicknode.webhook', method: 'POST', path: '/webhooks/quicknode', phase: 1, auth: 'webhook', status: 'live' },
   { id: 'voice.agent', method: 'GET', path: '/voice/agent', phase: 8, auth: 'none', status: 'live' },
+  { id: 'voice.session-owner', method: 'POST', path: '/voice/session-owner', phase: 8, auth: 'webhook', status: 'live' },
   { id: 'voice.tools', method: 'POST', path: '/voice/tools/:name', phase: 8, auth: 'webhook', status: 'live' },
   { id: 'voice.llm', method: 'POST', path: '/voice/llm/chat/completions', phase: 8, auth: 'webhook', status: 'live' },
   { id: 'cron.hourly', method: 'CRON', path: '0 * * * *', phase: 5, auth: 'platform', status: 'live' },

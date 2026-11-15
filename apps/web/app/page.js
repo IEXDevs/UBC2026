@@ -145,22 +145,31 @@ function AuthedShell() {
           return;
         }
 
-        const response = await fetch('/api/wallets', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(user?.id ? { 'x-owner-id': user.id } : {}),
-          },
-        });
-        const body = await response.json().catch(() => ({}));
-        if (stopped) return;
-        const ok = response.ok && Array.isArray(body.wallets) && body.wallets.length > 0;
-        if (!ok) {
-          console.error('[wallets] provision failed', response.status, {
+        // Prefer the Worker so wallets land in Supabase (agent list_bots/get_wallets).
+        // Fall back to the Next Privy route when the runtime proxy is unavailable.
+        const runtimeWallets = shellRuntimeUrl('/api/wallets');
+        const provisionUrls = runtimeWallets ? [runtimeWallets, '/api/wallets'] : ['/api/wallets'];
+        let body = {};
+        let ok = false;
+        for (const url of provisionUrls) {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              ...(user?.id ? { 'x-owner-id': user.id } : {}),
+            },
+          });
+          body = await response.json().catch(() => ({}));
+          if (stopped) return;
+          ok = response.ok && Array.isArray(body.wallets) && body.wallets.length > 0;
+          if (ok) break;
+          console.error('[wallets] provision failed', url, response.status, {
             error: body.error,
             detail: body.detail,
             missing: body.missing,
           });
+        }
+        if (!ok) {
           applyWalletFallback(user, body, setLiveWallets, setWalletNote);
           if (configNote && !body.error) {
             setWalletNote(current => (current ? `${current} ${configNote}` : configNote));
@@ -412,12 +421,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       }
     })();
     return () => { stop = true; };
-  }, [ownerId, signedIn, user, getAccessToken]);
+  }, [ownerId, signedIn, user, getAccessToken, liveWallets]);
 
   // Backfill local-only roster bots into Supabase once a real wallet exists.
   useEffect(() => {
     if (!ownerId || !rosterReady || !signedIn) return undefined;
-    const walletId = firstAssignableWalletId(remoteLists.wallets);
+    const walletId = firstAssignableWalletId(remoteLists.wallets)
+      || firstAssignableWalletId((liveWallets || []).filter((wallet) => (
+        wallet && typeof wallet.id === 'string' && !wallet.id.startsWith('client_')
+      )));
     if (!walletId) return undefined;
     const remoteIds = new Set((remoteLists.bots || []).map((bot) => bot?.id).filter(Boolean));
     const localBots = mergeRoster([], withoutPlaceholderBots(roster)).bots
@@ -441,7 +453,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       } catch { /* keep local */ }
     })();
     return () => { stop = true; };
-  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, getAccessToken]);
+  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, liveWallets, getAccessToken]);
 
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
@@ -521,6 +533,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const glance = walletGlance(wallets, positions, transfers);
   const clientTools = useMemo(() => createVoiceClientTools({
     bots,
+    wallets,
     activeBotId: activeBot,
     pane,
     setActiveBotId: setActiveBot,
@@ -529,7 +542,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       setPane('Main');
       setComputerOpen(true);
     },
-  }), [bots, activeBot, pane]);
+  }), [bots, wallets, activeBot, pane]);
 
   function choosePane(next, direction) {
     if (next === pane) return;
@@ -837,6 +850,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
             botGoal={bot.goal}
             botType={bot.type}
             ownerId={ownerId}
+            shellBots={bots}
+            shellWallets={wallets}
             clientTools={clientTools}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {

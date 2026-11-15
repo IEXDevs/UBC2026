@@ -51,6 +51,8 @@ export default function Composer({
   botGoal = '',
   botType = 'trading',
   ownerId = null,
+  shellBots = null,
+  shellWallets = null,
   lines = [],
   onLine,
   onThinking,
@@ -321,6 +323,8 @@ export default function Composer({
         goal: botGoal,
         type: botType,
         permission,
+        shellBots,
+        shellWallets,
       });
       if (result.ok) {
         pushLine('agent', result.reply, botId, result.tokens);
@@ -359,6 +363,8 @@ export default function Composer({
         goal: botGoal,
         type: botType,
         permission,
+        shellBots,
+        shellWallets,
       });
       pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error), botId, result.ok ? result.tokens : 0);
     } catch {
@@ -496,6 +502,21 @@ export default function Composer({
       live.setVolume?.({ volume: 1 });
       sealMic(live);
       voiceStarted.current = performance.now();
+      // Bind conversation → Privy owner so Worker tool webhooks can resolve owner_id
+      // even when ElevenLabs does not substitute {{owner_id}} in headers.
+      try {
+        const conversationId = typeof live.getId === 'function' ? live.getId() : '';
+        if (owner && conversationId) {
+          void fetch('/api/voice/bind', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationId, ownerId: owner }),
+            cache: 'no-store',
+          }).catch(() => {});
+        }
+      } catch {
+        /* tools may still work via dynamicVariables */
+      }
     } catch (error) {
       micGate.current.disarm();
       setNote(voiceFailureNote(error));

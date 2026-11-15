@@ -175,6 +175,32 @@ test('pause, loop, and stop_all go through the worker routes', async () => {
   assert.equal(JSON.stringify(stopBody).includes('live.browser.run'), false);
 });
 
+test('voice session-owner bind lets tools resolve owner without x-owner-id header', async () => {
+  const seen = [];
+  const fetchApi = async (request) => {
+    seen.push(request.headers.get('x-owner-id'));
+    return Response.json({ ok: true, source: 'supabase', items: [{ id: 'bot_1' }] });
+  };
+  const bind = await handleVoiceRequest(new Request(`${ORIGIN}/voice/session-owner`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-elevenlabs-webhook-secret': SECRET,
+    },
+    body: JSON.stringify({ conversationId: 'conv_abc', ownerId: 'did:privy:owner1' }),
+  }), env());
+  assert.equal(bind.status, 200);
+
+  const listed = await handleVoiceRequest(toolRequest('list_bots', {
+    headers: { 'x-owner-id': '{{owner_id}}' },
+    body: { conversation_id: 'conv_abc', parameters: {} },
+  }), env(), { fetchApi });
+  assert.equal(listed.status, 200);
+  assert.equal(seen[0], 'did:privy:owner1');
+  const body = await listed.json();
+  assert.equal(body.result.calls[0].body.items[0].id, 'bot_1');
+});
+
 test('tool calls fail closed without a webhook secret, owner, or known tool', async () => {
   let called = false;
   const fetchApi = async () => {
