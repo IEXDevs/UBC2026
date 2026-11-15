@@ -161,6 +161,7 @@ export default function PromptBar({
   const lastOpen = useRef(null);
   const dictation = useRef(0);
   const dictationJob = useRef(null);
+  const dictateBase = useRef('');
   const latest = useRef({});
   latest.current = { onSend, onStop, onAttach, onDictate, onEffortChange, onDraftChange, onChipClick, onRemoveAttachment };
 
@@ -393,28 +394,39 @@ export default function PromptBar({
     focusInput();
   };
 
+  const applyDictationText = (text) => {
+    const base = dictateBase.current;
+    const spoken = typeof text === 'string' ? text.trim() : '';
+    const next = spoken
+      ? (base.trim() ? `${base.trimEnd()} ${spoken}` : spoken)
+      : base;
+    setDraft(next);
+    latest.current.onDraftChange?.(next);
+    return next;
+  };
+
   const toggleListen = () => {
     if (listening) {
-      // Stop listening but keep the same seq so cancel's resolved transcript still applies.
+      // Keep the same seq so cancel's resolved transcript still applies.
       dictationJob.current?.cancel?.();
       return;
     }
     const seq = ++dictation.current;
+    dictateBase.current = draft;
     setListening(true);
-    const job = latest.current.onDictate?.();
+    const job = latest.current.onDictate?.({
+      onPartial: (text) => {
+        if (seq !== dictation.current) return;
+        applyDictationText(text);
+      },
+    });
     dictationJob.current = job && typeof job === 'object' ? job : null;
     Promise.resolve(job).then(
       (text) => {
         if (seq !== dictation.current) return;
         dictationJob.current = null;
         setListening(false);
-        if (text) {
-          setDraft((d) => {
-            const next = d.trim() ? `${d.trimEnd()} ${text}` : text;
-            latest.current.onDraftChange?.(next);
-            return next;
-          });
-        }
+        applyDictationText(text);
         focusInput();
       },
       () => {
