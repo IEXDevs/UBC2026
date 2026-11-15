@@ -63,7 +63,16 @@ import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
 import { showSignInGate } from '../lib/sign-in-gate.mjs';
 import { idleLockDue } from '../lib/desk-lock.mjs';
-import { clearPrivySessionBackups } from '../lib/privy-session.mjs';
+import { clearPrivySessionBackups, ensurePrivySessionKeys } from '../lib/privy-session.mjs';
+
+function readAccessToken(getAccessToken) {
+  try {
+    ensurePrivySessionKeys(window.localStorage, window.sessionStorage);
+  } catch {
+    /* private mode */
+  }
+  return Promise.resolve(getAccessToken?.()).catch(() => '');
+}
 
 const CONNECTORS = shellConnectors();
 const privyConfigured = privyProviderProps({
@@ -115,11 +124,13 @@ function applyWalletFallback(user, body, setLiveWallets, setWalletNote) {
 }
 
 function AuthedShell() {
-  const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
+  const { ready, authenticated, user, login, logout, getAccessToken: privyGetAccessToken } = usePrivy();
   const signedIn = ready && authenticated;
   const [liveWallets, setLiveWallets] = useState(null);
   const [walletNote, setWalletNote] = useState('');
   const accountsKey = linkedAccountsKey(user);
+
+  const getAccessToken = useCallback(() => readAccessToken(privyGetAccessToken), [privyGetAccessToken]);
 
   const onLogout = useCallback(async () => {
     try {
