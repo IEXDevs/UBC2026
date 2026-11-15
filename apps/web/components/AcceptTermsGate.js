@@ -8,6 +8,7 @@ import {
   readPrivyCaId,
   resolveAcceptTermsToken,
   resolvePrivyRefreshToken,
+  restorePrivySession,
   withPrivyLogout,
 } from '../lib/accept-terms-auth.mjs';
 
@@ -42,6 +43,8 @@ export default function AcceptTermsGate({ children }) {
   async function onAccept() {
     setBusy(true);
     setError('');
+    const auth = window.__maelstromAcceptTermsAuth;
+    if (auth) restorePrivySession(window.localStorage, auth);
     const token = resolveAcceptTermsToken(window);
     const refreshToken = resolvePrivyRefreshToken(window);
     if (!token && !refreshToken) {
@@ -64,6 +67,7 @@ export default function AcceptTermsGate({ children }) {
       setBusy(false);
       return;
     }
+    if (auth) restorePrivySession(window.localStorage, auth);
     window.location.reload();
   }
 

@@ -8,8 +8,13 @@
  * `getAccessToken()` also deletes `privy:pat` when the refresh token is
  * missing, then posts accept_terms with no Authorization. ofetch captures
  * `globalThis.fetch` at import, so a late fetch wrapper never sees that
- * call. We keep the session JWT (and refresh token) ourselves and POST
- * accept_terms with `Authorization: Bearer <privy:pat>`.
+ * call. We keep the session JWT (and refresh token) in Maelstrom backups
+ * and POST accept_terms with `Authorization: Bearer <privy:pat>`.
+ *
+ * Do NOT block removeItem on privy session keys. That left OAuth stuck on
+ * "You're good to go" with authenticated=false because login could not
+ * rotate tokens. Snapshot into backups, allow the delete, and rehydrate
+ * only when Accept needs a bearer.
  */
 
 export const ACCEPT_TERMS_PATH = '/api/v1/users/me/accept_terms';
@@ -199,6 +204,10 @@ export function createAcceptTermsAuth() {
       refresh = token;
       for (const storage of storages) writeBackup(storage, MAELSTROM_REFRESH_KEY, token);
     },
+    clear() {
+      cached = '';
+      refresh = '';
+    },
     current(storage, sessionStorage) {
       const live = readPrivyAccessToken(storage);
       if (live) {
@@ -365,20 +374,27 @@ function restoreBackups(auth, storage, backups, originalSet) {
   }
 }
 
-function preserveSessionEntries(storage) {
+/** Must use the unpatched remove to avoid re-entering logout backup clears. */
+function clearMaelstromBackupsWith(removeFn, storage) {
+  if (typeof removeFn !== 'function' || !storage) return;
+  try {
+    removeFn.call(storage, MAELSTROM_TOKEN_KEY);
+    removeFn.call(storage, MAELSTROM_REFRESH_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Only Maelstrom backups survive clear() — Privy must be free to drop privy:*. */
+function preserveMaelstromBackupEntries(storage) {
   const keep = {};
-  if (!storage || typeof storage.key !== 'function' || typeof storage.getItem !== 'function') return keep;
-  const length = typeof storage.length === 'number' ? storage.length : 0;
-  for (let i = 0; i < length; i += 1) {
-    const key = storage.key(i);
-    if (!key) continue;
-    if (isPrivySessionStorageKey(key) || key === MAELSTROM_TOKEN_KEY || key === MAELSTROM_REFRESH_KEY) {
-      try {
-        const value = storage.getItem(key);
-        if (value != null) keep[key] = value;
-      } catch {
-        /* ignore */
-      }
+  if (!storage || typeof storage.getItem !== 'function') return keep;
+  for (const key of [MAELSTROM_TOKEN_KEY, MAELSTROM_REFRESH_KEY]) {
+    try {
+      const value = storage.getItem(key);
+      if (value != null) keep[key] = value;
+    } catch {
+      /* ignore */
     }
   }
   return keep;
@@ -406,9 +422,15 @@ function patchStoragePrototype(auth, localStorage, sessionStorage, target) {
 
   if (typeof originalRemove === 'function') {
     proto.removeItem = function removeItem(key) {
+      // Snapshot into Maelstrom backups, then allow the delete so OAuth can
+      // rotate tokens after "You're good to go".
       snapshotBeforeRemove(auth, this, key, backups);
-      if (isPrivySessionStorageKey(key) && !logoutAllowed(target)) return undefined;
-      return originalRemove.call(this, key);
+      const result = originalRemove.call(this, key);
+      if (logoutAllowed(target) && isPrivySessionStorageKey(key)) {
+        auth.clear();
+        clearMaelstromBackupsWith(originalRemove, this);
+      }
+      return result;
     };
   }
 
@@ -416,12 +438,14 @@ function patchStoragePrototype(auth, localStorage, sessionStorage, target) {
     proto.clear = function clear() {
       auth.remember(readPrivyAccessToken(this), backups);
       auth.rememberRefresh(readPrivyRefreshToken(this), backups);
-      const keep = preserveSessionEntries(this);
+      const loggingOut = logoutAllowed(target);
+      const keep = loggingOut ? {} : preserveMaelstromBackupEntries(this);
+      if (loggingOut) auth.clear();
       originalClear.call(this);
       for (const [key, value] of Object.entries(keep)) {
         try { originalSet.call(this, key, value); } catch { /* ignore */ }
       }
-      restoreBackups(auth, this, backups, originalSet);
+      if (!loggingOut) restoreBackups(auth, this, backups, originalSet);
     };
   }
 
@@ -446,8 +470,11 @@ function patchStorageInstance(storage, auth, backups, target) {
     const originalRemove = storage.removeItem.bind(storage);
     storage.removeItem = (key) => {
       snapshotBeforeRemove(auth, storage, key, backups);
-      if (isPrivySessionStorageKey(key) && !logoutAllowed(target)) return;
       originalRemove(key);
+      if (logoutAllowed(target) && isPrivySessionStorageKey(key)) {
+        auth.clear();
+        clearMaelstromBackupsWith(originalRemove, storage);
+      }
     };
   }
 
@@ -457,12 +484,14 @@ function patchStorageInstance(storage, auth, backups, target) {
     storage.clear = () => {
       auth.remember(readPrivyAccessToken(storage), backups);
       auth.rememberRefresh(readPrivyRefreshToken(storage), backups);
-      const keep = preserveSessionEntries(storage);
+      const loggingOut = logoutAllowed(target);
+      const keep = loggingOut ? {} : preserveMaelstromBackupEntries(storage);
+      if (loggingOut) auth.clear();
       originalClear();
       for (const [key, value] of Object.entries(keep)) {
         try { originalSet(key, value); } catch { /* ignore */ }
       }
-      restoreBackups(auth, storage, backups, originalSet);
+      if (!loggingOut) restoreBackups(auth, storage, backups, originalSet);
     };
   }
 }
@@ -676,6 +705,7 @@ export function installAcceptTermsAuth(target = globalThis) {
           }
         }
         if (applySessionBearer(headers, token)) {
+          restorePrivySession(localStorage, auth);
           if (typeof input === 'string' || input instanceof URL) {
             nextInit = { ...init, headers };
           } else {
@@ -688,8 +718,15 @@ export function installAcceptTermsAuth(target = globalThis) {
       const response = await (
         nextInit === undefined ? originalFetch(nextInput) : originalFetch(nextInput, nextInit)
       );
+      // Cache tokens from Privy JSON, but do not force-restore privy:* keys
+      // after every response — that raced OAuth token rotation.
       if (isPrivyAuthOrigin(url) || isPrivyAuthOrigin(requestUrl(nextInput))) {
         await capturePrivyResponseTokens(auth, response, backups);
+      }
+      if (
+        isAcceptTermsRequest(url, method)
+        || isAcceptTermsRequest(requestUrl(nextInput), method)
+      ) {
         restorePrivySession(localStorage, auth);
       }
       return response;

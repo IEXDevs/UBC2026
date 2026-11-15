@@ -4165,9 +4165,13 @@ legend {
   .chat-line { font-size: 16px; }
 }
 
-/* Hide Privy's broken Accept modal while our gate handles terms. */
-body.maelstrom-terms-gate #privy-dialog {
+/* Hide Privy's Accept / OAuth success modal while our gate handles terms.
+   Keep it from trapping focus or clicks over the first-party Accept UI. */
+body.maelstrom-terms-gate #privy-dialog,
+body.maelstrom-terms-gate #privy-modal-content,
+body.maelstrom-terms-gate [id^="headlessui-dialog"] {
   display: none !important;
+  pointer-events: none !important;
 }
 
 .terms-gate {
