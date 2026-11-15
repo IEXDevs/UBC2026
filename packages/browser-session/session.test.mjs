@@ -86,17 +86,34 @@ test('openSession and navigateSession load https urls via openTab', async () => 
   assert.equal(tabs[1].url, 'https://example.com/');
 });
 
-test('per-bot concurrency limit is enforced', async () => {
+test('per-bot concurrency limit reuses and navigates instead of failing', async () => {
   let n = 0;
+  const tabs = [];
   const svc = service({
     idFactory: () => `rec-${++n}`,
-    browsers: { createSession: async () => ({ sessionId: `prov-${n}` }), readonlyView: async () => ({}) },
+    clock: () => 1000 + n,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${n}` }),
+      openTab: async (sessionId, url) => {
+        tabs.push({ sessionId, url });
+        return { targetId: 'T', url, title: 'Page' };
+      },
+      readonlyView: async () => ({}),
+    },
   });
   await svc.openSession({ ownerId: 'u1', botId: 'b1' });
   await svc.openSession({ ownerId: 'u1', botId: 'b1' });
-  await assert.rejects(svc.openSession({ ownerId: 'u1', botId: 'b1' }), (error) => error.code === 'concurrency_limit' && error.status === 429);
-  // Another bot still has capacity.
-  await svc.openSession({ ownerId: 'u1', botId: 'b2' });
+  const reused = await svc.openSession({
+    ownerId: 'u1',
+    botId: 'b1',
+    url: 'https://example.com/fun',
+  });
+  assert.equal(reused.reused, true);
+  assert.equal(reused.url, 'https://example.com/fun');
+  assert.equal(tabs.at(-1).url, 'https://example.com/fun');
+  // Another bot still has capacity for a fresh session.
+  const other = await svc.openSession({ ownerId: 'u1', botId: 'b2' });
+  assert.equal(other.reused, false);
 });
 
 test('live view is owner-only, no-store, and embeds the verified Live View host', async () => {

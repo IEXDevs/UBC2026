@@ -71,7 +71,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_open',
-    description: 'Open a Cloudflare browser session owned by this bot. Pass url (https) to load a page — without url the Live View stays on about:blank. Subject to per-bot concurrency limits. Does not expose CDP or privileged URLs.',
+    description: 'Open a Cloudflare browser session owned by this bot. Pass url (https) to load a page — without url the Live View stays on about:blank. If this bot is already at its session limit, reuses the newest open session and navigates when url is set. Does not expose CDP or privileged URLs.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -83,13 +83,13 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_navigate',
-    description: 'Open a new tab to an https URL in an existing bot-owned browser session. Use this when a session is already open and the owner should see a different page than about:blank.',
+    description: 'Open a new tab to an https URL in an existing bot-owned browser session. Prefer this over browser_open when a session is already open and the owner asks to look something up or change pages.',
     parameters: {
       type: 'object',
       additionalProperties: false,
-      required: ['sessionRecordId', 'url'],
+      required: ['url'],
       properties: {
-        sessionRecordId: { type: 'string', minLength: 1, maxLength: 128 },
+        sessionRecordId: { type: 'string', minLength: 1, maxLength: 128, description: 'Optional when exactly one session is open; otherwise required' },
         url: { type: 'string', minLength: 1, maxLength: 2000 },
       },
     },
@@ -191,7 +191,60 @@ export function createBrowserSessionService({
       if (typeof purpose !== 'string' || purpose.length > 256) fail('invalid_purpose');
       if (!browsers) throw new ProviderError('browser_not_configured', 503);
       const open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
-      if (open.length >= maxSessionsPerBot) fail('concurrency_limit', 429);
+      // At capacity: reuse the newest open session (navigate when url is set) instead of
+      // failing with concurrency_limit — chat kept calling open and getting stuck.
+      if (open.length >= maxSessionsPerBot) {
+        const newest = [...open].sort((a, b) => {
+          const aAt = Number(a.updatedAt ?? a.createdAt ?? 0);
+          const bAt = Number(b.updatedAt ?? b.createdAt ?? 0);
+          return bAt - aAt;
+        })[0];
+        if (!newest?.sessionRecordId) fail('concurrency_limit', 429);
+        if (url != null && url !== '') {
+          const navigated = await this.navigateSession({
+            ownerId,
+            botId,
+            sessionRecordId: newest.sessionRecordId,
+            url,
+          });
+          return {
+            sessionRecordId: navigated.sessionRecordId,
+            purpose: newest.purpose || purpose,
+            status: 'open',
+            url: navigated.url,
+            title: navigated.title,
+            reused: true,
+            note: 'Reused an existing session (at concurrency limit) and navigated to the url.',
+            event: {
+              type: 'tool',
+              name: 'browser_open',
+              status: 'ok',
+              sessionRecordId: navigated.sessionRecordId,
+              url: navigated.url,
+              reused: true,
+              at: clock(),
+            },
+          };
+        }
+        return {
+          sessionRecordId: newest.sessionRecordId,
+          purpose: newest.purpose || purpose,
+          status: 'open',
+          url: typeof newest.url === 'string' ? newest.url : null,
+          title: '',
+          reused: true,
+          note: 'Reused an existing session (at concurrency limit). Call browser_navigate with an https url to change the page.',
+          event: {
+            type: 'tool',
+            name: 'browser_open',
+            status: 'ok',
+            sessionRecordId: newest.sessionRecordId,
+            url: typeof newest.url === 'string' ? newest.url : null,
+            reused: true,
+            at: clock(),
+          },
+        };
+      }
       const { sessionId } = await browsers.createSession();
       let pageUrl = null;
       let targetId = null;
@@ -223,6 +276,7 @@ export function createBrowserSessionService({
         status: 'open',
         url: pageUrl,
         title,
+        reused: false,
         note: pageUrl
           ? undefined
           : 'Session is on about:blank until browser_open/browser_navigate is called with an https url.',
@@ -240,7 +294,15 @@ export function createBrowserSessionService({
     async navigateSession({ ownerId, botId, sessionRecordId, url }) {
       if (!browsers) throw new ProviderError('browser_not_configured', 503);
       if (typeof browsers.openTab !== 'function') throw new ProviderError('browser_not_configured', 503);
-      const record = await requireOwned(ownerId, botId, sessionRecordId);
+      let recordId = sessionRecordId;
+      if (!recordId) {
+        if (![ownerId, botId].every(idOk)) fail('invalid_identity');
+        const open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
+        if (open.length === 0) fail('session_not_found', 404);
+        open.sort((a, b) => Number(b.updatedAt ?? b.createdAt ?? 0) - Number(a.updatedAt ?? a.createdAt ?? 0));
+        recordId = open[0].sessionRecordId;
+      }
+      const record = await requireOwned(ownerId, botId, recordId);
       const tab = await browsers.openTab(record.providerSessionId, url);
       const updated = {
         ...record,
@@ -248,16 +310,16 @@ export function createBrowserSessionService({
         targetId: tab.targetId,
         updatedAt: clock(),
       };
-      await store.put(keyFor(ownerId, botId, sessionRecordId), updated);
+      await store.put(keyFor(ownerId, botId, record.sessionRecordId), updated);
       return {
-        sessionRecordId,
+        sessionRecordId: record.sessionRecordId,
         url: tab.url,
         title: tab.title,
         event: {
           type: 'tool',
           name: 'browser_navigate',
           status: 'ok',
-          sessionRecordId,
+          sessionRecordId: record.sessionRecordId,
           url: tab.url,
           at: clock(),
         },
