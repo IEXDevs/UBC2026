@@ -6,6 +6,7 @@ import {
   installAcceptTermsAuth,
   postAcceptTerms,
   resolveAcceptTermsToken,
+  withPrivyLogout,
 } from '../lib/accept-terms-auth.mjs';
 
 if (typeof window !== 'undefined') installAcceptTermsAuth(window);
@@ -20,6 +21,12 @@ export default function AcceptTermsGate({ children }) {
   const [error, setError] = useState('');
 
   const needsTerms = ready && authenticated && user && user.hasAcceptedTerms === false;
+
+  async function onDecline() {
+    await withPrivyLogout(window, async () => {
+      await logout?.();
+    });
+  }
 
   useEffect(() => {
     if (!needsTerms) return undefined;
@@ -71,7 +78,7 @@ export default function AcceptTermsGate({ children }) {
               type="button"
               className="terms-gate__decline"
               disabled={busy}
-              onClick={() => logout?.()}
+              onClick={() => { void onDecline(); }}
             >
               No thanks
             </button>
