@@ -1,7 +1,5 @@
 /**
- * Runs once in the browser before React hydrates so Privy token capture is
- * armed before login writes storage or ofetch binds fetch.
+ * Client instrumentation entry. Kept empty on purpose: we no longer wrap
+ * window.fetch / Storage for Privy accept_terms (require-terms is off and those
+ * hooks wiped sessions on refresh).
  */
-import { installAcceptTermsAuth } from './lib/accept-terms-auth.mjs';
-
-installAcceptTermsAuth(window);

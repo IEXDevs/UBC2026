@@ -23,6 +23,7 @@ test('Privy provider props stay public and Solana-only', () => {
   assert.equal(props.config.embeddedWallets.ethereum.createOnLogin, 'off');
   assert.equal(props.config.embeddedWallets.solana.createOnLogin, 'off');
   assert.equal(props.config.mfa.noPromptOnMfaRequired, false);
+  assert.equal(props.config.sessions.cookieWriteBehavior, 'never');
   assert.deepEqual(props.config.loginMethods, ['email', 'google', 'github', 'discord', 'wallet']);
 
   const withoutClient = privyProviderProps({ appId: 'cl-app' });

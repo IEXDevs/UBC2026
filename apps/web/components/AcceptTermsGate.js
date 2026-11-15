@@ -2,14 +2,11 @@
 
 import { useEffect } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
-import { installAcceptTermsAuth } from '../lib/accept-terms-auth.mjs';
-
-if (typeof window !== 'undefined') installAcceptTermsAuth(window);
 
 /**
- * Require-terms is off in the Privy dashboard, so we do not POST accept_terms
- * or block the shell. This only marks the body when a Privy session is live
- * (CSS hides leftover Privy dialog chrome after login).
+ * Require-terms is off. Do not wrap fetch/storage or POST accept_terms — that
+ * fought Privy and wiped sessions on refresh. Only mark when a session is live
+ * so CSS can hide leftover Privy dialog chrome.
  */
 export default function AcceptTermsGate({ children }) {
   const { ready, authenticated, user } = usePrivy();

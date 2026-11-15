@@ -42,7 +42,6 @@ import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
-import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 
 const CONNECTORS = shellConnectors();
@@ -102,9 +101,7 @@ function AuthedShell() {
   const accountsKey = linkedAccountsKey(user);
 
   const onLogout = useCallback(async () => {
-    await withPrivyLogout(typeof window !== 'undefined' ? window : globalThis, async () => {
-      await logout?.();
-    });
+    await logout?.();
   }, [logout]);
 
   useEffect(() => {
