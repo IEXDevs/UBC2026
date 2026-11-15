@@ -3,52 +3,75 @@ import { test } from 'node:test';
 import {
   dictationBusyError,
   dictationUnsupportedError,
-  speechRecognitionCtor,
   startBrowserDictation,
 } from './dictation.mjs';
 
-test('speechRecognitionCtor reads standard and webkit constructors', () => {
-  assert.equal(speechRecognitionCtor({}), null);
-  const Speech = function Speech() {};
-  assert.equal(speechRecognitionCtor({ SpeechRecognition: Speech }), Speech);
-  assert.equal(speechRecognitionCtor({ webkitSpeechRecognition: Speech }), Speech);
-});
+function fakeClient() {
+  const CommitStrategy = { VAD: 'vad', MANUAL: 'manual' };
+  const RealtimeEvents = {
+    COMMITTED_TRANSCRIPT: 'committed_transcript',
+    ERROR: 'error',
+    AUTH_ERROR: 'auth_error',
+    QUOTA_EXCEEDED: 'quota_exceeded',
+    CLOSE: 'close',
+  };
+  return { CommitStrategy, RealtimeEvents, Scribe: { connect() {} } };
+}
 
-test('startBrowserDictation rejects when recognition is unavailable', async () => {
-  await assert.rejects(
-    () => startBrowserDictation({ Recognition: null }),
-    (error) => error.code === 'unsupported',
-  );
+test('dictation helpers expose stable error codes', () => {
   assert.equal(dictationUnsupportedError().code, 'unsupported');
   assert.equal(dictationBusyError().code, 'voice_live');
 });
 
-test('startBrowserDictation resolves the final transcript and supports cancel', async () => {
-  let instance = null;
-  function FakeRecognition() {
-    instance = this;
-    this.lang = '';
-    this.interimResults = false;
-    this.continuous = true;
-    this.start = () => {};
-    this.stop = () => {
-      this.onend?.();
-    };
-  }
-  const job = startBrowserDictation({ Recognition: FakeRecognition });
-  assert.equal(instance.lang, 'en-US');
-  assert.equal(instance.interimResults, true);
-  assert.equal(instance.continuous, false);
-  instance.onresult?.({
-    results: [
-      { 0: { transcript: 'hello ' }, isFinal: false },
-      { 0: { transcript: 'world' }, isFinal: true },
-    ],
-  });
-  instance.onend?.();
-  assert.equal(await job, 'hello world');
+test('startBrowserDictation uses an ElevenLabs Scribe token and VAD commits', async () => {
+  let connectOpts = null;
+  let resolveReady;
+  const ready = new Promise((resolve) => { resolveReady = resolve; });
+  const listeners = new Map();
+  const connection = {
+    on(event, fn) {
+      listeners.set(event, fn);
+    },
+    close() {
+      listeners.get('close')?.();
+    },
+  };
 
-  const cancelled = startBrowserDictation({ Recognition: FakeRecognition });
-  cancelled.cancel();
-  assert.equal(await cancelled, '');
+  const job = startBrowserDictation({
+    fetcher: async () => ({
+      ok: true,
+      json: async () => ({ token: 'sutkn_test' }),
+    }),
+    loadClient: async () => {
+      const client = fakeClient();
+      client.Scribe.connect = (opts) => {
+        connectOpts = opts;
+        queueMicrotask(() => resolveReady());
+        return connection;
+      };
+      return client;
+    },
+  });
+
+  await ready;
+  assert.equal(connectOpts.token, 'sutkn_test');
+  assert.equal(connectOpts.modelId, 'scribe_v2_realtime');
+  assert.equal(connectOpts.commitStrategy, 'vad');
+  listeners.get('committed_transcript')?.({ text: 'hello ' });
+  listeners.get('committed_transcript')?.({ text: ' world' });
+  job.cancel();
+  assert.equal(await job, 'hello world');
+});
+
+test('startBrowserDictation rejects when the scribe token route fails', async () => {
+  await assert.rejects(
+    () => startBrowserDictation({
+      fetcher: async () => ({
+        ok: false,
+        json: async () => ({ error: 'voice_unconfigured' }),
+      }),
+      loadClient: async () => fakeClient(),
+    }),
+    (error) => error.code === 'voice_unconfigured',
+  );
 });
