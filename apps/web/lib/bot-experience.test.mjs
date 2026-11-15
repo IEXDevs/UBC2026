@@ -133,7 +133,7 @@ test('demo shell bots carry a bot page and money panes stay empty placeholders',
   assert.match(page, /AgentThread/);
   assert.match(page, /Statistics/);
   assert.equal(page.includes('aria-label="Stats"'), false);
-  assert.equal(page.includes('bot.goal'), false);
+  assert.match(page, /botGoal=\{bot\.goal\}/);
   assert.equal(page.includes('OverviewPanel'), false);
   assert.match(page, /SecurityPanel/);
   assert.match(page, /PositionBook|MoneyPane/);

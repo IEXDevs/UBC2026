@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { patchPrivySvgProps, rewriteSvgDomProps, silenceTurnstileExecuteWarning } from './patch-privy-svg-props.mjs';
+import { closePasswordlessLoginModal, patchPrivySvgProps, rewriteSvgDomProps, silenceTurnstileExecuteWarning } from './patch-privy-svg-props.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -24,6 +24,19 @@ test('keeps Privy app-config failures and skips the strict-mode abort warning', 
   assert.equal(next.includes('console.warn("Error generating app config: ",t)'), true);
   assert.match(next, /t\.name!=="AbortError"/);
   assert.equal(rewriteSvgDomProps(next), next);
+});
+
+test('email-code success closes the Privy modal instead of opening terms or wallet creation', () => {
+  const esm = 'if(w&&I&&_){if(s?.legal.requireUsersAcceptTerms&&!_.hasAcceptedTerms){let e=setTimeout((()=>{r("AffirmativeConsentScreen")}),B);return()=>clearTimeout(e)}if(E(_,s.embeddedWallets)){let e=setTimeout((()=>{a({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),T({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,screen:"AwaitingPasswordlessCodeScreen"}}),N()},callAuthOnSuccessOnClose:!0}}),r("EmbeddedWalletOnAccountCreateScreen")}),B);return()=>clearTimeout(e)}{A();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),f);return()=>clearTimeout(e)}}';
+  const cjs = 'if(g&&b&&S){if(s?.legal.requireUsersAcceptTerms&&!S.hasAcceptedTerms){let e=setTimeout((()=>{r("AffirmativeConsentScreen")}),M);return()=>clearTimeout(e)}if(p.shouldProceedtoEmbeddedWalletCreationFlow(S,s.embeddedWallets)){let e=setTimeout((()=>{n({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),x({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,screen:"AwaitingPasswordlessCodeScreen"}}),C()},callAuthOnSuccessOnClose:!0}}),r("EmbeddedWalletOnAccountCreateScreen")}),M);return()=>clearTimeout(e)}{E();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c.DEFAULT_SUCCESS_SCREEN_DURATION_MS);return()=>clearTimeout(e)}}';
+  const esmNext = closePasswordlessLoginModal(esm);
+  const cjsNext = closePasswordlessLoginModal(cjs);
+  assert.equal(esmNext, 'if(w&&I&&_){A(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}');
+  assert.equal(cjsNext, 'if(g&&b&&S){E(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}');
+  assert.equal(esmNext.includes('AffirmativeConsentScreen'), false);
+  assert.equal(cjsNext.includes('EmbeddedWalletOnAccountCreateScreen'), false);
+  assert.equal(closePasswordlessLoginModal(esmNext), esmNext);
+  assert.equal(closePasswordlessLoginModal(cjsNext), cjsNext);
 });
 
 test('drops the Turnstile execute-mode warning', () => {
