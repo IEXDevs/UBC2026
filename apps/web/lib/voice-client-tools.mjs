@@ -59,6 +59,16 @@ export function voiceToolDefinitions() {
         },
       },
     },
+    {
+      name: 'list_shell_bots',
+      description: 'List bots visible in the owner shell (local roster + live runtime).',
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      name: 'list_shell_wallets',
+      description: 'List wallets visible in the owner shell.',
+      parameters: { type: 'object', properties: {} },
+    },
   ];
 }
 
