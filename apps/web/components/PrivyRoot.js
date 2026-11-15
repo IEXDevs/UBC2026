@@ -3,6 +3,7 @@
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
 import { privyProviderProps } from '../lib/privy-config.mjs';
+import AcceptTermsGate from './AcceptTermsGate';
 
 const props = privyProviderProps({
   appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
@@ -23,5 +24,9 @@ export default function PrivyRoot({ children }) {
     },
   };
   if (props.clientId) providerProps.clientId = props.clientId;
-  return <PrivyProvider {...providerProps}>{children}</PrivyProvider>;
+  return (
+    <PrivyProvider {...providerProps}>
+      <AcceptTermsGate>{children}</AcceptTermsGate>
+    </PrivyProvider>
+  );
 }
