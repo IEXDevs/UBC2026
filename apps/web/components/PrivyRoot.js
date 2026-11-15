@@ -1,8 +1,13 @@
 'use client';
 
+import { useEffect } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
 import { privyProviderProps } from '../lib/privy-config.mjs';
+import {
+  installPrivySessionMirror,
+  restorePrivySessionIfMissing,
+} from '../lib/privy-session.mjs';
 import { ToastProvider } from './bits/SwipeToast';
 import AcceptTermsGate from './AcceptTermsGate';
 
@@ -11,7 +16,23 @@ const props = privyProviderProps({
   clientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
 });
 
+function bootPrivySession() {
+  if (typeof window === 'undefined') return;
+  try {
+    restorePrivySessionIfMissing(window.localStorage, window.sessionStorage);
+    installPrivySessionMirror(window);
+  } catch {
+    /* private mode — Privy still owns its own storage */
+  }
+}
+
+bootPrivySession();
+
 export default function PrivyRoot({ children }) {
+  useEffect(() => {
+    bootPrivySession();
+  }, []);
+
   if (!props) return <ToastProvider>{children}</ToastProvider>;
   // Omit clientId unless set — a wrong App Client id makes login show
   // "Something went wrong" (often invalid_origin against that client's allowlist).

@@ -63,6 +63,7 @@ import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
 import { showSignInGate } from '../lib/sign-in-gate.mjs';
 import { idleLockDue } from '../lib/desk-lock.mjs';
+import { clearPrivySessionBackups } from '../lib/privy-session.mjs';
 
 const CONNECTORS = shellConnectors();
 const privyConfigured = privyProviderProps({
@@ -121,6 +122,11 @@ function AuthedShell() {
   const accountsKey = linkedAccountsKey(user);
 
   const onLogout = useCallback(async () => {
+    try {
+      clearPrivySessionBackups(window.localStorage, window.sessionStorage);
+    } catch {
+      /* still log out of Privy */
+    }
     await logout?.();
   }, [logout]);
 

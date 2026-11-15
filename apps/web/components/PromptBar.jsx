@@ -395,10 +395,8 @@ export default function PromptBar({
 
   const toggleListen = () => {
     if (listening) {
-      dictation.current += 1;
+      // Stop listening but keep the same seq so cancel's resolved transcript still applies.
       dictationJob.current?.cancel?.();
-      dictationJob.current = null;
-      setListening(false);
       return;
     }
     const seq = ++dictation.current;
