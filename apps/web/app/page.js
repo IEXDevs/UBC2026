@@ -323,6 +323,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       setTransfers([]);
       return undefined;
     }
+    if (!sessionReadyForWallets(signedIn, user)) return undefined;
     const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
     if (!runtimeBase) return undefined;
     let stop = false;
@@ -343,7 +344,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       }
     })();
     return () => { stop = true; };
-  }, [ownerId, getAccessToken]);
+  }, [ownerId, getAccessToken, signedIn, user]);
 
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
@@ -677,6 +678,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               }
               void (async () => {
                 try {
+                  if (!sessionReadyForWallets(signedIn, user)) return;
                   const token = await getAccessToken?.();
                   const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/transfers`, {
                     method: 'POST',
