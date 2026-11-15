@@ -5130,7 +5130,42 @@ legend {
   min-width: 0;
   min-height: 0;
   display: flex;
+  gap: 16px;
+  align-items: stretch;
 }
+
+.loop-beside {
+  width: 280px;
+  flex: none;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 14px;
+  border-radius: 16px;
+  background: rgba(20, 20, 20, 0.72);
+  color: #f5f5f5;
+}
+
+.loop-beside h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.loop-beside .hint { margin: 0 0 12px; color: #a3a3a3; font-size: 12px; }
+.loop-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.loop-step {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #161616;
+}
+.loop-step-label { font-size: 13px; font-weight: 600; }
+.loop-step-state { font-size: 11px; color: #a3a3a3; text-align: right; }
+.loop-step-detail { grid-column: 1 / -1; font-size: 12px; color: #a3a3a3; }
+.loop-step.is-pending { opacity: 0.55; }
+.loop-step.is-thinking .loop-step-state,
+.loop-step.is-verifying .loop-step-state,
+.loop-step.is-running .loop-step-state { color: #3dd6c6; }
+.loop-step.is-waiting .loop-step-state { color: #f5c16c; }
+.loop-step.is-executed .loop-step-state { color: #8fd18a; }
+.loop-step.is-error .loop-step-state { color: #ef4444; }
 
 .browser-preview .live-view.is-fill {
   flex: 1;
@@ -5189,6 +5224,8 @@ legend {
   .shell.has-detail,
   .shell.is-collapsed.has-detail { grid-template-columns: 1fr; }
   .agent-detail { border-left: 0; border-top: 1px solid var(--line); height: auto; }
+  .browser-preview-stage { flex-direction: column; }
+  .loop-beside { width: 100%; max-height: 34vh; }
 }
 
 @media (max-width: 700px) {
