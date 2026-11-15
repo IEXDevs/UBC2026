@@ -138,6 +138,9 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
           return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 0 } });
         }
         if (body.method === 'getTokenAccountsByOwner') {
+          if (body.params?.[1]?.programId === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') {
+            return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
+          }
           return Response.json({
             jsonrpc: '2.0',
             id: 1,
@@ -169,6 +172,7 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
   assert.equal(body.items[0].usdcBalance, '1234500');
   assert.equal(body.items[0].usdcBalanceLabel, '1.2345 USDC');
   assert.equal(body.items[0].solLamports, '0');
+  assert.equal(body.items[0].tokens[0].symbol, 'USDC');
   assert.equal(body.items[0].balanceStatus, 'ok');
   assert.equal(body.items[0].cluster, 'devnet');
   assert.equal(body.balances.onchainUsdc, '1234500');
@@ -176,8 +180,9 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
   assert.equal(JSON.stringify(body).includes('example.invalid'), false);
 });
 
-test('wallets.list reports SOL when wallets only hold native lamports', async () => {
-  const { DEVNET_GENESIS_HASH } = await import('@ubc2026/wallets/privy');
+test('wallets.list reports SOL and every SPL token in the wallet', async () => {
+  const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const otherMint = 'So11111111111111111111111111111111111111112';
   const env = fakeEnv({
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
@@ -205,7 +210,42 @@ test('wallets.list reports SOL when wallets only hold native lamports', async ()
           return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 1_500_000_000 } });
         }
         if (body.method === 'getTokenAccountsByOwner') {
-          return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
+          const programId = body.params?.[1]?.programId;
+          if (programId === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') {
+            return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
+          }
+          return Response.json({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              value: [
+                {
+                  account: {
+                    data: {
+                      parsed: {
+                        info: {
+                          mint: DEVNET_USDC_MINT,
+                          tokenAmount: { amount: '2500000', decimals: 6 },
+                        },
+                      },
+                    },
+                  },
+                },
+                {
+                  account: {
+                    data: {
+                      parsed: {
+                        info: {
+                          mint: otherMint,
+                          tokenAmount: { amount: '7000000000', decimals: 9 },
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          });
         }
       }
       return new Response('nope', { status: 404 });
@@ -217,10 +257,12 @@ test('wallets.list reports SOL when wallets only hold native lamports', async ()
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.items[0].solLamports, '1500000000');
-  assert.equal(body.items[0].solBalanceLabel, '1.5 SOL (devnet)');
-  assert.equal(body.items[0].usdcBalance, '0');
-  assert.equal(body.balances.displaySource, 'sol');
-  assert.equal(body.balances.displayBalanceLabel, '1.5 SOL (devnet)');
+  assert.equal(body.items[0].tokens.length, 2);
+  assert.equal(body.items[0].tokens[0].symbol, 'USDC');
+  assert.match(body.items[0].tokens[1].symbol, /So11/);
+  assert.match(body.balances.displayBalanceLabel, /1\.5 SOL \(devnet\)/);
+  assert.match(body.balances.displayBalanceLabel, /2\.5 USDC/);
+  assert.match(body.balances.displayBalanceLabel, /7 So11/);
 });
 
 test('wallets.list prefers platform transfer net for displayUsdcLabel', async () => {
@@ -261,24 +303,7 @@ test('wallets.list prefers platform transfer net for displayUsdcLabel', async ()
           return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 0 } });
         }
         if (body.method === 'getTokenAccountsByOwner') {
-          return Response.json({
-            jsonrpc: '2.0',
-            id: 1,
-            result: {
-              value: [{
-                account: {
-                  data: {
-                    parsed: {
-                      info: {
-                        mint: DEVNET_USDC_MINT,
-                        tokenAmount: { amount: '0', decimals: 6 },
-                      },
-                    },
-                  },
-                },
-              }],
-            },
-          });
+          return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
         }
       }
       return new Response('nope', { status: 404 });

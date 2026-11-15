@@ -12,7 +12,9 @@ import {
   planScheduledWork,
   readDevnetUsdcBalance,
   readDevnetWalletBalances,
+  parseTokenAccountsByMint,
   readStreamHealthFromSupabase,
+  SPL_TOKEN_PROGRAM_ID,
 } from './schedules.mjs';
 
 const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
@@ -107,8 +109,8 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
       if (body.method === 'getBalance') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 9 } });
       }
-      assert.deepEqual(body.params[1], { mint: DEVNET_USDC_MINT });
-      assert.notEqual(body.params[1].mint, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+      assert.equal(body.method, 'getTokenAccountsByOwner');
+      assert.equal(body.params[1].programId, SPL_TOKEN_PROGRAM_ID);
       return Response.json({
         jsonrpc: '2.0',
         id: 1,
@@ -143,6 +145,43 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
   assert.equal(both.ok, true);
   assert.equal(both.solLamports, '2000000000');
   assert.equal(both.usdcAmount, '0');
+  assert.deepEqual(both.tokens, []);
+
+  const otherMint = 'So11111111111111111111111111111111111111112';
+  const parsed = parseTokenAccountsByMint([
+    {
+      account: {
+        data: {
+          parsed: {
+            info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '10', decimals: 6 } },
+          },
+        },
+      },
+    },
+    {
+      account: {
+        data: {
+          parsed: {
+            info: { mint: otherMint, tokenAmount: { amount: '5000000000', decimals: 9 } },
+          },
+        },
+      },
+    },
+    {
+      account: {
+        data: {
+          parsed: {
+            info: { mint: otherMint, tokenAmount: { amount: '0', decimals: 9 } },
+          },
+        },
+      },
+    },
+  ]);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.tokens.length, 2);
+  assert.equal(parsed.tokens[0].symbol, 'USDC');
+  assert.equal(parsed.tokens[0].amount, '10');
+  assert.equal(parsed.tokens[1].amount, '5000000000');
 
   const missing = await readDevnetUsdcBalance({ address, fetcher: async () => { throw new Error('no'); } });
   assert.equal(missing.code, 'rpc_not_configured');
