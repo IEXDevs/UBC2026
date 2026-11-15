@@ -6,6 +6,7 @@ import {
   SPEED_MIN,
   VOICES,
   clampSpeed,
+  clampVolume,
   parseVoiceSettings,
   voiceSession,
 } from './voice-settings.mjs';
@@ -21,8 +22,13 @@ test('voice settings keep a known voice and a stepped speed', () => {
   assert.equal(clampSpeed(4), 2);
   assert.equal(clampSpeed(0.73), 0.75);
 
+  assert.equal(clampVolume('nope'), 100);
+  assert.equal(clampVolume(-4), 0);
+  assert.equal(clampVolume(40.4), 40);
+  assert.equal(clampVolume(140), 100);
+
   const fallback = parseVoiceSettings(null);
-  assert.deepEqual(fallback, { voiceId: DEFAULT_VOICE_SETTINGS.voiceId, speed: 0.9 });
+  assert.deepEqual(fallback, { voiceId: DEFAULT_VOICE_SETTINGS.voiceId, speed: 0.9, volume: 100, language: 'auto' });
 
   const adam = VOICES.find(voice => voice.name === 'Adam');
   const parsed = parseVoiceSettings({ voiceId: adam.id, speed: 1.17 });
@@ -33,4 +39,8 @@ test('voice settings keep a known voice and a stepped speed', () => {
   const dropped = parseVoiceSettings({ voiceId: 'not-a-voice', speed: 0.9 });
   assert.equal(dropped.voiceId, DEFAULT_VOICE_SETTINGS.voiceId);
   assert.equal(dropped.speed, 0.9);
+  assert.equal(dropped.volume, 100);
+  assert.equal(parseVoiceSettings({ volume: 37 }).volume, 37);
+  assert.equal(parseVoiceSettings({ language: 'es' }).language, 'es');
+  assert.equal(parseVoiceSettings({ language: 'nope' }).language, 'auto');
 });

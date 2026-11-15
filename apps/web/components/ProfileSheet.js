@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
+import AccountStats from './AccountStats';
+import { profileStats } from '../lib/statistics.mjs';
 import { motion } from 'motion/react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
 import ProfileMark from './ProfileMark';
@@ -15,6 +17,10 @@ export default function ProfileSheet({
   profile = null,
   glance,
   wallets,
+  voiceMs = 0,
+  talks = {},
+  payments = [],
+  transfers = [],
   signedIn,
   loginDisabled,
   onLogin,
@@ -112,6 +118,9 @@ export default function ProfileSheet({
           )}
         </div>
         <div className="profile-settings">
+          <p className="plugin-kicker">Stats</p>
+          <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
+          <p className="quiet">Talk time is seconds on this device. Net PnL is inflows minus outflows. devnet execution, mainnet pricing.</p>
           <p className="plugin-kicker">Wallet</p>
           {signedIn ? (
             <>

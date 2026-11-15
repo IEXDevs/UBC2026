@@ -118,6 +118,7 @@ export async function sendBotChat({
   name,
   goal,
   type,
+  permission,
   runtimeBase = runtimeBaseUrl(),
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
@@ -149,6 +150,7 @@ export async function sendBotChat({
         ...(typeof name === 'string' && name.trim() ? { name: name.trim().slice(0, 80) } : {}),
         ...(typeof goal === 'string' && goal.trim() ? { goal: goal.trim().slice(0, 2000) } : {}),
         ...(typeof type === 'string' && type.trim() ? { type: type.trim().slice(0, 40) } : {}),
+        ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
       }),
       cache: 'no-store',
     });

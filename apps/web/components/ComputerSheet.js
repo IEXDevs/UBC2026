@@ -34,7 +34,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
             <X size={18} strokeWidth={1.75} />
           </button>
         </header>
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} />
+        <LiveViewPanel botId={bot.id} ownerId={ownerId} fill />
       </section>
     </div>
   );

@@ -303,6 +303,7 @@ export function createBrowserSessionService({
         recordId = open[0].sessionRecordId;
       }
       const record = await requireOwned(ownerId, botId, recordId);
+      if (record.control === 'owner') fail('owner_has_control', 409);
       const tab = await browsers.openTab(record.providerSessionId, url);
       const updated = {
         ...record,
@@ -326,11 +327,22 @@ export function createBrowserSessionService({
       };
     },
 
-    async liveView({ ownerId, botId, sessionRecordId }) {
+    async liveView({ ownerId, botId, sessionRecordId, control }) {
       if (!browsers) throw new ProviderError('browser_not_configured', 503);
       const record = await requireOwned(ownerId, botId, sessionRecordId);
+      const nextControl = control === 'owner' || control === 'agent'
+        ? control
+        : (record.control === 'owner' ? 'owner' : 'agent');
+      if (nextControl !== record.control) {
+        await store.put(keyFor(ownerId, botId, sessionRecordId), {
+          ...record,
+          control: nextControl,
+          updatedAt: clock(),
+        });
+      }
       const view = await browsers.readonlyView(record.providerSessionId, {
         targetId: typeof record.targetId === 'string' ? record.targetId : undefined,
+        interactive: nextControl === 'owner',
       });
       const embed = describeLiveViewEmbed(view.viewerUrl);
       // Viewer URLs contain bearer credentials: return only to the authorized owner with no-store.
@@ -340,6 +352,7 @@ export function createBrowserSessionService({
         viewerUrl: view.viewerUrl,
         connectBefore: view.connectBefore,
         mode: view.mode,
+        control: nextControl,
         pageUrl: typeof record.url === 'string' ? record.url : null,
         headers: { 'Cache-Control': 'no-store' },
         embedVerified: embed.embedVerified,

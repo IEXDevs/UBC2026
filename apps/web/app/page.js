@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelLeftClose, PanelLeftOpen, Plus, Search } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import MoneyPane from '../components/MoneyPane';
@@ -18,10 +18,12 @@ import PartySheet from '../components/PartySheet';
 import PluginsSheet from '../components/PluginsSheet';
 import StatisticsSheet from '../components/StatisticsSheet';
 import AgentDetail from '../components/AgentDetail';
+import AgentEdit from '../components/AgentEdit';
 import ComputerSheet from '../components/ComputerSheet';
 import { getDemoShellState } from '../lib/demo-state.mjs';
 import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
+import { netChangeSummary } from '../lib/spend-permission.mjs';
 import { compactLines, contextUsage } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
 import { mergeRoster, reorderIds, withoutId } from '../lib/roster.mjs';
@@ -32,6 +34,7 @@ import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
+import { reviseThread } from '../lib/talk-edit.mjs';
 import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 
@@ -191,6 +194,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [detailWidth, setDetailWidth] = useState(280);
   const [paneDrag, setPaneDrag] = useState(false);
   const [activeBot, setActiveBot] = useState(base.bots[0].id);
+  const [cornerEdit, setCornerEdit] = useState(null);
+  const [pendingSend, setPendingSend] = useState(null);
   const [pane, setPane] = useState('Main');
   const [slide, setSlide] = useState('right');
   const [createOpen, setCreateOpen] = useState(false);
@@ -198,6 +203,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [walletsOpen, setWalletsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [talks, setTalks] = useState({});
+  const talksRef = useRef(talks);
+  talksRef.current = talks;
   const [talksReady, setTalksReady] = useState(false);
   const [thinkingBot, setThinkingBot] = useState(null);
   const [botRecords, setBotRecords] = useState(base.bots);
@@ -222,6 +229,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       return next;
     });
   }, [ownerId]);
+  function onEditLine(lineId, text) {
+    if (!bot || thinkingBot === bot.id) return;
+    const revised = reviseThread(talksRef.current[bot.id] ?? [], lineId, text);
+    if (!revised) return;
+    setTalks(current => ({
+      ...current,
+      [bot.id]: compactLines(revised.lines),
+    }));
+  }
   const appendTalk = useCallback((botId, line) => {
     setTalks(current => ({
       ...current,
@@ -432,13 +448,34 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     }));
     setLooks(current => ({
       ...current,
-      [created.id]: { name: created.name, shape: created.shape, color: created.color },
+      [created.id]: { name: created.name, shape: created.shape, color: created.color, image: created.image || '' },
     }));
     setActiveBot(created.id);
     setQuery('');
     setSlide('right');
     setPane('Main');
     setCreateOpen(false);
+  }
+
+  function onEditLook(id, patch) {
+    const currentBot = bots.find(item => item.id === id);
+    setLooks(current => {
+      const prev = current[id] ?? {};
+      const next = {
+        ...prev,
+        name: patch.name ?? currentBot?.name,
+        shape: patch.shape ?? currentBot?.shape,
+        color: patch.color ?? currentBot?.color,
+        image: patch.image ?? currentBot?.image ?? '',
+      };
+      return { ...current, [id]: next };
+    });
+    if (patch.name) {
+      setRoster(current => ({
+        ...current,
+        extra: current.extra.map(item => (item.id === id ? { ...item, name: patch.name, color: patch.color, shape: patch.shape } : item)),
+      }));
+    }
   }
 
   function onReorder(fromId, toId) {
@@ -552,8 +589,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
 
   return (
     <div
-      className={`shell${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
-      style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px` }}
+      className={`shell${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
+      style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
       <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
         <div
@@ -596,6 +633,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           onSelect={openChat}
           onReorder={onReorder}
           onDelete={onDelete}
+          onEdit={onEditLook}
           onCreate={() => setCreateOpen(true)}
         />
         <footer className="you">
@@ -615,7 +653,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         </footer>
       </aside>
 
-      <section className="stage">
+      <section className={`stage${pane === 'Positions' ? ' is-book' : ''}`}>
         <header className="topbar">
           <span className="topbar-side" />
           <PaneDock panes={base.panes} pane={pane} onChange={choosePane} />
@@ -632,6 +670,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                   lines={talks[bot.id] ?? []}
                   thinking={thinkingBot === bot.id}
                   onParty={setParty}
+                  onEdit={onEditLine}
                 />
               ) : (
                 <>
@@ -655,7 +694,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         </div>
         {bot ? (
           <Composer
-            key={bot.id}
             hidden={pane !== 'Main'}
             botId={bot.id}
             botName={bot.name}
@@ -663,62 +701,24 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
             botType={bot.type}
             ownerId={ownerId}
             lines={talks[bot.id] ?? []}
-            onLine={line => {
-              appendTalk(bot.id, line);
+            onLine={(line, forBot) => {
+              const id = forBot || bot.id;
+              appendTalk(id, line);
               if (line.role !== 'user') return;
               const command = parsePlatformSend(line.text);
               if (!command || !ownerId) return;
-              const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
-              const reply = (text) => appendTalk(bot.id, { id: `${line.id}-send`, role: 'assistant', text });
-              if (!runtimeBase) {
-                reply('Platform sends need the agent runtime.');
-                toast?.('Platform sends need the agent runtime.');
-                return;
-              }
-              void (async () => {
-                try {
-                  const token = await getAccessToken?.();
-                  const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/transfers`, {
-                    method: 'POST',
-                    headers: {
-                      'content-type': 'application/json',
-                      ...(token ? { authorization: `Bearer ${token}` } : {}),
-                      'x-owner-id': ownerId,
-                    },
-                    body: JSON.stringify({
-                      ...command,
-                      botId: bot.id,
-                      idempotencyKey: `send_${bot.id}_${command.handle}_${command.amount}`.replace(/[^a-zA-Z0-9:_-]/g, '_'),
-                    }),
-                  });
-                  const body = await response.json().catch(() => ({}));
-                  if (!response.ok || !body.transfer) {
-                    const reason = body.error === 'handle_missing'
-                      ? `@${command.handle} is not on Maelstrom.`
-                      : body.error === 'wallet_frozen'
-                        ? 'That wallet is frozen.'
-                        : body.error === 'recipient_wallet_missing'
-                          ? `@${command.handle} does not have a wallet yet.`
-                          : body.error === 'policy_blocked'
-                            ? 'The agent policy blocked this send.'
-                            : 'The send did not post.';
-                    reply(reason);
-                    toast?.(reason);
-                    return;
-                  }
-                  setTransfers(current => [body.transfer, ...current.filter(item => item.id !== body.transfer.id)]);
-                  reply(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}. It is in their wallet.`);
-                  toast?.(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}`);
-                } catch {
-                  reply('The send did not post.');
-                  toast?.('The send did not post.');
-                }
-              })();
+              setPendingSend({
+                botId: id,
+                lineId: line.id,
+                command,
+                summary: netChangeSummary({ amount: command.amount, asset: 'USDC', handle: command.handle }),
+              });
             }}
             onThinking={on => setThinkingBot(on ? bot.id : null)}
             onVoiceSpan={addVoice}
             resolveMention={resolveMention}
             usage={contextUsage(talks[bot.id] ?? [])}
+            onEditLine={onEditLine}
             onAttach={items => {
               setLibrary(current => {
                 const prev = current[bot.id] ?? [];
@@ -739,6 +739,17 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           onResize={event => dragPane(event, 'right')}
           onWallet={() => { setCreateOpen(false); setProfileOpen(false); setPluginsOpen(false); setStatsOpen(false); setWalletsOpen(true); }}
           onComputer={() => onAccount('computer')}
+          onEdit={(event) => setCornerEdit({ x: event.clientX, y: event.clientY })}
+        />
+      ) : null}
+      {cornerEdit && bot ? (
+        <AgentEdit
+          bot={bot}
+          x={cornerEdit.x}
+          y={cornerEdit.y}
+          onClose={() => setCornerEdit(null)}
+          onSave={onEditLook}
+          onDelete={(id) => { onDelete(id); setCornerEdit(null); }}
         />
       ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
@@ -759,7 +770,89 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         bots={bots}
         ownerId={ownerId}
         voiceMs={voiceMs}
+        talks={talks}
+        payments={base.payments}
+        transfers={transfers}
       />
+      {pendingSend ? (
+        <div className="backdrop is-center" onMouseDown={() => setPendingSend(null)}>
+          <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Transaction summary" onMouseDown={event => event.stopPropagation()}>
+            <h2>{pendingSend.summary.title}</h2>
+            <ul>
+              {pendingSend.summary.lines.map(row => (
+                <li key={`${row.label}-${row.signed}`}>
+                  <span>{row.label}</span>
+                  <strong>{row.signed}</strong>
+                </li>
+              ))}
+            </ul>
+            <p className="spend-net"><span>Net</span><span>{pendingSend.summary.net}</span></p>
+            <p className="quiet">A transaction always waits for you. Nothing is signed until you confirm.</p>
+            <div className="spend-actions">
+              <button type="button" className="ghost" onClick={() => {
+                appendTalk(pendingSend.botId, { id: `${pendingSend.lineId}-send`, role: 'assistant', text: 'The send stayed unsent.' });
+                setPendingSend(null);
+              }}
+              >
+                Cancel
+              </button>
+              <button type="button" className="solid" onClick={() => {
+                const pending = pendingSend;
+                setPendingSend(null);
+                const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+                const reply = (text) => appendTalk(pending.botId, { id: `${pending.lineId}-send`, role: 'assistant', text });
+                if (!runtimeBase) {
+                  reply('Platform sends need the agent runtime.');
+                  toast?.('Platform sends need the agent runtime.');
+                  return;
+                }
+                void (async () => {
+                  try {
+                    const token = await getAccessToken?.();
+                    const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/transfers`, {
+                      method: 'POST',
+                      headers: {
+                        'content-type': 'application/json',
+                        ...(token ? { authorization: `Bearer ${token}` } : {}),
+                        'x-owner-id': ownerId,
+                      },
+                      body: JSON.stringify({
+                        ...pending.command,
+                        botId: pending.botId,
+                        idempotencyKey: `send_${pending.botId}_${pending.command.handle}_${pending.command.amount}`.replace(/[^a-zA-Z0-9:_-]/g, '_'),
+                      }),
+                    });
+                    const body = await response.json().catch(() => ({}));
+                    if (!response.ok || !body.transfer) {
+                      const reason = body.error === 'handle_missing'
+                        ? `@${pending.command.handle} is not on Maelstrom.`
+                        : body.error === 'wallet_frozen'
+                          ? 'That wallet is frozen.'
+                          : body.error === 'recipient_wallet_missing'
+                            ? `@${pending.command.handle} does not have a wallet yet.`
+                            : body.error === 'policy_blocked'
+                              ? 'The agent policy blocked this send.'
+                              : 'The send did not post.';
+                      reply(reason);
+                      toast?.(reason);
+                      return;
+                    }
+                    setTransfers(current => [body.transfer, ...current.filter(item => item.id !== body.transfer.id)]);
+                    reply(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}. It is in their wallet.`);
+                    toast?.(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}`);
+                  } catch {
+                    reply('The send did not post.');
+                    toast?.('The send did not post.');
+                  }
+                })();
+              }}
+              >
+                Confirm
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <ProfileSheet
         open={profileOpen}
         onClose={closeProfile}
@@ -768,6 +861,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         profile={profile}
         glance={glance}
         wallets={wallets}
+        voiceMs={voiceMs}
+        talks={talks}
+        payments={base.payments}
+        transfers={transfers}
         signedIn={signedIn}
         loginDisabled={loginDisabled}
         onLogin={onLogin}

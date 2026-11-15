@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileText, Film, Globe, Image as ImageIcon, MoreHorizontal, Music } from 'lucide-react';
 import { fileKind, filterLibrary, libraryGroups } from '../lib/file-library.mjs';
 import BotMark from './BotMark';
@@ -10,9 +10,16 @@ const FILTERS = [
   { id: 'pages', label: 'Pages' },
   { id: 'media', label: 'Media' },
   { id: 'files', label: 'Files' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 const PREVIEW_COUNT = 4;
+
+function computerStatus(status) {
+  if (status === 'watching') return 'Awake';
+  if (status === 'paused') return 'Paused';
+  return 'Asleep';
+}
 
 function FileGlyph({ file }) {
   const kind = fileKind(file);
@@ -53,12 +60,20 @@ function FileGroup({ label, files, onOpen }) {
   );
 }
 
-export default function FileLibrary({ bot, files = [], onComputer }) {
+export default function FileLibrary({ bot, files = [], onComputer, onEdit }) {
   const [filter, setFilter] = useState('all');
   const [preview, setPreview] = useState(null);
   const [menu, setMenu] = useState(false);
   const rows = filterLibrary(files, filter);
   const { fresh, older } = libraryGroups(rows);
+  const settingsOpen = filter === 'settings';
+
+  useEffect(() => {
+    if (!settingsOpen) return undefined;
+    const node = document.getElementById('detail-settings');
+    window.dispatchEvent(new CustomEvent('detail-settings', { detail: node }));
+    return () => window.dispatchEvent(new CustomEvent('detail-settings', { detail: null }));
+  }, [settingsOpen]);
 
   return (
     <div className="file-library">
@@ -72,8 +87,8 @@ export default function FileLibrary({ bot, files = [], onComputer }) {
           </div>
         ) : null}
       </div>
-      <header>
-        <BotMark shape={bot.shape} color={bot.color} size={72} />
+      <header onContextMenu={(event) => { event.preventDefault(); onEdit?.(event); }}>
+        <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={72} />
         <strong>{bot.name}</strong>
       </header>
       <div className="library-filters" role="tablist" aria-label="Library">
@@ -90,9 +105,29 @@ export default function FileLibrary({ bot, files = [], onComputer }) {
           </button>
         ))}
       </div>
-      {rows.length === 0 ? <p className="library-empty">No files yet.</p> : null}
-      <FileGroup label="This week" files={fresh} onOpen={setPreview} />
-      <FileGroup label="Older" files={older} onOpen={setPreview} />
+      {settingsOpen ? (
+        <div className="side-options">
+          <section>
+            <h3>Computer</h3>
+            <button type="button" className="side-option" onClick={() => onComputer?.()}>
+              <span>
+                <strong>Bot&apos;s computer</strong>
+                <small>{computerStatus(bot.status)}</small>
+              </span>
+              <span className="side-option-mark">
+                <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={36} />
+              </span>
+            </button>
+          </section>
+          <section>
+            <h3>Voice chat</h3>
+            <div className="side-option-card" id="detail-settings" />
+          </section>
+        </div>
+      ) : null}
+      {!settingsOpen && rows.length === 0 ? <p className="library-empty">No files yet.</p> : null}
+      {settingsOpen ? null : <FileGroup label="This week" files={fresh} onOpen={setPreview} />}
+      {settingsOpen ? null : <FileGroup label="Older" files={older} onOpen={setPreview} />}
       {preview ? (
         <div className="library-preview" role="dialog" aria-label={preview.name}>
           <button type="button" onClick={() => setPreview(null)}>Close</button>

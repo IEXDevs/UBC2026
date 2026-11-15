@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { animate, useReducedMotion } from 'motion/react';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowDown01Icon, SparklesIcon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { Orb } from '@yogesharc/thinking-orbs';
+import { chatOrbLook } from '../lib/voice-orb.mjs';
 import './ThoughtLine.css';
 
 const EASE_OUT = [0.23, 1, 0.32, 1];
@@ -168,7 +170,9 @@ export default function ThoughtLine({
     <>
       {glyph !== 'none' ? (
         <span ref={glyphRef} className="thought-line__glyph" aria-hidden="true">
-          {glyph === 'sparkle' ? (
+          {glyph === 'sparkle' && isWorking ? (
+            <Orb state={chatOrbLook('think').state} size={Math.max(14, fontSize)} label={chatOrbLook('think').label} />
+          ) : glyph === 'sparkle' ? (
             <HugeiconsIcon icon={SparklesIcon} size="100%" strokeWidth={2} />
           ) : glyph === 'dot' ? (
             <span className="thought-line__dot" />
@@ -250,7 +254,7 @@ export default function ThoughtLine({
                       {done ? (
                         <HugeiconsIcon icon={Tick02Icon} size="1em" strokeWidth={2.5} />
                       ) : (
-                        <i className="thought-line__pulse" />
+                        <Orb state={chatOrbLook('tool').state} size={14} label={chatOrbLook('tool').label} />
                       )}
                     </span>
                     <span className="thought-line__step-text">{text}</span>

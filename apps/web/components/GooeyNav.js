@@ -54,7 +54,7 @@ const FRAGMENT = `#version 300 es
 precision highp float;
 
 uniform vec2 uSize;
-uniform float uRatio;
+uniform vec2 uScale;
 uniform vec4 uPills[${MAX_PILLS}];
 uniform vec4 uHover;
 uniform vec4 uDrops[${MAX_DROPS}];
@@ -106,7 +106,7 @@ vec4 field(vec2 p) {
 }
 
 void main() {
-  vec2 p = vec2(gl_FragCoord.x, uSize.y * uRatio - gl_FragCoord.y) / uRatio;
+  vec2 p = vec2(gl_FragCoord.x / uScale.x, uSize.y - gl_FragCoord.y / uScale.y);
   vec4 shape = field(p);
   float d = shape.w;
   float aa = max(fwidth(d), 0.35);
@@ -172,7 +172,7 @@ const compile = (gl, type, source) => {
 
 const UNIFORMS = [
   'uSize',
-  'uRatio',
+  'uScale',
   'uPills',
   'uHover',
   'uDrops',
@@ -284,10 +284,31 @@ const GooeyNav = ({
     let raf = 0;
     let last = 0;
     let disposed = false;
+    let layoutSig = '';
 
     const measure = () => {
-      const box = stage.getBoundingClientRect();
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const mid = Math.floor((list.children.length - 1) / 2);
+      const active = list.querySelector(':scope > [data-active]');
+      const activeIndex = active ? Array.prototype.indexOf.call(list.children, active) : -1;
+      if (drops.length === 0 && active && activeIndex === mid && list.children.length > 1) {
+        const first = list.children[0].getBoundingClientRect();
+        const last = list.children[list.children.length - 1].getBoundingClientRect();
+        const host = active.getBoundingClientRect();
+        const padL = parseFloat(list.style.paddingLeft) || 0;
+        const padR = parseFloat(list.style.paddingRight) || 0;
+        const left = host.left - first.left;
+        const right = last.right - host.right;
+        const nextL = Math.max(0, Math.round((right - left) * 2) / 2);
+        const nextR = Math.max(0, Math.round((left - right) * 2) / 2);
+        if (Math.abs(nextL - padL) >= 0.5 || Math.abs(nextR - padR) >= 0.5) {
+          list.style.paddingLeft = `${nextL}px`;
+          list.style.paddingRight = `${nextR}px`;
+          overlay.style.paddingLeft = `${nextL}px`;
+          overlay.style.paddingRight = `${nextR}px`;
+        }
+      }
+      const box = stage.getBoundingClientRect();
       view.width = box.width;
       view.height = box.height;
       const outerWidth = box.width + MARGIN * 2;
@@ -518,8 +539,10 @@ const GooeyNav = ({
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
       gl.enableVertexAttribArray(position);
       gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-      gl.uniform2f(uniforms.uSize, view.width + MARGIN * 2, view.height + MARGIN * 2);
-      gl.uniform1f(uniforms.uRatio, canvas.width / Math.max(1, view.width + MARGIN * 2));
+      const cssWidth = view.width + MARGIN * 2;
+      const cssHeight = view.height + MARGIN * 2;
+      gl.uniform2f(uniforms.uSize, cssWidth, cssHeight);
+      gl.uniform2f(uniforms.uScale, canvas.width / Math.max(1, cssWidth), canvas.height / Math.max(1, cssHeight));
       gl.uniform4fv(uniforms.uPills, pillData);
       gl.uniform4f(uniforms.uHover, hover.x + MARGIN, hover.y + MARGIN, hover.w / 2, hover.h / 2);
       gl.uniform4fv(uniforms.uDrops, dropData);
@@ -608,6 +631,10 @@ const GooeyNav = ({
 
       render();
 
+      const layoutNow = rects.map(rect => `${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.w)}:${Math.round(rect.h)}`).join(';');
+      const layoutMoved = layoutNow !== layoutSig;
+      layoutSig = layoutNow;
+
       const host = pills.get(target);
       const resting =
         drops.length === 0 &&
@@ -619,7 +646,7 @@ const GooeyNav = ({
       const hovering =
         Math.abs(hoverGoal - hover.alpha) > 0.003 ||
         (hoverRect && Math.abs(hoverRect.x + hoverRect.w / 2 - hover.x) + Math.abs(hoverRect.w - hover.w) > 0.1);
-      if (!resting || hovering) raf = requestAnimationFrame(frame);
+      if (!resting || hovering || layoutMoved) raf = requestAnimationFrame(frame);
       else {
         host.mass = 1;
         host.scale = 1;
@@ -696,6 +723,7 @@ const GooeyNav = ({
       measure();
       if (!drops.length) settle(target < 0 ? indexRef.current : target);
       else render();
+      wake();
     });
     resizeObserver.observe(stage);
     resizeObserver.observe(list);

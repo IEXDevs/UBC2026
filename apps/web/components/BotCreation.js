@@ -12,6 +12,7 @@ import {
   visibleTemplates,
   walletPickerOptions,
 } from '../lib/creation-flow.mjs';
+import GlideSelect from './GlideSelect';
 
 const TYPES = [
   ['trading', 'Trading'],
@@ -122,19 +123,19 @@ export default function BotCreation({ ownerId, userTemplates, onTemplatesChange,
 
         <label className="field">
           Wallet
-          <select
-            aria-label="Wallet"
+          <GlideSelect
+            ariaLabel="Wallet"
+            placeholder="Choose a wallet"
+            menuWidth={280}
             value={form.walletId}
-            onChange={event => update({ walletId: event.target.value })}
-            required
-          >
-            <option value="">Choose a wallet</option>
-            {walletOptions.map(option => (
-              <option key={option.wallet.id} value={option.wallet.id} disabled={!option.selectable}>
-                {option.wallet.label} · {option.wallet.kind}{option.selectable ? '' : ' · frozen'}
-              </option>
-            ))}
-          </select>
+            options={walletOptions.map(option => ({
+              value: option.wallet.id,
+              label: `${option.wallet.label} · ${option.wallet.kind}`,
+              tag: option.selectable ? undefined : 'Frozen',
+              disabled: !option.selectable,
+            }))}
+            onChange={walletId => update({ walletId })}
+          />
         </label>
 
         <fieldset>

@@ -1,18 +1,20 @@
 /** Browser-only bot order and locally created agents. Not a server record. */
 
-import { SHAPES } from './bot-look.mjs';
+import { randomShape, SHAPES } from './bot-look.mjs';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const ID = /^bot_[a-z0-9_]{1,40}$/;
 
 export function draftBot({ name, shape, color, id } = {}) {
   const trimmed = typeof name === 'string' ? name.trim().slice(0, 64) : '';
-  if (!trimmed || !SHAPES.includes(shape) || typeof color !== 'string' || !HEX.test(color)) return null;
+  if (!trimmed || typeof color !== 'string' || !HEX.test(color)) return null;
+  const nextShape = SHAPES.includes(shape) ? shape : (shape == null ? randomShape() : null);
+  if (!nextShape) return null;
   const nextId = typeof id === 'string' && ID.test(id) ? id : `bot_${Math.random().toString(36).slice(2, 10)}`;
   return {
     id: nextId,
     name: trimmed,
-    shape,
+    shape: nextShape,
     color: color.toLowerCase(),
     type: 'trading',
     status: 'idle',

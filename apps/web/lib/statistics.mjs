@@ -2,7 +2,53 @@
  * Profile statistics. Voice time is measured on this device.
  * Spend counts come from the same owner rollup as the runtime metrics route.
  */
+import { estimateTokens, formatTokens } from './context-usage.mjs';
+import { formatBaseUnits } from './money-views.mjs';
 import { buildBotStats, buildOverview } from './overview.mjs';
+
+const AMOUNT = /^(0|[1-9][0-9]{0,39})$/;
+
+function units(value) {
+  return typeof value === 'string' && AMOUNT.test(value) ? BigInt(value) : 0n;
+}
+
+function usdcFlow(row) {
+  if (row?.asset && row.asset !== 'USDC') return null;
+  if (row?.direction === 'paid' || row?.direction === 'out') return 'out';
+  if (row?.direction === 'earned' || row?.direction === 'in') return 'in';
+  return null;
+}
+
+function usdcLabel(amount, signed = false) {
+  const negative = amount < 0n;
+  const body = formatBaseUnits((negative ? -amount : amount).toString());
+  return `${signed && negative ? '−' : ''}${body} USDC`;
+}
+
+/** Owner figures for the profile and the statistics sheet. */
+export function profileStats({ voiceMs = 0, talks = {}, payments = [], transfers = [] } = {}) {
+  const lines = Object.values(talks && typeof talks === 'object' ? talks : {}).flatMap(rows => (
+    Array.isArray(rows) ? rows : []
+  ));
+  const seconds = Math.floor(Math.max(0, Number(voiceMs) || 0) / 1000);
+  const messages = lines.filter(line => line?.role === 'user').length;
+  const tokens = lines.reduce((sum, line) => sum + estimateTokens(line?.text), 0);
+  let inflow = 0n;
+  let outflow = 0n;
+  for (const row of [...(Array.isArray(payments) ? payments : []), ...(Array.isArray(transfers) ? transfers : [])]) {
+    const flow = usdcFlow(row);
+    const amount = units(row?.amount);
+    if (flow === 'in') inflow += amount;
+    if (flow === 'out') outflow += amount;
+  }
+  return [
+    { key: 'voice', label: 'Talk time', value: `${seconds}s` },
+    { key: 'messages', label: 'Messages sent', value: String(messages) },
+    { key: 'tokens', label: 'Tokens used', value: formatTokens(tokens) },
+    { key: 'spent', label: 'Money spent', value: usdcLabel(outflow) },
+    { key: 'pnl', label: 'Net PnL', value: usdcLabel(inflow - outflow, true) },
+  ];
+}
 
 export function voiceMinutes(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return 0;
