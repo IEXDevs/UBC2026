@@ -9,6 +9,7 @@ import { runPermissionedSpend } from '@ubc2026/agent-loop';
 import { transferDevnetUsdc } from '@ubc2026/transfers';
 import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
 import { loadOwnerLoopContext, supabaseConfig } from './supabase-rest.mjs';
+import { alertFromSpend, publishBotAlert } from './bot-alerts.mjs';
 
 function json(body, status = 200) {
   return Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
@@ -113,5 +114,15 @@ export async function handleSpend(request, env = {}) {
     reason: result.reason || null,
   };
   if (result.signed === true) body.signature = result.signature;
+  const alert = alertFromSpend(result, parsed);
+  if (alert) {
+    await publishBotAlert(env, {
+      alert,
+      botId: parsed.botId,
+      ownerId,
+      at: now,
+      scope: parsed.idempotencyKey || `${parsed.action}_${parsed.amount}`,
+    });
+  }
   return json(body, result.signed ? 200 : 409);
 }

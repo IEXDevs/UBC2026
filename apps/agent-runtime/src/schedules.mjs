@@ -240,6 +240,7 @@ function mapBotRow(row) {
     enabled: row.enabled !== false,
     frozen: row.frozen === true,
     maxLoss: asAmount(row.max_loss),
+    ownerId: typeof row.owner_id === 'string' ? row.owner_id : null,
     asset: typeof row.cap_asset === 'string' ? row.cap_asset : null,
     address: typeof wallet?.address === 'string' ? wallet.address : null,
     positions: [],
@@ -250,7 +251,7 @@ function mapBotRow(row) {
 export async function listScheduledBotsFromSupabase(env, fetcher = fetch) {
   const result = await supabaseGet(
     env,
-    'bots?enabled=eq.true&select=id,goal,type,enabled,frozen,max_loss,cap_asset,wallets(address)',
+    'bots?enabled=eq.true&select=id,owner_id,goal,type,enabled,frozen,max_loss,cap_asset,wallets(address)',
     fetcher,
   );
   if (!result.rows) return [];

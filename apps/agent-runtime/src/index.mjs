@@ -21,6 +21,7 @@ import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs
 import { enrichEnv } from './runtime-env.mjs';
 import { handleApiData } from './api-data.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
+import { rememberBotAlert } from './bot-alerts.mjs';
 import { supabaseConfig } from './supabase-rest.mjs';
 import { corsPreflightResponse, withCors } from './cors.mjs';
 
@@ -286,6 +287,7 @@ function checkPayload(bot, { reason, quotes, balance, now }) {
     goal: typeof bot.goal === 'string' ? bot.goal : '',
     type: bot.type ?? null,
     maxLoss: bot.maxLoss ?? bot.cap?.maxLoss ?? null,
+    ownerId: typeof bot.ownerId === 'string' ? bot.ownerId : null,
     positions: Array.isArray(bot.positions) ? bot.positions : [],
     quotes: quotes ?? {},
     balance: balance ?? null,
@@ -317,9 +319,22 @@ function deliverCheck(env, bot, details) {
   for (const [mint, quote] of Object.entries(payload.quotes ?? {})) quotes[mint] = slimQuote(quote);
   payload.quotes = quotes;
   payload.balance = recorded.balance;
-  return botStub(env, bot.id).fetch(new Request('https://bot/position-check', {
+  const response = botStub(env, bot.id).fetch(new Request('https://bot/position-check', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   })).then(response => response, () => Response.json({ ok: false, check: recorded }));
+  if (recorded.flag === 'max-loss' && payload.ownerId) {
+    return response.then(async (delivered) => {
+      await rememberBotAlert(env, null, {
+        alert: 'max-loss',
+        botId: bot.id,
+        ownerId: payload.ownerId,
+        at: payload.now,
+        scope: payload.now,
+      });
+      return delivered;
+    });
+  }
+  return response;
 }
