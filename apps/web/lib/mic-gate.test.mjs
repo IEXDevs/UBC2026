@@ -50,6 +50,24 @@ test('mute disables the track and ignores a later enable', async () => {
   assert.equal(devices.getUserMedia, native);
 });
 
+test('a missing microphone uses a silent input so the call can start', async () => {
+  const silent = new FakeTrack();
+  const devices = {
+    getUserMedia() {
+      const error = new Error('Requested device not found');
+      error.name = 'NotFoundError';
+      return Promise.reject(error);
+    },
+  };
+  const gate = createMicGate({
+    silentStream: () => ({ getAudioTracks: () => [silent] }),
+  });
+  gate.arm(devices);
+  const stream = await devices.getUserMedia({ audio: true });
+  assert.equal(stream.getAudioTracks()[0], silent);
+  assert.equal(silent.enabled, true);
+});
+
 test('a microphone opened while muted starts disabled', async () => {
   const track = new FakeTrack();
   const devices = devicesWith({ getAudioTracks: () => [track] });

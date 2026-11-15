@@ -54,7 +54,28 @@ function unlockTrack(track) {
   track.enabled = current;
 }
 
-export function createMicGate() {
+export function missingMicrophoneError(error) {
+  const name = String(error?.name || '');
+  return name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError';
+}
+
+function browserSilentStream() {
+  const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (typeof Ctx !== 'function') {
+    throw new Error('No microphone is available.');
+  }
+  const context = new Ctx();
+  const destination = context.createMediaStreamDestination();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  gain.gain.value = 0;
+  oscillator.connect(gain);
+  gain.connect(destination);
+  oscillator.start();
+  return destination.stream;
+}
+
+export function createMicGate({ silentStream = browserSilentStream } = {}) {
   const tracks = new Set();
   let muted = false;
   let generation = 0;
@@ -89,10 +110,16 @@ export function createMicGate() {
       if (original || !mediaDevices?.getUserMedia) return generation;
       const raw = mediaDevices.getUserMedia;
       const native = raw.bind(mediaDevices);
-      const wrapped = (constraints) => Promise.resolve(native(constraints)).then((stream) => {
-        hold(stream);
-        return stream;
-      });
+      const wrapped = (constraints) => Promise.resolve()
+        .then(() => native(constraints))
+        .catch((error) => {
+          if (!missingMicrophoneError(error)) throw error;
+          return silentStream();
+        })
+        .then((stream) => {
+          hold(stream);
+          return stream;
+        });
       try {
         mediaDevices.getUserMedia = wrapped;
         original = raw;
