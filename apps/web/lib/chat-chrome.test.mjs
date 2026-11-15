@@ -9,6 +9,8 @@ const css = readFileSync(join(root, 'app/globals.css'), 'utf8');
 const rail = readFileSync(join(root, 'components/AnimatedList.css'), 'utf8');
 const bubbles = readFileSync(join(root, 'components/ChatBubbles.js'), 'utf8');
 const page = readFileSync(join(root, 'app/page.js'), 'utf8');
+const composer = readFileSync(join(root, 'components/Composer.js'), 'utf8');
+const promptBar = readFileSync(join(root, 'components/PromptBar.jsx'), 'utf8');
 
 test('the edit button stays hidden until the message is hovered or focused', () => {
   const start = css.indexOf('button.chat-edit {');
@@ -67,4 +69,12 @@ test('a chat message stays on its own side of the midline', () => {
   assert.match(block, /\[data-align='end'\] \[data-slot='message-content'\] \{\s*margin-left: auto;/);
   assert.match(block, /\.agent-thread \[data-slot='bubble'\] \{\s*max-width: 100%;/);
   assert.doesNotMatch(block, /max-width: min\(72%/);
+});
+
+test('the prompt bar exposes both dictation and live voice mode', () => {
+  assert.match(promptBar, /aria-label=\{listening \? 'Stop dictation' : 'Dictate'\}/);
+  assert.match(composer, /onDictate=\{live \? undefined : runDictation\}/);
+  assert.match(composer, /startBrowserDictation/);
+  assert.match(composer, /aria-label=\{live \? `Stop voice mode with \$\{callName \|\| botName\}` : 'Voice mode'\}/);
+  assert.match(composer, /className=\{`voice-mode\$\{live \? ' is-on' : ''\}`\}/);
 });

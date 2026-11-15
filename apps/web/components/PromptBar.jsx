@@ -160,6 +160,7 @@ export default function PromptBar({
   const rowRefs = useRef([]);
   const lastOpen = useRef(null);
   const dictation = useRef(0);
+  const dictationJob = useRef(null);
   const latest = useRef({});
   latest.current = { onSend, onStop, onAttach, onDictate, onEffortChange, onDraftChange, onChipClick, onRemoveAttachment };
 
@@ -253,6 +254,8 @@ export default function PromptBar({
 
   useEffect(() => () => {
     dictation.current += 1;
+    dictationJob.current?.cancel?.();
+    dictationJob.current = null;
   }, []);
 
   useEffect(() => {
@@ -393,14 +396,19 @@ export default function PromptBar({
   const toggleListen = () => {
     if (listening) {
       dictation.current += 1;
+      dictationJob.current?.cancel?.();
+      dictationJob.current = null;
       setListening(false);
       return;
     }
     const seq = ++dictation.current;
     setListening(true);
-    Promise.resolve(latest.current.onDictate?.()).then(
+    const job = latest.current.onDictate?.();
+    dictationJob.current = job && typeof job === 'object' ? job : null;
+    Promise.resolve(job).then(
       (text) => {
         if (seq !== dictation.current) return;
+        dictationJob.current = null;
         setListening(false);
         if (text) {
           setDraft((d) => {
@@ -412,7 +420,10 @@ export default function PromptBar({
         focusInput();
       },
       () => {
-        if (seq === dictation.current) setListening(false);
+        if (seq === dictation.current) {
+          dictationJob.current = null;
+          setListening(false);
+        }
       },
     );
   };

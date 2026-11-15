@@ -16,6 +16,10 @@ import GlideSelect from './GlideSelect';
 import PromptBar from './PromptBar';
 import { clampFloat, FLOAT_SIZE, FLOAT_STORAGE_KEY } from '../lib/voice-float.mjs';
 import { createMicGate } from '../lib/mic-gate.mjs';
+import {
+  dictationBusyError,
+  startBrowserDictation,
+} from '../lib/dictation.mjs';
 import { mentionIn, recipientHint } from '../lib/profile.mjs';
 import AddressCopy from './AddressCopy';
 import {
@@ -97,6 +101,7 @@ export default function Composer({
   const sessionRef = useRef(null);
   const micGate = useRef(null);
   if (!micGate.current) micGate.current = createMicGate();
+  const dictationRef = useRef(null);
   const modeRef = useRef('listening');
   const vadRef = useRef(0);
   const connectingRef = useRef(false);
@@ -451,6 +456,18 @@ export default function Composer({
     sealMic();
   }
 
+  function runDictation() {
+    if (presenceRef.current !== 'off' || sessionRef.current || connectingRef.current) {
+      return Promise.reject(dictationBusyError());
+    }
+    dictationRef.current?.cancel?.();
+    const job = startBrowserDictation();
+    dictationRef.current = job;
+    return Promise.resolve(job).finally(() => {
+      if (dictationRef.current === job) dictationRef.current = null;
+    });
+  }
+
   async function startSession() {
     if (sessionRef.current || connectingRef.current) {
       setMode('full');
@@ -460,6 +477,8 @@ export default function Composer({
       if (presenceRef.current !== 'leave') setMode('full');
       return;
     }
+    dictationRef.current?.cancel?.();
+    dictationRef.current = null;
     connectingRef.current = true;
     const id = botIdRef.current;
     callBotRef.current = id;
@@ -706,6 +725,7 @@ export default function Composer({
           extraReady={files.length > 0}
           chips={files.length > 0 ? <Attachments files={files} onRemove={dropFile} /> : null}
           onSend={(text) => sendMessage(text)}
+          onDictate={live ? undefined : runDictation}
           permission={permission}
           onPermissionChange={(next) => {
             const mode = parsePermission(next);
@@ -717,8 +737,9 @@ export default function Composer({
             <button
               type="button"
               className={`voice-mode${live ? ' is-on' : ''}`}
-              aria-label={live ? `Stop voice with ${callName || botName}` : 'Voice'}
+              aria-label={live ? `Stop voice mode with ${callName || botName}` : 'Voice mode'}
               aria-pressed={live}
+              title={live ? 'Stop voice mode' : 'Talk live with the agent'}
               onMouseDown={event => event.preventDefault()}
               onClick={() => { if (live) closeStage(); else startSession(); }}
             >
