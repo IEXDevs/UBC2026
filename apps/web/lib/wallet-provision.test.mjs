@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   missingWalletSecrets,
   resolvePrivyAppId,
+  walletConfigNote,
   walletProvisionNote,
   walletsFromPrivyUser,
 } from './wallet-provision.mjs';
@@ -104,4 +105,8 @@ test('wallet provision notes stay actionable and secret-free', () => {
     'Main wallet created and assigned to these agents.',
   );
   assert.equal(walletProvisionNote({ error: 'missing_config', missing: ['evil; drop'] }).includes('evil'), false);
+  assert.match(walletProvisionNote({ error: 'token_missing' }), /access token/);
+  assert.match(walletConfigNote({ missing: ['PRIVY_APP_SECRET'] }), /PRIVY_APP_SECRET/);
+  assert.match(walletConfigNote({ hasAppSecret: true, hasAuthorizationKey: false }), /PRIVY_AUTHORIZATION_KEY/);
+  assert.equal(walletConfigNote({ hasAppId: true, hasAppSecret: true, hasAuthorizationKey: true }), '');
 });

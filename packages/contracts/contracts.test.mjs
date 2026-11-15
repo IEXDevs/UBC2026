@@ -185,6 +185,7 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.equal(liveView.route.id, 'bots.browser.liveView');
   assert.equal(liveView.params.sessionRecordId, 'rec_1');
   assert.equal(matchApiRoute('GET', '/bots/bot_1/browser/sessions').route.id, 'bots.browser.list');
+  assert.equal(matchApiRoute('POST', '/bots/bot_1/browser/sessions/rec_1/navigate').route.id, 'bots.browser.navigate');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/browser/sessions/rec_1/release').route.id, 'bots.browser.release');
   assert.equal(matchApiRoute('POST', '/voice/tools/list_bots').route.id, 'voice.tools');
   assert.equal(matchApiRoute('POST', '/voice/tools/list_bots').params.name, 'list_bots');

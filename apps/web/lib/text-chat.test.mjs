@@ -75,3 +75,56 @@ test('missing model key does not call the network', async () => {
     error => error instanceof TextChatError && error.code === 'openrouter_not_configured',
   );
 });
+
+test('completeTextChat runs a tool round then answers', async () => {
+  let round = 0;
+  const seen = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'search for USDC rates',
+    tools: [{
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description: 'Search',
+        parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      },
+    }],
+    toolsInstruction: 'Use web_search when asked to look things up.',
+    invokeTool: async (name, args) => {
+      seen.push({ name, args });
+      return { results: [{ title: 'USDC', url: 'https://example.com' }] };
+    },
+    fetcher: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      round += 1;
+      if (round === 1) {
+        assert.ok(Array.isArray(body.tools));
+        assert.match(JSON.stringify(body.messages), /Use web_search/);
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [{
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'web_search', arguments: '{"query":"USDC rates"}' },
+              }],
+            },
+          }],
+        });
+      }
+      const roles = body.messages.map(item => item.role);
+      assert.ok(roles.includes('tool'));
+      assert.ok(body.messages.some(item => item.role === 'assistant' && Array.isArray(item.tool_calls)));
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'USDC looks stable.' } }],
+      });
+    },
+  });
+  assert.equal(result.text, 'USDC looks stable.');
+  assert.equal(result.toolRounds, 1);
+  assert.deepEqual(seen, [{ name: 'web_search', args: { query: 'USDC rates' } }]);
+});

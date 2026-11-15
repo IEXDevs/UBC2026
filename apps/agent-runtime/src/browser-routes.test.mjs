@@ -4,16 +4,23 @@ import { BotStateMachine, createDurableStore } from './bot-do.mjs';
 
 function browsers() {
   const closed = [];
+  const tabs = [];
   return {
     closed,
+    tabs,
     provider: {
       createSession: async () => ({ sessionId: 'prov-1' }),
-      readonlyView: async sessionId => {
+      openTab: async (sessionId, url) => {
+        tabs.push({ sessionId, url });
+        return { targetId: 'TAB1', url, title: 'Page' };
+      },
+      readonlyView: async (sessionId, opts = {}) => {
         if (sessionId !== 'prov-1') throw new Error('wrong provider session');
         return {
           viewerUrl: 'https://live.browser.run/ui/view?jwt=owner-secret',
           connectBefore: '2026-11-14T00:05:00.000Z',
           mode: 'readonly',
+          targetId: opts.targetId,
         };
       },
       closeSession: async sessionId => { closed.push(sessionId); },
@@ -22,23 +29,34 @@ function browsers() {
 }
 
 function machineWithBrowsers() {
-  const { provider, closed } = browsers();
-  return { machine: new BotStateMachine(), closed, env: { browsers: provider } };
+  const { provider, closed, tabs } = browsers();
+  return { machine: new BotStateMachine(), closed, tabs, env: { browsers: provider } };
 }
 
 test('browser sessions are owner-bound and hide the provider id', async () => {
-  const { machine, env, closed } = machineWithBrowsers();
+  const { machine, env, closed, tabs } = machineWithBrowsers();
   const opened = await machine.handle(new Request('https://bot/id/bot_1/browser/sessions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
-    body: JSON.stringify({ purpose: 'checkout' }),
+    body: JSON.stringify({ purpose: 'checkout', url: 'https://www.google.com/' }),
   }), env);
   assert.equal(opened.status, 200);
   assert.equal(opened.headers.get('cache-control'), 'no-store');
   const openBody = await opened.json();
   assert.equal(openBody.providerSessionId, undefined);
   assert.equal(openBody.status, 'open');
+  assert.equal(openBody.url, 'https://www.google.com/');
+  assert.deepEqual(tabs[0], { sessionId: 'prov-1', url: 'https://www.google.com/' });
   assert.equal(JSON.stringify(openBody).includes('prov-1'), false);
+
+  const navigated = await machine.handle(new Request(`https://bot/id/bot_1/browser/sessions/${openBody.sessionRecordId}/navigate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ url: 'https://example.com/' }),
+  }), env);
+  assert.equal(navigated.status, 200);
+  assert.equal((await navigated.json()).url, 'https://example.com/');
+  assert.equal(tabs[1].url, 'https://example.com/');
 
   const missingOwner = await machine.handle(new Request('https://bot/id/bot_1/browser/sessions', {
     method: 'POST',

@@ -282,7 +282,7 @@ export class BotStateMachine {
       }
     }
 
-    const browserPath = url.pathname.match(/^\/id\/([^/]+)\/browser\/sessions(?:\/([^/]+)\/(live-view|release))?$/);
+    const browserPath = url.pathname.match(/^\/id\/([^/]+)\/browser\/sessions(?:\/([^/]+)\/(live-view|release|navigate))?$/);
     if (browserPath) {
       return this.handleBrowser(request, env, {
         botId: decodeURIComponent(browserPath[1]),
@@ -304,12 +304,36 @@ export class BotStateMachine {
       }
       if (!leaf && request.method === 'POST') {
         const body = await readBrowserBody(request);
-        const opened = await service.openSession({ ownerId, botId, purpose: body.purpose ?? 'browse' });
+        const opened = await service.openSession({
+          ownerId,
+          botId,
+          purpose: body.purpose ?? 'browse',
+          url: typeof body.url === 'string' ? body.url : null,
+        });
         return noStore({
           sessionRecordId: opened.sessionRecordId,
           purpose: opened.purpose,
           status: opened.status,
+          url: opened.url,
+          title: opened.title,
+          reused: opened.reused === true,
+          note: opened.note,
           event: opened.event,
+        });
+      }
+      if (leaf === 'navigate' && request.method === 'POST') {
+        const body = await readBrowserBody(request);
+        const navigated = await service.navigateSession({
+          ownerId,
+          botId,
+          sessionRecordId,
+          url: body.url,
+        });
+        return noStore({
+          sessionRecordId: navigated.sessionRecordId,
+          url: navigated.url,
+          title: navigated.title,
+          event: navigated.event,
         });
       }
       if (leaf === 'live-view' && request.method === 'POST') {
@@ -320,6 +344,7 @@ export class BotStateMachine {
           viewerUrl: view.viewerUrl,
           connectBefore: view.connectBefore,
           mode: view.mode,
+          pageUrl: view.pageUrl,
           embedVerified: view.embedVerified,
           fallback: view.fallback,
           event: view.event,

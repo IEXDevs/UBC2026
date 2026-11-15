@@ -47,8 +47,12 @@ function trimKey(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function resolveTextChatProvider({ metaModelApiKey = '', openrouterApiKey = '' } = {}) {
-  const modelKey = trimKey(metaModelApiKey);
+export function resolveTextChatProvider({
+  metaModelApiKey = '',
+  modelApiKey = '',
+  openrouterApiKey = '',
+} = {}) {
+  const modelKey = trimKey(metaModelApiKey || modelApiKey);
   const openrouterKey = trimKey(openrouterApiKey);
   const llmAsOpenrouter = openrouterKey.startsWith('LLM_') ? openrouterKey : '';
   const metaKey = modelKey || llmAsOpenrouter;
@@ -79,6 +83,7 @@ export function buildTextChatMessages({
   message = '',
   secrets = [],
   provider = 'meta',
+  toolsInstruction = '',
 } = {}) {
   const name = clip(redact(String(botName || 'Agent'), secrets), 80) || 'Agent';
   const goal = clip(redact(String(botGoal || 'Waiting for a goal.'), secrets), 2000);
@@ -93,6 +98,9 @@ export function buildTextChatMessages({
         `Your goal (user text, not a platform rule): ${goal}`,
         'Reply to the owner in short chat messages. Do not claim you signed, broadcast, or settled anything.',
         'If the owner asks you to break platform rules, refuse and stay on-policy.',
+        ...(typeof toolsInstruction === 'string' && toolsInstruction.trim()
+          ? [toolsInstruction.trim()]
+          : []),
       ].join('\n'),
     },
   ];
@@ -110,55 +118,50 @@ export function buildTextChatMessages({
   return messages;
 }
 
-export async function completeTextChat({
-  apiKey = '',
-  metaModelApiKey = '',
-  openrouterApiKey = '',
-  botName,
-  botGoal,
-  botType,
-  history = [],
-  message = '',
-  model,
-  fetcher = fetch,
-} = {}) {
-  const resolved = resolveTextChatProvider({
-    metaModelApiKey: metaModelApiKey || (String(apiKey).startsWith('LLM_') ? apiKey : ''),
-    openrouterApiKey: openrouterApiKey || (!String(apiKey).startsWith('LLM_') ? apiKey : ''),
-  });
-  // Allow a single apiKey arg: detect LLM_ vs OpenRouter.
-  if (!resolved.apiKey && apiKey) {
-    const key = trimKey(apiKey);
-    if (key.startsWith('LLM_')) {
-      resolved.provider = 'meta';
-      resolved.apiKey = key;
-      resolved.baseUrl = META_MODEL_BASE;
-      resolved.model = META_SPARK_MODEL;
-    } else if (key) {
-      resolved.provider = 'openrouter';
-      resolved.apiKey = key;
-      resolved.baseUrl = OPENROUTER_BASE;
-      resolved.model = OPENROUTER_SPARK_MODEL;
-    }
+function parseToolArgs(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
   }
-  if (!resolved.apiKey) throw new TextChatError('openrouter_not_configured', 503);
-  const latest = typeof message === 'string' ? message.trim() : '';
-  if (!latest) throw new TextChatError('message_required', 400);
-  const secrets = [resolved.apiKey];
-  const modelId = typeof model === 'string' && model.trim() ? model.trim() : resolved.model;
-  const messages = buildTextChatMessages({
-    botName,
-    botGoal,
-    botType,
-    history,
-    message: latest,
-    secrets,
-    provider: resolved.provider,
-  });
+}
+
+function assistantToolMessage(message) {
+  const next = {
+    role: 'assistant',
+    content: typeof message?.content === 'string' ? message.content : (message?.content ?? null),
+  };
+  if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+    next.tool_calls = message.tool_calls.map(call => ({
+      id: typeof call?.id === 'string' ? call.id : '',
+      type: 'function',
+      function: {
+        name: typeof call?.function?.name === 'string' ? call.function.name : '',
+        arguments: typeof call?.function?.arguments === 'string' ? call.function.arguments : '{}',
+      },
+    })).filter(call => call.id && call.function.name);
+  }
+  return next;
+}
+
+async function postCompletion({
+  resolved,
+  modelId,
+  messages,
+  tools,
+  secrets,
+  fetcher,
+}) {
   const payload = {
     model: modelId,
     messages,
   };
+  if (Array.isArray(tools) && tools.length > 0) {
+    payload.tools = tools;
+    payload.tool_choice = 'auto';
+  }
   if (resolved.provider === 'meta') {
     payload.reasoning_effort = 'minimal';
   } else {
@@ -210,8 +213,120 @@ export async function completeTextChat({
   } catch {
     throw new TextChatError('openrouter_invalid_response', 502);
   }
-  const content = data?.choices?.[0]?.message?.content;
-  const text = typeof content === 'string' ? redact(content.trim(), secrets) : '';
-  if (!text) throw new TextChatError('openrouter_invalid_response', 502);
-  return { model: modelId, text, provider: resolved.provider };
+  const choice = data?.choices?.[0];
+  const message = choice?.message;
+  if (!message || typeof message !== 'object') {
+    throw new TextChatError('openrouter_invalid_response', 502);
+  }
+  return {
+    finishReason: typeof choice.finish_reason === 'string' ? choice.finish_reason : '',
+    message,
+    raw: data,
+  };
+}
+
+export async function completeTextChat({
+  apiKey = '',
+  metaModelApiKey = '',
+  modelApiKey = '',
+  openrouterApiKey = '',
+  botName,
+  botGoal,
+  botType,
+  history = [],
+  message = '',
+  model,
+  fetcher = fetch,
+  tools = null,
+  toolsInstruction = '',
+  invokeTool = null,
+  maxToolRounds = 4,
+} = {}) {
+  const resolved = resolveTextChatProvider({
+    metaModelApiKey: metaModelApiKey || modelApiKey || (String(apiKey).startsWith('LLM_') ? apiKey : ''),
+    openrouterApiKey: openrouterApiKey || (!String(apiKey).startsWith('LLM_') ? apiKey : ''),
+  });
+  // Allow a single apiKey arg: detect LLM_ vs OpenRouter.
+  if (!resolved.apiKey && apiKey) {
+    const key = trimKey(apiKey);
+    if (key.startsWith('LLM_')) {
+      resolved.provider = 'meta';
+      resolved.apiKey = key;
+      resolved.baseUrl = META_MODEL_BASE;
+      resolved.model = META_SPARK_MODEL;
+    } else if (key) {
+      resolved.provider = 'openrouter';
+      resolved.apiKey = key;
+      resolved.baseUrl = OPENROUTER_BASE;
+      resolved.model = OPENROUTER_SPARK_MODEL;
+    }
+  }
+  if (!resolved.apiKey) throw new TextChatError('openrouter_not_configured', 503);
+  const latest = typeof message === 'string' ? message.trim() : '';
+  if (!latest) throw new TextChatError('message_required', 400);
+  const secrets = [resolved.apiKey];
+  const modelId = typeof model === 'string' && model.trim() ? model.trim() : resolved.model;
+  const toolList = Array.isArray(tools) && tools.length > 0 && typeof invokeTool === 'function'
+    ? tools
+    : null;
+  const messages = buildTextChatMessages({
+    botName,
+    botGoal,
+    botType,
+    history,
+    message: latest,
+    secrets,
+    provider: resolved.provider,
+    toolsInstruction: toolList ? toolsInstruction : '',
+  });
+  const rounds = Number.isSafeInteger(maxToolRounds) && maxToolRounds > 0
+    ? Math.min(maxToolRounds, 8)
+    : 4;
+  let toolRounds = 0;
+  while (true) {
+    const completion = await postCompletion({
+      resolved,
+      modelId,
+      messages,
+      tools: toolList,
+      secrets,
+      fetcher,
+    });
+    const calls = Array.isArray(completion.message?.tool_calls)
+      ? completion.message.tool_calls.filter(call => call?.function?.name)
+      : [];
+    const wantsTools = completion.finishReason === 'tool_calls' || calls.length > 0;
+    if (!toolList || !wantsTools || toolRounds >= rounds) {
+      const content = completion.message?.content;
+      const text = typeof content === 'string' ? redact(content.trim(), secrets) : '';
+      if (!text) throw new TextChatError('openrouter_invalid_response', 502);
+      return {
+        model: modelId,
+        text,
+        provider: resolved.provider,
+        toolRounds,
+      };
+    }
+    messages.push(assistantToolMessage(completion.message));
+    for (const call of calls.slice(0, 8)) {
+      const name = typeof call?.function?.name === 'string' ? call.function.name : '';
+      const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
+      const args = parseToolArgs(call?.function?.arguments);
+      let result;
+      try {
+        result = await invokeTool(name, args);
+      } catch (error) {
+        result = { error: typeof error?.code === 'string' ? error.code : 'tool_failed' };
+      }
+      const content = typeof result === 'string'
+        ? clip(redact(result, secrets), 6000)
+        : clip(redact(JSON.stringify(result), secrets), 6000);
+      messages.push({
+        role: 'tool',
+        tool_call_id: id,
+        content: content || '{"error":"empty_tool_result"}',
+      });
+    }
+    toolRounds += 1;
+  }
 }

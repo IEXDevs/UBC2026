@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { browserSessionUrl, liveViewFrame } from './live-view.mjs';
+import { browserSessionUrl, liveViewFrame, pickOpenSession } from './live-view.mjs';
 
 test('browser session URLs stay on the runtime origin', () => {
   assert.equal(
@@ -35,4 +35,16 @@ test('only a verified live.browser.run URL is framed', () => {
   assert.equal(liveViewFrame({ embedVerified: true, viewerUrl: 'https://evil.example/ui/view?jwt=secret' }).src, null);
   assert.equal(liveViewFrame({ embedVerified: true, viewerUrl: 'http://live.browser.run/ui/view' }).src, null);
   assert.equal(liveViewFrame({ embedVerified: true, viewerUrl: 'https://live.browser.run/other?jwt=secret' }).embed, false);
+});
+
+test('pickOpenSession prefers the newest open record', () => {
+  assert.equal(pickOpenSession({ sessions: [] }), null);
+  const picked = pickOpenSession({
+    sessions: [
+      { sessionRecordId: 'old', status: 'open', createdAt: 1, updatedAt: 1 },
+      { sessionRecordId: 'new', status: 'open', createdAt: 2, updatedAt: 5 },
+      { sessionRecordId: 'closed', status: 'closed', createdAt: 9, updatedAt: 9 },
+    ],
+  });
+  assert.equal(picked.sessionRecordId, 'new');
 });

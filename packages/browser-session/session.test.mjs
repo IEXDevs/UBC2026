@@ -21,7 +21,7 @@ function service(overrides = {}) {
 test('agent tools cover search, scrape, and owned browser lifecycle', () => {
   assert.deepEqual(
     agentTools.map(tool => tool.name),
-    ['web_search', 'web_scrape', 'browser_open', 'browser_live_view', 'browser_release'],
+    ['web_search', 'web_scrape', 'browser_open', 'browser_navigate', 'browser_live_view', 'browser_release'],
   );
 });
 
@@ -44,22 +44,76 @@ test('sessions are bound to owner/bot and hide provider ids from open response',
   const opened = await svc.openSession({ ownerId: 'u1', botId: 'b1', purpose: 'checkout' });
   assert.equal(opened.sessionRecordId, 'rec-1');
   assert.equal(opened.providerSessionId, undefined);
+  assert.equal(opened.url, null);
+  assert.match(opened.note, /about:blank/);
   const listed = await svc.listOpenSessions({ ownerId: 'u1', botId: 'b1' });
   assert.equal(listed.sessions.length, 1);
   await assert.rejects(svc.liveView({ ownerId: 'other', botId: 'b1', sessionRecordId: 'rec-1' }), SessionError);
 });
 
-test('per-bot concurrency limit is enforced', async () => {
+test('openSession and navigateSession load https urls via openTab', async () => {
+  const tabs = [];
+  const svc = service({
+    browsers: {
+      createSession: async () => ({ sessionId: 'prov-1' }),
+      openTab: async (sessionId, url) => {
+        tabs.push({ sessionId, url });
+        return { targetId: 'T1', url, title: 'Google' };
+      },
+      readonlyView: async (sessionId, opts = {}) => {
+        assert.equal(sessionId, 'prov-1');
+        assert.equal(opts.targetId, 'T1');
+        return { viewerUrl: 'https://live.browser.run/ui/view?jwt=test', connectBefore: 't', mode: 'readonly' };
+      },
+    },
+  });
+  const opened = await svc.openSession({
+    ownerId: 'u1',
+    botId: 'b1',
+    url: 'https://www.google.com/',
+  });
+  assert.equal(opened.url, 'https://www.google.com/');
+  assert.equal(opened.note, undefined);
+  assert.deepEqual(tabs[0], { sessionId: 'prov-1', url: 'https://www.google.com/' });
+  const view = await svc.liveView({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1' });
+  assert.equal(view.pageUrl, 'https://www.google.com/');
+  const navigated = await svc.invokeTool(
+    'browser_navigate',
+    { sessionRecordId: 'rec-1', url: 'https://example.com/' },
+    { ownerId: 'u1', botId: 'b1' },
+  );
+  assert.equal(navigated.url, 'https://example.com/');
+  assert.equal(tabs[1].url, 'https://example.com/');
+});
+
+test('per-bot concurrency limit reuses and navigates instead of failing', async () => {
   let n = 0;
+  const tabs = [];
   const svc = service({
     idFactory: () => `rec-${++n}`,
-    browsers: { createSession: async () => ({ sessionId: `prov-${n}` }), readonlyView: async () => ({}) },
+    clock: () => 1000 + n,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${n}` }),
+      openTab: async (sessionId, url) => {
+        tabs.push({ sessionId, url });
+        return { targetId: 'T', url, title: 'Page' };
+      },
+      readonlyView: async () => ({}),
+    },
   });
   await svc.openSession({ ownerId: 'u1', botId: 'b1' });
   await svc.openSession({ ownerId: 'u1', botId: 'b1' });
-  await assert.rejects(svc.openSession({ ownerId: 'u1', botId: 'b1' }), (error) => error.code === 'concurrency_limit' && error.status === 429);
-  // Another bot still has capacity.
-  await svc.openSession({ ownerId: 'u1', botId: 'b2' });
+  const reused = await svc.openSession({
+    ownerId: 'u1',
+    botId: 'b1',
+    url: 'https://example.com/fun',
+  });
+  assert.equal(reused.reused, true);
+  assert.equal(reused.url, 'https://example.com/fun');
+  assert.equal(tabs.at(-1).url, 'https://example.com/fun');
+  // Another bot still has capacity for a fresh session.
+  const other = await svc.openSession({ ownerId: 'u1', botId: 'b2' });
+  assert.equal(other.reused, false);
 });
 
 test('live view is owner-only, no-store, and embeds the verified Live View host', async () => {

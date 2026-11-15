@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { browserSessionUrl, liveViewFrame } from '../lib/live-view.mjs';
+import { useCallback, useEffect, useState } from 'react';
+import { browserErrorNote, browserStatusNote } from '../lib/browser-status.mjs';
+import { browserSessionUrl, liveViewFrame, pickOpenSession } from '../lib/live-view.mjs';
 import GlassSurface from './GlassSurface';
 import LatticeLoader from './bits/LatticeLoader';
 
@@ -28,43 +29,121 @@ async function ownerFetch(url, ownerId, method, body) {
 /**
  * Owner Live View. The viewer URL is a bearer credential: it is an iframe src
  * or a link href, never copied into the timeline or button text.
+ * Chat-opened sessions live in the same Worker store — adopt them on load.
  */
 export default function LiveViewPanel({ botId, ownerId = null }) {
   const [sessionRecordId, setSessionRecordId] = useState(null);
+  const [openCount, setOpenCount] = useState(0);
   const [frame, setFrame] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const sessionUrl = browserSessionUrl(runtimeBase, botId);
+  const status = browserStatusNote({
+    ownerId,
+    runtimeBase,
+    sessionUrl,
+    sessionRecordId,
+    openCount,
+  });
+
+  const syncSessions = useCallback(async () => {
+    if (!ownerId || !sessionUrl) {
+      setSessionRecordId(null);
+      setOpenCount(0);
+      return null;
+    }
+    const listed = await ownerFetch(sessionUrl, ownerId, 'GET');
+    const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
+    setOpenCount(sessions.length);
+    const picked = pickOpenSession(listed);
+    if (picked?.sessionRecordId) {
+      setSessionRecordId(picked.sessionRecordId);
+      return picked.sessionRecordId;
+    }
+    setSessionRecordId(null);
+    return null;
+  }, [ownerId, sessionUrl]);
+
+  useEffect(() => {
+    let stopped = false;
+    (async () => {
+      try {
+        if (stopped) return;
+        await syncSessions();
+      } catch {
+        /* Listing is best-effort until the owner opens or views. */
+      }
+    })();
+    const timer = setInterval(() => {
+      syncSessions().catch(() => {});
+    }, 8000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [syncSessions]);
 
   async function run(action) {
     setError('');
     setBusy(true);
     try {
       if (action === 'open') {
-        const url = browserSessionUrl(runtimeBase, botId);
-        const opened = await ownerFetch(url, ownerId, 'POST', { purpose: 'browse' });
-        setSessionRecordId(opened.sessionRecordId);
-        setFrame(null);
-        return;
+        const existing = await syncSessions().catch(() => sessionRecordId);
+        if (existing) {
+          setSessionRecordId(existing);
+          return;
+        }
+        try {
+          const url = browserSessionUrl(runtimeBase, botId);
+          const opened = await ownerFetch(url, ownerId, 'POST', { purpose: 'browse' });
+          setSessionRecordId(opened.sessionRecordId);
+          setOpenCount(current => Math.max(current, 1));
+          setFrame(null);
+          return;
+        } catch (caught) {
+          const code = caught instanceof Error ? caught.message : 'browser_request_failed';
+          if (code === 'concurrency_limit') {
+            const adopted = await syncSessions().catch(() => null);
+            if (adopted) {
+              setError(browserErrorNote('concurrency_limit'));
+              return;
+            }
+          }
+          throw caught;
+        }
       }
       if (action === 'view') {
-        const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId, action: 'live-view' });
+        let id = sessionRecordId;
+        if (!id) {
+          id = await syncSessions();
+        }
+        if (!id) throw new Error('session_not_found');
+        const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'live-view' });
         const view = await ownerFetch(url, ownerId, 'POST', {});
+        setSessionRecordId(id);
         setFrame(liveViewFrame(view));
         return;
       }
-      const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId, action: 'release' });
+      let id = sessionRecordId;
+      if (!id) {
+        id = await syncSessions();
+      }
+      if (!id) throw new Error('session_not_found');
+      const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'release' });
       await ownerFetch(url, ownerId, 'POST', {});
       setSessionRecordId(null);
+      setOpenCount(0);
       setFrame(null);
+      await syncSessions().catch(() => null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'browser_request_failed');
+      const code = caught instanceof Error ? caught.message : 'browser_request_failed';
+      setError(browserErrorNote(code));
     } finally {
       setBusy(false);
     }
   }
 
-  const ready = Boolean(ownerId) && Boolean(browserSessionUrl(runtimeBase, botId));
-  const status = frame?.src ? 'Live' : sessionRecordId ? 'Session open' : 'No session';
+  const ready = Boolean(ownerId) && Boolean(sessionUrl);
 
   return (
     <div className="live-view">
@@ -82,7 +161,7 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
         </button>
         </div>
       </div>
-      {error && <p role="alert">{error}</p>}
+      {error ? <p className="preview-note" role="alert">{error}</p> : null}
       {frame?.embed && frame.src && (
         <GlassSurface
           className="live-glass"

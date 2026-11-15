@@ -71,12 +71,26 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_open',
-    description: 'Open a Cloudflare browser session owned by this bot for heavier browsing or checkout. Subject to per-bot concurrency limits. Does not expose CDP or privileged URLs.',
+    description: 'Open a Cloudflare browser session owned by this bot. Pass url (https) to load a page — without url the Live View stays on about:blank. If this bot is already at its session limit, reuses the newest open session and navigates when url is set. Does not expose CDP or privileged URLs.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         purpose: { type: 'string', maxLength: 256 },
+        url: { type: 'string', minLength: 1, maxLength: 2000, description: 'https URL to open in the session (required to leave about:blank)' },
+      },
+    },
+  },
+  {
+    name: 'browser_navigate',
+    description: 'Open a new tab to an https URL in an existing bot-owned browser session. Prefer this over browser_open when a session is already open and the owner asks to look something up or change pages.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['url'],
+      properties: {
+        sessionRecordId: { type: 'string', minLength: 1, maxLength: 128, description: 'Optional when exactly one session is open; otherwise required' },
+        url: { type: 'string', minLength: 1, maxLength: 2000 },
       },
     },
   },
@@ -172,13 +186,76 @@ export function createBrowserSessionService({
       };
     },
 
-    async openSession({ ownerId, botId, purpose = 'browse' }) {
+    async openSession({ ownerId, botId, purpose = 'browse', url = null } = {}) {
       if (![ownerId, botId].every(idOk)) fail('invalid_identity');
       if (typeof purpose !== 'string' || purpose.length > 256) fail('invalid_purpose');
       if (!browsers) throw new ProviderError('browser_not_configured', 503);
       const open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
-      if (open.length >= maxSessionsPerBot) fail('concurrency_limit', 429);
+      // At capacity: reuse the newest open session (navigate when url is set) instead of
+      // failing with concurrency_limit — chat kept calling open and getting stuck.
+      if (open.length >= maxSessionsPerBot) {
+        const newest = [...open].sort((a, b) => {
+          const aAt = Number(a.updatedAt ?? a.createdAt ?? 0);
+          const bAt = Number(b.updatedAt ?? b.createdAt ?? 0);
+          return bAt - aAt;
+        })[0];
+        if (!newest?.sessionRecordId) fail('concurrency_limit', 429);
+        if (url != null && url !== '') {
+          const navigated = await this.navigateSession({
+            ownerId,
+            botId,
+            sessionRecordId: newest.sessionRecordId,
+            url,
+          });
+          return {
+            sessionRecordId: navigated.sessionRecordId,
+            purpose: newest.purpose || purpose,
+            status: 'open',
+            url: navigated.url,
+            title: navigated.title,
+            reused: true,
+            note: 'Reused an existing session (at concurrency limit) and navigated to the url.',
+            event: {
+              type: 'tool',
+              name: 'browser_open',
+              status: 'ok',
+              sessionRecordId: navigated.sessionRecordId,
+              url: navigated.url,
+              reused: true,
+              at: clock(),
+            },
+          };
+        }
+        return {
+          sessionRecordId: newest.sessionRecordId,
+          purpose: newest.purpose || purpose,
+          status: 'open',
+          url: typeof newest.url === 'string' ? newest.url : null,
+          title: '',
+          reused: true,
+          note: 'Reused an existing session (at concurrency limit). Call browser_navigate with an https url to change the page.',
+          event: {
+            type: 'tool',
+            name: 'browser_open',
+            status: 'ok',
+            sessionRecordId: newest.sessionRecordId,
+            url: typeof newest.url === 'string' ? newest.url : null,
+            reused: true,
+            at: clock(),
+          },
+        };
+      }
       const { sessionId } = await browsers.createSession();
+      let pageUrl = null;
+      let targetId = null;
+      let title = '';
+      if (url != null && url !== '') {
+        if (typeof browsers.openTab !== 'function') throw new ProviderError('browser_not_configured', 503);
+        const tab = await browsers.openTab(sessionId, url);
+        pageUrl = tab.url;
+        targetId = tab.targetId;
+        title = tab.title || '';
+      }
       const sessionRecordId = idFactory();
       const record = {
         sessionRecordId,
@@ -187,6 +264,8 @@ export function createBrowserSessionService({
         botId,
         purpose,
         status: 'open',
+        url: pageUrl,
+        targetId,
         createdAt: clock(),
         updatedAt: clock(),
       };
@@ -195,14 +274,64 @@ export function createBrowserSessionService({
         sessionRecordId,
         purpose,
         status: 'open',
-        event: { type: 'tool', name: 'browser_open', status: 'ok', sessionRecordId, at: clock() },
+        url: pageUrl,
+        title,
+        reused: false,
+        note: pageUrl
+          ? undefined
+          : 'Session is on about:blank until browser_open/browser_navigate is called with an https url.',
+        event: {
+          type: 'tool',
+          name: 'browser_open',
+          status: 'ok',
+          sessionRecordId,
+          url: pageUrl,
+          at: clock(),
+        },
+      };
+    },
+
+    async navigateSession({ ownerId, botId, sessionRecordId, url }) {
+      if (!browsers) throw new ProviderError('browser_not_configured', 503);
+      if (typeof browsers.openTab !== 'function') throw new ProviderError('browser_not_configured', 503);
+      let recordId = sessionRecordId;
+      if (!recordId) {
+        if (![ownerId, botId].every(idOk)) fail('invalid_identity');
+        const open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
+        if (open.length === 0) fail('session_not_found', 404);
+        open.sort((a, b) => Number(b.updatedAt ?? b.createdAt ?? 0) - Number(a.updatedAt ?? a.createdAt ?? 0));
+        recordId = open[0].sessionRecordId;
+      }
+      const record = await requireOwned(ownerId, botId, recordId);
+      const tab = await browsers.openTab(record.providerSessionId, url);
+      const updated = {
+        ...record,
+        url: tab.url,
+        targetId: tab.targetId,
+        updatedAt: clock(),
+      };
+      await store.put(keyFor(ownerId, botId, record.sessionRecordId), updated);
+      return {
+        sessionRecordId: record.sessionRecordId,
+        url: tab.url,
+        title: tab.title,
+        event: {
+          type: 'tool',
+          name: 'browser_navigate',
+          status: 'ok',
+          sessionRecordId: record.sessionRecordId,
+          url: tab.url,
+          at: clock(),
+        },
       };
     },
 
     async liveView({ ownerId, botId, sessionRecordId }) {
       if (!browsers) throw new ProviderError('browser_not_configured', 503);
       const record = await requireOwned(ownerId, botId, sessionRecordId);
-      const view = await browsers.readonlyView(record.providerSessionId);
+      const view = await browsers.readonlyView(record.providerSessionId, {
+        targetId: typeof record.targetId === 'string' ? record.targetId : undefined,
+      });
       const embed = describeLiveViewEmbed(view.viewerUrl);
       // Viewer URLs contain bearer credentials: return only to the authorized owner with no-store.
       // Do not put the URL on the tool event.
@@ -211,6 +340,7 @@ export function createBrowserSessionService({
         viewerUrl: view.viewerUrl,
         connectBefore: view.connectBefore,
         mode: view.mode,
+        pageUrl: typeof record.url === 'string' ? record.url : null,
         headers: { 'Cache-Control': 'no-store' },
         embedVerified: embed.embedVerified,
         fallback: embed.fallback,
@@ -236,7 +366,14 @@ export function createBrowserSessionService({
       if (![ownerId, botId].every(idOk)) fail('invalid_identity');
       const rows = (await store.list(prefixFor(ownerId, botId)))
         .filter(row => row.status === 'open')
-        .map(({ sessionRecordId, purpose, createdAt, updatedAt, status }) => ({ sessionRecordId, purpose, createdAt, updatedAt, status }));
+        .map(({ sessionRecordId, purpose, createdAt, updatedAt, status, url }) => ({
+          sessionRecordId,
+          purpose,
+          createdAt,
+          updatedAt,
+          status,
+          url: typeof url === 'string' ? url : null,
+        }));
       return { sessions: rows, maxSessionsPerBot };
     },
 
@@ -252,7 +389,17 @@ export function createBrowserSessionService({
         case 'web_scrape':
           return this.scrape({ ...identity, url: args?.url });
         case 'browser_open':
-          return this.openSession({ ...identity, purpose: args?.purpose ?? 'browse' });
+          return this.openSession({
+            ...identity,
+            purpose: args?.purpose ?? 'browse',
+            url: args?.url ?? null,
+          });
+        case 'browser_navigate':
+          return this.navigateSession({
+            ...identity,
+            sessionRecordId: args?.sessionRecordId,
+            url: args?.url,
+          });
         case 'browser_live_view': {
           const view = await this.liveView({ ...identity, sessionRecordId: args?.sessionRecordId });
           // The model must not receive the bearer URL. The owner HTTP route returns it.
@@ -262,6 +409,7 @@ export function createBrowserSessionService({
             connectBefore: view.connectBefore,
             embedVerified: view.embedVerified,
             fallback: view.fallback,
+            pageUrl: view.pageUrl,
             event: view.event,
           };
         }

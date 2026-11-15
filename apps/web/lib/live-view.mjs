@@ -8,8 +8,28 @@ export function browserSessionUrl(runtimeBase, botId, { sessionRecordId, action 
   const root = `${base.origin}${base.pathname.replace(/\/$/, '')}`;
   const bot = encodeURIComponent(botId);
   if (!sessionRecordId) return `${root}/bots/${bot}/browser/sessions`;
-  if (action !== 'live-view' && action !== 'release') return null;
+  if (action !== 'live-view' && action !== 'release' && action !== 'navigate') return null;
   return `${root}/bots/${bot}/browser/sessions/${encodeURIComponent(sessionRecordId)}/${action}`;
+}
+
+/**
+ * Prefer the newest open session from GET /bots/:id/browser/sessions.
+ * Chat and the Live View panel share the Worker store — the panel must adopt
+ * sessions the model already opened instead of creating another slot.
+ */
+export function pickOpenSession(payload) {
+  const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+  const open = sessions.filter(row => row
+    && typeof row.sessionRecordId === 'string'
+    && row.sessionRecordId
+    && row.status !== 'closed');
+  if (open.length === 0) return null;
+  open.sort((a, b) => {
+    const aAt = Number(a.updatedAt ?? a.createdAt ?? 0);
+    const bAt = Number(b.updatedAt ?? b.createdAt ?? 0);
+    return bAt - aAt;
+  });
+  return open[0];
 }
 
 /**

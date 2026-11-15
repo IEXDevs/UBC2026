@@ -24,6 +24,8 @@
     "@solana/kit": "^3.0.3",
     "@tailwindcss/postcss": "^4.3.5",
     "@ubc2026/bot-creation": "0.1.0",
+    "@ubc2026/browser-search": "0.1.0",
+    "@ubc2026/browser-session": "0.1.0",
     "@ubc2026/contracts": "0.1.0",
     "@ubc2026/wallets": "0.1.0",
     "clsx": "^1.2.1",

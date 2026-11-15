@@ -306,6 +306,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'bots.loop', method: 'POST', path: '/bots/:botId/loop', phase: 4, auth: 'owner', status: 'live', action: 'loop' },
   { id: 'bots.browser.list', method: 'GET', path: '/bots/:botId/browser/sessions', phase: 3, auth: 'owner', status: 'live', action: 'browser/sessions' },
   { id: 'bots.browser.open', method: 'POST', path: '/bots/:botId/browser/sessions', phase: 3, auth: 'owner', status: 'live', action: 'browser/sessions' },
+  { id: 'bots.browser.navigate', method: 'POST', path: '/bots/:botId/browser/sessions/:sessionRecordId/navigate', phase: 3, auth: 'owner', status: 'live', action: 'browser/navigate' },
   { id: 'bots.browser.liveView', method: 'POST', path: '/bots/:botId/browser/sessions/:sessionRecordId/live-view', phase: 3, auth: 'owner', status: 'live', action: 'browser/live-view' },
   { id: 'bots.browser.release', method: 'POST', path: '/bots/:botId/browser/sessions/:sessionRecordId/release', phase: 3, auth: 'owner', status: 'live', action: 'browser/release' },
   { id: 'bots.shopping.prepare', method: 'POST', path: '/bots/:botId/shopping/prepare', phase: 6, auth: 'owner', status: 'live' },

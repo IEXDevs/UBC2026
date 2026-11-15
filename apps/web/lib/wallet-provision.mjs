@@ -91,6 +91,26 @@ export function resolvePrivyAppId(env = {}) {
   return pub;
 }
 
+/** Safe note from GET /api/wallets config flags (no secret values). */
+export function walletConfigNote(config = {}) {
+  const missing = Array.isArray(config.missing)
+    ? config.missing.filter(name => typeof name === 'string' && /^[A-Z0-9_]{1,64}$/.test(name))
+    : [];
+  if (missing.length > 0) {
+    return `Main wallet needs ${missing.join(', ')} in the repo root .env.local, then restart Next and sign in again.`;
+  }
+  if (config.hasAppSecret === false) {
+    return 'Main wallet needs PRIVY_APP_SECRET in the repo root .env.local, then restart Next and sign in again.';
+  }
+  if (config.hasAppId === false) {
+    return 'Main wallet needs PRIVY_APP_ID or NEXT_PUBLIC_PRIVY_APP_ID in the repo root .env.local.';
+  }
+  if (config.hasAuthorizationKey === false) {
+    return 'PRIVY_APP_SECRET is set. If wallet create returns 403, add PRIVY_AUTHORIZATION_KEY from Privy → Authorization keys, restart Next, and sign in again.';
+  }
+  return '';
+}
+
 export function walletProvisionNote(body = {}, { ok = false } = {}) {
   if (ok && Array.isArray(body.wallets) && body.wallets.length > 0) {
     return body.created
@@ -106,6 +126,9 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
   }
   if (code === 'missing_config') {
     return 'Main wallet needs PRIVY_APP_ID and PRIVY_APP_SECRET in the repo root .env.local.';
+  }
+  if (code === 'token_missing') {
+    return 'Privy did not return an access token. Sign out and sign in again, then open Wallets.';
   }
   if (code === 'invalid_rpc') {
     return 'QUICKNODE_DEVNET_RPC_URL must be an https QuickNode Solana devnet RPC URL.';
