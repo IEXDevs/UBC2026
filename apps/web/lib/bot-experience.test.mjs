@@ -9,6 +9,7 @@ import {
   buildBotPage,
   demoBotExperiences,
   eventsUrl,
+  normalizeLiveEvent,
   formatBaseUnits,
   raisedCap,
   logsUrl,
@@ -117,6 +118,19 @@ test('event polling stays on the runtime origin', () => {
   assert.equal(eventsUrl('', 'bot_meteora'), null);
   assert.equal(logsUrl('https://runtime.example/agent/'), 'https://runtime.example/agent/api/logs');
   assert.equal(logsUrl('javascript:alert(1)'), null);
+});
+
+test('live events accept an ISO timestamp from the Worker', () => {
+  const row = normalizeLiveEvent({
+    id: 'evt_1',
+    botId: 'bot_live',
+    ownerId: 'did:privy:abc',
+    kind: 'tool.call',
+    summary: 'Checked the pool',
+    at: '2026-11-15T01:00:00.000Z',
+  });
+  assert.equal(row.at, Date.parse('2026-11-15T01:00:00.000Z'));
+  assert.equal(timelineEntries([row], 'bot_live').length, 1);
 });
 
 test('demo shell bots carry a bot page and money panes stay empty placeholders', () => {

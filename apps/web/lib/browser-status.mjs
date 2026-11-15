@@ -10,8 +10,10 @@ export function browserStatusNote({
   openCount = 0,
 } = {}) {
   if (!ownerId) return 'Sign in to open an owner-bound Cloudflare browser session.';
-  if (!runtimeBase || !sessionUrl) {
-    return 'Set NEXT_PUBLIC_AGENT_RUNTIME_URL to the Worker origin so Live View can open browser sessions.';
+  if (!sessionUrl) {
+    return runtimeBase === 'shell'
+      ? 'This bot cannot open a browser session on the agent runtime.'
+      : 'Set NEXT_PUBLIC_AGENT_RUNTIME_URL to the Worker origin so Live View can open browser sessions.';
   }
   if (sessionRecordId) {
     return 'A browser session is open for this bot (chat and this panel share it). Use Show live view — do not open another until you Release.';

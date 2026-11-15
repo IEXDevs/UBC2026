@@ -1,9 +1,15 @@
 /**
  * Live Worker list helpers for the glass shell.
- * Never invent PreviewMain / demo bots — empty arrays when unsigned or unconfigured.
+ * The browser calls the same-origin /api/runtime proxy so panes load when the
+ * Worker URL is configured on the server. Empty arrays when unsigned or unconfigured.
+ * Never invent PreviewMain / demo bots.
  */
+import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
 
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
+const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
+const AMOUNT = /^(0|[1-9][0-9]{0,39})$/;
+const SIGNED = /^-?(0|[1-9][0-9]{0,39})$/;
 
 export function runtimeBaseUrl(value = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL) {
   if (typeof value !== 'string' || !value.trim()) return '';
@@ -40,31 +46,144 @@ export function shellBotFromRemote(row, looks = {}) {
   };
 }
 
-async function getJson(url, ownerId) {
-  const response = await fetch(url, {
-    headers: { 'x-owner-id': ownerId },
-    cache: 'no-store',
-  });
+function ownerHeaders(ownerId, accessToken) {
+  const headers = { 'x-owner-id': ownerId };
+  if (typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000) {
+    headers.authorization = `Bearer ${accessToken.trim()}`;
+  }
+  return headers;
+}
+
+/** Browser path. The Next route forwards this to the Worker. */
+export function shellRuntimeUrl(pathnameAndQuery) {
+  if (typeof pathnameAndQuery !== 'string') return null;
+  const q = pathnameAndQuery.indexOf('?');
+  const pathname = q === -1 ? pathnameAndQuery : pathnameAndQuery.slice(0, q);
+  const search = safeRuntimeSearch(q === -1 ? '' : pathnameAndQuery.slice(q));
+  if (search == null || !isAllowedRuntimePath(pathname)) return null;
+  return `/api/runtime${pathname}${search}`;
+}
+
+/**
+ * Absolute Worker URL when `runtimeBase` is set (tests and server tools).
+ * Otherwise the same-origin proxy.
+ */
+export function ownerApiUrl(path, runtimeBase) {
+  if (typeof path !== 'string') return null;
+  if (runtimeBase == null || runtimeBase === 'shell') return shellRuntimeUrl(path);
+  const root = runtimeBaseUrl(runtimeBase);
+  if (!root) return null;
+  const q = path.indexOf('?');
+  const pathname = q === -1 ? path : path.slice(0, q);
+  const search = safeRuntimeSearch(q === -1 ? '' : path.slice(q));
+  if (search == null || !isAllowedRuntimePath(pathname)) return null;
+  return `${root}${pathname}${search}`;
+}
+
+function shortMint(mint) {
+  if (typeof mint !== 'string' || mint.length < 8) return 'asset';
+  return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+}
+
+/** Paper rows from GET /bots/:id/status `positionCheck`. Drops unusable amounts. */
+export function positionsFromStatus(botId, body) {
+  if (typeof botId !== 'string' || !BOT_ID.test(botId)) return [];
+  const rows = Array.isArray(body?.positionCheck?.positions) ? body.positionCheck.positions : [];
+  const out = [];
+  for (const row of rows) {
+    const amount = typeof row?.amount === 'string' && AMOUNT.test(row.amount) ? row.amount : null;
+    if (!amount) continue;
+    const entry = typeof row.entryMicroUsd === 'string' && SIGNED.test(row.entryMicroUsd) ? row.entryMicroUsd : null;
+    const mark = typeof row.markMicroUsd === 'string' && SIGNED.test(row.markMicroUsd) ? row.markMicroUsd : null;
+    let pnl = '0';
+    if (entry && mark) {
+      const delta = (BigInt(mark) - BigInt(entry)).toString();
+      if (SIGNED.test(delta)) pnl = delta;
+    }
+    const mint = typeof row.mint === 'string' ? row.mint : '';
+    const asset = typeof row.asset === 'string' && row.asset.trim()
+      ? row.asset.trim().slice(0, 16)
+      : shortMint(mint);
+    out.push({
+      id: `${botId}:${mint || out.length}`,
+      botId,
+      asset,
+      mint: mint || null,
+      amount,
+      decimals: Number.isInteger(row.decimals) && row.decimals >= 0 && row.decimals <= 18 ? row.decimals : 6,
+      pnlMicroUsdc: pnl,
+      quoteSource: typeof row.quoteSource === 'string' && row.quoteSource.trim()
+        ? row.quoteSource.trim().slice(0, 64)
+        : 'runtime',
+      ...(typeof row.venue === 'string' && row.venue.trim() ? { venue: row.venue.trim().slice(0, 32) } : {}),
+      ...(typeof row.market === 'string' && row.market.trim()
+        ? { market: row.market.trim().slice(0, 32) }
+        : (row.pricingCluster === 'mainnet' ? { market: 'mainnet price' } : {})),
+      side: typeof row.side === 'string' && row.side.trim() ? row.side.trim().slice(0, 16) : 'supply',
+      mark: typeof row.priceUsd === 'string' ? row.priceUsd : null,
+      notionalMicroUsdc: mark && AMOUNT.test(mark) ? mark : null,
+      walletId: typeof row.walletId === 'string' ? row.walletId : null,
+    });
+  }
+  return out;
+}
+
+function livePayment(row) {
+  return Boolean(row
+    && typeof row.id === 'string'
+    && AMOUNT.test(typeof row.amount === 'string' ? row.amount : '')
+    && typeof row.asset === 'string'
+    && row.asset.trim());
+}
+
+function liveWallet(row) {
+  return Boolean(row && typeof row.id === 'string' && typeof row.address === 'string' && row.address.trim());
+}
+
+async function getJson(url, headers, fetcher) {
+  const response = await fetcher(url, { headers, cache: 'no-store' });
   const body = await response.json().catch(() => ({}));
   return { ok: response.ok, body };
 }
 
-export async function fetchOwnerLists(ownerId, runtimeBase = runtimeBaseUrl()) {
-  if (typeof ownerId !== 'string' || !OWNER.test(ownerId) || !runtimeBase) {
-    return { bots: [], wallets: [], payments: [], source: 'unsigned' };
+export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
+  const options = runtimeBaseOrOptions && typeof runtimeBaseOrOptions === 'object'
+    ? runtimeBaseOrOptions
+    : { runtimeBase: runtimeBaseOrOptions };
+  const runtimeBase = options.runtimeBase === undefined ? 'shell' : options.runtimeBase;
+  if (typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
+    return { bots: [], wallets: [], payments: [], positions: [], source: 'unsigned' };
   }
-  const root = runtimeBase.replace(/\/$/, '');
+  const fetcher = typeof options.fetcher === 'function' ? options.fetcher : fetch;
+  const headers = ownerHeaders(ownerId, options.accessToken);
+  const botsUrl = ownerApiUrl('/api/bots', runtimeBase);
+  const walletsUrl = ownerApiUrl('/api/wallets', runtimeBase);
+  const paymentsUrl = ownerApiUrl('/api/payments', runtimeBase);
+  if (!botsUrl || !walletsUrl || !paymentsUrl) {
+    return { bots: [], wallets: [], payments: [], positions: [], source: 'unsigned' };
+  }
   const [botsRes, walletsRes, paymentsRes] = await Promise.all([
-    getJson(`${root}/api/bots`, ownerId),
-    getJson(`${root}/api/wallets`, ownerId),
-    getJson(`${root}/api/payments`, ownerId),
+    getJson(botsUrl, headers, fetcher),
+    getJson(walletsUrl, headers, fetcher),
+    getJson(paymentsUrl, headers, fetcher),
   ]);
-  const source = botsRes.body?.source || walletsRes.body?.source || 'unknown';
+  const bots = botsRes.ok && Array.isArray(botsRes.body?.items) ? botsRes.body.items : [];
+  const positions = [];
+  await Promise.all(bots.slice(0, 30).map(async (bot) => {
+    if (!bot || !BOT_ID.test(bot.id)) return;
+    const url = ownerApiUrl(`/bots/${encodeURIComponent(bot.id)}/status`, runtimeBase);
+    if (!url) return;
+    const status = await getJson(url, headers, fetcher);
+    if (!status.ok) return;
+    positions.push(...positionsFromStatus(bot.id, status.body));
+  }));
+  const source = botsRes.body?.source || walletsRes.body?.source || paymentsRes.body?.source || 'unknown';
   return {
     source,
-    bots: botsRes.ok && Array.isArray(botsRes.body?.items) ? botsRes.body.items : [],
-    wallets: walletsRes.ok && Array.isArray(walletsRes.body?.items) ? walletsRes.body.items : [],
-    payments: paymentsRes.ok && Array.isArray(paymentsRes.body?.items) ? paymentsRes.body.items : [],
+    bots,
+    wallets: walletsRes.ok && Array.isArray(walletsRes.body?.items) ? walletsRes.body.items.filter(liveWallet) : [],
+    payments: paymentsRes.ok && Array.isArray(paymentsRes.body?.items) ? paymentsRes.body.items.filter(livePayment) : [],
+    positions,
   };
 }
 
@@ -78,15 +197,20 @@ export function deleteBotUrl(runtimeBase, botId) {
   return `${root}/api/bots/${encodeURIComponent(botId)}`;
 }
 
-export async function deleteOwnerBot(ownerId, botId, runtimeBase = runtimeBaseUrl()) {
-  const url = deleteBotUrl(runtimeBase, botId);
+export async function deleteOwnerBot(ownerId, botId, runtimeBaseOrOptions = 'shell') {
+  const options = runtimeBaseOrOptions && typeof runtimeBaseOrOptions === 'object'
+    ? runtimeBaseOrOptions
+    : { runtimeBase: runtimeBaseOrOptions };
+  const runtimeBase = options.runtimeBase === undefined ? 'shell' : options.runtimeBase;
+  const url = ownerApiUrl(`/api/bots/${encodeURIComponent(botId)}`, runtimeBase);
   if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
     return { ok: false, error: 'invalid_request' };
   }
+  const fetcher = typeof options.fetcher === 'function' ? options.fetcher : fetch;
   try {
-    const response = await fetch(url, {
+    const response = await fetcher(url, {
       method: 'DELETE',
-      headers: { 'x-owner-id': ownerId },
+      headers: ownerHeaders(ownerId, options.accessToken),
       cache: 'no-store',
     });
     const body = await response.json().catch(() => ({}));

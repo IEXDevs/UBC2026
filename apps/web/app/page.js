@@ -36,7 +36,7 @@ import {
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileRailLabel } from '../lib/profile.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
-import { emptyMoneyState, fetchOwnerLists, shellBotFromRemote } from '../lib/runtime-data.mjs';
+import { deleteOwnerBot, emptyMoneyState, fetchOwnerLists, shellBotFromRemote, shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
@@ -315,15 +315,17 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     } catch {
       setProfile(null);
     }
-    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
-    if (!runtimeBase) return undefined;
+    const profileUrl = shellRuntimeUrl('/api/profiles/me');
+    const accountUrl = shellRuntimeUrl('/api/me');
+    if (!profileUrl) return undefined;
     let stop = false;
     (async () => {
       try {
-        const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/profiles/me`, {
-          headers: { 'x-owner-id': ownerId },
-          cache: 'no-store',
-        });
+        const headers = { 'x-owner-id': ownerId };
+        const [response] = await Promise.all([
+          fetch(profileUrl, { headers, cache: 'no-store' }),
+          accountUrl ? fetch(accountUrl, { headers, cache: 'no-store' }).catch(() => null) : null,
+        ]);
         const body = await response.json();
         if (!stop && body.profile?.handle) {
           setProfile(body.profile);
@@ -342,13 +344,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       return undefined;
     }
     if (!sessionReadyForWallets(signedIn, user)) return undefined;
-    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
-    if (!runtimeBase) return undefined;
+    const transfersUrl = shellRuntimeUrl('/api/transfers');
+    if (!transfersUrl) return undefined;
     let stop = false;
     (async () => {
       try {
         const token = await getAccessToken?.();
-        const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/transfers`, {
+        const response = await fetch(transfersUrl, {
           headers: {
             ...(token ? { authorization: `Bearer ${token}` } : {}),
             'x-owner-id': ownerId,
@@ -370,26 +372,27 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       return undefined;
     }
     let stop = false;
-    fetchOwnerLists(ownerId).then((lists) => {
-      if (stop || !lists) return;
-      setRemoteLists({
-        bots: Array.isArray(lists.bots) ? lists.bots : [],
-        wallets: Array.isArray(lists.wallets) ? lists.wallets : [],
-        payments: Array.isArray(lists.payments) ? lists.payments : [],
-        positions: [],
-      });
-    }).catch(() => {
-      if (!stop) setRemoteLists(emptyMoneyState());
-    });
+    (async () => {
+      let accessToken = '';
+      if (sessionReadyForWallets(signedIn, user)) {
+        try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+      }
+      try {
+        const lists = await fetchOwnerLists(ownerId, { accessToken });
+        if (!stop && lists) setRemoteLists(lists);
+      } catch {
+        if (!stop) setRemoteLists(emptyMoneyState());
+      }
+    })();
     return () => { stop = true; };
-  }, [ownerId]);
+  }, [ownerId, signedIn, user, getAccessToken]);
 
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
     const key = profileKey(ownerId);
-    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
-    if (runtimeBase && ownerId) {
-      const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/profiles/me`, {
+    const profileUrl = ownerId ? shellRuntimeUrl('/api/profiles/me') : null;
+    if (profileUrl && ownerId) {
+      const response = await fetch(profileUrl, {
         method: 'PUT',
         headers: { 'content-type': 'application/json', 'x-owner-id': ownerId },
         body: JSON.stringify(stored),
@@ -409,11 +412,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const resolveMention = useCallback(async (token) => {
     const parsed = parseRecipient(token);
     if (!parsed) return null;
-    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
-    if (runtimeBase && ownerId) {
+    const lookupPath = ownerId ? shellRuntimeUrl(`/api/profiles/lookup?q=${encodeURIComponent(token)}`) : null;
+    if (lookupPath && ownerId) {
       try {
-        const url = new URL(`${runtimeBase.replace(/\/$/, '')}/api/profiles/lookup`);
-        url.searchParams.set('q', token);
+        const url = lookupPath;
         const response = await fetch(url, { headers: { 'x-owner-id': ownerId }, cache: 'no-store' });
         const body = await response.json().catch(() => ({}));
         if (body.recipient) return body.recipient;
@@ -456,10 +458,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const bots = assigned.bots;
   const wallets = pickWalletList(assigned.wallets, remoteLists.wallets);
   const payments = remoteLists.payments || [];
+  const positions = remoteLists.positions || [];
   const visible = bots.filter(bot => bot.name.toLowerCase().includes(query.trim().toLowerCase()));
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
-  const glance = walletGlance(wallets, [], transfers);
+  const glance = walletGlance(wallets, positions, transfers);
 
   function choosePane(next, direction) {
     if (next === pane) return;
@@ -509,6 +512,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
 
   function onDelete(id) {
     const name = bots.find(item => item.id === id)?.name ?? 'Agent';
+    if (ownerId) {
+      const tokenPromise = sessionReadyForWallets(signedIn, user)
+        ? Promise.resolve(getAccessToken?.()).catch(() => '')
+        : Promise.resolve('');
+      void tokenPromise.then((accessToken) => deleteOwnerBot(ownerId, id, { accessToken: accessToken || '' }));
+    }
     toast?.(`${name} removed`);
     setRoster(current => ({
       order: withoutId(current.order, id),
@@ -703,13 +712,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                 </>
               )
             ) : null}
-            {money ? <MoneyPane pane={money} state={{ bots, wallets, payments, positions: [], transfers }} onParty={setParty} /> : null}
+            {money ? <MoneyPane pane={money} state={{ bots, wallets, payments, positions, transfers }} onParty={setParty} /> : null}
             {pane === 'Logs' ? <LogsPanel bots={bots} ownerId={ownerId} onParty={setParty} /> : null}
             {pane === 'Security' ? (
               <SecurityPanel
                 bots={bots}
                 ownerId={ownerId}
                 accountLabel={accountLabel}
+                wallets={wallets}
                 onBotsChange={(next) => setBotRecords(next)}
               />
             ) : null}
@@ -730,9 +740,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               if (line.role !== 'user') return;
               const command = parsePlatformSend(line.text);
               if (!command || !ownerId) return;
-              const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+              const transfersUrl = shellRuntimeUrl('/api/transfers');
               const reply = (text) => appendTalk(bot.id, { id: `${line.id}-send`, role: 'assistant', text });
-              if (!runtimeBase) {
+              if (!transfersUrl) {
                 reply('Platform sends need the agent runtime.');
                 toast?.('Platform sends need the agent runtime.');
                 return;
@@ -741,7 +751,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                 try {
                   if (!sessionReadyForWallets(signedIn, user)) return;
                   const token = await getAccessToken?.();
-                  const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/transfers`, {
+                  const response = await fetch(transfersUrl, {
                     method: 'POST',
                     headers: {
                       'content-type': 'application/json',
@@ -805,7 +815,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         />
       ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
-      <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ bots, wallets, payments, positions: [] }} note={walletNote} transfers={transfers} bot={bot} onParty={setParty} signedIn={signedIn} />
+      <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ bots, wallets, payments, positions }} note={walletNote} transfers={transfers} bot={bot} onParty={setParty} signedIn={signedIn} />
       <PartySheet
         open={Boolean(party)}
         party={party}

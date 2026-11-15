@@ -1,10 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { logsUrl } from '../lib/bot-experience.mjs';
 import MentionText from './MentionText';
-
-const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 
 function stamp(at) {
   const date = typeof at === 'number' ? new Date(at) : new Date(at);
@@ -26,7 +24,7 @@ export default function LogsPanel({ bots, ownerId = null, onParty }) {
   const [remote, setRemote] = useState(null);
 
   useEffect(() => {
-    const url = logsUrl(runtimeBase);
+    const url = shellRuntimeUrl('/api/logs');
     if (!url || !ownerId) {
       setRemote(null);
       return undefined;

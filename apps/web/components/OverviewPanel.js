@@ -1,17 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { buildOverview, metricsUrl, pickOwnerRollup } from '../lib/overview.mjs';
+import { buildOverview, pickOwnerRollup } from '../lib/overview.mjs';
+import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import AnimatedList from './AnimatedList';
 import { listLook } from './listLook';
-
-const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
 export default function OverviewPanel({ bots, ownerId = null }) {
   const [remoteMetric, setRemoteMetric] = useState(null);
 
   useEffect(() => {
-    const url = metricsUrl(runtimeBase);
+    const url = shellRuntimeUrl('/api/metrics');
     if (!url || !ownerId) return undefined;
     let stop = false;
     async function load() {

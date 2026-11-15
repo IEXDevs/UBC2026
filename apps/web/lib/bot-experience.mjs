@@ -69,6 +69,15 @@ export function eventsUrl(runtimeBase, botId) {
  * Keep concise tool events for one bot. Drop unknown kinds, other bots, and
  * anything that would leak a Live View URL or hidden chain-of-thought.
  */
+/** Supabase timestamps arrive as ISO strings. The event validator wants epoch ms. */
+export function normalizeLiveEvent(row) {
+  if (!row || typeof row !== 'object') return null;
+  if (typeof row.at !== 'string') return row;
+  const ms = Date.parse(row.at);
+  if (!Number.isSafeInteger(ms) || ms <= 0) return row;
+  return { ...row, at: ms };
+}
+
 export function timelineEntries(events, botId) {
   if (!Array.isArray(events)) return [];
   const kept = [];

@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { metricsUrl, pickOwnerRollup } from '../lib/overview.mjs';
+import { pickOwnerRollup } from '../lib/overview.mjs';
+import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { statisticsView } from '../lib/statistics.mjs';
 import BranchedMenu from './BranchedMenu';
 import CountUp from './CountUp';
 import { usePresence } from './usePresence';
-
-const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
 function leafLabel(row) {
   if (row.text) {
@@ -49,7 +48,7 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
 
   useEffect(() => {
     if (!open) return undefined;
-    const url = metricsUrl(runtimeBase);
+    const url = shellRuntimeUrl('/api/metrics');
     if (!url || !ownerId) return undefined;
     let stop = false;
     async function load() {
