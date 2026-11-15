@@ -5,7 +5,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { closePasswordlessLoginModal, patchPrivySvgProps, rewriteSvgDomProps, silenceTurnstileExecuteWarning } from './patch-privy-svg-props.mjs';
+import {
+  closeOAuthLoginModal,
+  closePasswordlessLoginModal,
+  patchPrivySvgProps,
+  rewriteSvgDomProps,
+  silenceTurnstileExecuteWarning,
+} from './patch-privy-svg-props.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -37,6 +43,14 @@ test('email-code success closes the Privy modal instead of opening terms or wall
   assert.equal(cjsNext.includes('EmbeddedWalletOnAccountCreateScreen'), false);
   assert.equal(closePasswordlessLoginModal(esmNext), esmNext);
   assert.equal(closePasswordlessLoginModal(cjsNext), cjsNext);
+});
+
+test('OAuth success closes the Privy modal instead of opening terms or wallet creation', () => {
+  const esm = 'o((()=>{if(l&&t&&b&&d){if(h?.legal.requireUsersAcceptTerms&&!d.hasAcceptedTerms){let e=setTimeout((()=>{u("AffirmativeConsentScreen")}),c);return()=>clearTimeout(e)}if(C(d,h.embeddedWallets)){let e=setTimeout((()=>{m({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),A({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,provider:L,screen:"OAuthStatusScreen"}}),a()},callAuthOnSuccessOnClose:!0}}),u("EmbeddedWalletOnAccountCreateScreen")}),c);return()=>clearTimeout(e)}{let e=setTimeout((()=>T({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c);return v(),()=>clearTimeout(e)}}}),[l,t,b,d])';
+  const next = closeOAuthLoginModal(esm);
+  assert.equal(next, 'o((()=>{if(l&&t&&b&&d){v(),T({shouldCallAuthOnSuccess:!0,isSuccess:!0})}}),[l,t,b,d])');
+  assert.equal(next.includes('AffirmativeConsentScreen'), false);
+  assert.equal(closeOAuthLoginModal(next), next);
 });
 
 test('drops the Turnstile execute-mode warning', () => {

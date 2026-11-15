@@ -21,7 +21,7 @@ test('Privy provider props stay public and Solana-only', () => {
     'jupiter',
   ]);
   assert.equal(props.config.embeddedWallets.ethereum.createOnLogin, 'off');
-  assert.equal(props.config.embeddedWallets.solana.createOnLogin, 'all-users');
+  assert.equal(props.config.embeddedWallets.solana.createOnLogin, 'off');
   assert.equal(props.config.mfa.noPromptOnMfaRequired, false);
   assert.deepEqual(props.config.loginMethods, ['email', 'google', 'github', 'discord', 'wallet']);
 

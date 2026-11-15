@@ -41,9 +41,25 @@ const PASSWORDLESS_SUCCESS_CLOSE = Object.freeze([
   ],
 ]);
 
+/** Same for OAuth: do not stall on AffirmativeConsent / embedded-wallet screens. */
+const OAUTH_SUCCESS_CLOSE = Object.freeze([
+  [
+    'o((()=>{if(l&&t&&b&&d){if(h?.legal.requireUsersAcceptTerms&&!d.hasAcceptedTerms){let e=setTimeout((()=>{u("AffirmativeConsentScreen")}),c);return()=>clearTimeout(e)}if(C(d,h.embeddedWallets)){let e=setTimeout((()=>{m({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),A({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,provider:L,screen:"OAuthStatusScreen"}}),a()},callAuthOnSuccessOnClose:!0}}),u("EmbeddedWalletOnAccountCreateScreen")}),c);return()=>clearTimeout(e)}{let e=setTimeout((()=>T({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c);return v(),()=>clearTimeout(e)}}}),[l,t,b,d])',
+    'o((()=>{if(l&&t&&b&&d){v(),T({shouldCallAuthOnSuccess:!0,isSuccess:!0})}}),[l,t,b,d])',
+  ],
+]);
+
 export function closePasswordlessLoginModal(source) {
   let next = String(source);
   for (const [from, to] of PASSWORDLESS_SUCCESS_CLOSE) {
+    next = next.replaceAll(from, to);
+  }
+  return next;
+}
+
+export function closeOAuthLoginModal(source) {
+  let next = String(source);
+  for (const [from, to] of OAUTH_SUCCESS_CLOSE) {
     next = next.replaceAll(from, to);
   }
   return next;
@@ -98,7 +114,7 @@ function patchTree(dir, rewrite) {
 export function patchPrivySvgProps(repoRoot) {
   const privy = patchTree(
     path.join(repoRoot, 'node_modules', '@privy-io', 'react-auth', 'dist'),
-    (source) => closePasswordlessLoginModal(rewriteSvgDomProps(source)),
+    (source) => closeOAuthLoginModal(closePasswordlessLoginModal(rewriteSvgDomProps(source))),
   );
   const turnstile = patchTree(
     path.join(repoRoot, 'node_modules', '@marsidev', 'react-turnstile'),
