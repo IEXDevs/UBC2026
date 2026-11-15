@@ -5,6 +5,142 @@ import { SHAPES } from './bot-look.mjs';
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const ID = /^bot_[a-z0-9_]{1,40}$/;
 
+/** Legacy unscoped keys from before agents were tied to an account. */
+export const LEGACY_ROSTER_KEY = 'maelstrom.roster';
+export const LEGACY_LOOKS_KEY = 'maelstrom.botLooks';
+export const ROSTER_KEY_PREFIX = 'maelstrom.roster.';
+export const LOOKS_KEY_PREFIX = 'maelstrom.botLooks.';
+
+export function rosterStorageKey(ownerId) {
+  if (typeof ownerId !== 'string') return '';
+  const id = ownerId.trim();
+  if (!id || id.length > 256) return '';
+  return `${ROSTER_KEY_PREFIX}${id}`;
+}
+
+export function looksStorageKey(ownerId) {
+  if (typeof ownerId !== 'string') return '';
+  const id = ownerId.trim();
+  if (!id || id.length > 256) return '';
+  return `${LOOKS_KEY_PREFIX}${id}`;
+}
+
+function emptyRoster() {
+  return { order: [], extra: [] };
+}
+
+export function normalizeRoster(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return emptyRoster();
+  const order = Array.isArray(value.order)
+    ? value.order.filter((id) => typeof id === 'string' && id)
+    : [];
+  const extra = [];
+  if (Array.isArray(value.extra)) {
+    for (const item of value.extra) {
+      const bot = draftBot(item);
+      if (bot) extra.push(bot);
+    }
+  }
+  return { order, extra };
+}
+
+export function readRoster(storage, ownerId) {
+  const key = rosterStorageKey(ownerId);
+  if (!key || !storage || typeof storage.getItem !== 'function') return emptyRoster();
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return emptyRoster();
+    return normalizeRoster(JSON.parse(raw));
+  } catch {
+    return emptyRoster();
+  }
+}
+
+export function writeRoster(storage, ownerId, roster) {
+  const key = rosterStorageKey(ownerId);
+  if (!key || !storage || typeof storage.setItem !== 'function') return false;
+  try {
+    storage.setItem(key, JSON.stringify(normalizeRoster(roster)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function readLooks(storage, ownerId) {
+  const key = looksStorageKey(ownerId);
+  if (!key || !storage || typeof storage.getItem !== 'function') return {};
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeLooks(storage, ownerId, looks) {
+  const key = looksStorageKey(ownerId);
+  if (!key || !storage || typeof storage.setItem !== 'function') return false;
+  try {
+    const value = looks && typeof looks === 'object' && !Array.isArray(looks) ? looks : {};
+    storage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One-time claim of the old global roster/looks into this owner's keys.
+ * Only runs when the owner has no scoped data yet.
+ */
+export function adoptLegacyRoster(storage, ownerId) {
+  const rosterKey = rosterStorageKey(ownerId);
+  const looksKey = looksStorageKey(ownerId);
+  if (!rosterKey || !storage || typeof storage.getItem !== 'function') {
+    return { roster: emptyRoster(), looks: {}, adopted: false };
+  }
+  const existing = readRoster(storage, ownerId);
+  const existingLooks = readLooks(storage, ownerId);
+  const hasScoped = existing.order.length > 0 || existing.extra.length > 0
+    || Object.keys(existingLooks).length > 0;
+  if (hasScoped) return { roster: existing, looks: existingLooks, adopted: false };
+
+  let legacyRoster = emptyRoster();
+  let legacyLooks = {};
+  try {
+    const rawRoster = storage.getItem(LEGACY_ROSTER_KEY);
+    if (rawRoster) legacyRoster = normalizeRoster(JSON.parse(rawRoster));
+  } catch {
+    legacyRoster = emptyRoster();
+  }
+  try {
+    const rawLooks = storage.getItem(LEGACY_LOOKS_KEY);
+    if (rawLooks) {
+      const parsed = JSON.parse(rawLooks);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) legacyLooks = parsed;
+    }
+  } catch {
+    legacyLooks = {};
+  }
+
+  const hasLegacy = legacyRoster.order.length > 0 || legacyRoster.extra.length > 0
+    || Object.keys(legacyLooks).length > 0;
+  if (!hasLegacy) return { roster: emptyRoster(), looks: {}, adopted: false };
+
+  writeRoster(storage, ownerId, legacyRoster);
+  writeLooks(storage, ownerId, legacyLooks);
+  try {
+    storage.removeItem(LEGACY_ROSTER_KEY);
+    storage.removeItem(LEGACY_LOOKS_KEY);
+  } catch {
+    /* ignore */
+  }
+  return { roster: legacyRoster, looks: legacyLooks, adopted: true };
+}
+
 export function draftBot({ name, shape, color, id } = {}) {
   const trimmed = typeof name === 'string' ? name.trim().slice(0, 64) : '';
   if (!trimmed || !SHAPES.includes(shape) || typeof color !== 'string' || !HEX.test(color)) return null;
