@@ -2,22 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { BOT_COLORS, SHAPES } from '../lib/bot-look.mjs';
+import { BOT_COLORS, randomShape } from '../lib/bot-look.mjs';
 import { draftBot } from '../lib/roster.mjs';
+import { readAgentImage } from './AgentEdit';
 import BotMark from './BotMark';
 import { usePresence } from './usePresence';
 
 export default function CreateBotDialog({ open, onClose, onCreate }) {
   const { mounted, leaving } = usePresence(open);
   const [name, setName] = useState('');
-  const [shape, setShape] = useState('circle');
   const [color, setColor] = useState('#7c5cff');
+  const [image, setImage] = useState('');
+  const [shape, setShape] = useState('circle');
 
   useEffect(() => {
     if (!open) return undefined;
     setName('');
-    setShape('circle');
     setColor('#7c5cff');
+    setImage('');
+    setShape(randomShape());
     function onKey(event) {
       if (event.key === 'Escape') onClose();
     }
@@ -31,7 +34,7 @@ export default function CreateBotDialog({ open, onClose, onCreate }) {
     event.preventDefault();
     const bot = draftBot({ name, shape, color });
     if (!bot) return;
-    onCreate(bot);
+    onCreate({ ...bot, image });
   }
 
   return (
@@ -51,7 +54,7 @@ export default function CreateBotDialog({ open, onClose, onCreate }) {
           </button>
         </div>
         <div className="bot-preview">
-          <BotMark shape={shape} color={color} size={112} />
+          <BotMark shape={shape} color={color} image={image} size={112} />
         </div>
         <input
           className="bot-name"
@@ -62,20 +65,18 @@ export default function CreateBotDialog({ open, onClose, onCreate }) {
           autoFocus
           onChange={event => setName(event.target.value)}
         />
-        <div className="shape-grid" role="listbox" aria-label="Agent shape">
-          {SHAPES.map(option => (
-            <button
-              key={option}
-              type="button"
-              className={option === shape ? 'is-on' : ''}
-              aria-label={option}
-              aria-pressed={option === shape}
-              onClick={() => setShape(option)}
-            >
-              <BotMark shape={option} color={color} size={36} />
-            </button>
-          ))}
-        </div>
+        <label className="agent-edit-file">
+          Photo
+          <input
+            type="file"
+            accept="image/*"
+            aria-label="Agent photo"
+            onChange={async (event) => {
+              const next = await readAgentImage(event.target.files?.[0]);
+              if (next) setImage(next);
+            }}
+          />
+        </label>
         <div className="swatches" role="listbox" aria-label="Agent color">
           {BOT_COLORS.map(swatch => (
             <button

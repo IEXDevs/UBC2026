@@ -39,6 +39,7 @@ export interface CrystalizedBallProps extends Partial<PresetValues> {
   hoverStrength?: number;
   intro?: boolean;
   paused?: boolean;
+  voice?: number;
   className?: string;
   style?: CSSProperties;
 }
@@ -64,6 +65,7 @@ interface Settings extends Omit<PresetValues, 'color'> {
   hoverStrength: number;
   intro: boolean;
   paused: boolean;
+  voice: number;
 }
 
 interface StrandData {
@@ -339,19 +341,19 @@ const buildPalette = (color: Rgb, light: boolean): Palette => {
   }
   return {
     rim: color,
-    rimHot: mixColor(color, WHITE, 0.72),
-    rimMid: mixColor(color, BLACK, 0.15),
-    rimDeep: mixColor(color, BLACK, 0.45),
-    spark: mixColor(color, WHITE, 0.45),
-    sparkGlow: shift(color, 0, -0.15, 1),
-    haze: mixColor(color, BLACK, 0.6),
-    edge: shift(color, 0, -0.3, 0.9),
+    rimHot: mixColor(color, WHITE, 0.22),
+    rimMid: mixColor(color, BLACK, 0.05),
+    rimDeep: mixColor(color, BLACK, 0.32),
+    spark: mixColor(color, WHITE, 0.08),
+    sparkGlow: shift(color, 0, -0.06, 1.08),
+    haze: mixColor(color, BLACK, 0.35),
+    edge: shift(color, 0, -0.08, 1.08),
     tones: [
-      shift(color, 0, -0.06, 1),
-      shift(color, 16, -0.02, 1),
-      shift(color, -16, -0.12, 1.05),
-      shift(blend(color, WHITE, 0.25), 0, 0.04, 1),
-      blend(color, WHITE, 0.7)
+      shift(color, 0, 0.02, 1.08),
+      shift(color, 14, 0.04, 1.05),
+      shift(color, -14, -0.04, 1.05),
+      blend(color, WHITE, 0.16),
+      blend(color, WHITE, 0.28)
     ]
   };
 };
@@ -544,6 +546,7 @@ uniform float uUnfold;
 uniform float uBloom;
 uniform float uInside;
 uniform float uEncode;
+uniform float uVoice;
 uniform vec3 uRim;
 uniform vec3 uRimHot;
 uniform vec3 uRimMid;
@@ -605,18 +608,19 @@ void main() {
     col += uEdgeColor * edge * uInside * (0.5 + 0.5 * uHaze);
   }
 
+  float voice = clamp(uVoice, 0.0, 1.0);
   float dr = r - R;
   float halo = 1.0 - smoothstep(R * 0.05, R * 0.105, abs(dr - R * 0.0213));
   col += uRimDeep * 0.18 * halo * topDim * uGlow * uBloom;
   col += uRim * 0.12 * bell(dr + R * 0.0383, R * 0.032) * uGlow * uBloom;
-  col += uRim * 0.32 * bell(dr, max(R * 0.0117, uLine)) * uPresence * uUnfold;
+  col += uRim * 0.32 * bell(dr, max(R * 0.0117, uLine) * (1.0 + voice * 0.8)) * uPresence * uUnfold;
 
   float delta = mod(theta - uHeat.x + PI, TAU) - PI;
   float heat = uHeat.z * uHeat.y * exp(-delta * delta / 0.3);
   float crackle = uCrackle + heat * 0.9;
-  float amp = R * 0.016 * (0.3 + 1.4 * crackle) * uUnfold;
-  float jitterAmp = R * 0.0048 * (0.3 + 1.4 * uCrackle) * uUnfold * (1.0 + heat * 0.3);
-  float flareAmp = R * 0.064 * (0.4 + 1.2 * crackle) * uFlares * 1.6 * uUnfold;
+  float amp = R * 0.016 * (0.3 + 1.4 * crackle) * uUnfold * (1.0 + voice * 4.6);
+  float jitterAmp = R * 0.0048 * (0.3 + 1.4 * uCrackle) * uUnfold * (1.0 + heat * 0.3) * (1.0 + voice * 2.4);
+  float flareAmp = R * 0.064 * (0.4 + 1.2 * crackle) * uFlares * 1.6 * uUnfold * (1.0 + voice * 1.1);
 
   if (abs(dr) < amp * 2.0 + flareAmp + R * 0.3) {
     float step = TAU / uBins;
@@ -645,7 +649,7 @@ void main() {
       float grade = (off1 - off0) / (step * max(r, 1.0));
       float d = abs(r - rc) * inversesqrt(1.0 + grade * grade);
       float swell = 0.8 + 0.4 * (0.5 + 0.5 * sin(3.0 * theta + uTime * 0.7 + tone.x * 1.7));
-      float width = uLine * look.w * swell * (1.0 + heat * 0.25);
+      float width = uLine * look.w * swell * (1.0 + heat * 0.25) * (1.0 + voice * 0.45);
       float core = exp(-d * d / (width * width));
       float sheath = exp(-d * d / (width * width * 3.0));
       float bright = tone.w * (1.0 + heat * 0.45) * uPresence;
@@ -895,8 +899,9 @@ void main() {
     return;
   }
   light += vec3(max(peak - 1.8, 0.0) * 0.25);
-  vec3 shown = soften(light);
-  fragColor = vec4(shown, max(shown.r, max(shown.g, shown.b)));
+  vec3 hue = light / max(peak, 1e-4);
+  float mag = soften(vec3(peak)).r;
+  fragColor = vec4(hue * mag, mag);
 }
 `;
 
@@ -924,6 +929,7 @@ const CrystalizedBall = ({
   hoverStrength = 0.7,
   intro = true,
   paused = false,
+  voice = 0,
   className = '',
   style
 }: CrystalizedBallProps) => {
@@ -963,7 +969,8 @@ const CrystalizedBall = ({
       interactive,
       hoverStrength,
       intro,
-      paused
+      paused,
+      voice: clamp(voice, 0, 1)
     };
     wakeRef.current?.();
   });
@@ -1024,6 +1031,7 @@ const CrystalizedBall = ({
       uBloom: { value: 0 },
       uInside: { value: 0 },
       uEncode: { value: encode },
+      uVoice: { value: 0 },
       uRim: { value: [1, 1, 1] },
       uRimHot: { value: [1, 1, 1] },
       uRimMid: { value: [1, 1, 1] },
@@ -1385,6 +1393,7 @@ const CrystalizedBall = ({
       fieldUniforms.uUnfold.value = unfold;
       fieldUniforms.uBloom.value = presence * presence;
       fieldUniforms.uInside.value = smooth(0.2, 0.95, introClock);
+      fieldUniforms.uVoice.value = clamp(s.voice, 0, 1);
       fieldUniforms.uRim.value = palette.rim;
       fieldUniforms.uRimHot.value = palette.rimHot;
       fieldUniforms.uRimMid.value = palette.rimMid;

@@ -108,6 +108,19 @@ test('viewer always requests readonly permissions and a five-minute connect dead
   await assert.rejects(provider.readonlyView('../other'), { code: 'invalid_session' });
 });
 
+test('an interactive viewer omits the readonly guardrail', async () => {
+  const provider = createBrowserProvider({
+    accountId: 'a',
+    apiToken: 'b',
+    fetcher: async (_url, options) => {
+      assert.deepEqual(JSON.parse(options.body), { mode: 'tab', expiresInMs: 300000 });
+      return Response.json({ result: { devtoolsFrontendUrl: 'https://live.browser.run/ui/view?jwt=test' } });
+    },
+  });
+  const view = await provider.readonlyView('abc', { interactive: true });
+  assert.equal(view.mode, 'interactive');
+});
+
 test('openTab navigates with PUT json/new and rejects unsafe urls', async () => {
   const provider = createBrowserProvider({
     accountId: 'a',

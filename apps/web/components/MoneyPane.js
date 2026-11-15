@@ -10,6 +10,7 @@ import {
 } from '../lib/money-views.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
 import AnimatedList from './AnimatedList';
+import GlideSelect from './GlideSelect';
 import PositionBook from './PositionBook';
 import TxnLog from './TxnLog';
 import { listLook } from './listLook';
@@ -75,12 +76,14 @@ function History({ state, onParty }) {
       <div className="history-filters">
         <label>
           Bot
-          <select value={botId} onChange={event => setBotId(event.target.value)}>
-            <option value="">All bots</option>
-            {bots.map(item => (
-              <option key={item.id} value={item.id}>{item.name}</option>
-            ))}
-          </select>
+          <GlideSelect
+            ariaLabel="Bot"
+            size="sm"
+            menuWidth={180}
+            value={botId}
+            options={[{ value: '', label: 'All bots' }, ...bots.map(item => ({ value: item.id, label: item.name }))]}
+            onChange={setBotId}
+          />
         </label>
         <div className="library-filters" role="group" aria-label="Direction">
           {FLOWS.map(item => (
@@ -97,11 +100,14 @@ function History({ state, onParty }) {
         </div>
         <label>
           Value
-          <select value={minUnits} onChange={event => setMinUnits(event.target.value)}>
-            {VALUES.map(item => (
-              <option key={item.id} value={item.id}>{item.label}</option>
-            ))}
-          </select>
+          <GlideSelect
+            ariaLabel="Value"
+            size="sm"
+            menuWidth={160}
+            value={minUnits}
+            options={VALUES.map(item => ({ value: item.id, label: item.label }))}
+            onChange={setMinUnits}
+          />
         </label>
       </div>
       <TxnLog

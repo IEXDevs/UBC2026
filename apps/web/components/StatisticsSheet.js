@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
+import AccountStats from './AccountStats';
 import { pickOwnerRollup } from '../lib/overview.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
-import { statisticsView } from '../lib/statistics.mjs';
+import { profileStats, statisticsView } from '../lib/statistics.mjs';
 import BranchedMenu from './BranchedMenu';
 import CountUp from './CountUp';
 import { usePresence } from './usePresence';
@@ -33,7 +34,7 @@ function leafLabel(row) {
   );
 }
 
-export default function StatisticsSheet({ open, onClose, bots = [], ownerId = null, voiceMs = 0 }) {
+export default function StatisticsSheet({ open, onClose, bots = [], ownerId = null, voiceMs = 0, talks = {}, payments = [], transfers = [] }) {
   const { mounted, leaving } = usePresence(open);
   const [remoteMetric, setRemoteMetric] = useState(null);
 
@@ -116,6 +117,7 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
           </button>
         </div>
         <p className="stats-note">{view.note}</p>
+        <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
         <div className="stats-tree">
           <BranchedMenu
             items={items}

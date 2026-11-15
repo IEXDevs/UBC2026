@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { normalizeLiveEvent, timelineEntries } from '../lib/bot-experience.mjs';
 import { browserTrace, traceModel } from '../lib/agent-trace.mjs';
-import { browserSessionUrl, liveViewFrame } from '../lib/live-view.mjs';
+import { browserSessionUrl } from '../lib/live-view.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { ChainOfThought, TerminalBlock, ToolCall } from './ai/elements';
 import ChatBubbles from './ChatBubbles';
-import GlassSurface from './GlassSurface';
+import LiveViewPanel from './LiveViewPanel';
 import ShoppingPanel from './ShoppingPanel';
 
 function liveEventsUrl(botId) {
@@ -15,10 +15,9 @@ function liveEventsUrl(botId) {
   return shellRuntimeUrl(`/api/events?botId=${encodeURIComponent(botId)}`);
 }
 
-export default function AgentThread({ bot, ownerId = null, lines = [], thinking = false, onParty = null }) {
+export default function AgentThread({ bot, ownerId = null, lines = [], thinking = false, onParty = null, onEdit = null }) {
   const [remoteEvents, setRemoteEvents] = useState(null);
   const [sessions, setSessions] = useState([]);
-  const [frame, setFrame] = useState(null);
   const [focus, setFocus] = useState(null);
 
   useEffect(() => {
@@ -50,7 +49,6 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
 
   useEffect(() => {
     setSessions([]);
-    setFrame(null);
     const url = browserSessionUrl('shell', bot.id);
     if (!url || !ownerId) return undefined;
     let stop = false;
@@ -75,38 +73,6 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
     };
   }, [bot.id, ownerId]);
 
-  const openSession = sessions.find(row => row.status === 'open') ?? null;
-
-  useEffect(() => {
-    if (!openSession || !ownerId) {
-      setFrame(null);
-      return undefined;
-    }
-    const url = browserSessionUrl('shell', bot.id, {
-      sessionRecordId: openSession.sessionRecordId,
-      action: 'live-view',
-    });
-    if (!url) return undefined;
-    let stop = false;
-    async function load() {
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-owner-id': ownerId },
-          cache: 'no-store',
-        });
-        const data = await response.json();
-        if (stop || !response.ok) return;
-        const next = liveViewFrame(data);
-        setFrame(next.src ? next : null);
-      } catch {
-        if (!stop) setFrame(null);
-      }
-    }
-    load();
-    return () => { stop = true; };
-  }, [bot.id, ownerId, openSession?.sessionRecordId]);
-
   const entries = remoteEvents ? timelineEntries(remoteEvents, bot.id) : [];
   const trace = traceModel(entries);
   const browser = browserTrace(sessions);
@@ -116,7 +82,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
 
   return (
     <div className="agent-thread">
-      <ChatBubbles lines={lines} thinking={thinking} onParty={onParty} />
+      <ChatBubbles lines={lines} thinking={thinking} onParty={onParty} onEdit={onEdit} />
       {chips.length > 0 ? (
         <div className="agent-chips">
           {chips.map(chip => (
@@ -128,27 +94,8 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
           ))}
         </div>
       ) : null}
-      {frame?.embed && frame.src ? (
-        <GlassSurface
-          className="agent-browser"
-          width="100%"
-          height={280}
-          borderRadius={18}
-          borderWidth={0.08}
-          brightness={48}
-          opacity={0.94}
-          blur={10}
-          backgroundOpacity={0.18}
-          saturation={1.4}
-          distortionScale={-36}
-        >
-          <iframe
-            className="live-frame"
-            title="Browser live view"
-            src={frame.src}
-            referrerPolicy={frame.referrerPolicy}
-          />
-        </GlassSurface>
+      {sessions.some(row => row.status === 'open') ? (
+        <LiveViewPanel botId={bot.id} ownerId={ownerId} fill />
       ) : null}
       <ChainOfThought sections={sections} onSelect={setFocus} />
       {focused ? <p className="agent-focus">{focused.summary}</p> : null}

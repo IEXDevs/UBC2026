@@ -1,4 +1,4 @@
-export const FLOAT_SIZE = 76;
+export const FLOAT_SIZE = 104;
 export const FLOAT_STORAGE_KEY = 'maelstrom.voiceFloat';
 
 export function clampFloat(x, y, bounds = {}) {

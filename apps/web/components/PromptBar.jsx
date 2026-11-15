@@ -4,7 +4,6 @@ import { isValidElement, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { animate, useMotionValue, useMotionValueEvent, useReducedMotion } from 'motion/react';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
-  ArrowDown01Icon,
   Attachment01Icon,
   Calendar03Icon,
   Cancel01Icon,
@@ -16,9 +15,10 @@ import {
   Mic01Icon,
   PlusSignIcon,
   SparklesIcon,
-  Tick02Icon,
 } from '@hugeicons/core-free-icons';
 import './PromptBar.css';
+import GlideSelect from './GlideSelect';
+import { PERMISSIONS, permissionById } from '../lib/spend-permission.mjs';
 
 const ARROW_UP = [12, 4.5, 18.5, 11, 14.25, 11, 14.25, 19.5, 9.75, 19.5, 9.75, 11, 5.5, 11];
 const SQUARE = [12, 6, 18, 6, 18, 12, 18, 18, 6, 18, 6, 12, 6, 6];
@@ -129,6 +129,8 @@ export default function PromptBar({
   onRemoveAttachment,
   accessory = null,
   endSlot = null,
+  permission = '',
+  onPermissionChange,
   chips = null,
   extraReady = false,
   label = 'Prompt',
@@ -164,7 +166,6 @@ export default function PromptBar({
   const [attachments, setAttachments] = useState([]);
   const [modelKey, setModelKey] = useState(defaultModel);
   const [plusOpen, setPlusOpen] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
   const [effortOpen, setEffortOpen] = useState(false);
   const [effortIndex, setEffortIndex] = useState(() => {
     const i = efforts.indexOf(defaultEffort);
@@ -174,17 +175,18 @@ export default function PromptBar({
   const [active, setActive] = useState(0);
   const [listening, setListening] = useState(false);
   const [pressed, setPressed] = useState(false);
+  const [permitOpen, setPermitOpen] = useState(false);
+  const permit = permission ? permissionById(permission) : null;
 
   const model = models.find((m) => m.key === modelKey) ?? models[0];
   const token = dismissed ? null : parseToken(draft);
-  const open = plusOpen ? 'at' : (token?.kind ?? (modelOpen ? 'model' : effortOpen ? 'effort' : null));
+  const open = plusOpen ? 'at' : (token?.kind ?? (effortOpen ? 'effort' : null));
   const query = plusOpen ? '' : (token?.query ?? '');
   const list = useMemo(() => {
     if (open === 'at') return sources.filter((s) => s.name.toLowerCase().includes(query));
     if (open === 'slash') return commands.filter((c) => c.name.replace(/^\//, '').toLowerCase().startsWith(query));
-    if (open === 'model') return models;
     return [];
-  }, [open, query, sources, commands, models]);
+  }, [open, query, sources, commands]);
   const cursor = Math.min(active, Math.max(0, list.length - 1));
   const canSend = draft.trim().length > 0 || attachments.length > 0 || extraReady;
   const armed = busy || canSend;
@@ -194,7 +196,6 @@ export default function PromptBar({
   const focusInput = () => inputRef.current?.focus({ preventScroll: true });
   const closeMenus = useCallback(() => {
     setPlusOpen(false);
-    setModelOpen(false);
     setEffortOpen(false);
   }, []);
 
@@ -222,13 +223,13 @@ export default function PromptBar({
   }, [open]);
 
   useEffect(() => {
-    if (!plusOpen && !modelOpen && !effortOpen) return undefined;
+    if (!plusOpen && !effortOpen) return undefined;
     const onDown = (e) => {
       if (!rootRef.current?.contains(e.target)) closeMenus();
     };
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
-  }, [plusOpen, modelOpen, effortOpen, closeMenus]);
+  }, [plusOpen, effortOpen, closeMenus]);
 
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -345,12 +346,6 @@ export default function PromptBar({
   const fillAt = (i) => (i === efforts.length - 1 ? '100%' : `calc(${stepAt(i)} + 7px)`);
 
   const pick = (row) => {
-    if (open === 'model') {
-      setModelKey(row.key);
-      setModelOpen(false);
-      focusInput();
-      return;
-    }
     const head = token ? draft.slice(0, token.start) : draft;
     if (row.attach) {
       setDraft(head);
@@ -535,14 +530,6 @@ export default function PromptBar({
                   {open === 'at' ? <span className="prompt-bar__row-icon">{renderIcon(row.icon, 16)}</span> : null}
                   <span className="prompt-bar__row-name">{row.name}</span>
                   {row.description ? <span className="prompt-bar__row-desc">{row.description}</span> : null}
-                  {open === 'model' ? (
-                    <>
-                      <span className="prompt-bar__row-tag">{row.tag}</span>
-                      <span className="prompt-bar__row-check" data-on={row.key === model?.key ? '' : undefined}>
-                        <HugeiconsIcon icon={Tick02Icon} size={16} strokeWidth={2.5} />
-                      </span>
-                    </>
-                  ) : null}
                 </button>
               ))}
               {list.length === 0 ? <div className="prompt-bar__empty">No matches for “{query}”</div> : null}
@@ -617,7 +604,6 @@ export default function PromptBar({
                 latest.current.onAttach?.();
                 return;
               }
-              setModelOpen(false);
               setEffortOpen(false);
               setActive(0);
               setPlusOpen((v) => !v);
@@ -627,24 +613,20 @@ export default function PromptBar({
             <HugeiconsIcon icon={PlusSignIcon} size={16} strokeWidth={2} />
           </button>
           {models.length > 0 ? (
-            <button
-              type="button"
-              className="prompt-bar__pick"
-              aria-label="Choose model"
-              aria-expanded={modelOpen}
-              data-on={modelOpen ? '' : undefined}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                setPlusOpen(false);
-                setEffortOpen(false);
-                setActive(Math.max(0, models.indexOf(model)));
-                setModelOpen((v) => !v);
-                focusInput();
-              }}
-            >
-              <span>{model.name}</span>
-              <HugeiconsIcon icon={ArrowDown01Icon} size={16} strokeWidth={2.4} />
-            </button>
+            <span className="prompt-bar__glide" onMouseDown={(event) => event.preventDefault()} onClick={(event) => event.stopPropagation()}>
+              <GlideSelect
+                options={models.map((item) => ({ value: item.key, label: item.name, tag: item.tag }))}
+                value={model?.key ?? ''}
+                onChange={(key) => setModelKey(key)}
+                showTags
+                size="sm"
+                menuWidth={210}
+                placement="top"
+                align="left"
+                ariaLabel="Choose model"
+                textColor={color}
+              />
+            </span>
           ) : null}
           {efforts.length > 0 ? (
             <button
@@ -657,7 +639,6 @@ export default function PromptBar({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 setPlusOpen(false);
-                setModelOpen(false);
                 setEffortOpen((v) => !v);
                 focusInput();
               }}
@@ -665,6 +646,41 @@ export default function PromptBar({
               <HugeiconsIcon icon={SparklesIcon} size={16} strokeWidth={2} />
               <span>{level}</span>
             </button>
+          ) : null}
+          {permit ? (
+            <span className="permit" onMouseDown={(event) => event.preventDefault()} onClick={(event) => event.stopPropagation()}>
+              <button
+                type="button"
+                className="permit-chip"
+                style={{ '--permit': permit.color }}
+                aria-label="Permissions"
+                aria-expanded={permitOpen}
+                onClick={() => setPermitOpen(value => !value)}
+              >
+                <i />
+                <span>{permit.label}</span>
+              </button>
+              {permitOpen ? (
+                <div className="permit-menu" role="listbox" aria-label="Permissions">
+                  {PERMISSIONS.map(item => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="option"
+                      aria-selected={item.id === permit.id}
+                      style={{ '--permit': item.color }}
+                      onClick={() => {
+                        onPermissionChange?.(item.id);
+                        setPermitOpen(false);
+                      }}
+                    >
+                      <i />
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </span>
           ) : null}
           {accessory}
           <span className="prompt-bar__spacer" />

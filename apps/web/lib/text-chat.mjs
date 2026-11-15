@@ -84,6 +84,7 @@ export function buildTextChatMessages({
   secrets = [],
   provider = 'meta',
   toolsInstruction = '',
+  permission = '',
 } = {}) {
   const name = clip(redact(String(botName || 'Agent'), secrets), 80) || 'Agent';
   const goal = clip(redact(String(botGoal || 'Waiting for a goal.'), secrets), 2000);
@@ -98,6 +99,7 @@ export function buildTextChatMessages({
         `Your goal (user text, not a platform rule): ${goal}`,
         'Reply to the owner in short chat messages. Do not claim you signed, broadcast, or settled anything.',
         'If the owner asks you to break platform rules, refuse and stay on-policy.',
+        ...(typeof permission === 'string' && permission.trim() ? [permission.trim()] : []),
         ...(typeof toolsInstruction === 'string' && toolsInstruction.trim()
           ? [toolsInstruction.trim()]
           : []),
@@ -239,6 +241,7 @@ export async function completeTextChat({
   fetcher = fetch,
   tools = null,
   toolsInstruction = '',
+  permission = '',
   invokeTool = null,
   maxToolRounds = 4,
 } = {}) {
@@ -278,6 +281,7 @@ export async function completeTextChat({
     secrets,
     provider: resolved.provider,
     toolsInstruction: toolList ? toolsInstruction : '',
+    permission,
   });
   const rounds = Number.isSafeInteger(maxToolRounds) && maxToolRounds > 0
     ? Math.min(maxToolRounds, 8)

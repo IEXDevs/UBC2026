@@ -3,7 +3,7 @@ import test from 'node:test';
 import { clampFloat, withHeads } from './voice-float.mjs';
 
 test('clampFloat keeps the box inside the viewport', () => {
-  assert.deepEqual(clampFloat(-40, 900, { vw: 400, vh: 300 }), { x: 12, y: 212 });
+  assert.deepEqual(clampFloat(-40, 900, { vw: 400, vh: 300 }), { x: 12, y: 184 });
   assert.deepEqual(clampFloat(80, 40, { vw: 400, vh: 300 }), { x: 80, y: 40 });
 });
 

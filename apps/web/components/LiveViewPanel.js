@@ -1,9 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { browserErrorNote, browserStatusNote } from '../lib/browser-status.mjs';
 import { browserSessionUrl, liveViewFrame, pickOpenSession } from '../lib/live-view.mjs';
-import GlassSurface from './GlassSurface';
 import LatticeLoader from './bits/LatticeLoader';
 
 const runtimeBase = 'shell';
@@ -31,12 +30,14 @@ async function ownerFetch(url, ownerId, method, body) {
  * or a link href, never copied into the timeline or button text.
  * Chat-opened sessions live in the same Worker store — adopt them on load.
  */
-export default function LiveViewPanel({ botId, ownerId = null }) {
+export default function LiveViewPanel({ botId, ownerId = null, fill = false }) {
   const [sessionRecordId, setSessionRecordId] = useState(null);
   const [openCount, setOpenCount] = useState(0);
   const [frame, setFrame] = useState(null);
+  const [control, setControl] = useState('agent');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const shown = useRef(null);
   const sessionUrl = browserSessionUrl(runtimeBase, botId);
   const status = browserStatusNote({
     ownerId,
@@ -83,6 +84,13 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
     };
   }, [syncSessions]);
 
+  useEffect(() => {
+    if (!sessionRecordId || shown.current === sessionRecordId) return undefined;
+    shown.current = sessionRecordId;
+    run('view');
+    return undefined;
+  }, [sessionRecordId]);
+
   async function run(action) {
     setError('');
     setBusy(true);
@@ -112,15 +120,17 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
           throw caught;
         }
       }
-      if (action === 'view') {
+      if (action === 'view' || action === 'owner' || action === 'agent') {
         let id = sessionRecordId;
         if (!id) {
           id = await syncSessions();
         }
         if (!id) throw new Error('session_not_found');
+        const next = action === 'view' ? undefined : action;
         const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'live-view' });
-        const view = await ownerFetch(url, ownerId, 'POST', {});
+        const view = await ownerFetch(url, ownerId, 'POST', next ? { control: next } : {});
         setSessionRecordId(id);
+        setControl(view.control === 'owner' ? 'owner' : 'agent');
         setFrame(liveViewFrame(view));
         return;
       }
@@ -145,48 +155,49 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
 
   const ready = Boolean(ownerId) && Boolean(sessionUrl);
 
+  const driving = control === 'owner';
+
   return (
-    <div className="live-view">
-      <div className="live-row">
-        {busy ? <LatticeLoader label="Browser" /> : <p className="live-status">{status}</p>}
-        <div className="live-actions">
-        <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
-          Open browser session
-        </button>
-        <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('view')}>
-          Show live view
-        </button>
-        <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('release')}>
-          Release session
-        </button>
+    <div className={`live-view${fill ? ' is-fill' : ''}`}>
+      {frame?.src ? null : (
+        <div className="live-row">
+          {busy ? <LatticeLoader label="Browser" /> : <p className="live-status">{status}</p>}
+          <div className="live-actions">
+            <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
+              Open browser session
+            </button>
+            <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('release')}>
+              Release session
+            </button>
+          </div>
         </div>
-      </div>
+      )}
       {error ? <p className="preview-note" role="alert">{error}</p> : null}
-      {frame?.embed && frame.src && (
-        <GlassSurface
-          className="live-glass"
-          width="100%"
-          height={280}
-          borderRadius={18}
-          borderWidth={0.08}
-          brightness={48}
-          opacity={0.94}
-          blur={10}
-          backgroundOpacity={0.18}
-          saturation={1.4}
-          distortionScale={-36}
-        >
+      {frame?.embed && frame.src ? (
+        <div className="live-stage">
           <iframe
             className="live-frame"
             title="Browser live view"
             src={frame.src}
             referrerPolicy={frame.referrerPolicy}
           />
-        </GlassSurface>
-      )}
-      {frame?.src && (
-        <a href={frame.src} target="_blank" rel="noopener noreferrer">Open in tab</a>
-      )}
+        </div>
+      ) : null}
+      {frame?.src ? (
+        <div className="live-dock">
+          <button
+            className="cta"
+            type="button"
+            disabled={!ready || busy}
+            onClick={() => run(driving ? 'agent' : 'owner')}
+          >
+            {driving ? 'Resume' : 'Take control'}
+          </button>
+          <button className="ghost" type="button" disabled={!ready || busy} onClick={() => run('release')}>
+            Release
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

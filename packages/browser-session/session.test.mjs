@@ -84,6 +84,14 @@ test('openSession and navigateSession load https urls via openTab', async () => 
   );
   assert.equal(navigated.url, 'https://example.com/');
   assert.equal(tabs[1].url, 'https://example.com/');
+  const held = await svc.liveView({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1', control: 'owner' });
+  assert.equal(held.control, 'owner');
+  await assert.rejects(
+    svc.navigateSession({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1', url: 'https://example.com/held' }),
+    (error) => error.code === 'owner_has_control',
+  );
+  const returned = await svc.liveView({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1', control: 'agent' });
+  assert.equal(returned.control, 'agent');
 });
 
 test('per-bot concurrency limit reuses and navigates instead of failing', async () => {
