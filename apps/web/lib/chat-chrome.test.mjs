@@ -77,4 +77,8 @@ test('the prompt bar exposes both dictation and live voice mode', () => {
   assert.match(composer, /startBrowserDictation/);
   assert.match(composer, /aria-label=\{live \? `Stop voice mode with \$\{callName \|\| botName\}` : 'Voice mode'\}/);
   assert.match(composer, /className=\{`voice-mode\$\{live \? ' is-on' : ''\}`\}/);
+  const dictation = readFileSync(join(root, 'lib/dictation.mjs'), 'utf8');
+  assert.match(dictation, /scribe_v2_realtime/);
+  assert.match(dictation, /CommitStrategy\.VAD/);
+  assert.match(dictation, /\/api\/voice\/scribe-token/);
 });
