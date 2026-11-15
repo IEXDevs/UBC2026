@@ -75,7 +75,12 @@ test('sandbox store client lists catalog and surfaces 402 buy challenges', async
   const client = createSandboxStoreClient({
     fetcher: async (url, options) => {
       if (String(url).endsWith('/store/catalog')) {
-        return Response.json({ items: [{ id: 'sku_1', name: 'Sticker', price: '10000', description: 'demo' }] });
+        return Response.json({
+          items: [
+            { id: 'sku_1', name: 'Sticker', price: '10000', description: 'demo', quality: '700' },
+            { id: 'sku_2', name: 'Odd', price: '1000', quality: 'nope' },
+          ],
+        });
       }
       assert.equal(options.method, 'POST');
       assert.equal(options.headers['PAYMENT-SIGNATURE'], undefined);
@@ -87,6 +92,8 @@ test('sandbox store client lists catalog and surfaces 402 buy challenges', async
   });
   const items = await client.listCatalog();
   assert.equal(items[0].id, 'sku_1');
+  assert.equal(items[0].quality, '700');
+  assert.equal(items[1].quality, undefined);
   const challenge = await client.buy({ itemId: 'sku_1' });
   assert.equal(challenge.state, 'payment-required');
   assert.equal(challenge.paymentRequired, 'dGVzdA==');

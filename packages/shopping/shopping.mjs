@@ -20,8 +20,19 @@ export const LASO_BASE_URL = 'https://laso.finance';
 /** Tiny Laso prepaid card face value in USD (API minimum is $5). */
 export const LASO_TINY_CARD_USD = 5;
 
-export function rankCatalogItems(items, { preferCheapest = true } = {}) {
-  if (!Array.isArray(items) || items.length < 1) fail('Catalog items are required');
+const QUALITY_PATTERN = /^(0|[1-9][0-9]{0,3})$/;
+
+function catalogQuality(item) {
+  if (item?.quality == null && item?.qualityScore == null) return null;
+  const raw = item.quality ?? item.qualityScore;
+  const text = typeof raw === 'number' && Number.isInteger(raw) ? String(raw) : raw;
+  if (typeof text !== 'string' || !QUALITY_PATTERN.test(text) || BigInt(text) > 1000n) {
+    fail('Quality score must be an integer from 0 to 1000');
+  }
+  return BigInt(text);
+}
+
+function rankByPrice(items, preferCheapest) {
   const ranked = [...items].sort((a, b) => {
     const left = BigInt(a.price);
     const right = BigInt(b.price);
@@ -32,6 +43,42 @@ export function rankCatalogItems(items, { preferCheapest = true } = {}) {
     best: ranked[0],
     ranked,
     reason: preferCheapest ? 'lowest sandbox price' : 'highest sandbox price',
+    comparison: 'price',
+  };
+}
+
+/**
+ * Lowest price when the catalog has no quality scores.
+ * With a score (0–1000), pick the best quality per sandbox price.
+ * A higher score can beat a cheaper item. Nothing here signs or buys.
+ */
+export function rankCatalogItems(items, { preferCheapest = true, compareQuality = true } = {}) {
+  if (!Array.isArray(items) || items.length < 1) fail('Catalog items are required');
+  if (!compareQuality || preferCheapest === false) return rankByPrice(items, preferCheapest);
+  const scored = items.map((item) => ({ item, quality: catalogQuality(item) }));
+  if (!scored.some((row) => row.quality != null)) return rankByPrice(items, true);
+
+  const ranked = [...scored].sort((a, b) => {
+    const aScored = a.quality != null;
+    const bScored = b.quality != null;
+    if (aScored !== bScored) return aScored ? -1 : 1;
+    if (aScored) {
+      const left = a.quality * BigInt(b.item.price);
+      const right = b.quality * BigInt(a.item.price);
+      if (left !== right) return left > right ? -1 : 1;
+    }
+    const priceOrder = BigInt(a.item.price) < BigInt(b.item.price) ? -1 : BigInt(a.item.price) > BigInt(b.item.price) ? 1 : 0;
+    if (priceOrder !== 0) return priceOrder;
+    return String(a.item.id).localeCompare(String(b.item.id));
+  }).map((row) => ({ ...row.item, quality: row.quality == null ? null : String(row.quality) }));
+
+  const winner = ranked[0];
+  const shown = `${winner.quality}/1000`;
+  return {
+    best: winner,
+    ranked,
+    reason: `best quality per sandbox price (${shown})`,
+    comparison: 'price-and-quality',
   };
 }
 
@@ -76,16 +123,17 @@ export async function prepareSandboxPurchase({
   baseUrl,
   now = Date.now(),
   preferCheapest = true,
+  compareQuality = true,
 }) {
   const client = storeClient ?? createSandboxStoreClient({ baseUrl, fetcher });
   const items = await client.listCatalog();
-  const { best, ranked, reason } = rankCatalogItems(items, { preferCheapest });
+  const { best, ranked, reason, comparison } = rankCatalogItems(items, { preferCheapest, compareQuality });
   const { proposal, digest, item } = buildShoppingProposal({ bot, item: best, recipient, now });
   const policy = evaluateProposal(bot, proposal, ledger, now);
   const challenge = await client.buy({ itemId: item.id });
   return {
     ranked,
-    pick: { item, reason },
+    pick: { item, reason, comparison },
     proposal,
     digest,
     policy,
