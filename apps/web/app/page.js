@@ -31,6 +31,8 @@ import { withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
+import { readTalks, writeTalks } from '../lib/talk-store.mjs';
+import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 
 const base = getDemoShellState();
@@ -90,6 +92,12 @@ function AuthedShell() {
   const [liveWallets, setLiveWallets] = useState(null);
   const [walletNote, setWalletNote] = useState('');
   const accountsKey = linkedAccountsKey(user);
+
+  const onLogout = useCallback(async () => {
+    await withPrivyLogout(typeof window !== 'undefined' ? window : globalThis, async () => {
+      await logout?.();
+    });
+  }, [logout]);
 
   useEffect(() => {
     if (!signedIn) {
@@ -160,7 +168,7 @@ function AuthedShell() {
       signedIn={signedIn}
       loginDisabled={!ready}
       onLogin={login}
-      onLogout={logout}
+      onLogout={onLogout}
       liveWallets={liveWallets}
       walletNote={walletNote}
       getAccessToken={getAccessToken}
@@ -190,6 +198,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [walletsOpen, setWalletsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [talks, setTalks] = useState({});
+  const [talksReady, setTalksReady] = useState(false);
   const [thinkingBot, setThinkingBot] = useState(null);
   const [botRecords, setBotRecords] = useState(base.bots);
   const [profile, setProfile] = useState(null);
@@ -246,6 +255,26 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     localStorage.setItem(LOOK_KEY, JSON.stringify(looks));
     localStorage.setItem(ROSTER_KEY, JSON.stringify(roster));
   }, [looks, roster, ready]);
+
+  useEffect(() => {
+    setTalksReady(false);
+    if (!ownerId) {
+      setTalks({});
+      setTalksReady(true);
+      return;
+    }
+    try {
+      setTalks(readTalks(localStorage, ownerId));
+    } catch {
+      setTalks({});
+    }
+    setTalksReady(true);
+  }, [ownerId]);
+
+  useEffect(() => {
+    if (!talksReady || !ownerId) return;
+    writeTalks(localStorage, ownerId, talks);
+  }, [talks, talksReady, ownerId]);
 
   useEffect(() => {
     try {
