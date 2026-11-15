@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import SecretDraft from './SecretDraft';
 import {
   DESK_LOCK_IDLE_MS,
   createDeskLock,
@@ -9,6 +10,7 @@ import {
   unlockDesk,
   writeDeskLock,
 } from '../lib/desk-lock.mjs';
+import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
 
 const idleMinutes = Math.round(DESK_LOCK_IDLE_MS / 60000);
 
@@ -18,6 +20,9 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
   const [confirm, setConfirm] = useState('');
   const [note, setNote] = useState('');
   const [pending, setPending] = useState(false);
+  const [generated, setGenerated] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
     try {
@@ -28,6 +33,9 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
     setPassword('');
     setConfirm('');
     setNote('');
+    setGenerated(false);
+    setCopied(false);
+    setAcknowledged(false);
   }, [ownerId]);
 
   const setting = record == null;
@@ -45,6 +53,10 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
       }
       if (password !== confirm) {
         setNote('Those passwords do not match.');
+        return;
+      }
+      if (!secretAcceptAllowed({ generated, copied, acknowledged })) {
+        setNote('Copy the generated password or passphrase, or confirm that you copied it.');
         return;
       }
     }
@@ -82,18 +94,38 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
             : `Enter it to use wallets, sends, and agents. A reload asks again, and so does ${idleMinutes} minutes of idle time.`}
         </p>
         <form className="field" onSubmit={submit}>
-          <label>
-            Password
-            <input
-              type="password"
+          {setting ? (
+            <SecretDraft
+              label="Password"
               name="desk-password"
-              autoFocus
-              autoComplete={setting ? 'new-password' : 'current-password'}
               value={password}
+              generated={generated}
+              copied={copied}
+              acknowledged={acknowledged}
               disabled={record === undefined || pending}
-              onChange={event => setPassword(event.target.value)}
+              onValue={setPassword}
+              onFill={(next) => {
+                setPassword(next);
+                setConfirm(next);
+              }}
+              onGenerated={setGenerated}
+              onCopied={setCopied}
+              onAcknowledged={setAcknowledged}
             />
-          </label>
+          ) : (
+            <label>
+              Password
+              <input
+                type="password"
+                name="desk-password"
+                autoFocus
+                autoComplete="current-password"
+                value={password}
+                disabled={record === undefined || pending}
+                onChange={event => setPassword(event.target.value)}
+              />
+            </label>
+          )}
           {setting ? (
             <label>
               Confirm password
@@ -108,7 +140,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
             </label>
           ) : null}
           {note ? <p className="quiet" role="status">{note}</p> : null}
-          <button type="submit" className="solid" disabled={record === undefined || pending}>
+          <button type="submit" className="solid" disabled={record === undefined || pending || (setting && !secretAcceptAllowed({ generated, copied, acknowledged }))}>
             {pending ? 'Checking…' : (setting ? 'Set password' : 'Unlock')}
           </button>
         </form>

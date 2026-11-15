@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import AddressCopy from './AddressCopy';
 import SlideCommit from './bits/SlideCommit';
+import SecretDraft from './SecretDraft';
+import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
 import {
   createRecoveryPhrase,
   normalizePassphrase,
@@ -22,6 +24,9 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
   const [picked, setPicked] = useState([]);
   const [note, setNote] = useState('');
   const [step, setStep] = useState('pass');
+  const [generated, setGenerated] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
   const joined = words ? words.join(' ') : '';
   const bank = useMemo(() => (joined ? shuffledPhrase(joined) : []), [joined]);
   const phraseReady = words ? phraseComplete(picked, words.length) : false;
@@ -95,20 +100,37 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
                 setNote('Use the same passphrase, 8 to 64 characters.');
                 return;
               }
+              if (!secretAcceptAllowed({ generated, copied, acknowledged })) {
+                setNote('Copy the generated password or passphrase, or confirm that you copied it.');
+                return;
+              }
               setPassphrase(left);
               setNote('');
               setStep('save');
             }}
           >
-            <label>
-              Passphrase
-              <input type="password" value={passphrase} autoComplete="new-password" onChange={event => setPassphrase(event.target.value)} />
-            </label>
+            <SecretDraft
+              label="Passphrase"
+              name="recovery-passphrase"
+              value={passphrase}
+              generated={generated}
+              copied={copied}
+              acknowledged={acknowledged}
+              disabled={!words}
+              onValue={setPassphrase}
+              onFill={(next) => {
+                setPassphrase(next);
+                setAgain(next);
+              }}
+              onGenerated={setGenerated}
+              onCopied={setCopied}
+              onAcknowledged={setAcknowledged}
+            />
             <label>
               Confirm passphrase
               <input type="password" value={again} autoComplete="new-password" onChange={event => setAgain(event.target.value)} />
             </label>
-            <button type="submit" className="solid" disabled={!words}>Continue</button>
+            <button type="submit" className="solid" disabled={!words || !secretAcceptAllowed({ generated, copied, acknowledged })}>Continue</button>
           </form>
         ) : null}
         {step === 'save' ? (
