@@ -113,7 +113,6 @@ function AuthedShell() {
       setWalletNote('');
       return undefined;
     }
-    // getAccessToken() can erase the Privy session while the terms screen is open.
     if (!sessionReadyForWallets(signedIn, user)) return undefined;
     let stopped = false;
     setWalletNote('Provisioning Solana wallets…');

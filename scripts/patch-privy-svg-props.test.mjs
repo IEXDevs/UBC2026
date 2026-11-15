@@ -32,25 +32,36 @@ test('keeps Privy app-config failures and skips the strict-mode abort warning', 
   assert.equal(rewriteSvgDomProps(next), next);
 });
 
-test('email-code success closes the Privy modal instead of opening terms or wallet creation', () => {
+test('email-code success skips terms/wallet screens but keeps delayed modal close', () => {
   const esm = 'if(w&&I&&_){if(s?.legal.requireUsersAcceptTerms&&!_.hasAcceptedTerms){let e=setTimeout((()=>{r("AffirmativeConsentScreen")}),B);return()=>clearTimeout(e)}if(E(_,s.embeddedWallets)){let e=setTimeout((()=>{a({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),T({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,screen:"AwaitingPasswordlessCodeScreen"}}),N()},callAuthOnSuccessOnClose:!0}}),r("EmbeddedWalletOnAccountCreateScreen")}),B);return()=>clearTimeout(e)}{A();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),f);return()=>clearTimeout(e)}}';
   const cjs = 'if(g&&b&&S){if(s?.legal.requireUsersAcceptTerms&&!S.hasAcceptedTerms){let e=setTimeout((()=>{r("AffirmativeConsentScreen")}),M);return()=>clearTimeout(e)}if(p.shouldProceedtoEmbeddedWalletCreationFlow(S,s.embeddedWallets)){let e=setTimeout((()=>{n({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),x({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,screen:"AwaitingPasswordlessCodeScreen"}}),C()},callAuthOnSuccessOnClose:!0}}),r("EmbeddedWalletOnAccountCreateScreen")}),M);return()=>clearTimeout(e)}{E();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c.DEFAULT_SUCCESS_SCREEN_DURATION_MS);return()=>clearTimeout(e)}}';
+  const expectedEsm = 'if(w&&I&&_){A();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),f);return()=>clearTimeout(e)}';
+  const expectedCjs = 'if(g&&b&&S){E();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c.DEFAULT_SUCCESS_SCREEN_DURATION_MS);return()=>clearTimeout(e)}';
   const esmNext = closePasswordlessLoginModal(esm);
   const cjsNext = closePasswordlessLoginModal(cjs);
-  assert.equal(esmNext, 'if(w&&I&&_){A(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}');
-  assert.equal(cjsNext, 'if(g&&b&&S){E(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}');
+  assert.equal(esmNext, expectedEsm);
+  assert.equal(cjsNext, expectedCjs);
   assert.equal(esmNext.includes('AffirmativeConsentScreen'), false);
   assert.equal(cjsNext.includes('EmbeddedWalletOnAccountCreateScreen'), false);
   assert.equal(closePasswordlessLoginModal(esmNext), esmNext);
   assert.equal(closePasswordlessLoginModal(cjsNext), cjsNext);
+  assert.equal(
+    closePasswordlessLoginModal('if(w&&I&&_){A(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}'),
+    expectedEsm,
+  );
 });
 
-test('OAuth success closes the Privy modal instead of opening terms or wallet creation', () => {
+test('OAuth success skips terms/wallet screens but keeps delayed modal close', () => {
   const esm = 'o((()=>{if(l&&t&&b&&d){if(h?.legal.requireUsersAcceptTerms&&!d.hasAcceptedTerms){let e=setTimeout((()=>{u("AffirmativeConsentScreen")}),c);return()=>clearTimeout(e)}if(C(d,h.embeddedWallets)){let e=setTimeout((()=>{m({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),A({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,provider:L,screen:"OAuthStatusScreen"}}),a()},callAuthOnSuccessOnClose:!0}}),u("EmbeddedWalletOnAccountCreateScreen")}),c);return()=>clearTimeout(e)}{let e=setTimeout((()=>T({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c);return v(),()=>clearTimeout(e)}}}),[l,t,b,d])';
+  const expected = 'o((()=>{if(l&&t&&b&&d){let e=setTimeout((()=>T({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c);return v(),()=>clearTimeout(e)}}),[l,t,b,d])';
   const next = closeOAuthLoginModal(esm);
-  assert.equal(next, 'o((()=>{if(l&&t&&b&&d){v(),T({shouldCallAuthOnSuccess:!0,isSuccess:!0})}}),[l,t,b,d])');
+  assert.equal(next, expected);
   assert.equal(next.includes('AffirmativeConsentScreen'), false);
   assert.equal(closeOAuthLoginModal(next), next);
+  assert.equal(
+    closeOAuthLoginModal('o((()=>{if(l&&t&&b&&d){v(),T({shouldCallAuthOnSuccess:!0,isSuccess:!0})}}),[l,t,b,d])'),
+    expected,
+  );
 });
 
 test('drops the Turnstile execute-mode warning', () => {

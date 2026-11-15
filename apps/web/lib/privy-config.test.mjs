@@ -34,12 +34,11 @@ test('Privy provider props stay public and Solana-only', () => {
   assert.equal(serialized.includes('http'), false);
 });
 
-test('wallet provisioning waits until Privy terms are accepted', () => {
+test('wallet provisioning runs once Privy reports a signed-in user', () => {
   const user = { id: 'did:privy:abc', hasAcceptedTerms: false };
   assert.equal(sessionReadyForWallets(false, user), false);
   assert.equal(sessionReadyForWallets(true, null), false);
-  assert.equal(sessionReadyForWallets(true, user), false);
-  assert.equal(sessionReadyForWallets(true, { ...user, hasAcceptedTerms: true }), true);
+  assert.equal(sessionReadyForWallets(true, user), true);
   assert.equal(sessionReadyForWallets(true, { id: 'did:privy:abc' }), true);
 });
 

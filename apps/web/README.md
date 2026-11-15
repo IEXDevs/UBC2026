@@ -9,10 +9,10 @@ Privy mounts when `NEXT_PUBLIC_PRIVY_APP_ID` is set. Put that value (and the mat
 If Connect shows **Something went wrong**, fix the Privy dashboard (not the Next env file):
 
 1. [Authentication](https://dashboard.privy.io) → enable **Email**, **Google**, **GitHub**, and **Discord** (match `loginMethods` in `lib/privy-config.mjs`).
-2. Configuration → App settings → **Domains** → Allowed origins → add exactly `http://localhost:3000` (include the port). Add your deployed web origin the same way when you host it. OAuth also needs that origin (and redirect URLs) on the App client if you use one.
-3. Leave `NEXT_PUBLIC_PRIVY_CLIENT_ID` **empty** unless you created an App client and copied that client’s id. A wrong client id uses a different allowlist and fails login with the same generic error.
-4. Enable **Solana** embedded wallets (create on login) so the shell can mint the main wallet after sign-in.
-5. Restart `npm run dev -w @ubc2026/web` after any `.env.local` change. In DevTools → Network, a failing init call often returns `invalid_origin`.
+2. Configuration → App settings → **Domains** → Allowed origins → add exactly `http://localhost:3000` (include the port). For the hosted shell, add the **web** origin you open in the browser (`https://maelstrom.iexdevs.com`, or `https://maelstrom-web.<account>.workers.dev` if you use that Worker URL). Do **not** add the agent-runtime Worker (`maelstrom-agent-runtime….workers.dev`) — that is only `NEXT_PUBLIC_AGENT_RUNTIME_URL`, not the login page.
+3. Leave **Require users to accept terms** off (this app does not use Privy’s terms gate). Leave `NEXT_PUBLIC_PRIVY_CLIENT_ID` **empty** unless you created an App client and copied that client’s id. A wrong client id uses a different allowlist and fails login with the same generic error.
+4. While developing on localhost, leave **HttpOnly cookies** off on this app ID (or use a separate Privy development app). Cookies on a production app ID are not set on localhost, so refresh will look logged out even though login just worked. Solana wallets are provisioned by `POST /api/wallets` after sign-in (`createOnLogin` is off in code).
+5. Restart `npm run dev -w @ubc2026/web` after any `.env.local` change. In DevTools → Network, a failing init call often returns `invalid_origin`. After a good login, Application → Local Storage should keep `privy:*` keys across refresh.
 
 **Discord / GitHub / Google `invalid OAuth2 redirect_uri`:** that error comes from the provider console, not Next. Prefer Privy’s default social credentials (toggle the method on, leave custom client empty). If you pasted your own Discord/GitHub/Google app credentials into Privy → Login methods → Socials, that provider app must allow Privy’s callback **exactly**:
 

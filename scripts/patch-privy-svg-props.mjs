@@ -25,28 +25,37 @@ const APP_CONFIG_WARN_FIXED = 'p(t);if(t.name!=="AbortError")console.warn("Error
 const TURNSTILE_EXECUTE_WARN = 'console.warn(`Execution mode is not set to "execute"`)';
 
 /**
- * After the email code is accepted, Privy shows "Success!" and then routes to
- * the terms screen or embedded-wallet creation. Those routes keep the modal
- * open, so the signed-in shell never appears. Close the modal on that success
- * instead. Wallet provisioning stays on the app's own API.
+ * After email/OAuth success, Privy may route to AffirmativeConsent or
+ * embedded-wallet creation (keeps the modal open). Skip those screens, but
+ * keep Privy's delayed success close so session tokens finish writing —
+ * closing immediately left login looking fine until refresh signed people out.
+ * Wallet provisioning stays on the app's own API.
  */
+const PASSWORDLESS_SUCCESS_ESM = 'if(w&&I&&_){A();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),f);return()=>clearTimeout(e)}';
+const PASSWORDLESS_SUCCESS_CJS = 'if(g&&b&&S){E();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c.DEFAULT_SUCCESS_SCREEN_DURATION_MS);return()=>clearTimeout(e)}';
+const OAUTH_SUCCESS_ESM = 'o((()=>{if(l&&t&&b&&d){let e=setTimeout((()=>T({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c);return v(),()=>clearTimeout(e)}}),[l,t,b,d])';
+
 const PASSWORDLESS_SUCCESS_CLOSE = Object.freeze([
   [
     'if(w&&I&&_){if(s?.legal.requireUsersAcceptTerms&&!_.hasAcceptedTerms){let e=setTimeout((()=>{r("AffirmativeConsentScreen")}),B);return()=>clearTimeout(e)}if(E(_,s.embeddedWallets)){let e=setTimeout((()=>{a({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),T({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,screen:"AwaitingPasswordlessCodeScreen"}}),N()},callAuthOnSuccessOnClose:!0}}),r("EmbeddedWalletOnAccountCreateScreen")}),B);return()=>clearTimeout(e)}{A();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),f);return()=>clearTimeout(e)}}',
-    'if(w&&I&&_){A(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}',
+    PASSWORDLESS_SUCCESS_ESM,
   ],
+  // Upgrade prior "close immediately" patch so npm postinstall heals installed copies.
+  ['if(w&&I&&_){A(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}', PASSWORDLESS_SUCCESS_ESM],
   [
     'if(g&&b&&S){if(s?.legal.requireUsersAcceptTerms&&!S.hasAcceptedTerms){let e=setTimeout((()=>{r("AffirmativeConsentScreen")}),M);return()=>clearTimeout(e)}if(p.shouldProceedtoEmbeddedWalletCreationFlow(S,s.embeddedWallets)){let e=setTimeout((()=>{n({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),x({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,screen:"AwaitingPasswordlessCodeScreen"}}),C()},callAuthOnSuccessOnClose:!0}}),r("EmbeddedWalletOnAccountCreateScreen")}),M);return()=>clearTimeout(e)}{E();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c.DEFAULT_SUCCESS_SCREEN_DURATION_MS);return()=>clearTimeout(e)}}',
-    'if(g&&b&&S){E(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}',
+    PASSWORDLESS_SUCCESS_CJS,
   ],
+  ['if(g&&b&&S){E(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}', PASSWORDLESS_SUCCESS_CJS],
 ]);
 
-/** Same for OAuth: do not stall on AffirmativeConsent / embedded-wallet screens. */
+/** Same for OAuth: skip terms/wallet screens; keep delayed modal close. */
 const OAUTH_SUCCESS_CLOSE = Object.freeze([
   [
     'o((()=>{if(l&&t&&b&&d){if(h?.legal.requireUsersAcceptTerms&&!d.hasAcceptedTerms){let e=setTimeout((()=>{u("AffirmativeConsentScreen")}),c);return()=>clearTimeout(e)}if(C(d,h.embeddedWallets)){let e=setTimeout((()=>{m({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),A({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,provider:L,screen:"OAuthStatusScreen"}}),a()},callAuthOnSuccessOnClose:!0}}),u("EmbeddedWalletOnAccountCreateScreen")}),c);return()=>clearTimeout(e)}{let e=setTimeout((()=>T({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c);return v(),()=>clearTimeout(e)}}}),[l,t,b,d])',
-    'o((()=>{if(l&&t&&b&&d){v(),T({shouldCallAuthOnSuccess:!0,isSuccess:!0})}}),[l,t,b,d])',
+    OAUTH_SUCCESS_ESM,
   ],
+  ['o((()=>{if(l&&t&&b&&d){v(),T({shouldCallAuthOnSuccess:!0,isSuccess:!0})}}),[l,t,b,d])', OAUTH_SUCCESS_ESM],
 ]);
 
 export function closePasswordlessLoginModal(source) {
