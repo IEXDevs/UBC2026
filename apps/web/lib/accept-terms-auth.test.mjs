@@ -11,6 +11,7 @@ import {
   readPrivyAccessToken,
   rememberTokensFromPayload,
   createAcceptTermsAuth,
+  acceptFailureShouldContinue,
   postAcceptTerms,
   resolveAcceptTermsToken,
   resolvePrivyRefreshToken,
@@ -507,6 +508,26 @@ test('fetch captured before install still gets the session bearer', async () => 
     body: '{}',
   });
   assert.equal(seen[0], `Bearer ${TOKEN}`);
+});
+
+test('an expired session token does not call accept_terms and login can continue', async () => {
+  const expired = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ exp: 1 })).toString('base64url')}.sig`;
+  let called = false;
+  const result = await postAcceptTerms({
+    token: expired,
+    appId: 'app_123',
+    fetchImpl: async () => {
+      called = true;
+      return new Response('{}', { status: 200 });
+    },
+  });
+  assert.equal(called, false);
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 401);
+  assert.equal(acceptFailureShouldContinue(result), true);
+  assert.equal(acceptFailureShouldContinue({ ok: false, status: 401, error: 'Missing auth token.' }), true);
+  assert.equal(acceptFailureShouldContinue({ ok: false, status: 500, error: 'accept_failed' }), false);
+  assert.equal(acceptFailureShouldContinue({ ok: true, status: 200, error: '' }), false);
 });
 
 test('resolveAcceptTermsToken reads the installed cache', () => {

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import {
+  acceptFailureShouldContinue,
   installAcceptTermsAuth,
   postAcceptTerms,
   readPrivyCaId,
@@ -21,11 +22,12 @@ if (typeof window !== 'undefined') installAcceptTermsAuth(window);
 export default function AcceptTermsGate({ children }) {
   const { ready, authenticated, user } = usePrivy();
   const [error, setError] = useState('');
+  const [continued, setContinued] = useState(false);
   const accepting = useRef(false);
 
   const signedIn = ready && authenticated && user;
-  const needsTerms = Boolean(signedIn && user.hasAcceptedTerms === false);
-  const sessionReady = Boolean(signedIn && user.hasAcceptedTerms !== false);
+  const needsTerms = Boolean(signedIn && user.hasAcceptedTerms === false && !continued);
+  const sessionReady = Boolean(signedIn && (user.hasAcceptedTerms !== false || continued));
 
   useEffect(() => {
     if (!sessionReady) {
@@ -54,9 +56,11 @@ export default function AcceptTermsGate({ children }) {
       if (cancelled) return;
       if (!result.ok) {
         accepting.current = false;
-        setError(result.error === 'token_missing'
-          ? 'Session token missing. Sign in again.'
-          : 'Could not finish sign-in. Refresh or try again.');
+        if (acceptFailureShouldContinue(result)) {
+          setContinued(true);
+          return;
+        }
+        setError('Could not finish sign-in. Refresh or try again.');
         return;
       }
       window.location.reload();
