@@ -289,6 +289,17 @@ async function rpcCall(fetcher, rpcUrl, method, params) {
   return payload.result;
 }
 
+/** Classic SPL Token program. */
+export const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+/** Token-2022 program. */
+export const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const TOKEN_ACCOUNT_CAP = 48;
+const TOKEN_RESULT_CAP = 24;
+
+const KNOWN_MINTS = Object.freeze({
+  [DEVNET_USDC_MINT]: Object.freeze({ symbol: 'USDC' }),
+});
+
 function rejectBalance(code, address = null) {
   return {
     ok: false,
@@ -298,29 +309,57 @@ function rejectBalance(code, address = null) {
     amount: null,
     solLamports: null,
     usdcAmount: null,
+    tokens: [],
   };
 }
 
-function parseUsdcAccounts(accounts) {
-  if (!Array.isArray(accounts)) return { ok: false, code: 'rpc_rejected', amount: null };
-  let total = 0n;
-  for (const account of accounts) {
-    const info = account?.account?.data?.parsed?.info;
-    const tokenAmount = info?.tokenAmount;
-    if (!info || info.mint !== DEVNET_USDC_MINT || tokenAmount?.decimals !== 6) {
-      return { ok: false, code: 'rpc_rejected', amount: null };
-    }
-    if (typeof tokenAmount.amount !== 'string' || !integerAmount.test(tokenAmount.amount)) {
-      return { ok: false, code: 'rpc_rejected', amount: null };
-    }
-    total += BigInt(tokenAmount.amount);
-  }
-  return { ok: true, code: null, amount: total.toString() };
+function shortMint(mint) {
+  if (typeof mint !== 'string' || mint.length < 8) return 'TOKEN';
+  return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
 }
 
 /**
- * Read Solana-devnet SOL (lamports) + Circle USDC for one wallet.
- * One genesis check, then getBalance + getTokenAccountsByOwner.
+ * Aggregate parsed SPL token accounts by mint. Skips zero balances and bad rows.
+ * Never throws — malformed rows are ignored so one bad ATA does not hide the rest.
+ */
+export function parseTokenAccountsByMint(accounts, { cap = TOKEN_RESULT_CAP } = {}) {
+  if (!Array.isArray(accounts)) return { ok: false, code: 'rpc_rejected', tokens: [] };
+  const byMint = new Map();
+  for (const account of accounts.slice(0, TOKEN_ACCOUNT_CAP)) {
+    const info = account?.account?.data?.parsed?.info;
+    const tokenAmount = info?.tokenAmount;
+    const mint = typeof info?.mint === 'string' ? info.mint : '';
+    if (!base58.test(mint)) continue;
+    if (!Number.isInteger(tokenAmount?.decimals) || tokenAmount.decimals < 0 || tokenAmount.decimals > 18) continue;
+    if (typeof tokenAmount.amount !== 'string' || !integerAmount.test(tokenAmount.amount)) continue;
+    if (tokenAmount.amount === '0') continue;
+    const known = KNOWN_MINTS[mint];
+    const next = BigInt(tokenAmount.amount);
+    const existing = byMint.get(mint);
+    if (existing) {
+      existing.amount = (BigInt(existing.amount) + next).toString();
+      continue;
+    }
+    byMint.set(mint, {
+      mint,
+      amount: next.toString(),
+      decimals: tokenAmount.decimals,
+      symbol: known?.symbol || shortMint(mint),
+      known: Boolean(known),
+    });
+  }
+  const tokens = [...byMint.values()]
+    .sort((a, b) => {
+      if (a.known !== b.known) return a.known ? -1 : 1;
+      return a.symbol.localeCompare(b.symbol);
+    })
+    .slice(0, Math.max(1, Math.min(cap, TOKEN_RESULT_CAP)));
+  return { ok: true, code: null, tokens };
+}
+
+/**
+ * Read Solana-devnet SOL + every non-zero SPL / Token-2022 balance for one wallet.
+ * One genesis check, then getBalance + getTokenAccountsByOwner (both token programs).
  * The RPC URL is never copied into the result.
  */
 export async function readDevnetWalletBalances({ rpcUrl, address, fetcher = fetch } = {}) {
@@ -343,13 +382,19 @@ export async function readDevnetWalletBalances({ rpcUrl, address, fetcher = fetc
     if (genesis !== DEVNET_GENESIS_HASH) {
       return rejectBalance('wrong_cluster', address);
     }
-    const [lamportsRaw, listed] = await Promise.all([
+    const encoding = { encoding: 'jsonParsed' };
+    const [lamportsRaw, classic, token2022] = await Promise.all([
       rpcCall(fetcher, target, 'getBalance', [address]),
       rpcCall(fetcher, target, 'getTokenAccountsByOwner', [
         address,
-        { mint: DEVNET_USDC_MINT },
-        { encoding: 'jsonParsed' },
+        { programId: SPL_TOKEN_PROGRAM_ID },
+        encoding,
       ]),
+      rpcCall(fetcher, target, 'getTokenAccountsByOwner', [
+        address,
+        { programId: TOKEN_2022_PROGRAM_ID },
+        encoding,
+      ]).catch(() => ({ value: [] })),
     ]);
     const lamportsValue = typeof lamportsRaw === 'number'
       ? lamportsRaw
@@ -357,27 +402,32 @@ export async function readDevnetWalletBalances({ rpcUrl, address, fetcher = fetc
     if (!Number.isSafeInteger(lamportsValue) || lamportsValue < 0) {
       return rejectBalance('rpc_rejected', address);
     }
-    const usdc = parseUsdcAccounts(listed?.value);
-    if (!usdc.ok) {
+    const classicAccounts = Array.isArray(classic?.value) ? classic.value : null;
+    const token2022Accounts = Array.isArray(token2022?.value) ? token2022.value : [];
+    if (!classicAccounts) {
       return {
-        ok: false,
-        code: usdc.code,
-        cluster: 'devnet',
-        address,
-        amount: null,
+        ...rejectBalance('rpc_rejected', address),
         solLamports: String(lamportsValue),
-        usdcAmount: null,
       };
     }
+    const parsed = parseTokenAccountsByMint([...classicAccounts, ...token2022Accounts]);
+    if (!parsed.ok) {
+      return {
+        ...rejectBalance(parsed.code, address),
+        solLamports: String(lamportsValue),
+      };
+    }
+    const usdcAmount = parsed.tokens.find((token) => token.mint === DEVNET_USDC_MINT)?.amount || '0';
     return {
       ok: true,
       code: null,
       cluster: 'devnet',
       mint: DEVNET_USDC_MINT,
       address,
-      amount: usdc.amount,
+      amount: usdcAmount,
       solLamports: String(lamportsValue),
-      usdcAmount: usdc.amount,
+      usdcAmount,
+      tokens: parsed.tokens,
     };
   } catch {
     return rejectBalance('rpc_failed', address);

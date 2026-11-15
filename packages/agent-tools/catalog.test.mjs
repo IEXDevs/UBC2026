@@ -50,5 +50,6 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.match(sharedToolsInstruction(), /balances\.displayBalanceLabel/);
   const walletsTool = DASHBOARD_TOOLS.find((tool) => tool.name === 'get_wallets');
   assert.match(walletsTool.description, /displayBalanceLabel/);
+  assert.match(walletsTool.description, /tokens/);
   assert.match(walletsTool.description, /devnet/);
 });
