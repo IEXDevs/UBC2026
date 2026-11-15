@@ -23,12 +23,27 @@ const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 const recipient = 'So11111111111111111111111111111111111111112';
 
 test('ranks catalog by lowest price', () => {
-  const { best, reason } = rankCatalogItems([
+  const { best, reason, comparison } = rankCatalogItems([
     { id: 'a', name: 'A', price: '5000' },
     { id: 'b', name: 'B', price: '1000' },
   ]);
   assert.equal(best.id, 'b');
   assert.match(reason, /lowest/);
+  assert.equal(comparison, 'price');
+});
+
+test('quality per price can outrank a cheaper item and still only proposes', () => {
+  const { best, ranked, reason, comparison } = rankCatalogItems([
+    { id: 'cheap', name: 'Thin sticker', price: '1000', quality: '100' },
+    { id: 'solid', name: 'Solid sticker', price: '4000', quality: '800' },
+    { id: 'plain', name: 'Plain sticker', price: '2000' },
+  ]);
+  assert.equal(comparison, 'price-and-quality');
+  assert.equal(best.id, 'solid');
+  assert.equal(ranked.map((item) => item.id).join(','), 'solid,cheap,plain');
+  assert.equal(ranked[2].quality, null);
+  assert.match(reason, /800\/1000/);
+  assert.throws(() => rankCatalogItems([{ id: 'bad', name: 'Bad', price: '1000', quality: '1001' }]), /0 to 1000/);
 });
 
 test('builds a policy-bound shopping proposal', () => {
@@ -48,8 +63,9 @@ test('prepareSandboxPurchase lists, picks, evaluates policy, and surfaces 402', 
       { id: 'sku_hi', name: 'Fancy', price: '9000' },
       { id: 'sku_lo', name: 'Sticker', price: '1000' },
     ],
-    buy: async ({ itemId }) => {
+    buy: async ({ itemId, paymentSignature }) => {
       assert.equal(itemId, 'sku_lo');
+      assert.equal(paymentSignature, undefined);
       return { state: 'payment-required', paymentRequired: 'dGVzdA==', status: 402, body: null };
     },
   };
@@ -61,9 +77,33 @@ test('prepareSandboxPurchase lists, picks, evaluates policy, and surfaces 402', 
     now: Date.now(),
   });
   assert.equal(result.pick.item.id, 'sku_lo');
+  assert.equal(result.pick.comparison, 'price');
   assert.equal(result.challenge.state, 'payment-required');
   assert.equal(result.next, 'await-owner-approval');
   assert.equal(result.policy.state, 'approval-needed');
+});
+
+test('prepareSandboxPurchase proposes the quality pick and does not settle', async () => {
+  let bought = false;
+  const storeClient = {
+    listCatalog: async () => [
+      { id: 'sku_lo', name: 'Thin', price: '1000', quality: '50' },
+      { id: 'sku_hi', name: 'Solid', price: '3000', qualityScore: 900 },
+    ],
+    buy: async ({ itemId, paymentSignature }) => {
+      bought = true;
+      assert.equal(itemId, 'sku_hi');
+      assert.equal(paymentSignature ?? null, null);
+      return { state: 'payment-required', paymentRequired: 'dGVzdA==', status: 402, body: null };
+    },
+  };
+  const result = await prepareSandboxPurchase({ bot, ledger, recipient, storeClient, now: Date.now() });
+  assert.equal(bought, true);
+  assert.equal(result.pick.item.id, 'sku_hi');
+  assert.equal(result.pick.comparison, 'price-and-quality');
+  assert.equal(result.proposal.outflow, '3000');
+  assert.equal(result.next, 'await-owner-approval');
+  assert.notEqual(result.next, 'settled');
 });
 
 test('settleSandboxPurchase signs and confirms an order', async () => {

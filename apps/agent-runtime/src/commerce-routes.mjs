@@ -97,6 +97,7 @@ export async function handleShoppingPrepare(request, env, botId) {
       fetcher: env.fetch || fetch,
       baseUrl: env.X402_SANDBOX_BASE_URL,
       preferCheapest: body.preferCheapest !== false,
+      compareQuality: body.compareQuality !== false,
     });
     return json({ ok: true, botId, provider: 'sandbox', ...result });
   } catch (error) {

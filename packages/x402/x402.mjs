@@ -15,6 +15,13 @@ const amount = value => {
   return value;
 };
 const required = value => typeof value === 'string' && value.length > 0 && value.length <= 512;
+function optionalQuality(item) {
+  const raw = item?.quality ?? item?.qualityScore;
+  if (raw == null || raw === '') return null;
+  const text = typeof raw === 'number' && Number.isInteger(raw) ? String(raw) : raw;
+  if (typeof text !== 'string' || !/^(0|[1-9][0-9]{0,3})$/.test(text) || BigInt(text) > 1000n) return null;
+  return text;
+}
 const pubkey = value => {
   if (!required(value) || !base58.test(value)) fail('Invalid Solana pubkey');
   return value;
@@ -163,12 +170,15 @@ export function createSandboxStoreClient({
       const items = Array.isArray(data.items) ? data.items : data;
       return items.map(item => {
         if (!item || !required(item.id) || !required(item.name)) fail('Invalid catalog item');
-        return {
+        const row = {
           id: item.id,
           name: item.name,
           price: amount(String(item.price ?? item.amount ?? '')),
           description: typeof item.description === 'string' ? item.description.slice(0, 500) : '',
         };
+        const quality = optionalQuality(item);
+        if (quality) row.quality = quality;
+        return row;
       });
     },
 

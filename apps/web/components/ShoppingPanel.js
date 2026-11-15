@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { shoppingComparisonView } from '../lib/shopping-comparison.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 
 /**
@@ -93,42 +94,67 @@ export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
     <section className="panel" aria-label="Shopping">
       <h2>Shopping</h2>
       <p className="hint">
-        Compare the x402 sandbox catalog or open a tiny Laso mainnet card challenge.
-        Approval still gates spend.
+        Compare the x402 sandbox catalog on price and quality, or open a tiny Laso mainnet card challenge.
+        The result is a proposal. Nothing is bought until you approve.
       </p>
       <div className="live-actions">
         <button className="cta" type="button" disabled={busy} onClick={() => prepare('sandbox')}>
-          {busy ? 'Working…' : 'Prepare sandbox buy'}
+          {busy ? 'Working…' : 'Compare catalog'}
         </button>
         <button className="ghost" type="button" disabled={busy} onClick={() => prepare('laso')}>
           Laso $5 card challenge
         </button>
       </div>
       {error ? <p className="hint" role="alert">{error}</p> : null}
-      {result ? (
-        <dl className="approval-facts">
-          <div>
-            <dt>Provider</dt>
-            <dd>{result.provider || 'sandbox'}</dd>
-          </div>
-          <div>
-            <dt>Next</dt>
-            <dd>{result.next}</dd>
-          </div>
-          {result.pick?.item ? (
-            <div>
-              <dt>Pick</dt>
-              <dd>{result.pick.item.name} · {result.pick.item.price}</dd>
-            </div>
-          ) : null}
-          {result.proposal?.outflow ? (
-            <div>
-              <dt>Outflow</dt>
-              <dd>{result.proposal.outflow} base units</dd>
-            </div>
-          ) : null}
-        </dl>
-      ) : null}
+      {result ? <ShoppingProposal result={result} /> : null}
     </section>
+  );
+}
+
+function ShoppingProposal({ result }) {
+  const comparison = shoppingComparisonView(result);
+  return (
+    <>
+      {comparison ? (
+        <div>
+          <p className="hint">{comparison.ask}</p>
+          <p className="hint">{comparison.title}. {comparison.reason}</p>
+          <ol className="why-related" aria-label="Ranked shopping proposal">
+            {comparison.rows.map((row) => (
+              <li key={row.id}>
+                {row.role === 'proposal' ? 'Proposal' : 'Compared'}
+                {' · '}
+                {row.name}
+                {' · '}
+                {row.price}
+                {row.quality != null ? ` · quality ${row.quality}` : ''}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+      <dl className="approval-facts">
+        <div>
+          <dt>Provider</dt>
+          <dd>{result.provider || 'sandbox'}</dd>
+        </div>
+        <div>
+          <dt>Next</dt>
+          <dd>{result.next}</dd>
+        </div>
+        {result.pick?.item ? (
+          <div>
+            <dt>Pick</dt>
+            <dd>{result.pick.item.name} · {result.pick.item.price}</dd>
+          </div>
+        ) : null}
+        {result.proposal?.outflow ? (
+          <div>
+            <dt>Outflow</dt>
+            <dd>{result.proposal.outflow} base units</dd>
+          </div>
+        ) : null}
+      </dl>
+    </>
   );
 }
