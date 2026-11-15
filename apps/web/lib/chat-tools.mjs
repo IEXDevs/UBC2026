@@ -15,7 +15,9 @@ import { createBrowserProvider, createScrape, createSearch } from '@ubc2026/brow
 import {
   DASHBOARD_TOOLS,
   SHARED_AGENT_TOOLS,
+  parseAwaySince,
   sharedToolsInstruction,
+  spokenAwayBriefing,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
 import { readAgentPriceQuote } from '@ubc2026/prices';
@@ -464,7 +466,7 @@ export function createChatToolInvoker({
 
   const apiBase = root || 'shell';
 
-  async function invokeDashboard(name, args = {}) {
+  async function invokeDashboard(name, args = {}, { sessionBot = true } = {}) {
     const def = DASHBOARD_TOOLS.find((tool) => tool.name === name);
     if (!def?.voiceCalls?.length) return { error: 'unknown_tool' };
     if (name === 'stop_all') {
@@ -497,7 +499,8 @@ export function createChatToolInvoker({
     if (entry.query?.length) {
       const params = new URLSearchParams();
       for (const key of entry.query) {
-        const value = args[key] != null ? String(args[key]) : (key === 'botId' ? botId : '');
+        const explicit = args[key] != null && String(args[key]) !== '';
+        const value = explicit ? String(args[key]) : (sessionBot && key === 'botId' ? botId : '');
         if (value) params.set(key, value);
       }
       const query = params.toString();
@@ -571,6 +574,22 @@ export function createChatToolInvoker({
           },
           { ownerId, shellBalanceLabel: balanceHint, transfers },
         );
+      }
+      if (name === 'what_happened_while_away') {
+        if (args.since != null && args.since !== '' && parseAwaySince(String(args.since)) == null) {
+          return { error: 'invalid_parameters' };
+        }
+        if (typeof args.botId === 'string' && args.botId !== '' && !/^[a-zA-Z0-9:_-]{1,128}$/.test(args.botId)) {
+          return { error: 'invalid_parameters' };
+        }
+        const remote = await invokeDashboard(name, args, { sessionBot: false });
+        if (remote?.error) return remote;
+        return spokenAwayBriefing(remote?.items, {
+          since: args.since,
+          source: remote?.source,
+          botId: typeof args.botId === 'string' ? args.botId : '',
+          unavailable: remote?.ok === false,
+        });
       }
       if (DASHBOARD_NAMES.has(name)) {
         return await invokeDashboard(name, args);

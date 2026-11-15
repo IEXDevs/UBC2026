@@ -4,6 +4,7 @@
  * Dashboard tools call the same owner HTTP routes the UI uses.
  */
 import { agentTools } from '@ubc2026/browser-session';
+import { EVENT_KINDS } from '@ubc2026/contracts';
 
 const botId = Object.freeze({ type: 'string', description: 'Bot id' });
 
@@ -45,6 +46,16 @@ export const DASHBOARD_TOOLS = Object.freeze([
   dashboard('get_activity', 'Recent activity for one bot.', ['botId'], { botId }, [
     call('GET', '/api/events', { query: ['botId'] }),
   ]),
+  dashboard(
+    'what_happened_while_away',
+    'Spoken briefing of what happened while the owner was away. Reads stored timeline events for this owner through GET /api/events, including rows Streams already wrote there. Optional botId and since (ISO-8601 Z or epoch milliseconds). Read-only. Does not spend, sign, or broadcast. Read briefing.spoken aloud and do not invent events.',
+    [],
+    {
+      botId: { type: 'string', description: 'Optional bot id. Omit for every bot this owner can see.' },
+      since: { type: 'string', description: 'Optional ISO-8601 UTC timestamp or epoch milliseconds. Events before this are left out.' },
+    },
+    [call('GET', '/api/events', { query: ['botId'] })],
+  ),
   dashboard('why_decision', 'Why a bot acted (decision records).', ['botId'], { botId }, [
     call('GET', '/api/decisions', { query: ['botId'] }),
   ]),
@@ -144,7 +155,8 @@ export function toOpenAiTools(tools = SHARED_AGENT_TOOLS) {
 
 export function sharedToolsInstruction() {
   return [
-    'You have the same tools on text and voice: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
+    'You have the same tools on text and voice: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
+    'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
     'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
     'When the owner asks you to look something up: call web_search first, pick a real https result url, then browser_navigate (or browser_open with that url).',
     'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayBalanceLabel / holdings (whatever is non-zero on the address).',
@@ -154,6 +166,127 @@ export function sharedToolsInstruction() {
     'Do not raise limits or freeze wallets from tools.',
     'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
   ].join('\n');
+}
+
+const AWAY_KIND = Object.freeze({
+  'bot.created': 'A bot was created',
+  'bot.enabled': 'A bot was enabled',
+  'bot.paused': 'A bot was paused',
+  'bot.frozen': 'A bot was frozen',
+  'bot.unfrozen': 'A bot was unfrozen',
+  'wallet.frozen': 'A wallet was frozen',
+  'wallet.unfrozen': 'A wallet was unfrozen',
+  'run.checkpoint': 'A run checkpoint was stored',
+  'tool.call': 'A tool ran',
+  'trust.gate': 'A trust gate ran',
+  'verify.attempt': 'Verification retried',
+  'verify.settled': 'Verification settled',
+  'verify.mismatch': 'Verification mismatched',
+  'approval.requested': 'An approval is waiting',
+  'approval.granted': 'An approval was granted',
+  'approval.consumed': 'An approval was used',
+  'budget.reserved': 'Budget was reserved',
+  'budget.spent': 'Budget was recorded as spent',
+  'payment.x402': 'An x402 payment was recorded',
+  'tx.submitted': 'A transaction was submitted',
+  'tx.confirmed': 'A transaction confirmed',
+  'kill.stop-all': 'Stop all ran',
+  'funds.grabbed': 'Funds were pulled back',
+});
+
+const AWAY_SECRET = /https?:\/\/\S+|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+const AWAY_SINCE_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const AWAY_SHOWN = 6;
+
+/** Epoch ms for an away-briefing `since` value, or null when it is not a timestamp. */
+export function parseAwaySince(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 40) return null;
+  if (/^(0|[1-9][0-9]{0,15})$/.test(value)) {
+    const ms = Number(value);
+    return Number.isSafeInteger(ms) && ms > 0 ? ms : null;
+  }
+  if (!AWAY_SINCE_ISO.test(value)) return null;
+  const ms = Date.parse(value);
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : null;
+}
+
+function awayAt(event) {
+  if (typeof event?.at === 'number' && Number.isSafeInteger(event.at) && event.at > 0) return event.at;
+  if (typeof event?.at === 'string') {
+    const ms = Date.parse(event.at);
+    if (Number.isSafeInteger(ms) && ms > 0) return ms;
+  }
+  return null;
+}
+
+function awaySummary(summary) {
+  if (typeof summary !== 'string') return '';
+  const text = summary.replace(AWAY_SECRET, '[hidden]').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > 140 ? `${text.slice(0, 137)}…` : text;
+}
+
+/**
+ * Short spoken briefing from stored timeline rows.
+ * Read-only. Does not spend, sign, or broadcast.
+ */
+export function spokenAwayBriefing(items, { since, source, botId, unavailable = false } = {}) {
+  const base = { readOnly: true, spends: false, signs: false };
+  if (unavailable || source === 'unconfigured') {
+    return {
+      ...base,
+      spoken: 'Stored timeline events are not available yet.',
+      count: 0,
+      events: [],
+      unavailable: true,
+    };
+  }
+  const cutoff = since == null || since === '' ? null : parseAwaySince(typeof since === 'number' ? String(since) : since);
+  const rows = Array.isArray(items) ? items : [];
+  const kept = [];
+  for (const event of rows) {
+    if (!event || typeof event !== 'object') continue;
+    if (!EVENT_KINDS.includes(event.kind)) continue;
+    if (typeof event.id !== 'string' || typeof event.botId !== 'string') continue;
+    const at = awayAt(event);
+    if (at == null) continue;
+    if (cutoff != null && at < cutoff) continue;
+    const summary = awaySummary(event.summary);
+    kept.push({
+      id: event.id,
+      botId: event.botId,
+      kind: event.kind,
+      at,
+      summary,
+      stream: event.id.startsWith('stream:') || summary.startsWith('Stream '),
+    });
+  }
+  kept.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
+  if (kept.length === 0) {
+    return {
+      ...base,
+      spoken: 'Nothing new was stored on the timeline while you were away.',
+      count: 0,
+      events: [],
+    };
+  }
+  const shown = kept.slice(0, AWAY_SHOWN);
+  const lines = shown.map((event) => {
+    const lead = AWAY_KIND[event.kind] || 'An event was stored';
+    const where = event.stream ? 'from Streams' : 'on the timeline';
+    return event.summary ? `${lead} ${where}: ${event.summary}.` : `${lead} ${where}.`;
+  });
+  const noun = kept.length === 1 ? '1 timeline event was stored' : `${kept.length} timeline events were stored`;
+  const scope = typeof botId === 'string' && botId ? ' for this bot' : '';
+  const extra = kept.length > shown.length ? ` The newest ${shown.length} are these.` : '';
+  let spoken = `While you were away${scope}, ${noun}.${extra} ${lines.join(' ')}`;
+  if (spoken.length > 700) spoken = `${spoken.slice(0, 697)}…`;
+  return {
+    ...base,
+    spoken,
+    count: kept.length,
+    events: shown.map(({ stream: _stream, ...event }) => event),
+  };
 }
 
 /** Voice-only aliases kept so existing ElevenLabs configs keep working. */

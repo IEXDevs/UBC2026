@@ -164,6 +164,60 @@ test('webhook tools call the same routes as the bot page and Live View panel', a
   assert.equal(expectedRelease.pathname.includes('live-view'), false);
 });
 
+test('what happened while away speaks stored timeline events and does not spend', async () => {
+  const seen = [];
+  const fetchApi = async request => {
+    seen.push({ method: request.method, url: request.url, owner: request.headers.get('x-owner-id') });
+    return Response.json({
+      ok: true,
+      source: 'supabase',
+      items: [
+        {
+          id: 'stream:sig1',
+          botId: 'bot_1',
+          ownerId: 'user_1',
+          kind: 'tx.confirmed',
+          summary: 'Stream deposit · AbCdEf12… https://live.browser.run/ui/view?token=abc',
+          at: '2026-11-15T12:00:00.000Z',
+        },
+        {
+          id: 'evt_old',
+          botId: 'bot_1',
+          kind: 'bot.paused',
+          summary: 'Paused earlier',
+          at: '2026-11-01T00:00:00.000Z',
+        },
+      ],
+    });
+  };
+  const response = await handleVoiceRequest(toolRequest('what_happened_while_away', {
+    body: {
+      parameters: { since: '2026-11-15T00:00:00.000Z' },
+      conversation_id: 'conv_away',
+    },
+  }), env(), { fetchApi });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const url = new URL(seen[0].url);
+  assert.equal(seen[0].method, 'GET');
+  assert.equal(url.pathname, '/api/events');
+  assert.equal(url.search, '');
+  assert.equal(seen[0].owner, 'user_1');
+  assert.equal(seen.length, 1);
+  assert.match(body.result.briefing.spoken, /from Streams/);
+  assert.match(body.result.briefing.spoken, /1 timeline event was stored/);
+  assert.equal(body.result.briefing.spends, false);
+  assert.equal(body.result.briefing.signs, false);
+  assert.equal(JSON.stringify(body).includes('live.browser.run'), false);
+  assert.equal(JSON.stringify(body).includes('/api/spend'), false);
+
+  const bad = await handleVoiceRequest(toolRequest('what_happened_while_away', {
+    body: { parameters: { since: 'yesterday' } },
+  }), env(), { fetchApi });
+  assert.equal(bad.status, 400);
+  assert.equal(seen.length, 1);
+});
+
 test('pause, loop, and stop_all go through the worker routes', async () => {
   const paused = await worker.fetch(toolRequest('pause_bot', {
     body: { tool_name: 'pause_bot', parameters: { botId: 'bot_1' } },

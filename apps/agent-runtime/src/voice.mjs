@@ -13,7 +13,9 @@ import {
   PRICE_TOOLS,
   VOICE_BROWSER_ALIASES,
   VOICE_RESEARCH_WEBHOOKS,
+  parseAwaySince,
   sharedToolsInstruction,
+  spokenAwayBriefing,
 } from '@ubc2026/agent-tools';
 import { readAgentPriceQuote } from '@ubc2026/prices';
 import { META_SPARK_MODEL, resolveModelProvider } from './openrouter.mjs';
@@ -58,6 +60,7 @@ export const VOICE_SYSTEM_PROMPT = [
   'Do not ask for seed phrases, private keys, passwords, or API keys.',
   'Never read out Live View URLs, tokens, or secrets. If a tool hides them, leave them hidden.',
   'If a tool returns confirmation-required or manual-review, say so and stop.',
+  'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. Do not invent events. That tool only reads stored timeline events. It does not spend or sign.',
   'Execution stays on Solana devnet.',
   sharedToolsInstruction(),
 ].join('\n');
@@ -450,6 +453,33 @@ function trustedSpendPermission(value) {
 
 async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {}) {
   const secrets = knownSecrets(env);
+  if (toolDef.name === 'what_happened_while_away') {
+    const entry = toolDef.calls[0];
+    const outbound = requestFor(entry, parameters, owner);
+    if (!outbound) return { error: 'invalid_parameters' };
+    const response = await fetchApi(outbound, env);
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+    const rawItems = Array.isArray(payload?.items) ? payload.items : [];
+    const items = rawItems.map((item) => ({
+      ...item,
+      summary: typeof item?.summary === 'string' ? redactString(item.summary, secrets) : item?.summary,
+    }));
+    const briefing = spokenAwayBriefing(items, {
+      since: parameters.since,
+      source: payload?.source,
+      botId: parameters.botId,
+      unavailable: response.status >= 400,
+    });
+    return {
+      calls: [{ method: entry.method, path: entry.path, status: response.status }],
+      briefing,
+    };
+  }
   if (toolDef.name === 'stop_all') {
     const listRequest = requestFor(toolDef.calls[0], parameters, owner);
     const listed = await fetchApi(listRequest, env);
@@ -564,6 +594,12 @@ function validateParameters(toolDef, parameters) {
   }
   if (toolDef.properties.quoteCluster && parameters.quoteCluster != null) {
     if (parameters.quoteCluster !== 'mainnet' && parameters.quoteCluster !== 'devnet') return false;
+  }
+  if (toolDef.properties.botId && parameters.botId != null && parameters.botId !== '') {
+    if (typeof parameters.botId !== 'string' || !ID.test(parameters.botId)) return false;
+  }
+  if (toolDef.properties.since && parameters.since != null && parameters.since !== '') {
+    if (parseAwaySince(parameters.since) == null) return false;
   }
   return true;
 }
