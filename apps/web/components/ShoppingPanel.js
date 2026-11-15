@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-
-const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 
 /**
  * Shopping bot controls (Isaac / 6B): prepare sandbox or Laso challenge via the Worker.
@@ -20,8 +19,9 @@ export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
     setError(null);
     setResult(null);
     try {
-      if (!runtimeBase || !ownerId) {
-        setError(runtimeBase ? 'Sign in to prepare a purchase' : 'Set NEXT_PUBLIC_AGENT_RUNTIME_URL');
+      const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/shopping/prepare`);
+      if (!ownerId || !url) {
+        setError(ownerId ? 'This bot cannot prepare a purchase.' : 'Sign in to prepare a purchase');
         return;
       }
       const walletId = bot.record?.walletId || bot.walletId || '';
@@ -29,7 +29,6 @@ export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
         setError('Assign a provisioned wallet to this bot before shopping.');
         return;
       }
-      const url = new URL(`${runtimeBase.replace(/\/$/, '')}/bots/${encodeURIComponent(bot.id)}/shopping/prepare`);
       const body = provider === 'laso'
         ? {
           provider: 'laso',

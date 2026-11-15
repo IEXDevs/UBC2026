@@ -1,6 +1,17 @@
+import { shellRuntimeUrl } from './runtime-data.mjs';
+
 const LIVE_VIEW_PATHS = new Set(['/ui/view', '/ui/inspector']);
+const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 
 export function browserSessionUrl(runtimeBase, botId, { sessionRecordId, action } = {}) {
+  if (runtimeBase === 'shell') {
+    if (typeof botId !== 'string' || !BOT_ID.test(botId)) return null;
+    const bot = encodeURIComponent(botId);
+    if (!sessionRecordId) return shellRuntimeUrl(`/bots/${bot}/browser/sessions`);
+    if (action !== 'live-view' && action !== 'release' && action !== 'navigate') return null;
+    if (typeof sessionRecordId !== 'string' || !BOT_ID.test(sessionRecordId)) return null;
+    return shellRuntimeUrl(`/bots/${bot}/browser/sessions/${encodeURIComponent(sessionRecordId)}/${action}`);
+  }
   if (typeof runtimeBase !== 'string' || runtimeBase === '' || typeof botId !== 'string' || botId === '') return null;
   let base;
   try { base = new URL(runtimeBase); } catch { return null; }

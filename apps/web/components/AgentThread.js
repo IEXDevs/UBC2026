@@ -1,15 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { eventsUrl, timelineEntries } from '../lib/bot-experience.mjs';
+import { normalizeLiveEvent, timelineEntries } from '../lib/bot-experience.mjs';
 import { browserTrace, traceModel } from '../lib/agent-trace.mjs';
 import { browserSessionUrl, liveViewFrame } from '../lib/live-view.mjs';
+import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { ChainOfThought, TerminalBlock, ToolCall } from './ai/elements';
 import ChatBubbles from './ChatBubbles';
 import GlassSurface from './GlassSurface';
 import ShoppingPanel from './ShoppingPanel';
 
-const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+function liveEventsUrl(botId) {
+  if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) return null;
+  return shellRuntimeUrl(`/api/events?botId=${encodeURIComponent(botId)}`);
+}
 
 export default function AgentThread({ bot, ownerId = null, lines = [], thinking = false, onParty = null }) {
   const [remoteEvents, setRemoteEvents] = useState(null);
@@ -20,7 +24,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
   useEffect(() => {
     setFocus(null);
     setRemoteEvents(null);
-    const url = eventsUrl(runtimeBase, bot.id);
+    const url = liveEventsUrl(bot.id);
     if (!url || !ownerId) return undefined;
     let stop = false;
     async function load() {
@@ -31,7 +35,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
         });
         const data = await response.json();
         if (stop || !response.ok || data.stub || !Array.isArray(data.items)) return;
-        setRemoteEvents(data.items);
+        setRemoteEvents(data.items.map(normalizeLiveEvent).filter(Boolean));
       } catch {
         // Keep the thread on the conversation when the runtime is unreachable.
       }
@@ -47,7 +51,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
   useEffect(() => {
     setSessions([]);
     setFrame(null);
-    const url = browserSessionUrl(runtimeBase, bot.id);
+    const url = browserSessionUrl('shell', bot.id);
     if (!url || !ownerId) return undefined;
     let stop = false;
     async function load() {
@@ -78,7 +82,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
       setFrame(null);
       return undefined;
     }
-    const url = browserSessionUrl(runtimeBase, bot.id, {
+    const url = browserSessionUrl('shell', bot.id, {
       sessionRecordId: openSession.sessionRecordId,
       action: 'live-view',
     });

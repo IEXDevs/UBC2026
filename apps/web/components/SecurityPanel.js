@@ -4,12 +4,10 @@ import { useState } from 'react';
 import {
   applySecurityActionLocal,
   buildSecurityPage,
-  pauseAllUrl,
 } from '../lib/security.mjs';
+import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import AnimatedList from './AnimatedList';
 import { listLook } from './listLook';
-
-const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
 export default function SecurityPanel({
   bots,
@@ -27,11 +25,11 @@ export default function SecurityPanel({
     setPending(action.id);
     setMessage(null);
 
-    if (action.id === 'pause-all' && ownerId && runtimeBase) {
+    if (action.id === 'pause-all' && ownerId) {
       const results = [];
       for (const bot of bots) {
         if (bot.status === 'draft') continue;
-        const url = pauseAllUrl(runtimeBase, bot.id);
+        const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/pause`);
         if (!url) continue;
         try {
           const response = await fetch(url, {
@@ -49,7 +47,7 @@ export default function SecurityPanel({
       }
       setMessage(`Pause requested for ${results.length} bot(s).`);
     } else if (action.id === 'request-grab-back') {
-      if (ownerId && runtimeBase) {
+      if (ownerId) {
         try {
           const list = Array.isArray(wallets) ? wallets : [];
           const mainWallet = list.find((w) => w.kind === 'main') || null;
@@ -58,7 +56,7 @@ export default function SecurityPanel({
             setPending(null);
             return;
           }
-          const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/security/grab-back`, {
+          const response = await fetch(shellRuntimeUrl('/security/grab-back'), {
             method: 'POST',
             headers: {
               'content-type': 'application/json',

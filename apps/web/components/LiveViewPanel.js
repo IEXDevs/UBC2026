@@ -6,7 +6,7 @@ import { browserSessionUrl, liveViewFrame, pickOpenSession } from '../lib/live-v
 import GlassSurface from './GlassSurface';
 import LatticeLoader from './bits/LatticeLoader';
 
-const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+const runtimeBase = 'shell';
 
 async function ownerFetch(url, ownerId, method, body) {
   const response = await fetch(url, {

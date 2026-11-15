@@ -13,6 +13,14 @@ test('browser session URLs stay on the runtime origin', () => {
   );
   assert.equal(browserSessionUrl('', 'bot_1'), null);
   assert.equal(browserSessionUrl('javascript:alert(1)', 'bot_1'), null);
+  assert.equal(
+    browserSessionUrl('shell', 'bot_1'),
+    '/api/runtime/bots/bot_1/browser/sessions',
+  );
+  assert.equal(
+    browserSessionUrl('shell', 'bot_1', { sessionRecordId: 'rec_1', action: 'live-view' }),
+    '/api/runtime/bots/bot_1/browser/sessions/rec_1/live-view',
+  );
 });
 
 test('only a verified live.browser.run URL is framed', () => {
