@@ -10,7 +10,8 @@ export const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuE
 /** Solana testnet genesis hash. */
 export const TESTNET_GENESIS_HASH = '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY';
 
-/** Public HTTPS fallback when QUICKNODE_TESTNET_RPC_URL is unset (devnet still uses QuickNode). */
+/** Public HTTPS fallbacks when QuickNode secrets are unset or unreachable. */
+export const PUBLIC_DEVNET_RPC_URL = 'https://api.devnet.solana.com';
 export const PUBLIC_TESTNET_RPC_URL = 'https://api.testnet.solana.com';
 
 /** Cap RPC rows scanned / returned so a whale wallet cannot blow the response. */
@@ -253,7 +254,11 @@ export async function readClusterWalletBalances({
  * Testnet falls back to the public Solana HTTPS endpoint when the secret is empty.
  */
 export function resolveClusterRpcUrls(env = {}) {
-  const devnet = assertHttpsRpc(env.QUICKNODE_DEVNET_RPC_URL || env.devnetRpcUrl || '');
+  const devnet = assertHttpsRpc(
+    env.QUICKNODE_DEVNET_RPC_URL
+    || env.devnetRpcUrl
+    || PUBLIC_DEVNET_RPC_URL,
+  );
   const testnet = assertHttpsRpc(
     env.QUICKNODE_TESTNET_RPC_URL
     || env.testnetRpcUrl
@@ -292,6 +297,12 @@ export async function readWalletBalancesAcrossClusters({
     ...(Array.isArray(testnet.tokens) ? testnet.tokens : []),
   ];
   const anyOk = devnet.ok === true || testnet.ok === true;
+  const solLamports = (() => {
+    if (!anyOk) return null;
+    const a = devnet.ok ? BigInt(devnet.solLamports || '0') : 0n;
+    const b = testnet.ok ? BigInt(testnet.solLamports || '0') : 0n;
+    return (a + b).toString();
+  })();
   return {
     ok: anyOk,
     code: anyOk ? null : (devnet.code || testnet.code || 'rpc_failed'),
@@ -302,16 +313,13 @@ export async function readWalletBalancesAcrossClusters({
     cluster: testnet.ok && testnet.solLamports !== '0' && (!devnet.ok || devnet.solLamports === '0')
       ? 'testnet'
       : 'devnet',
-    solLamports: (() => {
-      const a = devnet.ok ? BigInt(devnet.solLamports || '0') : 0n;
-      const b = testnet.ok ? BigInt(testnet.solLamports || '0') : 0n;
-      return (a + b).toString();
-    })(),
+    solLamports,
     usdcAmount: devnet.ok ? (devnet.usdcAmount || '0') : null,
     amount: devnet.ok ? (devnet.usdcAmount || '0') : null,
     mint: DEVNET_USDC_MINT,
     tokens,
-    displayBalanceLabel: holdings.map((row) => row.label).filter(Boolean).join(' · ') || null,
+    displayBalanceLabel: holdings.map((row) => row.label).filter(Boolean).join(' · ')
+      || (anyOk ? null : `balance unavailable (${devnet.code || testnet.code || 'rpc_failed'})`),
   };
 }
 

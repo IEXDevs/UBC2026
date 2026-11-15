@@ -17,8 +17,12 @@ import {
 
 export { WalletError };
 
-/** Solana devnet genesis hash. Also the CAIP-2 reference for solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1. */
-export const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
+/**
+ * Full Solana-devnet genesis hash from getGenesisHash.
+ * CAIP-2 uses the truncated form solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1 — do not use that for RPC checks.
+ */
+export const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
+export const DEVNET_CAIP2 = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
 
 /** Circle USDC mint on Solana devnet. Mainnet USDC is never queried or transferred here. */
 export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';

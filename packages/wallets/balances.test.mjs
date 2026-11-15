@@ -12,6 +12,12 @@ import {
 const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const rpcUrl = 'https://example.invalid/quicknode-secret-path';
 
+test('DEVNET_GENESIS_HASH is the full getGenesisHash value (not the CAIP-2 truncation)', () => {
+  assert.equal(DEVNET_GENESIS_HASH, 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG');
+  assert.equal(DEVNET_GENESIS_HASH.length, 44);
+  assert.notEqual(DEVNET_GENESIS_HASH, 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1');
+});
+
 test('parseTokenAccountsByMint aggregates non-zero mints and skips zeros', () => {
   const other = 'So11111111111111111111111111111111111111112';
   const parsed = parseTokenAccountsByMint([
