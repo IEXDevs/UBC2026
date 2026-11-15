@@ -59,6 +59,16 @@ export function voiceToolDefinitions() {
         },
       },
     },
+    {
+      name: 'list_shell_bots',
+      description: 'List bots currently shown in the shell, including ones not synced yet.',
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      name: 'list_shell_wallets',
+      description: 'List wallets currently shown in the shell.',
+      parameters: { type: 'object', properties: {} },
+    },
   ];
 }
 

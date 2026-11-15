@@ -9,7 +9,7 @@
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
-    "test": "node --test lib/*.test.mjs"
+    "test": "node --test lib/*.test.mjs && node --test components/permit-menu.test.mjs"
   },
   "dependencies": {
     "@elevenlabs/client": "^1.36.1",
