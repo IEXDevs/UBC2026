@@ -16,6 +16,12 @@ function chatToolEnv() {
     FIRECRAWL_API_KEY: readRootEnv('FIRECRAWL_API_KEY'),
     CLOUDFLARE_ACCOUNT_ID: readRootEnv('CLOUDFLARE_ACCOUNT_ID'),
     CLOUDFLARE_API_TOKEN: readRootEnv('CLOUDFLARE_API_TOKEN'),
+    // Text-chat get_wallets enriches shell wallet addresses via QuickNode when
+    // Supabase rows are missing — same secret the Worker uses.
+    QUICKNODE_DEVNET_RPC_URL: readRootEnv('QUICKNODE_DEVNET_RPC_URL')
+      || (typeof process.env.QUICKNODE_DEVNET_RPC_URL === 'string'
+        ? process.env.QUICKNODE_DEVNET_RPC_URL.trim()
+        : ''),
     NEXT_PUBLIC_AGENT_RUNTIME_URL: readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL')
       || (typeof process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL === 'string'
         ? process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL.trim()
