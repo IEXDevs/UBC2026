@@ -21,6 +21,11 @@ export function draftBot({ name, shape, color, id } = {}) {
   };
 }
 
+export function withoutId(order, id) {
+  if (!Array.isArray(order)) return [];
+  return order.filter(item => item !== id);
+}
+
 export function reorderIds(order, fromId, toId) {
   if (!Array.isArray(order) || fromId === toId) return Array.isArray(order) ? order.slice() : [];
   const from = order.indexOf(fromId);

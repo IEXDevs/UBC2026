@@ -580,30 +580,6 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
         };
       }
 
-      function paintGlow(event) {
-        for (const object of cardObjects.values()) {
-          const el = object.element;
-          const rect = el.getBoundingClientRect();
-          const x = event.clientX - rect.left;
-          const y = event.clientY - rect.top;
-          el.style.setProperty('--gx', `${x}px`);
-          el.style.setProperty('--gy', `${y}px`);
-          const hot = x >= 0 && y >= 0 && x <= rect.width && y <= rect.height;
-          el.classList.toggle('is-hot', hot);
-          const state = tiltState.get(el.dataset.positionId);
-          if (!state || (gesture && gesture.moved)) continue;
-          if (hot && !(gesture && gesture.id === el.dataset.positionId && !gesture.moved)) {
-            state.targetRx = -((y / rect.height) * 2 - 1) * 9;
-            state.targetRy = ((x / rect.width) * 2 - 1) * 11;
-            state.targetS = 1.035;
-          } else if (!hot) {
-            state.targetRx = 0;
-            state.targetRy = 0;
-            state.targetS = 1;
-          }
-        }
-      }
-
       function framedDistance() {
         const width = mount.clientWidth || 1;
         const height = mount.clientHeight || 1;
@@ -709,7 +685,6 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
       }
 
       function move(event) {
-        paintGlow(event);
         if (gesture) {
           const distance = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
           if (!gesture.moved && distance > DRAG_PX) {

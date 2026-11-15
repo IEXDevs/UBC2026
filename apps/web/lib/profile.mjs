@@ -1,3 +1,12 @@
+/** Sidebar label. A handle wins over the display name. */
+export function profileRailLabel({ handle, displayName, fallback = 'You' } = {}) {
+  const clean = typeof handle === 'string' ? handle.trim().replace(/^@+/, '') : '';
+  if (clean) return `@${clean}`;
+  if (typeof displayName === 'string' && displayName.trim()) return displayName.trim();
+  if (typeof fallback === 'string' && fallback.trim()) return fallback.trim();
+  return 'You';
+}
+
 export function mentionIn(text) {
   if (typeof text !== 'string') return null;
   const match = text.match(/(?:^|\s)(@[A-Za-z0-9][A-Za-z0-9_.-]{0,80})/);

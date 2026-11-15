@@ -1,19 +1,33 @@
 /**
  * Privy login settings for the glass shell.
  * App id and client id are public. Never put PRIVY_APP_SECRET or an RPC URL here.
- * Dashboard must enable the same methods: Email, Google, GitHub, Discord, Wallet + Solana.
+ * Dashboard login methods: Email, Google, GitHub, Discord, and Solana wallets.
+ * Ethereum wallet login and Ethereum embedded wallets stay off.
+ * Signup creates a Solana embedded wallet for every user.
+ * Dashboard MFA (authenticator app and passkey) stays enabled; prompts use Privy's UI.
  */
+
+const SOLANA_WALLETS = Object.freeze([
+  'detected_solana_wallets',
+  'phantom',
+  'solflare',
+  'backpack',
+  'jupiter',
+]);
 
 const SOLANA_LOGIN = Object.freeze({
   appearance: Object.freeze({
     theme: 'dark',
     accentColor: '#3dd6c6',
     walletChainType: 'solana-only',
+    walletList: SOLANA_WALLETS,
   }),
   loginMethods: Object.freeze(['email', 'google', 'github', 'discord', 'wallet']),
   embeddedWallets: Object.freeze({
-    solana: Object.freeze({ createOnLogin: 'users-without-wallets' }),
+    ethereum: Object.freeze({ createOnLogin: 'off' }),
+    solana: Object.freeze({ createOnLogin: 'all-users' }),
   }),
+  mfa: Object.freeze({ noPromptOnMfaRequired: false }),
 });
 
 function publicId(value) {
@@ -59,11 +73,16 @@ export function privyProviderProps({ appId, clientId } = {}) {
   const props = {
     appId: id,
     config: {
-      appearance: { ...SOLANA_LOGIN.appearance },
+      appearance: {
+        ...SOLANA_LOGIN.appearance,
+        walletList: [...SOLANA_LOGIN.appearance.walletList],
+      },
       loginMethods: [...SOLANA_LOGIN.loginMethods],
       embeddedWallets: {
+        ethereum: { ...SOLANA_LOGIN.embeddedWallets.ethereum },
         solana: { ...SOLANA_LOGIN.embeddedWallets.solana },
       },
+      mfa: { ...SOLANA_LOGIN.mfa },
     },
   };
   const client = publicId(clientId);

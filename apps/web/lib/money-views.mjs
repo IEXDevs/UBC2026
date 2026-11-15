@@ -1,4 +1,5 @@
 /** Money pane view models from live Worker / Privy rows (no preview seeds). */
+import { platformBalance } from './platform-send.mjs';
 
 export const MONEY_PANES = Object.freeze({
   History: 'history',
@@ -52,10 +53,22 @@ export function describeWallets(wallets, bots) {
   }));
 }
 
-export function solscanTxUrl(signature, cluster = 'devnet') {
+function txSignature(signature, cluster) {
   if (cluster !== 'devnet' && cluster !== 'testnet') return null;
   if (typeof signature !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(signature)) return null;
-  return `https://solscan.io/tx/${signature}?cluster=${cluster}`;
+  return signature;
+}
+
+export function solscanTxUrl(signature, cluster = 'devnet') {
+  const clean = txSignature(signature, cluster);
+  if (!clean) return null;
+  return `https://solscan.io/tx/${clean}?cluster=${cluster}`;
+}
+
+export function solanaExplorerTxUrl(signature, cluster = 'devnet') {
+  const clean = txSignature(signature, cluster);
+  if (!clean) return null;
+  return `https://explorer.solana.com/tx/${clean}?cluster=${cluster}`;
 }
 
 export function describeHistory(payments, bots) {
@@ -77,6 +90,8 @@ export function describeHistory(payments, bots) {
       txSignature: signature,
       signedFigure: `${outflow ? '−' : '+'}${formatBaseUnits(payment.amount)}`,
       solscanUrl: solscanTxUrl(payment.txSignature, payment.cluster),
+      explorerUrl: solanaExplorerTxUrl(payment.txSignature, payment.cluster),
+      legs: Array.isArray(payment.netLegs) ? payment.netLegs : null,
     };
   });
 }
@@ -96,13 +111,15 @@ export function glanceBalance(positions) {
   return `${formatBaseUnits(sum.toString())} USDC`;
 }
 
-export function walletGlance(wallets, positions) {
+export function walletGlance(wallets, positions, transfers = []) {
   const main = wallets.find(wallet => wallet.kind === 'main') ?? wallets[0] ?? null;
+  const platform = Array.isArray(transfers) && transfers.length > 0;
   return {
     label: main?.label ?? 'Wallet',
     address: main?.address ?? '',
     short: shortAddress(main?.address),
-    balanceLabel: glanceBalance(positions),
+    balanceLabel: platform ? `${formatBaseUnits(platformBalance(transfers))} USDC` : glanceBalance(positions),
+    platform,
   };
 }
 

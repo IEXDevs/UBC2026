@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { actionLabel, formatBaseUnits, raisedCap } from '../lib/bot-experience.mjs';
+import { Confirmation } from './ai/elements';
 
 function capFields(type, current) {
   if (type === 'position-management') {
@@ -70,8 +71,9 @@ export default function ApprovalPreview({ preview, botType = 'trading' }) {
           {preview.violations.length > 0 && (
             <p className="form-error" role="alert">Over budget: {preview.violations.join(', ')}.</p>
           )}
-          <div className="row-actions">
-            {preview.actions.map(action => (
+          <Confirmation
+            title="Confirm before this runs"
+            actions={preview.actions.map(action => (
               <button
                 key={action}
                 type="button"
@@ -81,7 +83,7 @@ export default function ApprovalPreview({ preview, botType = 'trading' }) {
                 {actionLabel(action)}
               </button>
             ))}
-          </div>
+          />
           {choice && choice !== 'raise-limit' && (
             <p role="status">Recorded {actionLabel(choice)} for {preview.digestShort}. Nothing was signed.</p>
           )}

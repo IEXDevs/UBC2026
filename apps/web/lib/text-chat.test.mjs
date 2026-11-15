@@ -35,7 +35,7 @@ test('text chat messages keep platform rules and map agent history', () => {
 });
 
 test('LLM_ keys resolve to Meta Model API', () => {
-  const resolved = resolveTextChatProvider({ modelApiKey: META_KEY });
+  const resolved = resolveTextChatProvider({ metaModelApiKey: META_KEY });
   assert.equal(resolved.provider, 'meta');
   assert.equal(resolved.model, META_SPARK_MODEL);
   assert.match(resolved.baseUrl, /api\.meta\.ai/);
@@ -49,7 +49,7 @@ test('LLM_ keys resolve to Meta Model API', () => {
 test('completeTextChat hits Meta and never puts the key in the body', async () => {
   let seen;
   const result = await completeTextChat({
-    modelApiKey: META_KEY,
+    metaModelApiKey: META_KEY,
     botName: 'Nova',
     message: 'status?',
     fetcher: async (url, options) => {

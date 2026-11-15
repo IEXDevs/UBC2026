@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { browserSessionUrl, liveViewFrame } from '../lib/live-view.mjs';
 import GlassSurface from './GlassSurface';
+import LatticeLoader from './bits/LatticeLoader';
 
 const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
@@ -63,20 +64,13 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
   }
 
   const ready = Boolean(ownerId) && Boolean(browserSessionUrl(runtimeBase, botId));
+  const status = frame?.src ? 'Live' : sessionRecordId ? 'Session open' : 'No session';
 
   return (
     <div className="live-view">
-      <h3>Live View</h3>
-      {!ownerId && (
-        <p>Connect with Privy to open an owner-bound Cloudflare browser session.</p>
-      )}
-      {ownerId && !browserSessionUrl(runtimeBase, botId) && (
-        <p>Set NEXT_PUBLIC_AGENT_RUNTIME_URL to the agent runtime that owns browser sessions.</p>
-      )}
-      {ownerId && browserSessionUrl(runtimeBase, botId) && (
-        <p>Read-only Live View for this agent. A separate tab is there if the frame does not load.</p>
-      )}
-      <div className="live-actions">
+      <div className="live-row">
+        {busy ? <LatticeLoader label="Browser" /> : <p className="live-status">{status}</p>}
+        <div className="live-actions">
         <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
           Open browser session
         </button>
@@ -86,6 +80,7 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
         <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('release')}>
           Release session
         </button>
+        </div>
       </div>
       {error && <p role="alert">{error}</p>}
       {frame?.embed && frame.src && (

@@ -1,0 +1,33 @@
+.spotlight {
+  position: relative;
+  isolation: isolate;
+}
+
+.spotlight__glow {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    180px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    rgba(255, 255, 255, 0.14),
+    transparent 68%
+  );
+  transition: opacity 160ms ease;
+}
+
+.spotlight:hover .spotlight__glow,
+.spotlight:focus-within .spotlight__glow {
+  opacity: 1;
+}
+
+.spotlight > :not(.spotlight__glow) {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight__glow { transition: none; }
+}

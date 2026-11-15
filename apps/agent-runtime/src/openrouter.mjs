@@ -1,7 +1,7 @@
 /**
  * Model chat client for the bot loop (Meta Model API by default).
  * Keys are Authorization headers only — never written into the prompt.
- * Prefers MODEL_API_KEY (LLM_…) → https://api.meta.ai/v1.
+ * Prefers META_MODEL_API_KEY (LLM_…) → https://api.meta.ai/v1.
  * Falls back to OPENROUTER_API_KEY (sk-or-…) → OpenRouter.
  * Tests inject `fetcher` and pass without a live key.
  */
@@ -72,7 +72,7 @@ function trimKey(value) {
  * LLM_-prefixed keys always go to Meta even if stored as OPENROUTER_API_KEY.
  */
 export function resolveModelProvider(env = {}) {
-  const modelKey = trimKey(env.MODEL_API_KEY);
+  const modelKey = trimKey(env.META_MODEL_API_KEY);
   const openrouterKey = trimKey(env.OPENROUTER_API_KEY);
   const llmAsOpenrouter = openrouterKey.startsWith('LLM_') ? openrouterKey : '';
   const metaKey = modelKey || llmAsOpenrouter;

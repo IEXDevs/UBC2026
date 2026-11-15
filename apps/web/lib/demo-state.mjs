@@ -1,5 +1,6 @@
 import { createBuiltinTemplates } from '@ubc2026/contracts';
 import { demoBotExperiences } from './bot-experience.mjs';
+import { composioConnectors, composioLogo } from './composio-catalog.mjs';
 
 /** Placeholder shell chrome. Money panes are filled by Sid's book; Overview/Security keep Isaac labels. */
 export function panePlaceholder(name) {
@@ -14,7 +15,7 @@ export function getDemoShellState() {
   return {
     product: 'Maelstrom',
     ownerId: null,
-    panes: ['Main', 'Positions', 'Plugins', 'History'],
+    panes: ['Main', 'Positions', 'History'],
     bots: [
       {
         id: 'bot_meteora',
@@ -73,6 +74,43 @@ export function getDemoShellState() {
         txSignature: null,
         counterparty: 'signal endpoint',
       },
+      {
+        id: 'pay_bob_out',
+        botId: 'bot_meteora',
+        direction: 'paid',
+        protocol: 'x402',
+        amount: '5000000',
+        asset: 'USDC',
+        cluster: 'devnet',
+        txSignature: null,
+        counterparty: '@bob',
+      },
+      {
+        id: 'pay_bob_in',
+        botId: 'bot_meteora',
+        direction: 'earned',
+        protocol: 'x402',
+        amount: '2000000',
+        asset: 'USDC',
+        cluster: 'devnet',
+        txSignature: null,
+        counterparty: '@bob',
+      },
+      {
+        id: 'pay_swap',
+        botId: 'bot_meteora',
+        direction: 'paid',
+        protocol: 'x402',
+        amount: '5000000',
+        asset: 'USDC',
+        cluster: 'devnet',
+        txSignature: '5'.repeat(88),
+        counterparty: 'Jupiter',
+        netLegs: [
+          { mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU', symbol: 'USDC', delta: '-5000000', decimals: 6, direction: 'out' },
+          { mint: 'So11111111111111111111111111111111111111112', symbol: 'SOL', delta: '21000000', decimals: 9, direction: 'in' },
+        ],
+      },
     ],
     wallets: [
       {
@@ -97,14 +135,10 @@ export function getDemoShellState() {
     connectors: [
       { id: 'solana', name: 'Solana', detail: 'Devnet only. Mainnet execution stays off.', category: 'Chain', popular: true, builtin: true, linked: true },
       { id: 'privy', name: 'Privy', detail: 'Owner sign-in and the agent wallet.', category: 'Identity', popular: true, builtin: true, linked: true },
-      { id: 'firecrawl', name: 'Firecrawl', detail: 'Research pages for the decision loop.', category: 'Research', popular: true, builtin: true, linked: true },
+      { id: 'firecrawl', name: 'Firecrawl', detail: 'Research pages for the decision loop.', category: 'Research', popular: true, builtin: true, linked: true, logo: composioLogo('firecrawl') },
       { id: 'browser-run', name: 'Browser Run', detail: 'Cloudflare browser session for the live view.', category: 'Research', popular: true, builtin: true, linked: true },
       { id: 'x402', name: 'x402', detail: 'Paid fetches. A spend still needs approval.', category: 'Payments', popular: true, builtin: true, linked: true },
-      { id: 'github', name: 'GitHub', detail: 'Repositories, issues, and pull requests.', category: 'Code', popular: true, builtin: false, linked: false },
-      { id: 'gmail', name: 'Gmail', detail: 'Read and draft mail for the agent.', category: 'Mail', popular: true, builtin: false, linked: false },
-      { id: 'slack', name: 'Slack', detail: 'Post into the channels the owner allows.', category: 'Chat', popular: true, builtin: false, linked: false },
-      { id: 'notion', name: 'Notion', detail: 'Read pages the owner has shared.', category: 'Docs', popular: true, builtin: false, linked: false },
-      { id: 'gcal', name: 'Google Calendar', detail: 'See the owner calendar before booking.', category: 'Calendar', popular: true, builtin: false, linked: false },
+      ...composioConnectors(),
     ],
     positions: [
       {

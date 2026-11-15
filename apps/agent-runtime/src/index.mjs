@@ -137,6 +137,8 @@ async function dispatch(request, env, rawEnv = env) {
       'profiles.me',
       'profiles.update',
       'profiles.lookup',
+      'transfers.list',
+      'transfers.create',
     ].includes(matched.route.id)) {
       const response = await handleApiData(request, env, matched);
       if (response) return response;

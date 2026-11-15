@@ -29,7 +29,7 @@ export async function POST(request, context) {
 
   try {
     const reply = await completeTextChat({
-      modelApiKey: readRootEnv('MODEL_API_KEY'),
+      metaModelApiKey: readRootEnv('META_MODEL_API_KEY'),
       openrouterApiKey: readRootEnv('OPENROUTER_API_KEY'),
       botName: typeof body.name === 'string' ? body.name : 'Agent',
       botGoal: typeof body.goal === 'string' ? body.goal : '',

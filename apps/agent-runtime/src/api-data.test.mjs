@@ -188,6 +188,69 @@ test('bot delete is dispatched when Supabase is unconfigured', async () => {
   assert.equal((await res.json()).error, 'unconfigured');
 });
 
+test('a platform send posts to the recipient handle and lists it on both wallets', async () => {
+  const fetcher = async (url, init = {}) => {
+    const href = String(url);
+    if (href.includes('/rpc/policy_reserve_budget')) {
+      return Response.json({ state: 'reserved' });
+    }
+    if (href.includes('/rpc/platform_post_transfer')) {
+      const body = JSON.parse(init.body);
+      assert.equal(body.payload.handle, 'bob');
+      assert.equal(body.payload.amount, '5000000');
+      return Response.json({
+        replay: false,
+        transfer: {
+          id: body.payload.idempotencyKey,
+          handle: 'bob',
+          amount: '5000000',
+          from_owner_id: 'alice',
+          to_owner_id: 'bob',
+          bot_id: 'bot_shop',
+        },
+      });
+    }
+    if (href.includes('bots?')) return Response.json([{ id: 'bot_shop' }]);
+    if (href.includes('platform_transfers?')) {
+      return Response.json([{
+        id: 'send_bob_5000000',
+        handle: 'bob',
+        amount: '5000000',
+        from_owner_id: 'alice',
+        to_owner_id: 'bob',
+        asset: 'USDC',
+      }]);
+    }
+    return Response.json([]);
+  };
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: fetcher,
+  });
+  const posted = await worker.fetch(new Request('https://runtime/api/transfers', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'alice' },
+    body: JSON.stringify({
+      handle: '@bob',
+      amount: '5000000',
+      idempotencyKey: 'send_bob_5000000',
+      botId: 'bot_shop',
+    }),
+  }), env);
+  const postedBody = await posted.json();
+  assert.equal(posted.status, 200);
+  assert.equal(postedBody.transfer.direction, 'out');
+  assert.equal(postedBody.transfer.handle, 'bob');
+
+  const listed = await worker.fetch(new Request('https://runtime/api/transfers', {
+    headers: { 'x-owner-id': 'bob' },
+  }), env);
+  const listedBody = await listed.json();
+  assert.equal(listedBody.items[0].direction, 'in');
+  assert.equal(listedBody.items[0].amount, '5000000');
+});
+
 test('health reports signing and supabase readiness flags', async () => {
   const incomplete = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
     transferClient: { ok: true },

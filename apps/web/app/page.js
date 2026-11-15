@@ -1,41 +1,39 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Plus, Search, Wallet } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Plus, Search } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
-import LiveViewPanel from '../components/LiveViewPanel';
 import MoneyPane from '../components/MoneyPane';
-import ConnectorsPane from '../components/ConnectorsPane';
 import BotRail from '../components/BotRail';
-import BotPage from '../components/BotPage';
+import AgentThread from '../components/AgentThread';
 import SecurityPanel from '../components/SecurityPanel';
 import LogsPanel from '../components/LogsPanel';
 import AccountMenu from '../components/AccountMenu';
 import PaneDock from '../components/PaneDock';
-import ChatBubbles from '../components/ChatBubbles';
 import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
 import ProfileSheet from '../components/ProfileSheet';
 import WalletsSheet from '../components/WalletsSheet';
+import PartySheet from '../components/PartySheet';
+import PluginsSheet from '../components/PluginsSheet';
+import StatisticsSheet from '../components/StatisticsSheet';
+import AgentDetail from '../components/AgentDetail';
+import ComputerSheet from '../components/ComputerSheet';
 import { getDemoShellState } from '../lib/demo-state.mjs';
-import { moneyPane, walletGlance } from '../lib/money-views.mjs';
+import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
+import { parsePlatformSend } from '../lib/platform-send.mjs';
+import { compactLines, contextUsage } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
-import { mergeRoster, removeBotFromRoster, reorderIds } from '../lib/roster.mjs';
+import { mergeRoster, reorderIds, withoutId } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
-import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
+import { profileRailLabel } from '../lib/profile.mjs';
+import { withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
-import { buildBotStats } from '../lib/overview.mjs';
+import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
-import {
-  deleteOwnerBot,
-  emptyMoneyState,
-  fetchOwnerLists,
-  runtimeBaseUrl,
-  shellBotFromRemote,
-} from '../lib/runtime-data.mjs';
+import { useToast } from '../components/bits/SwipeToast';
 
-/** Catalog only — panes + connector list. Never seed bots/wallets/payments from this. */
-const catalog = getDemoShellState();
+const base = getDemoShellState();
 const LOOK_KEY = 'maelstrom.botLooks';
 const ROSTER_KEY = 'maelstrom.roster';
 const privyConfigured = privyProviderProps({
@@ -99,7 +97,6 @@ function AuthedShell() {
             setWalletNote(`${walletProvisionNote(body, { ok: false })} Showing the Privy client wallet until server create succeeds.`);
             return;
           }
-          setLiveWallets([]);
           setWalletNote(walletProvisionNote(body, { ok: false }));
           return;
         }
@@ -113,7 +110,6 @@ function AuthedShell() {
             setLiveWallets(fallback);
             setWalletNote(`${walletProvisionNote({}, { ok: false })} Showing the Privy client wallet until server create succeeds.`);
           } else {
-            setLiveWallets([]);
             setWalletNote(walletProvisionNote({}, { ok: false }));
           }
         }
@@ -133,6 +129,7 @@ function AuthedShell() {
       onLogout={logout}
       liveWallets={liveWallets}
       walletNote={walletNote}
+      getAccessToken={getAccessToken}
     />
   );
 }
@@ -141,40 +138,53 @@ function profileKey(ownerId) {
   return ownerId ? `maelstrom.profile.${ownerId}` : '';
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '' }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', getAccessToken = null }) {
+  const toast = useToast();
   const [looks, setLooks] = useState({});
-  const [roster, setRoster] = useState({ order: [], extra: [] });
+  const [roster, setRoster] = useState({ order: base.bots.map(bot => bot.id), extra: [] });
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState('');
   const [railCollapsed, setRailCollapsed] = useState(false);
-  const [activeBot, setActiveBot] = useState(null);
+  const [sideWidth, setSideWidth] = useState(300);
+  const [detailWidth, setDetailWidth] = useState(280);
+  const [paneDrag, setPaneDrag] = useState(false);
+  const [activeBot, setActiveBot] = useState(base.bots[0].id);
   const [pane, setPane] = useState('Main');
   const [slide, setSlide] = useState('right');
   const [createOpen, setCreateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [walletsOpen, setWalletsOpen] = useState(false);
+  const [pluginsOpen, setPluginsOpen] = useState(false);
   const [talks, setTalks] = useState({});
   const [thinkingBot, setThinkingBot] = useState(null);
-  const [remoteBots, setRemoteBots] = useState([]);
-  const [remotePayments, setRemotePayments] = useState([]);
-  const [remoteWallets, setRemoteWallets] = useState([]);
-  const [dataNote, setDataNote] = useState('');
+  const [botRecords, setBotRecords] = useState(base.bots);
   const [profile, setProfile] = useState(null);
+  const [transfers, setTransfers] = useState([]);
+  const [party, setParty] = useState(null);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [computerOpen, setComputerOpen] = useState(false);
+  const [library, setLibrary] = useState({});
+  const [voiceMs, setVoiceMs] = useState(0);
   const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
+  const closePlugins = useCallback(() => setPluginsOpen(false), []);
+  const closeStats = useCallback(() => setStatsOpen(false), []);
+  const closeComputer = useCallback(() => setComputerOpen(false), []);
+  const addVoice = useCallback((delta) => {
+    setVoiceMs((current) => {
+      const next = addVoiceMs(current, delta);
+      try { localStorage.setItem(voiceTimeKey(ownerId), String(next)); } catch { /* keep the session total in memory */ }
+      return next;
+    });
+  }, [ownerId]);
   const appendTalk = useCallback((botId, line) => {
     setTalks(current => ({
       ...current,
-      [botId]: [...(current[botId] ?? []), line].slice(-80),
+      [botId]: compactLines([...(current[botId] ?? []), line].slice(-80)),
     }));
   }, []);
-  const dockPanes = useMemo(
-    () => catalog.panes.filter((name) => name !== 'Plugins'),
-    [],
-  );
-
   useEffect(() => {
     let savedLooks = {};
     let savedRoster = null;
@@ -190,12 +200,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     } catch {
       savedRoster = null;
     }
+    const merged = mergeRoster(base.bots, savedRoster);
     setLooks(savedLooks);
-    // Only keep locally created extras — never rehydrate the old demo bot ids.
-    const extras = savedRoster && Array.isArray(savedRoster.extra) ? savedRoster.extra : [];
-    const order = savedRoster && Array.isArray(savedRoster.order) ? savedRoster.order : [];
-    setRoster({ order, extra: extras });
-    setActiveBot(null);
+    setRoster({ order: merged.order, extra: merged.extra });
+    setActiveBot(merged.order[0] ?? null);
     setReady(true);
   }, []);
 
@@ -206,40 +214,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }, [looks, roster, ready]);
 
   useEffect(() => {
-    if (!signedIn || !ownerId) {
-      setRemoteBots([]);
-      setRemotePayments([]);
-      setRemoteWallets([]);
-      setDataNote('');
-      return undefined;
+    try {
+      setVoiceMs(readVoiceMs(localStorage.getItem(voiceTimeKey(ownerId))));
+    } catch {
+      setVoiceMs(0);
     }
-    const runtimeBase = runtimeBaseUrl();
-    if (!runtimeBase) {
-      setDataNote('Set NEXT_PUBLIC_AGENT_RUNTIME_URL to load live bots and payments.');
-      return undefined;
-    }
-    let stop = false;
-    async function load() {
-      try {
-        const lists = await fetchOwnerLists(ownerId, runtimeBase);
-        if (stop) return;
-        setRemoteBots(lists.bots);
-        setRemotePayments(lists.payments);
-        setRemoteWallets(lists.wallets);
-        setDataNote(lists.source === 'unconfigured'
-          ? 'Worker is up but Supabase is not configured on the runtime.'
-          : '');
-      } catch {
-        if (!stop) setDataNote('Could not reach the Worker API.');
-      }
-    }
-    load();
-    const timer = setInterval(load, 8000);
-    return () => {
-      stop = true;
-      clearInterval(timer);
-    };
-  }, [signedIn, ownerId]);
+  }, [ownerId]);
 
   useEffect(() => {
     const key = profileKey(ownerId);
@@ -254,12 +234,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     } catch {
       setProfile(null);
     }
-    const runtimeBase = runtimeBaseUrl();
+    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
     if (!runtimeBase) return undefined;
     let stop = false;
     (async () => {
       try {
-        const response = await fetch(`${runtimeBase}/api/profiles/me`, {
+        const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/profiles/me`, {
           headers: { 'x-owner-id': ownerId },
           cache: 'no-store',
         });
@@ -275,12 +255,39 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     return () => { stop = true; };
   }, [ownerId]);
 
+  useEffect(() => {
+    if (!ownerId) {
+      setTransfers([]);
+      return undefined;
+    }
+    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+    if (!runtimeBase) return undefined;
+    let stop = false;
+    (async () => {
+      try {
+        const token = await getAccessToken?.();
+        const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/transfers`, {
+          headers: {
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+            'x-owner-id': ownerId,
+          },
+          cache: 'no-store',
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!stop && Array.isArray(body.items)) setTransfers(body.items);
+      } catch {
+        // Keep transfers already loaded for this owner.
+      }
+    })();
+    return () => { stop = true; };
+  }, [ownerId, getAccessToken]);
+
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
     const key = profileKey(ownerId);
-    const runtimeBase = runtimeBaseUrl();
+    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
     if (runtimeBase && ownerId) {
-      const response = await fetch(`${runtimeBase}/api/profiles/me`, {
+      const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/profiles/me`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json', 'x-owner-id': ownerId },
         body: JSON.stringify(stored),
@@ -300,10 +307,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const resolveMention = useCallback(async (token) => {
     const parsed = parseRecipient(token);
     if (!parsed) return null;
-    const runtimeBase = runtimeBaseUrl();
+    const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
     if (runtimeBase && ownerId) {
       try {
-        const url = new URL(`${runtimeBase}/api/profiles/lookup`);
+        const url = new URL(`${runtimeBase.replace(/\/$/, '')}/api/profiles/lookup`);
         url.searchParams.set('q', token);
         const response = await fetch(url, { headers: { 'x-owner-id': ownerId }, cache: 'no-store' });
         const body = await response.json().catch(() => ({}));
@@ -321,48 +328,22 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }, [ownerId, profile]);
 
   const seedBots = useMemo(() => {
-    if (!signedIn) return [];
-    const fromRemote = remoteBots.map(row => shellBotFromRemote(row, looks)).filter(Boolean);
-    return fromRemote;
-  }, [signedIn, remoteBots, looks]);
-
-  const merged = useMemo(() => mergeRoster(seedBots, signedIn ? roster : { order: [], extra: [] }), [roster, seedBots, signedIn]);
+    const byId = new Map(botRecords.map((bot) => [bot.id, bot]));
+    return base.bots.map((bot) => ({ ...bot, ...(byId.get(bot.id) || {}) }));
+  }, [botRecords]);
+  const merged = useMemo(() => mergeRoster(seedBots, roster), [roster, seedBots]);
   const styled = useMemo(() => applyLooks(merged.bots, looks), [merged, looks]);
-  // Empty arrays must not block later sources (client Privy fallback / Worker list).
-  const walletSource = useMemo(
-    () => pickWalletList(liveWallets, remoteWallets),
-    [liveWallets, remoteWallets],
-  );
-  const assigned = useMemo(
-    () => withAssignedWallet(styled, walletSource),
-    [styled, walletSource],
-  );
-  const bots = signedIn ? assigned.bots : [];
-  const wallets = signedIn ? (assigned.wallets || walletSource) : [];
-  const payments = signedIn ? remotePayments : [];
-  const positions = [];
-  const moneyState = signedIn
-    ? { bots, wallets, payments, positions }
-    : emptyMoneyState();
+  const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
+  const bots = assigned.bots;
+  const wallets = assigned.wallets ?? base.wallets;
   const visible = bots.filter(bot => bot.name.toLowerCase().includes(query.trim().toLowerCase()));
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
-  const glance = walletGlance(wallets, positions);
-  const walletChipLabel = !signedIn
-    ? 'Sign in'
-    : (wallets.length ? glance.balanceLabel : 'No wallet');
-
-  useEffect(() => {
-    if (!signedIn) {
-      setActiveBot(null);
-      return;
-    }
-    if (activeBot && bots.some(item => item.id === activeBot)) return;
-    setActiveBot(bots[0]?.id ?? null);
-  }, [signedIn, bots, activeBot]);
+  const glance = walletGlance(wallets, base.positions, transfers);
 
   function choosePane(next, direction) {
     if (next === pane) return;
+    setPluginsOpen(false);
     setSlide(direction);
     setPane(next);
     if (next === 'Main') setActiveBot(current => current ?? bots[0]?.id ?? null);
@@ -371,7 +352,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   function openChat(id) {
     setCreateOpen(false);
     setWalletsOpen(false);
+    setPluginsOpen(false);
     setProfileOpen(false);
+    setStatsOpen(false);
     setActiveBot(id);
     if (pane !== 'Main') {
       setSlide('left');
@@ -380,10 +363,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }
 
   function onCreate(created) {
-    if (!signedIn) {
-      onLogin?.();
-      return;
-    }
     setRoster(current => ({
       order: [created.id, ...current.order.filter(id => id !== created.id)],
       extra: [created, ...current.extra.filter(item => item.id !== created.id)],
@@ -403,71 +382,124 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     setRoster(current => ({ ...current, order: reorderIds(current.order, fromId, toId) }));
   }
 
-  async function onDeleteBot(botId) {
-    if (!signedIn || typeof botId !== 'string' || !botId) return;
-    const target = bots.find(item => item.id === botId);
-    if (!target) return;
-    if (!window.confirm(`Delete ${target.name}? This removes the agent and its stored ledger rows.`)) return;
-
-    const isRemote = Boolean(target.record);
-    if (isRemote && ownerId) {
-      const result = await deleteOwnerBot(ownerId, botId);
-      if (!result.ok) {
-        setDataNote(`Could not delete agent (${result.error}).`);
-        return;
-      }
-      setRemoteBots(current => current.filter(row => row.id !== botId));
-      setRemotePayments(current => current.filter(row => row.botId !== botId));
-    }
-
-    setRoster(current => removeBotFromRoster(current, botId));
+  function onDelete(id) {
+    const name = bots.find(item => item.id === id)?.name ?? 'Agent';
+    toast?.(`${name} removed`);
+    setRoster(current => ({
+      order: withoutId(current.order, id),
+      extra: current.extra.filter(item => item.id !== id),
+    }));
     setLooks(current => {
-      if (!current || !current[botId]) return current;
+      if (!current[id]) return current;
       const next = { ...current };
-      delete next[botId];
+      delete next[id];
       return next;
     });
     setTalks(current => {
-      if (!current || !current[botId]) return current;
+      if (!current[id]) return current;
       const next = { ...current };
-      delete next[botId];
+      delete next[id];
       return next;
     });
-    setActiveBot(current => (current === botId ? null : current));
-    setDataNote('');
+    setThinkingBot(current => (current === id ? null : current));
+    setActiveBot(current => {
+      if (current !== id) return current;
+      return bots.find(item => item.id !== id)?.id ?? null;
+    });
   }
 
   function onAccount(id) {
     setCreateOpen(false);
+    setComputerOpen(id === 'computer');
     if (id === 'profile') {
       setWalletsOpen(false);
+      setPluginsOpen(false);
+      setStatsOpen(false);
       setProfileOpen(true);
+      return;
+    }
+    if (id === 'computer') {
+      setProfileOpen(false);
+      setWalletsOpen(false);
+      setPluginsOpen(false);
+      setStatsOpen(false);
+      setComputerOpen(true);
+      return;
+    }
+    if (id === 'statistics') {
+      setProfileOpen(false);
+      setWalletsOpen(false);
+      setPluginsOpen(false);
+      setStatsOpen(true);
       return;
     }
     if (id === 'wallet') {
       setProfileOpen(false);
+      setPluginsOpen(false);
+      setStatsOpen(false);
       setWalletsOpen(true);
+      return;
+    }
+    if (id === 'plugins') {
+      setProfileOpen(false);
+      setWalletsOpen(false);
+      setStatsOpen(false);
+      setPluginsOpen(true);
       return;
     }
     setProfileOpen(false);
     setWalletsOpen(false);
-    if (id === 'plugins') choosePane('Plugins', 'right');
+    setPluginsOpen(false);
+    setStatsOpen(false);
     if (id === 'security') choosePane('Security', 'right');
     if (id === 'logs') choosePane('Logs', 'right');
   }
 
-  function openCreate() {
-    if (!signedIn) {
-      onLogin?.();
-      return;
+  function dragPane(event, side) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startSide = railCollapsed ? 88 : sideWidth;
+    const startDetail = detailWidth;
+    setPaneDrag(true);
+    function move(next) {
+      const delta = next.clientX - startX;
+      if (side === 'left') {
+        const width = startSide + delta;
+        if (width <= 168) {
+          setRailCollapsed(true);
+          return;
+        }
+        setRailCollapsed(false);
+        setSideWidth(Math.min(480, Math.max(200, width)));
+        return;
+      }
+      setDetailWidth(Math.min(520, Math.max(220, startDetail - delta)));
     }
-    setProfileOpen(false);
-    setCreateOpen(true);
+    function up() {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setPaneDrag(false);
+    }
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
+  const sideColumn = railCollapsed ? 88 : sideWidth;
+
   return (
-    <div className={`shell${railCollapsed ? ' is-collapsed' : ''}`}>
+    <div
+      className={`shell${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
+      style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px` }}
+    >
       <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
+        <div
+          className="pane-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize agents"
+          onPointerDown={event => dragPane(event, 'left')}
+        />
         <div className="side-tools">
           <button
             type="button"
@@ -489,7 +521,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               onChange={event => setQuery(event.target.value)}
             />
           </label>
-          <button type="button" className="add-agent" aria-label="Add agent" onClick={openCreate}>
+          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setPluginsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
         </div>
@@ -500,14 +532,21 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           collapsed={railCollapsed}
           onSelect={openChat}
           onReorder={onReorder}
-          onCreate={openCreate}
-          onDelete={onDeleteBot}
+          onDelete={onDelete}
+          onCreate={() => setCreateOpen(true)}
         />
         <footer className="you">
           <AccountMenu
-            accountLabel={profile?.displayName || accountLabel}
-            hint={signedIn ? (profile?.handle ? `@${profile.handle}` : 'Account') : 'Not signed in'}
+            accountLabel={profileRailLabel({
+              handle: profile?.handle,
+              displayName: profile?.displayName,
+              fallback: accountLabel,
+            })}
             avatarUrl={avatarUrl}
+            collapsed={railCollapsed}
+            signedIn={signedIn}
+            loginDisabled={loginDisabled}
+            onLogin={onLogin}
             onPick={onAccount}
           />
         </footer>
@@ -516,92 +555,37 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       <section className="stage">
         <header className="topbar">
           <span className="topbar-side" />
-          <PaneDock panes={dockPanes} pane={pane} onChange={choosePane} />
-          <button
-            type="button"
-            className="wallet-chip"
-            onClick={() => {
-              if (!signedIn) {
-                onLogin?.();
-                return;
-              }
-              setCreateOpen(false);
-              setProfileOpen(false);
-              setWalletsOpen(true);
-            }}
-          >
-            <Wallet size={16} strokeWidth={1.75} />
-            <span>{walletChipLabel}</span>
-          </button>
+          <PaneDock panes={base.panes} pane={pane} onChange={choosePane} />
+          <span />
         </header>
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}`}>
-          <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}${pane === 'Plugins' ? ' is-plugins' : ''}`} aria-label={pane}>
+          <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}`} aria-label={pane}>
             {pane === 'Main' ? (
-              !signedIn ? (
-                <>
-                  <h1>Sign in to run agents</h1>
-                  <p>Connect with Privy to load your wallets, bots, and live Worker data. Nothing here is a preview of someone else’s account.</p>
-                  <button type="button" className="solid" disabled={loginDisabled} onClick={onLogin}>Connect</button>
-                </>
-              ) : bot ? (
-                <>
-                  <header className="bubble-head">
-                    <strong>{bot.name}</strong>
-                    <span>{bot.type} · {bot.status}</span>
-                  </header>
-                  <h1>{bot.goal}</h1>
-                  <section className="panel" aria-label="Stats">
-                    <h2>Stats</h2>
-                    <dl className="overview-metrics">
-                      {buildBotStats(bot).cards.map(card => (
-                        <div key={card.key}>
-                          <dt>{card.label}</dt>
-                          <dd>{card.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </section>
-                  <LiveViewPanel botId={bot.id} ownerId={ownerId} />
-                  <BotPage bot={bot} ownerId={ownerId} />
-                  <ChatBubbles botName={bot.name} lines={talks[bot.id] ?? []} thinking={thinkingBot === bot.id} />
-                </>
+              bot ? (
+                <AgentThread
+                  key={bot.id}
+                  bot={bot}
+                  ownerId={ownerId}
+                  lines={talks[bot.id] ?? []}
+                  thinking={thinkingBot === bot.id}
+                  onParty={setParty}
+                />
               ) : (
                 <>
                   <h1>Make your first Agent!</h1>
-                  <p>{dataNote || 'Your bot list is empty. Create one or wait for the Worker to return bots from Supabase.'}</p>
-                  <button type="button" className="solid" onClick={openCreate}>Create</button>
+                  <p>The list stays empty until you create one.</p>
+                  <button type="button" className="solid" onClick={() => setCreateOpen(true)}>Create</button>
                 </>
               )
             ) : null}
-            {money ? (
-              <MoneyPane
-                pane={money}
-                state={moneyState}
-                signedIn={signedIn}
-                onSignIn={onLogin}
-                note={signedIn ? (walletNote || dataNote) : ''}
-              />
-            ) : null}
-            {pane === 'Plugins' ? <ConnectorsPane connectors={catalog.connectors} bots={bots} /> : null}
-            {pane === 'Logs' ? <LogsPanel bots={bots} ownerId={ownerId} /> : null}
+            {money ? <MoneyPane pane={money} state={{ ...base, bots, wallets, transfers }} onParty={setParty} /> : null}
+            {pane === 'Logs' ? <LogsPanel bots={bots} ownerId={ownerId} onParty={setParty} /> : null}
             {pane === 'Security' ? (
               <SecurityPanel
                 bots={bots}
                 ownerId={ownerId}
                 accountLabel={accountLabel}
-                wallets={wallets}
-                onBotsChange={(next) => {
-                  // Local status toggles only — remote list refreshes on the next poll.
-                  setRemoteBots(current => current.map(row => {
-                    const updated = next.find(bot => bot.id === row.id);
-                    if (!updated) return row;
-                    return {
-                      ...row,
-                      enabled: updated.status !== 'paused' && updated.enabled !== false,
-                      frozen: updated.status === 'paused' || updated.frozen === true,
-                    };
-                  }));
-                }}
+                onBotsChange={(next) => setBotRecords(next)}
               />
             ) : null}
           </article>
@@ -610,26 +594,109 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           <Composer
             key={bot.id}
             hidden={pane !== 'Main'}
-            botId={bot.id}
             botName={bot.name}
-            botGoal={bot.goal}
-            botType={bot.type}
-            ownerId={ownerId}
             lines={talks[bot.id] ?? []}
-            onLine={line => appendTalk(bot.id, line)}
+            onLine={line => {
+              appendTalk(bot.id, line);
+              if (line.role !== 'user') return;
+              const command = parsePlatformSend(line.text);
+              if (!command || !ownerId) return;
+              const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+              const reply = (text) => appendTalk(bot.id, { id: `${line.id}-send`, role: 'assistant', text });
+              if (!runtimeBase) {
+                reply('Platform sends need the agent runtime.');
+                toast?.('Platform sends need the agent runtime.');
+                return;
+              }
+              void (async () => {
+                try {
+                  const token = await getAccessToken?.();
+                  const response = await fetch(`${runtimeBase.replace(/\/$/, '')}/api/transfers`, {
+                    method: 'POST',
+                    headers: {
+                      'content-type': 'application/json',
+                      ...(token ? { authorization: `Bearer ${token}` } : {}),
+                      'x-owner-id': ownerId,
+                    },
+                    body: JSON.stringify({
+                      ...command,
+                      botId: bot.id,
+                      idempotencyKey: `send_${bot.id}_${command.handle}_${command.amount}`.replace(/[^a-zA-Z0-9:_-]/g, '_'),
+                    }),
+                  });
+                  const body = await response.json().catch(() => ({}));
+                  if (!response.ok || !body.transfer) {
+                    const reason = body.error === 'handle_missing'
+                      ? `@${command.handle} is not on Maelstrom.`
+                      : body.error === 'wallet_frozen'
+                        ? 'That wallet is frozen.'
+                        : body.error === 'recipient_wallet_missing'
+                          ? `@${command.handle} does not have a wallet yet.`
+                          : body.error === 'policy_blocked'
+                            ? 'The agent policy blocked this send.'
+                            : 'The send did not post.';
+                    reply(reason);
+                    toast?.(reason);
+                    return;
+                  }
+                  setTransfers(current => [body.transfer, ...current.filter(item => item.id !== body.transfer.id)]);
+                  reply(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}. It is in their wallet.`);
+                  toast?.(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}`);
+                } catch {
+                  reply('The send did not post.');
+                  toast?.('The send did not post.');
+                }
+              })();
+            }}
             onThinking={on => setThinkingBot(on ? bot.id : null)}
+            onVoiceSpan={addVoice}
             resolveMention={resolveMention}
+            usage={contextUsage(talks[bot.id] ?? [])}
+            onSuggest={(text) => {
+              appendTalk(bot.id, { id: `${Date.now()}-suggest`, role: 'user', text });
+              setThinkingBot(bot.id);
+              window.setTimeout(() => setThinkingBot((current) => (current === bot.id ? null : current)), 1400);
+            }}
+            onAttach={items => {
+              setLibrary(current => {
+                const prev = current[bot.id] ?? [];
+                const seen = new Set(prev.map(file => file.id));
+                const added = items.filter(file => !seen.has(file.id));
+                if (added.length === 0) return current;
+                return { ...current, [bot.id]: [...added, ...prev] };
+              });
+            }}
           />
         ) : pane === 'Positions' ? null : <div className="composer-gap" />}
       </section>
+      {pane === 'Main' && bot ? (
+        <AgentDetail
+          bot={bot}
+          files={library[bot.id] ?? []}
+          balanceLabel={glance.balanceLabel}
+          onResize={event => dragPane(event, 'right')}
+          onWallet={() => { setCreateOpen(false); setProfileOpen(false); setPluginsOpen(false); setStatsOpen(false); setWalletsOpen(true); }}
+          onComputer={() => onAccount('computer')}
+        />
+      ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
-      <WalletsSheet
-        open={walletsOpen}
-        onClose={closeWallets}
-        state={moneyState}
-        note={signedIn ? walletNote : 'Sign in to provision and list your Privy wallets.'}
-        signedIn={signedIn}
-        onSignIn={onLogin}
+      <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ ...base, bots, wallets }} note={walletNote} transfers={transfers} bot={bot} onParty={setParty} signedIn={signedIn} />
+      <PartySheet
+        open={Boolean(party)}
+        party={party}
+        transfers={transfers}
+        payments={base.payments}
+        onClose={() => setParty(null)}
+        resolve={resolveMention}
+      />
+      <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={base.connectors} />
+      <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} />
+      <StatisticsSheet
+        open={statsOpen}
+        onClose={closeStats}
+        bots={bots}
+        ownerId={ownerId}
+        voiceMs={voiceMs}
       />
       <ProfileSheet
         open={profileOpen}

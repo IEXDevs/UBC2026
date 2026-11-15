@@ -108,7 +108,7 @@ export const ACCOUNT_VENDORS = Object.freeze([
     dashboard: 'https://dev.meta.ai/',
     names: Object.freeze([...SECRET_GROUPS.metaModel, ...SECRET_GROUPS.openrouter]),
     steps: Object.freeze([
-      'Create a Meta Model API key (starts with LLM_) and store it as MODEL_API_KEY in root .env.local.',
+      'Create a Meta Model API key (starts with LLM_) and store it as META_MODEL_API_KEY in root .env.local.',
       'Optional fallback: create an OpenRouter key (sk-or-) as OPENROUTER_API_KEY.',
       'Keys are Authorization headers only. Never put them in the prompt or commit them.',
     ]),

@@ -1,7 +1,6 @@
 'use client';
 
-import AnimatedList from './AnimatedList';
-import { listLook } from './listLook';
+import { TaskList } from './ai/elements';
 
 const KIND_LABELS = {
   'tool.call': 'Tool',
@@ -22,27 +21,27 @@ function formatWhen(at) {
   return new Date(at).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
+function statusFor(kind) {
+  if (kind === 'verify.mismatch') return 'error';
+  if (kind === 'tool.call' || kind === 'approval.requested' || kind === 'tx.submitted' || kind === 'verify.attempt') return 'running';
+  return 'done';
+}
+
 export default function BotTimeline({ entries, live, onWhy }) {
-  const items = entries.map(entry => ({
+  const items = entries.map((entry) => ({
     id: entry.id,
-    title: KIND_LABELS[entry.kind] ?? entry.kind,
-    description: entry.summary,
-    meta: formatWhen(entry.at),
+    status: statusFor(entry.kind),
+    title: `${KIND_LABELS[entry.kind] ?? entry.kind}. ${entry.summary || ''}${formatWhen(entry.at) ? ` ${formatWhen(entry.at)}` : ''}`,
+    action: (
+      <button type="button" className="text-btn" onClick={() => onWhy(entry)}>Why</button>
+    ),
   }));
 
   return (
     <section className="panel" aria-label="Live timeline">
       <h2>Live timeline</h2>
       <p className="hint">{live ? 'Updating from the agent runtime.' : 'Showing the latest stored tool events.'}</p>
-      {items.length === 0 ? (
-        <p>No tool events yet.</p>
-      ) : (
-        <AnimatedList
-          {...listLook()}
-          items={items}
-          onItemSelect={(_item, index) => onWhy(entries[index])}
-        />
-      )}
+      {items.length === 0 ? <p>No tool events yet.</p> : <TaskList items={items} />}
     </section>
   );
 }
