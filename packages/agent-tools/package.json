@@ -1,0 +1,12 @@
+{
+  "name": "@ubc2026/agent-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./catalog.mjs",
+  "scripts": { "test": "node --test catalog.test.mjs" },
+  "dependencies": {
+    "@ubc2026/browser-session": "0.1.0"
+  },
+  "engines": { "node": ">=20" }
+}

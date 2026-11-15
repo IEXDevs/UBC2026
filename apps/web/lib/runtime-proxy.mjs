@@ -24,6 +24,8 @@ const ALLOWED = Object.freeze([
   new RegExp(`^/bots/${BOT}/pause$`),
   new RegExp(`^/bots/${BOT}/resume$`),
   new RegExp(`^/bots/${BOT}/wake$`),
+  new RegExp(`^/bots/${BOT}/loop$`),
+  new RegExp(`^/bots/${BOT}/sns/send$`),
   new RegExp(`^/bots/${BOT}/browser/sessions$`),
   new RegExp(`^/bots/${BOT}/browser/sessions/${REC}/(?:live-view|release|navigate)$`),
   new RegExp(`^/bots/${BOT}/shopping/(?:prepare|settle)$`),

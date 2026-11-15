@@ -7,6 +7,13 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 import { SECRET_NAMES } from '@ubc2026/contracts';
+import { createScrape, createSearch } from '@ubc2026/browser-search';
+import {
+  DASHBOARD_TOOLS,
+  VOICE_BROWSER_ALIASES,
+  VOICE_RESEARCH_WEBHOOKS,
+  sharedToolsInstruction,
+} from '@ubc2026/agent-tools';
 import { META_SPARK_MODEL, resolveModelProvider } from './openrouter.mjs';
 
 export const DEFAULT_VOICE_MODEL = META_SPARK_MODEL;
@@ -31,99 +38,41 @@ export const VOICE_SYSTEM_PROMPT = [
   'Never read out Live View URLs, tokens, or secrets. If a tool hides them, leave them hidden.',
   'If a tool returns confirmation-required or manual-review, say so and stop.',
   'Execution stays on Solana devnet.',
+  sharedToolsInstruction(),
 ].join('\n');
 
-const botIdProp = Object.freeze({
-  type: 'string',
-  description: 'Bot id',
-});
+function toVoiceTool(def) {
+  const required = Array.isArray(def.required)
+    ? def.required
+    : (Array.isArray(def.parameters?.required) ? def.parameters.required : []);
+  const properties = def.properties
+    || Object.fromEntries(
+      Object.entries(def.parameters?.properties || {}).map(([key, schema]) => {
+        const next = { type: schema.type, description: schema.description || key };
+        if (schema.minimum != null) next.minimum = schema.minimum;
+        if (schema.maximum != null) next.maximum = schema.maximum;
+        return [key, next];
+      }),
+    );
+  return Object.freeze({
+    name: def.name,
+    description: def.description,
+    required: Object.freeze([...required]),
+    properties: Object.freeze({ ...properties }),
+    calls: Object.freeze(def.voiceCalls || def.calls || []),
+    handler: def.handler || 'http',
+  });
+}
 
 /**
- * Each tool's `calls` are the existing UI/runtime routes. ElevenLabs posts to
- * /voice/tools/:name, and that handler performs these calls with the same owner header.
+ * Same capabilities as text chat: research/browser + dashboard tools.
+ * Legacy open_browser_session / release_browser_session aliases remain.
  */
 export const VOICE_TOOLS = Object.freeze([
-  tool('list_bots', 'List this user\'s bots. Same route as the bots API the app uses.', [], {}, [
-    call('GET', '/api/bots'),
-  ]),
-  tool('get_bot_status', 'Status for one bot. Same route as the runtime status page.', ['botId'], { botId: botIdProp }, [
-    call('GET', '/bots/:botId/status'),
-  ]),
-  tool('get_wallets', 'List wallets. Same route as the wallets API.', [], {}, [
-    call('GET', '/api/wallets'),
-  ]),
-  tool('get_overview', 'Overview metrics, including PnL. Same route as the metrics API.', [], {}, [
-    call('GET', '/api/metrics'),
-  ]),
-  tool('get_activity', 'Recent activity for one bot. Same feed as the bot page timeline.', ['botId'], { botId: botIdProp }, [
-    call('GET', '/api/events', { query: ['botId'] }),
-  ]),
-  tool('why_decision', 'Why a bot acted. Same route as the decision record API.', ['botId'], { botId: botIdProp }, [
-    call('GET', '/api/decisions', { query: ['botId'] }),
-  ]),
-  tool('get_payment_feed', 'Payments in and out for one bot. Same route as the payments API.', ['botId'], { botId: botIdProp }, [
-    call('GET', '/api/payments', { query: ['botId'] }),
-  ]),
-  tool('pause_bot', 'Pause one bot. Same route as the runtime pause control.', ['botId'], { botId: botIdProp }, [
-    call('POST', '/bots/:botId/pause'),
-  ]),
-  tool('resume_bot', 'Resume one bot. Same route as the runtime resume control.', ['botId'], { botId: botIdProp }, [
-    call('POST', '/bots/:botId/resume'),
-  ]),
-  tool('wake_bot', 'Wake one bot to continue its goal. Same route as the runtime wake control.', ['botId'], {
-    botId: botIdProp,
-    goal: { type: 'string', description: 'Optional goal text already stored for this bot' },
-  }, [
-    call('POST', '/bots/:botId/wake', { body: ['goal'] }),
-  ]),
-  tool('start_task', 'Start the checkpointed research, decide, and approval loop for one bot. Same route as the runtime loop.', ['botId'], {
-    botId: botIdProp,
-    goal: { type: 'string', description: 'Optional goal text already stored for this bot' },
-  }, [
-    call('POST', '/bots/:botId/loop', { body: ['goal'] }),
-  ]),
-  tool('list_browser_sessions', 'List this owner\'s browser sessions for a bot. Same route as the Live View panel.', ['botId'], { botId: botIdProp }, [
-    call('GET', '/bots/:botId/browser/sessions'),
-  ]),
-  tool('open_browser_session', 'Open an owner-bound browser session. Same route as the Live View panel open button. Does not return a Live View URL.', ['botId'], {
-    botId: botIdProp,
-    purpose: { type: 'string', description: 'Short purpose, such as browse' },
-  }, [
-    call('POST', '/bots/:botId/browser/sessions', { body: ['purpose'] }),
-  ]),
-  tool('release_browser_session', 'Release a browser session. Same route as the Live View panel release button.', ['botId', 'sessionRecordId'], {
-    botId: botIdProp,
-    sessionRecordId: { type: 'string', description: 'Session record id returned by open_browser_session' },
-  }, [
-    call('POST', '/bots/:botId/browser/sessions/:sessionRecordId/release'),
-  ]),
-  tool('stop_all', 'Pause every listed bot. Uses the bots list and the pause route. Say "Stopping all bots now" before calling.', [], {}, [
-    call('GET', '/api/bots'),
-    call('POST', '/bots/:botId/pause'),
-  ]),
-  tool('prepare_shopping', 'Prepare an x402 sandbox (or Laso) shopping purchase for a shopping bot. Same route as the shopping panel. Does not sign.', ['botId'], {
-    botId: botIdProp,
-    provider: { type: 'string', description: 'sandbox or laso' },
-  }, [
-    call('POST', '/bots/:botId/shopping/prepare', { body: ['provider'] }),
-  ]),
-  tool('sns_send', 'Resolve a .sol name and build a send intent. Same route as SNS send. Does not sign unless the Worker has an injected executor.', ['botId'], {
-    botId: botIdProp,
-    domain: { type: 'string', description: 'SNS domain like alex.sol' },
-    amount: { type: 'string', description: 'Base-unit amount string' },
-    from: { type: 'string', description: 'Sender pubkey' },
-  }, [
-    call('POST', '/bots/:botId/sns/send', { body: ['domain', 'amount', 'from'] }),
-  ]),
+  ...VOICE_RESEARCH_WEBHOOKS.map(toVoiceTool),
+  ...DASHBOARD_TOOLS.map(toVoiceTool),
+  ...VOICE_BROWSER_ALIASES.map(toVoiceTool),
 ]);
-
-function tool(name, description, required, properties, calls) {
-  return Object.freeze({ name, description, required: Object.freeze(required), properties: Object.freeze(properties), calls: Object.freeze(calls) });
-}
-
-function call(method, path, extra = {}) {
-  return Object.freeze({ method, path, query: Object.freeze(extra.query ?? []), body: Object.freeze(extra.body ?? []) });
-}
 
 export function grokVoiceModel(env = {}) {
   const override = typeof env.OPENROUTER_MODEL_VOICE === 'string' ? env.OPENROUTER_MODEL_VOICE.trim() : '';
@@ -301,7 +250,9 @@ function requestFor(entry, parameters, owner) {
   if (entry.method !== 'GET') {
     const body = {};
     for (const key of entry.body) {
-      if (typeof parameters[key] === 'string' && parameters[key].trim() !== '') body[key] = parameters[key].trim().slice(0, 256);
+      if (typeof parameters[key] !== 'string' || parameters[key].trim() === '') continue;
+      const max = key === 'url' || key === 'goal' ? 2000 : 256;
+      body[key] = parameters[key].trim().slice(0, max);
     }
     if (entry.path.endsWith('/browser/sessions') && body.purpose == null) body.purpose = 'browse';
     init.headers['content-type'] = 'application/json';
@@ -357,6 +308,45 @@ async function speakable(response, secrets) {
   };
 }
 
+async function runResearchTool(name, parameters, env) {
+  const secrets = knownSecrets(env);
+  try {
+    if (name === 'web_search') {
+      const search = createSearch({ apiKey: env.FIRECRAWL_API_KEY, fetcher: fetch });
+      const limit = Number.isInteger(parameters.limit) ? parameters.limit : 5;
+      const results = await search(parameters.query, limit);
+      return { handler: 'research', results: redact(results, secrets) };
+    }
+    if (name === 'web_scrape') {
+      const scrape = createScrape({ apiKey: env.FIRECRAWL_API_KEY, fetcher: fetch });
+      const page = await scrape(parameters.url);
+      return { handler: 'research', page: redact(page, secrets) };
+    }
+  } catch (error) {
+    const code = typeof error?.code === 'string' ? error.code : 'voice_api_failed';
+    return { error: code };
+  }
+  return { error: 'unknown_tool' };
+}
+
+async function resolveSessionId(parameters, owner, fetchApi, env) {
+  if (typeof parameters.sessionRecordId === 'string' && ID.test(parameters.sessionRecordId)) {
+    return parameters.sessionRecordId;
+  }
+  if (!ID.test(parameters.botId)) return '';
+  const listRequest = requestFor(
+    { method: 'GET', path: '/bots/:botId/browser/sessions', query: [], body: [] },
+    { botId: parameters.botId },
+    owner,
+  );
+  if (!listRequest) return '';
+  const listed = await fetchApi(listRequest, env);
+  const payload = await listed.json().catch(() => ({}));
+  const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+  const open = sessions.filter((row) => row?.status === 'open' && ID.test(row.sessionRecordId));
+  return open[0]?.sessionRecordId || '';
+}
+
 async function runCalls(toolDef, parameters, owner, fetchApi, env) {
   const secrets = knownSecrets(env);
   if (toolDef.name === 'stop_all') {
@@ -374,9 +364,17 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env) {
     }
     return { calls: toolDef.calls.map(entry => ({ method: entry.method, path: entry.path })), list: summary, paused };
   }
+  let params = { ...parameters };
+  if (
+    (toolDef.name === 'browser_navigate' || toolDef.name === 'browser_live_view' || toolDef.name === 'browser_release')
+    && !ID.test(params.sessionRecordId || '')
+  ) {
+    params.sessionRecordId = await resolveSessionId(params, owner, fetchApi, env);
+    if (!ID.test(params.sessionRecordId || '')) return { error: 'session_not_found' };
+  }
   const results = [];
   for (const entry of toolDef.calls) {
-    const outbound = requestFor(entry, parameters, owner);
+    const outbound = requestFor(entry, params, owner);
     if (!outbound) return { error: 'invalid_parameters' };
     const response = await fetchApi(outbound, env);
     results.push({ method: entry.method, path: entry.path, ...(await speakable(response, secrets)) });
@@ -386,7 +384,28 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env) {
 
 function validateParameters(toolDef, parameters) {
   for (const key of toolDef.required) {
-    if (!ID.test(parameters[key])) return false;
+    if (key === 'botId' || key === 'sessionRecordId') {
+      if (typeof parameters[key] !== 'string' || !ID.test(parameters[key])) return false;
+      continue;
+    }
+    if (key === 'query') {
+      if (typeof parameters.query !== 'string' || !parameters.query.trim() || parameters.query.length > 1000) return false;
+      continue;
+    }
+    if (key === 'url') {
+      if (typeof parameters.url !== 'string' || !parameters.url.trim() || parameters.url.length > 2000) return false;
+      continue;
+    }
+    if (parameters[key] == null || parameters[key] === '') return false;
+  }
+  if (toolDef.properties.query && parameters.query != null) {
+    if (typeof parameters.query !== 'string' || !parameters.query.trim() || parameters.query.length > 1000) return false;
+  }
+  if (toolDef.properties.url && parameters.url != null) {
+    if (typeof parameters.url !== 'string' || !parameters.url.trim() || parameters.url.length > 2000) return false;
+  }
+  if (toolDef.properties.limit && parameters.limit != null) {
+    if (!Number.isInteger(parameters.limit) || parameters.limit < 1 || parameters.limit > 10) return false;
   }
   if (toolDef.properties.purpose && parameters.purpose != null && (typeof parameters.purpose !== 'string' || parameters.purpose.length > 64)) return false;
   if (toolDef.properties.goal && parameters.goal != null && typeof parameters.goal !== 'string') return false;
@@ -425,18 +444,22 @@ async function handleTool(name, request, env, fetchApi) {
   if (!owner) return json({ error: 'owner_required' }, 400);
   const toolDef = VOICE_TOOLS.find(item => item.name === name);
   if (!toolDef) return json({ error: 'unknown_tool' }, 404);
-  if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
   const body = await request.json().catch(() => null);
   const parsed = parameterBag(body, name);
   if (parsed.error) return json({ error: parsed.error }, 400);
   if (!validateParameters(toolDef, parsed.parameters)) return json({ error: 'invalid_parameters' }, 400);
   let result;
   try {
-    result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env);
+    if (toolDef.handler === 'research') {
+      result = await runResearchTool(name, parsed.parameters, env);
+    } else {
+      if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
+      result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env);
+    }
   } catch {
     return json({ error: 'voice_api_failed' }, 502);
   }
-  if (result.error) return json({ error: result.error }, 400);
+  if (result.error) return json({ error: result.error }, result.error === 'session_not_found' ? 404 : 400);
   return json({
     result: {
       tool: name,

@@ -67,7 +67,9 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.equal(prompt.custom_llm.api_type, 'chat_completions');
   assert.equal(prompt.custom_llm.url, `${ORIGIN}/voice/llm/chat/completions`);
   assert.equal(prompt.custom_llm.api_key, undefined);
-  assert.equal(prompt.tools.some(item => item.name === 'browser_live_view'), false);
+  assert.equal(prompt.tools.some(item => item.name === 'browser_live_view'), true);
+  assert.equal(prompt.tools.some(item => item.name === 'web_search'), true);
+  assert.equal(prompt.tools.some(item => item.name === 'browser_navigate'), true);
   const text = JSON.stringify(spec);
   assert.equal(text.includes(SECRET), false);
   assert.equal(text.includes(OPENROUTER), false);
@@ -196,10 +198,11 @@ test('tool calls fail closed without a webhook secret, owner, or known tool', as
     body: { tool_name: 'pause_bot', parameters: {} },
   }), env());
   assert.equal(mismatch.status, 400);
-  const unknown = await worker.fetch(toolRequest('browser_live_view', { body: { parameters: {} } }), env());
-  assert.equal(unknown.status, 404);
+  const missingLive = await worker.fetch(toolRequest('browser_live_view', { body: { parameters: {} } }), env());
+  assert.equal(missingLive.status, 400);
   assert.equal(called, false);
-  assert.equal(VOICE_TOOLS.some(item => item.calls.some(call => call.path.includes('live-view'))), false);
+  assert.equal(VOICE_TOOLS.some(item => item.calls.some(call => call.path.includes('live-view'))), true);
+  assert.equal(VOICE_TOOLS.some(item => item.name === 'web_search'), true);
 });
 
 test('the custom LLM streams Grok through OpenRouter and does not call out without a key', async () => {

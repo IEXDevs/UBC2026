@@ -95,15 +95,15 @@ export function createVoiceClientTools({
       const bot = findBot(bots, params);
       if (!bot) return { ok: false, error: 'bot_not_found' };
       if (typeof setActiveBotId === 'function') setActiveBotId(bot.id);
-      if (typeof setPane === 'function') setPane('Agents');
+      if (typeof setPane === 'function') setPane('Main');
       if (typeof pushEvent === 'function') pushEvent({ kind: 'client.open_bot', botId: bot.id });
-      return { ok: true, botId: bot.id, name: bot.name, pane: 'Agents' };
+      return { ok: true, botId: bot.id, name: bot.name, pane: 'Main' };
     },
     async show_live_view(params = {}) {
       const bot = findBot(bots, { botId: params.botId || activeBotId });
       if (!bot) return { ok: false, error: 'bot_not_found' };
       if (typeof setActiveBotId === 'function') setActiveBotId(bot.id);
-      if (typeof setPane === 'function') setPane('Agents');
+      if (typeof setPane === 'function') setPane('Main');
       if (typeof focusLiveView === 'function') focusLiveView(bot.id);
       if (typeof pushEvent === 'function') pushEvent({ kind: 'client.show_live_view', botId: bot.id });
       return { ok: true, botId: bot.id, focused: 'live-view' };

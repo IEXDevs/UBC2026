@@ -46,6 +46,7 @@ import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
+import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 
 const CONNECTORS = shellConnectors();
 const privyConfigured = privyProviderProps({
@@ -475,6 +476,17 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
   const glance = walletGlance(wallets, positions, transfers);
+  const clientTools = useMemo(() => createVoiceClientTools({
+    bots,
+    activeBotId: activeBot,
+    pane,
+    setActiveBotId: setActiveBot,
+    setPane,
+    focusLiveView: () => {
+      setPane('Main');
+      setComputerOpen(true);
+    },
+  }), [bots, activeBot, pane]);
 
   function choosePane(next, direction) {
     if (next === pane) return;
@@ -768,6 +780,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
             botGoal={bot.goal}
             botType={bot.type}
             ownerId={ownerId}
+            clientTools={clientTools}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {
               const id = forBot || bot.id;

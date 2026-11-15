@@ -1,45 +1,35 @@
 /**
- * Wire browser-session agentTools into same-origin text chat.
+ * Shared agent tools for same-origin text chat (parity with voice).
  * Browser open/live-view/release prefer the Worker (same DO store as Live View).
  * Search/scrape use Firecrawl from root env when present.
+ * Dashboard tools call the same owner HTTP routes as voice webhooks.
  */
 
 import {
-  agentTools,
   createBrowserSessionService,
   createMemoryStore,
   ProviderError,
   SessionError,
 } from '@ubc2026/browser-session';
 import { createBrowserProvider, createScrape, createSearch } from '@ubc2026/browser-search';
+import {
+  DASHBOARD_TOOLS,
+  SHARED_AGENT_TOOLS,
+  sharedToolsInstruction,
+  toOpenAiTools,
+} from '@ubc2026/agent-tools';
 import { browserSessionUrl } from './live-view.mjs';
-import { runtimeBaseUrl } from './runtime-data.mjs';
+import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
 
 const MAX_TOOL_RESULT = 6000;
+const DASHBOARD_NAMES = new Set(DASHBOARD_TOOLS.map((tool) => tool.name));
 
-export function openAiAgentTools(tools = agentTools) {
-  return tools.map(tool => ({
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    },
-  }));
+export function openAiAgentTools(tools = SHARED_AGENT_TOOLS) {
+  return toOpenAiTools(tools);
 }
 
 export function chatToolsInstruction() {
-  return [
-    'You have tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, and browser_release.',
-    'When the owner asks you to look something up: call web_search first, pick a real https result url, then browser_navigate (or browser_open with that url) so Live View leaves the previous page.',
-    'Do not claim you looked something up unless web_search returned results and navigate/open returned that url.',
-    'Do not claim you lack a browser while these tools are available.',
-    'browser_open without url starts on about:blank. Always pass url as a full https link when the owner should see a page.',
-    'If a session is already open, prefer browser_navigate with its sessionRecordId. browser_open at capacity reuses that session and navigates when url is set.',
-    'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
-    'After a successful open/navigate, tell the owner to use Show live view (not Open browser session again).',
-    'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
-  ].join('\n');
+  return sharedToolsInstruction();
 }
 
 function clipJson(value) {
@@ -211,6 +201,60 @@ export function createChatToolInvoker({
     return local.invokeTool(name, args, identity);
   }
 
+  const apiBase = root || 'shell';
+
+  async function invokeDashboard(name, args = {}) {
+    const def = DASHBOARD_TOOLS.find((tool) => tool.name === name);
+    if (!def?.voiceCalls?.length) return { error: 'unknown_tool' };
+    if (name === 'stop_all') {
+      const listPath = ownerApiUrl('/api/bots', apiBase);
+      if (!listPath) return { error: 'runtime_unconfigured' };
+      const listed = await workerJson(fetcher, listPath, ownerId, 'GET');
+      const items = Array.isArray(listed.items) ? listed.items : [];
+      const paused = [];
+      for (const item of items) {
+        const id = typeof item?.id === 'string' ? item.id : '';
+        if (!id) continue;
+        const pausePath = ownerApiUrl(`/bots/${encodeURIComponent(id)}/pause`, apiBase);
+        if (!pausePath) continue;
+        const result = await workerJson(fetcher, pausePath, ownerId, 'POST', {});
+        paused.push({ botId: id, status: result.status || 'paused' });
+      }
+      return { list: listed, paused };
+    }
+    const entry = def.voiceCalls[0];
+    let path = entry.path;
+    for (const key of ['botId', 'sessionRecordId']) {
+      if (path.includes(`:${key}`)) {
+        const value = typeof args[key] === 'string' ? args[key] : (key === 'botId' ? botId : '');
+        if (!value) return { error: 'invalid_parameters' };
+        path = path.replace(`:${key}`, encodeURIComponent(value));
+      }
+    }
+    let url = ownerApiUrl(path, apiBase);
+    if (!url) return { error: 'runtime_unconfigured' };
+    if (entry.query?.length) {
+      const params = new URLSearchParams();
+      for (const key of entry.query) {
+        const value = args[key] != null ? String(args[key]) : (key === 'botId' ? botId : '');
+        if (value) params.set(key, value);
+      }
+      const query = params.toString();
+      if (query) url = `${url}${url.includes('?') ? '&' : '?'}${query}`;
+    }
+    const body = {};
+    for (const key of entry.body || []) {
+      if (typeof args[key] === 'string' && args[key].trim()) body[key] = args[key].trim();
+    }
+    return workerJson(
+      fetcher,
+      url,
+      ownerId,
+      entry.method,
+      entry.method === 'GET' ? undefined : body,
+    );
+  }
+
   return async function invokeTool(name, args = {}) {
     try {
       if (name === 'web_search' || name === 'web_scrape') {
@@ -223,6 +267,9 @@ export function createChatToolInvoker({
         || name === 'browser_release'
       ) {
         return await invokeBrowser(name, args);
+      }
+      if (DASHBOARD_NAMES.has(name)) {
+        return await invokeDashboard(name, args);
       }
       return await local.invokeTool(name, args, identity);
     } catch (error) {

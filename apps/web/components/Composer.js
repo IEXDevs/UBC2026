@@ -59,6 +59,7 @@ export default function Composer({
   usage = null,
   onAttach = null,
   onEditLine = null,
+  clientTools = null,
 }) {
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
@@ -99,7 +100,9 @@ export default function Composer({
   const thinkTimer = useRef(0);
   const voiceStarted = useRef(0);
   const onVoiceSpanRef = useRef(onVoiceSpan);
+  const clientToolsRef = useRef(clientTools);
   onVoiceSpanRef.current = onVoiceSpan;
+  clientToolsRef.current = clientTools;
   settingsRef.current = settings;
   botIdRef.current = botId;
   placeRef.current = place;
@@ -448,9 +451,11 @@ export default function Composer({
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'voice_failed');
       const { Conversation } = await import('@elevenlabs/client');
+      const tools = clientToolsRef.current;
       const live = await Conversation.startSession({
         conversationToken: payload.token,
         overrides: { tts: { voiceId: payload.voiceId, speed: payload.speed } },
+        ...(tools && typeof tools === 'object' ? { clientTools: tools } : {}),
         onMessage: ({ message, role }) => {
           if (sessionRef.current !== live) return;
           pushLine(role === 'user' ? 'user' : 'agent', message, callBotRef.current);

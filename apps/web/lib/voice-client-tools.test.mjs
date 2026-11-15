@@ -27,7 +27,7 @@ test('voice client tools open bots and confirm without spending', async () => {
   const opened = await runVoiceClientTool(tools, 'open_bot', { name: 'Sandbox shopper' });
   assert.equal(opened.ok, true);
   assert.equal(active, 'bot_shop');
-  assert.equal(pane, 'Agents');
+  assert.equal(pane, 'Main');
 
   const confirm = await tools.confirm_dialog({ prompt: 'Approve 1 USDC?', actionId: 'approve' });
   assert.equal(confirm.accepted, true);
