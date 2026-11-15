@@ -595,6 +595,11 @@ export async function postAcceptTerms({
   if (!isPrivyAccessToken(accessToken)) {
     return { ok: false, status: 0, error: 'token_missing' };
   }
+  // An expired privy:pat cannot be refreshed when the refresh token was never
+  // stored. Sending it makes auth.privy.io answer "Missing auth token."
+  if (!isUnexpiredPrivyAccessToken(accessToken)) {
+    return { ok: false, status: 401, error: 'Missing auth token.' };
+  }
 
   persistSession(storages, accessToken, refresh);
 
@@ -621,6 +626,20 @@ export async function postAcceptTerms({
   } catch {
     return { ok: false, status: 0, error: 'network_error' };
   }
+}
+
+/**
+ * accept_terms can fail while Privy already has an authenticated user:
+ * the stored session JWT is expired, or auth.privy.io rejects it with
+ * "Missing auth token." That must not trap the shell on the finish screen.
+ */
+export function acceptFailureShouldContinue(result) {
+  if (!result || result.ok) return false;
+  if (result.error === 'token_missing' || result.error === 'refresh_failed' || result.error === 'refresh_missing') {
+    return true;
+  }
+  if (result.status === 401) return true;
+  return /missing auth token/i.test(String(result.error || ''));
 }
 
 function applySessionBearer(headers, token) {
