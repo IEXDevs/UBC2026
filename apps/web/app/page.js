@@ -24,7 +24,16 @@ import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { compactLines, contextUsage } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
-import { mergeRoster, reorderIds, withoutId } from '../lib/roster.mjs';
+import {
+  adoptLegacyRoster,
+  mergeRoster,
+  readLooks,
+  readRoster,
+  reorderIds,
+  withoutId,
+  writeLooks,
+  writeRoster,
+} from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileRailLabel } from '../lib/profile.mjs';
 import { withAssignedWallet } from '../lib/wallet-assign.mjs';
@@ -36,8 +45,6 @@ import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 
 const base = getDemoShellState();
-const LOOK_KEY = 'maelstrom.botLooks';
-const ROSTER_KEY = 'maelstrom.roster';
 const privyConfigured = privyProviderProps({
   appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
   clientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
@@ -199,6 +206,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [talks, setTalks] = useState({});
   const [talksReady, setTalksReady] = useState(false);
+  const [rosterReady, setRosterReady] = useState(false);
   const [thinkingBot, setThinkingBot] = useState(null);
   const [botRecords, setBotRecords] = useState(base.bots);
   const [profile, setProfile] = useState(null);
@@ -229,32 +237,45 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     }));
   }, []);
   useEffect(() => {
-    let savedLooks = {};
-    let savedRoster = null;
-    try {
-      const rawLooks = localStorage.getItem(LOOK_KEY);
-      if (rawLooks) savedLooks = JSON.parse(rawLooks);
-    } catch {
-      savedLooks = {};
-    }
-    try {
-      const rawRoster = localStorage.getItem(ROSTER_KEY);
-      if (rawRoster) savedRoster = JSON.parse(rawRoster);
-    } catch {
-      savedRoster = null;
-    }
-    const merged = mergeRoster(base.bots, savedRoster);
-    setLooks(savedLooks);
+    // Seed chrome only until we know the signed-in owner; custom agents are per-account.
+    const merged = mergeRoster(base.bots, null);
+    setLooks({});
     setRoster({ order: merged.order, extra: merged.extra });
     setActiveBot(merged.order[0] ?? null);
     setReady(true);
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
-    localStorage.setItem(LOOK_KEY, JSON.stringify(looks));
-    localStorage.setItem(ROSTER_KEY, JSON.stringify(roster));
-  }, [looks, roster, ready]);
+    if (!ready) return undefined;
+    setRosterReady(false);
+    if (!ownerId) {
+      // Logged out: demo seeds only — never the previous account's custom agents.
+      const merged = mergeRoster(base.bots, null);
+      setLooks({});
+      setRoster({ order: merged.order, extra: [] });
+      setActiveBot(merged.order[0] ?? null);
+      setRosterReady(true);
+      return undefined;
+    }
+    const adopted = adoptLegacyRoster(localStorage, ownerId);
+    const savedRoster = adopted.adopted ? adopted.roster : readRoster(localStorage, ownerId);
+    const savedLooks = adopted.adopted ? adopted.looks : readLooks(localStorage, ownerId);
+    const hasSaved = savedRoster.order.length > 0 || savedRoster.extra.length > 0;
+    const merged = mergeRoster(base.bots, hasSaved ? savedRoster : null);
+    setLooks(savedLooks);
+    setRoster({ order: merged.order, extra: merged.extra });
+    setActiveBot((current) => (
+      merged.order.includes(current) ? current : (merged.order[0] ?? null)
+    ));
+    setRosterReady(true);
+    return undefined;
+  }, [ownerId, ready]);
+
+  useEffect(() => {
+    if (!ready || !rosterReady || !ownerId) return;
+    writeLooks(localStorage, ownerId, looks);
+    writeRoster(localStorage, ownerId, roster);
+  }, [looks, roster, ready, rosterReady, ownerId]);
 
   useEffect(() => {
     setTalksReady(false);
@@ -427,6 +448,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }
 
   function onCreate(created) {
+    if (!ownerId) {
+      toast?.('Sign in to create an agent.');
+      setCreateOpen(false);
+      return;
+    }
     setRoster(current => ({
       order: [created.id, ...current.order.filter(id => id !== created.id)],
       extra: [created, ...current.extra.filter(item => item.id !== created.id)],

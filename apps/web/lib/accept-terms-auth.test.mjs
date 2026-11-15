@@ -15,6 +15,7 @@ import {
   resolvePrivyRefreshToken,
   restorePrivySession,
   MAELSTROM_TOKEN_KEY,
+  MAELSTROM_CUSTOMER_KEY,
   MAELSTROM_REFRESH_KEY,
   SESSIONS_URL,
 } from './accept-terms-auth.mjs';
@@ -367,14 +368,41 @@ test('a wiped session is minted from the refresh token before accept_terms', asy
   assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), 'refresh-2');
 });
 
-test('rememberTokensFromPayload keeps the session token, not the customer token', () => {
+test('rememberTokensFromPayload keeps session and customer tokens separate', () => {
   const auth = createAcceptTermsAuth();
   rememberTokensFromPayload(auth, {
     data: { token: 'customer.access.jwt', privy_access_token: TOKEN },
   });
   assert.equal(auth.current(null), TOKEN);
+  assert.equal(auth.customerToken(null), 'customer.access.jwt');
   rememberTokensFromPayload(auth, { token: 'other.customer.jwt' });
   assert.equal(auth.current(null), TOKEN);
+  assert.equal(auth.customerToken(null), 'other.customer.jwt');
+});
+
+test('refresh restore puts back both privy:pat and privy:token after a wipe', async () => {
+  const storage = memoryStorage();
+  const target = {
+    Request,
+    localStorage: storage,
+    sessionStorage: memoryStorage(),
+    fetch: async () => new Response('{}'),
+  };
+  installAcceptTermsAuth(target);
+  const customer = 'customer.access.tok';
+  storage.setItem('privy:pat', JSON.stringify(TOKEN));
+  storage.setItem('privy:token', JSON.stringify(customer));
+  storage.setItem('privy:refresh_token', JSON.stringify('refresh-1'));
+  storage.removeItem('privy:pat');
+  storage.removeItem('privy:token');
+  storage.removeItem('privy:refresh_token');
+  assert.equal(storage.getItem('privy:pat'), null);
+  assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN);
+  assert.equal(storage.getItem(MAELSTROM_CUSTOMER_KEY), customer);
+  await new Promise((resolve) => queueMicrotask(resolve));
+  assert.equal(JSON.parse(storage.getItem('privy:pat')), TOKEN);
+  assert.equal(JSON.parse(storage.getItem('privy:token')), customer);
+  assert.equal(JSON.parse(storage.getItem('privy:refresh_token')), 'refresh-1');
 });
 
 test('postAcceptTerms sends bearer and app id', async () => {
