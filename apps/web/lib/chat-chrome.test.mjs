@@ -43,3 +43,28 @@ test('chat message lists reuse the agent rail scrollbar', () => {
   assert.match(page, /pane === 'Main' \? ' is-chat'/);
   assert.doesNotMatch(css, /\.voice-script,\s*\.voice-script \.chat-log/);
 });
+
+test('the chat top bar does not cover messages or the scrollbar', () => {
+  const topbar = css.slice(css.indexOf('.stage:not(.is-book) .topbar {'), css.indexOf('.stage:not(.is-book) .topbar .dock-slot'));
+  assert.match(topbar, /position: absolute;/);
+  assert.match(topbar, /background: transparent;/);
+  assert.match(topbar, /pointer-events: none;/);
+  assert.match(css, /\.stage:not\(\.is-book\) \.topbar \.dock-slot \{\s*pointer-events: auto;/);
+  const chat = css.slice(css.indexOf('.thread.is-chat {'), css.indexOf('.thread.is-chat::-webkit-scrollbar'));
+  assert.match(chat, /background: transparent;/);
+  assert.doesNotMatch(chat, /background:\s*#000/);
+  const bubble = css.slice(css.indexOf('.thread.is-chat .bubble {'), css.indexOf('.thread.is-chat::-webkit-scrollbar'));
+  assert.match(bubble, /background: transparent;/);
+  assert.doesNotMatch(bubble, /background:\s*#000/);
+});
+
+test('a chat message stays on its own side of the midline', () => {
+  const block = css.slice(
+    css.indexOf(".agent-thread [data-slot='message-content']"),
+    css.indexOf('.voice-dock'),
+  );
+  assert.match(block, /\.agent-thread \[data-slot='message-content'\] \{\s*width: auto;\s*max-width: 50%;/);
+  assert.match(block, /\[data-align='end'\] \[data-slot='message-content'\] \{\s*margin-left: auto;/);
+  assert.match(block, /\.agent-thread \[data-slot='bubble'\] \{\s*max-width: 100%;/);
+  assert.doesNotMatch(block, /max-width: min\(72%/);
+});
