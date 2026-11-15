@@ -1,17 +1,15 @@
 /**
- * Soft Privy session mirror.
+ * Soft Privy session helpers.
  *
- * Privy owns localStorage (`privy:pat` / `privy:token` / `privy:refresh_token`).
- * We only:
+ * Privy destroys the entire session (pat + token + refresh) when
+ * getAccessToken() runs with a live access token and no refresh_token.
+ * We:
  * - mirror writes into Maelstrom backups
- * - restore those backups once on cold boot (before PrivyProvider)
- * - gap-fill a missing refresh_token when an access token is already live
- * - clear backups when Privy wipes every session key (failed refresh / logout)
+ * - restore once on cold boot
+ * - re-attach refresh from backup if Privy deletes it while access is live
+ * - never call getAccessToken when that would trigger destroyLocalState
  *
- * Never block removeItem/clear — that fought Privy and signed people out.
- *
- * Do NOT re-restore after Privy rejects a session. That left tokens in
- * storage while authenticated stayed false ("zombie" login).
+ * Do not wrap clear() or block all removeItem — only repair refresh deletes.
  */
 
 import {
@@ -72,6 +70,31 @@ function encodePrivyValue(token) {
   return JSON.stringify(token);
 }
 
+function readAccess(storage, key) {
+  const token = unwrapStoredToken(read(storage, key));
+  return isPrivyAccessToken(token) ? token : '';
+}
+
+function readRefresh(storage, key) {
+  return isRefreshToken(read(storage, key));
+}
+
+function fillKey(storage, key, token) {
+  if (!token) return false;
+  const existing = key.includes('refresh_token') ? readRefresh(storage, key) : readAccess(storage, key);
+  if (existing) return false;
+  return write(storage, key, encodePrivyValue(token));
+}
+
+function liveAccessToken(storage) {
+  return readAccess(storage, PRIVY_CUSTOMER_TOKEN_KEY) || readAccess(storage, PRIVY_ACCESS_TOKEN_KEY);
+}
+
+function backupRefresh(storage, sessionStorage) {
+  return isRefreshToken(read(storage, MAELSTROM_REFRESH_KEY))
+    || isRefreshToken(read(sessionStorage, MAELSTROM_REFRESH_KEY));
+}
+
 /** Best-effort user id (`did:privy:…`) from a Privy access/customer JWT. */
 export function userIdFromPrivyToken(value) {
   const token = unwrapStoredToken(value);
@@ -90,44 +113,17 @@ export function userIdFromPrivyToken(value) {
   }
 }
 
-function readAccess(storage, key) {
-  const token = unwrapStoredToken(read(storage, key));
-  return isPrivyAccessToken(token) ? token : '';
-}
-
-function readRefresh(storage, key) {
-  return isRefreshToken(read(storage, key));
-}
-
-function fillKey(storage, key, token, restored) {
-  if (!token) return;
-  const existing = key.includes('refresh_token') ? readRefresh(storage, key) : readAccess(storage, key);
-  if (existing) return;
-  if (write(storage, key, encodePrivyValue(token))) restored.push(key);
-}
-
-/** True when any Privy session credential is still in localStorage. */
 export function livePrivySessionPresent(storage) {
   if (!storage) return false;
-  if (
-    readAccess(storage, PRIVY_ACCESS_TOKEN_KEY)
-    || readAccess(storage, PRIVY_CUSTOMER_TOKEN_KEY)
-    || readRefresh(storage, PRIVY_REFRESH_TOKEN_KEY)
-  ) {
-    return true;
-  }
-  if (typeof storage.length !== 'number' || typeof storage.key !== 'function') return false;
-  for (let i = 0; i < storage.length; i += 1) {
-    const key = storage.key(i);
-    if (!isPrivySessionStorageKey(key)) continue;
-    if (isPrivyTokenStorageKey(key) && readAccess(storage, key)) return true;
-    if (isPrivyCustomerTokenStorageKey(key) && readAccess(storage, key)) return true;
-    if (isPrivyRefreshStorageKey(key) && readRefresh(storage, key)) return true;
-  }
-  return false;
+  return Boolean(liveAccessToken(storage) || readRefresh(storage, PRIVY_REFRESH_TOKEN_KEY));
 }
 
-/** Backup whatever Privy just wrote. Safe to call repeatedly. */
+/** True when calling Privy getAccessToken would destroyLocalState. */
+export function getAccessTokenWouldDestroy(storage) {
+  if (!storage) return false;
+  return Boolean(liveAccessToken(storage) && !readRefresh(storage, PRIVY_REFRESH_TOKEN_KEY));
+}
+
 export function mirrorPrivyStorageWrite(key, value, storages = []) {
   const name = String(key || '');
   if (name === PRIVY_ACTIVE_USER_KEY) {
@@ -168,9 +164,7 @@ export function mirrorPrivyStorageWrite(key, value, storages = []) {
 }
 
 /**
- * Cold-boot restore: put backups back into the unprefixed keys Privy's
- * Session reads (`privy:pat` / `privy:token` / `privy:refresh_token`).
- * Call once before mounting PrivyProvider — not after a failed refresh.
+ * Cold-boot restore into the unprefixed keys Privy's Session reads.
  */
 export function restorePrivySessionIfMissing(storage, sessionStorage = null) {
   if (!storage) return { restored: false, keys: [] };
@@ -180,8 +174,7 @@ export function restorePrivySessionIfMissing(storage, sessionStorage = null) {
     || unwrapStoredToken(read(sessionStorage, MAELSTROM_TOKEN_KEY));
   const backupCustomer = unwrapStoredToken(read(storage, MAELSTROM_CUSTOMER_KEY))
     || unwrapStoredToken(read(sessionStorage, MAELSTROM_CUSTOMER_KEY));
-  const backupRefresh = isRefreshToken(read(storage, MAELSTROM_REFRESH_KEY))
-    || isRefreshToken(read(sessionStorage, MAELSTROM_REFRESH_KEY));
+  const refresh = readRefresh(storage, PRIVY_REFRESH_TOKEN_KEY) || backupRefresh(storage, sessionStorage);
   const backupUser = unwrapStoredToken(read(storage, MAELSTROM_ACTIVE_USER_KEY))
     || unwrapStoredToken(read(sessionStorage, MAELSTROM_ACTIVE_USER_KEY));
 
@@ -189,16 +182,14 @@ export function restorePrivySessionIfMissing(storage, sessionStorage = null) {
     || (isPrivyAccessToken(backupPat) ? backupPat : '');
   const customer = readAccess(storage, PRIVY_CUSTOMER_TOKEN_KEY)
     || (isPrivyAccessToken(backupCustomer) ? backupCustomer : '');
-  const refresh = readRefresh(storage, PRIVY_REFRESH_TOKEN_KEY) || backupRefresh;
 
-  // Need refresh + at least one access token to hydrate. Don't half-restore.
   if (!refresh || (!pat && !customer)) {
     return { restored: false, keys: [] };
   }
 
-  fillKey(storage, PRIVY_ACCESS_TOKEN_KEY, pat, restored);
-  fillKey(storage, PRIVY_CUSTOMER_TOKEN_KEY, customer, restored);
-  fillKey(storage, PRIVY_REFRESH_TOKEN_KEY, refresh, restored);
+  if (fillKey(storage, PRIVY_ACCESS_TOKEN_KEY, pat)) restored.push(PRIVY_ACCESS_TOKEN_KEY);
+  if (fillKey(storage, PRIVY_CUSTOMER_TOKEN_KEY, customer)) restored.push(PRIVY_CUSTOMER_TOKEN_KEY);
+  if (fillKey(storage, PRIVY_REFRESH_TOKEN_KEY, refresh)) restored.push(PRIVY_REFRESH_TOKEN_KEY);
 
   const userId = backupUser || userIdFromPrivyToken(customer) || userIdFromPrivyToken(pat);
   if (userId) {
@@ -209,35 +200,34 @@ export function restorePrivySessionIfMissing(storage, sessionStorage = null) {
     write(storage, MAELSTROM_ACTIVE_USER_KEY, userId);
   }
 
-  return { restored: restored.length > 0, keys: [...new Set(restored)] };
-}
-
-/**
- * Only fill a missing refresh_token when an access token is already live.
- * Never resurrect wiped access tokens (that created zombie "logged out but
- * tokens present" state after Privy rejected a session).
- */
-export function ensurePrivyRefreshOnly(storage, sessionStorage = null) {
-  if (!storage) return { restored: false, keys: [] };
-  const hasAccess = Boolean(
-    readAccess(storage, PRIVY_ACCESS_TOKEN_KEY)
-    || readAccess(storage, PRIVY_CUSTOMER_TOKEN_KEY),
-  );
-  if (!hasAccess) return { restored: false, keys: [] };
-  if (readRefresh(storage, PRIVY_REFRESH_TOKEN_KEY)) return { restored: false, keys: [] };
-
-  const backupRefresh = isRefreshToken(read(storage, MAELSTROM_REFRESH_KEY))
-    || isRefreshToken(read(sessionStorage, MAELSTROM_REFRESH_KEY));
-  if (!backupRefresh) return { restored: false, keys: [] };
-
-  const restored = [];
-  fillKey(storage, PRIVY_REFRESH_TOKEN_KEY, backupRefresh, restored);
   return { restored: restored.length > 0, keys: restored };
 }
 
-/** @deprecated use ensurePrivyRefreshOnly after boot — kept for call-site clarity */
-export function ensurePrivySessionKeys(storage, sessionStorage = null) {
-  return ensurePrivyRefreshOnly(storage, sessionStorage);
+/** Re-attach refresh from backup when access is live but refresh is gone. */
+export function ensurePrivyRefreshOnly(storage, sessionStorage = null) {
+  if (!storage) return { restored: false, keys: [] };
+  if (!liveAccessToken(storage)) return { restored: false, keys: [] };
+  if (readRefresh(storage, PRIVY_REFRESH_TOKEN_KEY)) return { restored: false, keys: [] };
+  const refresh = backupRefresh(storage, sessionStorage);
+  if (!refresh) return { restored: false, keys: [] };
+  if (!fillKey(storage, PRIVY_REFRESH_TOKEN_KEY, refresh)) return { restored: false, keys: [] };
+  return { restored: true, keys: [PRIVY_REFRESH_TOKEN_KEY] };
+}
+
+/**
+ * Read a Privy access token without ever calling getAccessToken when that
+ * would wipe localStorage. Prefer Privy's refresher when refresh is present.
+ */
+export function safePrivyAccessToken(getAccessToken, storage, sessionStorage = null) {
+  try {
+    ensurePrivyRefreshOnly(storage, sessionStorage);
+  } catch {
+    /* private mode */
+  }
+  if (getAccessTokenWouldDestroy(storage)) {
+    return Promise.resolve(liveAccessToken(storage) || '');
+  }
+  return Promise.resolve(getAccessToken?.()).catch(() => liveAccessToken(storage) || '');
 }
 
 export function clearPrivySessionBackups(storage, sessionStorage = null) {
@@ -250,8 +240,8 @@ export function clearPrivySessionBackups(storage, sessionStorage = null) {
 }
 
 /**
- * Mirror setItem into backups. Observe removeItem: when Privy clears every
- * session key, drop backups so we do not zombie-restore a rejected session.
+ * Mirror setItem. If Privy deletes refresh while access tokens remain
+ * (e.g. a token response omitted refresh_token), put it back from backup.
  */
 export function installPrivySessionMirror(target = globalThis) {
   if (!target || target.__maelstromPrivySessionMirror) {
@@ -265,18 +255,22 @@ export function installPrivySessionMirror(target = globalThis) {
   const originalRemove = typeof storage.removeItem === 'function'
     ? storage.removeItem.bind(storage)
     : null;
+  const backups = [storage, session].filter(Boolean);
 
   storage.setItem = (key, value) => {
     originalSet(key, value);
-    mirrorPrivyStorageWrite(key, value, [storage, session].filter(Boolean));
+    mirrorPrivyStorageWrite(key, value, backups);
+    if (isPrivyTokenStorageKey(key) || isPrivyCustomerTokenStorageKey(key)) {
+      ensurePrivyRefreshOnly(storage, session);
+    }
   };
 
   if (originalRemove) {
     storage.removeItem = (key) => {
       originalRemove(key);
-      if (!isPrivySessionStorageKey(key) && key !== PRIVY_ACTIVE_USER_KEY) return;
-      if (livePrivySessionPresent(storage)) return;
-      clearPrivySessionBackups(storage, session);
+      if (!isPrivyRefreshStorageKey(key)) return;
+      // Logout clears backups first, so this no-ops there.
+      ensurePrivyRefreshOnly(storage, session);
     };
   }
 

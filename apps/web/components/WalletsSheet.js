@@ -238,11 +238,8 @@ function ConnectedPortfolio({ open }) {
     setError('');
     (async () => {
       try {
-        try {
-          const { ensurePrivyRefreshOnly } = await import('../lib/privy-session.mjs');
-          ensurePrivyRefreshOnly(window.localStorage, window.sessionStorage);
-        } catch { /* private mode */ }
-        const token = await getAccessToken();
+        const { safePrivyAccessToken } = await import('../lib/privy-session.mjs');
+        const token = await safePrivyAccessToken(getAccessToken, window.localStorage, window.sessionStorage);
         if (stopped) return;
         if (!token) {
           setPortfolio(null);

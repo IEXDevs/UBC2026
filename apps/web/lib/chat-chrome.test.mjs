@@ -87,6 +87,7 @@ test('the prompt bar exposes both dictation and live voice mode', () => {
   const privyRoot = readFileSync(join(root, 'components/PrivyRoot.js'), 'utf8');
   assert.match(privyRoot, /restorePrivySessionIfMissing/);
   assert.match(privyRoot, /installPrivySessionMirror/);
-  assert.equal(privyRoot.includes('ensurePrivySessionKeys'), false);
   assert.equal(privyRoot.includes('setTimeout'), false);
+  const privyConfig = readFileSync(join(root, 'lib/privy-config.mjs'), 'utf8');
+  assert.equal(privyConfig.includes('cookieWriteBehavior'), false);
 });
