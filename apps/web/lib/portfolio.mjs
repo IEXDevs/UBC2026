@@ -23,6 +23,7 @@ export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const READ_ONLY_RPC = new Set(['getGenesisHash', 'getBalance', 'getTokenAccountsByOwner']);
 
 const GENESIS = Object.freeze({
   // Full getGenesisHash values, plus the shorter ids used in CAIP-2 and older mocks.
@@ -53,6 +54,12 @@ const MAX_TOKENS = 40;
 
 function fail(code) {
   throw new PortfolioError(code);
+}
+
+/** Balance reads. A broadcast or sign method is refused before any request. */
+export function assertPortfolioReadMethod(method) {
+  if (typeof method !== 'string' || !READ_ONLY_RPC.has(method)) fail('broadcast_refused');
+  return method;
 }
 
 export function assertPortfolioRpc(url) {
@@ -240,6 +247,7 @@ function abortAfter(ms) {
 }
 
 async function rpcBatch(fetcher, rpcUrl, calls) {
+  for (const call of calls) assertPortfolioReadMethod(call?.method);
   const url = assertPortfolioRpc(rpcUrl);
   let response;
   try {

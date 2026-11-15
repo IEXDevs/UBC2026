@@ -6,6 +6,7 @@ import {
   PRICE_LABEL,
   SOL_MINT,
   PortfolioError,
+  assertPortfolioReadMethod,
   buildPortfolio,
   choosePortfolioRpc,
   formatShare,
@@ -20,6 +21,15 @@ const MAINNET = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 const DEVNET = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 const PHANTOM = 'So11111111111111111111111111111111111111112';
 const AGENT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+
+test('portfolio reads refuse a broadcast method', () => {
+  assert.equal(assertPortfolioReadMethod('getBalance'), 'getBalance');
+  assert.equal(assertPortfolioReadMethod('getTokenAccountsByOwner'), 'getTokenAccountsByOwner');
+  assert.throws(
+    () => assertPortfolioReadMethod('sendTransaction'),
+    error => error instanceof PortfolioError && error.code === 'broadcast_refused',
+  );
+});
 
 test('usd micro multiplies base units by a decimal price', () => {
   assert.equal(usdMicro('1000000000', 9, '150.25'), '150250000');

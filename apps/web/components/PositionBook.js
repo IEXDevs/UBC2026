@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
 import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
 import AddressCopy from './AddressCopy';
+import EarningsChart from './EarningsChart';
 
 const PLACE_KEY = 'maelstrom.cardPlaces';
 const DRAG_PX = 7;
@@ -194,7 +195,9 @@ function walletElement(wallet) {
   const sub = document.createElement('p');
   sub.textContent = wallet.frozen
     ? 'Frozen'
-    : `${wallet.venues.length} providers · ${wallet.count} positions`;
+    : wallet.readOnly
+      ? `Read-only · ${wallet.count} positions`
+      : `${wallet.venues.length} providers · ${wallet.count} positions`;
   article.append(head, sub);
   return article;
 }
@@ -248,7 +251,7 @@ function starTexture() {
   return canvas;
 }
 
-export default function PositionBook({ positions, bots, wallets = [] }) {
+export default function PositionBook({ positions, bots, wallets = [], earnings = null }) {
   const book = useMemo(() => layoutPositionBook(positions, bots, wallets), [positions, bots, wallets]);
   const mountRef = useRef(null);
   const cameraRef = useRef(null);
@@ -574,7 +577,10 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
         if (wallet) {
           return {
             title: wallet.label,
-            kicker: wallet.frozen ? 'Frozen wallet' : `${wallet.accountKind} wallet`,
+            kicker: wallet.frozen ? 'Frozen wallet' : (wallet.readOnly ? 'Read-only wallet' : `${wallet.accountKind} wallet`),
+            note: wallet.readOnly
+              ? 'Read-only balance. devnet execution, mainnet pricing. This does not authorize a transaction.'
+              : null,
             address: wallet.fullAddress,
             rows: [
               ['Notional', wallet.notionalLabel],
@@ -906,6 +912,7 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
 
   return (
     <section className="position-book" aria-label="Positions" ref={mountRef}>
+      <EarningsChart series={earnings} />
       <p className="book-caption">
         {book.summary.count === 0 ? (
           <span>No positions yet.</span>

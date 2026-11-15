@@ -59,6 +59,7 @@ export function layoutPositionBook(positions, bots, wallets = []) {
       address: shortAddress(wallet.address),
       fullAddress: wallet.address,
       frozen: wallet.frozen === true,
+      readOnly: wallet.readOnly === true,
       x: rootX,
       y: rootY,
       venues: venueNames,

@@ -1183,7 +1183,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                 </>
               )
             ) : null}
-            {money ? <MoneyPane pane={money} state={{ bots, wallets, payments, positions, transfers }} onParty={setParty} /> : null}
+            {money ? (
+              <MoneyPane
+                pane={money}
+                state={{ bots, wallets, payments, positions, transfers }}
+                onParty={setParty}
+                ownerId={ownerId}
+                getAccessToken={getAccessToken}
+              />
+            ) : null}
             {pane === 'Logs' ? (
               <LogsPanel
                 bots={bots}
