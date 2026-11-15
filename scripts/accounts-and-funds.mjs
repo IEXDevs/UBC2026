@@ -124,7 +124,11 @@ export const ACCOUNT_VENDORS = Object.freeze([
   {
     id: 'quicknode',
     dashboard: 'https://dashboard.quicknode.com',
-    names: Object.freeze([...SECRET_GROUPS.quicknode, ...SECRET_GROUPS.quicknodeWebhook]),
+    names: Object.freeze([
+      ...SECRET_GROUPS.quicknode,
+      ...SECRET_GROUPS.quicknodeTestnet,
+      ...SECRET_GROUPS.quicknodeWebhook,
+    ]),
     steps: Object.freeze([
       'Sign in to QuickNode and claim any hackathon credits from the sponsor instructions.',
       'Create an endpoint with chain Solana and network Devnet.',
