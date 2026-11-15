@@ -1,5 +1,5 @@
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
-import { createDexScreenerPriceProvider } from '@ubc2026/prices';
+import { resolvePriceLookup } from './price-lookup.mjs';
 import { BotDurableObject } from './bot-do.mjs';
 import {
   processQuickNodeWebhook,
@@ -246,9 +246,7 @@ function logCron(env, ctx, detail) {
 export default worker;
 
 function priceLookup(env) {
-  if (env.lookupPrice === null) return null;
-  if (typeof env.lookupPrice === 'function') return env.lookupPrice;
-  return createDexScreenerPriceProvider({ fetcher: env.fetch ?? fetch });
+  return resolvePriceLookup(env);
 }
 
 async function quotePositions(lookup, positions) {

@@ -18,6 +18,7 @@ import {
   sharedToolsInstruction,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
+import { readAgentPriceQuote } from '@ubc2026/prices';
 import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
@@ -517,6 +518,14 @@ export function createChatToolInvoker({
 
   return async function invokeTool(name, args = {}) {
     try {
+      if (name === 'get_price') {
+        const mint = typeof args.mint === 'string' ? args.mint.trim() : '';
+        const apiKey = typeof env.JUPITER_API_KEY === 'string' && env.JUPITER_API_KEY.trim()
+          ? env.JUPITER_API_KEY.trim()
+          : null;
+        const quote = await readAgentPriceQuote(mint, { fetcher, apiKey });
+        return { ok: true, quote };
+      }
       if (name === 'web_search' || name === 'web_scrape') {
         return await local.invokeTool(name, args, identity);
       }

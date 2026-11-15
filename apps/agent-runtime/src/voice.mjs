@@ -10,10 +10,12 @@ import { SECRET_NAMES } from '@ubc2026/contracts';
 import { createScrape, createSearch } from '@ubc2026/browser-search';
 import {
   DASHBOARD_TOOLS,
+  PRICE_TOOLS,
   VOICE_BROWSER_ALIASES,
   VOICE_RESEARCH_WEBHOOKS,
   sharedToolsInstruction,
 } from '@ubc2026/agent-tools';
+import { readAgentPriceQuote } from '@ubc2026/prices';
 import { META_SPARK_MODEL, resolveModelProvider } from './openrouter.mjs';
 
 export const DEFAULT_VOICE_MODEL = META_SPARK_MODEL;
@@ -87,6 +89,7 @@ function toVoiceTool(def) {
  */
 export const VOICE_TOOLS = Object.freeze([
   ...VOICE_RESEARCH_WEBHOOKS.map(toVoiceTool),
+  ...PRICE_TOOLS.map(toVoiceTool),
   ...DASHBOARD_TOOLS.map(toVoiceTool),
   ...VOICE_BROWSER_ALIASES.map(toVoiceTool),
 ]);
@@ -384,6 +387,21 @@ async function speakable(response, secrets) {
   };
 }
 
+async function runPriceTool(parameters, env) {
+  const rawKey = env.JUPITER_API_KEY;
+  const apiKey = typeof rawKey === 'string' && rawKey.trim() ? rawKey.trim() : null;
+  try {
+    const quote = await readAgentPriceQuote(parameters.mint, {
+      fetcher: typeof env.fetch === 'function' ? env.fetch : fetch,
+      apiKey,
+    });
+    return { handler: 'price', quote };
+  } catch (error) {
+    const code = typeof error?.code === 'string' ? error.code : 'price_unavailable';
+    return { error: code };
+  }
+}
+
 async function runResearchTool(name, parameters, env) {
   const secrets = knownSecrets(env);
   try {
@@ -497,6 +515,9 @@ function validateParameters(toolDef, parameters) {
   if (toolDef.properties.from && parameters.from != null) {
     if (typeof parameters.from !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.from)) return false;
   }
+  if (toolDef.properties.mint && parameters.mint != null) {
+    if (typeof parameters.mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.mint)) return false;
+  }
   return true;
 }
 
@@ -554,6 +575,8 @@ async function handleTool(name, request, env, fetchApi) {
   try {
     if (toolDef.handler === 'research') {
       result = await runResearchTool(name, parsed.parameters, env);
+    } else if (toolDef.handler === 'price') {
+      result = await runPriceTool(parsed.parameters, env);
     } else {
       if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
       result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env);

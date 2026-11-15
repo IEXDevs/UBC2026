@@ -9,11 +9,38 @@ import {
 
 test('openAiAgentTools maps shared research and dashboard schemas', () => {
   const tools = openAiAgentTools();
+  assert.ok(tools.some(tool => tool.function.name === 'get_price'));
   assert.ok(tools.some(tool => tool.function.name === 'web_search'));
   assert.ok(tools.some(tool => tool.function.name === 'browser_open'));
   assert.ok(tools.some(tool => tool.function.name === 'list_bots'));
   assert.ok(tools.some(tool => tool.function.name === 'pause_bot'));
   assert.match(chatToolsInstruction(), /same tools on text and voice/);
+  assert.match(chatToolsInstruction(), /get_price/);
+  assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/);
+});
+
+test('get_price returns a paper quote and does not sign', async () => {
+  const calls = [];
+  const mint = 'So11111111111111111111111111111111111111112';
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: { JUPITER_API_KEY: 'jupiter-test-key' },
+    fetcher: async (url, options) => {
+      calls.push({ url: String(url), key: options?.headers?.['x-api-key'] ?? null });
+      if (String(url).includes('dexscreener')) return Response.json([]);
+      return Response.json({ [mint]: { usdPrice: 2, liquidity: 1, blockId: 1 } });
+    },
+  });
+  const result = await invoke('get_price', { mint });
+  assert.equal(result.ok, true);
+  assert.equal(result.quote.quoteSource, 'jupiter-price-v3');
+  assert.equal(result.quote.fallbackFrom, 'dexscreener');
+  assert.equal(result.quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(result.quote.authorizesTransaction, false);
+  assert.equal(result.quote.executionCluster, 'devnet');
+  assert.equal(JSON.stringify(result).includes('jupiter-test-key'), false);
+  assert.equal(calls.some(call => call.key === 'jupiter-test-key'), true);
 });
 
 test('serializeToolResult strips viewerUrl', () => {

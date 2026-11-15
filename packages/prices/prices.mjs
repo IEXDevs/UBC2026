@@ -66,7 +66,7 @@ export function createDexScreenerPriceProvider({
   };
 }
 
-const PRICE_LABEL = 'devnet execution, mainnet pricing';
+export const PRICE_LABEL = 'devnet execution, mainnet pricing';
 const FALLBACK_CODES = new Set([
   'price_not_found',
   'provider_unavailable',
@@ -108,6 +108,52 @@ function expandScientific(raw) {
   text = text.replace(/^0+(?=\d)/, '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
   if (text.startsWith('.')) text = `0${text}`;
   return text;
+}
+
+/**
+ * Unsigned micro-USD integer for a USD decimal. Used when a consensus field
+ * must stay an integer string. A quote still does not authorize a transaction.
+ */
+export function usdPriceBaseUnits(priceUsd) {
+  const plain = formatUsdPrice(priceUsd);
+  const [whole, frac = ''] = plain.split('.');
+  const digits = `${frac}000000`.slice(0, 6);
+  const micro = BigInt(whole) * 1_000_000n + BigInt(digits);
+  if (micro <= 0n) throw new PriceError('invalid_provider_response');
+  const text = micro.toString();
+  if (!/^(0|[1-9][0-9]{0,39})$/.test(text)) throw new PriceError('invalid_provider_response');
+  return text;
+}
+
+/**
+ * One paper-PnL quote for an agent tool. DexScreener, then Jupiter Price API v3.
+ * The result never carries a signature, a transaction, or permission to broadcast.
+ */
+export async function readAgentPriceQuote(mint, options = {}) {
+  const lookup = typeof options.lookup === 'function'
+    ? options.lookup
+    : createMainnetPriceProvider(options);
+  const quote = await lookup(mint);
+  if (
+    !quote
+    || quote.label !== PRICE_LABEL
+    || quote.pricingCluster !== 'mainnet'
+    || quote.executionCluster !== 'devnet'
+    || typeof quote.priceUsd !== 'string'
+  ) throw new PriceError('invalid_provider_response');
+  return {
+    mint: quote.mint,
+    priceUsd: quote.priceUsd,
+    priceBaseUnits: usdPriceBaseUnits(quote.priceUsd),
+    quoteSource: quote.quoteSource,
+    fallbackFrom: typeof quote.fallbackFrom === 'string' ? quote.fallbackFrom : null,
+    pricingCluster: 'mainnet',
+    executionCluster: 'devnet',
+    label: PRICE_LABEL,
+    paperPnl: true,
+    authorizesTransaction: false,
+    fetchedAt: quote.fetchedAt,
+  };
 }
 
 function quoteShell(mint, priceUsd, extra) {

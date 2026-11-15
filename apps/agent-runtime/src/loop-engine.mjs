@@ -5,6 +5,7 @@
  * Signing goes through an injected devnet transfer client. This module does not call x402.
  */
 import { approvalRequirement } from '@ubc2026/agent-loop';
+import { usdPriceBaseUnits } from '@ubc2026/prices';
 import { evaluateProposal, validateApproval } from '@ubc2026/bot-policy';
 import { evaluateTrust } from '@ubc2026/trust-score';
 import { transferDevnetUsdc } from '@ubc2026/transfers';
@@ -240,6 +241,7 @@ async function performDecide(run, ctx) {
         'Role: decide',
         'Return JSON only with summary, facts, and proposal.',
         'facts fields: asset, mint, cluster, price, amount, trustScore, reasonSummary.',
+        'When a mainnet price lookup is configured, the platform replaces price with that paper quote before verify. A price quote does not sign, broadcast, or authorize a transaction.',
         'proposal fields: asset, recipient, outflow, expectedReceive, expectedReceiveAsset, maxFee, expiresAt, cluster.',
         'cluster must be devnet or testnet. Amounts are integer strings in base units.',
         'Do not invent an API key or a signature.',
@@ -288,11 +290,47 @@ async function performTrust(run, ctx) {
   return finishStep(run, 'trust-gate', { trust }, ctx.now);
 }
 
+function integerPrice(quote) {
+  if (typeof quote === 'string' && /^(?:[1-9][0-9]{0,39})$/.test(quote)) return quote;
+  if (quote && typeof quote.price === 'string' && /^(?:[1-9][0-9]{0,39})$/.test(quote.price)) return quote.price;
+  if (quote && typeof quote.priceUsd === 'string') {
+    try { return usdPriceBaseUnits(quote.priceUsd); } catch { return null; }
+  }
+  return null;
+}
+
+function publicQuote(quote) {
+  if (!quote || typeof quote !== 'object') return null;
+  return {
+    mint: typeof quote.mint === 'string' ? quote.mint : null,
+    priceUsd: typeof quote.priceUsd === 'string' ? quote.priceUsd : null,
+    quoteSource: typeof quote.quoteSource === 'string' ? quote.quoteSource.slice(0, 64) : null,
+    pricingCluster: 'mainnet',
+    executionCluster: 'devnet',
+    label: quote.label === 'devnet execution, mainnet pricing' ? quote.label : 'devnet execution, mainnet pricing',
+    paperPnl: true,
+    authorizesTransaction: false,
+  };
+}
+
+async function quotedPrice(facts, ctx) {
+  if (typeof ctx.deps.lookupPrice !== 'function') return null;
+  try {
+    const quote = await ctx.deps.lookupPrice(facts.mint);
+    const price = integerPrice(quote);
+    if (!price) return { error: 'price_unavailable' };
+    return { price, quote: publicQuote(quote) };
+  } catch (error) {
+    return { error: typeof error?.code === 'string' ? error.code : 'price_unavailable' };
+  }
+}
+
 async function verifyFromProviders(facts, ctx) {
   const next = { ...facts };
   if (typeof ctx.deps.lookupPrice === 'function') {
-    const quote = await ctx.deps.lookupPrice(facts.mint);
-    next.price = typeof quote === 'string' ? quote : String(quote?.price ?? '');
+    const priced = await quotedPrice(facts, ctx);
+    if (priced?.error) throw new LoopEngineError(priced.error, 422);
+    if (priced) next.price = priced.price;
   }
   if (typeof ctx.deps.trustLookup === 'function') {
     const looked = await ctx.deps.trustLookup(facts.mint);
@@ -305,11 +343,19 @@ async function verifyFromProviders(facts, ctx) {
 
 async function performVerify(run, ctx) {
   const facts = run.checkpoints.decide.facts;
+  const priced = typeof ctx.deps.verifyFn === 'function' ? null : await quotedPrice(facts, ctx);
+  if (priced?.error) return waitStep(run, 'verify', priced.error, {}, ctx.now);
   const verifyFn = typeof ctx.deps.verifyFn === 'function'
     ? ctx.deps.verifyFn
     : async () => {
+      if (priced) {
+        const again = await quotedPrice(facts, ctx);
+        if (!again || again.error) throw new LoopEngineError(again?.error || 'price_unavailable', 422);
+        const base = ctx.input.verifyFacts ? ctx.input.verifyFacts : facts;
+        return { ...base, price: again.price };
+      }
       if (ctx.input.verifyFacts) return ctx.input.verifyFacts;
-      if (ctx.deps.lookupPrice || ctx.deps.trustLookup) return verifyFromProviders(facts, ctx);
+      if (ctx.deps.trustLookup) return verifyFromProviders(facts, ctx);
       const completion = await ctx.models.complete({
         role: 'verify',
         goal: goalFor(run, ctx.bot),
@@ -327,7 +373,8 @@ async function performVerify(run, ctx) {
     };
   let consensus;
   try {
-    consensus = await reachConsensus({ mainFn: async () => facts, verifyFn });
+    const mainFacts = priced ? { ...facts, price: priced.price } : facts;
+    consensus = await reachConsensus({ mainFn: async () => mainFacts, verifyFn });
   } catch {
     return waitStep(run, 'verify', 'verify-invalid', {}, ctx.now);
   }
@@ -343,6 +390,7 @@ async function performVerify(run, ctx) {
     digest: consensus.digest,
     decisionRecord: consensus.decisionRecord,
     memo,
+    priceQuote: priced?.quote ?? null,
   }, ctx.now);
 }
 

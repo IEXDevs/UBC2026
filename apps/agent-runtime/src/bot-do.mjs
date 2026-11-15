@@ -6,6 +6,7 @@ import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mj
 import { decideFromCheckpoint } from './decide.mjs';
 import { LoopEngineError, runBotLoop } from './loop-engine.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
+import { resolvePriceLookup } from './price-lookup.mjs';
 import { assessPositions } from './schedules.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 
@@ -225,7 +226,7 @@ export class BotStateMachine {
         execute: env.execute ?? null,
         ledgerApi: env.ledgerApi ?? null,
         verifyFn: env.verifyFn,
-        lookupPrice: env.lookupPrice,
+        lookupPrice: resolvePriceLookup(env),
         trustLookup: env.trustLookup,
         recentBlockhash: env.recentBlockhash,
         secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
