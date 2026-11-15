@@ -22,7 +22,6 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
   const [pending, setPending] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
     try {
@@ -35,7 +34,6 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
     setNote('');
     setGenerated(false);
     setCopied(false);
-    setAcknowledged(false);
   }, [ownerId]);
 
   const setting = record == null;
@@ -55,8 +53,8 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
         setNote('Those passwords do not match.');
         return;
       }
-      if (!secretAcceptAllowed({ generated, copied, acknowledged })) {
-        setNote('Copy the generated password, or confirm that you copied it.');
+      if (!secretAcceptAllowed({ generated, copied })) {
+        setNote('Copy the generated password before you continue.');
         return;
       }
     }
@@ -102,7 +100,6 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
               value={password}
               generated={generated}
               copied={copied}
-              acknowledged={acknowledged}
               disabled={record === undefined || pending}
               onValue={setPassword}
               onFill={(next) => {
@@ -111,7 +108,6 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
               }}
               onGenerated={setGenerated}
               onCopied={setCopied}
-              onAcknowledged={setAcknowledged}
             />
           ) : (
             <label>
@@ -141,7 +137,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
             </label>
           ) : null}
           {note ? <p className="quiet" role="status">{note}</p> : null}
-          <button type="submit" className="solid" disabled={record === undefined || pending || (setting && !secretAcceptAllowed({ generated, copied, acknowledged }))}>
+          <button type="submit" className="solid" disabled={record === undefined || pending || (setting && !secretAcceptAllowed({ generated, copied }))}>
             {pending ? 'Checking…' : (setting ? 'Set password' : 'Unlock')}
           </button>
         </form>
