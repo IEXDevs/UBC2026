@@ -89,9 +89,31 @@ export async function POST(request) {
       origin: requestOrigin(request),
       ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
     });
+    const wallets = [result.main, ...result.additional].filter(Boolean).map(publicWallet);
+    // Mirror into the Worker so Supabase-backed agent tools (list_bots / get_wallets) see them.
+    const runtime = readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL');
+    if (runtime && typeof runtime === 'string' && runtime.trim()) {
+      try {
+        const base = new URL(runtime.trim());
+        if (base.protocol === 'https:' || base.protocol === 'http:') {
+          await fetch(new URL('/api/wallets', base), {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              ...(typeof ownerHeader === 'string' && ownerHeader.trim()
+                ? { 'x-owner-id': ownerHeader.trim() }
+                : {}),
+            },
+            cache: 'no-store',
+          }).catch(() => null);
+        }
+      } catch {
+        /* local Privy wallets still return below */
+      }
+    }
     return Response.json({
       created: result.created === true,
-      wallets: [result.main, ...result.additional].filter(Boolean).map(publicWallet),
+      wallets,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const fields = walletErrorFields(error);

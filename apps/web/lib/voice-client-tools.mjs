@@ -9,6 +9,9 @@ export const VOICE_CLIENT_TOOLS = Object.freeze([
   'show_live_view',
   'confirm_dialog',
   'read_back',
+  // Shell-side mirrors so voice can see local roster/wallets even before Supabase sync.
+  'list_shell_bots',
+  'list_shell_wallets',
 ]);
 
 export function voiceToolDefinitions() {
@@ -80,6 +83,7 @@ function findBot(bots, { botId, name } = {}) {
  */
 export function createVoiceClientTools({
   bots = [],
+  wallets = [],
   activeBotId = null,
   pane = 'Agents',
   approvalSummary = null,
@@ -91,6 +95,29 @@ export function createVoiceClientTools({
   conversation = null,
 } = {}) {
   return {
+    async list_shell_bots() {
+      const items = (Array.isArray(bots) ? bots : []).map((bot) => ({
+        id: bot.id,
+        name: bot.name,
+        type: bot.type,
+        status: bot.status,
+        goal: bot.goal,
+        walletId: bot.walletId || null,
+      }));
+      if (typeof pushEvent === 'function') pushEvent({ kind: 'client.list_shell_bots', count: items.length });
+      return { ok: true, source: 'shell', items, count: items.length };
+    },
+    async list_shell_wallets() {
+      const items = (Array.isArray(wallets) ? wallets : []).map((wallet) => ({
+        id: wallet.id,
+        label: wallet.label,
+        kind: wallet.kind,
+        address: wallet.address,
+        frozen: wallet.frozen === true,
+      }));
+      if (typeof pushEvent === 'function') pushEvent({ kind: 'client.list_shell_wallets', count: items.length });
+      return { ok: true, source: 'shell', items, count: items.length };
+    },
     async open_bot(params = {}) {
       const bot = findBot(bots, params);
       if (!bot) return { ok: false, error: 'bot_not_found' };

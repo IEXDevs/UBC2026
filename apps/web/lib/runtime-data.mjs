@@ -308,6 +308,8 @@ export async function sendBotChat({
   goal,
   type,
   permission,
+  shellBots = null,
+  shellWallets = null,
   runtimeBase = runtimeBaseUrl(),
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
@@ -340,6 +342,8 @@ export async function sendBotChat({
         ...(typeof goal === 'string' && goal.trim() ? { goal: goal.trim().slice(0, 2000) } : {}),
         ...(typeof type === 'string' && type.trim() ? { type: type.trim().slice(0, 40) } : {}),
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
+        ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),
+        ...(Array.isArray(shellWallets) ? { shellWallets: shellWallets.slice(0, 40) } : {}),
       }),
       cache: 'no-store',
     });

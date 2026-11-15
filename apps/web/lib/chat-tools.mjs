@@ -82,12 +82,45 @@ function localBrowserService(env = {}, fetcher = fetch) {
  * Build an invokeTool(name, args) for completeTextChat.
  * Prefer Worker browser routes when NEXT_PUBLIC_AGENT_RUNTIME_URL is set.
  */
+function shellBotItems(shellBots) {
+  if (!Array.isArray(shellBots)) return [];
+  return shellBots
+    .filter((bot) => bot && typeof bot.id === 'string' && bot.id)
+    .map((bot) => ({
+      id: bot.id,
+      name: typeof bot.name === 'string' ? bot.name : bot.id,
+      type: bot.type || 'trading',
+      status: bot.status || 'idle',
+      goal: typeof bot.goal === 'string' ? bot.goal : '',
+      walletId: bot.walletId || null,
+      enabled: bot.enabled !== false,
+      frozen: bot.frozen === true,
+    }));
+}
+
+function shellWalletItems(shellWallets) {
+  if (!Array.isArray(shellWallets)) return [];
+  return shellWallets
+    .filter((wallet) => wallet && typeof wallet.id === 'string' && wallet.id)
+    .map((wallet) => ({
+      id: wallet.id,
+      ownerId: wallet.ownerId || null,
+      kind: wallet.kind || 'additional',
+      label: wallet.label || 'Wallet',
+      address: wallet.address || null,
+      frozen: wallet.frozen === true,
+      provider: wallet.provider || 'privy',
+    }));
+}
+
 export function createChatToolInvoker({
   ownerId,
   botId,
   env = {},
   fetcher = fetch,
   runtimeBase = runtimeBaseUrl(env.NEXT_PUBLIC_AGENT_RUNTIME_URL),
+  shellBots = null,
+  shellWallets = null,
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
@@ -95,6 +128,8 @@ export function createChatToolInvoker({
   const identity = { ownerId, botId };
   const local = localBrowserService(env, fetcher);
   const root = runtimeBaseUrl(runtimeBase);
+  const localBots = shellBotItems(shellBots);
+  const localWallets = shellWalletItems(shellWallets);
 
   async function invokeBrowser(name, args = {}) {
     const openUrl = browserSessionUrl(root, botId);
@@ -267,6 +302,20 @@ export function createChatToolInvoker({
         || name === 'browser_release'
       ) {
         return await invokeBrowser(name, args);
+      }
+      if (name === 'list_bots') {
+        const remote = await invokeDashboard(name, args);
+        const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
+        if (remoteItems.length > 0) return remote;
+        if (localBots.length > 0) return { ok: true, source: 'shell', items: localBots };
+        return remote;
+      }
+      if (name === 'get_wallets') {
+        const remote = await invokeDashboard(name, args);
+        const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
+        if (remoteItems.length > 0) return remote;
+        if (localWallets.length > 0) return { ok: true, source: 'shell', items: localWallets };
+        return remote;
       }
       if (DASHBOARD_NAMES.has(name)) {
         return await invokeDashboard(name, args);

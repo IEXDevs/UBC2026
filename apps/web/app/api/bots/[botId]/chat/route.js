@@ -53,6 +53,8 @@ export async function POST(request, context) {
     botId,
     env,
     runtimeBase: env.NEXT_PUBLIC_AGENT_RUNTIME_URL,
+    shellBots: Array.isArray(body.shellBots) ? body.shellBots.slice(0, 40) : null,
+    shellWallets: Array.isArray(body.shellWallets) ? body.shellWallets.slice(0, 40) : null,
   });
 
   try {
