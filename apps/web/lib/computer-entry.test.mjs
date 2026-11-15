@@ -23,6 +23,7 @@ test('the live browser opens from the sidebar computer card', () => {
   assert.match(library, /computerStatus\(\{ openSessionCount/);
   assert.match(sheet, /browser-preview/);
   assert.match(sheet, /LiveViewPanel/);
+  assert.match(sheet, /LoopSteps/);
   assert.match(panel, /Take control/);
   assert.match(panel, /Return control/);
   assert.match(panel, /You can interact/);
