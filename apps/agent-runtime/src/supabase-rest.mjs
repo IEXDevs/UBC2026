@@ -69,16 +69,19 @@ export async function supabaseWrite(env, {
       signal: AbortSignal.timeout(15000),
     });
   } catch {
-    return { configured: true, rows: null, status: 0 };
+    return { configured: true, rows: null, status: 0, ok: false };
   }
   let rows = null;
+  let code = '';
   try {
     const parsed = await response.json();
     rows = Array.isArray(parsed) ? parsed : parsed == null ? null : [parsed];
+    const raw = parsed && !Array.isArray(parsed) && typeof parsed.code === 'string' ? parsed.code : '';
+    if (/^[0-9A-Z]{5}$/.test(raw) || /^PGRST[0-9]{3}$/.test(raw)) code = raw;
   } catch {
     rows = null;
   }
-  return { configured: true, rows, status: response.status, ok: response.ok };
+  return { configured: true, rows, status: response.status, ok: response.ok, ...(code ? { code } : {}) };
 }
 
 /** Postgres RPC caller for createSupabaseLedger. */

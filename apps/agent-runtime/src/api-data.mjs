@@ -1102,13 +1102,16 @@ export async function handleApiData(request, env, matched) {
     if (!supabaseConfig(env)) {
       return json({ ok: true, source: 'unconfigured', profile: { handle, displayName, avatarUrl } });
     }
-    await supabaseWrite(env, {
-      path: 'users',
+    const userWrite = await supabaseWrite(env, {
+      path: 'users?on_conflict=id',
       method: 'POST',
       prefer: 'resolution=merge-duplicates,return=minimal',
       body: { id: ownerId, privy_user_id: ownerId },
       fetcher,
     });
+    if (userWrite?.ok !== true) {
+      return json({ error: userWrite?.code || 'profile_save_failed' }, 502);
+    }
     const saved = await supabaseWrite(env, {
       path: 'profiles?on_conflict=owner_id',
       method: 'POST',
@@ -1123,7 +1126,13 @@ export async function handleApiData(request, env, matched) {
       fetcher,
     });
     if (saved.status === 409) return json({ error: 'handle_taken' }, 409);
-    if (saved.ok === false) return json({ error: 'profile_save_failed' }, 502);
+    if (saved?.ok !== true) return json({ error: saved?.code || 'profile_save_failed' }, 502);
+    const stored = await supabaseGet(
+      env,
+      `profiles?owner_id=eq.${encodeURIComponent(ownerId)}&select=handle,display_name,avatar_url`,
+      fetcher,
+    );
+    if (stored.rows?.[0]?.handle !== handle) return json({ error: 'profile_save_failed' }, 502);
     return json({ ok: true, source: 'supabase', profile: { handle, displayName, avatarUrl } });
   }
 

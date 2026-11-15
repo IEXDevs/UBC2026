@@ -753,3 +753,45 @@ test('payments feed lists stream-confirmed x402 rows and cross-checks the ledger
   assert.equal(body.crossCheck[0].excess, '10');
   assert.equal(JSON.stringify(body).includes('service-role-test'), false);
 });
+
+test('a profile claim upserts the user and stays readable', async () => {
+  const writes = [];
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      const method = init.method || 'GET';
+      writes.push({ href, method });
+      if (href.includes('/rest/v1/users')) return new Response('', { status: 201 });
+      if (method === 'POST' && href.includes('/rest/v1/profiles')) {
+        return Response.json([{ owner_id: 'user_1', handle: 'alex01', display_name: 'Alex' }]);
+      }
+      if (method === 'GET' && href.includes('/rest/v1/profiles')) {
+        return Response.json([{ handle: 'alex01', display_name: 'Alex', avatar_url: null }]);
+      }
+      return Response.json([]);
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/profiles/me', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ displayName: 'Alex', handle: 'Alex01' }),
+  }), env);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).profile.handle, 'alex01');
+  assert.equal(writes.some(call => call.href.includes('users?on_conflict=id')), true);
+  assert.equal(writes.some(call => call.href.includes('profiles?on_conflict=owner_id')), true);
+
+  const failed = await worker.fetch(new Request('https://runtime/api/profiles/me', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ displayName: 'Alex', handle: 'alex01' }),
+  }), fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => { throw new Error('down'); },
+  }));
+  assert.equal(failed.status, 502);
+  assert.equal((await failed.json()).error, 'profile_save_failed');
+});
