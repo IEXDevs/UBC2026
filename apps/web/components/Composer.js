@@ -471,7 +471,7 @@ export default function Composer({
         conversationToken: payload.token,
         overrides: payload.overrides ?? voiceOverrides(payload),
         // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
-        ...(owner ? { dynamicVariables: { owner_id: owner } } : {}),
+        ...(owner ? { dynamicVariables: { owner_id: owner, spend_permission: permissionRef.current } } : {}),
         customLlmExtraBody: { ownerPermission: permissionRef.current },
         ...(tools && typeof tools === 'object' ? { clientTools: tools } : {}),
         onMessage: ({ message, role }) => {

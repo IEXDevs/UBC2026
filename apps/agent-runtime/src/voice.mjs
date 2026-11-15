@@ -33,13 +33,13 @@ const voiceOwners = new Map();
 
 export function ownerPermissionNote(value) {
   if (value === 'full') {
-    return 'The owner set full permission. Research and prepare without asking. A transaction is never sent until the owner confirms the net changes.';
+    return 'The owner set full permissions and let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay. Infer the action and call request_spend. A mainnet price quote never authorizes a transaction. Execution stays on Solana devnet.';
   }
   if (value === 'review') {
-    return 'The owner set review by AI. State what would change and wait before a trade or state change. A transaction is never sent until the owner confirms the net changes.';
+    return 'The owner set review by AI. State what would change and wait before a trade or a spend. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. A transaction is not sent until they confirm.';
   }
   if (value === 'ask') {
-    return 'The owner set ask every time. Ask before a trade, a spend, or a state change. A transaction is never sent until the owner confirms the net changes.';
+    return 'The owner set ask every time. Ask before a trade or a spend. If it is ambiguous, ask whether they mean buy, sell, spend, or pay. Do not call request_spend until they confirm.';
   }
   return '';
 }
@@ -52,7 +52,9 @@ export const VOICE_SYSTEM_PROMPT = [
   'If a tool result has stub set to true, or items is empty, say the data is not available yet. Do not fill the gap.',
   'Pause and resume affect one bot. stop_all pauses every bot the list route returns. Before stop_all, say "Stopping all bots now".',
   'Pause, resume, and stop_all only make the fleet safer.',
-  'Do not send funds, approve spends, raise limits, or freeze wallets. Those stay on the app\'s existing approval screen. If the user asks, say the preview has to appear in the app first.',
+  'Fund movements go through request_spend only. That route runs trust, verify, wallet freeze, bot policy, approval mode, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.',
+  'When the owner set full permissions, they let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay.',
+  'In ask or review, wait for the owner before request_spend. Do not raise limits or freeze wallets from tools.',
   'Do not ask for seed phrases, private keys, passwords, or API keys.',
   'Never read out Live View URLs, tokens, or secrets. If a tool hides them, leave them hidden.',
   'If a tool returns confirmation-required or manual-review, say so and stop.',
@@ -113,6 +115,7 @@ function webhookHeaders() {
   return Object.freeze({
     [WEBHOOK_HEADER]: SECRET_PLACEHOLDER,
     'x-owner-id': '{{owner_id}}',
+    'x-spend-permission': '{{spend_permission}}',
   });
 }
 
@@ -441,7 +444,11 @@ async function resolveSessionId(parameters, owner, fetchApi, env) {
   return open[0]?.sessionRecordId || '';
 }
 
-async function runCalls(toolDef, parameters, owner, fetchApi, env) {
+function trustedSpendPermission(value) {
+  return value === 'ask' || value === 'review' || value === 'full' ? value : 'ask';
+}
+
+async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {}) {
   const secrets = knownSecrets(env);
   if (toolDef.name === 'stop_all') {
     const listRequest = requestFor(toolDef.calls[0], parameters, owner);
@@ -459,6 +466,34 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env) {
     return { calls: toolDef.calls.map(entry => ({ method: entry.method, path: entry.path })), list: summary, paused };
   }
   let params = { ...parameters };
+  if (toolDef.name === 'request_spend') {
+    const body = {
+      botId: params.botId,
+      action: params.action,
+      amount: params.amount,
+      permission: trustedSpendPermission(options.spendPermission),
+      confirmed: false,
+    };
+    if (typeof params.destination === 'string') body.destination = params.destination;
+    if (typeof params.handle === 'string') body.handle = params.handle;
+    if (typeof params.asset === 'string') body.asset = params.asset;
+    if (params.quoteCluster === 'mainnet') {
+      body.quote = { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false };
+    }
+    const outbound = new Request('https://runtime.internal/api/spend', {
+      method: 'POST',
+      headers: {
+        'x-owner-id': owner,
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const response = await fetchApi(outbound, env);
+    return {
+      calls: [{ method: 'POST', path: '/api/spend', ...(await speakable(response, secrets)) }],
+    };
+  }
   if (
     (toolDef.name === 'browser_navigate' || toolDef.name === 'browser_live_view' || toolDef.name === 'browser_release')
     && !ID.test(params.sessionRecordId || '')
@@ -517,6 +552,18 @@ function validateParameters(toolDef, parameters) {
   }
   if (toolDef.properties.mint && parameters.mint != null) {
     if (typeof parameters.mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.mint)) return false;
+  }
+  if (toolDef.properties.action && parameters.action != null) {
+    if (!['buy', 'sell', 'spend', 'pay'].includes(parameters.action)) return false;
+  }
+  if (toolDef.properties.handle && parameters.handle != null) {
+    if (typeof parameters.handle !== 'string' || !/^[a-z0-9][a-z0-9_]{1,31}$/.test(parameters.handle)) return false;
+  }
+  if (toolDef.properties.destination && parameters.destination != null) {
+    if (typeof parameters.destination !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.destination)) return false;
+  }
+  if (toolDef.properties.quoteCluster && parameters.quoteCluster != null) {
+    if (parameters.quoteCluster !== 'mainnet' && parameters.quoteCluster !== 'devnet') return false;
   }
   return true;
 }
@@ -579,7 +626,9 @@ async function handleTool(name, request, env, fetchApi) {
       result = await runPriceTool(parsed.parameters, env);
     } else {
       if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
-      result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env);
+      result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env, {
+        spendPermission: request.headers.get('x-spend-permission'),
+      });
     }
   } catch {
     return json({ error: 'voice_api_failed' }, 502);

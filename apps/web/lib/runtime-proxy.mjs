@@ -21,6 +21,7 @@ const ALLOWED = Object.freeze([
   /^\/api\/profiles\/me$/,
   /^\/api\/profiles\/lookup$/,
   /^\/api\/transfers$/,
+  /^\/api\/spend$/,
   new RegExp(`^/bots/${BOT}/status$`),
   new RegExp(`^/bots/${BOT}/pause$`),
   new RegExp(`^/bots/${BOT}/resume$`),

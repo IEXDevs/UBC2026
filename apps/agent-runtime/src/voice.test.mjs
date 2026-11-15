@@ -16,6 +16,8 @@ test('voice permission note follows the owner chip and ignores unknown modes', (
   assert.match(ownerPermissionNote('ask'), /ask every time/);
   assert.match(ownerPermissionNote('review'), /review by AI/);
   assert.match(ownerPermissionNote('full'), /full permission/);
+  assert.match(ownerPermissionNote('full'), /Do not ask whether they are going to buy, sell, spend, or pay/);
+  assert.match(ownerPermissionNote('ask'), /buy, sell, spend, or pay/);
   assert.equal(ownerPermissionNote('sometimes'), '');
 });
 

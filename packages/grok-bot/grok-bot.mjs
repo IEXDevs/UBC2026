@@ -4,6 +4,8 @@
  * Live posting stays withheld until an X secret exists outside this build.
  */
 
+import { buildPermissionedSpendRequest } from '@ubc2026/contracts';
+
 export class GrokBotError extends Error {}
 
 const fail = message => {
@@ -327,6 +329,19 @@ function toMarkdown(exported) {
  * Export a Grok Bot chat. format is json (default), markdown, or both.
  * Secret-shaped strings are removed from titles and message text.
  */
+/**
+ * Future Grok Bot spends call the same permissioned spend API as voice and the glass UI.
+ * This builds the request. It does not sign and it does not read a secret.
+ */
+export function grokSpendRequest(input) {
+  const request = buildPermissionedSpendRequest(input);
+  return {
+    method: request.method,
+    path: request.path,
+    body: request.body,
+  };
+}
+
 export function exportGrokChat(chat, { format = 'json' } = {}) {
   if (!['json', 'markdown', 'both'].includes(format)) fail('Export format must be json, markdown, or both');
   assertChat(chat);

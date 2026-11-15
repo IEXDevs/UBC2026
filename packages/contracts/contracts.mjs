@@ -288,6 +288,60 @@ export function profileInitials(label) {
   return (letters || text[0]).toUpperCase();
 }
 
+export const OWNER_SPEND_PERMISSIONS = Object.freeze(['ask', 'review', 'full']);
+export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay']);
+export const PERMISSIONED_SPEND_PATH = '/api/spend';
+
+function sanitizeSpendQuote(quote) {
+  if (quote == null) return null;
+  if (typeof quote !== 'object' || Array.isArray(quote)) return undefined;
+  const pricingCluster = quote.pricingCluster === 'mainnet' || quote.pricingCluster === 'devnet' ? quote.pricingCluster : null;
+  const cluster = quote.cluster === 'mainnet' || quote.cluster === 'devnet' ? quote.cluster : null;
+  if (quote.pricingCluster != null && !pricingCluster) return undefined;
+  if (quote.cluster != null && !cluster) return undefined;
+  return {
+    ...(pricingCluster ? { pricingCluster } : {}),
+    ...(cluster ? { cluster } : {}),
+    ...(quote.paperPnl === true ? { paperPnl: true } : {}),
+    ...(quote.authorizesTransaction === true ? { authorizesTransaction: true } : {}),
+  };
+}
+
+/** Shared body for voice, the glass UI, and Grok Bot. Returns null when the body cannot be a spend. */
+export function parsePermissionedSpendBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  if (!OWNER_SPEND_PERMISSIONS.includes(body.permission)) return null;
+  if (!idOk(body.botId)) return null;
+  if (body.action != null && !FUND_ACTIONS.includes(body.action)) return null;
+  let units;
+  try { units = amount(body.amount); } catch { return null; }
+  if (units === '0') return null;
+  const destination = typeof body.destination === 'string' && base58.test(body.destination) ? body.destination : null;
+  const handle = typeof body.handle === 'string' ? normalizeHandle(body.handle) : null;
+  if (!destination && !handle) return null;
+  if (body.asset != null && body.asset !== 'USDC') return null;
+  const quote = sanitizeSpendQuote(body.quote);
+  if (body.quote != null && quote == null && body.quote !== null) return null;
+  return {
+    permission: body.permission,
+    botId: body.botId,
+    action: FUND_ACTIONS.includes(body.action) ? body.action : 'spend',
+    amount: units,
+    asset: 'USDC',
+    destination,
+    handle,
+    confirmed: body.confirmed === true,
+    quote,
+    idempotencyKey: typeof body.idempotencyKey === 'string' && idOk(body.idempotencyKey) ? body.idempotencyKey : null,
+  };
+}
+
+export function buildPermissionedSpendRequest(input) {
+  const parsed = parsePermissionedSpendBody(input);
+  if (!parsed) fail('Permissioned spend needs ask, review, or full, plus a bot, amount, and handle or destination');
+  return { method: 'POST', path: PERMISSIONED_SPEND_PATH, body: parsed };
+}
+
 export const API_ROUTES = Object.freeze([
   { id: 'health', method: 'GET', path: '/health', phase: 1, auth: 'none', status: 'live' },
   { id: 'routes.list', method: 'GET', path: '/api/routes', phase: 0, auth: 'none', status: 'live' },
@@ -329,6 +383,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'profiles.lookup', method: 'GET', path: '/api/profiles/lookup', phase: 1, auth: 'privy', status: 'live' },
   { id: 'transfers.list', method: 'GET', path: '/api/transfers', phase: 1, auth: 'privy', status: 'live' },
   { id: 'transfers.create', method: 'POST', path: '/api/transfers', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'spend.create', method: 'POST', path: '/api/spend', phase: 2, auth: 'privy', status: 'live' },
   { id: 'quicknode.webhook', method: 'POST', path: '/webhooks/quicknode', phase: 1, auth: 'webhook', status: 'live' },
   { id: 'voice.agent', method: 'GET', path: '/voice/agent', phase: 8, auth: 'none', status: 'live' },
   { id: 'voice.session-owner', method: 'POST', path: '/voice/session-owner', phase: 8, auth: 'webhook', status: 'live' },

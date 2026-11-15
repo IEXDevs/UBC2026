@@ -22,7 +22,7 @@ import AgentEdit from '../components/AgentEdit';
 import ComputerSheet from '../components/ComputerSheet';
 import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
-import { netChangeSummary } from '../lib/spend-permission.mjs';
+import { managesFunds, netChangeSummary, readStoredPermission } from '../lib/spend-permission.mjs';
 import { compactLines, contextUsage } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
 import {
@@ -48,7 +48,7 @@ import {
   upsertOwnerBot,
 } from '../lib/runtime-data.mjs';
 import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
-import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
+import { buildPermissionedSpendRequest, parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
@@ -734,6 +734,113 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     window.addEventListener('pointerup', up);
   }
 
+  async function settleSpend(pending, confirmed) {
+    const reply = (text) => appendTalk(pending.botId, { id: `${pending.lineId}-send`, role: 'assistant', text });
+    const permission = pending.permission || readStoredPermission(typeof localStorage === 'undefined' ? null : localStorage);
+    let requestBody;
+    try {
+      requestBody = buildPermissionedSpendRequest({
+        botId: pending.botId,
+        permission,
+        action: 'spend',
+        amount: pending.command.amount,
+        handle: pending.command.handle,
+        asset: 'USDC',
+        confirmed: confirmed === true,
+        idempotencyKey: pending.command.idempotencyKey,
+      });
+    } catch {
+      reply('The send did not post.');
+      return;
+    }
+    const spendUrl = shellRuntimeUrl(requestBody.path);
+    if (!spendUrl) {
+      reply('Platform sends need the agent runtime.');
+      toast?.('Platform sends need the agent runtime.');
+      return;
+    }
+    try {
+      if (!sessionReadyForWallets(signedIn, user)) return;
+      const token = await getAccessToken?.();
+      const response = await fetch(spendUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          'x-owner-id': ownerId,
+        },
+        body: JSON.stringify(requestBody.body),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (body.state === 'approval-needed' && !confirmed) {
+        setPendingSend({ ...pending, permission });
+        return;
+      }
+      if (body.signed === true && body.signature) {
+        reply(`Sent ${formatBaseUnits(pending.command.amount)} USDC to @${pending.command.handle} on devnet.`);
+        toast?.(`Sent ${formatBaseUnits(pending.command.amount)} USDC to @${pending.command.handle}`);
+        return;
+      }
+      if (body.state === 'signer-not-configured' || body.state === 'recipient_address_missing') {
+        await postPlatformTransfer(pending, reply);
+        return;
+      }
+      const reason = body.state === 'blocked' && body.reason === 'spend-frozen'
+        ? 'That wallet is frozen.'
+        : body.state === 'quote-not-authorization'
+          ? 'A mainnet quote cannot authorize this send.'
+          : body.state === 'approval-needed'
+            ? 'The send still needs you to confirm it.'
+            : 'The send did not post.';
+      reply(reason);
+      toast?.(reason);
+    } catch {
+      reply('The send did not post.');
+      toast?.('The send did not post.');
+    }
+  }
+
+  async function postPlatformTransfer(pending, reply) {
+    const transfersUrl = shellRuntimeUrl('/api/transfers');
+    if (!transfersUrl) {
+      reply('Platform sends need the agent runtime.');
+      toast?.('Platform sends need the agent runtime.');
+      return;
+    }
+    const token = await getAccessToken?.();
+    const response = await fetch(transfersUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        'x-owner-id': ownerId,
+      },
+      body: JSON.stringify({
+        ...pending.command,
+        botId: pending.botId,
+        idempotencyKey: `send_${pending.botId}_${pending.command.handle}_${pending.command.amount}`.replace(/[^a-zA-Z0-9:_-]/g, '_'),
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.transfer) {
+      const reason = body.error === 'handle_missing'
+        ? `@${pending.command.handle} is not on Maelstrom.`
+        : body.error === 'wallet_frozen'
+          ? 'That wallet is frozen.'
+          : body.error === 'recipient_wallet_missing'
+            ? `@${pending.command.handle} does not have a wallet yet.`
+            : body.error === 'policy_blocked'
+              ? 'The agent policy blocked this send.'
+              : 'The send did not post.';
+      reply(reason);
+      toast?.(reason);
+      return;
+    }
+    setTransfers(current => [body.transfer, ...current.filter(item => item.id !== body.transfer.id)]);
+    reply(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}. It is in their wallet.`);
+    toast?.(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}`);
+  }
+
   const sideColumn = railCollapsed ? 88 : sideWidth;
 
   return (
@@ -861,12 +968,19 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               if (line.role !== 'user') return;
               const command = parsePlatformSend(line.text);
               if (!command || !ownerId) return;
-              setPendingSend({
+              const permission = readStoredPermission(typeof localStorage === 'undefined' ? null : localStorage);
+              const pending = {
                 botId: id,
                 lineId: line.id,
                 command,
+                permission,
                 summary: netChangeSummary({ amount: command.amount, asset: 'USDC', handle: command.handle }),
-              });
+              };
+              if (managesFunds(permission)) {
+                void settleSpend(pending, false);
+                return;
+              }
+              setPendingSend(pending);
             }}
             onThinking={on => setThinkingBot(on ? bot.id : null)}
             onVoiceSpan={addVoice}
@@ -942,7 +1056,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               ))}
             </ul>
             <p className="spend-net"><span>Net</span><span>{pendingSend.summary.net}</span></p>
-            <p className="quiet">A transaction always waits for you. Nothing is signed until you confirm.</p>
+            <p className="quiet">Nothing is signed until you confirm.</p>
             <div className="spend-actions">
               <button type="button" className="ghost" onClick={() => {
                 appendTalk(pendingSend.botId, { id: `${pendingSend.lineId}-send`, role: 'assistant', text: 'The send stayed unsent.' });
@@ -954,53 +1068,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               <button type="button" className="solid" onClick={() => {
                 const pending = pendingSend;
                 setPendingSend(null);
-                const transfersUrl = shellRuntimeUrl('/api/transfers');
-                const reply = (text) => appendTalk(pending.botId, { id: `${pending.lineId}-send`, role: 'assistant', text });
-                if (!transfersUrl) {
-                  reply('Platform sends need the agent runtime.');
-                  toast?.('Platform sends need the agent runtime.');
-                  return;
-                }
-                void (async () => {
-                  try {
-                    if (!sessionReadyForWallets(signedIn, user)) return;
-                    const token = await getAccessToken?.();
-                    const response = await fetch(transfersUrl, {
-                      method: 'POST',
-                      headers: {
-                        'content-type': 'application/json',
-                        ...(token ? { authorization: `Bearer ${token}` } : {}),
-                        'x-owner-id': ownerId,
-                      },
-                      body: JSON.stringify({
-                        ...pending.command,
-                        botId: pending.botId,
-                        idempotencyKey: `send_${pending.botId}_${pending.command.handle}_${pending.command.amount}`.replace(/[^a-zA-Z0-9:_-]/g, '_'),
-                      }),
-                    });
-                    const body = await response.json().catch(() => ({}));
-                    if (!response.ok || !body.transfer) {
-                      const reason = body.error === 'handle_missing'
-                        ? `@${pending.command.handle} is not on Maelstrom.`
-                        : body.error === 'wallet_frozen'
-                          ? 'That wallet is frozen.'
-                          : body.error === 'recipient_wallet_missing'
-                            ? `@${pending.command.handle} does not have a wallet yet.`
-                            : body.error === 'policy_blocked'
-                              ? 'The agent policy blocked this send.'
-                              : 'The send did not post.';
-                      reply(reason);
-                      toast?.(reason);
-                      return;
-                    }
-                    setTransfers(current => [body.transfer, ...current.filter(item => item.id !== body.transfer.id)]);
-                    reply(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}. It is in their wallet.`);
-                    toast?.(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}`);
-                  } catch {
-                    reply('The send did not post.');
-                    toast?.('The send did not post.');
-                  }
-                })();
+                void settleSpend(pending, true);
               }}
               >
                 Confirm
