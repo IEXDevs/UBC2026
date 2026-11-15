@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   clearPrivySessionBackups,
+  ensurePrivyRefreshOnly,
   ensurePrivySessionKeys,
   installPrivySessionMirror,
+  livePrivySessionPresent,
   mirrorPrivyStorageWrite,
   restorePrivySessionIfMissing,
   MAELSTROM_ACTIVE_USER_KEY,
@@ -50,7 +52,7 @@ test('mirrorPrivyStorageWrite backs up pat and refresh without touching unrelate
   assert.equal(mirrorPrivyStorageWrite('maelstrom.profile.x', 'nope', [storage]), false);
 });
 
-test('restorePrivySessionIfMissing fills empty Privy keys from backups', () => {
+test('cold-boot restore fills empty Privy keys from backups when refresh exists', () => {
   const storage = memoryStorage({
     [MAELSTROM_TOKEN_KEY]: PAT,
     [MAELSTROM_REFRESH_KEY]: REFRESH,
@@ -66,19 +68,47 @@ test('restorePrivySessionIfMissing fills empty Privy keys from backups', () => {
   assert.equal(second.keys.includes(PRIVY_ACCESS_TOKEN_KEY), false);
 });
 
-test('restore gap-fills missing refresh even when pat is already present', () => {
+test('cold-boot restore refuses half sessions without refresh', () => {
+  const storage = memoryStorage({
+    [MAELSTROM_TOKEN_KEY]: PAT,
+  });
+  const result = restorePrivySessionIfMissing(storage);
+  assert.equal(result.restored, false);
+  assert.equal(storage.getItem(PRIVY_ACCESS_TOKEN_KEY), null);
+});
+
+test('ensurePrivyRefreshOnly fills missing refresh when access is live', () => {
   const storage = memoryStorage({
     [PRIVY_ACCESS_TOKEN_KEY]: JSON.stringify(PAT),
     [MAELSTROM_REFRESH_KEY]: REFRESH,
     [MAELSTROM_TOKEN_KEY]: PAT,
   });
-  const result = restorePrivySessionIfMissing(storage);
+  const result = ensurePrivyRefreshOnly(storage);
   assert.equal(result.restored, true);
   assert.equal(JSON.parse(storage.getItem(PRIVY_REFRESH_TOKEN_KEY)), REFRESH);
-  assert.equal(JSON.parse(storage.getItem(PRIVY_ACCESS_TOKEN_KEY)), PAT);
 });
 
-test('restore writes user-prefixed keys and active-user from JWT sub', () => {
+test('ensurePrivyRefreshOnly does not resurrect wiped access tokens', () => {
+  const storage = memoryStorage({
+    [MAELSTROM_TOKEN_KEY]: PAT,
+    [MAELSTROM_CUSTOMER_KEY]: PAT,
+    [MAELSTROM_REFRESH_KEY]: REFRESH,
+  });
+  const result = ensurePrivyRefreshOnly(storage);
+  assert.equal(result.restored, false);
+  assert.equal(storage.getItem(PRIVY_ACCESS_TOKEN_KEY), null);
+  assert.equal(storage.getItem(PRIVY_REFRESH_TOKEN_KEY), null);
+});
+
+test('ensurePrivySessionKeys aliases ensurePrivyRefreshOnly', () => {
+  const storage = memoryStorage({
+    [PRIVY_CUSTOMER_TOKEN_KEY]: JSON.stringify(PAT),
+    [MAELSTROM_REFRESH_KEY]: REFRESH,
+  });
+  assert.equal(JSON.parse(ensurePrivySessionKeys(storage) && storage.getItem(PRIVY_REFRESH_TOKEN_KEY)), REFRESH);
+});
+
+test('restore sets active-user from JWT sub', () => {
   const storage = memoryStorage({
     [MAELSTROM_TOKEN_KEY]: REAL_PAT,
     [MAELSTROM_CUSTOMER_KEY]: REAL_PAT,
@@ -87,24 +117,27 @@ test('restore writes user-prefixed keys and active-user from JWT sub', () => {
   assert.equal(userIdFromPrivyToken(REAL_PAT), USER);
   const result = restorePrivySessionIfMissing(storage);
   assert.equal(result.restored, true);
-  assert.equal(JSON.parse(storage.getItem(PRIVY_ACCESS_TOKEN_KEY)), REAL_PAT);
-  assert.equal(JSON.parse(storage.getItem(`privy:${USER}:pat`)), REAL_PAT);
-  assert.equal(JSON.parse(storage.getItem(`privy:${USER}:refresh_token`)), REFRESH);
   assert.equal(JSON.parse(storage.getItem(PRIVY_ACTIVE_USER_KEY)), USER);
   assert.equal(storage.getItem(MAELSTROM_ACTIVE_USER_KEY), USER);
 });
 
-test('ensurePrivySessionKeys is an alias for gap-fill restore', () => {
-  const storage = memoryStorage({
-    [PRIVY_CUSTOMER_TOKEN_KEY]: JSON.stringify(PAT),
-    [MAELSTROM_REFRESH_KEY]: REFRESH,
-  });
-  const result = ensurePrivySessionKeys(storage);
-  assert.equal(JSON.parse(storage.getItem(PRIVY_REFRESH_TOKEN_KEY)), REFRESH);
-  assert.equal(result.restored, true);
+test('wiping the last Privy session key clears Maelstrom backups', () => {
+  const target = { localStorage: memoryStorage(), sessionStorage: memoryStorage() };
+  installPrivySessionMirror(target);
+  target.localStorage.setItem(PRIVY_ACCESS_TOKEN_KEY, JSON.stringify(PAT));
+  target.localStorage.setItem(PRIVY_REFRESH_TOKEN_KEY, JSON.stringify(REFRESH));
+  assert.equal(target.localStorage.getItem(MAELSTROM_TOKEN_KEY), PAT);
+  assert.equal(livePrivySessionPresent(target.localStorage), true);
+
+  target.localStorage.removeItem(PRIVY_ACCESS_TOKEN_KEY);
+  assert.equal(target.localStorage.getItem(MAELSTROM_TOKEN_KEY), PAT);
+  target.localStorage.removeItem(PRIVY_REFRESH_TOKEN_KEY);
+  assert.equal(livePrivySessionPresent(target.localStorage), false);
+  assert.equal(target.localStorage.getItem(MAELSTROM_TOKEN_KEY), null);
+  assert.equal(target.localStorage.getItem(MAELSTROM_REFRESH_KEY), null);
 });
 
-test('installPrivySessionMirror observes setItem and does not block removeItem', () => {
+test('installPrivySessionMirror observes setItem without blocking removeItem', () => {
   const target = { localStorage: memoryStorage(), sessionStorage: memoryStorage() };
   installPrivySessionMirror(target);
   target.localStorage.setItem(PRIVY_ACCESS_TOKEN_KEY, JSON.stringify(PAT));
@@ -113,5 +146,4 @@ test('installPrivySessionMirror observes setItem and does not block removeItem',
   assert.equal(target.localStorage.getItem(PRIVY_ACCESS_TOKEN_KEY), null);
   clearPrivySessionBackups(target.localStorage, target.sessionStorage);
   assert.equal(target.localStorage.getItem(MAELSTROM_TOKEN_KEY), null);
-  assert.equal(target.localStorage.getItem(MAELSTROM_ACTIVE_USER_KEY), null);
 });

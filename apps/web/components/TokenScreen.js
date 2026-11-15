@@ -34,8 +34,8 @@ export default function TokenScreen({ open, onSend, onReceive, onSwap }) {
     (async () => {
       try {
         try {
-          const { ensurePrivySessionKeys } = await import('../lib/privy-session.mjs');
-          ensurePrivySessionKeys(window.localStorage, window.sessionStorage);
+          const { ensurePrivyRefreshOnly } = await import('../lib/privy-session.mjs');
+          ensurePrivyRefreshOnly(window.localStorage, window.sessionStorage);
         } catch { /* private mode */ }
         const token = await getAccessToken();
         if (stopped) return;

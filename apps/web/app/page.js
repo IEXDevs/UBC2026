@@ -63,11 +63,12 @@ import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
 import { showSignInGate } from '../lib/sign-in-gate.mjs';
 import { idleLockDue } from '../lib/desk-lock.mjs';
-import { clearPrivySessionBackups, ensurePrivySessionKeys } from '../lib/privy-session.mjs';
+import { clearPrivySessionBackups, ensurePrivyRefreshOnly } from '../lib/privy-session.mjs';
 
 function readAccessToken(getAccessToken) {
   try {
-    ensurePrivySessionKeys(window.localStorage, window.sessionStorage);
+    // Only fill a missing refresh_token — never resurrect wiped access tokens.
+    ensurePrivyRefreshOnly(window.localStorage, window.sessionStorage);
   } catch {
     /* private mode */
   }
