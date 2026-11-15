@@ -812,6 +812,9 @@ function readPlace() {
 
 function voiceFailureNote(error) {
   if (error?.name === 'NotAllowedError') return 'Microphone is off, so the session stayed closed.';
+  if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError' || error?.name === 'OverconstrainedError') {
+    return 'No microphone was found, so the session stayed closed.';
+  }
   if (error?.message === 'voice_unconfigured') return 'Voice is not configured on the server.';
   if (error?.message === 'voice_rejected') return 'The voice service refused the session. Publish the agent and turn on Voice ID and Speed overrides.';
   if (error?.message === 'voice_unreachable') return 'The voice service did not respond.';
