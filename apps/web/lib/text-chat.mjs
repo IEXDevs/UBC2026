@@ -224,6 +224,30 @@ async function postCompletion({
     finishReason: typeof choice.finish_reason === 'string' ? choice.finish_reason : '',
     message,
     raw: data,
+    usage: readUsage(data?.usage),
+  };
+}
+
+function usageCount(value) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : 0;
+}
+
+function readUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  const prompt = usageCount(usage.prompt_tokens);
+  const completion = usageCount(usage.completion_tokens);
+  const total = usageCount(usage.total_tokens) || prompt + completion;
+  if (prompt === 0 && completion === 0 && total === 0) return null;
+  return { prompt, completion, total };
+}
+
+function addUsage(current, next) {
+  if (!next) return current;
+  return {
+    prompt: current.prompt + next.prompt,
+    completion: current.completion + next.completion,
+    total: current.total + next.total,
   };
 }
 
@@ -287,6 +311,7 @@ export async function completeTextChat({
     ? Math.min(maxToolRounds, 8)
     : 4;
   let toolRounds = 0;
+  let usage = { prompt: 0, completion: 0, total: 0 };
   while (true) {
     const completion = await postCompletion({
       resolved,
@@ -299,6 +324,7 @@ export async function completeTextChat({
     const calls = Array.isArray(completion.message?.tool_calls)
       ? completion.message.tool_calls.filter(call => call?.function?.name)
       : [];
+    usage = addUsage(usage, completion.usage);
     const wantsTools = completion.finishReason === 'tool_calls' || calls.length > 0;
     if (!toolList || !wantsTools || toolRounds >= rounds) {
       const content = completion.message?.content;
@@ -309,6 +335,7 @@ export async function completeTextChat({
         text,
         provider: resolved.provider,
         toolRounds,
+        ...(usage.total > 0 ? { usage } : {}),
       };
     }
     messages.push(assistantToolMessage(completion.message));

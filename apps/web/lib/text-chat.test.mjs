@@ -58,12 +58,25 @@ test('completeTextChat hits Meta and never puts the key in the body', async () =
     },
   });
   assert.equal(result.text, 'watching');
+  assert.equal(result.usage, undefined);
   assert.equal(result.provider, 'meta');
   assert.equal(result.model, META_SPARK_MODEL);
   assert.match(seen.url, /api\.meta\.ai/);
   assert.equal(seen.body.model, META_SPARK_MODEL);
   assert.equal(seen.body.reasoning_effort, 'minimal');
   assert.equal(JSON.stringify(seen.body).includes(META_KEY), false);
+});
+
+test('completeTextChat keeps the provider token total', async () => {
+  const result = await completeTextChat({
+    metaModelApiKey: META_KEY,
+    message: 'status?',
+    fetcher: async () => Response.json({
+      usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
+      choices: [{ message: { content: 'watching' } }],
+    }),
+  });
+  assert.deepEqual(result.usage, { prompt: 11, completion: 4, total: 15 });
 });
 
 test('missing model key does not call the network', async () => {

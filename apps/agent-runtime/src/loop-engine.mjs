@@ -357,7 +357,7 @@ function performPolicy(run, ctx) {
   if (policy.state === 'blocked') return waitStep(run, 'policy', policy.reason ?? 'blocked', { policy: slimPolicy(policy) }, ctx.now);
   let needed;
   try {
-    needed = approvalRequirement(ctx.bot, policy);
+    needed = approvalRequirement(ctx.bot, policy, { ownerPermission: ctx.input?.ownerPermission });
   } catch {
     return waitStep(run, 'policy', 'policy-invalid', { policy: slimPolicy(policy) }, ctx.now);
   }

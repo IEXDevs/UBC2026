@@ -46,6 +46,8 @@ import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
+import SignInPage from '../components/SignInPage';
+import { showSignInGate } from '../lib/sign-in-gate.mjs';
 
 const CONNECTORS = shellConnectors();
 const privyConfigured = privyProviderProps({
@@ -166,6 +168,10 @@ function AuthedShell() {
     })();
     return () => { stopped = true; };
   }, [signedIn, user, user?.id, user?.hasAcceptedTerms, accountsKey, getAccessToken]);
+
+  if (showSignInGate({ privyConfigured: true, ready, authenticated })) {
+    return <SignInPage disabled={!ready} onLogin={login} />;
+  }
 
   return (
     <Shell
