@@ -5,10 +5,12 @@ import {
   deleteBotUrl,
   emptyMoneyState,
   fetchOwnerLists,
+  firstAssignableWalletId,
   positionsFromStatus,
   runtimeBaseUrl,
   shellBotFromRemote,
   shellRuntimeUrl,
+  upsertOwnerBot,
 } from './runtime-data.mjs';
 
 test('runtime base rejects junk and keeps origin', () => {
@@ -124,4 +126,36 @@ test('bot chat URL uses the same-origin Next route', () => {
   assert.equal(botChatUrl('https://runtime.example/agent/', 'bot_1'), '/api/bots/bot_1/chat');
   assert.equal(botChatUrl('', 'bot_1'), '/api/bots/bot_1/chat');
   assert.equal(botChatUrl('https://runtime.example', '../evil'), null);
+});
+
+test('firstAssignableWalletId skips frozen wallets', () => {
+  assert.equal(firstAssignableWalletId([]), '');
+  assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }]), 'w_ok');
+});
+
+test('upsertOwnerBot posts the shell bot to the runtime proxy', async () => {
+  const calls = [];
+  const result = await upsertOwnerBot(
+    'did:privy:abc',
+    { id: 'bot_local', name: 'Local', goal: 'Watch', type: 'trading' },
+    {
+      walletId: 'w_main',
+      accessToken: 'tok',
+      fetcher: async (url, init) => {
+        calls.push({ url, method: init.method, body: JSON.parse(init.body), owner: init.headers['x-owner-id'] });
+        return {
+          ok: true,
+          json: async () => ({ ok: true, source: 'supabase', bot: { id: 'bot_local', walletId: 'w_main' } }),
+        };
+      },
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(calls[0].url, '/api/runtime/api/bots');
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].owner, 'did:privy:abc');
+  assert.equal(calls[0].body.walletId, 'w_main');
+  assert.equal(calls[0].body.id, 'bot_local');
+  const missingWallet = await upsertOwnerBot('did:privy:abc', { id: 'bot_x', name: 'X' }, { fetcher: async () => ({}) });
+  assert.equal(missingWallet.error, 'wallet_required');
 });

@@ -457,9 +457,12 @@ export default function Composer({
       if (!response.ok) throw new Error(payload.error || 'voice_failed');
       const { Conversation } = await import('@elevenlabs/client');
       const tools = clientToolsRef.current;
+      const owner = typeof ownerId === 'string' ? ownerId.trim() : '';
       const live = await Conversation.startSession({
         conversationToken: payload.token,
         overrides: payload.overrides ?? voiceOverrides(payload),
+        // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
+        ...(owner ? { dynamicVariables: { owner_id: owner } } : {}),
         customLlmExtraBody: { ownerPermission: permissionRef.current },
         ...(tools && typeof tools === 'object' ? { clientTools: tools } : {}),
         onMessage: ({ message, role }) => {
