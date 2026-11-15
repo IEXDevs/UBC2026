@@ -36,7 +36,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
   dashboard('get_bot_status', 'Status for one bot.', ['botId'], { botId }, [call('GET', '/bots/:botId/status')]),
   dashboard(
     'get_wallets',
-    'List wallets and every non-zero balance for this owner. Read balances.displayBalanceLabel aloud — it lists Solana-devnet SOL plus each SPL token (tokens[] / tokensLabel). Also returns solBalanceLabel, usdcBalanceLabel, and platformUsdcLabel. Cluster is Solana devnet — not mainnet.',
+    'List wallets and every non-zero balance for this owner. Read balances.displayBalanceLabel aloud — Solana-devnet SOL plus each SPL token (tokens[]). If balances are zero, say so and mention clusterNote (devnet only; testnet/mainnet funds are invisible).',
     [],
     {},
     [call('GET', '/api/wallets')],

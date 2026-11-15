@@ -28,7 +28,7 @@ import {
   transferErrorCode,
   transferRequest,
 } from './platform-transfer.mjs';
-import { readDevnetWalletBalances } from './schedules.mjs';
+import { readDevnetWalletBalances } from '@ubc2026/wallets/balances';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
