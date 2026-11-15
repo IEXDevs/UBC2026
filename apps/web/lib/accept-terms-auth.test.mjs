@@ -11,7 +11,10 @@ import {
   createAcceptTermsAuth,
   postAcceptTerms,
   resolveAcceptTermsToken,
+  resolvePrivyRefreshToken,
   MAELSTROM_TOKEN_KEY,
+  MAELSTROM_REFRESH_KEY,
+  SESSIONS_URL,
 } from './accept-terms-auth.mjs';
 
 const TOKEN = 'header.payload.signature';
@@ -50,7 +53,9 @@ test('only the Privy terms POST is treated as the accept-terms request', () => {
   assert.equal(isPrivyAccessToken(`"${TOKEN}"`), true);
   assert.equal(isPrivyAccessToken('not a token'), false);
   assert.equal(isPrivyTokenStorageKey('privy:pat'), true);
-  assert.equal(isPrivyTokenStorageKey('privy:clxxx:token'), true);
+  assert.equal(isPrivyTokenStorageKey('privy:clxxx:pat'), true);
+  assert.equal(isPrivyTokenStorageKey('privy:token'), false);
+  assert.equal(isPrivyTokenStorageKey('privy:clxxx:token'), false);
   assert.equal(isPrivyTokenStorageKey('privy:refresh_token'), false);
 });
 
@@ -172,7 +177,7 @@ test('auth.privy.io JSON responses refill the token cache', async () => {
 });
 
 test('empty Bearer headers are replaced on accept_terms', async () => {
-  const storage = memoryStorage({ 'privy:token': JSON.stringify(TOKEN) });
+  const storage = memoryStorage({ 'privy:pat': JSON.stringify(TOKEN) });
   const seen = [];
   const target = {
     Request,
@@ -192,8 +197,11 @@ test('empty Bearer headers are replaced on accept_terms', async () => {
   assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
-test('an existing valid authorization header is left alone', async () => {
-  const storage = memoryStorage({ 'privy:token': JSON.stringify(TOKEN) });
+test('a customer bearer on accept_terms is replaced with the session token', async () => {
+  const storage = memoryStorage({
+    'privy:pat': JSON.stringify(TOKEN),
+    'privy:token': JSON.stringify('customer.access.jwt'),
+  });
   const seen = [];
   const target = {
     Request,
@@ -210,12 +218,95 @@ test('an existing valid authorization header is left alone', async () => {
     method: 'POST',
     headers: { authorization: 'Bearer already.have.one' },
   });
-  assert.equal(seen[0], 'Bearer already.have.one');
+  assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
-test('rememberTokensFromPayload reads nested session bodies', () => {
+test('the session bearer is left in place when it is already set', async () => {
+  const storage = memoryStorage({ 'privy:pat': JSON.stringify(TOKEN) });
+  const seen = [];
+  const target = {
+    Request,
+    localStorage: storage,
+    sessionStorage: memoryStorage(),
+    fetch: async (input, init) => {
+      seen.push(new Request(input, init).headers.get('authorization'));
+      return new Response('{}');
+    },
+  };
+  installAcceptTermsAuth(target);
+  await target.fetch('https://auth.privy.io/api/v1/users/me/accept_terms', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  assert.equal(seen[0], `Bearer ${TOKEN}`);
+});
+
+test('the customer access token is not sent as the accept_terms bearer', async () => {
+  const storage = memoryStorage({ 'privy:token': JSON.stringify(TOKEN) });
+  const seen = [];
+  const target = {
+    Request,
+    localStorage: storage,
+    sessionStorage: memoryStorage(),
+    fetch: async (input, init) => {
+      seen.push(new Request(input, init).headers.get('authorization'));
+      return new Response('{}');
+    },
+  };
+  installAcceptTermsAuth(target);
+  assert.equal(readPrivyAccessToken(storage), '');
+  await target.fetch('https://auth.privy.io/api/v1/users/me/accept_terms', {
+    method: 'POST',
+    headers: { 'privy-app-id': 'app' },
+    body: '{}',
+  });
+  assert.equal(seen[0], null);
+});
+
+test('a wiped session is minted from the refresh token before accept_terms', async () => {
+  const storage = memoryStorage({
+    'privy:refresh_token': JSON.stringify('refresh-1'),
+  });
+  const seen = [];
+  const target = {
+    Request,
+    localStorage: storage,
+    sessionStorage: memoryStorage(),
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      if (request.url === SESSIONS_URL) {
+        assert.equal(await request.json().then((body) => body.refresh_token), 'refresh-1');
+        return new Response(JSON.stringify({
+          token: 'customer.access.jwt',
+          privy_access_token: TOKEN,
+          refresh_token: 'refresh-2',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      seen.push(request.headers.get('authorization'));
+      return new Response('{}', { status: 200 });
+    },
+  };
+  installAcceptTermsAuth(target);
+  await target.fetch('https://auth.privy.io/api/v1/users/me/accept_terms', {
+    method: 'POST',
+    headers: { 'privy-app-id': 'app_123', authorization: 'Bearer customer.access.jwt' },
+    body: '{}',
+  });
+  assert.equal(seen[0], `Bearer ${TOKEN}`);
+  assert.equal(resolvePrivyRefreshToken(target), 'refresh-2');
+  assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), 'refresh-2');
+});
+
+test('rememberTokensFromPayload keeps the session token, not the customer token', () => {
   const auth = createAcceptTermsAuth();
-  rememberTokensFromPayload(auth, { data: { privy_access_token: TOKEN } });
+  rememberTokensFromPayload(auth, {
+    data: { token: 'customer.access.jwt', privy_access_token: TOKEN },
+  });
+  assert.equal(auth.current(null), TOKEN);
+  rememberTokensFromPayload(auth, { token: 'other.customer.jwt' });
   assert.equal(auth.current(null), TOKEN);
 });
 
@@ -235,6 +326,28 @@ test('postAcceptTerms sends bearer and app id', async () => {
   assert.equal(seen[0].headers.authorization, `Bearer ${TOKEN}`);
   assert.equal(seen[0].headers['privy-app-id'], 'app_123');
   assert.equal(seen[0].headers['privy-client-id'], 'client_9');
+  assert.equal(seen[0].headers['privy-client'], 'react-auth:3.51.4');
+});
+
+test('postAcceptTerms mints a session bearer from the refresh token', async () => {
+  const seen = [];
+  const result = await postAcceptTerms({
+    token: '',
+    refreshToken: 'refresh-1',
+    appId: 'app_123',
+    fetchImpl: async (url, init) => {
+      seen.push({ url, authorization: init.headers.authorization, body: init.body });
+      if (String(url).endsWith('/api/v1/sessions')) {
+        return new Response(JSON.stringify({ privy_access_token: TOKEN }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(seen[0].url, SESSIONS_URL);
+  assert.equal(seen[0].authorization, undefined);
+  assert.equal(JSON.parse(seen[0].body).refresh_token, 'refresh-1');
+  assert.equal(seen[1].authorization, `Bearer ${TOKEN}`);
 });
 
 test('postAcceptTerms fails closed without a token', async () => {
@@ -247,6 +360,35 @@ test('postAcceptTerms fails closed without a token', async () => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.error, 'token_missing');
+});
+
+test('fetch captured before install still gets the session bearer', async () => {
+  const seen = [];
+  const native = async (input, init) => {
+    seen.push(new Request(input, init).headers.get('authorization'));
+    return new Response('{}', { status: 200 });
+  };
+  let hook = null;
+  const captured = (input, init) => (typeof hook === 'function' ? hook(input, init) : native(input, init));
+  const storage = memoryStorage({ 'privy:pat': JSON.stringify(TOKEN) });
+  const target = {
+    Request,
+    localStorage: storage,
+    sessionStorage: memoryStorage(),
+    fetch: captured,
+    __maelstromNativeFetch: native,
+  };
+  Object.defineProperty(target, '__maelstromFetchHook', {
+    configurable: true,
+    get() { return hook; },
+    set(value) { hook = value; },
+  });
+  installAcceptTermsAuth(target);
+  await captured('https://auth.privy.io/api/v1/users/me/accept_terms', {
+    method: 'POST',
+    body: '{}',
+  });
+  assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
 test('resolveAcceptTermsToken reads the installed cache', () => {
