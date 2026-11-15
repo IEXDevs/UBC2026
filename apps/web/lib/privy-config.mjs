@@ -23,9 +23,11 @@ const SOLANA_LOGIN = Object.freeze({
     walletList: SOLANA_WALLETS,
   }),
   loginMethods: Object.freeze(['email', 'google', 'github', 'discord', 'wallet']),
+  // Wallet create-on-login logs the user out on failure. The shell provisions
+  // Solana wallets via POST /api/wallets after a stable session instead.
   embeddedWallets: Object.freeze({
     ethereum: Object.freeze({ createOnLogin: 'off' }),
-    solana: Object.freeze({ createOnLogin: 'all-users' }),
+    solana: Object.freeze({ createOnLogin: 'off' }),
   }),
   mfa: Object.freeze({ noPromptOnMfaRequired: false }),
 });
