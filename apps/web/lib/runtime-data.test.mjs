@@ -38,7 +38,13 @@ test('shell bot mapping never invents preview experience', () => {
 });
 
 test('empty money state has no fake rows', () => {
-  assert.deepEqual(emptyMoneyState(), { bots: [], wallets: [], payments: [], positions: [] });
+  assert.deepEqual(emptyMoneyState(), {
+    bots: [],
+    wallets: [],
+    payments: [],
+    positions: [],
+    paymentCrossCheck: [],
+  });
 });
 
 test('delete bot URL stays on the runtime origin', () => {
@@ -85,6 +91,10 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
           { id: 'bad', amount: 'nope', asset: 'USDC' },
           { id: 'p2', botId: 'bot_live', direction: 'paid', protocol: 'x402', amount: '10', asset: 'USDC', counterparty: 'desk', cluster: 'devnet' },
         ],
+        crossCheck: [
+          { walletId: 'w1', alert: 'unapproved_spend', freeze: true, excess: '10', asset: 'USDC' },
+          { walletId: 'w2', alert: 'other', freeze: false, excess: '1' },
+        ],
       });
     }
     if (url.endsWith('/status')) {
@@ -111,6 +121,8 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
   assert.equal(lists.bots.length, 1);
   assert.equal(lists.wallets.length, 1);
   assert.equal(lists.payments.length, 1);
+  assert.equal(lists.paymentCrossCheck.length, 1);
+  assert.equal(lists.paymentCrossCheck[0].walletId, 'w1');
   assert.equal(lists.positions.length, 1);
   assert.equal(lists.positions[0].pnlMicroUsdc, '-500');
   assert.equal(lists.positions[0].botId, 'bot_live');

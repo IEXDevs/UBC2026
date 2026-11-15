@@ -5,6 +5,7 @@ import { ExternalLink } from 'lucide-react';
 import { filterBotHistory } from '../lib/bot-history.mjs';
 import {
   describeHistory,
+  describeSpendAlerts,
   describeWallets,
   SOLSCAN_DEVNET,
 } from '../lib/money-views.mjs';
@@ -46,6 +47,7 @@ function historyRows(state) {
     party: partyFromToken(row.counterparty),
     explorerUrl: row.explorerUrl,
     legs: row.legs,
+    badge: row.badge,
     record: row,
   }));
   const transfers = (state.transfers || []).map(row => ({
@@ -70,9 +72,15 @@ function History({ state, onParty }) {
   const [minUnits, setMinUnits] = useState('0');
   const shown = filterBotHistory(rows, { botId, flow, minUnits });
   const bots = state.bots || [];
+  const alerts = describeSpendAlerts(state.paymentCrossCheck);
   return (
     <section className="panel" aria-label="History">
       <h2>History</h2>
+      {alerts.map(alert => (
+        <p key={alert.walletId} className="preview-note" role="alert">
+          Unapproved spend of {alert.excessLabel} {alert.asset}. The wallet is frozen.
+        </p>
+      ))}
       <div className="history-filters">
         <label>
           Bot
@@ -135,6 +143,7 @@ function HistoryDetail({ row }) {
       <Detail label="Base units" value={`${row.baseUnits} ${row.asset}`} />
       <Detail label="Payment" value={row.id} />
       <Detail label="Signature" value={row.txSignature ?? 'Not broadcast yet'} />
+      {row.badge === 'confirmed' ? <Detail label="Stream" value="Confirmed" /> : null}
       <div className="ledger-meta ledger-meta-link">
         <dt>Explorer</dt>
         <dd>

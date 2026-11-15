@@ -440,6 +440,175 @@ export function createKvDedupeStore(ns, { ttlSeconds = 60 * 60 * 24 * 14, prefix
   };
 }
 
+/** Circle devnet USDC mint. Public address, not a secret. */
+export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+
+const PAYMENT_DIRECTIONS = Object.freeze({ 'x402-in': 'earned', 'x402-out': 'paid' });
+const OUTFLOW_TYPES = new Set(['x402-out', 'withdrawal']);
+
+function integerAmount(value) {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (/^(0|[1-9][0-9]{0,39})$/.test(trimmed)) return trimmed;
+  if (/^(0|[1-9][0-9]{0,39})\.0+$/.test(trimmed)) return trimmed.slice(0, trimmed.indexOf('.'));
+  return null;
+}
+
+/** Map a stream token to a ledger asset. Missing tokens stay missing. */
+export function streamAsset(token) {
+  if (token == null) return null;
+  const value = String(token).trim();
+  if (!value || value.length > 64) return null;
+  if (value === 'USDC' || value === DEVNET_USDC_MINT) return 'USDC';
+  return value;
+}
+
+function eventType(event) {
+  return event?.type || event?.event_type || null;
+}
+
+function attributeBot(event, bots) {
+  const explicit = event?.botId || event?.bot_id;
+  if (typeof explicit === 'string' && explicit) return explicit;
+  const matches = (bots || [])
+    .filter(bot => bot && (bot.walletAddress === event?.wallet || bot.address === event?.wallet))
+    .map(bot => bot.id || bot.botId)
+    .filter(id => typeof id === 'string' && id)
+    .sort();
+  return matches[0] || null;
+}
+
+/**
+ * Payment-feed rows from QuickNode stream events.
+ * x402 in/out only, and only when the event already carries an amount, asset, signature, and bot.
+ * An empty event list stays an empty feed.
+ */
+export function streamConfirmedPayments(events, { bots = [] } = {}) {
+  if (!Array.isArray(events)) return [];
+  const rows = [];
+  const seen = new Set();
+  for (const event of events) {
+    const direction = PAYMENT_DIRECTIONS[eventType(event)];
+    if (!direction) continue;
+    const signature = typeof event?.signature === 'string' ? event.signature : '';
+    if (!signature || signature.length > 128 || seen.has(signature)) continue;
+    const amount = integerAmount(event.amount);
+    const asset = streamAsset(event.token ?? event.asset);
+    const botId = attributeBot(event, bots);
+    const cluster = event?.cluster === 'testnet' ? 'testnet' : event?.cluster === 'devnet' ? 'devnet' : null;
+    const counterparty = typeof event?.counterparty === 'string' && event.counterparty.trim()
+      ? event.counterparty.trim()
+      : event?.wallet;
+    if (!amount || !asset || !botId || !cluster || typeof counterparty !== 'string' || !counterparty) continue;
+    seen.add(signature);
+    rows.push({
+      id: `stream:${signature}`,
+      botId,
+      direction,
+      protocol: 'x402',
+      amount,
+      asset,
+      counterparty,
+      cluster,
+      txSignature: signature,
+      streamConfirmed: true,
+      badge: 'confirmed',
+    });
+  }
+  return rows;
+}
+
+/**
+ * Match on-chain outflows to bot-policy spent + reserved.
+ * No outflow to check → checked false. Unreadable ledger amounts do not freeze.
+ * Chain movement above the ledger is unapproved spend.
+ */
+export function walletLedgerCrossCheck({ events = [], ledgers = [] } = {}) {
+  const byAsset = new Map();
+  const seen = new Set();
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!OUTFLOW_TYPES.has(eventType(event))) continue;
+    const signature = typeof event?.signature === 'string' ? event.signature : '';
+    if (signature) {
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+    }
+    const asset = streamAsset(event.token ?? event.asset);
+    const amount = integerAmount(event.amount);
+    if (!asset || !amount) continue;
+    byAsset.set(asset, (byAsset.get(asset) || 0n) + BigInt(amount));
+  }
+  if (byAsset.size === 0) {
+    return { checked: false, ok: true, alert: null, freeze: false, excess: '0' };
+  }
+
+  for (const [asset, chain] of byAsset) {
+    const rows = (Array.isArray(ledgers) ? ledgers : []).filter(row => streamAsset(row?.asset) === asset);
+    let allowed = 0n;
+    for (const row of rows) {
+      const spent = integerAmount(row.spent);
+      const reserved = integerAmount(row.reserved);
+      if (spent == null || reserved == null) {
+        return {
+          checked: true,
+          ok: true,
+          alert: null,
+          freeze: false,
+          excess: '0',
+          reason: 'ledger_unreadable',
+          asset,
+        };
+      }
+      allowed += BigInt(spent) + BigInt(reserved);
+    }
+    if (chain > allowed) {
+      return {
+        checked: true,
+        ok: false,
+        alert: 'unapproved_spend',
+        freeze: true,
+        excess: (chain - allowed).toString(),
+        asset,
+        chainOutflow: chain.toString(),
+        allowed: allowed.toString(),
+      };
+    }
+  }
+  return { checked: true, ok: true, alert: null, freeze: false, excess: '0' };
+}
+
+/** Per-wallet alerts. Wallets with no countable outflow are omitted. */
+export function spendLedgerCrossCheck({ events = [], wallets = [], ledgers = [] } = {}) {
+  const alerts = [];
+  for (const wallet of Array.isArray(wallets) ? wallets : []) {
+    if (!wallet?.id || !wallet.address) continue;
+    const botIds = new Set((wallet.botIds || []).filter(id => typeof id === 'string'));
+    const mine = (Array.isArray(events) ? events : []).filter(event => {
+      if (event?.wallet === wallet.address) return true;
+      const botId = event?.botId || event?.bot_id;
+      return typeof botId === 'string' && botIds.has(botId);
+    });
+    const walletLedgers = (Array.isArray(ledgers) ? ledgers : []).filter(row => {
+      const botId = row?.botId || row?.bot_id;
+      return typeof botId === 'string' && botIds.has(botId);
+    });
+    const decision = walletLedgerCrossCheck({ events: mine, ledgers: walletLedgers });
+    if (decision.alert !== 'unapproved_spend') continue;
+    alerts.push({
+      walletId: wallet.id,
+      address: wallet.address,
+      alert: decision.alert,
+      freeze: true,
+      excess: decision.excess,
+      asset: decision.asset,
+      chainOutflow: decision.chainOutflow,
+      allowed: decision.allowed,
+    });
+  }
+  return alerts;
+}
+
 /** README snippet for the QuickNode Streams bounty. */
 export function streamsReadmeSection() {
   return [

@@ -15,6 +15,10 @@ import {
   syncWalletsToKv,
   runStreamBackfill,
   streamsReadmeSection,
+  streamConfirmedPayments,
+  walletLedgerCrossCheck,
+  spendLedgerCrossCheck,
+  DEVNET_USDC_MINT,
   StreamsError,
 } from './streams.mjs';
 
@@ -168,4 +172,67 @@ test('supabase store resolves bots, persists, and backfill wakes with afterWake'
   });
   assert.equal(backfill.accepted.length, 1);
   assert.deepEqual(after, ['bot_1']);
+});
+
+test('payment feed stays empty until a stream posts an x402 amount', () => {
+  assert.deepEqual(streamConfirmedPayments([]), []);
+  assert.deepEqual(streamConfirmedPayments(null), []);
+  const signature = '5'.repeat(64);
+  const hidden = streamConfirmedPayments([
+    { signature, wallet, type: 'deposit', amount: '10', token: 'USDC', cluster: 'devnet', botId: 'bot_1' },
+    { signature: '6'.repeat(64), wallet, type: 'x402-out', token: 'USDC', cluster: 'devnet', botId: 'bot_1' },
+    { signature: '7'.repeat(64), wallet, type: 'x402-in', amount: '4', token: 'USDC', cluster: 'mainnet', botId: 'bot_1' },
+  ]);
+  assert.deepEqual(hidden, []);
+  const rows = streamConfirmedPayments([
+    { signature, wallet, type: 'x402-out', amount: '25', token: 'USDC', cluster: 'devnet', botId: 'bot_shop' },
+    { signature: '8'.repeat(64), wallet, event_type: 'x402-in', amount: '9', token: DEVNET_USDC_MINT, cluster: 'devnet' },
+  ], { bots: [{ id: 'bot_only', walletAddress: wallet }] });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].direction, 'paid');
+  assert.equal(rows[0].badge, 'confirmed');
+  assert.equal(rows[0].streamConfirmed, true);
+  assert.equal(rows[0].amount, '25');
+  assert.equal(rows[1].direction, 'earned');
+  assert.equal(rows[1].botId, 'bot_only');
+  assert.equal(rows[1].asset, 'USDC');
+});
+
+test('spend ledger cross-check freezes only unapproved outflows', () => {
+  const covered = walletLedgerCrossCheck({
+    events: [{ signature: 'a'.repeat(32), type: 'x402-out', amount: '5', token: 'USDC' }],
+    ledgers: [{ asset: 'USDC', spent: '3', reserved: '2' }],
+  });
+  assert.equal(covered.ok, true);
+  assert.equal(covered.freeze, false);
+
+  const over = walletLedgerCrossCheck({
+    events: [
+      { signature: 'b'.repeat(32), type: 'x402-out', amount: '8', token: 'USDC' },
+      { signature: 'b'.repeat(32), type: 'withdrawal', amount: '8', token: 'USDC' },
+      { signature: 'c'.repeat(32), type: 'x402-in', amount: '100', token: 'USDC' },
+    ],
+    ledgers: [{ asset: 'USDC', spent: '4', reserved: '1' }],
+  });
+  assert.equal(over.alert, 'unapproved_spend');
+  assert.equal(over.freeze, true);
+  assert.equal(over.excess, '3');
+  assert.equal(over.chainOutflow, '8');
+
+  const unreadable = walletLedgerCrossCheck({
+    events: [{ signature: 'd'.repeat(32), type: 'withdrawal', amount: '9', token: 'USDC' }],
+    ledgers: [{ asset: 'USDC', spent: '1.5', reserved: '0' }],
+  });
+  assert.equal(unreadable.freeze, false);
+  assert.equal(unreadable.reason, 'ledger_unreadable');
+
+  const alerts = spendLedgerCrossCheck({
+    events: [{ signature: 'e'.repeat(32), wallet, type: 'x402-out', amount: '10', token: 'USDC', bot_id: 'bot_1' }],
+    wallets: [{ id: 'w1', address: wallet, botIds: ['bot_1'] }],
+    ledgers: [{ bot_id: 'bot_1', asset: 'USDC', spent: '0', reserved: '0' }],
+  });
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].walletId, 'w1');
+  assert.equal(alerts[0].excess, '10');
+  assert.deepEqual(spendLedgerCrossCheck({ events: [], wallets: [{ id: 'w1', address: wallet, botIds: ['bot_1'] }], ledgers: [] }), []);
 });

@@ -33,4 +33,25 @@ test('filters keep one bot, one direction, and a minimum value', () => {
   assert.deepEqual(filtered.map(row => row.id), ['out']);
   assert.equal(filterBotHistory(rows, { flow: 'in' }).length, 1);
   assert.equal(filterBotHistory(rows, { botId: 'bot_shop' })[0].id, 'small');
+  assert.equal(filterBotHistory(rows, { botId: 'bot_shop' })[0].badge, null);
+});
+
+test('a stream-confirmed payment keeps the confirmed badge', () => {
+  const rows = botHistoryRows({
+    payments: [{
+      id: 'stream:sig',
+      botId: 'bot_shop',
+      direction: 'earned',
+      amount: '10000',
+      asset: 'USDC',
+      counterparty: 'desk',
+      protocol: 'x402',
+      cluster: 'devnet',
+      streamConfirmed: true,
+      badge: 'confirmed',
+    }],
+    bots,
+  });
+  assert.equal(rows[0].badge, 'confirmed');
+  assert.equal(rows[0].direction, 'in');
 });

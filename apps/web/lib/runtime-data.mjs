@@ -152,7 +152,7 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
     : { runtimeBase: runtimeBaseOrOptions };
   const runtimeBase = options.runtimeBase === undefined ? 'shell' : options.runtimeBase;
   if (typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
-    return { bots: [], wallets: [], payments: [], positions: [], source: 'unsigned' };
+    return { bots: [], wallets: [], payments: [], positions: [], paymentCrossCheck: [], source: 'unsigned' };
   }
   const fetcher = typeof options.fetcher === 'function' ? options.fetcher : fetch;
   const headers = ownerHeaders(ownerId, options.accessToken);
@@ -160,7 +160,7 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
   const walletsUrl = ownerApiUrl('/api/wallets', runtimeBase);
   const paymentsUrl = ownerApiUrl('/api/payments', runtimeBase);
   if (!botsUrl || !walletsUrl || !paymentsUrl) {
-    return { bots: [], wallets: [], payments: [], positions: [], source: 'unsigned' };
+    return { bots: [], wallets: [], payments: [], positions: [], paymentCrossCheck: [], source: 'unsigned' };
   }
   const [botsRes, walletsRes, paymentsRes] = await Promise.all([
     getJson(botsUrl, headers, fetcher),
@@ -183,12 +183,19 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
     bots,
     wallets: walletsRes.ok && Array.isArray(walletsRes.body?.items) ? walletsRes.body.items.filter(liveWallet) : [],
     payments: paymentsRes.ok && Array.isArray(paymentsRes.body?.items) ? paymentsRes.body.items.filter(livePayment) : [],
+    paymentCrossCheck: paymentsRes.ok && Array.isArray(paymentsRes.body?.crossCheck)
+      ? paymentsRes.body.crossCheck.filter(row => row
+        && row.alert === 'unapproved_spend'
+        && row.freeze === true
+        && typeof row.walletId === 'string'
+        && typeof row.excess === 'string')
+      : [],
     positions,
   };
 }
 
 export function emptyMoneyState() {
-  return { bots: [], wallets: [], payments: [], positions: [] };
+  return { bots: [], wallets: [], payments: [], positions: [], paymentCrossCheck: [] };
 }
 
 export function deleteBotUrl(runtimeBase, botId) {

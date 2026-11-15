@@ -7,8 +7,10 @@ import {
   createKvDedupeStore,
   syncWalletsToKv,
   runStreamBackfill,
+  walletLedgerCrossCheck,
   StreamsError,
 } from '@ubc2026/quicknode-streams';
+import { supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 
 /** Process-wide fallback dedupe for local/dev; prefer STREAM_DEDUPE KV or Supabase in production. */
 const fallbackDedupe = createMemoryDedupeStore();
@@ -64,13 +66,127 @@ function resolveBotIdsFor(env) {
 
 function persistFor(env) {
   return async (event) => {
+    let stamped = event;
+    try {
+      const resolved = await resolveBotIdsFor(env)(event);
+      const first = (resolved || [])
+        .map((entry) => (typeof entry === 'string' ? { botId: entry } : entry))
+        .find((entry) => entry && typeof entry.botId === 'string' && entry.botId);
+      if (first?.botId) {
+        stamped = {
+          ...event,
+          botId: event.botId || first.botId,
+          ownerId: event.ownerId || first.ownerId || null,
+        };
+      }
+    } catch {
+      stamped = event;
+    }
     if (typeof env.persistStreamEvent === 'function') {
-      return env.persistStreamEvent(event);
+      return env.persistStreamEvent(stamped);
     }
     const sb = supabaseStore(env);
-    if (sb) return sb.persistEvent(event);
+    if (sb) return sb.persistEvent(stamped);
     return null;
   };
+}
+
+function integerRows(rows) {
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function snapshotsFromSupabase(env, interesting) {
+  const fetcher = env.fetch || fetch;
+  const addresses = [...new Set(interesting.map((event) => event.wallet).filter(Boolean))];
+  const snapshots = [];
+  for (const address of addresses) {
+    const wallets = await supabaseGet(
+      env,
+      `wallets?address=eq.${encodeURIComponent(address)}&select=id,owner_id,address,frozen`,
+      fetcher,
+    );
+    const wallet = wallets.rows?.[0];
+    if (!wallet?.id || !wallet.owner_id) continue;
+    const bots = await supabaseGet(
+      env,
+      `bots?wallet_id=eq.${encodeURIComponent(wallet.id)}&select=id`,
+      fetcher,
+    );
+    const botIds = integerRows(bots.rows).map((row) => row.id).filter(Boolean);
+    const ledgers = botIds.length
+      ? await supabaseGet(
+        env,
+        `spend_ledgers?bot_id=in.(${botIds.map(encodeURIComponent).join(',')})&select=bot_id,asset,spent,reserved`,
+        fetcher,
+      )
+      : { rows: [] };
+    if (botIds.length && ledgers.rows == null) continue;
+    const events = await supabaseGet(
+      env,
+      `stream_events?wallet=eq.${encodeURIComponent(address)}&event_type=in.(x402-out,withdrawal)&select=signature,wallet,event_type,amount,token&limit=200`,
+      fetcher,
+    );
+    const rows = integerRows(events.rows);
+    const seen = new Set(rows.map((row) => row.signature));
+    for (const event of interesting) {
+      if (event.wallet === address && !seen.has(event.signature)) rows.push(event);
+    }
+    snapshots.push({
+      walletId: wallet.id,
+      ownerId: wallet.owner_id,
+      address,
+      frozen: wallet.frozen === true,
+      ledgers: integerRows(ledgers.rows),
+      events: rows,
+    });
+  }
+  return snapshots;
+}
+
+/**
+ * Compare stream outflows with the bot-policy ledger.
+ * Skips the check when the ledger cannot be read. Unapproved spend freezes the wallet.
+ */
+export async function applySpendCrossCheck(env, accepted) {
+  const interesting = (accepted || []).filter((event) => event?.type === 'x402-out' || event?.type === 'withdrawal');
+  if (!interesting.length) return [];
+  if (typeof env.loadSpendCrossCheck !== 'function' && !supabaseConfig(env)) return [];
+  const snapshots = typeof env.loadSpendCrossCheck === 'function'
+    ? await env.loadSpendCrossCheck(interesting)
+    : await snapshotsFromSupabase(env, interesting);
+  if (!Array.isArray(snapshots)) return [];
+  const alerts = [];
+  for (const snapshot of snapshots) {
+    const decision = walletLedgerCrossCheck({
+      events: snapshot.events || interesting.filter((event) => event.wallet === snapshot.address),
+      ledgers: snapshot.ledgers || [],
+    });
+    if (decision.alert !== 'unapproved_spend') continue;
+    let freezeResult = snapshot.frozen === true ? 'already_frozen' : 'not_frozen';
+    if (snapshot.frozen !== true && typeof env.ledgerApi?.freezeWallet === 'function' && snapshot.ownerId && snapshot.walletId) {
+      try {
+        const frozen = await env.ledgerApi.freezeWallet({
+          ownerId: snapshot.ownerId,
+          walletId: snapshot.walletId,
+          now: Date.now(),
+        });
+        freezeResult = frozen?.state || 'frozen';
+      } catch {
+        freezeResult = 'freeze_failed';
+      }
+    }
+    alerts.push({
+      walletId: snapshot.walletId,
+      alert: 'unapproved_spend',
+      freeze: true,
+      excess: decision.excess,
+      asset: decision.asset,
+      chainOutflow: decision.chainOutflow,
+      allowed: decision.allowed,
+      freezeResult,
+    });
+  }
+  return alerts;
 }
 
 async function wakeAndMaybeLoop(env, botStub, wake) {
@@ -145,12 +261,19 @@ export async function processQuickNodeWebhook(request, env, botStub) {
       status: w.after?.wakeStatus ?? 0,
       loopStatus: w.after?.loopStatus,
     }));
+    let crossCheck = [];
+    try {
+      crossCheck = await applySpendCrossCheck(env, result.accepted);
+    } catch {
+      crossCheck = [];
+    }
 
     return Response.json({
       ok: true,
       accepted: result.accepted.length,
       duplicates: result.duplicates.length,
       wakes: wakeResults,
+      crossCheck,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const status = error.status ?? 400;
@@ -216,6 +339,12 @@ export async function processStreamBackfill(request, env, botStub) {
       resolveBotIds: resolveBotIdsFor(env),
       afterWake: (wake) => wakeAndMaybeLoop(env, botStub, wake),
     });
+    let crossCheck = [];
+    try {
+      crossCheck = await applySpendCrossCheck(env, result.accepted);
+    } catch {
+      crossCheck = [];
+    }
     return Response.json({
       ok: true,
       ownerId,
@@ -226,6 +355,7 @@ export async function processStreamBackfill(request, env, botStub) {
         status: w.after?.wakeStatus ?? 0,
         loopStatus: w.after?.loopStatus,
       })),
+      crossCheck,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof StreamsError) {
