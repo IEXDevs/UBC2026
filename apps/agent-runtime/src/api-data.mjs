@@ -1077,7 +1077,10 @@ export async function handleApiData(request, env, matched) {
       `profiles?owner_id=eq.${encodeURIComponent(ownerId)}&select=handle,display_name,avatar_url`,
       fetcher,
     );
-    const row = result.rows?.[0];
+    if (result.status !== 200 || !Array.isArray(result.rows)) {
+      return json({ error: 'profile_read_failed' }, 502);
+    }
+    const row = result.rows[0];
     return json({
       ok: true,
       source: 'supabase',

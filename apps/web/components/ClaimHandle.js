@@ -30,7 +30,7 @@ export default function ClaimHandle({ accountLabel = '', onSave }) {
               displayName: nextName,
               handle: nextHandle,
             })).then((saved) => {
-              if (saved?.error === 'handle_taken') {
+              if (saved?.error || saved?.ok === false) {
                 setNote(claimSaveNote(saved));
                 setPending(false);
                 return;

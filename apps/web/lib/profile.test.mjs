@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { claimSaveNote, mentionIn, profileAfterDirectoryRead, profileRailLabel, recipientHint } from './profile.mjs';
+import {
+  claimSaveNote,
+  mentionIn,
+  profileAfterDirectoryRead,
+  profileRailLabel,
+  profileSaveResult,
+  recipientHint,
+} from './profile.mjs';
 
 test('a message can name a handle or an SNS name', () => {
   assert.equal(mentionIn('send it to @Alex'), '@Alex');
@@ -23,7 +30,10 @@ test('an empty Supabase directory does not erase a saved handle claim', () => {
   assert.equal(empty.profile.handle, 'alex');
   assert.equal(empty.profile.displayName, 'Alex');
   const missingName = profileAfterDirectoryRead({ handle: 'alex' }, { source: 'supabase', profile: null });
-  assert.equal(missingName.persist, 'clear');
+  assert.equal(missingName.persist, 'keep');
+  assert.equal(missingName.profile.handle, 'alex');
+  const nothing = profileAfterDirectoryRead(null, { source: 'supabase', profile: null });
+  assert.equal(nothing.persist, 'clear');
   const server = profileAfterDirectoryRead(local, {
     source: 'supabase',
     profile: { handle: 'alex', displayName: 'Alex Rivera' },
@@ -31,6 +41,32 @@ test('an empty Supabase directory does not erase a saved handle claim', () => {
   assert.equal(server.persist, 'write');
   assert.equal(server.profile.displayName, 'Alex Rivera');
   assert.equal(profileAfterDirectoryRead(local, { source: 'local' }).persist, 'keep');
+});
+
+test('a 200 without a stored handle is not a saved claim', () => {
+  const missing = profileSaveResult(200, { ok: true, source: 'supabase', profile: null }, 'alex');
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error, 'profile_save_failed');
+  const echoed = profileSaveResult(200, {
+    ok: true,
+    source: 'unconfigured',
+    profile: { handle: 'alex', displayName: 'Alex' },
+  }, 'alex');
+  assert.equal(echoed.ok, false);
+  assert.equal(echoed.error, 'profile_save_failed');
+  const stored = profileSaveResult(200, {
+    ok: true,
+    source: 'supabase',
+    profile: { handle: 'alex', displayName: 'Alex' },
+  }, 'alex');
+  assert.equal(stored.ok, true);
+  assert.equal(stored.profile.handle, 'alex');
+  const kept = profileAfterDirectoryRead(
+    { handle: 'alex', displayName: 'Alex' },
+    { ok: true, source: 'supabase', profile: null },
+  );
+  assert.equal(kept.persist, 'keep');
+  assert.equal(kept.profile.handle, 'alex');
 });
 
 test('a failed claim names the status and error code', () => {

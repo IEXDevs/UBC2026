@@ -39,7 +39,7 @@ import {
   writeRoster,
 } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
-import { profileAfterDirectoryRead, profileRailLabel } from '../lib/profile.mjs';
+import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '../lib/profile.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import {
   deleteOwnerBot,
@@ -549,19 +549,22 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         body: JSON.stringify(stored),
       });
       const body = await response.json().catch(() => ({}));
-      if (response.status === 409 || body.error === 'handle_taken') return { error: 'handle_taken', status: response.status };
-      if (!response.ok) {
-        const code = typeof body.error === 'string' && /^[a-z0-9_]{1,64}$/i.test(body.error)
-          ? body.error
-          : 'profile_save_failed';
-        const error = new Error(code);
-        error.code = code;
-        error.status = response.status;
+      const saved = profileSaveResult(response.status, body, stored.handle);
+      if (!saved.ok) {
+        const error = new Error(saved.error);
+        error.code = saved.error;
+        error.status = saved.status;
         throw error;
       }
-      setProfile(stored);
-      if (key) localStorage.setItem(key, JSON.stringify(stored));
-      return body;
+      const confirmed = {
+        ...stored,
+        handle: saved.profile.handle,
+        displayName: saved.profile.displayName || stored.displayName,
+        avatarUrl: saved.profile.avatarUrl || stored.avatarUrl || null,
+      };
+      setProfile(confirmed);
+      if (key) localStorage.setItem(key, JSON.stringify(confirmed));
+      return { ok: true, source: body.source || 'supabase', profile: confirmed };
     }
     setProfile(stored);
     if (key) localStorage.setItem(key, JSON.stringify(stored));
