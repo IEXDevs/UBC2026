@@ -53,6 +53,122 @@ test('wallet create reports signer_not_configured without Privy secrets', async 
   assert.equal((await res.json()).error, 'signer_not_configured');
 });
 
+test('wallets.persist writes rows without calling Privy acceptLogin', async () => {
+  const writes = [];
+  let acceptCalls = 0;
+  const env = fakeEnv({
+    transferClient: {
+      acceptLogin: async () => {
+        acceptCalls += 1;
+        throw new Error('should not call Privy');
+      },
+    },
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      writes.push({ href, method: init.method || 'GET', body: init.body });
+      if (href.includes('/rest/v1/wallets?') && (!init.method || init.method === 'GET')) {
+        return Response.json([{
+          id: 'w1',
+          owner_id: 'user_1',
+          kind: 'main',
+          label: 'Main',
+          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          provider: 'privy',
+          frozen: false,
+        }]);
+      }
+      return new Response(null, { status: 201 });
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/wallets/persist', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer tok_1',
+      'x-owner-id': 'user_1',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      wallets: [{
+        id: 'w1',
+        ownerId: 'user_1',
+        kind: 'main',
+        label: 'Main',
+        address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+        provider: 'privy',
+        frozen: false,
+      }],
+    }),
+  }), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.wrote, 1);
+  assert.equal(body.wallets[0].id, 'w1');
+  assert.equal(acceptCalls, 0);
+  assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/wallets') && entry.method === 'POST'), true);
+});
+
+test('wallets.list attaches usdcBalance from QuickNode when configured', async () => {
+  const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('/rest/v1/wallets')) {
+        return Response.json([{
+          id: 'w1',
+          owner_id: 'user_1',
+          kind: 'main',
+          label: 'Main',
+          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          provider: 'privy',
+          frozen: false,
+        }]);
+      }
+      if (href.includes('/rpc') || href === 'https://example.invalid/rpc') {
+        const body = JSON.parse(init.body || '{}');
+        if (body.method === 'getGenesisHash') {
+          return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        }
+        if (body.method === 'getTokenAccountsByOwner') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              value: [{
+                account: {
+                  data: {
+                    parsed: {
+                      info: {
+                        mint: DEVNET_USDC_MINT,
+                        tokenAmount: { amount: '1234500', decimals: 6 },
+                      },
+                    },
+                  },
+                },
+              }],
+            },
+          });
+        }
+      }
+      return new Response('nope', { status: 404 });
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/wallets', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.items[0].usdcBalance, '1234500');
+  assert.equal(body.items[0].balanceStatus, 'ok');
+  assert.equal(body.items[0].cluster, 'devnet');
+  assert.equal(JSON.stringify(body).includes('example.invalid'), false);
+});
+
 test('wallet create forwards browser origin into Privy acceptLogin', async () => {
   const seen = [];
   const env = fakeEnv({
