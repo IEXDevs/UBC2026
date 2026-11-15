@@ -56,7 +56,7 @@ test('startBrowserDictation uses an ElevenLabs Scribe token and VAD commits', as
   await ready;
   assert.equal(connectOpts.token, 'sutkn_test');
   assert.equal(connectOpts.modelId, 'scribe_v2_realtime');
-  assert.equal(connectOpts.commitStrategy, 'vad');
+  assert.equal(connectOpts.commitStrategy, 'manual');
   listeners.get('committed_transcript')?.({ text: 'hello ' });
   listeners.get('committed_transcript')?.({ text: ' world' });
   job.cancel();

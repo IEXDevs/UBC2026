@@ -79,6 +79,9 @@ test('the prompt bar exposes both dictation and live voice mode', () => {
   assert.match(composer, /className=\{`voice-mode\$\{live \? ' is-on' : ''\}`\}/);
   const dictation = readFileSync(join(root, 'lib/dictation.mjs'), 'utf8');
   assert.match(dictation, /scribe_v2_realtime/);
-  assert.match(dictation, /CommitStrategy\.VAD/);
+  assert.match(dictation, /CommitStrategy\.MANUAL/);
   assert.match(dictation, /\/api\/voice\/scribe-token/);
+  const privyRoot = readFileSync(join(root, 'components/PrivyRoot.js'), 'utf8');
+  assert.match(privyRoot, /restorePrivySessionIfMissing/);
+  assert.match(privyRoot, /installPrivySessionMirror/);
 });
