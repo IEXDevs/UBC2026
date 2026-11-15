@@ -2,7 +2,7 @@
  * Live /api/* data routes backed by Supabase + Privy when secrets exist.
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
-import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
+import { createPrivyWalletClientFromEnv, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import {
   ConfigError,
   httpsAvatarUrl,
@@ -28,6 +28,7 @@ import {
   transferErrorCode,
   transferRequest,
 } from './platform-transfer.mjs';
+import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -54,6 +55,22 @@ function privyClient(env) {
   }
 }
 
+/** Browser Origin for Privy /users/me — required when creating/syncing wallets. */
+function requestOrigin(request, env = {}) {
+  const headerOrigin = sanitizeOrigin(request.headers.get('origin') || request.headers.get('Origin'));
+  if (headerOrigin) return headerOrigin;
+  const maelstrom = sanitizeOrigin(request.headers.get('x-maelstrom-origin'));
+  if (maelstrom) return maelstrom;
+  const referer = request.headers.get('referer') || request.headers.get('Referer');
+  if (typeof referer === 'string' && referer.trim()) {
+    try {
+      const fromReferer = sanitizeOrigin(new URL(referer.trim()).origin);
+      if (fromReferer) return fromReferer;
+    } catch { /* ignore */ }
+  }
+  return sanitizeOrigin(env.WEB_ORIGIN || env.PRIVY_ALLOWED_ORIGIN || '');
+}
+
 async function resolveOwner(request, env) {
   const header = ownerHeader(request);
   const token = bearerToken(request);
@@ -63,7 +80,11 @@ async function resolveOwner(request, env) {
   if (!client?.acceptLogin) return { ownerId: header, user: null, token };
 
   try {
-    const result = await client.acceptLogin({ accessToken: token, ownerId: header || undefined });
+    const result = await client.acceptLogin({
+      accessToken: token,
+      ownerId: header || undefined,
+      origin: requestOrigin(request, env),
+    });
     const ownerId = header || result?.main?.ownerId || result?.userId || null;
     return { ownerId, user: result, token };
   } catch (error) {
@@ -73,6 +94,10 @@ async function resolveOwner(request, env) {
     return { ownerId: header, user: null, token, error: 'privy_failed' };
   }
 }
+
+const WALLET_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
+const WALLET_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const BALANCE_CAP = 8;
 
 function publicWallet(wallet) {
   return {
@@ -86,35 +111,311 @@ function publicWallet(wallet) {
   };
 }
 
-async function persistLogin(env, login, ownerId) {
-  if (!supabaseConfig(env) || !login?.main) return;
-  const owner = ownerId || login.main.ownerId;
-  const fetcher = env.fetch ?? fetch;
+function walletRowFromPublic(wallet, ownerId) {
+  if (!wallet || typeof wallet !== 'object') return null;
+  const id = typeof wallet.id === 'string' ? wallet.id.trim() : '';
+  const address = typeof wallet.address === 'string' ? wallet.address.trim() : '';
+  const kind = wallet.kind === 'additional' ? 'additional' : 'main';
+  const label = typeof wallet.label === 'string' && wallet.label.trim()
+    ? wallet.label.trim().slice(0, 64)
+    : (kind === 'main' ? 'Main' : 'Wallet');
+  if (!WALLET_ID.test(id) || !WALLET_ADDRESS.test(address)) return null;
+  return {
+    id,
+    owner_id: ownerId,
+    kind,
+    label,
+    address,
+    provider: wallet.provider === 'privy' || !wallet.provider ? 'privy' : 'privy',
+    frozen: wallet.frozen === true,
+  };
+}
+
+async function persistWalletRows(env, ownerId, wallets, fetcher) {
+  if (!supabaseConfig(env) || !ownerId) return { wrote: 0 };
+  const rows = (Array.isArray(wallets) ? wallets : [])
+    .map((wallet) => walletRowFromPublic(wallet, ownerId))
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!rows.length) return { wrote: 0 };
   await supabaseWrite(env, {
     path: 'users',
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=minimal',
-    body: { id: owner, privy_user_id: login.main.ownerId || owner },
+    body: { id: ownerId, privy_user_id: ownerId },
     fetcher,
   });
-  const rows = [login.main, ...(login.additional || [])].filter(Boolean).map((wallet) => ({
-    id: wallet.id,
-    owner_id: owner,
-    kind: wallet.kind,
-    label: wallet.label,
-    address: wallet.address,
-    provider: wallet.provider || 'privy',
-    frozen: wallet.frozen === true,
-  }));
-  if (rows.length) {
-    await supabaseWrite(env, {
-      path: 'wallets',
-      method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=minimal',
-      body: rows,
+  await supabaseWrite(env, {
+    path: 'wallets',
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=minimal',
+    body: rows,
+    fetcher,
+  });
+  return { wrote: rows.length };
+}
+
+async function persistLogin(env, login, ownerId) {
+  if (!supabaseConfig(env) || !login?.main) return;
+  const owner = ownerId || login.main.ownerId;
+  const fetcher = env.fetch ?? fetch;
+  await persistWalletRows(
+    env,
+    owner,
+    [login.main, ...(login.additional || [])].filter(Boolean),
+    fetcher,
+  );
+}
+
+function formatFixedUnits(amount, decimals, symbol) {
+  if (typeof amount !== 'string' || !/^-?(0|[1-9][0-9]{0,39})$/.test(amount)) return null;
+  const negative = amount.startsWith('-');
+  const digits = negative ? amount.slice(1) : amount;
+  const padded = digits.padStart(decimals + 1, '0');
+  const whole = padded.slice(0, -decimals);
+  const fraction = padded.slice(-decimals).replace(/0+$/, '');
+  const shown = fraction ? `${whole}.${fraction}` : whole;
+  return `${negative ? '-' : ''}${shown} ${symbol}`;
+}
+
+/** Format USDC base units (6 decimals) for agent speech — never invent values. */
+export function formatUsdcLabel(amount) {
+  return formatFixedUnits(amount, 6, 'USDC');
+}
+
+/** Format SOL lamports (9 decimals) for agent speech. */
+export function formatSolLabel(lamports, cluster = null) {
+  const label = formatFixedUnits(lamports, 9, 'SOL');
+  if (!label) return null;
+  return cluster ? `${label} (${cluster})` : label;
+}
+
+function mapTransferDirection(row, ownerId) {
+  if (!row || row.asset !== 'USDC') return null;
+  const amount = typeof row.amount === 'number' ? String(row.amount) : String(row.amount ?? '');
+  if (!/^(0|[1-9][0-9]{0,39})$/.test(amount)) return null;
+  if (row.to_owner_id === ownerId || row.toOwnerId === ownerId) return { direction: 'in', amount };
+  if (row.from_owner_id === ownerId || row.fromOwnerId === ownerId) return { direction: 'out', amount };
+  return null;
+}
+
+/** Same net the shell wallet glance uses (platform transfers). */
+async function platformUsdcNet(env, ownerId, fetcher) {
+  if (!supabaseConfig(env) || !ownerId) {
+    return { amount: null, label: null, transferCount: 0 };
+  }
+  const result = await supabaseGet(
+    env,
+    `platform_transfers?or=(from_owner_id.eq.${encodeURIComponent(ownerId)},to_owner_id.eq.${encodeURIComponent(ownerId)})&select=*&order=created_at.desc&limit=100`,
+    fetcher,
+  );
+  const rows = Array.isArray(result.rows) ? result.rows : [];
+  let net = 0n;
+  let count = 0;
+  for (const row of rows) {
+    const entry = mapTransferDirection(row, ownerId);
+    if (!entry) continue;
+    count += 1;
+    const units = BigInt(entry.amount);
+    net += entry.direction === 'in' ? units : -units;
+  }
+  const amount = net.toString();
+  return { amount, label: formatUsdcLabel(amount), transferCount: count };
+}
+
+function emptyOnchainFields(status) {
+  return {
+    usdcBalance: null,
+    usdcBalanceLabel: null,
+    usdcBalanceDecimals: 6,
+    solLamports: null,
+    solBalanceLabel: null,
+    solDecimals: 9,
+    tokens: [],
+    tokensLabel: null,
+    holdings: [],
+    balanceStatus: status,
+    cluster: null,
+  };
+}
+
+function formatTokenLabel(token) {
+  if (!token || typeof token !== 'object') return null;
+  const symbol = typeof token.symbol === 'string' && token.symbol.trim()
+    ? token.symbol.trim().slice(0, 32)
+    : 'TOKEN';
+  const base = formatFixedUnits(token.amount, token.decimals, symbol);
+  if (!base) return null;
+  return token.cluster ? `${base} (${token.cluster})` : base;
+}
+
+function publicTokens(tokens) {
+  if (!Array.isArray(tokens)) return [];
+  return tokens.slice(0, 48).map((token) => ({
+    mint: token.mint,
+    amount: token.amount,
+    decimals: token.decimals,
+    symbol: token.symbol,
+    known: token.known === true,
+    cluster: token.cluster || null,
+    label: formatTokenLabel(token),
+  })).filter((token) => token.label);
+}
+
+function tokensLabel(tokens) {
+  const labels = publicTokens(tokens).map((token) => token.label).filter(Boolean);
+  return labels.length ? labels.join(' · ') : null;
+}
+
+/** Attach whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet. */
+async function withOnchainBalances(env, wallets) {
+  const list = Array.isArray(wallets) ? wallets : [];
+  const fetcher = env.fetch ?? fetch;
+  const head = list.slice(0, BALANCE_CAP);
+  const enriched = await Promise.all(head.map(async (wallet) => {
+    const bal = await readWalletBalancesAcrossClusters({
+      address: wallet.address,
+      env,
       fetcher,
     });
+    const holdings = Array.isArray(bal.holdings) ? bal.holdings.filter((row) => row?.label) : [];
+    const tokens = publicTokens(bal.tokens);
+    const usdc = bal.usdcAmount;
+    const sol = bal.solLamports;
+    const solOk = typeof sol === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(sol);
+    const usdcOk = typeof usdc === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(usdc);
+    return {
+      ...wallet,
+      usdcBalance: usdcOk ? usdc : null,
+      usdcBalanceLabel: usdcOk ? formatUsdcLabel(usdc) : null,
+      usdcBalanceDecimals: 6,
+      solLamports: solOk ? sol : null,
+      solBalanceLabel: solOk ? formatSolLabel(sol) : null,
+      solDecimals: 9,
+      tokens,
+      tokensLabel: tokensLabel(tokens),
+      holdings,
+      displayBalanceLabel: bal.displayBalanceLabel
+        || holdings.map((row) => row.label).join(' · ')
+        || null,
+      balanceStatus: bal.ok === true || holdings.length > 0 ? 'ok' : (bal.code || 'rpc_failed'),
+      cluster: bal.cluster || null,
+      clusters: bal.clusters
+        ? {
+          devnet: bal.clusters.devnet?.ok === true,
+          testnet: bal.clusters.testnet?.ok === true,
+        }
+        : null,
+    };
+  }));
+  const rest = list.slice(BALANCE_CAP).map((wallet) => ({
+    ...wallet,
+    ...emptyOnchainFields('capped'),
+  }));
+  return [...enriched, ...rest];
+}
+
+function sumField(items, key) {
+  return (Array.isArray(items) ? items : []).reduce((sum, wallet) => {
+    const value = wallet?.[key];
+    if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(value)) return sum;
+    return sum + BigInt(value);
+  }, 0n).toString();
+}
+
+function mergeTokenHoldings(items) {
+  const byMint = new Map();
+  for (const wallet of Array.isArray(items) ? items : []) {
+    for (const token of Array.isArray(wallet?.tokens) ? wallet.tokens : []) {
+      if (!token?.mint || typeof token.amount !== 'string') continue;
+      if (!/^(0|[1-9][0-9]{0,39})$/.test(token.amount) || token.amount === '0') continue;
+      const existing = byMint.get(token.mint);
+      if (existing) {
+        existing.amount = (BigInt(existing.amount) + BigInt(token.amount)).toString();
+        continue;
+      }
+      byMint.set(token.mint, {
+        mint: token.mint,
+        amount: token.amount,
+        decimals: token.decimals,
+        symbol: token.symbol,
+        known: token.known === true,
+      });
+    }
   }
+  return publicTokens([...byMint.values()]);
+}
+
+function joinBalanceParts(parts) {
+  return parts.filter(Boolean).join(' · ') || null;
+}
+
+function walletDisplayParts(wallet) {
+  if (Array.isArray(wallet?.holdings) && wallet.holdings.length) {
+    return wallet.holdings.map((row) => row?.label).filter(Boolean);
+  }
+  const parts = [];
+  if (wallet?.solLamports && wallet.solLamports !== '0' && wallet.solBalanceLabel) {
+    parts.push(wallet.solBalanceLabel);
+  }
+  if (Array.isArray(wallet?.tokens)) {
+    for (const token of wallet.tokens) {
+      if (token?.label) parts.push(token.label);
+    }
+  } else if (wallet?.usdcBalance && wallet.usdcBalance !== '0' && wallet.usdcBalanceLabel) {
+    parts.push(wallet.usdcBalanceLabel);
+  }
+  return parts;
+}
+
+function walletBalanceSummary(items, platform) {
+  const onchainUsdc = sumField(items, 'usdcBalance');
+  const onchainSol = sumField(items, 'solLamports');
+  const tokens = mergeTokenHoldings(items);
+  const holdings = [];
+  for (const wallet of Array.isArray(items) ? items : []) {
+    for (const row of Array.isArray(wallet?.holdings) ? wallet.holdings : []) {
+      if (row?.label) holdings.push(row);
+    }
+  }
+  const hasPlatform = platform.transferCount > 0 && platform.amount != null;
+  const hasSol = onchainSol !== '0';
+  const parts = [];
+  if (hasPlatform) parts.push(platform.label);
+  if (holdings.length) {
+    for (const row of holdings) parts.push(row.label);
+  } else {
+    if (hasSol) parts.push(formatSolLabel(onchainSol));
+    for (const token of tokens) {
+      if (token.label) parts.push(token.label);
+    }
+  }
+  if (!parts.length) {
+    parts.push(formatSolLabel(onchainSol) || formatUsdcLabel(onchainUsdc));
+  }
+  const displayBalanceLabel = joinBalanceParts(parts);
+  const displaySource = hasPlatform
+    ? (hasSol || tokens.length || holdings.length ? 'mixed' : 'platform')
+    : 'onchain';
+  const displayUsdc = hasPlatform ? platform.amount : onchainUsdc;
+  return {
+    platformUsdc: platform.amount,
+    platformUsdcLabel: platform.label,
+    platformTransferCount: platform.transferCount,
+    onchainUsdc,
+    onchainUsdcLabel: formatUsdcLabel(onchainUsdc),
+    onchainSol,
+    onchainSolLabel: formatSolLabel(onchainSol),
+    tokens,
+    tokensLabel: tokensLabel(tokens),
+    holdings,
+    displayUsdc,
+    displayUsdcLabel: formatUsdcLabel(displayUsdc),
+    displaySol: onchainSol,
+    displaySolLabel: formatSolLabel(onchainSol),
+    displayBalanceLabel,
+    displaySource,
+  };
 }
 
 export async function handleApiData(request, env, matched) {
@@ -145,8 +446,69 @@ export async function handleApiData(request, env, matched) {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
-    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
+    if (!supabaseConfig(env)) {
+      return json({
+        ok: true,
+        source: 'unconfigured',
+        items: [],
+        balances: walletBalanceSummary([], { amount: null, label: null, transferCount: 0 }),
+      });
+    }
     const result = await supabaseGet(
+      env,
+      `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=created_at.asc`,
+      fetcher,
+    );
+    const [items, platform] = await Promise.all([
+      withOnchainBalances(
+        env,
+        (result.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
+      ),
+      platformUsdcNet(env, ownerId, fetcher),
+    ]);
+    const balances = walletBalanceSummary(items, platform);
+    return json({
+      ok: true,
+      source: 'supabase',
+      items: items.map((wallet) => {
+        const onchainParts = walletDisplayParts(wallet);
+        const displayBalanceLabel = balances.displaySource === 'platform' || balances.displaySource === 'mixed'
+          ? joinBalanceParts([
+            balances.platformUsdcLabel,
+            ...onchainParts,
+          ])
+          : (joinBalanceParts(onchainParts) || balances.displayBalanceLabel);
+        return {
+          ...wallet,
+          displayUsdc: balances.displaySource === 'platform' || balances.displaySource === 'mixed'
+            ? balances.displayUsdc
+            : wallet.usdcBalance,
+          displayUsdcLabel: balances.displaySource === 'platform' || balances.displaySource === 'mixed'
+            ? balances.displayUsdcLabel
+            : (wallet.usdcBalanceLabel || balances.displayUsdcLabel),
+          displaySolLabel: wallet.solBalanceLabel,
+          displayBalanceLabel,
+          displaySource: balances.displaySource,
+        };
+      }),
+      balances,
+    });
+  }
+
+  if (routeId === 'wallets.persist') {
+    // Cloudflare Workers strip Origin on outbound Privy calls — Next provisions
+    // wallets, then posts them here so Supabase (and agents) see the same rows.
+    // Skip Privy here: require bearer + x-owner-id (same trust as list when Privy fails).
+    const ownerId = ownerHeader(request);
+    const token = bearerToken(request);
+    if (!token) return json({ error: 'login_required' }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const body = await request.json().catch(() => null);
+    const wallets = Array.isArray(body?.wallets) ? body.wallets : [];
+    const { wrote } = await persistWalletRows(env, ownerId, wallets, fetcher);
+    if (!wrote) return json({ error: 'invalid_wallets' }, 400);
+    const listed = await supabaseGet(
       env,
       `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=created_at.asc`,
       fetcher,
@@ -154,18 +516,30 @@ export async function handleApiData(request, env, matched) {
     return json({
       ok: true,
       source: 'supabase',
-      items: (result.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
+      wrote,
+      wallets: (listed.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
     });
   }
 
   if (routeId === 'wallets.create') {
     const { ownerId, user, token, error } = await resolveOwner(request, env);
-    if (error) return json({ error }, 502);
+    if (error) {
+      const status = error === 'missing_origin' ? 503 : 502;
+      const detail = error === 'privy_failed' || error === 'missing_origin'
+        ? 'Worker cannot set Origin for Privy; use POST /api/wallets on Next then /api/wallets/persist'
+        : undefined;
+      return json(detail ? { error, detail } : { error }, status);
+    }
     if (!token) return json({ error: 'login_required' }, 401);
     const client = privyClient(env);
     if (!client) return json({ error: 'signer_not_configured' }, 503);
     try {
-      const login = user || await client.acceptLogin({ accessToken: token, ownerId: ownerId || undefined });
+      const origin = requestOrigin(request, env);
+      const login = user || await client.acceptLogin({
+        accessToken: token,
+        ownerId: ownerId || undefined,
+        origin,
+      });
       const owner = ownerId || login.main?.ownerId;
       await persistLogin(env, login, owner);
       return json({
@@ -175,8 +549,11 @@ export async function handleApiData(request, env, matched) {
       });
     } catch (err) {
       const code = err instanceof WalletError ? err.code : 'wallet_failed';
-      const status = code === 'missing_config' || code === 'missing_secrets' ? 503 : 502;
-      return json({ error: code }, status);
+      const status = code === 'missing_config' || code === 'missing_secrets' || code === 'missing_origin' ? 503 : 502;
+      const detail = typeof err?.message === 'string'
+        ? err.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
+        : undefined;
+      return json(detail ? { error: code, detail } : { error: code }, status);
     }
   }
 

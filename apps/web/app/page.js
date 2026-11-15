@@ -145,10 +145,10 @@ function AuthedShell() {
           return;
         }
 
-        // Prefer the Worker so wallets land in Supabase (agent list_bots/get_wallets).
-        // Fall back to the Next Privy route when the runtime proxy is unavailable.
+        // Prefer Next Privy provision (Workers strip Origin on outbound Privy).
+        // Next mirrors wallets into Supabase via /api/wallets/persist.
         const runtimeWallets = shellRuntimeUrl('/api/wallets');
-        const provisionUrls = runtimeWallets ? [runtimeWallets, '/api/wallets'] : ['/api/wallets'];
+        const provisionUrls = runtimeWallets ? ['/api/wallets', runtimeWallets] : ['/api/wallets'];
         let body = {};
         let ok = false;
         for (const url of provisionUrls) {
@@ -423,13 +423,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     return () => { stop = true; };
   }, [ownerId, signedIn, user, getAccessToken, liveWallets]);
 
-  // Backfill local-only roster bots into Supabase once a real wallet exists.
+  // Backfill local-only roster bots into Supabase once a Supabase wallet exists.
+  // Do not use liveWallets-only ids — bots.create 404s with wallet_not_found.
   useEffect(() => {
     if (!ownerId || !rosterReady || !signedIn) return undefined;
-    const walletId = firstAssignableWalletId(remoteLists.wallets)
-      || firstAssignableWalletId((liveWallets || []).filter((wallet) => (
-        wallet && typeof wallet.id === 'string' && !wallet.id.startsWith('client_')
-      )));
+    const walletId = firstAssignableWalletId(remoteLists.wallets);
     if (!walletId) return undefined;
     const remoteIds = new Set((remoteLists.bots || []).map((bot) => bot?.id).filter(Boolean));
     const localBots = mergeRoster([], withoutPlaceholderBots(roster)).bots
@@ -445,6 +443,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         if (stop) return;
         const saved = await upsertOwnerBot(ownerId, bot, { walletId, accessToken });
         if (saved.ok) wrote += 1;
+        // Stop hammering when the wallet is not in Supabase yet.
+        if (!saved.ok && (saved.error === 'wallet_not_found' || saved.status === 404)) break;
       }
       if (!wrote || stop) return;
       try {
@@ -453,7 +453,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       } catch { /* keep local */ }
     })();
     return () => { stop = true; };
-  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, liveWallets, getAccessToken]);
+  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, getAccessToken]);
 
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
@@ -852,6 +852,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
             ownerId={ownerId}
             shellBots={bots}
             shellWallets={wallets}
+            shellBalanceLabel={glance.balanceLabel}
             clientTools={clientTools}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {

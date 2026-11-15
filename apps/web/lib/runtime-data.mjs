@@ -268,7 +268,13 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
       cache: 'no-store',
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: body.error || `http_${response.status}`,
+      };
+    }
     return { ok: true, bot: body.bot || null, source: body.source || 'supabase' };
   } catch {
     return { ok: false, error: 'network' };
@@ -310,6 +316,7 @@ export async function sendBotChat({
   permission,
   shellBots = null,
   shellWallets = null,
+  shellBalanceLabel = null,
   runtimeBase = runtimeBaseUrl(),
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
@@ -344,6 +351,9 @@ export async function sendBotChat({
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
         ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),
         ...(Array.isArray(shellWallets) ? { shellWallets: shellWallets.slice(0, 40) } : {}),
+        ...(typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
+          ? { shellBalanceLabel: shellBalanceLabel.trim().slice(0, 64) }
+          : {}),
       }),
       cache: 'no-store',
     });

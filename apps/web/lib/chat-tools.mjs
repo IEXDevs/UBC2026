@@ -18,11 +18,14 @@ import {
   sharedToolsInstruction,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
+import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
 
 const MAX_TOOL_RESULT = 6000;
 const DASHBOARD_NAMES = new Set(DASHBOARD_TOOLS.map((tool) => tool.name));
+const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const CLUSTER_NOTE = 'Holdings are whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet for these addresses. Mainnet is never queried.';
 
 export function openAiAgentTools(tools = SHARED_AGENT_TOOLS) {
   return toOpenAiTools(tools);
@@ -110,7 +113,225 @@ function shellWalletItems(shellWallets) {
       address: wallet.address || null,
       frozen: wallet.frozen === true,
       provider: wallet.provider || 'privy',
+      ...(typeof wallet.usdcBalance === 'string' ? { usdcBalance: wallet.usdcBalance } : {}),
+      ...(typeof wallet.usdcBalanceLabel === 'string' ? { usdcBalanceLabel: wallet.usdcBalanceLabel } : {}),
+      ...(typeof wallet.displayUsdcLabel === 'string' ? { displayUsdcLabel: wallet.displayUsdcLabel } : {}),
     }));
+}
+
+function formatFixedUnits(amount, decimals, symbol) {
+  if (typeof amount !== 'string' || !/^-?(0|[1-9][0-9]{0,39})$/.test(amount)) return null;
+  const negative = amount.startsWith('-');
+  const digits = negative ? amount.slice(1) : amount;
+  const padded = digits.padStart(decimals + 1, '0');
+  const whole = padded.slice(0, -decimals);
+  const fraction = padded.slice(-decimals).replace(/0+$/, '');
+  const shown = fraction ? `${whole}.${fraction}` : whole;
+  return `${negative ? '-' : ''}${shown} ${symbol}`;
+}
+
+function formatUsdcLabel(amount) {
+  return formatFixedUnits(amount, 6, 'USDC');
+}
+
+function formatSolLabel(lamports, cluster = null) {
+  const label = formatFixedUnits(lamports, 9, 'SOL');
+  if (!label) return null;
+  return cluster ? `${label} (${cluster})` : label;
+}
+
+function formatTokenLabel(token) {
+  if (!token || typeof token !== 'object') return null;
+  const symbol = typeof token.symbol === 'string' && token.symbol.trim()
+    ? token.symbol.trim().slice(0, 32)
+    : 'TOKEN';
+  const base = formatFixedUnits(token.amount, token.decimals, symbol);
+  if (!base) return null;
+  return token.cluster ? `${base} (${token.cluster})` : base;
+}
+
+function publicTokens(tokens) {
+  if (!Array.isArray(tokens)) return [];
+  return tokens.slice(0, 48).map((token) => ({
+    mint: token.mint,
+    amount: token.amount,
+    decimals: token.decimals,
+    symbol: token.symbol,
+    known: token.known === true,
+    cluster: token.cluster || null,
+    label: formatTokenLabel(token),
+  })).filter((token) => token.label);
+}
+
+/** Read whatever non-zero SOL/SPL balances exist on Solana-devnet + Solana-testnet. */
+async function enrichWalletsOnchain(wallets, { env = {}, fetcher = fetch } = {}) {
+  const list = Array.isArray(wallets) ? wallets : [];
+  const head = list.slice(0, 8);
+  const enriched = await Promise.all(head.map(async (wallet) => {
+    const address = typeof wallet?.address === 'string' ? wallet.address : '';
+    if (!ADDRESS.test(address)) {
+      return {
+        ...wallet,
+        balanceStatus: 'invalid_address',
+        holdings: [],
+        tokens: Array.isArray(wallet.tokens) ? wallet.tokens : [],
+      };
+    }
+    const bal = await readWalletBalancesAcrossClusters({ address, env, fetcher });
+    const holdings = Array.isArray(bal.holdings) ? bal.holdings.filter((row) => row?.label) : [];
+    const tokens = publicTokens(bal.tokens);
+    const usdc = bal.usdcAmount;
+    const sol = bal.solLamports;
+    const solOk = typeof sol === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(sol);
+    const usdcOk = typeof usdc === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(usdc);
+    const label = bal.displayBalanceLabel
+      || holdings.map((row) => row.label).join(' · ')
+      || null;
+    return {
+      ...wallet,
+      usdcBalance: usdcOk ? usdc : (wallet.usdcBalance ?? null),
+      usdcBalanceLabel: usdcOk ? formatUsdcLabel(usdc) : (wallet.usdcBalanceLabel ?? null),
+      usdcBalanceDecimals: 6,
+      solLamports: solOk ? sol : (wallet.solLamports ?? null),
+      solBalanceLabel: solOk ? formatSolLabel(sol) : (wallet.solBalanceLabel ?? null),
+      solDecimals: 9,
+      tokens,
+      tokensLabel: tokens.map((token) => token.label).filter(Boolean).join(' · ') || null,
+      holdings,
+      displayBalanceLabel: label,
+      displaySolLabel: solOk ? formatSolLabel(sol) : null,
+      balanceStatus: bal.ok === true || holdings.length > 0 ? 'ok' : (bal.code || 'rpc_failed'),
+      cluster: bal.cluster || null,
+    };
+  }));
+  return {
+    items: [...enriched, ...list.slice(8)],
+    note: null,
+    clusterNote: CLUSTER_NOTE,
+  };
+}
+
+function summarizeOnchain(items) {
+  const holdings = [];
+  for (const wallet of items) {
+    for (const row of Array.isArray(wallet?.holdings) ? wallet.holdings : []) {
+      if (row?.label) holdings.push(row);
+    }
+  }
+  const tokens = [];
+  for (const wallet of items) {
+    for (const token of Array.isArray(wallet?.tokens) ? wallet.tokens : []) {
+      if (token?.label) tokens.push(token);
+    }
+  }
+  let sol = 0n;
+  for (const wallet of items) {
+    if (typeof wallet?.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports)) {
+      sol += BigInt(wallet.solLamports);
+    }
+  }
+  const displayBalanceLabel = holdings.map((row) => row.label).filter(Boolean).join(' · ')
+    || formatSolLabel(sol.toString());
+  return {
+    onchainSol: sol.toString(),
+    onchainSolLabel: formatSolLabel(sol.toString()),
+    tokens,
+    tokensLabel: tokens.map((token) => token.label).filter(Boolean).join(' · ') || null,
+    holdings,
+    displayBalanceLabel,
+    displaySolLabel: formatSolLabel(sol.toString()),
+    displaySource: 'onchain',
+  };
+}
+
+function platformNetFromTransfers(items, ownerId) {
+  let net = 0n;
+  let count = 0;
+  for (const row of Array.isArray(items) ? items : []) {
+    if (!row || row.asset !== 'USDC') continue;
+    if (typeof row.amount !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(row.amount)) continue;
+    const mine = row.toOwnerId === ownerId || row.fromOwnerId === ownerId
+      || row.direction === 'in' || row.direction === 'out';
+    if (!mine && row.direction !== 'in' && row.direction !== 'out') continue;
+    let direction = row.direction;
+    if (direction !== 'in' && direction !== 'out') {
+      if (row.toOwnerId === ownerId) direction = 'in';
+      else if (row.fromOwnerId === ownerId) direction = 'out';
+      else continue;
+    }
+    count += 1;
+    const units = BigInt(row.amount);
+    net += direction === 'in' ? units : -units;
+  }
+  const amount = net.toString();
+  return { amount, label: formatUsdcLabel(amount), transferCount: count };
+}
+
+function withDisplayBalances(payload, {
+  ownerId,
+  shellBalanceLabel = null,
+  transfers = null,
+} = {}) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const platform = platformNetFromTransfers(transfers?.items || transfers, ownerId);
+  const existing = payload?.balances && typeof payload.balances === 'object' ? payload.balances : null;
+  const shellHint = typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
+    ? shellBalanceLabel.trim().slice(0, 64)
+    : null;
+  const solLabel = existing?.displaySolLabel
+    || existing?.onchainSolLabel
+    || items.find((wallet) => typeof wallet?.solBalanceLabel === 'string')?.solBalanceLabel
+    || null;
+  const displayUsdcLabel = shellHint
+    || existing?.displayUsdcLabel
+    || (platform.transferCount > 0 ? platform.label : null)
+    || items.find((wallet) => typeof wallet?.displayUsdcLabel === 'string')?.displayUsdcLabel
+    || items.find((wallet) => typeof wallet?.usdcBalanceLabel === 'string')?.usdcBalanceLabel
+    || null;
+  const onchain = summarizeOnchain(items);
+  const solLabelFinal = onchain.onchainSolLabel || solLabel;
+  const onchainLabel = onchain.holdings?.length
+    ? onchain.displayBalanceLabel
+    : (onchain.onchainSol !== '0' ? onchain.displayBalanceLabel : null);
+  const displayBalanceLabel = [
+    platform.transferCount > 0 ? platform.label : null,
+    onchainLabel,
+    shellHint,
+    solLabelFinal,
+    displayUsdcLabel,
+  ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ')
+    || onchain.displayBalanceLabel
+    || '0 SOL';
+  const balances = {
+    ...(existing || {}),
+    ...onchain,
+    ...(platform.transferCount > 0 ? {
+      platformUsdc: platform.amount,
+      platformUsdcLabel: platform.label,
+      platformTransferCount: platform.transferCount,
+    } : {}),
+    displayUsdcLabel: displayUsdcLabel || existing?.displayUsdcLabel || null,
+    displaySolLabel: solLabelFinal,
+    displayBalanceLabel,
+    displaySource: platform.transferCount > 0
+      ? (onchain.tokens.length || onchain.onchainSol !== '0' ? 'mixed' : 'platform')
+      : 'onchain',
+    clusterNote: CLUSTER_NOTE,
+  };
+  return {
+    ...payload,
+    items: items.map((wallet) => ({
+      ...wallet,
+      displayUsdcLabel: wallet.displayUsdcLabel || wallet.usdcBalanceLabel || displayUsdcLabel || null,
+      displaySolLabel: wallet.displaySolLabel || wallet.solBalanceLabel || solLabelFinal || null,
+      displayBalanceLabel: wallet.displayBalanceLabel
+        || [wallet.solBalanceLabel, wallet.tokensLabel || wallet.usdcBalanceLabel].filter(Boolean).join(' · ')
+        || displayBalanceLabel,
+      displaySource: wallet.displaySource || balances.displaySource,
+    })),
+    balances,
+    clusterNote: CLUSTER_NOTE,
+  };
 }
 
 export function createChatToolInvoker({
@@ -121,6 +342,7 @@ export function createChatToolInvoker({
   runtimeBase = runtimeBaseUrl(env.NEXT_PUBLIC_AGENT_RUNTIME_URL),
   shellBots = null,
   shellWallets = null,
+  shellBalanceLabel = null,
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
@@ -130,6 +352,9 @@ export function createChatToolInvoker({
   const root = runtimeBaseUrl(runtimeBase);
   const localBots = shellBotItems(shellBots);
   const localWallets = shellWalletItems(shellWallets);
+  const balanceHint = typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
+    ? shellBalanceLabel.trim().slice(0, 64)
+    : null;
 
   async function invokeBrowser(name, args = {}) {
     const openUrl = browserSessionUrl(root, botId);
@@ -313,9 +538,30 @@ export function createChatToolInvoker({
       if (name === 'get_wallets') {
         const remote = await invokeDashboard(name, args);
         const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
-        if (remoteItems.length > 0) return remote;
-        if (localWallets.length > 0) return { ok: true, source: 'shell', items: localWallets };
-        return remote;
+        let transfers = null;
+        try {
+          const transferPath = ownerApiUrl('/api/transfers', apiBase);
+          if (transferPath) transfers = await workerJson(fetcher, transferPath, ownerId, 'GET');
+        } catch {
+          transfers = null;
+        }
+        const baseItems = remoteItems.length > 0
+          ? remoteItems
+          : (localWallets.length > 0 ? localWallets : []);
+        const source = remoteItems.length > 0
+          ? (remote?.source || 'supabase')
+          : (localWallets.length > 0 ? 'shell' : (remote?.source || 'empty'));
+        const enriched = await enrichWalletsOnchain(baseItems, { env, fetcher });
+        return withDisplayBalances(
+          {
+            ok: true,
+            source,
+            items: enriched.items,
+            ...(remote?.balances ? { balances: remote.balances } : {}),
+            rpcNote: enriched.note,
+          },
+          { ownerId, shellBalanceLabel: balanceHint, transfers },
+        );
       }
       if (DASHBOARD_NAMES.has(name)) {
         return await invokeDashboard(name, args);
