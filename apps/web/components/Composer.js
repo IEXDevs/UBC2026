@@ -456,16 +456,21 @@ export default function Composer({
     sealMic();
   }
 
-  function runDictation() {
+  function runDictation(options = {}) {
     if (presenceRef.current !== 'off' || sessionRef.current || connectingRef.current) {
       return Promise.reject(dictationBusyError());
     }
     dictationRef.current?.cancel?.();
-    const job = startBrowserDictation();
+    const job = startBrowserDictation({
+      onPartial: typeof options?.onPartial === 'function' ? options.onPartial : null,
+    });
     dictationRef.current = job;
-    return Promise.resolve(job).finally(() => {
+    // Keep returning `job` so PromptBar can call job.cancel() — wrapping in
+    // Promise.resolve(...).finally() strips the cancel method.
+    void Promise.resolve(job).finally(() => {
       if (dictationRef.current === job) dictationRef.current = null;
     });
+    return job;
   }
 
   async function startSession() {

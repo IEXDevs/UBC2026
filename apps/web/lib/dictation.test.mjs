@@ -3,12 +3,14 @@ import { test } from 'node:test';
 import {
   dictationBusyError,
   dictationUnsupportedError,
+  joinTranscript,
   startBrowserDictation,
 } from './dictation.mjs';
 
 function fakeClient() {
   const CommitStrategy = { VAD: 'vad', MANUAL: 'manual' };
   const RealtimeEvents = {
+    PARTIAL_TRANSCRIPT: 'partial_transcript',
     COMMITTED_TRANSCRIPT: 'committed_transcript',
     ERROR: 'error',
     AUTH_ERROR: 'auth_error',
@@ -21,9 +23,10 @@ function fakeClient() {
 test('dictation helpers expose stable error codes', () => {
   assert.equal(dictationUnsupportedError().code, 'unsupported');
   assert.equal(dictationBusyError().code, 'voice_live');
+  assert.equal(joinTranscript([' hello ', '', 'world ']), 'hello world');
 });
 
-test('startBrowserDictation uses an ElevenLabs Scribe token and VAD commits', async () => {
+test('startBrowserDictation streams partials and cancel settles with committed text', async () => {
   let connectOpts = null;
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
@@ -32,12 +35,18 @@ test('startBrowserDictation uses an ElevenLabs Scribe token and VAD commits', as
     on(event, fn) {
       listeners.set(event, fn);
     },
+    commit() {
+      listeners.get('committed_transcript')?.({ text: 'world' });
+    },
     close() {
       listeners.get('close')?.();
     },
   };
+  const partials = [];
 
   const job = startBrowserDictation({
+    commitGraceMs: 20,
+    onPartial: (text) => partials.push(text),
     fetcher: async () => ({
       ok: true,
       json: async () => ({ token: 'sutkn_test' }),
@@ -53,12 +62,15 @@ test('startBrowserDictation uses an ElevenLabs Scribe token and VAD commits', as
     },
   });
 
+  assert.equal(typeof job.cancel, 'function');
   await ready;
   assert.equal(connectOpts.token, 'sutkn_test');
   assert.equal(connectOpts.modelId, 'scribe_v2_realtime');
-  assert.equal(connectOpts.commitStrategy, 'manual');
-  listeners.get('committed_transcript')?.({ text: 'hello ' });
-  listeners.get('committed_transcript')?.({ text: ' world' });
+  assert.equal(connectOpts.commitStrategy, 'vad');
+  listeners.get('partial_transcript')?.({ text: 'hel' });
+  listeners.get('partial_transcript')?.({ text: 'hello' });
+  listeners.get('committed_transcript')?.({ text: 'hello' });
+  assert.deepEqual(partials, ['hel', 'hello', 'hello']);
   job.cancel();
   assert.equal(await job, 'hello world');
 });

@@ -15,8 +15,8 @@ export function dictationBusyError() {
   return error;
 }
 
-function joinTranscript(parts) {
-  return parts
+export function joinTranscript(parts) {
+  return (Array.isArray(parts) ? parts : [])
     .map((part) => (typeof part === 'string' ? part.trim() : ''))
     .filter(Boolean)
     .join(' ')
@@ -25,31 +25,40 @@ function joinTranscript(parts) {
 }
 
 /**
- * Start ElevenLabs realtime STT. Resolves with committed transcript text (may be '').
- * Call `cancel()` to stop; commits buffered audio first, then resolves with the text.
- *
- * @param {object} [options]
- * @param {string} [options.tokenUrl]
- * @param {typeof fetch} [options.fetcher]
- * @param {(opts: object) => object} [options.connect] — inject Scribe.connect in tests
- * @param {() => Promise<{ Scribe: any, CommitStrategy: any, RealtimeEvents: any }>} [options.loadClient]
- * @param {number} [options.commitGraceMs] — wait for commit after stop before force-close
+ * Start ElevenLabs realtime STT.
+ * - `onPartial(text)` fires as words arrive (committed + current partial).
+ * - Resolves with the final committed transcript (may be '').
+ * - `cancel()` stops the mic and settles quickly.
  */
 export function startBrowserDictation({
   tokenUrl = '/api/voice/scribe-token',
   fetcher = fetch,
   connect = null,
   loadClient = async () => import('@elevenlabs/client'),
-  commitGraceMs = 900,
+  commitGraceMs = 450,
+  onPartial = null,
 } = {}) {
   let connection = null;
   let settled = false;
   let cancelled = false;
   let closing = false;
   const parts = [];
+  let partial = '';
   let resolveOuter = null;
   let rejectOuter = null;
   let commitTimer = 0;
+  let closeTimer = 0;
+
+  const liveText = () => joinTranscript(partial ? [...parts, partial] : parts);
+
+  const emitPartial = () => {
+    if (typeof onPartial !== 'function') return;
+    try {
+      onPartial(liveText());
+    } catch {
+      /* UI errors must not kill dictation */
+    }
+  };
 
   const settle = (ok, value) => {
     if (settled) return;
@@ -57,6 +66,10 @@ export function startBrowserDictation({
     if (commitTimer) {
       clearTimeout(commitTimer);
       commitTimer = 0;
+    }
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+      closeTimer = 0;
     }
     try {
       connection?.close?.();
@@ -68,7 +81,8 @@ export function startBrowserDictation({
     else rejectOuter?.(value);
   };
 
-  const finishFromClose = () => {
+  const finish = () => {
+    partial = '';
     settle(true, joinTranscript(parts));
   };
 
@@ -81,10 +95,18 @@ export function startBrowserDictation({
     try {
       connection.commit?.();
     } catch {
-      /* commit optional if already closed */
+      /* optional */
     }
+    // Release the mic quickly even if commit is slow.
+    closeTimer = setTimeout(() => {
+      try {
+        connection?.close?.();
+      } catch {
+        /* ignore */
+      }
+    }, 120);
     commitTimer = setTimeout(() => {
-      finishFromClose();
+      finish();
     }, Math.max(0, commitGraceMs));
   };
 
@@ -130,11 +152,11 @@ export function startBrowserDictation({
       }
 
       try {
-        // MANUAL so stop can flush the last utterance; VAD alone drops audio on immediate cancel.
         connection = (connect || Scribe.connect)({
           token: payload.token.trim(),
           modelId: 'scribe_v2_realtime',
-          commitStrategy: CommitStrategy.MANUAL,
+          // VAD commits phrases while speaking; stop still flushes via commit().
+          commitStrategy: CommitStrategy.VAD,
           microphone: {
             echoCancellation: true,
             noiseSuppression: true,
@@ -157,16 +179,22 @@ export function startBrowserDictation({
         settle(false, error);
       };
 
+      connection.on?.(RealtimeEvents.PARTIAL_TRANSCRIPT, (data) => {
+        partial = typeof data?.text === 'string' ? data.text : '';
+        emitPartial();
+      });
       connection.on?.(RealtimeEvents.COMMITTED_TRANSCRIPT, (data) => {
+        partial = '';
         const text = typeof data?.text === 'string' ? data.text.trim() : '';
         if (text) parts.push(text);
-        if (closing) finishFromClose();
+        emitPartial();
+        if (closing) finish();
       });
       connection.on?.(RealtimeEvents.ERROR, fail);
       connection.on?.(RealtimeEvents.AUTH_ERROR, fail);
       connection.on?.(RealtimeEvents.QUOTA_EXCEEDED, fail);
       connection.on?.(RealtimeEvents.CLOSE, () => {
-        finishFromClose();
+        finish();
       });
     })().catch((error) => {
       settle(false, error instanceof Error ? error : dictationUnsupportedError());
@@ -174,11 +202,8 @@ export function startBrowserDictation({
   });
 
   promise.cancel = () => {
-    requestStop();
-    if (!connection && !settled) {
-      // Token/connect still in flight — the async path settles once cancelled is seen.
-      cancelled = true;
-    }
+    cancelled = true;
+    if (connection) requestStop();
   };
 
   return promise;
