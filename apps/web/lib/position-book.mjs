@@ -197,3 +197,22 @@ export function bookFrame(book) {
   if (!Number.isFinite(minX)) return { x: 0, y: 0, minX: -200, maxX: 200, minY: -200, maxY: 200 };
   return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, minX, maxX, minY, maxY };
 }
+
+/** Slide linked nodes after a pinned one. Farther nodes use a longer follow, so they trail. */
+export function stepBubbleFollow(nodes, dtMs) {
+  const dt = Math.min(34, Math.max(0, Number(dtMs) || 0));
+  const pinned = nodes?.find(node => node.pin);
+  if (!dt || !pinned) return 0;
+  let remain = 0;
+  for (const node of nodes) {
+    if (node.pin || node.lag == null) continue;
+    const tau = 110 + node.lag * 150;
+    const k = 1 - Math.exp(-dt / tau);
+    const tx = pinned.x + (node.ox || 0);
+    const ty = pinned.y + (node.oy || 0);
+    node.x += (tx - node.x) * k;
+    node.y += (ty - node.y) * k;
+    remain = Math.max(remain, Math.hypot(tx - node.x, ty - node.y));
+  }
+  return remain;
+}

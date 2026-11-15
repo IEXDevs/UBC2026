@@ -31,6 +31,8 @@ function memoryStorage(initial = {}) {
 test('a bot draft needs a name, a known shape, and a hex color', () => {
   assert.equal(draftBot({ name: '  ', shape: 'circle', color: '#7c5cff' }), null);
   assert.equal(draftBot({ name: 'Ada', shape: 'squircle', color: '#7c5cff' }), null);
+  const loose = draftBot({ name: 'Ada', color: '#7c5cff' });
+  assert.equal(typeof loose.shape, 'string');
   const bot = draftBot({ name: '  Ada  ', shape: 'triangle', color: '#7C5CFF', id: 'bot_ada' });
   assert.equal(bot.name, 'Ada');
   assert.equal(bot.shape, 'triangle');

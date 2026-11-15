@@ -1,13 +1,11 @@
 /** Local bot name, shape, and color. Stored in the browser, not a server record. */
 
-export const SHAPES = Object.freeze(['circle', 'square', 'triangle', 'diamond', 'pill']);
+export const SHAPES = Object.freeze(['circle', 'square', 'triangle']);
 
 export const SHAPE_PATHS = Object.freeze({
   circle: 'M32 6a26 26 0 1 0 .1 0',
   square: 'M14 14h36v36H14z',
   triangle: 'M32 8 58 54H6z',
-  diamond: 'M32 4 60 32 32 60 4 32z',
-  pill: 'M20 18h24a14 14 0 0 1 0 28H20a14 14 0 0 1 0-28z',
 });
 
 export const BOT_COLORS = Object.freeze([
@@ -36,6 +34,13 @@ export function defaultLook(botId) {
   return DEFAULTS[botId] ?? { shape: 'circle', color: '#7c5cff' };
 }
 
+export function randomShape(seed = Math.random()) {
+  const index = Math.abs(Math.floor(Number(seed) * SHAPES.length)) % SHAPES.length;
+  return SHAPES[Number.isFinite(index) ? index : 0];
+}
+
+const IMAGE = /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\s]+$/i;
+
 export function sanitizeLook(botId, patch) {
   const base = defaultLook(botId);
   const next = { shape: base.shape, color: base.color };
@@ -45,6 +50,10 @@ export function sanitizeLook(botId, patch) {
     const name = patch.name.trim().slice(0, 64);
     if (name) next.name = name;
   }
+  if (patch && patch.image === '') next.image = '';
+  else if (patch && typeof patch.image === 'string' && patch.image.length < 120000 && IMAGE.test(patch.image)) {
+    next.image = patch.image;
+  }
   return next;
 }
 
@@ -53,6 +62,6 @@ export function applyLooks(bots, saved) {
   return bots.map(bot => {
     const own = bot.shape ? { shape: bot.shape, color: bot.color, name: bot.name } : {};
     const look = sanitizeLook(bot.id, { ...own, ...store[bot.id] });
-    return { ...bot, name: look.name ?? bot.name, shape: look.shape, color: look.color };
+    return { ...bot, name: look.name ?? bot.name, shape: look.shape, color: look.color, image: look.image || '' };
   });
 }

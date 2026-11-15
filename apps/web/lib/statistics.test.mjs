@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getDemoShellState } from './demo-state.mjs';
-import { statisticsView, voiceMinutes } from './statistics.mjs';
+import { profileStats, statisticsView, voiceMinutes } from './statistics.mjs';
 
 test('statistics keeps voice minutes with the owner rollup', () => {
   assert.equal(voiceMinutes(0), 0);
@@ -13,4 +13,17 @@ test('statistics keeps voice minutes with the owner rollup', () => {
   assert.equal(view.agents[0].rows.find(row => row.key === 'decisions').value, 2);
   assert.match(view.note, /devnet execution, mainnet pricing/);
   assert.equal(view.source, 'local');
+});
+
+test('profile stats count talk seconds, messages, tokens, spend, and net flow', () => {
+  const rows = profileStats({
+    voiceMs: 12_400,
+    talks: { bot_meteora: [{ role: 'user', text: 'hello there' }, { role: 'agent', text: 'hi' }] },
+    payments: getDemoShellState().payments,
+  });
+  assert.equal(rows.find(row => row.key === 'voice').value, '12s');
+  assert.equal(rows.find(row => row.key === 'messages').value, '1');
+  assert.equal(rows.find(row => row.key === 'tokens').value, '4');
+  assert.equal(rows.find(row => row.key === 'spent').value, '10.01 USDC');
+  assert.equal(rows.find(row => row.key === 'pnl').value, '−7.76 USDC');
 });

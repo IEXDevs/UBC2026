@@ -6,6 +6,7 @@ import {
   serializeToolResult,
 } from '../../../../../lib/chat-tools.mjs';
 import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mjs';
+import { permissionInstruction } from '../../../../../lib/spend-permission.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -66,6 +67,7 @@ export async function POST(request, context) {
       model: readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined,
       tools: openAiAgentTools(),
       toolsInstruction: chatToolsInstruction(),
+      permission: permissionInstruction(body.permission),
       invokeTool: async (name, args) => serializeToolResult(await invokeRaw(name, args)),
     });
     return Response.json(

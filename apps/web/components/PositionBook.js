@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
-import { bookFrame, layoutPositionBook } from '../lib/position-book.mjs';
+import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
 
 const PLACE_KEY = 'maelstrom.cardPlaces';
 const DRAG_PX = 7;
@@ -491,8 +491,81 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
         return (2 * Math.tan((camera.fov * Math.PI) / 360) * camera.position.z) / height;
       }
 
-      function followNode(id) {
-        refreshLinks(id);
+      const bodies = [];
+      const bodyById = new Map();
+      for (const [id, object] of cardObjects) {
+        const body = { id, x: object.position.x, y: object.position.y, pin: false, lag: null, ox: 0, oy: 0, dirty: false };
+        bodies.push(body);
+        bodyById.set(id, body);
+      }
+      const neighbors = new Map();
+      for (const link of book.links) {
+        if (!bodyById.has(link.fromId) || !bodyById.has(link.toId)) continue;
+        if (!neighbors.has(link.fromId)) neighbors.set(link.fromId, []);
+        if (!neighbors.has(link.toId)) neighbors.set(link.toId, []);
+        neighbors.get(link.fromId).push(link.toId);
+        neighbors.get(link.toId).push(link.fromId);
+      }
+      let trailing = false;
+
+      function applyBodies() {
+        for (const body of bodies) {
+          const object = cardObjects.get(body.id);
+          if (!object) continue;
+          object.position.x = body.x;
+          object.position.y = body.y;
+        }
+        refreshLinks();
+      }
+
+      function flushPlaces() {
+        for (const body of bodies) {
+          if (!body.dirty) continue;
+          writePlace(body.id, body.x, body.y);
+          body.dirty = false;
+        }
+      }
+
+      function pinOnly(id) {
+        const origin = bodyById.get(id);
+        const lag = new Map([[id, 0]]);
+        const queue = [id];
+        while (queue.length) {
+          const current = queue.shift();
+          const depth = lag.get(current);
+          for (const next of neighbors.get(current) ?? []) {
+            if (lag.has(next)) continue;
+            lag.set(next, depth + 1);
+            queue.push(next);
+          }
+        }
+        for (const body of bodies) {
+          const depth = lag.get(body.id);
+          body.pin = body.id === id;
+          body.lag = depth === undefined ? null : depth;
+          body.ox = origin ? body.x - origin.x : 0;
+          body.oy = origin ? body.y - origin.y : 0;
+        }
+      }
+
+      function stepTrail(dt) {
+        if (!trailing) return;
+        const stretch = stepBubbleFollow(bodies, dt);
+        let moved = false;
+        for (const body of bodies) {
+          const object = cardObjects.get(body.id);
+          if (!object) continue;
+          if (Math.hypot(object.position.x - body.x, object.position.y - body.y) > 0.05) {
+            body.dirty = true;
+            moved = true;
+          }
+        }
+        if (moved) applyBodies();
+        if (!(gesture && gesture.moved) && (stretch < 0.75 || !moved)) {
+          for (const body of bodies) body.pin = false;
+          flushPlaces();
+          trailing = false;
+        }
       }
 
       function detailPayload(id, point) {
@@ -628,6 +701,7 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
       function render(now) {
         const dt = Math.min(48, Math.max(0, now - lastFrame));
         lastFrame = now;
+        stepTrail(dt);
         if (!dragging && !(gesture && gesture.moved)) {
           const k = 1 - Math.exp(-dt / 88);
           const dx = focus.x - camera.position.x;
@@ -693,13 +767,19 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
           }
           if (gesture.moved) {
             const object = cardObjects.get(gesture.id);
-            if (!object) return;
+            const body = bodyById.get(gesture.id);
+            if (!object || !body) return;
             const scale = worldPerPixel();
-            object.position.x += (event.clientX - gesture.x) * scale;
-            object.position.y -= (event.clientY - gesture.y) * scale;
+            if (!body.pin) pinOnly(gesture.id);
+            body.x += (event.clientX - gesture.x) * scale;
+            body.y -= (event.clientY - gesture.y) * scale;
+            body.dirty = true;
+            object.position.x = body.x;
+            object.position.y = body.y;
             gesture.x = event.clientX;
             gesture.y = event.clientY;
-            followNode(gesture.id);
+            trailing = true;
+            refreshLinks(gesture.id);
           }
           return;
         }
@@ -719,10 +799,9 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
         if (gesture) {
           const element = cardObjects.get(gesture.id)?.element;
           element?.classList.remove('is-dragging');
-          if (gesture.moved) {
-            const object = cardObjects.get(gesture.id);
-            if (object) writePlace(gesture.id, object.position.x, object.position.y);
-          } else {
+          if (!gesture.moved) {
+            const body = bodyById.get(gesture.id);
+            if (body) body.pin = false;
             const payload = detailPayload(gesture.id);
             if (payload) openRef.current?.(payload);
           }
@@ -781,6 +860,7 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
       loop(performance.now());
 
       cleanup = () => {
+        flushPlaces();
         cancelAnimationFrame(frame);
         observer.disconnect();
         mount.removeEventListener('pointerdown', down);

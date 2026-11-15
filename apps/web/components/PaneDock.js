@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { DOCK_EXPAND_MS, dockCollapseDelay, dockShouldStayOpen } from '../lib/dock-hold.mjs';
+import { DOCK_EXPAND_MS, DOCK_SWITCH_MS, dockHoldDelay, dockShouldStayOpen, pillAnchor } from '../lib/dock-hold.mjs';
 import GlassSurface from './GlassSurface';
 import GooeyNav from './GooeyNav';
 
@@ -24,6 +24,7 @@ export default function PaneDock({ panes, pane, onChange }) {
   const closed = useRef(true);
   const expanded = useRef(false);
   const openedAt = useRef(0);
+  const switchUntil = useRef(0);
   const wasOpen = useRef(false);
   const openState = useRef(false);
   const rootRef = useRef(null);
@@ -42,6 +43,31 @@ export default function PaneDock({ panes, pane, onChange }) {
     setPill(mid);
     return undefined;
   }, [pane, panes, open, mid]);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const shell = root?.closest('.shell');
+    if (!root || !shell) return undefined;
+    const place = () => {
+      const style = getComputedStyle(shell);
+      const side = Number.parseFloat(style.getPropertyValue('--side-w')) || 0;
+      const detail = Number.parseFloat(style.getPropertyValue('--pill-detail')) || 0;
+      const narrow = window.matchMedia('(max-width: 800px)').matches;
+      const center = narrow ? shell.clientWidth / 2 : pillAnchor(shell.clientWidth, side, detail);
+      root.style.left = `${center}px`;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(shell);
+    const sideEl = shell.querySelector(':scope > .side');
+    if (sideEl) observer.observe(sideEl);
+    const mo = new MutationObserver(place);
+    mo.observe(shell, { attributes: true, attributeFilter: ['style', 'class'] });
+    return () => {
+      observer.disconnect();
+      mo.disconnect();
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const node = measureRef.current;
@@ -91,9 +117,20 @@ export default function PaneDock({ panes, pane, onChange }) {
     return x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad;
   }
 
+  function switchLeft(now = performance.now()) {
+    return Math.max(0, switchUntil.current - now);
+  }
+
   function collapse() {
+    const left = switchLeft();
+    if (left > 0) {
+      clearTimeout(wait.current);
+      wait.current = setTimeout(() => syncRef.current(), left);
+      return;
+    }
     expanded.current = false;
     openedAt.current = 0;
+    switchUntil.current = 0;
     closed.current = false;
     hold.current = false;
     setOpen(false);
@@ -109,8 +146,10 @@ export default function PaneDock({ panes, pane, onChange }) {
   function sync() {
     const inside = containsPointer();
     const duration = expandMs();
-    const elapsed = expanded.current ? performance.now() - openedAt.current : duration;
-    const stay = expanded.current && dockShouldStayOpen(inside, elapsed, duration);
+    const now = performance.now();
+    const elapsed = expanded.current ? now - openedAt.current : duration;
+    const switching = switchLeft(now);
+    const stay = expanded.current && dockShouldStayOpen(inside, elapsed, duration, switching);
     if (inside || stay) {
       clearTimeout(wait.current);
       hold.current = true;
@@ -124,7 +163,8 @@ export default function PaneDock({ panes, pane, onChange }) {
       }
       if (!openState.current) setOpen(true);
       if (!inside) {
-        wait.current = setTimeout(() => syncRef.current(), dockCollapseDelay(performance.now(), openedAt.current, duration));
+        const delay = dockHoldDelay(performance.now(), openedAt.current, switchUntil.current, duration);
+        if (delay > 0) wait.current = setTimeout(() => syncRef.current(), delay);
       }
       return;
     }
@@ -153,8 +193,10 @@ export default function PaneDock({ panes, pane, onChange }) {
 
   function pick(index, item) {
     if (!open || !item || item.label === pane) return;
+    switchUntil.current = performance.now() + DOCK_SWITCH_MS;
     setPill(index);
     onChange(item.label, index >= mid ? 'right' : 'left');
+    sync();
   }
 
   return (
@@ -197,7 +239,7 @@ export default function PaneDock({ panes, pane, onChange }) {
             size="md"
             particleCount={15}
             spread={56}
-            animationTime={600}
+            animationTime={1000}
             timeVariance={300}
             gooeyness={0.5}
             wobble={0.5}

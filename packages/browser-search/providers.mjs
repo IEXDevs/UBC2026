@@ -156,16 +156,21 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) 
         title: typeof result.title === 'string' ? result.title.slice(0, 200) : '',
       };
     },
-    async readonlyView(sessionId, { targetId } = {}) {
+    async readonlyView(sessionId, { targetId, interactive = false } = {}) {
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
-      const body = { mode: 'tab', expiresInMs: LIVE_VIEW_TTL_MS, guardrails: { mode: 'readonly' } };
+      const body = { mode: 'tab', expiresInMs: LIVE_VIEW_TTL_MS };
+      if (!interactive) body.guardrails = { mode: 'readonly' };
       if (typeof targetId === 'string' && TARGET_ID.test(targetId)) body.targetId = targetId;
       const result = await call(`/${encodeURIComponent(sessionId)}/live_view`, { body });
       let url;
       try { url = new URL(result.devtoolsFrontendUrl); } catch { throw new ProviderError('invalid_provider_response'); }
       if (url.protocol !== 'https:' || url.hostname !== 'live.browser.run' || url.username || url.password) throw new ProviderError('invalid_provider_response');
       if (url.pathname !== '/ui/view' && url.pathname !== '/ui/inspector') throw new ProviderError('invalid_provider_response');
-      return { viewerUrl: url.href, connectBefore: new Date(Date.now() + LIVE_VIEW_TTL_MS).toISOString(), mode: 'readonly' };
+      return {
+        viewerUrl: url.href,
+        connectBefore: new Date(Date.now() + LIVE_VIEW_TTL_MS).toISOString(),
+        mode: interactive ? 'interactive' : 'readonly',
+      };
     },
     async closeSession(sessionId) {
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);

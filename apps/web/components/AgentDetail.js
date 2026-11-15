@@ -3,7 +3,7 @@
 import { Wallet } from 'lucide-react';
 import FileLibrary from './FileLibrary';
 
-export default function AgentDetail({ bot, files = [], balanceLabel = '', onResize, onWallet, onComputer }) {
+export default function AgentDetail({ bot, files = [], balanceLabel = '', onResize, onWallet, onComputer, onEdit }) {
   return (
     <aside className="agent-detail" aria-label={`${bot.name} details`}>
       <div
@@ -19,7 +19,7 @@ export default function AgentDetail({ bot, files = [], balanceLabel = '', onResi
           <span>{balanceLabel || 'Wallet'}</span>
         </button>
       </div>
-      <FileLibrary bot={bot} files={files} onComputer={onComputer} />
+      <FileLibrary bot={bot} files={files} onComputer={onComputer} onEdit={onEdit} />
     </aside>
   );
 }

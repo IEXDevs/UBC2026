@@ -1,18 +1,29 @@
+'use client';
+
+import { useId } from 'react';
 import { SHAPE_PATHS } from '../lib/bot-look.mjs';
 
-const EYE_Y = {
-  triangle: 34,
-  diamond: 25,
-  pill: 25,
-};
-
-export default function BotMark({ shape = 'circle', color = '#7c5cff', size = 36 }) {
-  const y = EYE_Y[shape] ?? 24;
+export default function BotMark({ shape = 'circle', color = '#7c5cff', size = 36, image = '' }) {
+  const path = SHAPE_PATHS[shape] ?? SHAPE_PATHS.circle;
+  const clip = `mark-${useId().replace(/:/g, '')}`;
   return (
     <svg className={`mark mark-${shape}`} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
-      <path d={SHAPE_PATHS[shape] ?? SHAPE_PATHS.circle} fill={color} />
-      <rect x="23" y={y} width="6" height="14" rx="3" fill="#140c22" />
-      <rect x="35" y={y} width="6" height="14" rx="3" fill="#140c22" />
+      {image ? (
+        <>
+          <defs>
+            <clipPath id={clip}>
+              <path d={path} />
+            </clipPath>
+          </defs>
+          <image href={image} x="0" y="0" width="64" height="64" preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clip})`} />
+        </>
+      ) : (
+        <>
+          <path d={path} fill={color} />
+          <rect x="23" y="24" width="6" height="14" rx="3" fill="#140c22" />
+          <rect x="35" y="24" width="6" height="14" rx="3" fill="#140c22" />
+        </>
+      )}
     </svg>
   );
 }

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { Orb } from '@yogesharc/thinking-orbs';
+import { chatOrbLook } from '../../lib/voice-orb.mjs';
 import { Trace, TraceDescription, TraceLine, TraceTitle } from '../ui/trace';
 import './elements.css';
 
@@ -13,10 +15,12 @@ function traceStatus(status) {
 
 export function Reasoning({ text = '', streaming = false }) {
   const [open, setOpen] = useState(Boolean(streaming));
+  const look = chatOrbLook('think');
   return (
     <Trace>
       <button type="button" className="w-fit border-0 bg-transparent p-0 text-left" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <TraceLine status={streaming ? 'running' : undefined}>
+          {streaming ? <Orb state={look.state} variant={look.variant} size={16} label={look.label} /> : null}
           <TraceTitle>{streaming ? 'Thinking' : 'Thought'}</TraceTitle>
         </TraceLine>
       </button>

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Pencil } from 'lucide-react';
 import { withHeads } from '../lib/voice-float.mjs';
 import MentionText from './MentionText';
 import { Reasoning, Sources } from './ai/elements';
@@ -11,9 +12,11 @@ function urlsIn(text) {
   return [...String(text || '').matchAll(/https?:\/\/[^\s)]+/g)].map((match) => match[0]);
 }
 
-export default function ChatBubbles({ lines, className = '', thinking = false, onParty }) {
+export default function ChatBubbles({ lines, className = '', thinking = false, onParty, onEdit }) {
   const tailRef = useRef(null);
   const rows = withHeads(lines);
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState('');
 
   useEffect(() => {
     tailRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
@@ -25,14 +28,66 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
     <MessageGroup className={className}>
       {rows.map((line) => {
         if (line.role === 'user') {
+          const editing = editingId === line.id;
           return (
             <Message key={line.id} align="end">
               <MessageContent>
-                <Bubble align="end" variant="secondary">
-                  <BubbleContent>
-                    <MentionText text={line.text} onParty={onParty} />
-                  </BubbleContent>
-                </Bubble>
+                {editing ? (
+                  <form
+                    className="chat-revise"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const next = draft.trim();
+                      if (!next) return;
+                      setEditingId(null);
+                      onEdit?.(line.id, next);
+                    }}
+                  >
+                    <textarea
+                      aria-label="Edit message"
+                      value={draft}
+                      rows={Math.min(8, Math.max(2, draft.split('\n').length))}
+                      autoFocus
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setEditingId(null);
+                        }
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          event.currentTarget.form?.requestSubmit();
+                        }
+                      }}
+                    />
+                    <div className="chat-revise-actions">
+                      <button type="button" onClick={() => setEditingId(null)}>Cancel</button>
+                      <button type="submit" disabled={!draft.trim()}>Save</button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <Bubble align="end" variant="secondary">
+                      <BubbleContent>
+                        <MentionText text={line.text} onParty={onParty} />
+                      </BubbleContent>
+                    </Bubble>
+                    {onEdit ? (
+                      <button
+                        type="button"
+                        className="chat-edit"
+                        aria-label="Edit message"
+                        disabled={thinking}
+                        onClick={() => {
+                          setDraft(line.text);
+                          setEditingId(line.id);
+                        }}
+                      >
+                        <Pencil size={14} strokeWidth={1.75} />
+                      </button>
+                    ) : null}
+                  </>
+                )}
               </MessageContent>
             </Message>
           );
@@ -41,9 +96,11 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
         return (
           <Message key={line.id}>
             <MessageContent>
-              <div className="text-sm leading-relaxed text-foreground">
-                <MentionText text={line.text} onParty={onParty} />
-              </div>
+              <Bubble align="start" variant="secondary">
+                <BubbleContent>
+                  <MentionText text={line.text} onParty={onParty} />
+                </BubbleContent>
+              </Bubble>
               <Sources urls={urls} />
             </MessageContent>
           </Message>

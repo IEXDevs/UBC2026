@@ -337,13 +337,15 @@ export class BotStateMachine {
         });
       }
       if (leaf === 'live-view' && request.method === 'POST') {
-        await readBrowserBody(request);
-        const view = await service.liveView({ ownerId, botId, sessionRecordId });
+        const body = await readBrowserBody(request);
+        const control = body.control === 'owner' || body.control === 'agent' ? body.control : undefined;
+        const view = await service.liveView({ ownerId, botId, sessionRecordId, control });
         return noStore({
           sessionRecordId: view.sessionRecordId,
           viewerUrl: view.viewerUrl,
           connectBefore: view.connectBefore,
           mode: view.mode,
+          control: view.control,
           pageUrl: view.pageUrl,
           embedVerified: view.embedVerified,
           fallback: view.fallback,
