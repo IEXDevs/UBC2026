@@ -198,6 +198,41 @@ export const SECRET_GROUPS = Object.freeze({
   serverSigning: Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']),
 });
 
+/** OpenRouter fallback. The id ends with :free so a low-balance key is not billed. */
+export const OPENROUTER_FREE_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
+
+function isZeroModelPrice(value) {
+  if (typeof value === 'number') return Object.is(value, 0);
+  if (typeof value !== 'string') return false;
+  return /^0(?:\.0+)?$/.test(value.trim());
+}
+
+/**
+ * OpenRouter may bill only a free model: an id ending in `:free`, or a
+ * pricing object whose listed amounts are all zero.
+ */
+export function isFreeOpenRouterModel(modelId, pricing) {
+  const id = typeof modelId === 'string' ? modelId.trim() : '';
+  if (!id || id.length > 128) return false;
+  if (id.endsWith(':free')) return true;
+  if (!pricing || typeof pricing !== 'object' || Array.isArray(pricing)) return false;
+  const amounts = Object.values(pricing).filter(value => value != null && value !== '');
+  if (amounts.length === 0) return false;
+  return amounts.every(isZeroModelPrice);
+}
+
+/**
+ * Keep a free OpenRouter id. A paid id is skipped in favor of `fallback`.
+ * Returns null when neither id is free, so the caller can reject the call.
+ */
+export function selectFreeOpenRouterModel(modelId, { pricing, fallback = OPENROUTER_FREE_MODEL, fallbackPricing } = {}) {
+  const id = typeof modelId === 'string' ? modelId.trim() : '';
+  if (isFreeOpenRouterModel(id, pricing)) return id;
+  const next = typeof fallback === 'string' ? fallback.trim() : '';
+  if (isFreeOpenRouterModel(next, fallbackPricing)) return next;
+  return null;
+}
+
 export class ConfigError extends Error {
   constructor(missing) {
     super(`Missing configuration: ${missing.join(', ')}. Set these names in the environment. Do not commit values.`);

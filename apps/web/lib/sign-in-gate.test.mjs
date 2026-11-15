@@ -44,7 +44,7 @@ test('refresh keeps a stored session off the login page and the unlock field is 
   assert.match(page, /showSessionHold/);
   assert.match(page, /hasStoredPrivySession/);
   assert.doesNotMatch(page, /inert=\{locked/);
-  assert.match(config, /cookieWriteBehavior: 'never'/);
+  assert.doesNotMatch(config, /cookieWriteBehavior/);
   assert.match(desk, /autoComplete="off"/);
   assert.doesNotMatch(desk, /current-password/);
   assert.match(desk, /name="maelstrom-desk-unlock"/);

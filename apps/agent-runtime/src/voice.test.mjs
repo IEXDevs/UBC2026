@@ -353,7 +353,9 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(calls[0].init.headers.Authorization, `Bearer ${OPENROUTER}`);
-  assert.equal(calls[0].body.model, 'meta/muse-spark-1.3-contributor');
+  assert.equal(calls[0].body.model.endsWith(':free'), true);
+  assert.notEqual(calls[0].body.model, 'gpt-4o');
+  assert.notEqual(calls[0].body.model, 'meta/muse-spark-1.3-contributor');
   assert.equal(calls[0].body.stream, true);
   assert.equal(calls[0].body.messages[0].content.includes(OPENROUTER), false);
 
