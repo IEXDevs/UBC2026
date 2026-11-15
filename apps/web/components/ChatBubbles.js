@@ -30,7 +30,7 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
         if (line.role === 'user') {
           const editing = editingId === line.id;
           return (
-            <Message key={line.id} align="end">
+            <Message key={line.id} align="end" tabIndex={onEdit && !editing ? 0 : undefined}>
               <MessageContent>
                 {editing ? (
                   <form

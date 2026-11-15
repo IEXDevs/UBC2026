@@ -1462,6 +1462,30 @@ button:focus-visible, input:focus-visible {
   padding: 12px 16px 8px;
 }
 
+/* Rail dark thumb from .animated-list__viewport / listLook theme dark. */
+.thread.is-chat,
+.voice-script {
+  --al-thumb: rgba(255, 255, 255, 0.16);
+  scrollbar-width: thin;
+  scrollbar-color: var(--al-thumb) transparent;
+}
+
+.thread.is-chat::-webkit-scrollbar,
+.voice-script::-webkit-scrollbar {
+  width: 6px;
+}
+
+.thread.is-chat::-webkit-scrollbar-track,
+.voice-script::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thread.is-chat::-webkit-scrollbar-thumb,
+.voice-script::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--al-thumb);
+}
+
 .thread.is-book { padding: 0; overflow: hidden; }
 
 .bubble {
@@ -2076,13 +2100,9 @@ button:focus-visible, input:focus-visible {
   background: #101010;
 }
 
-.voice-script,
-.voice-script .chat-log,
 .voice-side {
   scrollbar-width: none;
 }
-.voice-script::-webkit-scrollbar,
-.voice-script .chat-log::-webkit-scrollbar,
 .voice-side::-webkit-scrollbar {
   display: none;
 }
@@ -2231,6 +2251,38 @@ button:focus-visible, input:focus-visible {
 }
 
 .chat-edit:disabled { opacity: 0.35; }
+
+[data-slot='message']:focus-visible {
+  outline: 1px solid #fff;
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-slot='message'] .chat-edit {
+    opacity: 0;
+  }
+
+  [data-slot='message']:hover .chat-edit,
+  [data-slot='message']:focus .chat-edit,
+  [data-slot='message']:focus-within .chat-edit {
+    opacity: 0.7;
+  }
+
+  [data-slot='message']:hover .chat-edit:hover,
+  [data-slot='message']:hover .chat-edit:focus-visible,
+  [data-slot='message']:focus .chat-edit:hover,
+  [data-slot='message']:focus .chat-edit:focus-visible,
+  [data-slot='message']:focus-within .chat-edit:hover,
+  [data-slot='message']:focus-within .chat-edit:focus-visible {
+    opacity: 1;
+  }
+
+  [data-slot='message']:hover .chat-edit:disabled,
+  [data-slot='message']:focus .chat-edit:disabled,
+  [data-slot='message']:focus-within .chat-edit:disabled {
+    opacity: 0.35;
+  }
+}
 
 .chat-revise {
   align-self: flex-end;

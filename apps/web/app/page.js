@@ -744,7 +744,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           <PaneDock panes={SHELL_PANES} pane={pane} onChange={choosePane} />
           <span />
         </header>
-        <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}`}>
+        <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' ? ' is-chat' : ''}`}>
           <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}`} aria-label={pane}>
             {pane === 'Main' ? (
               bot ? (
