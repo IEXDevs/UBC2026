@@ -316,6 +316,7 @@ export async function sendBotChat({
   permission,
   shellBots = null,
   shellWallets = null,
+  shellBalanceLabel = null,
   runtimeBase = runtimeBaseUrl(),
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
@@ -350,6 +351,9 @@ export async function sendBotChat({
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
         ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),
         ...(Array.isArray(shellWallets) ? { shellWallets: shellWallets.slice(0, 40) } : {}),
+        ...(typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
+          ? { shellBalanceLabel: shellBalanceLabel.trim().slice(0, 64) }
+          : {}),
       }),
       cache: 'no-store',
     });

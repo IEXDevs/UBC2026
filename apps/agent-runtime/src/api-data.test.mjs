@@ -164,9 +164,81 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.items[0].usdcBalance, '1234500');
+  assert.equal(body.items[0].usdcBalanceLabel, '1.2345 USDC');
   assert.equal(body.items[0].balanceStatus, 'ok');
   assert.equal(body.items[0].cluster, 'devnet');
+  assert.equal(body.balances.onchainUsdc, '1234500');
+  assert.equal(body.balances.displayUsdcLabel, '1.2345 USDC');
   assert.equal(JSON.stringify(body).includes('example.invalid'), false);
+});
+
+test('wallets.list prefers platform transfer net for displayUsdcLabel', async () => {
+  const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('/rest/v1/wallets')) {
+        return Response.json([{
+          id: 'w1',
+          owner_id: 'user_1',
+          kind: 'main',
+          label: 'Main',
+          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          provider: 'privy',
+          frozen: false,
+        }]);
+      }
+      if (href.includes('/rest/v1/platform_transfers')) {
+        return Response.json([{
+          id: 't1',
+          from_owner_id: 'user_2',
+          to_owner_id: 'user_1',
+          amount: 5000000,
+          asset: 'USDC',
+          handle: 'bob',
+        }]);
+      }
+      if (href.includes('/rpc') || href === 'https://example.invalid/rpc') {
+        const body = JSON.parse(init.body || '{}');
+        if (body.method === 'getGenesisHash') {
+          return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        }
+        if (body.method === 'getTokenAccountsByOwner') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              value: [{
+                account: {
+                  data: {
+                    parsed: {
+                      info: {
+                        mint: DEVNET_USDC_MINT,
+                        tokenAmount: { amount: '0', decimals: 6 },
+                      },
+                    },
+                  },
+                },
+              }],
+            },
+          });
+        }
+      }
+      return new Response('nope', { status: 404 });
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/wallets', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.balances.displaySource, 'platform');
+  assert.equal(body.balances.displayUsdcLabel, '5 USDC');
+  assert.equal(body.items[0].displayUsdcLabel, '5 USDC');
+  assert.equal(body.items[0].usdcBalance, '0');
 });
 
 test('wallet create forwards browser origin into Privy acceptLogin', async () => {

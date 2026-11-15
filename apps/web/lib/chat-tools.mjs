@@ -110,7 +110,81 @@ function shellWalletItems(shellWallets) {
       address: wallet.address || null,
       frozen: wallet.frozen === true,
       provider: wallet.provider || 'privy',
+      ...(typeof wallet.usdcBalance === 'string' ? { usdcBalance: wallet.usdcBalance } : {}),
+      ...(typeof wallet.usdcBalanceLabel === 'string' ? { usdcBalanceLabel: wallet.usdcBalanceLabel } : {}),
+      ...(typeof wallet.displayUsdcLabel === 'string' ? { displayUsdcLabel: wallet.displayUsdcLabel } : {}),
     }));
+}
+
+function formatUsdcLabel(amount) {
+  if (typeof amount !== 'string' || !/^-?(0|[1-9][0-9]{0,39})$/.test(amount)) return null;
+  const negative = amount.startsWith('-');
+  const digits = negative ? amount.slice(1) : amount;
+  const padded = digits.padStart(7, '0');
+  const whole = padded.slice(0, -6);
+  const fraction = padded.slice(-6).replace(/0+$/, '');
+  const shown = fraction ? `${whole}.${fraction}` : whole;
+  return `${negative ? '-' : ''}${shown} USDC`;
+}
+
+function platformNetFromTransfers(items, ownerId) {
+  let net = 0n;
+  let count = 0;
+  for (const row of Array.isArray(items) ? items : []) {
+    if (!row || row.asset !== 'USDC') continue;
+    if (typeof row.amount !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(row.amount)) continue;
+    const mine = row.toOwnerId === ownerId || row.fromOwnerId === ownerId
+      || row.direction === 'in' || row.direction === 'out';
+    if (!mine && row.direction !== 'in' && row.direction !== 'out') continue;
+    let direction = row.direction;
+    if (direction !== 'in' && direction !== 'out') {
+      if (row.toOwnerId === ownerId) direction = 'in';
+      else if (row.fromOwnerId === ownerId) direction = 'out';
+      else continue;
+    }
+    count += 1;
+    const units = BigInt(row.amount);
+    net += direction === 'in' ? units : -units;
+  }
+  const amount = net.toString();
+  return { amount, label: formatUsdcLabel(amount), transferCount: count };
+}
+
+function withDisplayBalances(payload, {
+  ownerId,
+  shellBalanceLabel = null,
+  transfers = null,
+} = {}) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const platform = platformNetFromTransfers(transfers?.items || transfers, ownerId);
+  const existing = payload?.balances && typeof payload.balances === 'object' ? payload.balances : null;
+  const displayUsdcLabel = (typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim())
+    ? shellBalanceLabel.trim().slice(0, 64)
+    : (existing?.displayUsdcLabel
+      || (platform.transferCount > 0 ? platform.label : null)
+      || items.find((wallet) => typeof wallet?.displayUsdcLabel === 'string')?.displayUsdcLabel
+      || items.find((wallet) => typeof wallet?.usdcBalanceLabel === 'string')?.usdcBalanceLabel
+      || null);
+  const balances = {
+    ...(existing || {}),
+    ...(platform.transferCount > 0 ? {
+      platformUsdc: platform.amount,
+      platformUsdcLabel: platform.label,
+      platformTransferCount: platform.transferCount,
+    } : {}),
+    displayUsdcLabel,
+    displaySource: existing?.displaySource
+      || (platform.transferCount > 0 ? 'platform' : (displayUsdcLabel ? 'shell' : 'onchain')),
+  };
+  return {
+    ...payload,
+    items: items.map((wallet) => ({
+      ...wallet,
+      displayUsdcLabel: wallet.displayUsdcLabel || displayUsdcLabel || wallet.usdcBalanceLabel || null,
+      displaySource: wallet.displaySource || balances.displaySource,
+    })),
+    balances,
+  };
 }
 
 export function createChatToolInvoker({
@@ -121,6 +195,7 @@ export function createChatToolInvoker({
   runtimeBase = runtimeBaseUrl(env.NEXT_PUBLIC_AGENT_RUNTIME_URL),
   shellBots = null,
   shellWallets = null,
+  shellBalanceLabel = null,
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
@@ -130,6 +205,9 @@ export function createChatToolInvoker({
   const root = runtimeBaseUrl(runtimeBase);
   const localBots = shellBotItems(shellBots);
   const localWallets = shellWalletItems(shellWallets);
+  const balanceHint = typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
+    ? shellBalanceLabel.trim().slice(0, 64)
+    : null;
 
   async function invokeBrowser(name, args = {}) {
     const openUrl = browserSessionUrl(root, botId);
@@ -313,9 +391,27 @@ export function createChatToolInvoker({
       if (name === 'get_wallets') {
         const remote = await invokeDashboard(name, args);
         const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
-        if (remoteItems.length > 0) return remote;
-        if (localWallets.length > 0) return { ok: true, source: 'shell', items: localWallets };
-        return remote;
+        let transfers = null;
+        try {
+          const transferPath = ownerApiUrl('/api/transfers', apiBase);
+          if (transferPath) transfers = await workerJson(fetcher, transferPath, ownerId, 'GET');
+        } catch {
+          transfers = null;
+        }
+        if (remoteItems.length > 0) {
+          return withDisplayBalances(remote, { ownerId, shellBalanceLabel: balanceHint, transfers });
+        }
+        if (localWallets.length > 0) {
+          return withDisplayBalances(
+            { ok: true, source: 'shell', items: localWallets },
+            { ownerId, shellBalanceLabel: balanceHint, transfers },
+          );
+        }
+        return withDisplayBalances(remote || { ok: true, items: [] }, {
+          ownerId,
+          shellBalanceLabel: balanceHint,
+          transfers,
+        });
       }
       if (DASHBOARD_NAMES.has(name)) {
         return await invokeDashboard(name, args);

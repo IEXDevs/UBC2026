@@ -162,7 +162,16 @@ test('createChatToolInvoker falls back to shell bots and wallets when Worker is 
     runtimeBase: 'https://runtime.example',
     shellBots: [{ id: 'bot_local', name: 'Local', type: 'trading', status: 'idle', goal: 'Watch' }],
     shellWallets: [{ id: 'w_main', label: 'Main', address: 'Addr1111111111111111111111111111111111', kind: 'main' }],
-    fetcher: async () => Response.json({ ok: true, source: 'supabase', items: [] }),
+    shellBalanceLabel: '12.5 USDC',
+    fetcher: async (url) => {
+      if (String(url).includes('/api/transfers')) {
+        return Response.json({
+          ok: true,
+          items: [{ asset: 'USDC', amount: '12500000', direction: 'in', toOwnerId: 'did:privy:owner1' }],
+        });
+      }
+      return Response.json({ ok: true, source: 'supabase', items: [] });
+    },
   });
   const bots = await invoke('list_bots', {});
   assert.equal(bots.source, 'shell');
@@ -170,6 +179,8 @@ test('createChatToolInvoker falls back to shell bots and wallets when Worker is 
   const wallets = await invoke('get_wallets', {});
   assert.equal(wallets.source, 'shell');
   assert.equal(wallets.items[0].id, 'w_main');
+  assert.equal(wallets.balances.displayUsdcLabel, '12.5 USDC');
+  assert.equal(wallets.items[0].displayUsdcLabel, '12.5 USDC');
 });
 
 test('createChatToolInvoker pauses a bot via Worker', async () => {
