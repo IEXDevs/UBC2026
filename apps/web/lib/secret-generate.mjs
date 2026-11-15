@@ -35,8 +35,8 @@ export function generatePassphrase(random) {
   return text;
 }
 
-/** A typed secret can be accepted. A generated one needs a copy or an explicit acknowledgement. */
-export function secretAcceptAllowed({ generated = false, copied = false, acknowledged = false } = {}) {
+/** A typed secret can be accepted. A generated one needs the copy icon. */
+export function secretAcceptAllowed({ generated = false, copied = false } = {}) {
   if (!generated) return true;
-  return copied === true || acknowledged === true;
+  return copied === true;
 }

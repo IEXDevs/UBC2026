@@ -26,7 +26,6 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
   const [step, setStep] = useState('pass');
   const [generated, setGenerated] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [acknowledged, setAcknowledged] = useState(false);
   const joined = words ? words.join(' ') : '';
   const bank = useMemo(() => (joined ? shuffledPhrase(joined) : []), [joined]);
   const phraseReady = words ? phraseComplete(picked, words.length) : false;
@@ -100,8 +99,8 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
                 setNote('Use the same passphrase, 8 to 64 characters.');
                 return;
               }
-              if (!secretAcceptAllowed({ generated, copied, acknowledged })) {
-                setNote('Copy the generated passphrase, or confirm that you copied it.');
+              if (!secretAcceptAllowed({ generated, copied })) {
+                setNote('Copy the generated passphrase before you continue.');
                 return;
               }
               setPassphrase(left);
@@ -116,7 +115,6 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
               value={passphrase}
               generated={generated}
               copied={copied}
-              acknowledged={acknowledged}
               disabled={!words}
               onValue={setPassphrase}
               onFill={(next) => {
@@ -125,13 +123,12 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
               }}
               onGenerated={setGenerated}
               onCopied={setCopied}
-              onAcknowledged={setAcknowledged}
             />
             <label>
               Confirm passphrase
               <input type="password" value={again} autoComplete="new-password" onChange={event => setAgain(event.target.value)} />
             </label>
-            <button type="submit" className="solid" disabled={!words || !secretAcceptAllowed({ generated, copied, acknowledged })}>Continue</button>
+            <button type="submit" className="solid" disabled={!words || !secretAcceptAllowed({ generated, copied })}>Continue</button>
           </form>
         ) : null}
         {step === 'save' ? (
