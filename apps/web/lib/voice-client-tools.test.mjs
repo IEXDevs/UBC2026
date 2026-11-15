@@ -38,4 +38,9 @@ test('voice client tools open bots and confirm without spending', async () => {
 
   const missing = await runVoiceClientTool(tools, 'nope', {});
   assert.equal(missing.error, 'unknown_tool');
+
+  const locked = createVoiceClientTools({ bots: state.bots, locked: true, setActiveBotId: () => { active = 'changed'; } });
+  const refused = await locked.open_bot({ name: 'Sandbox shopper' });
+  assert.deepEqual(refused, { ok: false, error: 'desk_locked' });
+  assert.equal(active, 'bot_shop');
 });

@@ -61,7 +61,7 @@ import { useToast } from '../components/bits/SwipeToast';
 import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
-import { showSignInGate } from '../lib/sign-in-gate.mjs';
+import { hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
 import { idleLockDue } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 
@@ -116,6 +116,14 @@ function applyWalletFallback(user, body, setLiveWallets, setWalletNote) {
   }
   setLiveWallets([]);
   setWalletNote(note);
+}
+
+function SessionHold() {
+  const [label, setLabel] = useState('');
+  useEffect(() => {
+    if (hasStoredPrivySession(window.localStorage)) setLabel('Restoring your session');
+  }, []);
+  return <div className="sign-in" aria-busy="true" role="status">{label}</div>;
 }
 
 function AuthedShell() {
@@ -200,8 +208,12 @@ function AuthedShell() {
     return () => { stopped = true; };
   }, [signedIn, user, user?.id, user?.hasAcceptedTerms, accountsKey, getAccessToken]);
 
+  if (showSessionHold({ privyConfigured: true, ready })) {
+    return <SessionHold />;
+  }
+
   if (showSignInGate({ privyConfigured: true, ready, authenticated })) {
-    return <SignInPage disabled={!ready} onLogin={login} />;
+    return <SignInPage onLogin={login} />;
   }
 
   return (
@@ -769,7 +781,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       setComputerOpen(true);
     },
     confirm: askSlideConfirm,
-  }), [bots, wallets, activeBot, pane, askSlideConfirm]);
+    locked: signedIn && Boolean(ownerId) && !unlocked,
+  }), [bots, wallets, activeBot, pane, askSlideConfirm, signedIn, ownerId, unlocked]);
 
   function choosePane(next, direction) {
     if (next === pane) return;
@@ -963,6 +976,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
 
   async function settleSpend(pending, confirmed) {
     const reply = (text) => appendTalk(pending.botId, { id: `${pending.lineId}-send`, role: 'assistant', text });
+    if (deskLockOnRef.current && !unlockedRef.current) {
+      reply('Enter your password before a wallet action.');
+      return;
+    }
     const permission = pending.permission || readStoredPermission(typeof localStorage === 'undefined' ? null : localStorage);
     let requestBody;
     try {
@@ -1099,8 +1116,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   return (
     <>
     <div
-      inert={locked ? true : undefined}
-      className={`shell${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
+      className={`shell${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}${locked ? ' is-locked' : ''}`}
       style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
       <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>

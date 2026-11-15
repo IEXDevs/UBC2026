@@ -1,5 +1,7 @@
 import { Figtree } from 'next/font/google';
 import './globals.css';
+import CrashGuard from '../components/CrashGuard';
+import DeployReload from '../components/DeployReload';
 import PrivyRoot from '../components/PrivyRoot';
 
 const chatFont = Figtree({
@@ -17,7 +19,10 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={chatFont.variable}>
-        <PrivyRoot>{children}</PrivyRoot>
+        <DeployReload />
+        <CrashGuard>
+          <PrivyRoot>{children}</PrivyRoot>
+        </CrashGuard>
       </body>
     </html>
   );

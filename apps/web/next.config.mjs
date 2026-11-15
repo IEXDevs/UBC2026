@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
+import { resolveBuildId } from './lib/build-id.mjs';
 import { applyRootPublicEnv } from './lib/root-env.mjs';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
@@ -10,8 +11,13 @@ const fromApp = (name) => path.join(appDir, 'node_modules', name);
 // only read apps/web/.env*. Apply before the config object is used.
 applyRootPublicEnv();
 
+const buildId = resolveBuildId();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_BUILD_ID: buildId,
+  },
   reactStrictMode: true,
   transpilePackages: [
     '@ubc2026/bot-creation',

@@ -103,7 +103,15 @@ export function createVoiceClientTools({
   confirm = async () => false,
   pushEvent = null,
   conversation = null,
+  locked = false,
 } = {}) {
+  if (locked === true) {
+    const blocked = {};
+    for (const name of VOICE_CLIENT_TOOLS) {
+      blocked[name] = async () => ({ ok: false, error: 'desk_locked' });
+    }
+    return blocked;
+  }
   return {
     async list_shell_bots() {
       const items = (Array.isArray(bots) ? bots : []).map((bot) => ({
