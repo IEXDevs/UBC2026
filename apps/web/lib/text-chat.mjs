@@ -1,11 +1,16 @@
 /**
  * Same-origin text chat via Meta Model API (META_MODEL_API_KEY = LLM_…).
  * Falls back to OpenRouter when only OPENROUTER_API_KEY (sk-or-…) is set.
+ * OpenRouter calls use a free model only.
  */
+import { OPENROUTER_FREE_MODEL, selectFreeOpenRouterModel } from '@ubc2026/contracts';
+
+export { OPENROUTER_FREE_MODEL };
 
 export const META_MODEL_BASE = 'https://api.meta.ai/v1';
 export const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 export const META_SPARK_MODEL = 'muse-spark-1.3-contributor';
+/** Paid OpenRouter slug. Not sent. */
 export const OPENROUTER_SPARK_MODEL = 'meta/muse-spark-1.3-contributor';
 export const TEXT_CHAT_MODEL = META_SPARK_MODEL;
 export const OPENROUTER_CHAT_URL = `${META_MODEL_BASE}/chat/completions`;
@@ -69,7 +74,7 @@ export function resolveTextChatProvider({
       provider: 'openrouter',
       apiKey: openrouterKey,
       baseUrl: OPENROUTER_BASE,
-      model: OPENROUTER_SPARK_MODEL,
+      model: OPENROUTER_FREE_MODEL,
     };
   }
   return { provider: 'none', apiKey: '', baseUrl: META_MODEL_BASE, model: META_SPARK_MODEL };
@@ -285,14 +290,19 @@ export async function completeTextChat({
       resolved.provider = 'openrouter';
       resolved.apiKey = key;
       resolved.baseUrl = OPENROUTER_BASE;
-      resolved.model = OPENROUTER_SPARK_MODEL;
+      resolved.model = OPENROUTER_FREE_MODEL;
     }
   }
   if (!resolved.apiKey) throw new TextChatError('openrouter_not_configured', 503);
   const latest = typeof message === 'string' ? message.trim() : '';
   if (!latest) throw new TextChatError('message_required', 400);
   const secrets = [resolved.apiKey];
-  const modelId = typeof model === 'string' && model.trim() ? model.trim() : resolved.model;
+  let modelId = typeof model === 'string' && model.trim() ? model.trim() : resolved.model;
+  if (resolved.provider === 'openrouter') {
+    const selected = selectFreeOpenRouterModel(modelId);
+    if (!selected) throw new TextChatError('openrouter_paid_model', 400);
+    modelId = selected;
+  }
   const toolList = Array.isArray(tools) && tools.length > 0 && typeof invokeTool === 'function'
     ? tools
     : null;
