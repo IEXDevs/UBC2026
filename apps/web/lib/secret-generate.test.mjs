@@ -23,20 +23,19 @@ test('generated password and passphrase fit the create rules without being logge
   assert.equal(secretAcceptAllowed({ generated: false }), true);
 });
 
-test('generate actions and the warning sit above the entry field', () => {
-  const source = readFileSync(new URL('../components/SecretDraft.js', import.meta.url), 'utf8');
-  const password = source.indexOf('Generate password');
-  const phrase = source.indexOf('Generate passphrase');
-  const preview = source.indexOf('secret-preview');
-  const warning = source.indexOf('Copy this before you continue');
-  const field = source.indexOf('name={name}');
-  assert.ok(password >= 0 && phrase > password);
-  assert.ok(preview > phrase);
-  assert.ok(warning > preview);
-  assert.ok(field > warning);
-  assert.match(source, /I copied it/);
-  assert.match(readFileSync(new URL('../components/DeskLock.js', import.meta.url), 'utf8'), /SecretDraft/);
-  assert.match(readFileSync(new URL('../components/RecoveryCeremony.js', import.meta.url), 'utf8'), /SecretDraft/);
-  assert.match(readFileSync(new URL('../components/DeskLock.js', import.meta.url), 'utf8'), /secretAcceptAllowed/);
-  assert.match(readFileSync(new URL('../components/RecoveryCeremony.js', import.meta.url), 'utf8'), /secretAcceptAllowed/);
+test('each create screen shows only its own generator above the field', () => {
+  const draft = readFileSync(new URL('../components/SecretDraft.js', import.meta.url), 'utf8');
+  const warning = draft.indexOf('Copy this before you continue');
+  const field = draft.indexOf('name={name}');
+  assert.ok(warning >= 0 && field > warning);
+  assert.match(draft, /I copied it/);
+  assert.match(draft, /kind === 'passphrase'/);
+  const desk = readFileSync(new URL('../components/DeskLock.js', import.meta.url), 'utf8');
+  const recovery = readFileSync(new URL('../components/RecoveryCeremony.js', import.meta.url), 'utf8');
+  assert.match(desk, /kind="password"/);
+  assert.equal(desk.includes('Generate passphrase'), false);
+  assert.match(desk, /secretAcceptAllowed/);
+  assert.match(recovery, /kind="passphrase"/);
+  assert.equal(recovery.includes('Generate password'), false);
+  assert.match(recovery, /secretAcceptAllowed/);
 });
