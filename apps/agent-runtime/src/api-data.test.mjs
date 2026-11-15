@@ -260,9 +260,11 @@ test('wallets.list reports SOL and every SPL token in the wallet', async () => {
   assert.equal(body.items[0].tokens.length, 2);
   assert.equal(body.items[0].tokens[0].symbol, 'USDC');
   assert.match(body.items[0].tokens[1].symbol, /So11/);
-  assert.match(body.balances.displayBalanceLabel, /1\.5 SOL \(devnet\)/);
+  assert.match(body.balances.displayBalanceLabel, /1\.5 SOL/);
   assert.match(body.balances.displayBalanceLabel, /2\.5 USDC/);
   assert.match(body.balances.displayBalanceLabel, /7 So11/);
+  assert.ok(Array.isArray(body.items[0].holdings));
+  assert.ok(body.items[0].holdings.length >= 2);
 });
 
 test('wallets.list prefers platform transfer net for displayUsdcLabel', async () => {

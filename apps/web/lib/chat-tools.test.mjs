@@ -185,28 +185,34 @@ test('createChatToolInvoker falls back to shell bots and wallets when Worker is 
 
 test('createChatToolInvoker enriches shell wallet addresses via QuickNode', async () => {
   const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const { TESTNET_GENESIS_HASH } = await import('@ubc2026/wallets/balances');
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
     botId: 'bot_local',
     runtimeBase: 'https://runtime.example',
-    env: { QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc' },
+    env: {
+      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
+    },
     shellWallets: [{ id: 'w_main', label: 'Main', address, kind: 'main' }],
     fetcher: async (url, init = {}) => {
       const href = String(url);
       if (href.includes('/api/wallets') || href.includes('/api/transfers') || href.includes('/api/bots')) {
         return Response.json({ ok: true, source: 'supabase', items: [] });
       }
-      if (href.includes('/rpc') || href === 'https://example.invalid/rpc') {
+      if (href.includes('example.invalid')) {
         const body = JSON.parse(init.body || '{}');
+        const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : DEVNET_GENESIS_HASH;
         if (body.method === 'getGenesisHash') {
-          return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+          return Response.json({ jsonrpc: '2.0', id: 1, result: genesis });
         }
         if (body.method === 'getBalance') {
-          return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 2_500_000_000 } });
+          const value = href.includes('testnet') ? 0 : 2_500_000_000;
+          return Response.json({ jsonrpc: '2.0', id: 1, result: { value } });
         }
         if (body.method === 'getTokenAccountsByOwner') {
-          if (body.params?.[1]?.programId === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') {
+          if (href.includes('testnet') || body.params?.[1]?.programId === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') {
             return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
           }
           return Response.json({
@@ -235,8 +241,9 @@ test('createChatToolInvoker enriches shell wallet addresses via QuickNode', asyn
   const wallets = await invoke('get_wallets', {});
   assert.equal(wallets.items[0].solLamports, '2500000000');
   assert.equal(wallets.items[0].tokens[0].symbol, 'USDC');
-  assert.match(wallets.balances.displayBalanceLabel, /2\.5 SOL \(devnet\)/);
+  assert.match(wallets.balances.displayBalanceLabel, /2\.5 SOL/);
   assert.match(wallets.balances.displayBalanceLabel, /0\.75 USDC/);
+  assert.ok(wallets.items[0].holdings.some((row) => row.cluster === 'devnet'));
 });
 
 test('createChatToolInvoker pauses a bot via Worker', async () => {

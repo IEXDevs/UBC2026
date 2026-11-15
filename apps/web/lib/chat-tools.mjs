@@ -18,14 +18,14 @@ import {
   sharedToolsInstruction,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
-import { readDevnetWalletBalances } from '@ubc2026/wallets/balances';
+import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
 
 const MAX_TOOL_RESULT = 6000;
 const DASHBOARD_NAMES = new Set(DASHBOARD_TOOLS.map((tool) => tool.name));
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const CLUSTER_NOTE = 'On-chain balances are Solana-devnet only. Testnet/mainnet funds are invisible here.';
+const CLUSTER_NOTE = 'Holdings are whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet for these addresses. Mainnet is never queried.';
 
 export function openAiAgentTools(tools = SHARED_AGENT_TOOLS) {
   return toOpenAiTools(tools);
@@ -134,9 +134,10 @@ function formatUsdcLabel(amount) {
   return formatFixedUnits(amount, 6, 'USDC');
 }
 
-function formatSolLabel(lamports) {
+function formatSolLabel(lamports, cluster = null) {
   const label = formatFixedUnits(lamports, 9, 'SOL');
-  return label ? `${label} (devnet)` : null;
+  if (!label) return null;
+  return cluster ? `${label} (${cluster})` : label;
 }
 
 function formatTokenLabel(token) {
@@ -144,31 +145,27 @@ function formatTokenLabel(token) {
   const symbol = typeof token.symbol === 'string' && token.symbol.trim()
     ? token.symbol.trim().slice(0, 32)
     : 'TOKEN';
-  return formatFixedUnits(token.amount, token.decimals, symbol);
+  const base = formatFixedUnits(token.amount, token.decimals, symbol);
+  if (!base) return null;
+  return token.cluster ? `${base} (${token.cluster})` : base;
 }
 
 function publicTokens(tokens) {
   if (!Array.isArray(tokens)) return [];
-  return tokens.slice(0, 24).map((token) => ({
+  return tokens.slice(0, 48).map((token) => ({
     mint: token.mint,
     amount: token.amount,
     decimals: token.decimals,
     symbol: token.symbol,
     known: token.known === true,
+    cluster: token.cluster || null,
     label: formatTokenLabel(token),
   })).filter((token) => token.label);
 }
 
-/** Fill SOL + SPL token fields for shell or incomplete Worker rows via QuickNode. */
-async function enrichWalletsOnchain(wallets, { rpcUrl, fetcher = fetch } = {}) {
+/** Read whatever non-zero SOL/SPL balances exist on Solana-devnet + Solana-testnet. */
+async function enrichWalletsOnchain(wallets, { env = {}, fetcher = fetch } = {}) {
   const list = Array.isArray(wallets) ? wallets : [];
-  if (!rpcUrl || typeof rpcUrl !== 'string' || !rpcUrl.trim()) {
-    return {
-      items: list,
-      note: 'rpc_not_configured',
-      clusterNote: CLUSTER_NOTE,
-    };
-  }
   const head = list.slice(0, 8);
   const enriched = await Promise.all(head.map(async (wallet) => {
     const address = typeof wallet?.address === 'string' ? wallet.address : '';
@@ -176,27 +173,20 @@ async function enrichWalletsOnchain(wallets, { rpcUrl, fetcher = fetch } = {}) {
       return {
         ...wallet,
         balanceStatus: 'invalid_address',
-        cluster: 'devnet',
+        holdings: [],
         tokens: Array.isArray(wallet.tokens) ? wallet.tokens : [],
       };
     }
-    // Keep Worker-provided holdings when they already look populated.
-    const hasSol = typeof wallet.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports);
-    const hasTokens = Array.isArray(wallet.tokens) && wallet.tokens.length > 0;
-    if (hasSol && (hasTokens || wallet.usdcBalance != null) && wallet.balanceStatus === 'ok') {
-      return wallet;
-    }
-    const bal = await readDevnetWalletBalances({ rpcUrl, address, fetcher });
+    const bal = await readWalletBalancesAcrossClusters({ address, env, fetcher });
+    const holdings = Array.isArray(bal.holdings) ? bal.holdings.filter((row) => row?.label) : [];
+    const tokens = publicTokens(bal.tokens);
     const usdc = bal.usdcAmount;
     const sol = bal.solLamports;
     const solOk = typeof sol === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(sol);
     const usdcOk = typeof usdc === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(usdc);
-    const tokens = publicTokens(bal.tokens);
-    const parts = [];
-    if (solOk && sol !== '0') parts.push(formatSolLabel(sol));
-    for (const token of tokens) {
-      if (token.label) parts.push(token.label);
-    }
+    const label = bal.displayBalanceLabel
+      || holdings.map((row) => row.label).join(' · ')
+      || null;
     return {
       ...wallet,
       usdcBalance: usdcOk ? usdc : (wallet.usdcBalance ?? null),
@@ -206,11 +196,12 @@ async function enrichWalletsOnchain(wallets, { rpcUrl, fetcher = fetch } = {}) {
       solBalanceLabel: solOk ? formatSolLabel(sol) : (wallet.solBalanceLabel ?? null),
       solDecimals: 9,
       tokens,
-      tokensLabel: parts.filter((part) => !String(part).includes('SOL')).join(' · ') || null,
-      displayBalanceLabel: parts.join(' · ') || formatSolLabel(solOk ? sol : '0'),
+      tokensLabel: tokens.map((token) => token.label).filter(Boolean).join(' · ') || null,
+      holdings,
+      displayBalanceLabel: label,
       displaySolLabel: solOk ? formatSolLabel(sol) : null,
-      balanceStatus: bal.ok === true || solOk ? 'ok' : (bal.code || 'rpc_failed'),
-      cluster: 'devnet',
+      balanceStatus: bal.ok === true || holdings.length > 0 ? 'ok' : (bal.code || 'rpc_failed'),
+      cluster: bal.cluster || null,
     };
   }));
   return {
@@ -221,35 +212,33 @@ async function enrichWalletsOnchain(wallets, { rpcUrl, fetcher = fetch } = {}) {
 }
 
 function summarizeOnchain(items) {
+  const holdings = [];
+  for (const wallet of items) {
+    for (const row of Array.isArray(wallet?.holdings) ? wallet.holdings : []) {
+      if (row?.label) holdings.push(row);
+    }
+  }
+  const tokens = [];
+  for (const wallet of items) {
+    for (const token of Array.isArray(wallet?.tokens) ? wallet.tokens : []) {
+      if (token?.label) tokens.push(token);
+    }
+  }
   let sol = 0n;
-  const byMint = new Map();
   for (const wallet of items) {
     if (typeof wallet?.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports)) {
       sol += BigInt(wallet.solLamports);
     }
-    for (const token of Array.isArray(wallet?.tokens) ? wallet.tokens : []) {
-      if (!token?.mint || typeof token.amount !== 'string') continue;
-      if (!/^(0|[1-9][0-9]{0,39})$/.test(token.amount) || token.amount === '0') continue;
-      const existing = byMint.get(token.mint);
-      if (existing) {
-        existing.amount = (BigInt(existing.amount) + BigInt(token.amount)).toString();
-        continue;
-      }
-      byMint.set(token.mint, { ...token });
-    }
   }
-  const tokens = publicTokens([...byMint.values()]);
-  const parts = [];
-  if (sol > 0n) parts.push(formatSolLabel(sol.toString()));
-  for (const token of tokens) {
-    if (token.label) parts.push(token.label);
-  }
+  const displayBalanceLabel = holdings.map((row) => row.label).filter(Boolean).join(' · ')
+    || formatSolLabel(sol.toString());
   return {
     onchainSol: sol.toString(),
     onchainSolLabel: formatSolLabel(sol.toString()),
     tokens,
     tokensLabel: tokens.map((token) => token.label).filter(Boolean).join(' · ') || null,
-    displayBalanceLabel: parts.join(' · ') || formatSolLabel(sol.toString()),
+    holdings,
+    displayBalanceLabel,
     displaySolLabel: formatSolLabel(sol.toString()),
     displaySource: 'onchain',
   };
@@ -301,17 +290,18 @@ function withDisplayBalances(payload, {
     || null;
   const onchain = summarizeOnchain(items);
   const solLabelFinal = onchain.onchainSolLabel || solLabel;
+  const onchainLabel = onchain.holdings?.length
+    ? onchain.displayBalanceLabel
+    : (onchain.onchainSol !== '0' ? onchain.displayBalanceLabel : null);
   const displayBalanceLabel = [
     platform.transferCount > 0 ? platform.label : null,
-    onchain.displayBalanceLabel && onchain.displayBalanceLabel !== '0 SOL (devnet)'
-      ? onchain.displayBalanceLabel
-      : null,
+    onchainLabel,
     shellHint,
     solLabelFinal,
     displayUsdcLabel,
   ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ')
     || onchain.displayBalanceLabel
-    || '0 SOL (devnet)';
+    || '0 SOL';
   const balances = {
     ...(existing || {}),
     ...onchain,
@@ -561,10 +551,7 @@ export function createChatToolInvoker({
         const source = remoteItems.length > 0
           ? (remote?.source || 'supabase')
           : (localWallets.length > 0 ? 'shell' : (remote?.source || 'empty'));
-        const rpcUrl = typeof env.QUICKNODE_DEVNET_RPC_URL === 'string'
-          ? env.QUICKNODE_DEVNET_RPC_URL
-          : '';
-        const enriched = await enrichWalletsOnchain(baseItems, { rpcUrl, fetcher });
+        const enriched = await enrichWalletsOnchain(baseItems, { env, fetcher });
         return withDisplayBalances(
           {
             ok: true,

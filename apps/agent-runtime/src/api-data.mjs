@@ -28,7 +28,7 @@ import {
   transferErrorCode,
   transferRequest,
 } from './platform-transfer.mjs';
-import { readDevnetWalletBalances } from '@ubc2026/wallets/balances';
+import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -183,10 +183,11 @@ export function formatUsdcLabel(amount) {
   return formatFixedUnits(amount, 6, 'USDC');
 }
 
-/** Format SOL lamports (9 decimals) for agent speech — Solana devnet native. */
-export function formatSolLabel(lamports) {
+/** Format SOL lamports (9 decimals) for agent speech. */
+export function formatSolLabel(lamports, cluster = null) {
   const label = formatFixedUnits(lamports, 9, 'SOL');
-  return label ? `${label} (devnet)` : null;
+  if (!label) return null;
+  return cluster ? `${label} (${cluster})` : label;
 }
 
 function mapTransferDirection(row, ownerId) {
@@ -232,8 +233,9 @@ function emptyOnchainFields(status) {
     solDecimals: 9,
     tokens: [],
     tokensLabel: null,
+    holdings: [],
     balanceStatus: status,
-    cluster: 'devnet',
+    cluster: null,
   };
 }
 
@@ -242,17 +244,20 @@ function formatTokenLabel(token) {
   const symbol = typeof token.symbol === 'string' && token.symbol.trim()
     ? token.symbol.trim().slice(0, 32)
     : 'TOKEN';
-  return formatFixedUnits(token.amount, token.decimals, symbol);
+  const base = formatFixedUnits(token.amount, token.decimals, symbol);
+  if (!base) return null;
+  return token.cluster ? `${base} (${token.cluster})` : base;
 }
 
 function publicTokens(tokens) {
   if (!Array.isArray(tokens)) return [];
-  return tokens.slice(0, 24).map((token) => ({
+  return tokens.slice(0, 48).map((token) => ({
     mint: token.mint,
     amount: token.amount,
     decimals: token.decimals,
     symbol: token.symbol,
     known: token.known === true,
+    cluster: token.cluster || null,
     label: formatTokenLabel(token),
   })).filter((token) => token.label);
 }
@@ -262,26 +267,23 @@ function tokensLabel(tokens) {
   return labels.length ? labels.join(' · ') : null;
 }
 
-/** Attach Solana-devnet SOL + all SPL token balances for agent get_wallets. */
+/** Attach whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet. */
 async function withOnchainBalances(env, wallets) {
   const list = Array.isArray(wallets) ? wallets : [];
-  const rpcUrl = typeof env.QUICKNODE_DEVNET_RPC_URL === 'string' ? env.QUICKNODE_DEVNET_RPC_URL : '';
-  if (!rpcUrl.trim()) {
-    return list.map((wallet) => ({ ...wallet, ...emptyOnchainFields('rpc_not_configured') }));
-  }
   const fetcher = env.fetch ?? fetch;
   const head = list.slice(0, BALANCE_CAP);
   const enriched = await Promise.all(head.map(async (wallet) => {
-    const bal = await readDevnetWalletBalances({
-      rpcUrl,
+    const bal = await readWalletBalancesAcrossClusters({
       address: wallet.address,
+      env,
       fetcher,
     });
+    const holdings = Array.isArray(bal.holdings) ? bal.holdings.filter((row) => row?.label) : [];
+    const tokens = publicTokens(bal.tokens);
     const usdc = bal.usdcAmount;
     const sol = bal.solLamports;
     const solOk = typeof sol === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(sol);
     const usdcOk = typeof usdc === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(usdc);
-    const tokens = publicTokens(bal.tokens);
     return {
       ...wallet,
       usdcBalance: usdcOk ? usdc : null,
@@ -292,8 +294,18 @@ async function withOnchainBalances(env, wallets) {
       solDecimals: 9,
       tokens,
       tokensLabel: tokensLabel(tokens),
-      balanceStatus: bal.ok === true || solOk ? 'ok' : (bal.code || 'rpc_failed'),
-      cluster: 'devnet',
+      holdings,
+      displayBalanceLabel: bal.displayBalanceLabel
+        || holdings.map((row) => row.label).join(' · ')
+        || null,
+      balanceStatus: bal.ok === true || holdings.length > 0 ? 'ok' : (bal.code || 'rpc_failed'),
+      cluster: bal.cluster || null,
+      clusters: bal.clusters
+        ? {
+          devnet: bal.clusters.devnet?.ok === true,
+          testnet: bal.clusters.testnet?.ok === true,
+        }
+        : null,
     };
   }));
   const rest = list.slice(BALANCE_CAP).map((wallet) => ({
@@ -339,6 +351,9 @@ function joinBalanceParts(parts) {
 }
 
 function walletDisplayParts(wallet) {
+  if (Array.isArray(wallet?.holdings) && wallet.holdings.length) {
+    return wallet.holdings.map((row) => row?.label).filter(Boolean);
+  }
   const parts = [];
   if (wallet?.solLamports && wallet.solLamports !== '0' && wallet.solBalanceLabel) {
     parts.push(wallet.solBalanceLabel);
@@ -357,21 +372,31 @@ function walletBalanceSummary(items, platform) {
   const onchainUsdc = sumField(items, 'usdcBalance');
   const onchainSol = sumField(items, 'solLamports');
   const tokens = mergeTokenHoldings(items);
+  const holdings = [];
+  for (const wallet of Array.isArray(items) ? items : []) {
+    for (const row of Array.isArray(wallet?.holdings) ? wallet.holdings : []) {
+      if (row?.label) holdings.push(row);
+    }
+  }
   const hasPlatform = platform.transferCount > 0 && platform.amount != null;
   const hasSol = onchainSol !== '0';
   const parts = [];
   if (hasPlatform) parts.push(platform.label);
-  if (hasSol) parts.push(formatSolLabel(onchainSol));
-  for (const token of tokens) {
-    if (token.label) parts.push(token.label);
+  if (holdings.length) {
+    for (const row of holdings) parts.push(row.label);
+  } else {
+    if (hasSol) parts.push(formatSolLabel(onchainSol));
+    for (const token of tokens) {
+      if (token.label) parts.push(token.label);
+    }
   }
   if (!parts.length) {
     parts.push(formatSolLabel(onchainSol) || formatUsdcLabel(onchainUsdc));
   }
   const displayBalanceLabel = joinBalanceParts(parts);
   const displaySource = hasPlatform
-    ? (hasSol || tokens.length ? 'mixed' : 'platform')
-    : (tokens.length || hasSol ? 'onchain' : 'onchain');
+    ? (hasSol || tokens.length || holdings.length ? 'mixed' : 'platform')
+    : 'onchain';
   const displayUsdc = hasPlatform ? platform.amount : onchainUsdc;
   return {
     platformUsdc: platform.amount,
@@ -383,6 +408,7 @@ function walletBalanceSummary(items, platform) {
     onchainSolLabel: formatSolLabel(onchainSol),
     tokens,
     tokensLabel: tokensLabel(tokens),
+    holdings,
     displayUsdc,
     displayUsdcLabel: formatUsdcLabel(displayUsdc),
     displaySol: onchainSol,
