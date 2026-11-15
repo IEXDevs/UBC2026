@@ -3,6 +3,7 @@
 import { generatePassphrase, generatePassword } from '../lib/secret-generate.mjs';
 
 export default function SecretDraft({
+  kind,
   label,
   value,
   generated,
@@ -17,9 +18,9 @@ export default function SecretDraft({
   name = 'secret',
   disabled = false,
 }) {
-  function fill(kind) {
-    const next = kind === 'password' ? generatePassword() : generatePassphrase();
-    onGenerated(kind);
+  function fill() {
+    const next = kind === 'passphrase' ? generatePassphrase() : generatePassword();
+    onGenerated(kind === 'passphrase' ? 'passphrase' : 'password');
     if (onFill) onFill(next);
     else onValue(next);
     onCopied(false);
@@ -39,8 +40,11 @@ export default function SecretDraft({
   return (
     <div className="secret-draft">
       <div className="choice-row">
-        <button type="button" className="ghost" onClick={() => fill('password')} disabled={disabled}>Generate password</button>
-        <button type="button" className="ghost" onClick={() => fill('passphrase')} disabled={disabled}>Generate passphrase</button>
+        {kind === 'passphrase' ? (
+          <button type="button" className="ghost" onClick={fill} disabled={disabled}>Generate passphrase</button>
+        ) : (
+          <button type="button" className="ghost" onClick={fill} disabled={disabled}>Generate password</button>
+        )}
       </div>
       {generated && value ? (
         <>

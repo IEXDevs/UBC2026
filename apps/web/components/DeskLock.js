@@ -56,7 +56,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
         return;
       }
       if (!secretAcceptAllowed({ generated, copied, acknowledged })) {
-        setNote('Copy the generated password or passphrase, or confirm that you copied it.');
+        setNote('Copy the generated password, or confirm that you copied it.');
         return;
       }
     }
@@ -96,6 +96,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
         <form className="field" onSubmit={submit}>
           {setting ? (
             <SecretDraft
+              kind="password"
               label="Password"
               name="desk-password"
               value={password}

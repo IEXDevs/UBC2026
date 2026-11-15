@@ -101,7 +101,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
                 return;
               }
               if (!secretAcceptAllowed({ generated, copied, acknowledged })) {
-                setNote('Copy the generated password or passphrase, or confirm that you copied it.');
+                setNote('Copy the generated passphrase, or confirm that you copied it.');
                 return;
               }
               setPassphrase(left);
@@ -110,6 +110,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
             }}
           >
             <SecretDraft
+              kind="passphrase"
               label="Passphrase"
               name="recovery-passphrase"
               value={passphrase}
