@@ -2228,7 +2228,7 @@ button:focus-visible, input:focus-visible {
   40% { transform: scale(1); opacity: 1; }
 }
 
-.chat-edit {
+button.chat-edit {
   align-self: flex-end;
   display: inline-flex;
   align-items: center;
@@ -2240,48 +2240,44 @@ button:focus-visible, input:focus-visible {
   border-radius: 999px;
   background: transparent;
   color: #a3a3a3;
-  opacity: 0.7;
+  opacity: 0;
 }
 
-.chat-edit:hover,
-.chat-edit:focus-visible {
-  opacity: 1;
-  background: #2a2a2a;
-  color: #f5f5f5;
+button.chat-edit:disabled {
+  opacity: 0;
 }
-
-.chat-edit:disabled { opacity: 0.35; }
 
 [data-slot='message']:focus-visible {
   outline: 1px solid #fff;
   outline-offset: 2px;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  [data-slot='message'] .chat-edit {
-    opacity: 0;
-  }
+[data-slot='message']:hover button.chat-edit,
+[data-slot='message']:focus button.chat-edit,
+[data-slot='message']:focus-within button.chat-edit,
+button.chat-edit:focus,
+button.chat-edit:focus-visible {
+  opacity: 0.7;
+}
 
-  [data-slot='message']:hover .chat-edit,
-  [data-slot='message']:focus .chat-edit,
-  [data-slot='message']:focus-within .chat-edit {
-    opacity: 0.7;
-  }
+[data-slot='message']:hover button.chat-edit:hover,
+[data-slot='message']:hover button.chat-edit:focus-visible,
+[data-slot='message']:focus button.chat-edit:focus-visible,
+[data-slot='message']:focus-within button.chat-edit:hover,
+[data-slot='message']:focus-within button.chat-edit:focus-visible {
+  opacity: 1;
+  background: #2a2a2a;
+  color: #f5f5f5;
+}
 
-  [data-slot='message']:hover .chat-edit:hover,
-  [data-slot='message']:hover .chat-edit:focus-visible,
-  [data-slot='message']:focus .chat-edit:hover,
-  [data-slot='message']:focus .chat-edit:focus-visible,
-  [data-slot='message']:focus-within .chat-edit:hover,
-  [data-slot='message']:focus-within .chat-edit:focus-visible {
-    opacity: 1;
-  }
-
-  [data-slot='message']:hover .chat-edit:disabled,
-  [data-slot='message']:focus .chat-edit:disabled,
-  [data-slot='message']:focus-within .chat-edit:disabled {
-    opacity: 0.35;
-  }
+[data-slot='message']:hover button.chat-edit:disabled,
+[data-slot='message']:focus button.chat-edit:disabled,
+[data-slot='message']:focus-within button.chat-edit:disabled,
+button.chat-edit:disabled:focus,
+button.chat-edit:disabled:focus-visible {
+  opacity: 0.35;
+  background: transparent;
+  color: #a3a3a3;
 }
 
 .chat-revise {

@@ -10,16 +10,19 @@ const rail = readFileSync(join(root, 'components/AnimatedList.css'), 'utf8');
 const bubbles = readFileSync(join(root, 'components/ChatBubbles.js'), 'utf8');
 const page = readFileSync(join(root, 'app/page.js'), 'utf8');
 
-test('message edit stays hidden until hover or focus on devices that can hover', () => {
-  const gate = css.slice(css.indexOf("@media (hover: hover) and (pointer: fine) {\n  [data-slot='message'] .chat-edit"));
-  assert.notEqual(gate, '');
-  assert.match(gate, /\[data-slot='message'\] \.chat-edit \{\s*opacity: 0;/);
-  assert.match(gate, /\[data-slot='message'\]:hover \.chat-edit/);
-  assert.match(gate, /\[data-slot='message'\]:focus \.chat-edit/);
-  assert.match(gate, /\[data-slot='message'\]:focus-within \.chat-edit/);
-  assert.match(gate, /opacity: 0\.7/);
-  const resting = css.slice(css.indexOf('.chat-edit {'), css.indexOf('.chat-edit:hover'));
-  assert.match(resting, /opacity: 0\.7/);
+test('the edit button stays hidden until the message is hovered or focused', () => {
+  const start = css.indexOf('button.chat-edit {');
+  const block = css.slice(start, css.indexOf('.chat-revise {', start));
+  assert.match(block, /button\.chat-edit \{\s*[^}]*opacity: 0;/);
+  assert.match(block, /button\.chat-edit:disabled \{\s*opacity: 0;/);
+  assert.doesNotMatch(block, /@media \(hover: hover\)/);
+  assert.match(block, /\[data-slot='message'\]:hover button\.chat-edit/);
+  assert.match(block, /\[data-slot='message'\]:focus button\.chat-edit/);
+  assert.match(block, /\[data-slot='message'\]:focus-within button\.chat-edit/);
+  assert.match(block, /button\.chat-edit:focus/);
+  assert.match(block, /button\.chat-edit:focus-visible/);
+  assert.match(bubbles, /className="chat-edit"/);
+  assert.match(bubbles, /aria-label="Edit message"/);
   assert.match(bubbles, /tabIndex=\{onEdit && !editing \? 0 : undefined\}/);
 });
 
