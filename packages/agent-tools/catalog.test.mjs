@@ -47,7 +47,8 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.ok(names.includes('web_search'));
   assert.ok(VOICE_BROWSER_ALIASES.some((item) => item.name === 'open_browser_session'));
   assert.match(sharedToolsInstruction(), /same tools on text and voice/);
-  assert.match(sharedToolsInstruction(), /balances\.displayUsdcLabel/);
+  assert.match(sharedToolsInstruction(), /balances\.displayBalanceLabel/);
   const walletsTool = DASHBOARD_TOOLS.find((tool) => tool.name === 'get_wallets');
-  assert.match(walletsTool.description, /displayUsdcLabel/);
+  assert.match(walletsTool.description, /displayBalanceLabel/);
+  assert.match(walletsTool.description, /devnet/);
 });

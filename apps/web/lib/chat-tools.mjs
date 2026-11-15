@@ -158,13 +158,25 @@ function withDisplayBalances(payload, {
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const platform = platformNetFromTransfers(transfers?.items || transfers, ownerId);
   const existing = payload?.balances && typeof payload.balances === 'object' ? payload.balances : null;
-  const displayUsdcLabel = (typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim())
+  const shellHint = typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
     ? shellBalanceLabel.trim().slice(0, 64)
-    : (existing?.displayUsdcLabel
-      || (platform.transferCount > 0 ? platform.label : null)
-      || items.find((wallet) => typeof wallet?.displayUsdcLabel === 'string')?.displayUsdcLabel
-      || items.find((wallet) => typeof wallet?.usdcBalanceLabel === 'string')?.usdcBalanceLabel
-      || null);
+    : null;
+  const solLabel = existing?.displaySolLabel
+    || existing?.onchainSolLabel
+    || items.find((wallet) => typeof wallet?.solBalanceLabel === 'string')?.solBalanceLabel
+    || null;
+  const displayUsdcLabel = shellHint
+    || existing?.displayUsdcLabel
+    || (platform.transferCount > 0 ? platform.label : null)
+    || items.find((wallet) => typeof wallet?.displayUsdcLabel === 'string')?.displayUsdcLabel
+    || items.find((wallet) => typeof wallet?.usdcBalanceLabel === 'string')?.usdcBalanceLabel
+    || null;
+  const displayBalanceLabel = existing?.displayBalanceLabel
+    || shellHint
+    || (platform.transferCount > 0 ? platform.label : null)
+    || solLabel
+    || displayUsdcLabel
+    || null;
   const balances = {
     ...(existing || {}),
     ...(platform.transferCount > 0 ? {
@@ -173,14 +185,18 @@ function withDisplayBalances(payload, {
       platformTransferCount: platform.transferCount,
     } : {}),
     displayUsdcLabel,
+    displaySolLabel: solLabel,
+    displayBalanceLabel,
     displaySource: existing?.displaySource
-      || (platform.transferCount > 0 ? 'platform' : (displayUsdcLabel ? 'shell' : 'onchain')),
+      || (platform.transferCount > 0 ? 'platform' : (solLabel && !displayUsdcLabel ? 'sol' : (displayUsdcLabel ? 'shell' : 'onchain'))),
   };
   return {
     ...payload,
     items: items.map((wallet) => ({
       ...wallet,
       displayUsdcLabel: wallet.displayUsdcLabel || displayUsdcLabel || wallet.usdcBalanceLabel || null,
+      displaySolLabel: wallet.displaySolLabel || wallet.solBalanceLabel || solLabel || null,
+      displayBalanceLabel: wallet.displayBalanceLabel || displayBalanceLabel || wallet.solBalanceLabel || null,
       displaySource: wallet.displaySource || balances.displaySource,
     })),
     balances,

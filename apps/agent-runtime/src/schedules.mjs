@@ -289,50 +289,85 @@ async function rpcCall(fetcher, rpcUrl, method, params) {
   return payload.result;
 }
 
+function rejectBalance(code, address = null) {
+  return {
+    ok: false,
+    code,
+    cluster: 'devnet',
+    address,
+    amount: null,
+    solLamports: null,
+    usdcAmount: null,
+  };
+}
+
+function parseUsdcAccounts(accounts) {
+  if (!Array.isArray(accounts)) return { ok: false, code: 'rpc_rejected', amount: null };
+  let total = 0n;
+  for (const account of accounts) {
+    const info = account?.account?.data?.parsed?.info;
+    const tokenAmount = info?.tokenAmount;
+    if (!info || info.mint !== DEVNET_USDC_MINT || tokenAmount?.decimals !== 6) {
+      return { ok: false, code: 'rpc_rejected', amount: null };
+    }
+    if (typeof tokenAmount.amount !== 'string' || !integerAmount.test(tokenAmount.amount)) {
+      return { ok: false, code: 'rpc_rejected', amount: null };
+    }
+    total += BigInt(tokenAmount.amount);
+  }
+  return { ok: true, code: null, amount: total.toString() };
+}
+
 /**
- * Read devnet USDC for one wallet. Refuses any RPC whose genesis hash is not devnet.
+ * Read Solana-devnet SOL (lamports) + Circle USDC for one wallet.
+ * One genesis check, then getBalance + getTokenAccountsByOwner.
  * The RPC URL is never copied into the result.
  */
-export async function readDevnetUsdcBalance({ rpcUrl, address, fetcher = fetch } = {}) {
+export async function readDevnetWalletBalances({ rpcUrl, address, fetcher = fetch } = {}) {
   if (typeof address !== 'string' || !base58.test(address)) {
-    return { ok: false, code: 'invalid_address', cluster: 'devnet', address: null, amount: null };
+    return rejectBalance('invalid_address', null);
   }
   if (typeof rpcUrl !== 'string' || rpcUrl.trim() === '') {
-    return { ok: false, code: 'rpc_not_configured', cluster: 'devnet', address, amount: null };
+    return rejectBalance('rpc_not_configured', address);
   }
   let endpoint;
   try { endpoint = new URL(rpcUrl.trim()); } catch {
-    return { ok: false, code: 'invalid_rpc', cluster: 'devnet', address, amount: null };
+    return rejectBalance('invalid_rpc', address);
   }
   if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) {
-    return { ok: false, code: 'invalid_rpc', cluster: 'devnet', address, amount: null };
+    return rejectBalance('invalid_rpc', address);
   }
   const target = endpoint.toString();
   try {
     const genesis = await rpcCall(fetcher, target, 'getGenesisHash');
     if (genesis !== DEVNET_GENESIS_HASH) {
-      return { ok: false, code: 'wrong_cluster', cluster: 'devnet', address, amount: null };
+      return rejectBalance('wrong_cluster', address);
     }
-    const listed = await rpcCall(fetcher, target, 'getTokenAccountsByOwner', [
-      address,
-      { mint: DEVNET_USDC_MINT },
-      { encoding: 'jsonParsed' },
+    const [lamportsRaw, listed] = await Promise.all([
+      rpcCall(fetcher, target, 'getBalance', [address]),
+      rpcCall(fetcher, target, 'getTokenAccountsByOwner', [
+        address,
+        { mint: DEVNET_USDC_MINT },
+        { encoding: 'jsonParsed' },
+      ]),
     ]);
-    const accounts = listed?.value;
-    if (!Array.isArray(accounts)) {
-      return { ok: false, code: 'rpc_rejected', cluster: 'devnet', address, amount: null };
+    const lamportsValue = typeof lamportsRaw === 'number'
+      ? lamportsRaw
+      : (typeof lamportsRaw?.value === 'number' ? lamportsRaw.value : null);
+    if (!Number.isSafeInteger(lamportsValue) || lamportsValue < 0) {
+      return rejectBalance('rpc_rejected', address);
     }
-    let total = 0n;
-    for (const account of accounts) {
-      const info = account?.account?.data?.parsed?.info;
-      const tokenAmount = info?.tokenAmount;
-      if (!info || info.mint !== DEVNET_USDC_MINT || tokenAmount?.decimals !== 6) {
-        return { ok: false, code: 'rpc_rejected', cluster: 'devnet', address, amount: null };
-      }
-      if (typeof tokenAmount.amount !== 'string' || !integerAmount.test(tokenAmount.amount)) {
-        return { ok: false, code: 'rpc_rejected', cluster: 'devnet', address, amount: null };
-      }
-      total += BigInt(tokenAmount.amount);
+    const usdc = parseUsdcAccounts(listed?.value);
+    if (!usdc.ok) {
+      return {
+        ok: false,
+        code: usdc.code,
+        cluster: 'devnet',
+        address,
+        amount: null,
+        solLamports: String(lamportsValue),
+        usdcAmount: null,
+      };
     }
     return {
       ok: true,
@@ -340,9 +375,27 @@ export async function readDevnetUsdcBalance({ rpcUrl, address, fetcher = fetch }
       cluster: 'devnet',
       mint: DEVNET_USDC_MINT,
       address,
-      amount: total.toString(),
+      amount: usdc.amount,
+      solLamports: String(lamportsValue),
+      usdcAmount: usdc.amount,
     };
   } catch {
-    return { ok: false, code: 'rpc_failed', cluster: 'devnet', address, amount: null };
+    return rejectBalance('rpc_failed', address);
   }
+}
+
+/**
+ * Read devnet USDC for one wallet. Refuses any RPC whose genesis hash is not devnet.
+ * The RPC URL is never copied into the result.
+ */
+export async function readDevnetUsdcBalance({ rpcUrl, address, fetcher = fetch } = {}) {
+  const bal = await readDevnetWalletBalances({ rpcUrl, address, fetcher });
+  return {
+    ok: bal.ok === true && bal.usdcAmount != null,
+    code: bal.ok === true ? null : bal.code,
+    cluster: 'devnet',
+    mint: DEVNET_USDC_MINT,
+    address: bal.address,
+    amount: bal.usdcAmount,
+  };
 }
