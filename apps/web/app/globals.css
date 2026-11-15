@@ -1116,6 +1116,7 @@ button:focus-visible, input:focus-visible {
 }
 .address-copy small { color: #a3a3a3; font-size: 12px; }
 .address-copy.is-empty { box-shadow: none; background: transparent; padding-left: 0; }
+.backdrop.desk-lock { z-index: 80; }
 .sheet.wallet-gate {
   width: min(520px, calc(100vw - 32px));
   max-height: min(760px, calc(100vh - 32px));

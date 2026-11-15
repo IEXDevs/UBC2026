@@ -52,7 +52,9 @@ import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 import SignInPage from '../components/SignInPage';
+import DeskLock from '../components/DeskLock';
 import { showSignInGate } from '../lib/sign-in-gate.mjs';
+import { idleLockDue } from '../lib/desk-lock.mjs';
 
 const CONNECTORS = shellConnectors();
 const privyConfigured = privyProviderProps({
@@ -232,6 +234,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [activeBot, setActiveBot] = useState(null);
   const [cornerEdit, setCornerEdit] = useState(null);
   const [pendingSend, setPendingSend] = useState(null);
+  const [unlocked, setUnlocked] = useState(false);
+  const unlockedRef = useRef(false);
+  const deskLockOnRef = useRef(false);
+  const activityRef = useRef(0);
+  deskLockOnRef.current = signedIn && Boolean(ownerId);
   const [pane, setPane] = useState('Main');
   const [slide, setSlide] = useState('right');
   const [createOpen, setCreateOpen] = useState(false);
@@ -542,7 +549,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     walletCount: Array.isArray(liveWallets) ? liveWallets.length : 0,
     recoveryConfirmed: recoveryAck === true,
   });
+  const grantDesk = useCallback(() => {
+    activityRef.current = Date.now();
+    unlockedRef.current = true;
+    setUnlocked(true);
+  }, []);
   const onWalletSend = useCallback(async (pending) => {
+    if (deskLockOnRef.current && !unlockedRef.current) {
+      return { ok: false, message: 'Enter your password to use the wallet.' };
+    }
     const target = pending?.target;
     if (target?.kind === 'sns') {
       const main = (Array.isArray(liveWallets) ? liveWallets : wallets).find(item => item?.kind === 'main') || null;
@@ -661,6 +676,30 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     setSlideConfirm(null);
     if (resolve) resolve(accepted === true);
   }, []);
+  useEffect(() => {
+    unlockedRef.current = false;
+    setUnlocked(false);
+    setPendingSend(null);
+  }, [ownerId]);
+  useEffect(() => {
+    if (!deskLockOnRef.current || !unlocked) return undefined;
+    const mark = () => { activityRef.current = Date.now(); };
+    mark();
+    window.addEventListener('pointerdown', mark, true);
+    window.addEventListener('keydown', mark, true);
+    const tick = window.setInterval(() => {
+      if (!idleLockDue(activityRef.current, Date.now())) return;
+      unlockedRef.current = false;
+      setUnlocked(false);
+      setPendingSend(null);
+      finishSlideConfirm(false);
+    }, 5000);
+    return () => {
+      window.removeEventListener('pointerdown', mark, true);
+      window.removeEventListener('keydown', mark, true);
+      window.clearInterval(tick);
+    };
+  }, [unlocked, ownerId, signedIn, finishSlideConfirm]);
   const clientTools = useMemo(() => createVoiceClientTools({
     bots,
     activeBotId: activeBot,
@@ -851,9 +890,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }
 
   const sideColumn = railCollapsed ? 88 : sideWidth;
+  const locked = signedIn && Boolean(ownerId) && !unlocked;
 
   return (
+    <>
     <div
+      inert={locked ? true : undefined}
       className={`shell${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
       style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
@@ -1138,6 +1180,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                 }
                 void (async () => {
                   try {
+                    if (deskLockOnRef.current && !unlockedRef.current) return;
                     if (!sessionReadyForWallets(signedIn, user)) return;
                     const token = await getAccessToken?.();
                     const response = await fetch(transfersUrl, {
@@ -1204,5 +1247,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         onSave={saveProfile}
       />
     </div>
+    {locked ? (
+      <DeskLock
+        ownerId={ownerId}
+        accountLabel={accountLabel}
+        onUnlock={grantDesk}
+      />
+    ) : null}
+    </>
   );
 }
