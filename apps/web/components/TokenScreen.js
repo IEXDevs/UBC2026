@@ -33,8 +33,8 @@ export default function TokenScreen({ open, onSend, onReceive, onSwap }) {
     setLoading(true);
     (async () => {
       try {
-        const { safePrivyAccessToken } = await import('../lib/privy-session.mjs');
-        const token = await safePrivyAccessToken(getAccessToken, window.localStorage, window.sessionStorage);
+        const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
+        const token = await getPrivyAccessToken(getAccessToken, window.localStorage);
         if (stopped) return;
         if (!token) {
           setError(portfolioErrorNote({ error: 'login_required' }));

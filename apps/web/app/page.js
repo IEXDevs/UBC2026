@@ -63,10 +63,10 @@ import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
 import { showSignInGate } from '../lib/sign-in-gate.mjs';
 import { idleLockDue } from '../lib/desk-lock.mjs';
-import { clearPrivySessionBackups, safePrivyAccessToken } from '../lib/privy-session.mjs';
+import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 
 function readAccessToken(getAccessToken) {
-  return safePrivyAccessToken(getAccessToken, window.localStorage, window.sessionStorage);
+  return getPrivyAccessToken(getAccessToken, window.localStorage);
 }
 
 const CONNECTORS = shellConnectors();
@@ -128,11 +128,6 @@ function AuthedShell() {
   const getAccessToken = useCallback(() => readAccessToken(privyGetAccessToken), [privyGetAccessToken]);
 
   const onLogout = useCallback(async () => {
-    try {
-      clearPrivySessionBackups(window.localStorage, window.sessionStorage);
-    } catch {
-      /* still log out of Privy */
-    }
     await logout?.();
   }, [logout]);
 

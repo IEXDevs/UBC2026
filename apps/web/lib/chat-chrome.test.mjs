@@ -85,9 +85,12 @@ test('the prompt bar exposes both dictation and live voice mode', () => {
   assert.match(composer, /Keep returning `job` so PromptBar can call job\.cancel/);
   assert.match(promptBar, /onPartial:/);
   const privyRoot = readFileSync(join(root, 'components/PrivyRoot.js'), 'utf8');
-  assert.match(privyRoot, /restorePrivySessionIfMissing/);
-  assert.match(privyRoot, /installPrivySessionMirror/);
-  assert.equal(privyRoot.includes('setTimeout'), false);
-  const privyConfig = readFileSync(join(root, 'lib/privy-config.mjs'), 'utf8');
-  assert.equal(privyConfig.includes('cookieWriteBehavior'), false);
+  assert.match(privyRoot, /PrivyProvider/);
+  assert.equal(privyRoot.includes('installPrivySessionMirror'), false);
+  assert.equal(privyRoot.includes('restorePrivySessionIfMissing'), false);
+  assert.equal(privyRoot.includes('localStorage.setItem'), false);
+  const privySession = readFileSync(join(root, 'lib/privy-session.mjs'), 'utf8');
+  assert.match(privySession, /getPrivyAccessToken/);
+  assert.equal(privySession.includes('maelstrom:privy'), false);
+  assert.equal(privySession.includes('removeItem'), false);
 });

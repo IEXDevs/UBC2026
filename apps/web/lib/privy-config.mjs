@@ -30,9 +30,6 @@ const SOLANA_LOGIN = Object.freeze({
     solana: Object.freeze({ createOnLogin: 'off' }),
   }),
   mfa: Object.freeze({ noPromptOnMfaRequired: false }),
-  // Use Privy defaults for session cookies + localStorage. Forcing cookies
-  // off left refresh credentials missing when the dashboard expected them,
-  // and getAccessToken then wiped the customer access token.
 });
 
 function publicId(value) {
