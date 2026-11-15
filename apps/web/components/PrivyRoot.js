@@ -20,7 +20,7 @@ export default function PrivyRoot({ children }) {
     config: {
       ...props.config,
       externalWallets: {
-        solana: { connectors: toSolanaWalletConnectors() },
+        solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) },
       },
     },
   };

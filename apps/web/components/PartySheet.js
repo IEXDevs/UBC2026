@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { partyBook, signedUsdc } from '../lib/party-book.mjs';
+import AddressCopy from './AddressCopy';
 import TxnLog from './TxnLog';
 import { usePresence } from './usePresence';
 
@@ -56,7 +57,7 @@ export default function PartySheet({ open, party, transfers = [], payments = [],
         <div className="sheet-head">
           <div>
             <h2 id="party-title">{party.label}</h2>
-            <p className="quiet">{address || 'Platform handle'}</p>
+            {address ? <AddressCopy address={address} /> : <p className="quiet">Platform handle</p>}
           </div>
           <button type="button" className="icon-btn" aria-label="Close counterparty" onClick={onClose}>
             <X size={18} strokeWidth={1.75} />

@@ -17,6 +17,7 @@ import PromptBar from './PromptBar';
 import { clampFloat, FLOAT_SIZE, FLOAT_STORAGE_KEY } from '../lib/voice-float.mjs';
 import { createMicGate } from '../lib/mic-gate.mjs';
 import { mentionIn, recipientHint } from '../lib/profile.mjs';
+import AddressCopy from './AddressCopy';
 import {
   DEFAULT_VOICE_SETTINGS,
   SPEED_MAX,
@@ -80,6 +81,7 @@ export default function Composer({
   const [files, setFiles] = useState([]);
   const fileRef = useRef(null);
   const [mention, setMention] = useState('');
+  const [mentionCopy, setMentionCopy] = useState(null);
   const [thinking, setThinking] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
   const [stage, setStage] = useState(null);
@@ -234,13 +236,26 @@ export default function Composer({
     const token = mentionIn(draft);
     if (!token || typeof resolveMention !== 'function') {
       setMention('');
+      setMentionCopy(null);
       return undefined;
     }
     let stop = false;
     resolveMention(token).then((recipient) => {
-      if (!stop) setMention(recipientHint(recipient));
+      if (stop) return;
+      setMention(recipientHint(recipient));
+      if (recipient?.address && recipient.kind === 'sns') {
+        setMentionCopy({ address: recipient.address, prefix: recipient.domain });
+      } else if (recipient?.address) {
+        const prefix = recipient.displayName || (recipient.handle ? `@${recipient.handle}` : '');
+        setMentionCopy({ address: recipient.address, prefix });
+      } else {
+        setMentionCopy(null);
+      }
     }).catch(() => {
-      if (!stop) setMention('');
+      if (!stop) {
+        setMention('');
+        setMentionCopy(null);
+      }
     });
     return () => { stop = true; };
   }, [draft, resolveMention]);
@@ -660,7 +675,9 @@ export default function Composer({
       {floatNode}
       {settingsNode}
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
-      {mention ? <p className="mention-hint" role="status">{mention}</p> : null}
+      {mentionCopy ? (
+        <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} /></p>
+      ) : mention ? <p className="mention-hint" role="status">{mention}</p> : null}
       {lines.length === 0 ? (
         <div className="entry-suggestions">
           {SUGGESTIONS.map((text) => (

@@ -18,6 +18,9 @@ const nextConfig = {
     '@ubc2026/browser-search',
     '@ubc2026/browser-session',
     '@ubc2026/contracts',
+    '@ubc2026/prices',
+    '@ubc2026/sns',
+    '@ubc2026/transfers',
     '@ubc2026/wallets',
   ],
   webpack: (config) => {

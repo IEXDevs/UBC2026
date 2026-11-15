@@ -41,8 +41,16 @@
   pointer-events: none;
 }
 
+.sign-in-note {
+  margin: -8px auto 28px;
+  max-width: 36rem;
+  color: #c9bddf;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
 .sign-in-copy h1 {
-  margin: 0 0 28px;
+  margin: 0 0 16px;
   font-family: var(--font-chat), ui-sans-serif, system-ui, sans-serif;
   font-size: clamp(2.75rem, 6.4vw, 5.25rem);
   font-weight: 600;

@@ -24,6 +24,7 @@ export default function SignInPage({ disabled = false, onLogin }) {
       <main className="sign-in-stage">
         <div className="sign-in-copy">
           <h1>Make your first agent.</h1>
+          <p className="sign-in-note">Email, Google, GitHub, Discord, or a Solana wallet. Methods you link on the account all sign into that one account.</p>
           <div className="sign-in-actions">
             <SpecularButton
               size="lg"

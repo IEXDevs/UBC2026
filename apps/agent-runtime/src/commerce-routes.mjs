@@ -11,7 +11,7 @@ import {
   ShoppingError,
 } from '@ubc2026/shopping';
 import { buildSignalOffer, settleSignalSale, CommerceError } from '@ubc2026/agent-commerce';
-import { createSnsResolver, prepareSnsSend, SnsError } from '@ubc2026/sns';
+import { createSnsResolver, prepareSnsSend, resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { grabBackToMain, TransferError } from '@ubc2026/transfers';
 import { DEVNET_USDC_MINT } from '@ubc2026/x402';
 
@@ -48,7 +48,8 @@ function defaultResolver(env) {
   return createSnsResolver({
     resolveFn: async (domain) => {
       if (demo[domain]) return demo[domain];
-      throw new SnsError(`SNS name not found: ${domain}`);
+      const resolved = await resolveSnsOwner(domain, { fetcher: env.fetch || fetch });
+      return resolved.address;
     },
   });
 }

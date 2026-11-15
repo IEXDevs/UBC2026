@@ -89,7 +89,7 @@ function findBot(bots, { botId, name } = {}) {
 
 /**
  * Create client-tool handlers bound to shell setters.
- * `confirm` should return a boolean (window.confirm or a custom modal).
+ * `confirm` should return a boolean. The shell passes a slide, not a browser dialog.
  */
 export function createVoiceClientTools({
   bots = [],
@@ -100,7 +100,7 @@ export function createVoiceClientTools({
   setActiveBotId,
   setPane,
   focusLiveView,
-  confirm = (prompt) => (typeof window !== 'undefined' ? window.confirm(prompt) : false),
+  confirm = async () => false,
   pushEvent = null,
   conversation = null,
 } = {}) {

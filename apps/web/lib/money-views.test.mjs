@@ -11,6 +11,7 @@ import {
   moneyPane,
   solanaExplorerTxUrl,
   solscanTxUrl,
+  shortAddress,
   walletGlance,
 } from './money-views.mjs';
 
@@ -68,10 +69,18 @@ test('demo money rows match the contract shapes', () => {
   ]).balanceLabel, '5 USDC');
 });
 
-test('solscan links are limited to devnet and testnet signatures', () => {
+test('wallet addresses show the first five and last five characters', () => {
+  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  assert.equal(shortAddress(address), '4zMMC...DncDU');
+  assert.equal(shortAddress('short'), 'short');
+});
+
+test('solscan links cover devnet, testnet, and mainnet signatures', () => {
   const signature = '5'.repeat(64);
   assert.equal(solscanTxUrl(signature, 'devnet'), `https://solscan.io/tx/${signature}?cluster=devnet`);
   assert.equal(solanaExplorerTxUrl(signature, 'devnet'), `https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+  assert.equal(solscanTxUrl(signature, 'mainnet'), `https://solscan.io/tx/${signature}`);
   assert.equal(solscanTxUrl(null, 'devnet'), null);
+  assert.equal(solscanTxUrl(signature, 'mainnet-beta'), null);
   assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta'), null);
 });

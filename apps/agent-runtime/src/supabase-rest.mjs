@@ -121,7 +121,8 @@ export function mapWalletRow(row) {
     address: row.address,
     provider: row.provider || 'privy',
     frozen: row.frozen === true,
-    privyWalletId: row.id,
+    spendable: row.spendable !== false && !String(row.id).startsWith('linked_'),
+    privyWalletId: row.spendable === false || String(row.id).startsWith('linked_') ? undefined : row.id,
     createdAt: row.created_at ?? null,
   };
 }

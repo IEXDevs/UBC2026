@@ -10,8 +10,8 @@ import {
   normalizeHandle,
   parseRecipient,
 } from '@ubc2026/contracts';
-import { createSnsResolver, SnsError } from '@ubc2026/sns';
-import { WalletError } from '@ubc2026/wallets';
+import { createSnsResolver, resolveSnsOwner, SnsError } from '@ubc2026/sns';
+import { accountWriteBodies, WalletError } from '@ubc2026/wallets';
 import {
   amountText,
   createSupabaseRpc,
@@ -108,7 +108,50 @@ function publicWallet(wallet) {
     address: wallet.address,
     provider: wallet.provider || 'privy',
     frozen: wallet.frozen === true,
+    spendable: wallet.spendable !== false && !String(wallet.id).startsWith('linked_'),
+    walletClientType: wallet.walletClientType || null,
   };
+}
+
+async function persistLogin(env, login, ownerId) {
+  const bodies = accountWriteBodies(login, ownerId);
+  if (!supabaseConfig(env) || !bodies) return;
+  const fetcher = env.fetch ?? fetch;
+  const userWrite = await supabaseWrite(env, {
+    path: 'users',
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=minimal',
+    body: bodies.user,
+    fetcher,
+  });
+  if (!userWrite?.ok) {
+    const { login_methods, ...core } = bodies.user;
+    await supabaseWrite(env, {
+      path: 'users',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: core,
+      fetcher,
+    });
+  }
+  if (bodies.wallets.length) {
+    const walletWrite = await supabaseWrite(env, {
+      path: 'wallets',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: bodies.wallets,
+      fetcher,
+    });
+    if (!walletWrite?.ok) {
+      await supabaseWrite(env, {
+        path: 'wallets',
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=minimal',
+        body: bodies.wallets.map(({ spendable, ...row }) => row),
+        fetcher,
+      });
+    }
+  }
 }
 
 function walletRowFromPublic(wallet, ownerId) {
@@ -153,18 +196,6 @@ async function persistWalletRows(env, ownerId, wallets, fetcher) {
     fetcher,
   });
   return { wrote: rows.length };
-}
-
-async function persistLogin(env, login, ownerId) {
-  if (!supabaseConfig(env) || !login?.main) return;
-  const owner = ownerId || login.main.ownerId;
-  const fetcher = env.fetch ?? fetch;
-  await persistWalletRows(
-    env,
-    owner,
-    [login.main, ...(login.additional || [])].filter(Boolean),
-    fetcher,
-  );
 }
 
 function formatFixedUnits(amount, decimals, symbol) {
@@ -428,17 +459,23 @@ export async function handleApiData(request, env, matched) {
     const { ownerId, user, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const liveMethods = Array.isArray(user?.loginMethods) ? user.loginMethods : [];
     if (!supabaseConfig(env)) {
-      return json({ ok: true, source: 'unconfigured', user: { id: ownerId, privyUserId: user?.main?.ownerId || ownerId } });
+      return json({
+        ok: true,
+        source: 'unconfigured',
+        user: { id: ownerId, privyUserId: user?.main?.ownerId || ownerId, loginMethods: liveMethods },
+      });
     }
     const result = await supabaseGet(env, `users?id=eq.${encodeURIComponent(ownerId)}&select=*`, fetcher);
     const row = result.rows?.[0];
+    const storedMethods = Array.isArray(row?.login_methods) ? row.login_methods : liveMethods;
     return json({
       ok: true,
       source: result.configured ? 'supabase' : 'unconfigured',
       user: row
-        ? { id: row.id, privyUserId: row.privy_user_id, createdAt: row.created_at }
-        : { id: ownerId, privyUserId: user?.main?.ownerId || ownerId },
+        ? { id: row.id, privyUserId: row.privy_user_id, createdAt: row.created_at, loginMethods: storedMethods }
+        : { id: ownerId, privyUserId: user?.main?.ownerId || ownerId, loginMethods: liveMethods },
     });
   }
 
@@ -546,6 +583,7 @@ export async function handleApiData(request, env, matched) {
         ok: true,
         created: login.created === true,
         wallets: [login.main, ...(login.additional || [])].filter(Boolean).map(publicWallet),
+        loginMethods: login.loginMethods || [],
       });
     } catch (err) {
       const code = err instanceof WalletError ? err.code : 'wallet_failed';
@@ -578,6 +616,9 @@ export async function handleApiData(request, env, matched) {
       wallet = mapWalletRow(loaded.rows?.[0]);
     }
     if (!wallet) return json({ error: 'wallet_not_found' }, 404);
+    if (wallet.spendable === false || String(wallet.id).startsWith('linked_')) {
+      return json({ error: 'observing_wallet' }, 400);
+    }
     try {
       const sent = body.bot
         ? await client.signAndBroadcastDevnet({ bot: body.bot, wallet, transaction: body.transaction })
@@ -1053,7 +1094,8 @@ export async function handleApiData(request, env, matched) {
             : async (domain) => {
               const demo = env.SNS_DEMO_MAP && typeof env.SNS_DEMO_MAP === 'object' ? env.SNS_DEMO_MAP : {};
               if (demo[domain]) return demo[domain];
-              throw new SnsError('sns_not_found');
+              const resolved = await resolveSnsOwner(domain, { fetcher });
+              return resolved.address;
             },
         });
         const resolved = await resolver(parsed.domain);
