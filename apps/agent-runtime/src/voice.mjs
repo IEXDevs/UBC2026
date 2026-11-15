@@ -11,12 +11,16 @@ import { createScrape, createSearch } from '@ubc2026/browser-search';
 import {
   DASHBOARD_TOOLS,
   PRICE_TOOLS,
+  SHARED_AGENT_TOOLS,
   VOICE_BROWSER_ALIASES,
   VOICE_RESEARCH_WEBHOOKS,
   parseAwaySince,
   sharedToolsInstruction,
   spokenAwayBriefing,
+  toOpenAiTools,
 } from '@ubc2026/agent-tools';
+import { buildTextChatMessages } from '../../web/lib/text-chat.mjs';
+import { permissionInstruction } from '../../web/lib/spend-permission.mjs';
 import { readAgentPriceQuote } from '@ubc2026/prices';
 import { META_SPARK_MODEL, resolveModelProvider } from './openrouter.mjs';
 
@@ -46,24 +50,11 @@ export function ownerPermissionNote(value) {
   return '';
 }
 
-export const VOICE_SYSTEM_PROMPT = [
-  'You are the voice remote for this user\'s Maelstrom Solana agent dashboard.',
-  'Prefer short confirmations.',
-  'Always name the active bot before an action. If it is unclear, call list_bots and ask.',
-  'Never invent balances, addresses, trust scores, positions, or decisions. Call get_wallets and read balances.displayBalanceLabel / holdings (whatever non-zero SOL or SPL is on the address).',
-  'If a tool result has stub set to true, or items is empty, say the data is not available yet. Do not fill the gap.',
-  'Pause and resume affect one bot. stop_all pauses every bot the list route returns. Before stop_all, say "Stopping all bots now".',
-  'Pause, resume, and stop_all only make the fleet safer.',
-  'Fund movements go through request_spend only. That route runs trust, verify, wallet freeze, bot policy, approval mode, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.',
-  'When the owner set full permissions, they let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay.',
-  'In ask or review, wait for the owner before request_spend. Do not raise limits or freeze wallets from tools.',
-  'Do not ask for seed phrases, private keys, passwords, or API keys.',
-  'Never read out Live View URLs, tokens, or secrets. If a tool hides them, leave them hidden.',
-  'If a tool returns confirmation-required or manual-review, say so and stop.',
-  'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. Do not invent events. That tool only reads stored timeline events. It does not spend or sign.',
-  'Execution stays on Solana devnet.',
-  sharedToolsInstruction(),
-].join('\n');
+/**
+ * ElevenLabs only transcribes and speaks. Policy, tools, and the permission
+ * line are applied on the custom LLM, the same way as text chat.
+ */
+export const VOICE_SPEAK_PROMPT = 'Transcribe the owner and speak the custom LLM reply. Do not add a policy.';
 
 function toVoiceTool(def) {
   const required = Array.isArray(def.required)
@@ -133,7 +124,7 @@ export function voiceAgentCreateBody({ origin, modelId = DEFAULT_VOICE_MODEL } =
     conversation_config: {
       agent: {
         prompt: {
-          prompt: VOICE_SYSTEM_PROMPT,
+          prompt: VOICE_SPEAK_PROMPT,
           llm: 'custom-llm',
           custom_llm: {
             url: `${base}/voice/llm/chat/completions`,
@@ -717,18 +708,52 @@ function sanitizeMessages(messages, secrets) {
   return cleaned;
 }
 
-function sanitizeTools(tools, secrets) {
-  if (tools == null) return undefined;
-  if (!Array.isArray(tools) || tools.length > 32) return null;
-  const encoded = JSON.stringify(tools);
-  if (encoded.length > 100000) return null;
-  let text = encoded;
-  for (const secret of secrets) text = text.split(secret).join('[hidden]');
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
+/**
+ * Decision messages for a voice turn. Same prefix as text chat: locked platform
+ * prompt, then bot name, type, goal, the permission line, and the shared tool
+ * instruction. Caller system lines are dropped so ElevenLabs cannot add a policy.
+ */
+export function voiceDecisionMessages({
+  botName = 'Agent',
+  botGoal = '',
+  botType = 'trading',
+  ownerPermission = 'ask',
+  transcript = [],
+  secrets = [],
+  provider = 'meta',
+} = {}) {
+  const prefix = buildTextChatMessages({
+    botName,
+    botGoal,
+    botType,
+    history: [],
+    message: '',
+    secrets,
+    provider: provider === 'openrouter' ? 'openrouter' : 'meta',
+    toolsInstruction: sharedToolsInstruction(),
+    permission: permissionInstruction(ownerPermission),
+  });
+  const turns = [];
+  for (const item of Array.isArray(transcript) ? transcript : []) {
+    if (!item || item.role === 'system' || item.role === 'developer') continue;
+    if (item.role === 'tool') {
+      const content = typeof item.content === 'string' ? item.content : '';
+      if (!content) continue;
+      turns.push({
+        role: 'tool',
+        tool_call_id: typeof item.tool_call_id === 'string' ? item.tool_call_id : '',
+        content,
+      });
+      continue;
+    }
+    if (item.role !== 'user' && item.role !== 'assistant') continue;
+    const content = typeof item.content === 'string' ? item.content : '';
+    if (!content && !Array.isArray(item.tool_calls)) continue;
+    const next = { role: item.role, content };
+    if (Array.isArray(item.tool_calls) && item.tool_calls.length > 0) next.tool_calls = item.tool_calls;
+    turns.push(next);
   }
+  return [...prefix, ...turns];
 }
 
 async function handleCustomLlm(request, env, fetcher) {
@@ -741,18 +766,18 @@ async function handleCustomLlm(request, env, fetcher) {
   const incoming = await request.json().catch(() => null);
   if (!incoming || typeof incoming !== 'object') return json({ error: 'invalid_body' }, 400);
   const messages = sanitizeMessages(incoming.messages, secrets);
-  const tools = sanitizeTools(incoming.tools, secrets);
-  if (!messages || tools === null) return json({ error: 'invalid_body' }, 400);
-  const adapted = resolved.provider === 'meta'
-    ? messages.map(item => (item?.role === 'system' ? { ...item, role: 'developer' } : item))
-    : messages.slice();
-  const permissionNote = ownerPermissionNote(incoming.ownerPermission);
-  if (permissionNote) {
-    adapted.unshift({
-      role: resolved.provider === 'meta' ? 'developer' : 'system',
-      content: permissionNote,
-    });
-  }
+  if (!messages) return json({ error: 'invalid_body' }, 400);
+  const provider = resolved.provider === 'openrouter' ? 'openrouter' : 'meta';
+  const adapted = voiceDecisionMessages({
+    botName: incoming.botName,
+    botGoal: incoming.botGoal,
+    botType: incoming.botType,
+    ownerPermission: incoming.ownerPermission,
+    transcript: messages,
+    secrets,
+    provider,
+  });
+  if (!adapted.some(item => item.role === 'user' && item.content)) return json({ error: 'invalid_body' }, 400);
   let model = grokVoiceModel(env);
   if (resolved.provider === 'openrouter') {
     const selected = selectFreeOpenRouterModel(model);
@@ -764,9 +789,10 @@ async function handleCustomLlm(request, env, fetcher) {
     messages: adapted,
     stream: true,
   };
-  if (resolved.provider !== 'meta') payload.temperature = 0.4;
+  if (provider !== 'meta') payload.temperature = 0.5;
   else payload.reasoning_effort = 'minimal';
-  if (tools) payload.tools = tools;
+  payload.tools = toOpenAiTools(SHARED_AGENT_TOOLS);
+  payload.tool_choice = 'auto';
   let response;
   try {
     response = await fetcher(voiceChatCompletionsUrl(env), {
