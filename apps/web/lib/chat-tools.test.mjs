@@ -287,3 +287,38 @@ test('createChatToolInvoker pauses a bot via Worker', async () => {
   const paused = await invoke('pause_bot', { botId: 'bot_2' });
   assert.equal(paused.status, 'paused');
 });
+
+test('what happened while away reads events and does not spend', async () => {
+  const seen = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_active',
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (url, options) => {
+      seen.push({ url: String(url), method: options.method, owner: options.headers['x-owner-id'] });
+      return Response.json({
+        ok: true,
+        source: 'supabase',
+        items: [{
+          id: 'evt_1',
+          botId: 'bot_shop',
+          kind: 'approval.requested',
+          summary: 'Need a look at the sandbox order',
+          at: '2026-11-15T12:00:00.000Z',
+        }],
+      });
+    },
+  });
+  const briefing = await invoke('what_happened_while_away', {});
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].method, 'GET');
+  assert.equal(seen[0].owner, 'did:privy:owner1');
+  assert.match(seen[0].url, /\/api\/events$/);
+  assert.equal(seen[0].url.includes('bot_active'), false);
+  assert.equal(briefing.spends, false);
+  assert.equal(briefing.signs, false);
+  assert.match(briefing.spoken, /approval is waiting/);
+  const bad = await invoke('what_happened_while_away', { since: 'yesterday' });
+  assert.equal(bad.error, 'invalid_parameters');
+  assert.equal(seen.length, 1);
+});
