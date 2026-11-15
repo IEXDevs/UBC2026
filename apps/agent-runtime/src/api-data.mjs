@@ -21,6 +21,7 @@ import {
   supabaseGet,
   supabaseWrite,
 } from './supabase-rest.mjs';
+import { readBotAlerts } from './bot-alerts.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 import {
   mapTransferRow,
@@ -894,24 +895,37 @@ export async function handleApiData(request, env, matched) {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
-    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const url = new URL(request.url);
     const botId = url.searchParams.get('botId');
+    const local = await readBotAlerts(env, botId, ownerId);
+    if (!supabaseConfig(env)) {
+      return json({
+        ok: true,
+        source: local.length > 0 ? 'bot' : 'unconfigured',
+        items: local,
+      });
+    }
     let path = `timeline_events?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=at.desc&limit=100`;
     if (botId) path = `timeline_events?owner_id=eq.${encodeURIComponent(ownerId)}&bot_id=eq.${encodeURIComponent(botId)}&select=*&order=at.desc&limit=100`;
     const result = await supabaseGet(env, path, fetcher);
+    const remote = (result.rows || []).map((row) => ({
+      id: row.id,
+      botId: row.bot_id,
+      ownerId: row.owner_id,
+      kind: row.kind,
+      summary: row.summary,
+      prevHash: row.prev_hash,
+      at: row.at,
+    }));
+    const seen = new Set(remote.map(event => event.id));
+    const items = remote.slice();
+    for (const event of local) {
+      if (!seen.has(event.id)) items.push(event);
+    }
     return json({
       ok: true,
       source: 'supabase',
-      items: (result.rows || []).map((row) => ({
-        id: row.id,
-        botId: row.bot_id,
-        ownerId: row.owner_id,
-        kind: row.kind,
-        summary: row.summary,
-        prevHash: row.prev_hash,
-        at: row.at,
-      })),
+      items,
     });
   }
 

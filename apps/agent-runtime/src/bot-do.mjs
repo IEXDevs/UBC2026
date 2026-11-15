@@ -8,6 +8,7 @@ import { LoopEngineError, runBotLoop } from './loop-engine.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
 import { assessPositions } from './schedules.mjs';
+import { alertFromGate, alertFromPauseReason, rememberBotAlert } from './bot-alerts.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
@@ -157,7 +158,35 @@ export class BotStateMachine {
       const history = await this.get('positionCheckHistory');
       const prior = Array.isArray(history) ? history : [];
       await this.put('positionCheckHistory', [...prior, check].slice(-48));
+      if (check.flag === 'max-loss' && typeof body.ownerId === 'string' && body.ownerId.length > 0) {
+        await rememberBotAlert(env, this, {
+          alert: 'max-loss',
+          botId,
+          ownerId: body.ownerId,
+          at: checkedAt,
+          scope: checkedAt,
+        });
+      }
       return Response.json({ ok: true, check });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/alert') {
+      const ownerId = ownerFrom(request);
+      const body = await request.json().catch(() => null);
+      if (!ownerId || !body || body.ownerId !== ownerId) {
+        return Response.json({ error: 'owner_required' }, { status: 401 });
+      }
+      const event = await rememberBotAlert(env, this, body);
+      if (!event) return Response.json({ error: 'invalid_alert' }, { status: 400 });
+      return Response.json({ ok: true, event });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/alerts') {
+      const ownerId = ownerFrom(request);
+      if (!ownerId) return Response.json({ error: 'owner_required' }, { status: 401 });
+      const prior = await this.get('alerts');
+      const items = (Array.isArray(prior) ? prior : []).filter(event => event && event.ownerId === ownerId);
+      return Response.json({ ok: true, items });
     }
 
     if (request.method === 'POST' && url.pathname === '/wake') {
@@ -244,6 +273,16 @@ export class BotStateMachine {
           now,
           persist: async next => { await this.put('run', next); },
         });
+        const alert = alertFromPauseReason(result.run?.pauseReason);
+        if (alert && body.bot?.id) {
+          await rememberBotAlert(env, this, {
+            alert,
+            botId: body.bot.id,
+            ownerId,
+            at: now,
+            scope: result.run?.runId || now,
+          });
+        }
         return Response.json({ ok: true, ...result });
       } catch (error) {
         const saved = await this.get('run');
@@ -277,6 +316,16 @@ export class BotStateMachine {
         });
         await this.put('run', result.run);
         await this.put('lastGate', { at: now, gate: result.gate });
+        const alert = alertFromGate(result.gate);
+        if (alert && body.bot?.id && body.bot?.ownerId) {
+          await rememberBotAlert(env, this, {
+            alert,
+            botId: body.bot.id,
+            ownerId: body.bot.ownerId,
+            at: now,
+            scope: result.run?.runId || now,
+          });
+        }
         return Response.json({ ok: true, run: result.run, gate: result.gate });
       } catch (error) {
         return Response.json({ error: error.message }, { status: 409 });
