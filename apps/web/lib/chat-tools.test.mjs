@@ -77,6 +77,34 @@ test('createChatToolInvoker navigates via Worker', async () => {
   assert.equal(navigated.url, 'https://example.com/');
 });
 
+test('createChatToolInvoker reuses session after Worker concurrency_limit', async () => {
+  let step = 0;
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (url, options) => {
+      step += 1;
+      if (step === 1) {
+        assert.equal(options.method, 'POST');
+        return Response.json({ error: 'concurrency_limit' }, { status: 429 });
+      }
+      if (step === 2) {
+        assert.equal(options.method, 'GET');
+        return Response.json({
+          sessions: [{ sessionRecordId: 'bs_old', status: 'open', updatedAt: 9, url: 'https://www.google.com/' }],
+        });
+      }
+      assert.match(String(url), /\/sessions\/bs_old\/navigate$/);
+      return Response.json({ sessionRecordId: 'bs_old', url: 'https://example.com/fun', title: 'Fun' });
+    },
+  });
+  const opened = await invoke('browser_open', { url: 'https://example.com/fun' });
+  assert.equal(opened.reused, true);
+  assert.equal(opened.url, 'https://example.com/fun');
+  assert.equal(opened.sessionRecordId, 'bs_old');
+});
+
 test('createChatToolInvoker redacts live-view viewer URLs from Worker', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',

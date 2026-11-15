@@ -31,12 +31,13 @@ export function openAiAgentTools(tools = agentTools) {
 export function chatToolsInstruction() {
   return [
     'You have tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, and browser_release.',
-    'When the owner asks you to look something up, browse, or open a page, call those tools.',
-    'Do not claim you lack a browser or web access while these tools are available.',
-    'browser_open without url starts on about:blank. Always pass url as a full https link (e.g. https://www.google.com) when the owner should see a page.',
-    'Never claim a site loaded unless the tool result includes that url. Use browser_navigate on an existing sessionRecordId to change pages.',
+    'When the owner asks you to look something up: call web_search first, pick a real https result url, then browser_navigate (or browser_open with that url) so Live View leaves the previous page.',
+    'Do not claim you looked something up unless web_search returned results and navigate/open returned that url.',
+    'Do not claim you lack a browser while these tools are available.',
+    'browser_open without url starts on about:blank. Always pass url as a full https link when the owner should see a page.',
+    'If a session is already open, prefer browser_navigate with its sessionRecordId. browser_open at capacity reuses that session and navigates when url is set.',
     'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
-    'After browser_open or browser_live_view, tell the owner to use Show live view on the Live View panel — not Open browser session again (that hits concurrency_limit).',
+    'After a successful open/navigate, tell the owner to use Show live view (not Open browser session again).',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
   ].join('\n');
 }
@@ -115,18 +116,62 @@ export function createChatToolInvoker({
         purpose: typeof args.purpose === 'string' ? args.purpose : 'browse',
       };
       if (typeof args.url === 'string' && args.url.trim()) body.url = args.url.trim();
-      const opened = await workerJson(fetcher, openUrl, ownerId, 'POST', body);
-      return {
-        sessionRecordId: opened.sessionRecordId,
-        purpose: opened.purpose,
-        status: opened.status || 'open',
-        url: opened.url ?? null,
-        title: opened.title ?? '',
-        note: opened.note,
-      };
+      try {
+        const opened = await workerJson(fetcher, openUrl, ownerId, 'POST', body);
+        return {
+          sessionRecordId: opened.sessionRecordId,
+          purpose: opened.purpose,
+          status: opened.status || 'open',
+          url: opened.url ?? null,
+          title: opened.title ?? '',
+          reused: opened.reused === true,
+          note: opened.note,
+        };
+      } catch (error) {
+        // Older Workers still return concurrency_limit — reuse via list + navigate.
+        if (error?.code !== 'concurrency_limit') throw error;
+        const listed = await workerJson(fetcher, openUrl, ownerId, 'GET');
+        const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
+        const newest = [...sessions].sort((a, b) => {
+          const aAt = Number(a?.updatedAt ?? a?.createdAt ?? 0);
+          const bAt = Number(b?.updatedAt ?? b?.createdAt ?? 0);
+          return bAt - aAt;
+        })[0];
+        if (!newest?.sessionRecordId) throw error;
+        if (typeof args.url === 'string' && args.url.trim()) {
+          const navUrl = browserSessionUrl(root, botId, {
+            sessionRecordId: newest.sessionRecordId,
+            action: 'navigate',
+          });
+          const navigated = await workerJson(fetcher, navUrl, ownerId, 'POST', { url: args.url.trim() });
+          return {
+            sessionRecordId: navigated.sessionRecordId || newest.sessionRecordId,
+            purpose: newest.purpose || body.purpose,
+            status: 'open',
+            url: navigated.url,
+            title: navigated.title,
+            reused: true,
+            note: 'Reused an existing session after concurrency_limit and navigated to the url.',
+          };
+        }
+        return {
+          sessionRecordId: newest.sessionRecordId,
+          purpose: newest.purpose || body.purpose,
+          status: 'open',
+          url: typeof newest.url === 'string' ? newest.url : null,
+          title: '',
+          reused: true,
+          note: 'Reused an existing session after concurrency_limit. Call browser_navigate with an https url to change the page.',
+        };
+      }
     }
     if (name === 'browser_navigate') {
-      const sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
+      let sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
+      if (!sessionRecordId) {
+        const listed = await workerJson(fetcher, openUrl, ownerId, 'GET');
+        const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
+        sessionRecordId = sessions[0]?.sessionRecordId || '';
+      }
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'navigate' });
       const navigated = await workerJson(fetcher, url, ownerId, 'POST', {
         url: typeof args.url === 'string' ? args.url : '',

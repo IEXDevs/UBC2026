@@ -316,6 +316,7 @@ export class BotStateMachine {
           status: opened.status,
           url: opened.url,
           title: opened.title,
+          reused: opened.reused === true,
           note: opened.note,
           event: opened.event,
         });
