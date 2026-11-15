@@ -24,6 +24,31 @@ const APP_CONFIG_WARN_FIXED = 'p(t);if(t.name!=="AbortError")console.warn("Error
 
 const TURNSTILE_EXECUTE_WARN = 'console.warn(`Execution mode is not set to "execute"`)';
 
+/**
+ * After the email code is accepted, Privy shows "Success!" and then routes to
+ * the terms screen or embedded-wallet creation. Those routes keep the modal
+ * open, so the signed-in shell never appears. Close the modal on that success
+ * instead. Wallet provisioning stays on the app's own API.
+ */
+const PASSWORDLESS_SUCCESS_CLOSE = Object.freeze([
+  [
+    'if(w&&I&&_){if(s?.legal.requireUsersAcceptTerms&&!_.hasAcceptedTerms){let e=setTimeout((()=>{r("AffirmativeConsentScreen")}),B);return()=>clearTimeout(e)}if(E(_,s.embeddedWallets)){let e=setTimeout((()=>{a({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),T({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,screen:"AwaitingPasswordlessCodeScreen"}}),N()},callAuthOnSuccessOnClose:!0}}),r("EmbeddedWalletOnAccountCreateScreen")}),B);return()=>clearTimeout(e)}{A();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),f);return()=>clearTimeout(e)}}',
+    'if(w&&I&&_){A(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}',
+  ],
+  [
+    'if(g&&b&&S){if(s?.legal.requireUsersAcceptTerms&&!S.hasAcceptedTerms){let e=setTimeout((()=>{r("AffirmativeConsentScreen")}),M);return()=>clearTimeout(e)}if(p.shouldProceedtoEmbeddedWalletCreationFlow(S,s.embeddedWallets)){let e=setTimeout((()=>{n({createWallet:{onSuccess:()=>{},onFailure:e=>{console.error(e),x({eventName:"embedded_wallet_creation_failure_logout",payload:{error:e,screen:"AwaitingPasswordlessCodeScreen"}}),C()},callAuthOnSuccessOnClose:!0}}),r("EmbeddedWalletOnAccountCreateScreen")}),M);return()=>clearTimeout(e)}{E();let e=setTimeout((()=>l({shouldCallAuthOnSuccess:!0,isSuccess:!0})),c.DEFAULT_SUCCESS_SCREEN_DURATION_MS);return()=>clearTimeout(e)}}',
+    'if(g&&b&&S){E(),l({shouldCallAuthOnSuccess:!0,isSuccess:!0})}',
+  ],
+]);
+
+export function closePasswordlessLoginModal(source) {
+  let next = String(source);
+  for (const [from, to] of PASSWORDLESS_SUCCESS_CLOSE) {
+    next = next.replaceAll(from, to);
+  }
+  return next;
+}
+
 export function rewriteSvgDomProps(source) {
   let next = String(source);
   for (const [pattern, replacement] of SVG_PROP_REWRITES) {
@@ -73,7 +98,7 @@ function patchTree(dir, rewrite) {
 export function patchPrivySvgProps(repoRoot) {
   const privy = patchTree(
     path.join(repoRoot, 'node_modules', '@privy-io', 'react-auth', 'dist'),
-    rewriteSvgDomProps,
+    (source) => closePasswordlessLoginModal(rewriteSvgDomProps(source)),
   );
   const turnstile = patchTree(
     path.join(repoRoot, 'node_modules', '@marsidev', 'react-turnstile'),
