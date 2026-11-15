@@ -84,11 +84,33 @@ export const DASHBOARD_TOOLS = Object.freeze([
 export const RESEARCH_TOOLS = agentTools;
 
 /**
+ * Mainnet paper-PnL price. DexScreener, then Jupiter Price API v3.
+ * The handler reads the quote. It does not sign or broadcast.
+ */
+export const PRICE_TOOLS = Object.freeze([
+  Object.freeze({
+    name: 'get_price',
+    description: 'Look up a mainnet USD price for one Solana mint. DexScreener first; Jupiter Price API v3 only if DexScreener fails. Paper PnL. The quote is labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
+    parameters: Object.freeze({
+      type: 'object',
+      additionalProperties: false,
+      required: Object.freeze(['mint']),
+      properties: Object.freeze({
+        mint: Object.freeze({ type: 'string', description: 'Solana mint address' }),
+      }),
+    }),
+    handler: 'price',
+    voiceCalls: Object.freeze([]),
+  }),
+]);
+
+/**
  * Full shared catalog. Voice also keeps legacy aliases
  * (open_browser_session / release_browser_session) that map to the same routes.
  */
 export const SHARED_AGENT_TOOLS = Object.freeze([
   ...RESEARCH_TOOLS,
+  ...PRICE_TOOLS,
   ...DASHBOARD_TOOLS,
 ]);
 
@@ -107,7 +129,8 @@ export function toOpenAiTools(tools = SHARED_AGENT_TOOLS) {
 
 export function sharedToolsInstruction() {
   return [
-    'You have the same tools on text and voice: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, sns_send).',
+    'You have the same tools on text and voice: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, sns_send).',
+    'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
     'When the owner asks you to look something up: call web_search first, pick a real https result url, then browser_navigate (or browser_open with that url).',
     'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayBalanceLabel / holdings (whatever is non-zero on the address).',
     'Never claim you lack a browser while these tools are available.',

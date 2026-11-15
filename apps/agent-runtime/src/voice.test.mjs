@@ -77,12 +77,42 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.equal(prompt.custom_llm.api_key, undefined);
   assert.equal(prompt.tools.some(item => item.name === 'browser_live_view'), true);
   assert.equal(prompt.tools.some(item => item.name === 'web_search'), true);
+  assert.equal(prompt.tools.some(item => item.name === 'get_price'), true);
+  assert.match(prompt.prompt, /get_price/);
+  assert.match(prompt.prompt, /devnet execution, mainnet pricing/);
   assert.equal(prompt.tools.some(item => item.name === 'browser_navigate'), true);
   const text = JSON.stringify(spec);
   assert.equal(text.includes(SECRET), false);
   assert.equal(text.includes(OPENROUTER), false);
   assert.equal(text.includes(ELEVEN), false);
   assert.match(text, /Stopping all bots now/);
+});
+
+test('get_price quotes DexScreener then Jupiter and does not authorize a transfer', async () => {
+  const mint = 'So11111111111111111111111111111111111111112';
+  const seen = [];
+  const response = await handleVoiceRequest(toolRequest('get_price', {
+    body: { tool_name: 'get_price', parameters: { mint } },
+  }), env({
+    JUPITER_API_KEY: 'jupiter-test-key',
+    fetch: async (url, options) => {
+      seen.push(String(url));
+      if (String(url).includes('jup.ag')) assert.equal(options.headers['x-api-key'], 'jupiter-test-key');
+      else assert.equal(options.headers['x-api-key'], undefined);
+      if (String(url).includes('dexscreener')) return Response.json([]);
+      return Response.json({ [mint]: { usdPrice: 2.25, liquidity: 3, blockId: 8 } });
+    },
+  }), { fetchApi: async () => { throw new Error('price tool must not call bot routes'); } });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.result.tool, 'get_price');
+  assert.equal(body.result.quote.quoteSource, 'jupiter-price-v3');
+  assert.equal(body.result.quote.fallbackFrom, 'dexscreener');
+  assert.equal(body.result.quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(body.result.quote.authorizesTransaction, false);
+  assert.equal(body.result.quote.executionCluster, 'devnet');
+  assert.equal(JSON.stringify(body).includes('jupiter-test-key'), false);
+  assert.equal(seen.length, 2);
 });
 
 test('webhook tools call the same routes as the bot page and Live View panel', async () => {
