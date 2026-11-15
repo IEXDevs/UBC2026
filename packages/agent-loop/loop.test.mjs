@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { approvalRequirement, runDecisionGate } from './loop.mjs';
+import {
+  PERMISSIONED_SPEND_STEPS,
+  approvalRequirement,
+  runDecisionGate,
+  runPermissionedSpend,
+} from './loop.mjs';
 import { memoFromDecision } from '@ubc2026/verify-consensus';
 
 function assertDecisionMemo(result) {
@@ -139,12 +144,77 @@ test('approval requirement follows the bot mode and still holds over-budget', ()
     { approvalMode: 'fully-automatic' },
     { state: 'ready-to-reserve', debit: '1000' },
     { ownerPermission: 'full' },
+  ), false);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'fully-automatic' },
+    { state: 'over-budget', debit: '1000' },
+    { ownerPermission: 'full' },
   ), true);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'ask' },
+    { state: 'ready-to-reserve', debit: '1000' },
+    { ownerPermission: 'ask', confirmed: true },
+  ), false);
   assert.equal(approvalRequirement(
     { approvalMode: 'fully-automatic' },
     { state: 'blocked', debit: '1000' },
     { ownerPermission: 'ask' },
   ), false);
+});
+
+test('full permissions manage funds and a mainnet quote never signs', async () => {
+  const seen = [];
+  const signed = await runPermissionedSpend({
+    bot: { ...bot, approvalMode: 'ask' },
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '800',
+    ownerPermission: 'full',
+    mainFn: async () => { seen.push('verify-consensus'); return facts; },
+    verifyFn: async () => facts,
+    now: Date.now(),
+    signDevnet: async () => { seen.push('sign'); return { cluster: 'devnet', signature: 'sig_devnet_1' }; },
+  });
+  assert.equal(signed.state, 'signed');
+  assert.deepEqual(signed.steps, [...PERMISSIONED_SPEND_STEPS]);
+  assert.deepEqual(seen, ['verify-consensus', 'sign']);
+  assert.equal(signed.signature, 'sig_devnet_1');
+
+  const calls = [];
+  const quoted = await runPermissionedSpend({
+    bot: { ...bot, approvalMode: 'fully-automatic' },
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '800',
+    ownerPermission: 'full',
+    quote: { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false },
+    mainFn: async () => facts,
+    verifyFn: async () => facts,
+    now: Date.now(),
+    signDevnet: async () => { calls.push('sign'); return { cluster: 'devnet', signature: 'nope' }; },
+  });
+  assert.equal(quoted.state, 'quote-not-authorization');
+  assert.equal(quoted.signed, false);
+  assert.equal(quoted.steps.includes('sign'), false);
+  assert.equal(quoted.steps.at(-1), 'approval-mode');
+  assert.deepEqual(calls, []);
+
+  const asking = await runPermissionedSpend({
+    bot,
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '800',
+    ownerPermission: 'ask',
+    mainFn: async () => facts,
+    verifyFn: async () => facts,
+    now: Date.now(),
+    signDevnet: async () => { throw new Error('should not sign'); },
+  });
+  assert.equal(asking.state, 'approval-needed');
+  assert.equal(asking.steps.at(-1), 'approval-mode');
 });
 
 test('frozen wallet blocks the loop', async () => {

@@ -1,8 +1,9 @@
 /**
- * Pure decision-loop orchestration:
- * trust-score gate → verify-consensus → wallet freeze → bot-policy.
- * A passing gate includes a memo whose hash is the verifier decision record.
- * Does not sign, broadcast, submit a memo, or talk to networks.
+ * Pure decision-loop orchestration.
+ * Permissioned spend order: trust gate, verify-consensus, wallet freeze,
+ * bot-policy, approval mode, then sign. A refusal stops at that step.
+ * Signing is an injected devnet call into @ubc2026/wallets. This module
+ * does not hold keys and does not broadcast.
  */
 import { evaluateTrust } from '@ubc2026/trust-score';
 import { reachConsensus, factsDigest, memoFromDecision } from '@ubc2026/verify-consensus';
@@ -27,16 +28,42 @@ function needsHumanApproval(bot, policyDecision) {
 const OWNER_PERMISSIONS = new Set(['ask', 'review', 'full']);
 
 /** Whether this policy result still needs a person. Over-budget always does.
- * An owner spend permission from the shell makes every transaction wait, including full. */
+ * Full permissions means the owner let the agent manage funds, so a ready
+ * proposal does not wait. Ask and review wait unless the owner already confirmed. */
 export function approvalRequirement(bot, policyDecision, options = {}) {
   if (!policyDecision || typeof policyDecision.state !== 'string') fail('Policy decision is required');
-  if (OWNER_PERMISSIONS.has(options?.ownerPermission)) {
-    return policyDecision.state !== 'blocked';
+  if (policyDecision.state === 'blocked') return false;
+  if (policyDecision.state === 'over-budget') return true;
+  if (options?.ownerPermission === 'full') return false;
+  if (options?.ownerPermission === 'ask' || options?.ownerPermission === 'review') {
+    return options?.confirmed !== true;
+  }
+  if (options?.ownerPermission != null && !OWNER_PERMISSIONS.has(options.ownerPermission)) {
+    fail('Unknown owner permission');
   }
   return needsHumanApproval(
     { approvalMode: bot?.approvalMode ?? 'ask', autoApproveCap: bot?.autoApproveCap },
     policyDecision,
   );
+}
+
+export const PERMISSIONED_SPEND_STEPS = Object.freeze([
+  'trust-gate',
+  'verify-consensus',
+  'wallet-freeze',
+  'bot-policy',
+  'approval-mode',
+  'sign',
+]);
+
+/** A mainnet or paper price quote never authorizes a transaction. */
+export function mainnetQuoteBlocksSpend(quote) {
+  if (quote == null) return false;
+  if (typeof quote !== 'object') return true;
+  if (quote.pricingCluster === 'mainnet' || quote.cluster === 'mainnet') return true;
+  if (quote.paperPnl === true) return true;
+  if (quote.authorizesTransaction === true) return true;
+  return false;
 }
 
 /**
@@ -67,6 +94,16 @@ export async function runDecisionGate({
   if (typeof mainFn !== 'function' || typeof verifyFn !== 'function') fail('mainFn and verifyFn are required');
   if (!Number.isSafeInteger(now)) fail('Explicit server time is required');
 
+  const trust = evaluateTrust({ score: trustScore, threshold: trustThreshold, confirmed: trustConfirmed });
+  if (trust.state === 'confirmation-required') {
+    return { state: 'trust-confirmation-required', trust };
+  }
+
+  const consensus = await reachConsensus({ mainFn, verifyFn });
+  if (consensus.state === 'manual-review') {
+    return { state: 'verify-mismatch', consensus };
+  }
+
   try {
     assertSpendAllowed({
       bot: {
@@ -78,17 +115,7 @@ export async function runDecisionGate({
       wallet,
     });
   } catch (error) {
-    return { state: 'blocked', reason: 'spend-frozen', detail: error.message };
-  }
-
-  const trust = evaluateTrust({ score: trustScore, threshold: trustThreshold, confirmed: trustConfirmed });
-  if (trust.state === 'confirmation-required') {
-    return { state: 'trust-confirmation-required', trust };
-  }
-
-  const consensus = await reachConsensus({ mainFn, verifyFn });
-  if (consensus.state === 'manual-review') {
-    return { state: 'verify-mismatch', consensus };
+    return { state: 'blocked', reason: 'spend-frozen', detail: error.message, trust, consensus };
   }
 
   const policy = evaluateProposal(bot, proposal, ledger, now);
@@ -110,5 +137,101 @@ export async function runDecisionGate({
       proposal: policy.digest ?? proposalDigest(proposal),
       decision: consensus.decisionRecord.recordDigest,
     },
+  };
+}
+
+function spendBot(bot, wallet) {
+  return {
+    ...bot,
+    approvalMode: bot.approvalMode ?? 'ask',
+    frozen: bot.frozen ?? false,
+    walletId: bot.walletId ?? wallet.id,
+  };
+}
+
+/**
+ * One spend path for voice, the glass UI, and Grok Bot.
+ * Steps run in PERMISSIONED_SPEND_STEPS order. Sign runs only after the
+ * earlier steps pass, and only through the injected wallets signer.
+ */
+export async function runPermissionedSpend({
+  bot,
+  wallet,
+  ledger,
+  proposal,
+  trustScore,
+  trustConfirmed = false,
+  trustThreshold = '400',
+  mainFn,
+  verifyFn,
+  now,
+  ownerPermission,
+  confirmed = false,
+  quote = null,
+  signDevnet,
+} = {}) {
+  const steps = [];
+  if (!bot || !wallet || !ledger || !proposal) fail('bot, wallet, ledger, and proposal are required');
+  if (typeof mainFn !== 'function' || typeof verifyFn !== 'function') fail('mainFn and verifyFn are required');
+  if (!Number.isSafeInteger(now)) fail('Explicit server time is required');
+
+  steps.push('trust-gate');
+  const trust = evaluateTrust({ score: trustScore, threshold: trustThreshold, confirmed: trustConfirmed });
+  if (trust.state === 'confirmation-required') {
+    return { state: 'trust-confirmation-required', steps, signed: false, trust };
+  }
+
+  steps.push('verify-consensus');
+  const consensus = await reachConsensus({ mainFn, verifyFn });
+  if (consensus.state !== 'consensus') {
+    return { state: 'verify-mismatch', steps, signed: false, trust, consensus };
+  }
+
+  steps.push('wallet-freeze');
+  try {
+    assertSpendAllowed({ bot: spendBot(bot, wallet), wallet });
+  } catch (error) {
+    return { state: 'blocked', reason: 'spend-frozen', steps, signed: false, detail: error.message };
+  }
+
+  steps.push('bot-policy');
+  const policy = evaluateProposal(bot, proposal, ledger, now);
+  if (policy.state === 'blocked') {
+    return { state: 'blocked', reason: policy.reason, steps, signed: false, policy };
+  }
+
+  steps.push('approval-mode');
+  const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed });
+  if (approvalNeeded) {
+    return { state: 'approval-needed', steps, signed: false, policy };
+  }
+  if (proposal.cluster !== 'devnet') {
+    return { state: 'wrong-cluster', steps, signed: false };
+  }
+  if (mainnetQuoteBlocksSpend(quote)) {
+    return { state: 'quote-not-authorization', steps, signed: false };
+  }
+  if (typeof signDevnet !== 'function') {
+    return { state: 'signer-not-configured', steps, signed: false };
+  }
+
+  steps.push('sign');
+  const memo = memoFromDecision(consensus.decisionRecord);
+  let signed;
+  try {
+    signed = await signDevnet({ bot, wallet, proposal, memo, cluster: 'devnet' });
+  } catch {
+    return { state: 'sign-rejected', steps, signed: false };
+  }
+  if (!signed || signed.cluster !== 'devnet' || typeof signed.signature !== 'string' || signed.signature.length < 1) {
+    return { state: 'sign-rejected', steps, signed: false };
+  }
+  return {
+    state: 'signed',
+    steps,
+    signed: true,
+    signature: signed.signature,
+    cluster: 'devnet',
+    memo,
   };
 }

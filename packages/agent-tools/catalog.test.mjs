@@ -25,6 +25,7 @@ test('shared catalog covers research and dashboard tools', () => {
     'get_wallets',
     'pause_bot',
     'start_task',
+    'request_spend',
   ]) {
     assert.ok(SHARED_TOOL_NAMES.includes(name), name);
   }
