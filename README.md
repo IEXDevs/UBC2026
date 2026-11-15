@@ -58,7 +58,7 @@ goal → research (Firecrawl search/scrape, browser tools)
      → monitor note
 ```
 
-`POST /bots/:id/loop` checkpoints each step on the bot Durable Object. Without `OPENROUTER_API_KEY` the model step returns `openrouter_not_configured` and does not call the network. Without an injected devnet transfer client, execute waits at `signer-not-configured`. It does not broadcast.
+`POST /bots/:id/loop` checkpoints each step on the bot Durable Object. Without `META_MODEL_API_KEY` (or the `OPENROUTER_API_KEY` fallback) the model step returns `openrouter_not_configured` and does not call the network. Without an injected devnet transfer client, execute waits at `signer-not-configured`. It does not broadcast.
 
 ### Safety limits
 
@@ -120,7 +120,7 @@ Helpers live in `packages/quicknode-streams`. The Worker wires verify → dedupe
 
 The product in this repo is **ElevenLabs Agents**, not ElevenCreative. `@elevenlabs/react` is not a dependency, and the Talk button does not open a session.
 
-- `GET /voice/agent` returns the agent spec. The custom LLM is Meta Muse Spark 1.3 Contributor (`muse-spark-1.3-contributor`, or `OPENROUTER_MODEL_VOICE`) via `POST /voice/llm/chat/completions`. Prefer `MODEL_API_KEY` (LLM_…); OpenRouter is a fallback.
+- `GET /voice/agent` returns the agent spec. The custom LLM is Meta Muse Spark 1.3 Contributor (`muse-spark-1.3-contributor`, or `OPENROUTER_MODEL_VOICE`) via `POST /voice/llm/chat/completions`. Prefer `META_MODEL_API_KEY` (LLM_…); OpenRouter is a fallback.
 - `POST /voice/tools/:name` is the webhook tool route. Each tool calls the same bot, event, wallet, metric, payment, or browser route as the UI, with the same `x-owner-id`. Live View URLs are removed before the model sees the result. The route requires `ELEVENLABS_WEBHOOK_SECRET`. Without it the handler returns `elevenlabs_webhook_not_configured` and does not call ElevenLabs.
 - The system prompt tells the agent to name the bot, to call a tool instead of inventing balances, and to refuse sends, approvals, limit raises, and freezes.
 - Sid’s composer / Talk path mounts when `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` is set and the Worker has `ELEVENLABS_*` secrets. Client tools (open bot, Live View, confirm, read-back) share the same permissioned routes as the UI.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { draftBot, mergeRoster, removeBotFromRoster, reorderIds } from './roster.mjs';
+import { draftBot, mergeRoster, removeBotFromRoster, reorderIds, withoutId } from './roster.mjs';
 
 test('a bot draft needs a name, a known shape, and a hex color', () => {
   assert.equal(draftBot({ name: '  ', shape: 'circle', color: '#7c5cff' }), null);
@@ -10,6 +10,12 @@ test('a bot draft needs a name, a known shape, and a hex color', () => {
   assert.equal(bot.shape, 'triangle');
   assert.equal(bot.color, '#7c5cff');
   assert.equal(bot.id, 'bot_ada');
+});
+
+test('withoutId drops one agent and leaves the rest', () => {
+  assert.deepEqual(withoutId(['a', 'b', 'c'], 'b'), ['a', 'c']);
+  assert.deepEqual(withoutId(['a'], 'a'), []);
+  assert.deepEqual(withoutId(['a'], 'z'), ['a']);
 });
 
 test('reorder moves one id and leaves the others in place', () => {

@@ -1,20 +1,31 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
+import { ChartColumn, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
+import { hasSeenLogin, markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
+import SpecularButton from './SpecularButton';
 
 const ITEMS = [
   { id: 'profile', label: 'Profile', icon: UserRound },
+  { id: 'statistics', label: 'Statistics', icon: ChartColumn },
   { id: 'wallet', label: 'Wallet', icon: Wallet },
   { id: 'plugins', label: 'Plugins', icon: Plug },
   { id: 'security', label: 'Security', icon: Shield },
   { id: 'logs', label: 'Logs', icon: ScrollText },
+  { id: 'computer', label: 'Computer', icon: Monitor },
 ];
 
-export default function AccountMenu({ accountLabel, hint = 'Account', avatarUrl = null, onPick }) {
+export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, onLogin, onPick }) {
   const [open, setOpen] = useState(false);
+  const [returning, setReturning] = useState(false);
   const rootRef = useRef(null);
+
+  useEffect(() => {
+    const storage = window.localStorage;
+    if (signedIn) markSeenLogin(storage);
+    setReturning(hasSeenLogin(storage));
+  }, [signedIn]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -31,6 +42,19 @@ export default function AccountMenu({ accountLabel, hint = 'Account', avatarUrl 
       window.removeEventListener('keydown', onKey);
     };
   }, [open]);
+
+  if (!signedIn) {
+    return (
+      <div className="sign-up-slot">
+        <SpecularButton size="sm" radius={999} disabled={loginDisabled} onClick={onLogin}>
+          {returning ? 'Log In' : 'Sign Up'}
+        </SpecularButton>
+        <button type="button" className="auth-alt" disabled={loginDisabled} onClick={onLogin}>
+          {returning ? 'Sign Up' : 'Log In'}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className={`account-menu${open ? ' is-open' : ''}`} ref={rootRef}>
@@ -55,24 +79,19 @@ export default function AccountMenu({ accountLabel, hint = 'Account', avatarUrl 
           );
         })}
       </div>
-      <button
-        type="button"
-        className="you-btn"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={accountLabel}
-        onClick={() => setOpen(value => !value)}
-      >
-        {avatarUrl ? <ProfileMark src={avatarUrl} label={accountLabel} /> : (
-          <span className="you-mark" aria-hidden="true">
-            <UserRound size={16} strokeWidth={1.75} />
-          </span>
-        )}
-        <span className="you-copy">
-          <strong>{accountLabel}</strong>
-          <small>{hint}</small>
-        </span>
-      </button>
+      <div className="you-row">
+        <button
+          type="button"
+          className="you-id"
+          aria-label={accountLabel}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen(value => !value)}
+        >
+          <ProfileMark src={avatarUrl} label={accountLabel} className="you-mark is-round" />
+          {collapsed ? null : <strong>{accountLabel}</strong>}
+        </button>
+      </div>
     </div>
   );
 }

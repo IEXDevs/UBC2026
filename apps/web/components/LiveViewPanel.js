@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { browserErrorNote, browserStatusNote } from '../lib/browser-status.mjs';
 import { browserSessionUrl, liveViewFrame, pickOpenSession } from '../lib/live-view.mjs';
 import GlassSurface from './GlassSurface';
+import LatticeLoader from './bits/LatticeLoader';
 
 const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
@@ -146,9 +147,9 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
 
   return (
     <div className="live-view">
-      <h3>Live View</h3>
-      <p className="preview-note" role="status">{status}</p>
-      <div className="live-actions">
+      <div className="live-row">
+        {busy ? <LatticeLoader label="Browser" /> : <p className="live-status">{status}</p>}
+        <div className="live-actions">
         <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
           Open browser session
         </button>
@@ -158,6 +159,7 @@ export default function LiveViewPanel({ botId, ownerId = null }) {
         <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('release')}>
           Release session
         </button>
+        </div>
       </div>
       {error ? <p className="preview-note" role="alert">{error}</p> : null}
       {frame?.embed && frame.src && (

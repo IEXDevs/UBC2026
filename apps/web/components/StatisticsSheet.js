@@ -1,0 +1,136 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
+import { metricsUrl, pickOwnerRollup } from '../lib/overview.mjs';
+import { statisticsView } from '../lib/statistics.mjs';
+import BranchedMenu from './BranchedMenu';
+import CountUp from './CountUp';
+import { usePresence } from './usePresence';
+
+const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
+
+function leafLabel(row) {
+  if (row.text) {
+    return (
+      <span className="stat-leaf">
+        <span>{row.label}</span>
+        <span className="stat-num">{row.text}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="stat-leaf">
+      <span>{row.label}</span>
+      <CountUp
+        key={`${row.key}-${row.value}`}
+        className="stat-num"
+        to={row.value}
+        decimals={row.decimals}
+        duration={1.05}
+        trigger="load"
+      />
+    </span>
+  );
+}
+
+export default function StatisticsSheet({ open, onClose, bots = [], ownerId = null, voiceMs = 0 }) {
+  const { mounted, leaving } = usePresence(open);
+  const [remoteMetric, setRemoteMetric] = useState(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onKey(event) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const url = metricsUrl(runtimeBase);
+    if (!url || !ownerId) return undefined;
+    let stop = false;
+    async function load() {
+      try {
+        const response = await fetch(url, {
+          headers: { 'x-owner-id': ownerId },
+          cache: 'no-store',
+        });
+        const data = await response.json();
+        if (stop || !response.ok || data.stub) return;
+        const rollup = pickOwnerRollup(data, ownerId);
+        if (rollup) setRemoteMetric(rollup);
+      } catch {
+        // Keep the stored counts when the runtime is unreachable.
+      }
+    }
+    load();
+    const timer = setInterval(load, 8000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [open, ownerId]);
+
+  if (!mounted) return null;
+
+  const view = statisticsView({
+    bots,
+    ownerId: ownerId ?? 'demo_owner',
+    remoteMetric,
+    voiceMs,
+  });
+  const items = [
+    {
+      value: 'owner',
+      label: 'All agents',
+      children: view.ownerRows.map(row => ({
+        value: `owner-${row.key}`,
+        label: leafLabel(row),
+      })),
+    },
+    ...view.agents.map(agent => ({
+      value: agent.id,
+      label: agent.label,
+      children: agent.rows.map(row => ({
+        value: `${agent.id}-${row.key}`,
+        label: leafLabel(row),
+      })),
+    })),
+  ];
+
+  return (
+    <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
+      <section
+        className="stats-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="statistics-title"
+        onMouseDown={event => event.stopPropagation()}
+      >
+        <div className="stats-head">
+          <h2 id="statistics-title">Statistics</h2>
+          <button type="button" className="icon-btn" aria-label="Close statistics" onClick={onClose}>
+            <X size={18} strokeWidth={1.75} />
+          </button>
+        </div>
+        <p className="stats-note">{view.note}</p>
+        <div className="stats-tree">
+          <BranchedMenu
+            items={items}
+            defaultOpen={items.map((_, index) => index)}
+            width={640}
+            rowHeight={40}
+            fontSize={15}
+            color="#f5f5f5"
+            accentColor="#f5f5f5"
+            lineColor="#3a3a3a"
+          />
+        </div>
+        <p className="quiet">{bots.length} agents on this account.</p>
+      </section>
+    </div>
+  );
+}

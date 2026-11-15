@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { logsUrl } from '../lib/bot-experience.mjs';
+import MentionText from './MentionText';
 
 const runtimeBase = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL ?? '';
 
@@ -21,7 +22,7 @@ function summarize(detail) {
   }
 }
 
-export default function LogsPanel({ bots, ownerId = null }) {
+export default function LogsPanel({ bots, ownerId = null, onParty }) {
   const [remote, setRemote] = useState(null);
 
   useEffect(() => {
@@ -85,7 +86,7 @@ export default function LogsPanel({ bots, ownerId = null }) {
             <li key={row.id}>
               <strong>{row.bot}</strong>
               <small>{stamp(row.at)} · {row.kind}</small>
-              <span>{row.summary}</span>
+              <span><MentionText text={row.summary} onParty={onParty} /></span>
             </li>
           ))}
         </ul>

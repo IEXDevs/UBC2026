@@ -49,7 +49,7 @@ function toolRequest(name, { headers = {}, body = {} } = {}) {
 
 test('the agent spec uses Muse Spark as the custom LLM and includes no secret values', async () => {
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/agent`), env({
-    MODEL_API_KEY: 'LLM_test_secret_value_here',
+    META_MODEL_API_KEY: 'LLM_test_secret_value_here',
     ELEVENLABS_API_KEY: ELEVEN,
     OPENROUTER_MODEL_VOICE: 'not a model',
   }));
@@ -239,7 +239,7 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
     body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
-  }), env({ MODEL_API_KEY: 'LLM_test_secret_value_here', OPENROUTER_MODEL_VOICE: 'muse-spark-1.3' }), {
+  }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here', OPENROUTER_MODEL_VOICE: 'muse-spark-1.3' }), {
     fetcher: async (url, init) => {
       calls.push({ url, body: JSON.parse(init.body) });
       return new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {

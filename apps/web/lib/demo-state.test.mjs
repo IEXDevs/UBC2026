@@ -6,7 +6,7 @@ test('demo shell exposes locked panes and three builtin templates', () => {
   const state = getDemoShellState();
   assert.equal(state.product, 'Maelstrom');
   assert.equal(state.ownerId, null);
-  assert.deepEqual(state.panes, ['Main', 'Positions', 'Plugins', 'History']);
+  assert.deepEqual(state.panes, ['Main', 'Positions', 'History']);
   assert.equal(state.bots.length, 3);
   assert.deepEqual(
     state.connectors.filter(item => item.builtin).map(item => item.name),

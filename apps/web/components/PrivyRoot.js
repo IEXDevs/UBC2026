@@ -3,6 +3,7 @@
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
 import { privyProviderProps } from '../lib/privy-config.mjs';
+import { ToastProvider } from './bits/SwipeToast';
 import AcceptTermsGate from './AcceptTermsGate';
 
 const props = privyProviderProps({
@@ -11,7 +12,7 @@ const props = privyProviderProps({
 });
 
 export default function PrivyRoot({ children }) {
-  if (!props) return children;
+  if (!props) return <ToastProvider>{children}</ToastProvider>;
   // Omit clientId unless set — a wrong App Client id makes login show
   // "Something went wrong" (often invalid_origin against that client's allowlist).
   const providerProps = {
@@ -25,8 +26,10 @@ export default function PrivyRoot({ children }) {
   };
   if (props.clientId) providerProps.clientId = props.clientId;
   return (
-    <PrivyProvider {...providerProps}>
-      <AcceptTermsGate>{children}</AcceptTermsGate>
-    </PrivyProvider>
+    <ToastProvider>
+      <PrivyProvider {...providerProps}>
+        <AcceptTermsGate>{children}</AcceptTermsGate>
+      </PrivyProvider>
+    </ToastProvider>
   );
 }

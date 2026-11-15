@@ -2,10 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AudioLines, Mic, MicOff, Minimize2, Plus, Settings, Square } from 'lucide-react';
+import { Mic, MicOff, Minimize2, Settings, Square } from 'lucide-react';
+import { Attachment01Icon } from '@hugeicons/core-free-icons';
 import ChatBubbles from './ChatBubbles';
+import ContextUsage from './ContextUsage';
+import Attachments, { isImageFile } from './Attachments';
+import { Suggestion } from './ai/elements';
 import CrystalizedBall from './CrystalizedBall';
-import SlingButton from './SlingButton';
+import VoiceHalo from './VoiceHalo';
+import PromptBar from './PromptBar';
 import Stepper, { Step } from './Stepper';
 import { clampFloat, FLOAT_SIZE, FLOAT_STORAGE_KEY } from '../lib/voice-float.mjs';
 import { mentionIn, recipientHint } from '../lib/profile.mjs';
@@ -18,22 +23,22 @@ import {
   VOICES,
   parseVoiceSettings,
 } from '../lib/voice-settings.mjs';
-import { sendBotChat } from '../lib/runtime-data.mjs';
 
 const LEAVE_MS = 760;
+const PROMPT_SOURCES = [
+  { key: 'files', name: 'Photos & files', description: 'Upload from this device', icon: Attachment01Icon, attach: true },
+];
+const PROMPT_MODELS = [
+  { key: 'muse-spark', name: 'Muse Spark', tag: 'Chat' },
+];
+const PROMPT_EFFORTS = ['Low', 'Medium', 'High', 'Extra', 'Max'];
+const SUGGESTIONS = [
+  'What should this agent watch?',
+  'Summarize the latest activity',
+  'Show the open positions',
+];
 
-export default function Composer({
-  botId = null,
-  botName,
-  botGoal = '',
-  botType = 'trading',
-  ownerId = null,
-  lines = [],
-  onLine,
-  onThinking,
-  hidden = false,
-  resolveMention = null,
-}) {
+export default function Composer({ botName, lines = [], onLine, onThinking, onVoiceSpan = null, hidden = false, resolveMention = null, usage = null, onAttach = null, onSuggest = null }) {
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
   const [note, setNote] = useState('');
@@ -43,6 +48,8 @@ export default function Composer({
   const [dragging, setDragging] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_VOICE_SETTINGS);
   const [draft, setDraft] = useState('');
+  const [files, setFiles] = useState([]);
+  const fileRef = useRef(null);
   const [mention, setMention] = useState('');
   const [thinking, setThinking] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -59,13 +66,22 @@ export default function Composer({
   const placeRef = useRef(place);
   const leaveTimer = useRef(0);
   const thinkTimer = useRef(0);
-  const sendingRef = useRef(false);
+  const voiceStarted = useRef(0);
+  const onVoiceSpanRef = useRef(onVoiceSpan);
+  onVoiceSpanRef.current = onVoiceSpan;
   settingsRef.current = settings;
   placeRef.current = place;
 
   function setPhase(next) {
     presenceRef.current = next;
     setPresence(next);
+  }
+
+  function commitVoice() {
+    const started = voiceStarted.current;
+    if (!started) return;
+    voiceStarted.current = 0;
+    onVoiceSpanRef.current?.(performance.now() - started);
   }
 
   useEffect(() => {
@@ -112,6 +128,11 @@ export default function Composer({
     window.clearTimeout(leaveTimer.current);
     window.clearTimeout(thinkTimer.current);
     onThinking?.(false);
+    const started = voiceStarted.current;
+    if (started) {
+      voiceStarted.current = 0;
+      onVoiceSpanRef.current?.(performance.now() - started);
+    }
     sessionRef.current?.endSession?.().catch(() => {});
     sessionRef.current = null;
   }, []);
@@ -131,46 +152,71 @@ export default function Composer({
     return () => { stop = true; };
   }, [draft, resolveMention]);
 
-  async function sendMessage() {
-    const text = draft.trim();
-    if (!text || sendingRef.current) return;
-    const prior = lines;
-    pushLine('user', text);
+  function addFiles(list) {
+    const room = Math.max(0, 10 - files.length);
+    const next = [...list].slice(0, room).map(file => ({
+      id: `${file.name}-${file.size}-${file.lastModified}`,
+      name: file.name,
+      size: file.size,
+      type: file.type || 'file',
+      url: isImageFile({ name: file.name, type: file.type }) ? URL.createObjectURL(file) : '',
+    }));
+    if (next.length === 0) return;
+    setFiles(current => [...current, ...next].slice(0, 10));
+    onAttach?.(next.map(file => ({ ...file, addedAt: Date.now() })));
+  }
+
+  function dropFile(id) {
+    setFiles(current => current.filter(file => file.id !== id));
+  }
+
+  function pickFiles() {
+    const input = fileRef.current;
+    if (!input) return [];
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (names) => {
+        if (settled) return;
+        settled = true;
+        input.removeEventListener('change', changed);
+        input.removeEventListener('cancel', dismissed);
+        window.removeEventListener('focus', cancelled);
+        resolve(names);
+      };
+      const changed = () => {
+        const list = [...(input.files || [])];
+        input.value = '';
+        addFiles(list);
+        finish([]);
+      };
+      const cancelled = () => {
+        window.setTimeout(() => finish([]), 500);
+      };
+      const dismissed = () => finish([]);
+      input.addEventListener('change', changed);
+      input.addEventListener('cancel', dismissed);
+      input.click();
+      requestAnimationFrame(() => window.addEventListener('focus', cancelled, { once: true }));
+    });
+  }
+
+  function sendMessage(text) {
+    const spokenText = typeof text === 'string' ? text.trim() : draft.trim();
+    const attached = files.map(file => file.name).join(', ');
+    const spoken = attached ? `${spokenText}${spokenText ? '\n' : ''}${attached}` : spokenText;
+    if (!spoken) return;
+    pushLine('user', spoken);
     if (mention) pushLine('assistant', mention);
     setDraft('');
+    setFiles([]);
     setMention('');
     setThinking(true);
     onThinking?.(true);
     window.clearTimeout(thinkTimer.current);
-    sendingRef.current = true;
-    try {
-      if (!ownerId || !botId) {
-        pushLine('agent', ownerId
-          ? 'Pick a bot before chatting.'
-          : 'Sign in to chat with this bot.');
-        return;
-      }
-      const result = await sendBotChat({
-        ownerId,
-        botId,
-        message: text,
-        history: prior,
-        name: botName,
-        goal: botGoal,
-        type: botType,
-      });
-      if (result.ok) {
-        pushLine('agent', result.reply);
-      } else {
-        pushLine('agent', chatFailureNote(result.error));
-      }
-    } catch {
-      pushLine('agent', chatFailureNote('network'));
-    } finally {
-      sendingRef.current = false;
+    thinkTimer.current = window.setTimeout(() => {
       setThinking(false);
       onThinking?.(false);
-    }
+    }, 1400);
   }
 
   function pushLine(role, text) {
@@ -180,6 +226,7 @@ export default function Composer({
   }
 
   function finishLeave(keepNote) {
+    commitVoice();
     const live = sessionRef.current;
     sessionRef.current = null;
     connectingRef.current = false;
@@ -259,6 +306,7 @@ export default function Composer({
         return;
       }
       sessionRef.current = live;
+      voiceStarted.current = performance.now();
     } catch (error) {
       setNote(voiceFailureNote(error));
       closeStage(true);
@@ -293,7 +341,6 @@ export default function Composer({
     window.addEventListener('pointerup', up);
   }
 
-  const voiceName = VOICES.find(voice => voice.id === settings.voiceId)?.name ?? 'Voice';
   const live = presence !== 'off';
   const stageOpen = mode === 'full' && presence === 'on';
   const floatOpen = mode === 'mini' && (presence === 'on' || presence === 'enter');
@@ -385,47 +432,53 @@ export default function Composer({
       {floatNode}
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mention ? <p className="mention-hint" role="status">{mention}</p> : null}
-      <form className="composer" aria-label="Message the agent" onSubmit={event => { event.preventDefault(); sendMessage(); }}>
-        <button type="button" className="icon-btn" aria-label="Add" disabled title="Attachments are not wired yet">
-          <Plus size={18} strokeWidth={1.75} />
-        </button>
-        <input
-          aria-label={`Message ${botName}`}
+      {lines.length === 0 && onSuggest ? (
+        <div className="entry-suggestions">
+          {SUGGESTIONS.map((text) => (
+            <Suggestion key={text} onClick={() => onSuggest(text)}>{text}</Suggestion>
+          ))}
+        </div>
+      ) : null}
+      <div className="composer" aria-label="Message the agent">
+        <input ref={fileRef} className="sr-only" type="file" multiple aria-label="Attach files" />
+        <PromptBar
           placeholder={`Message ${botName}`}
-          value={draft}
-          onChange={event => setDraft(event.target.value)}
+          label={`Message ${botName}`}
+          sources={PROMPT_SOURCES}
+          models={PROMPT_MODELS}
+          efforts={PROMPT_EFFORTS}
+          defaultEffort="Medium"
+          busy={thinking}
+          background="transparent"
+          color="#f5f5f5"
+          menuBackground="#27272a"
+          sparkColor="#f5f5f5"
+          width={1200}
+          radius={20}
+          onDraftChange={setDraft}
+          onAttach={pickFiles}
+          extraReady={files.length > 0}
+          chips={files.length > 0 ? <Attachments files={files} onRemove={dropFile} /> : null}
+          onSend={(text) => sendMessage(text)}
+          accessory={usage ? <ContextUsage usage={usage} /> : null}
+          endSlot={(
+            <button
+              type="button"
+              className={`voice-mode${live ? ' is-on' : ''}`}
+              aria-label={live ? 'Stop voice' : 'Voice'}
+              aria-pressed={live}
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => { if (live) closeStage(); else startSession(); }}
+            >
+              <span className="voice-mode-bars" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            </button>
+          )}
         />
-        <SlingButton
-          onSend={sendMessage}
-          padColor="#f5f5f5"
-          iconColor="#18181b"
-          accentColor="#f5f5f5"
-          wellColor="#27272a"
-          bandColor="#52525b"
-          size={48}
-          strokeWidth={3}
-          armAt={40}
-          maxPull={120}
-          launchSpeed={2600}
-          recoil={0.2}
-          flight={90}
-          particles={14}
-          spread={60}
-          axis="any"
-          tapSends
-          disabled={!draft.trim()}
-          ariaLabel="Send"
-        />
-        <button
-          type="button"
-          className={`icon-btn voice${live ? ' is-on' : ''}`}
-          aria-label={live ? 'Open voice' : 'Start voice session'}
-          title={voiceName}
-          onClick={startSession}
-        >
-          <AudioLines size={18} strokeWidth={1.75} />
-        </button>
-      </form>
+      </div>
     </div>
   );
 }
@@ -456,7 +509,7 @@ function TalkOrb({ sessionRef, modeRef, vadRef, size, interactive }) {
   }, [sessionRef, modeRef, vadRef]);
 
   const color = talk.side === 'agent' ? '#6cb2ff' : talk.side === 'user' ? '#ff9a4a' : '#e7edf2';
-  return (
+  const ball = (
     <CrystalizedBall
       preset="eclipse"
       color={color}
@@ -469,6 +522,12 @@ function TalkOrb({ sessionRef, modeRef, vadRef, size, interactive }) {
       crackle={0.28 + talk.level * 0.75}
       motion={talk.side === 'user' ? 'rise' : talk.side === 'agent' ? 'orbit' : 'drift'}
     />
+  );
+  if (size < 0.6) return ball;
+  return (
+    <VoiceHalo level={talk.level} color={color} size={340}>
+      {ball}
+    </VoiceHalo>
   );
 }
 
@@ -524,21 +583,4 @@ function voiceFailureNote(error) {
   if (error?.message === 'voice_rejected') return 'The voice service refused the session. Publish the agent and turn on Voice ID and Speed overrides.';
   if (error?.message === 'voice_unreachable') return 'The voice service did not respond.';
   return 'The voice session did not start.';
-}
-
-function chatFailureNote(code) {
-  if (code === 'openrouter_not_configured') {
-    return 'Add MODEL_API_KEY=LLM_… (Meta Model API) to the root .env.local and restart Next.';
-  }
-  if (code === 'openrouter_unauthorized') {
-    return 'Meta Model API rejected the key. Check MODEL_API_KEY in root .env.local (should start with LLM_).';
-  }
-  if (code === 'openrouter_bad_request') return 'The model request was invalid. Try a shorter message.';
-  if (code === 'openrouter_failed' || code === 'openrouter_unavailable') {
-    return 'The model call failed. Try again in a moment.';
-  }
-  if (code === 'not_found' || code === 'bot_not_found') return 'This bot was not found for your account.';
-  if (code === 'invalid_request') return 'Sign in to chat with this bot.';
-  if (code === 'network') return 'Could not reach the chat API for a reply.';
-  return 'I could not reply just now.';
 }

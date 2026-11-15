@@ -1,5 +1,5 @@
 /**
- * Same-origin text chat via Meta Model API (MODEL_API_KEY = LLM_…).
+ * Same-origin text chat via Meta Model API (META_MODEL_API_KEY = LLM_…).
  * Falls back to OpenRouter when only OPENROUTER_API_KEY (sk-or-…) is set.
  */
 
@@ -47,8 +47,12 @@ function trimKey(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function resolveTextChatProvider({ modelApiKey = '', openrouterApiKey = '' } = {}) {
-  const modelKey = trimKey(modelApiKey);
+export function resolveTextChatProvider({
+  metaModelApiKey = '',
+  modelApiKey = '',
+  openrouterApiKey = '',
+} = {}) {
+  const modelKey = trimKey(metaModelApiKey || modelApiKey);
   const openrouterKey = trimKey(openrouterApiKey);
   const llmAsOpenrouter = openrouterKey.startsWith('LLM_') ? openrouterKey : '';
   const metaKey = modelKey || llmAsOpenrouter;
@@ -223,6 +227,7 @@ async function postCompletion({
 
 export async function completeTextChat({
   apiKey = '',
+  metaModelApiKey = '',
   modelApiKey = '',
   openrouterApiKey = '',
   botName,
@@ -238,7 +243,7 @@ export async function completeTextChat({
   maxToolRounds = 4,
 } = {}) {
   const resolved = resolveTextChatProvider({
-    modelApiKey: modelApiKey || (String(apiKey).startsWith('LLM_') ? apiKey : ''),
+    metaModelApiKey: metaModelApiKey || modelApiKey || (String(apiKey).startsWith('LLM_') ? apiKey : ''),
     openrouterApiKey: openrouterApiKey || (!String(apiKey).startsWith('LLM_') ? apiKey : ''),
   });
   // Allow a single apiKey arg: detect LLM_ vs OpenRouter.

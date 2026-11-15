@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
 import {
   CodeIcon,
@@ -38,6 +38,7 @@ type State = 'in' | 'above' | 'below';
 interface AnimatedListProps {
   items?: AnimatedListItem[];
   onItemSelect?: (item: AnimatedListItem, index: number) => void;
+  onItemContextMenu?: (item: AnimatedListItem, index: number, event: MouseEvent<HTMLDivElement>) => void;
   renderItem?: (item: AnimatedListItem, index: number, isSelected: boolean) => ReactNode;
   initialSelectedIndex?: number;
   selectedIndex?: number;
@@ -155,6 +156,7 @@ const size = (value: number | string) => (typeof value === 'number' ? `${value}p
 const AnimatedList = ({
   items = DEFAULT_ITEMS,
   onItemSelect,
+  onItemContextMenu,
   renderItem,
   initialSelectedIndex = -1,
   selectedIndex,
@@ -573,6 +575,10 @@ const AnimatedList = ({
                 data-index={index}
                 data-selected={isSelected ? '' : undefined}
                 onPointerEnter={selectOnHover ? () => hover(index) : undefined}
+                onContextMenu={event => {
+                  event.preventDefault();
+                  onItemContextMenu?.(item, index, event);
+                }}
                 onClick={() => choose(item, index)}
               >
                 {renderItem ? (

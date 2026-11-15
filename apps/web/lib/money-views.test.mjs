@@ -9,6 +9,7 @@ import {
   describeWallets,
   formatBaseUnits,
   moneyPane,
+  solanaExplorerTxUrl,
   solscanTxUrl,
   walletGlance,
 } from './money-views.mjs';
@@ -62,11 +63,15 @@ test('demo money rows match the contract shapes', () => {
   assert.equal(history[1].cluster, 'devnet');
   assert.equal(walletGlance(state.wallets, state.positions).balanceLabel, '25 USDC');
   assert.equal(walletGlance(state.wallets, state.positions).label, 'Main');
+  assert.equal(walletGlance(state.wallets, state.positions, [
+    { asset: 'USDC', amount: '5000000', direction: 'in' },
+  ]).balanceLabel, '5 USDC');
 });
 
 test('solscan links are limited to devnet and testnet signatures', () => {
   const signature = '5'.repeat(64);
   assert.equal(solscanTxUrl(signature, 'devnet'), `https://solscan.io/tx/${signature}?cluster=devnet`);
+  assert.equal(solanaExplorerTxUrl(signature, 'devnet'), `https://explorer.solana.com/tx/${signature}?cluster=devnet`);
   assert.equal(solscanTxUrl(null, 'devnet'), null);
-  assert.equal(solscanTxUrl(signature, 'mainnet-beta'), null);
+  assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta'), null);
 });

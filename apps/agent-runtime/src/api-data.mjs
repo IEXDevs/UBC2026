@@ -14,6 +14,7 @@ import { createSnsResolver, SnsError } from '@ubc2026/sns';
 import { WalletError } from '@ubc2026/wallets';
 import {
   amountText,
+  createSupabaseRpc,
   mapBotRow,
   mapWalletRow,
   supabaseConfig,
@@ -21,6 +22,12 @@ import {
   supabaseWrite,
 } from './supabase-rest.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
+import {
+  mapTransferRow,
+  platformProposal,
+  transferErrorCode,
+  transferRequest,
+} from './platform-transfer.mjs';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -609,6 +616,83 @@ export async function handleApiData(request, env, matched) {
         address: wallet.rows?.[0]?.address || null,
       },
     });
+  }
+
+  if (routeId === 'transfers.list') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
+    const owner = encodeURIComponent(ownerId);
+    const result = await supabaseGet(
+      env,
+      `platform_transfers?or=(from_owner_id.eq.${owner},to_owner_id.eq.${owner})&select=*&order=created_at.desc&limit=50`,
+      fetcher,
+    );
+    return json({
+      ok: true,
+      source: 'supabase',
+      items: (result.rows || []).map(row => mapTransferRow(row, ownerId)).filter(Boolean),
+    });
+  }
+
+  if (routeId === 'transfers.create') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const body = await request.json().catch(() => ({}));
+    const requestBody = transferRequest(body);
+    if (!requestBody) return json({ error: 'invalid_transfer' }, 400);
+    if (!supabaseConfig(env)) return json({ ok: false, error: 'unconfigured', source: 'unconfigured' }, 503);
+    const rpc = createSupabaseRpc(env, fetcher);
+    if (requestBody.botId) {
+      const bot = await supabaseGet(
+        env,
+        `bots?id=eq.${encodeURIComponent(requestBody.botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+        fetcher,
+      );
+      if (bot.rows?.[0]) {
+        let decision;
+        try {
+          decision = await rpc('policy_reserve_budget', {
+            payload: platformProposal({
+              ownerId,
+              botId: requestBody.botId,
+              handle: requestBody.handle,
+              amount: requestBody.amount,
+              idempotencyKey: requestBody.idempotencyKey,
+              now: Date.now(),
+            }),
+          });
+        } catch (err) {
+          return json({ error: 'policy_failed' }, 502);
+        }
+        if (decision?.state !== 'reserved') {
+          return json({
+            ok: false,
+            error: 'policy_blocked',
+            state: decision?.state || 'blocked',
+            reason: decision?.reason || null,
+          }, 409);
+        }
+      }
+    }
+    try {
+      const posted = await rpc('platform_post_transfer', {
+        payload: {
+          ownerId,
+          handle: requestBody.handle,
+          amount: requestBody.amount,
+          idempotencyKey: requestBody.idempotencyKey,
+          botId: requestBody.botId,
+        },
+      });
+      const transfer = mapTransferRow(posted?.transfer, ownerId);
+      if (!transfer) return json({ error: 'transfer_failed' }, 502);
+      return json({ ok: true, source: 'supabase', replay: posted.replay === true, transfer });
+    } catch (err) {
+      return json({ error: transferErrorCode(err) }, 409);
+    }
   }
 
   return null;

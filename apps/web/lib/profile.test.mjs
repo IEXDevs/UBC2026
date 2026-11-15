@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mentionIn, recipientHint } from './profile.mjs';
+import { mentionIn, profileRailLabel, recipientHint } from './profile.mjs';
 
 test('a message can name a handle or an SNS name', () => {
   assert.equal(mentionIn('send it to @Alex'), '@Alex');
@@ -10,4 +10,8 @@ test('a message can name a handle or an SNS name', () => {
   assert.equal(recipientHint({ kind: 'handle', handle: 'alex', missing: true }), '@alex is not on Maelstrom');
   assert.match(recipientHint({ kind: 'sns', domain: 'richclub.sol' }), /SNS/);
   assert.match(recipientHint({ kind: 'sns', domain: 'richclub.sol', error: 'sns_not_found' }), /not found/);
+  assert.equal(profileRailLabel({ handle: 'sid', displayName: 'Sid Chevvan' }), '@sid');
+  assert.equal(profileRailLabel({ handle: '  @sid ', displayName: 'Sid Chevvan' }), '@sid');
+  assert.equal(profileRailLabel({ displayName: 'Sid Chevvan', fallback: 'You' }), 'Sid Chevvan');
+  assert.equal(profileRailLabel({ fallback: 'You' }), 'You');
 });

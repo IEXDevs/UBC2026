@@ -130,8 +130,10 @@ test('demo shell bots carry a bot page and money panes stay empty placeholders',
   }
   const page = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../app/page.js'), 'utf8');
   assert.match(page, /pane === 'Main'/);
-  assert.match(page, /BotPage/);
-  assert.match(page, /aria-label="Stats"/);
+  assert.match(page, /AgentThread/);
+  assert.match(page, /Statistics/);
+  assert.equal(page.includes('aria-label="Stats"'), false);
+  assert.equal(page.includes('bot.goal'), false);
   assert.equal(page.includes('OverviewPanel'), false);
   assert.match(page, /SecurityPanel/);
   assert.match(page, /PositionBook|MoneyPane/);
