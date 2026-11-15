@@ -14,6 +14,8 @@ test('runtime proxy allowlist is the live owner and bot routes', () => {
   assert.equal(isAllowedRuntimePath('/api/events'), true);
   assert.equal(isAllowedRuntimePath('/api/decisions'), true);
   assert.equal(isAllowedRuntimePath('/bots/bot_1/status'), true);
+  assert.equal(isAllowedRuntimePath('/bots/bot_1/loop'), true);
+  assert.equal(isAllowedRuntimePath('/bots/bot_1/sns/send'), true);
   assert.equal(isAllowedRuntimePath('/bots/bot_1/browser/sessions/rec_1/live-view'), true);
   assert.equal(isAllowedRuntimePath('/security/grab-back'), true);
   assert.equal(isAllowedRuntimePath('/api/routes'), false);

@@ -7,11 +7,13 @@ import {
   serializeToolResult,
 } from './chat-tools.mjs';
 
-test('openAiAgentTools maps browser-session schemas', () => {
+test('openAiAgentTools maps shared research and dashboard schemas', () => {
   const tools = openAiAgentTools();
   assert.ok(tools.some(tool => tool.function.name === 'web_search'));
   assert.ok(tools.some(tool => tool.function.name === 'browser_open'));
-  assert.match(chatToolsInstruction(), /Do not claim you lack a browser/);
+  assert.ok(tools.some(tool => tool.function.name === 'list_bots'));
+  assert.ok(tools.some(tool => tool.function.name === 'pause_bot'));
+  assert.match(chatToolsInstruction(), /same tools on text and voice/);
 });
 
 test('serializeToolResult strips viewerUrl', () => {
@@ -133,4 +135,37 @@ test('createChatToolInvoker returns search_not_configured without Firecrawl', as
   });
   const result = await invoke('web_search', { query: 'solana usdc' });
   assert.equal(result.error, 'search_not_configured');
+});
+
+test('createChatToolInvoker lists bots via Worker dashboard tools', async () => {
+  const calls = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (url, options) => {
+      calls.push({ url: String(url), method: options.method, owner: options.headers['x-owner-id'] });
+      return Response.json({ items: [{ id: 'bot_1', name: 'Alpha' }] });
+    },
+  });
+  const listed = await invoke('list_bots', {});
+  assert.equal(listed.items[0].id, 'bot_1');
+  assert.match(calls[0].url, /\/api\/bots$/);
+  assert.equal(calls[0].method, 'GET');
+  assert.equal(calls[0].owner, 'did:privy:owner1');
+});
+
+test('createChatToolInvoker pauses a bot via Worker', async () => {
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (url, options) => {
+      assert.match(String(url), /\/bots\/bot_2\/pause$/);
+      assert.equal(options.method, 'POST');
+      return Response.json({ status: 'paused' });
+    },
+  });
+  const paused = await invoke('pause_bot', { botId: 'bot_2' });
+  assert.equal(paused.status, 'paused');
 });

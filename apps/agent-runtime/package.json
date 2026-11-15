@@ -12,6 +12,7 @@
   "dependencies": {
     "@ubc2026/agent-commerce": "0.1.0",
     "@ubc2026/agent-loop": "0.1.0",
+    "@ubc2026/agent-tools": "0.1.0",
     "@ubc2026/bot-policy": "0.1.0",
     "@ubc2026/browser-search": "0.1.0",
     "@ubc2026/browser-session": "0.1.0",
