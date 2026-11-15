@@ -22,6 +22,10 @@ function chatToolEnv() {
       || (typeof process.env.QUICKNODE_DEVNET_RPC_URL === 'string'
         ? process.env.QUICKNODE_DEVNET_RPC_URL.trim()
         : ''),
+    QUICKNODE_TESTNET_RPC_URL: readRootEnv('QUICKNODE_TESTNET_RPC_URL')
+      || (typeof process.env.QUICKNODE_TESTNET_RPC_URL === 'string'
+        ? process.env.QUICKNODE_TESTNET_RPC_URL.trim()
+        : ''),
     NEXT_PUBLIC_AGENT_RUNTIME_URL: readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL')
       || (typeof process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL === 'string'
         ? process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL.trim()
