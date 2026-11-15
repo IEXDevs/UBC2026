@@ -134,6 +134,9 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
         if (body.method === 'getGenesisHash') {
           return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
         }
+        if (body.method === 'getBalance') {
+          return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 0 } });
+        }
         if (body.method === 'getTokenAccountsByOwner') {
           return Response.json({
             jsonrpc: '2.0',
@@ -165,11 +168,59 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
   const body = await res.json();
   assert.equal(body.items[0].usdcBalance, '1234500');
   assert.equal(body.items[0].usdcBalanceLabel, '1.2345 USDC');
+  assert.equal(body.items[0].solLamports, '0');
   assert.equal(body.items[0].balanceStatus, 'ok');
   assert.equal(body.items[0].cluster, 'devnet');
   assert.equal(body.balances.onchainUsdc, '1234500');
   assert.equal(body.balances.displayUsdcLabel, '1.2345 USDC');
   assert.equal(JSON.stringify(body).includes('example.invalid'), false);
+});
+
+test('wallets.list reports SOL when wallets only hold native lamports', async () => {
+  const { DEVNET_GENESIS_HASH } = await import('@ubc2026/wallets/privy');
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('/rest/v1/wallets')) {
+        return Response.json([{
+          id: 'w1',
+          owner_id: 'user_1',
+          kind: 'main',
+          label: 'Main',
+          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          provider: 'privy',
+          frozen: false,
+        }]);
+      }
+      if (href.includes('/rest/v1/platform_transfers')) return Response.json([]);
+      if (href.includes('/rpc') || href === 'https://example.invalid/rpc') {
+        const body = JSON.parse(init.body || '{}');
+        if (body.method === 'getGenesisHash') {
+          return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        }
+        if (body.method === 'getBalance') {
+          return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 1_500_000_000 } });
+        }
+        if (body.method === 'getTokenAccountsByOwner') {
+          return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
+        }
+      }
+      return new Response('nope', { status: 404 });
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/wallets', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.items[0].solLamports, '1500000000');
+  assert.equal(body.items[0].solBalanceLabel, '1.5 SOL (devnet)');
+  assert.equal(body.items[0].usdcBalance, '0');
+  assert.equal(body.balances.displaySource, 'sol');
+  assert.equal(body.balances.displayBalanceLabel, '1.5 SOL (devnet)');
 });
 
 test('wallets.list prefers platform transfer net for displayUsdcLabel', async () => {
@@ -205,6 +256,9 @@ test('wallets.list prefers platform transfer net for displayUsdcLabel', async ()
         const body = JSON.parse(init.body || '{}');
         if (body.method === 'getGenesisHash') {
           return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        }
+        if (body.method === 'getBalance') {
+          return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 0 } });
         }
         if (body.method === 'getTokenAccountsByOwner') {
           return Response.json({

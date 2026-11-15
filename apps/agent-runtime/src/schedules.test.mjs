@@ -11,6 +11,7 @@ import {
   listScheduledBotsFromSupabase,
   planScheduledWork,
   readDevnetUsdcBalance,
+  readDevnetWalletBalances,
   readStreamHealthFromSupabase,
 } from './schedules.mjs';
 
@@ -103,6 +104,9 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
       if (body.method === 'getGenesisHash') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
       }
+      if (body.method === 'getBalance') {
+        return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 9 } });
+      }
       assert.deepEqual(body.params[1], { mint: DEVNET_USDC_MINT });
       assert.notEqual(body.params[1].mint, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
       return Response.json({
@@ -121,6 +125,24 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
   assert.equal(ok.amount, '42');
   assert.equal(ok.mint, DEVNET_USDC_MINT);
   assert.equal(JSON.stringify(ok).includes(secretUrl), false);
+
+  const both = await readDevnetWalletBalances({
+    rpcUrl: secretUrl,
+    address,
+    fetcher: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.method === 'getGenesisHash') {
+        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+      }
+      if (body.method === 'getBalance') {
+        return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 2_000_000_000 } });
+      }
+      return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
+    },
+  });
+  assert.equal(both.ok, true);
+  assert.equal(both.solLamports, '2000000000');
+  assert.equal(both.usdcAmount, '0');
 
   const missing = await readDevnetUsdcBalance({ address, fetcher: async () => { throw new Error('no'); } });
   assert.equal(missing.code, 'rpc_not_configured');

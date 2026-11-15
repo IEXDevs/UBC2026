@@ -36,7 +36,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
   dashboard('get_bot_status', 'Status for one bot.', ['botId'], { botId }, [call('GET', '/bots/:botId/status')]),
   dashboard(
     'get_wallets',
-    'List wallets and balances for this owner. Read balances.displayUsdcLabel (or displayUsdcLabel on each wallet) aloud — that matches the shell. Also returns on-chain usdcBalanceLabel and platformUsdcLabel when available.',
+    'List wallets and balances for this owner. Read balances.displayBalanceLabel aloud (Solana-devnet SOL and/or USDC). Also returns solBalanceLabel, usdcBalanceLabel, and platformUsdcLabel when available. Cluster is Solana devnet — not mainnet.',
     [],
     {},
     [call('GET', '/api/wallets')],
@@ -109,7 +109,7 @@ export function sharedToolsInstruction() {
   return [
     'You have the same tools on text and voice: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, sns_send).',
     'When the owner asks you to look something up: call web_search first, pick a real https result url, then browser_navigate (or browser_open with that url).',
-    'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayUsdcLabel (or displayUsdcLabel).',
+    'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayBalanceLabel (devnet SOL and/or USDC).',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
     'Do not send funds, approve spends, raise limits, or freeze wallets from tools. Those stay on the app approval UI.',

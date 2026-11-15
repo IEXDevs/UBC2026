@@ -28,7 +28,7 @@ import {
   transferErrorCode,
   transferRequest,
 } from './platform-transfer.mjs';
-import { readDevnetUsdcBalance } from './schedules.mjs';
+import { readDevnetWalletBalances } from './schedules.mjs';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -167,16 +167,26 @@ async function persistLogin(env, login, ownerId) {
   );
 }
 
-/** Format USDC base units (6 decimals) for agent speech — never invent values. */
-export function formatUsdcLabel(amount) {
+function formatFixedUnits(amount, decimals, symbol) {
   if (typeof amount !== 'string' || !/^-?(0|[1-9][0-9]{0,39})$/.test(amount)) return null;
   const negative = amount.startsWith('-');
   const digits = negative ? amount.slice(1) : amount;
-  const padded = digits.padStart(7, '0');
-  const whole = padded.slice(0, -6);
-  const fraction = padded.slice(-6).replace(/0+$/, '');
+  const padded = digits.padStart(decimals + 1, '0');
+  const whole = padded.slice(0, -decimals);
+  const fraction = padded.slice(-decimals).replace(/0+$/, '');
   const shown = fraction ? `${whole}.${fraction}` : whole;
-  return `${negative ? '-' : ''}${shown} USDC`;
+  return `${negative ? '-' : ''}${shown} ${symbol}`;
+}
+
+/** Format USDC base units (6 decimals) for agent speech — never invent values. */
+export function formatUsdcLabel(amount) {
+  return formatFixedUnits(amount, 6, 'USDC');
+}
+
+/** Format SOL lamports (9 decimals) for agent speech — Solana devnet native. */
+export function formatSolLabel(lamports) {
+  const label = formatFixedUnits(lamports, 9, 'SOL');
+  return label ? `${label} (devnet)` : null;
 }
 
 function mapTransferDirection(row, ownerId) {
@@ -212,65 +222,102 @@ async function platformUsdcNet(env, ownerId, fetcher) {
   return { amount, label: formatUsdcLabel(amount), transferCount: count };
 }
 
-/** Attach Solana-devnet USDC balances for agent get_wallets (RPC URL never returned). */
-async function withUsdcBalances(env, wallets) {
+function emptyOnchainFields(status) {
+  return {
+    usdcBalance: null,
+    usdcBalanceLabel: null,
+    usdcBalanceDecimals: 6,
+    solLamports: null,
+    solBalanceLabel: null,
+    solDecimals: 9,
+    balanceStatus: status,
+    cluster: 'devnet',
+  };
+}
+
+/** Attach Solana-devnet SOL + USDC for agent get_wallets (RPC URL never returned). */
+async function withOnchainBalances(env, wallets) {
   const list = Array.isArray(wallets) ? wallets : [];
   const rpcUrl = typeof env.QUICKNODE_DEVNET_RPC_URL === 'string' ? env.QUICKNODE_DEVNET_RPC_URL : '';
   if (!rpcUrl.trim()) {
-    return list.map((wallet) => ({
-      ...wallet,
-      usdcBalance: null,
-      usdcBalanceLabel: null,
-      usdcBalanceDecimals: 6,
-      balanceStatus: 'rpc_not_configured',
-      cluster: 'devnet',
-    }));
+    return list.map((wallet) => ({ ...wallet, ...emptyOnchainFields('rpc_not_configured') }));
   }
   const fetcher = env.fetch ?? fetch;
   const head = list.slice(0, BALANCE_CAP);
   const enriched = await Promise.all(head.map(async (wallet) => {
-    const bal = await readDevnetUsdcBalance({
+    const bal = await readDevnetWalletBalances({
       rpcUrl,
       address: wallet.address,
       fetcher,
     });
-    const amount = bal.ok === true ? bal.amount : null;
+    const usdc = bal.usdcAmount;
+    const sol = bal.solLamports;
+    const solOk = typeof sol === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(sol);
+    const usdcOk = typeof usdc === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(usdc);
     return {
       ...wallet,
-      usdcBalance: amount,
-      usdcBalanceLabel: amount != null ? formatUsdcLabel(amount) : null,
+      usdcBalance: usdcOk ? usdc : null,
+      usdcBalanceLabel: usdcOk ? formatUsdcLabel(usdc) : null,
       usdcBalanceDecimals: 6,
-      balanceStatus: bal.ok === true ? 'ok' : (bal.code || 'rpc_failed'),
+      solLamports: solOk ? sol : null,
+      solBalanceLabel: solOk ? formatSolLabel(sol) : null,
+      solDecimals: 9,
+      balanceStatus: bal.ok === true || solOk ? 'ok' : (bal.code || 'rpc_failed'),
       cluster: 'devnet',
     };
   }));
   const rest = list.slice(BALANCE_CAP).map((wallet) => ({
     ...wallet,
-    usdcBalance: null,
-    usdcBalanceLabel: null,
-    usdcBalanceDecimals: 6,
-    balanceStatus: 'capped',
-    cluster: 'devnet',
+    ...emptyOnchainFields('capped'),
   }));
   return [...enriched, ...rest];
 }
 
-function walletBalanceSummary(items, platform) {
-  const onchainTotal = (Array.isArray(items) ? items : []).reduce((sum, wallet) => {
-    if (typeof wallet?.usdcBalance !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(wallet.usdcBalance)) return sum;
-    return sum + BigInt(wallet.usdcBalance);
+function sumField(items, key) {
+  return (Array.isArray(items) ? items : []).reduce((sum, wallet) => {
+    const value = wallet?.[key];
+    if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(value)) return sum;
+    return sum + BigInt(value);
   }, 0n).toString();
+}
+
+function walletBalanceSummary(items, platform) {
+  const onchainUsdc = sumField(items, 'usdcBalance');
+  const onchainSol = sumField(items, 'solLamports');
   const hasPlatform = platform.transferCount > 0 && platform.amount != null;
-  const displayAmount = hasPlatform ? platform.amount : onchainTotal;
-  const displaySource = hasPlatform ? 'platform' : 'onchain';
+  const hasSol = onchainSol !== '0';
+  const hasUsdc = onchainUsdc !== '0';
+  let displaySource = 'onchain';
+  let displayBalanceLabel = null;
+  if (hasPlatform) {
+    displaySource = 'platform';
+    displayBalanceLabel = platform.label;
+  } else if (hasSol && !hasUsdc) {
+    displaySource = 'sol';
+    displayBalanceLabel = formatSolLabel(onchainSol);
+  } else if (hasUsdc && !hasSol) {
+    displaySource = 'onchain';
+    displayBalanceLabel = formatUsdcLabel(onchainUsdc);
+  } else if (hasSol || hasUsdc) {
+    displaySource = 'onchain';
+    displayBalanceLabel = [formatSolLabel(onchainSol), formatUsdcLabel(onchainUsdc)].filter(Boolean).join(' · ');
+  } else {
+    displayBalanceLabel = formatSolLabel(onchainSol) || formatUsdcLabel(onchainUsdc);
+  }
+  const displayUsdc = hasPlatform ? platform.amount : onchainUsdc;
   return {
     platformUsdc: platform.amount,
     platformUsdcLabel: platform.label,
     platformTransferCount: platform.transferCount,
-    onchainUsdc: onchainTotal,
-    onchainUsdcLabel: formatUsdcLabel(onchainTotal),
-    displayUsdc: displayAmount,
-    displayUsdcLabel: formatUsdcLabel(displayAmount),
+    onchainUsdc,
+    onchainUsdcLabel: formatUsdcLabel(onchainUsdc),
+    onchainSol,
+    onchainSolLabel: formatSolLabel(onchainSol),
+    displayUsdc,
+    displayUsdcLabel: formatUsdcLabel(displayUsdc),
+    displaySol: onchainSol,
+    displaySolLabel: formatSolLabel(onchainSol),
+    displayBalanceLabel,
     displaySource,
   };
 }
@@ -317,7 +364,7 @@ export async function handleApiData(request, env, matched) {
       fetcher,
     );
     const [items, platform] = await Promise.all([
-      withUsdcBalances(
+      withOnchainBalances(
         env,
         (result.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
       ),
@@ -329,11 +376,20 @@ export async function handleApiData(request, env, matched) {
       source: 'supabase',
       items: items.map((wallet) => ({
         ...wallet,
-        // Prefer the same figure the shell glance shows when platform transfers exist.
+        // Prefer platform USDC when transfers exist; otherwise speak SOL/USDC on-chain.
         displayUsdc: balances.displaySource === 'platform' ? balances.displayUsdc : wallet.usdcBalance,
         displayUsdcLabel: balances.displaySource === 'platform'
           ? balances.displayUsdcLabel
           : wallet.usdcBalanceLabel,
+        displaySolLabel: wallet.solBalanceLabel,
+        displayBalanceLabel: balances.displaySource === 'platform'
+          ? balances.displayBalanceLabel
+          : (wallet.solBalanceLabel && wallet.usdcBalance === '0'
+            ? wallet.solBalanceLabel
+            : (wallet.usdcBalanceLabel && wallet.solLamports === '0'
+              ? wallet.usdcBalanceLabel
+              : [wallet.solBalanceLabel, wallet.usdcBalanceLabel].filter(Boolean).join(' · ')
+                || balances.displayBalanceLabel)),
         displaySource: balances.displaySource,
       })),
       balances,
