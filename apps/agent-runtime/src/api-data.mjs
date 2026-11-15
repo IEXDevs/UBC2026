@@ -2,7 +2,7 @@
  * Live /api/* data routes backed by Supabase + Privy when secrets exist.
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
-import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
+import { createPrivyWalletClientFromEnv, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import {
   ConfigError,
   httpsAvatarUrl,
@@ -54,6 +54,22 @@ function privyClient(env) {
   }
 }
 
+/** Browser Origin for Privy /users/me — required when creating/syncing wallets. */
+function requestOrigin(request, env = {}) {
+  const headerOrigin = sanitizeOrigin(request.headers.get('origin') || request.headers.get('Origin'));
+  if (headerOrigin) return headerOrigin;
+  const maelstrom = sanitizeOrigin(request.headers.get('x-maelstrom-origin'));
+  if (maelstrom) return maelstrom;
+  const referer = request.headers.get('referer') || request.headers.get('Referer');
+  if (typeof referer === 'string' && referer.trim()) {
+    try {
+      const fromReferer = sanitizeOrigin(new URL(referer.trim()).origin);
+      if (fromReferer) return fromReferer;
+    } catch { /* ignore */ }
+  }
+  return sanitizeOrigin(env.WEB_ORIGIN || env.PRIVY_ALLOWED_ORIGIN || '');
+}
+
 async function resolveOwner(request, env) {
   const header = ownerHeader(request);
   const token = bearerToken(request);
@@ -63,7 +79,11 @@ async function resolveOwner(request, env) {
   if (!client?.acceptLogin) return { ownerId: header, user: null, token };
 
   try {
-    const result = await client.acceptLogin({ accessToken: token, ownerId: header || undefined });
+    const result = await client.acceptLogin({
+      accessToken: token,
+      ownerId: header || undefined,
+      origin: requestOrigin(request, env),
+    });
     const ownerId = header || result?.main?.ownerId || result?.userId || null;
     return { ownerId, user: result, token };
   } catch (error) {
@@ -160,12 +180,17 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'wallets.create') {
     const { ownerId, user, token, error } = await resolveOwner(request, env);
-    if (error) return json({ error }, 502);
+    if (error) return json({ error }, error === 'missing_origin' ? 503 : 502);
     if (!token) return json({ error: 'login_required' }, 401);
     const client = privyClient(env);
     if (!client) return json({ error: 'signer_not_configured' }, 503);
     try {
-      const login = user || await client.acceptLogin({ accessToken: token, ownerId: ownerId || undefined });
+      const origin = requestOrigin(request, env);
+      const login = user || await client.acceptLogin({
+        accessToken: token,
+        ownerId: ownerId || undefined,
+        origin,
+      });
       const owner = ownerId || login.main?.ownerId;
       await persistLogin(env, login, owner);
       return json({
@@ -175,7 +200,7 @@ export async function handleApiData(request, env, matched) {
       });
     } catch (err) {
       const code = err instanceof WalletError ? err.code : 'wallet_failed';
-      const status = code === 'missing_config' || code === 'missing_secrets' ? 503 : 502;
+      const status = code === 'missing_config' || code === 'missing_secrets' || code === 'missing_origin' ? 503 : 502;
       return json({ error: code }, status);
     }
   }

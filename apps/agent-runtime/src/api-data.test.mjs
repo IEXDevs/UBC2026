@@ -53,6 +53,55 @@ test('wallet create reports signer_not_configured without Privy secrets', async 
   assert.equal((await res.json()).error, 'signer_not_configured');
 });
 
+test('wallet create forwards browser origin into Privy acceptLogin', async () => {
+  const seen = [];
+  const env = fakeEnv({
+    transferClient: {
+      acceptLogin: async (args) => {
+        seen.push(args);
+        return {
+          created: false,
+          main: {
+            id: 'w1',
+            ownerId: 'user_1',
+            kind: 'main',
+            label: 'Main',
+            address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+            frozen: false,
+            provider: 'privy',
+          },
+          additional: [],
+        };
+      },
+    },
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => new Response(null, { status: 201 }),
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/wallets', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer tok_1',
+      'x-owner-id': 'user_1',
+      origin: 'http://localhost:3000',
+    },
+  }), env);
+  assert.equal(res.status, 200);
+  assert.equal(seen[0].origin, 'http://localhost:3000');
+
+  seen.length = 0;
+  const viaProxy = await worker.fetch(new Request('https://runtime/api/wallets', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer tok_1',
+      'x-owner-id': 'user_1',
+      'x-maelstrom-origin': 'http://localhost:3000',
+    },
+  }), env);
+  assert.equal(viaProxy.status, 200);
+  assert.equal(seen[0].origin, 'http://localhost:3000');
+});
+
 test('supabase mappers turn rows into bot/wallet/ledger records', () => {
   const bot = mapBotRow({
     id: 'bot_1',
