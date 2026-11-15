@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import {
   applyTemplate,
-  demoWallets,
   draftInputFromForm,
   initialForm,
   removeUserTemplate,
@@ -25,11 +24,10 @@ const APPROVALS = [
   ['ask', 'Ask'],
 ];
 
-export default function BotCreation({ ownerId, userTemplates, onTemplatesChange, onDraft }) {
+export default function BotCreation({ ownerId, userTemplates, onTemplatesChange, onDraft, wallets = [] }) {
   const [form, setForm] = useState(() => initialForm(ownerId));
   const [error, setError] = useState('');
-  const wallets = demoWallets(ownerId);
-  const walletOptions = walletPickerOptions(wallets, ownerId);
+  const walletOptions = walletPickerOptions(Array.isArray(wallets) ? wallets : [], ownerId);
   const templates = visibleTemplates(userTemplates);
 
   useEffect(() => {

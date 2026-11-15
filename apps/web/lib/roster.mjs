@@ -153,7 +153,7 @@ export function draftBot({ name, shape, color, id } = {}) {
     type: 'trading',
     status: 'idle',
     goal: 'Waiting for a goal.',
-    walletId: 'wallet_main',
+    walletId: null,
   };
 }
 

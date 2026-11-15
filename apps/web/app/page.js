@@ -19,7 +19,6 @@ import PluginsSheet from '../components/PluginsSheet';
 import StatisticsSheet from '../components/StatisticsSheet';
 import AgentDetail from '../components/AgentDetail';
 import ComputerSheet from '../components/ComputerSheet';
-import { getDemoShellState } from '../lib/demo-state.mjs';
 import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { compactLines, contextUsage } from '../lib/context-usage.mjs';
@@ -36,7 +35,9 @@ import {
 } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileRailLabel } from '../lib/profile.mjs';
-import { withAssignedWallet } from '../lib/wallet-assign.mjs';
+import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
+import { emptyMoneyState, fetchOwnerLists, shellBotFromRemote } from '../lib/runtime-data.mjs';
+import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
@@ -44,7 +45,7 @@ import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 
-const base = getDemoShellState();
+const CONNECTORS = shellConnectors();
 const privyConfigured = privyProviderProps({
   appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
   clientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
@@ -190,14 +191,14 @@ function profileKey(ownerId) {
 function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', getAccessToken = null }) {
   const toast = useToast();
   const [looks, setLooks] = useState({});
-  const [roster, setRoster] = useState({ order: base.bots.map(bot => bot.id), extra: [] });
+  const [roster, setRoster] = useState({ order: [], extra: [] });
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState('');
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [sideWidth, setSideWidth] = useState(300);
   const [detailWidth, setDetailWidth] = useState(280);
   const [paneDrag, setPaneDrag] = useState(false);
-  const [activeBot, setActiveBot] = useState(base.bots[0].id);
+  const [activeBot, setActiveBot] = useState(null);
   const [pane, setPane] = useState('Main');
   const [slide, setSlide] = useState('right');
   const [createOpen, setCreateOpen] = useState(false);
@@ -208,7 +209,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [talksReady, setTalksReady] = useState(false);
   const [rosterReady, setRosterReady] = useState(false);
   const [thinkingBot, setThinkingBot] = useState(null);
-  const [botRecords, setBotRecords] = useState(base.bots);
+  const [botRecords, setBotRecords] = useState([]);
+  const [remoteLists, setRemoteLists] = useState(() => emptyMoneyState());
   const [profile, setProfile] = useState(null);
   const [transfers, setTransfers] = useState([]);
   const [party, setParty] = useState(null);
@@ -237,11 +239,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     }));
   }, []);
   useEffect(() => {
-    // Seed chrome only until we know the signed-in owner; custom agents are per-account.
-    const merged = mergeRoster(base.bots, null);
     setLooks({});
-    setRoster({ order: merged.order, extra: merged.extra });
-    setActiveBot(merged.order[0] ?? null);
+    setRoster({ order: [], extra: [] });
+    setActiveBot(null);
     setReady(true);
   }, []);
 
@@ -249,19 +249,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     if (!ready) return undefined;
     setRosterReady(false);
     if (!ownerId) {
-      // Logged out: demo seeds only — never the previous account's custom agents.
-      const merged = mergeRoster(base.bots, null);
       setLooks({});
-      setRoster({ order: merged.order, extra: [] });
-      setActiveBot(merged.order[0] ?? null);
+      setRoster({ order: [], extra: [] });
+      setActiveBot(null);
       setRosterReady(true);
       return undefined;
     }
     const adopted = adoptLegacyRoster(localStorage, ownerId);
-    const savedRoster = adopted.adopted ? adopted.roster : readRoster(localStorage, ownerId);
+    const savedRoster = withoutPlaceholderBots(adopted.adopted ? adopted.roster : readRoster(localStorage, ownerId));
     const savedLooks = adopted.adopted ? adopted.looks : readLooks(localStorage, ownerId);
-    const hasSaved = savedRoster.order.length > 0 || savedRoster.extra.length > 0;
-    const merged = mergeRoster(base.bots, hasSaved ? savedRoster : null);
+    const merged = mergeRoster([], savedRoster);
     setLooks(savedLooks);
     setRoster({ order: merged.order, extra: merged.extra });
     setActiveBot((current) => (
@@ -367,6 +364,26 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     return () => { stop = true; };
   }, [ownerId, getAccessToken, signedIn, user]);
 
+  useEffect(() => {
+    if (!ownerId) {
+      setRemoteLists(emptyMoneyState());
+      return undefined;
+    }
+    let stop = false;
+    fetchOwnerLists(ownerId).then((lists) => {
+      if (stop || !lists) return;
+      setRemoteLists({
+        bots: Array.isArray(lists.bots) ? lists.bots : [],
+        wallets: Array.isArray(lists.wallets) ? lists.wallets : [],
+        payments: Array.isArray(lists.payments) ? lists.payments : [],
+        positions: [],
+      });
+    }).catch(() => {
+      if (!stop) setRemoteLists(emptyMoneyState());
+    });
+    return () => { stop = true; };
+  }, [ownerId]);
+
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
     const key = profileKey(ownerId);
@@ -412,19 +429,37 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     return { kind: 'handle', handle: parsed.handle, missing: true };
   }, [ownerId, profile]);
 
+  const remoteBots = useMemo(
+    () => (remoteLists.bots || [])
+      .map((row) => shellBotFromRemote(row, looks))
+      .filter((bot) => bot && !isPlaceholderBotId(bot.id)),
+    [remoteLists.bots, looks],
+  );
+  const localRoster = useMemo(() => mergeRoster([], withoutPlaceholderBots(roster)), [roster]);
   const seedBots = useMemo(() => {
-    const byId = new Map(botRecords.map((bot) => [bot.id, bot]));
-    return base.bots.map((bot) => ({ ...bot, ...(byId.get(bot.id) || {}) }));
-  }, [botRecords]);
-  const merged = useMemo(() => mergeRoster(seedBots, roster), [roster, seedBots]);
-  const styled = useMemo(() => applyLooks(merged.bots, looks), [merged, looks]);
+    const overlay = new Map(botRecords.map((bot) => [bot.id, bot]));
+    const byId = new Map();
+    for (const bot of remoteBots) byId.set(bot.id, bot);
+    for (const bot of localRoster.bots) {
+      const prior = byId.get(bot.id);
+      byId.set(bot.id, prior
+        ? { ...prior, name: bot.name, shape: bot.shape, color: bot.color }
+        : bot);
+    }
+    const order = [];
+    for (const id of localRoster.order) if (byId.has(id)) order.push(id);
+    for (const bot of remoteBots) if (!order.includes(bot.id)) order.push(bot.id);
+    return order.map((id) => ({ ...byId.get(id), ...(overlay.get(id) || {}) }));
+  }, [botRecords, localRoster, remoteBots]);
+  const styled = useMemo(() => applyLooks(seedBots, looks), [seedBots, looks]);
   const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
   const bots = assigned.bots;
-  const wallets = assigned.wallets ?? base.wallets;
+  const wallets = pickWalletList(assigned.wallets, remoteLists.wallets);
+  const payments = remoteLists.payments || [];
   const visible = bots.filter(bot => bot.name.toLowerCase().includes(query.trim().toLowerCase()));
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
-  const glance = walletGlance(wallets, base.positions, transfers);
+  const glance = walletGlance(wallets, [], transfers);
 
   function choosePane(next, direction) {
     if (next === pane) return;
@@ -645,7 +680,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       <section className="stage">
         <header className="topbar">
           <span className="topbar-side" />
-          <PaneDock panes={base.panes} pane={pane} onChange={choosePane} />
+          <PaneDock panes={SHELL_PANES} pane={pane} onChange={choosePane} />
           <span />
         </header>
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}`}>
@@ -668,7 +703,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                 </>
               )
             ) : null}
-            {money ? <MoneyPane pane={money} state={{ ...base, bots, wallets, transfers }} onParty={setParty} /> : null}
+            {money ? <MoneyPane pane={money} state={{ bots, wallets, payments, positions: [], transfers }} onParty={setParty} /> : null}
             {pane === 'Logs' ? <LogsPanel bots={bots} ownerId={ownerId} onParty={setParty} /> : null}
             {pane === 'Security' ? (
               <SecurityPanel
@@ -770,16 +805,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         />
       ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
-      <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ ...base, bots, wallets }} note={walletNote} transfers={transfers} bot={bot} onParty={setParty} signedIn={signedIn} />
+      <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ bots, wallets, payments, positions: [] }} note={walletNote} transfers={transfers} bot={bot} onParty={setParty} signedIn={signedIn} />
       <PartySheet
         open={Boolean(party)}
         party={party}
         transfers={transfers}
-        payments={base.payments}
+        payments={payments}
         onClose={() => setParty(null)}
         resolve={resolveMention}
       />
-      <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={base.connectors} />
+      <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={CONNECTORS} />
       <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} />
       <StatisticsSheet
         open={statsOpen}

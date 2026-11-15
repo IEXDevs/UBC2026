@@ -826,9 +826,15 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
   return (
     <section className="position-book" aria-label="Positions" ref={mountRef}>
       <p className="book-caption">
-        <strong>{book.summary.notionalLabel}</strong>
-        <span>{book.summary.count} positions · {book.summary.venues} venues · PnL {book.summary.pnlLabel}</span>
-        <span>Preview · devnet execution, mainnet pricing</span>
+        {book.summary.count === 0 ? (
+          <span>No positions yet.</span>
+        ) : (
+          <>
+            <strong>{book.summary.notionalLabel}</strong>
+            <span>{book.summary.count} positions · {book.summary.venues} venues · PnL {book.summary.pnlLabel}</span>
+          </>
+        )}
+        <span>devnet execution, mainnet pricing</span>
       </p>
       <div className="book-tools">
         <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.86)}>
