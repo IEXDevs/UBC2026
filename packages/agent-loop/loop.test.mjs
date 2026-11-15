@@ -135,6 +135,16 @@ test('approval requirement follows the bot mode and still holds over-budget', ()
     { approvalMode: 'ask' },
     { state: 'approval-needed', debit: '1000' },
   ), true);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'fully-automatic' },
+    { state: 'ready-to-reserve', debit: '1000' },
+    { ownerPermission: 'full' },
+  ), true);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'fully-automatic' },
+    { state: 'blocked', debit: '1000' },
+    { ownerPermission: 'ask' },
+  ), false);
 });
 
 test('frozen wallet blocks the loop', async () => {

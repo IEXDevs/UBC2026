@@ -1,6 +1,6 @@
 import { readRootEnv } from '../../../../lib/root-env.mjs';
 import { requestVoiceToken, VoiceTokenError } from '../../../../lib/voice-token.mjs';
-import { voiceSession } from '../../../../lib/voice-settings.mjs';
+import { voiceOverrides, voiceSession } from '../../../../lib/voice-settings.mjs';
 
 export async function POST(request) {
   let body = {};
@@ -16,7 +16,13 @@ export async function POST(request) {
       agentId: readRootEnv('ELEVENLABS_AGENT_ID'),
     });
     return Response.json(
-      { token, voiceId: session.voiceId, speed: session.speed },
+      {
+        token,
+        voiceId: session.voiceId,
+        speed: session.speed,
+        language: session.language,
+        overrides: voiceOverrides(session),
+      },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (error) {

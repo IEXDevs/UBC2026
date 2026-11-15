@@ -91,6 +91,19 @@ export default function FileLibrary({ bot, files = [], onComputer, onEdit }) {
         <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={72} />
         <strong>{bot.name}</strong>
       </header>
+      <section className="side-computer">
+        <h3>Computer</h3>
+        <button type="button" className="side-option" onClick={() => onComputer?.()}>
+          <span>
+            <strong>Bot&apos;s computer</strong>
+            <small>{computerStatus(bot.status)}</small>
+          </span>
+          <span className={`side-option-mark${computerStatus(bot.status) === 'Asleep' ? ' is-asleep' : ''}`}>
+            <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={28} />
+            {computerStatus(bot.status) === 'Asleep' ? <span className="side-option-sleep">z</span> : null}
+          </span>
+        </button>
+      </section>
       <div className="library-filters" role="tablist" aria-label="Library">
         {FILTERS.map(item => (
           <button
@@ -107,18 +120,6 @@ export default function FileLibrary({ bot, files = [], onComputer, onEdit }) {
       </div>
       {settingsOpen ? (
         <div className="side-options">
-          <section>
-            <h3>Computer</h3>
-            <button type="button" className="side-option" onClick={() => onComputer?.()}>
-              <span>
-                <strong>Bot&apos;s computer</strong>
-                <small>{computerStatus(bot.status)}</small>
-              </span>
-              <span className="side-option-mark">
-                <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={36} />
-              </span>
-            </button>
-          </section>
           <section>
             <h3>Voice chat</h3>
             <div className="side-option-card" id="detail-settings" />

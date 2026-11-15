@@ -7,7 +7,6 @@ import { browserSessionUrl } from '../lib/live-view.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { ChainOfThought, TerminalBlock, ToolCall } from './ai/elements';
 import ChatBubbles from './ChatBubbles';
-import LiveViewPanel from './LiveViewPanel';
 import ShoppingPanel from './ShoppingPanel';
 
 function liveEventsUrl(botId) {
@@ -93,9 +92,6 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
             )
           ))}
         </div>
-      ) : null}
-      {sessions.some(row => row.status === 'open') ? (
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} fill />
       ) : null}
       <ChainOfThought sections={sections} onSelect={setFocus} />
       {focused ? <p className="agent-focus">{focused.summary}</p> : null}

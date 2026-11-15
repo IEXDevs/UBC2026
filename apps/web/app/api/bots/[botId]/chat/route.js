@@ -78,6 +78,7 @@ export async function POST(request, context) {
         model: reply.model,
         provider: reply.provider,
         toolRounds: reply.toolRounds ?? 0,
+        ...(reply.usage ? { usage: reply.usage } : {}),
       },
       { headers: { 'Cache-Control': 'no-store' } },
     );

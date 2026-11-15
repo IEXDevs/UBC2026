@@ -24,9 +24,15 @@ function needsHumanApproval(bot, policyDecision) {
   fail('Unknown approval mode');
 }
 
-/** Whether this policy result still needs a person. Over-budget always does. */
-export function approvalRequirement(bot, policyDecision) {
+const OWNER_PERMISSIONS = new Set(['ask', 'review', 'full']);
+
+/** Whether this policy result still needs a person. Over-budget always does.
+ * An owner spend permission from the shell makes every transaction wait, including full. */
+export function approvalRequirement(bot, policyDecision, options = {}) {
   if (!policyDecision || typeof policyDecision.state !== 'string') fail('Policy decision is required');
+  if (OWNER_PERMISSIONS.has(options?.ownerPermission)) {
+    return policyDecision.state !== 'blocked';
+  }
   return needsHumanApproval(
     { approvalMode: bot?.approvalMode ?? 'ask', autoApproveCap: bot?.autoApproveCap },
     policyDecision,
