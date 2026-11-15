@@ -9,11 +9,10 @@ import {
   SOLSCAN_DEVNET,
 } from '../lib/money-views.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
-import AnimatedList from './AnimatedList';
+import AddressCopy from './AddressCopy';
 import GlideSelect from './GlideSelect';
 import PositionBook from './PositionBook';
 import TxnLog from './TxnLog';
-import { listLook } from './listLook';
 
 const FLOWS = [
   { id: 'all', label: 'All' },
@@ -162,18 +161,18 @@ function Wallets({ state }) {
   return (
     <section className="panel" aria-label="Wallets">
       <h2>Wallets</h2>
-      {rows.length === 0 ? <p className="preview-note">No wallet yet.</p> : (
-        <AnimatedList
-          {...listLook()}
-          items={rows.map(row => ({
-            id: row.id,
-            title: row.label,
-            description: `${row.address} · ${row.bots.length ? row.bots.join(', ') : 'No agents assigned'}`,
-            meta: row.frozen ? 'Frozen' : row.kind,
-          }))}
-        />
+      {rows.length === 0 ? <p className="quiet">No wallet yet.</p> : (
+        <ul className="token-rows">
+          {rows.map(row => (
+            <li key={row.id} className="token-settings">
+              <strong>{row.label}</strong>
+              <AddressCopy address={row.address} />
+              <small>{row.frozen ? 'Frozen' : row.kind}{row.bots.length ? ` · ${row.bots.join(', ')}` : ' · No agents assigned'}</small>
+            </li>
+          ))}
+        </ul>
       )}
-      <p className="preview-note">Freeze calls the policy API when that route is live.</p>
+      <p className="quiet">devnet execution, mainnet pricing. Freeze calls the policy API when that route is live.</p>
     </section>
   );
 }

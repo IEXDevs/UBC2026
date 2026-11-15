@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { ConfigError } from '@ubc2026/contracts';
 import { assignBotWallet, createMainWallet } from './wallets.mjs';
+import { accountWriteBodies } from './wallets.mjs';
 import {
   DEVNET_GENESIS_HASH,
   WalletError,
   canonicalizeJson,
   createPrivyWalletClient,
   createPrivyWalletClientFromEnv,
+  loginMethodsFromUser,
 } from './privy.mjs';
 
 const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
@@ -110,6 +112,37 @@ test('missing server-signing names throw before any request', () => {
   );
 });
 
+test('readLoginUser returns linked wallets and does not create one', async () => {
+  const phantom = 'So11111111111111111111111111111111111111112';
+  const { fetcher, calls } = mockFetch([
+    {
+      match: url => url.endsWith('/api/v1/users/me'),
+      body: {
+        id: privyUserId,
+        linked_accounts: [
+          embedded(walletId, 0),
+          {
+            type: 'wallet',
+            address: phantom,
+            chain_type: 'solana',
+            wallet_client_type: 'phantom',
+            connector_type: 'solana_adapter',
+          },
+        ],
+      },
+    },
+  ]);
+  const user = await client({ fetcher }).readLoginUser({
+    accessToken,
+    origin: 'http://localhost:3000',
+    ownerId: privyUserId,
+  });
+  assert.equal(user.id, privyUserId);
+  assert.equal(user.linked_accounts[1].address, phantom);
+  assert.equal(calls.some(call => call.init?.method === 'POST'), false);
+  assert.equal(calls.some(call => String(call.url).includes('/v1/wallets')), false);
+});
+
 test('login recovers owner id from JWT sub when users/me omits id', async () => {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
@@ -129,6 +162,48 @@ test('login recovers owner id from JWT sub when users/me omits id', async () => 
   assert.equal(result.created, true);
   assert.equal(result.main.ownerId, privyUserId);
   assert.equal(calls[2].body.owner.user_id, privyUserId);
+});
+
+test('login keeps linked wallets and sign-in methods on the same owner', async () => {
+  const phantom = 'So11111111111111111111111111111111111111112';
+  const { fetcher } = mockFetch([
+    {
+      match: url => url.endsWith('/api/v1/users/me'),
+      body: {
+        id: privyUserId,
+        linked_accounts: [
+          { type: 'email', address: 'a@example.com' },
+          { type: 'google_oauth', email: 'g@example.com' },
+          embedded(walletId, 0),
+          {
+            type: 'wallet',
+            address: phantom,
+            chain_type: 'solana',
+            wallet_client_type: 'phantom',
+            connector_type: 'solana_adapter',
+          },
+        ],
+      },
+    },
+  ]);
+  const result = await client({ fetcher }).acceptLogin({
+    accessToken,
+    ownerId: privyUserId,
+    origin: 'http://localhost:3000',
+  });
+  assert.equal(result.main.address, address);
+  assert.equal(result.main.spendable, true);
+  assert.equal(result.additional.length, 1);
+  assert.equal(result.additional[0].id, `linked_${phantom}`);
+  assert.equal(result.additional[0].spendable, false);
+  assert.equal(result.additional[0].privyWalletId, undefined);
+  assert.deepEqual(result.loginMethods.map(method => method.method), ['email', 'google', 'wallet', 'wallet']);
+  const stored = accountWriteBodies(result, privyUserId);
+  assert.equal(stored.user.privy_user_id, privyUserId);
+  assert.equal(stored.user.login_methods.length, 4);
+  assert.equal(stored.wallets[1].spendable, false);
+  assert.equal(stored.wallets[1].owner_id, privyUserId);
+  assert.equal(loginMethodsFromUser({ linked_accounts: [] }).length, 0);
 });
 
 test('login creates the main Solana wallet when Privy has none', async () => {

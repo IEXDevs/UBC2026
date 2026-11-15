@@ -13,6 +13,30 @@ export function normalizeSnsName(name) {
   return name.trim().toLowerCase();
 }
 
+const SNS_PROXY = 'https://sdk-proxy.sns.id/resolve/';
+
+/**
+ * Read a .sol owner from the SNS proxy. If the proxy does not answer, this throws.
+ * Tests inject `fetcher`.
+ */
+export async function resolveSnsOwner(name, { fetcher = fetch } = {}) {
+  const raw = typeof name === 'string' && name.startsWith('@') ? name.slice(1) : name;
+  const domain = normalizeSnsName(raw);
+  const url = new URL(`${SNS_PROXY}${encodeURIComponent(domain)}`);
+  if (url.protocol !== 'https:' || url.hostname !== 'sdk-proxy.sns.id') fail('SNS proxy URL is not allowed');
+  let response;
+  try {
+    response = await fetcher(url);
+  } catch {
+    fail('sns_not_found');
+  }
+  const body = await response.json().catch(() => null);
+  if (!response?.ok || body?.s !== 'ok' || typeof body.result !== 'string' || !base58.test(body.result)) {
+    fail('sns_not_found');
+  }
+  return { domain, address: body.result, clusterRead: 'mainnet-read', executionCluster: 'devnet' };
+}
+
 export function createSnsResolver({ resolveFn }) {
   if (typeof resolveFn !== 'function') fail('resolveFn is required');
   return async function resolve(name) {

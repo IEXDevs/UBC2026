@@ -22,6 +22,20 @@ export function missingWalletSecrets(env = {}) {
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
+const CLIENT_LABELS = Object.freeze({
+  phantom: 'Phantom',
+  solflare: 'Solflare',
+  backpack: 'Backpack',
+  jupiter: 'Jupiter',
+  privy: 'Privy',
+});
+
+function clientLabel(client) {
+  if (CLIENT_LABELS[client]) return CLIENT_LABELS[client];
+  if (typeof client !== 'string' || !/^[a-z0-9_-]{1,24}$/i.test(client)) return 'Wallet';
+  return client.slice(0, 1).toUpperCase() + client.slice(1);
+}
+
 /**
  * Build display wallets from the Privy client user when POST /api/wallets fails.
  * Include every Solana linked wallet (embedded Privy + connected external).
@@ -44,17 +58,19 @@ export function walletsFromPrivyUser(user, ownerId) {
     const id = typeof idHint === 'string' && idHint.trim()
       ? idHint.trim()
       : `client_${addressText.slice(0, 8)}`;
+    const spendable = client === 'privy';
     out.push({
       id,
       ownerId: owner,
       kind: out.length === 0 ? 'main' : 'additional',
-      label: out.length === 0
-        ? (client === 'privy' ? 'Main' : `Main (${client})`)
-        : `Additional ${out.length}`,
+      label: spendable
+        ? (out.length === 0 ? 'Main' : `Additional ${out.length}`)
+        : clientLabel(client),
       address: addressText,
       frozen: false,
       provider: 'privy',
       walletClientType: client,
+      spendable,
     });
   }
 
@@ -82,6 +98,22 @@ export function walletsFromPrivyUser(user, ownerId) {
   }
 
   return out;
+}
+
+/**
+ * Server agent wallets stay spendable. Linked external wallets are appended
+ * for the portfolio and never replace the agent main wallet.
+ */
+export function mergeObservedWallets(serverWallets, user, ownerId) {
+  const server = Array.isArray(serverWallets)
+    ? serverWallets.filter(wallet => wallet && typeof wallet.address === 'string' && wallet.address)
+    : [];
+  const seen = new Set(server.map(wallet => wallet.address));
+  const observed = walletsFromPrivyUser(user, ownerId).filter(wallet => !seen.has(wallet.address));
+  return [
+    ...server.map(wallet => ({ ...wallet, spendable: wallet.spendable !== false })),
+    ...observed.map(wallet => ({ ...wallet, kind: 'additional' })),
+  ];
 }
 
 export function resolvePrivyAppId(env = {}) {

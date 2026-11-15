@@ -1,5 +1,6 @@
 export const runtime = 'nodejs';
 
+import { accountWriteBodies } from '@ubc2026/wallets';
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { missingWalletSecrets, resolvePrivyAppId } from '../../../lib/wallet-provision.mjs';
@@ -23,7 +24,51 @@ function publicWallet(wallet) {
     address: wallet.address,
     frozen: wallet.frozen,
     provider: wallet.provider,
+    spendable: wallet.spendable !== false && !String(wallet.id).startsWith('linked_'),
+    walletClientType: wallet.walletClientType || null,
   };
+}
+
+async function persistAccount(login, ownerId) {
+  const url = readRootEnv('SUPABASE_URL');
+  const key = readRootEnv('SUPABASE_SERVICE_ROLE_KEY');
+  const bodies = accountWriteBodies(login, ownerId);
+  if (!url || !key || !bodies) return;
+  let origin;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return;
+    origin = parsed.origin;
+  } catch {
+    return;
+  }
+  const headers = {
+    apikey: key,
+    authorization: `Bearer ${key}`,
+    accept: 'application/json',
+    'content-type': 'application/json',
+    prefer: 'resolution=merge-duplicates,return=minimal',
+  };
+  async function write(path, body) {
+    const response = await fetch(`${origin}/rest/v1/${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      redirect: 'error',
+    });
+    return response.ok;
+  }
+  const userOk = await write('users', bodies.user);
+  if (!userOk) {
+    const { login_methods, ...core } = bodies.user;
+    await write('users', core);
+  }
+  if (bodies.wallets.length) {
+    const walletsOk = await write('wallets', bodies.wallets);
+    if (!walletsOk) {
+      await write('wallets', bodies.wallets.map(({ spendable, ...row }) => row));
+    }
+  }
 }
 
 function rootWalletEnv() {
@@ -89,9 +134,18 @@ export async function POST(request) {
       origin: requestOrigin(request),
       ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
     });
+    const ownerId = typeof ownerHeader === 'string' && ownerHeader.trim()
+      ? ownerHeader.trim()
+      : result.main?.ownerId;
+    try {
+      await persistAccount(result, ownerId);
+    } catch {
+      console.error('[api/wallets]', 'account_persist_failed');
+    }
     return Response.json({
       created: result.created === true,
       wallets: [result.main, ...result.additional].filter(Boolean).map(publicWallet),
+      loginMethods: result.loginMethods || [],
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const fields = walletErrorFields(error);

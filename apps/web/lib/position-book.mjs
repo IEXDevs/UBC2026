@@ -1,6 +1,6 @@
 /** Places preview positions on an open plane, one cluster per venue. */
 
-import { describePositions, formatBaseUnits } from './money-views.mjs';
+import { describePositions, formatBaseUnits, shortAddress } from './money-views.mjs';
 
 export const VENUE_LOGOS = Object.freeze({
   Kamino: '/venues/kamino.webp',
@@ -17,11 +17,6 @@ function addMicro(rows, key) {
     if (typeof value === 'string' && /^-?(0|[1-9][0-9]*)$/.test(value)) sum += BigInt(value);
   }
   return sum;
-}
-
-function shortAddress(address) {
-  if (typeof address !== 'string' || address.length < 12) return address ?? '';
-  return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
 function walletFor(position, bots) {

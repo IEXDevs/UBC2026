@@ -228,6 +228,130 @@ function resolvePrivyUserId(user, accessToken, ownerId) {
   return '';
 }
 
+const CLIENT_LABELS = Object.freeze({
+  phantom: 'Phantom',
+  solflare: 'Solflare',
+  backpack: 'Backpack',
+  jupiter: 'Jupiter',
+  privy: 'Privy',
+});
+
+function clientLabel(client) {
+  if (CLIENT_LABELS[client]) return CLIENT_LABELS[client];
+  if (typeof client !== 'string' || !/^[a-z0-9_-]{1,24}$/i.test(client)) return 'Wallet';
+  return client.slice(0, 1).toUpperCase() + client.slice(1);
+}
+
+function linkedAccountList(user) {
+  if (Array.isArray(user?.linked_accounts)) return user.linked_accounts;
+  if (Array.isArray(user?.linkedAccounts)) return user.linkedAccounts;
+  return [];
+}
+
+function methodDetail(value) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  if (!text || text.length > 128 || /[\r\n]/.test(text)) return '';
+  return text;
+}
+
+/** Sign-in methods on this Privy user. A later login with any of them is the same owner. */
+export function loginMethodsFromUser(user) {
+  const methods = [];
+  const seen = new Set();
+  for (const account of linkedAccountList(user)) {
+    if (!account || typeof account !== 'object') continue;
+    const type = typeof account.type === 'string' ? account.type : '';
+    if (type === 'email') {
+      const detail = methodDetail(account.address || account.email);
+      if (detail && !seen.has(`email:${detail}`)) {
+        seen.add(`email:${detail}`);
+        methods.push({ method: 'email', detail });
+      }
+      continue;
+    }
+    if (type === 'google_oauth' || type === 'google') {
+      const detail = methodDetail(account.email || account.name);
+      if (!seen.has('google')) {
+        seen.add('google');
+        methods.push({ method: 'google', detail });
+      }
+      continue;
+    }
+    if (type === 'github_oauth' || type === 'github') {
+      const detail = methodDetail(account.username || account.email);
+      if (!seen.has('github')) {
+        seen.add('github');
+        methods.push({ method: 'github', detail });
+      }
+      continue;
+    }
+    if (type === 'discord_oauth' || type === 'discord') {
+      const detail = methodDetail(account.username || account.email);
+      if (!seen.has('discord')) {
+        seen.add('discord');
+        methods.push({ method: 'discord', detail });
+      }
+      continue;
+    }
+    if (type !== 'wallet') continue;
+    const chain = accountField(account, 'chain_type', 'chainType');
+    const address = typeof account.address === 'string' ? account.address.trim() : '';
+    if ((chain && chain !== 'solana') || !base58.test(address) || seen.has(`wallet:${address}`)) continue;
+    seen.add(`wallet:${address}`);
+    const client = accountField(account, 'wallet_client_type', 'walletClientType') || 'wallet';
+    methods.push({
+      method: 'wallet',
+      detail: typeof client === 'string' ? client : 'wallet',
+      address,
+    });
+  }
+  return methods;
+}
+
+function observingWallets(user, ownerId, privyUserId, taken) {
+  const out = [];
+  for (const account of linkedAccountList(user)) {
+    if (!account || account.type !== 'wallet') continue;
+    const chain = accountField(account, 'chain_type', 'chainType');
+    const client = accountField(account, 'wallet_client_type', 'walletClientType') || 'wallet';
+    const connector = accountField(account, 'connector_type', 'connectorType');
+    const address = typeof account.address === 'string' ? account.address.trim() : '';
+    if ((chain && chain !== 'solana') || !base58.test(address) || taken.has(address)) continue;
+    if (client === 'privy' && connector === 'embedded') continue;
+    taken.add(address);
+    out.push({
+      ...createAdditionalWallet({
+        ownerId,
+        address,
+        id: `linked_${address}`,
+        label: clientLabel(client),
+      }),
+      spendable: false,
+      walletClientType: typeof client === 'string' ? client : 'wallet',
+      privyUserId,
+    });
+  }
+  return out;
+}
+
+function attachLinked(record, user) {
+  if (!record?.main) return record;
+  const taken = new Set([
+    record.main.address,
+    ...(record.additional || []).map(wallet => wallet.address),
+  ]);
+  return {
+    ...record,
+    main: { ...record.main, spendable: true },
+    additional: [
+      ...(record.additional || []).map(wallet => ({ ...wallet, spendable: wallet.spendable !== false })),
+      ...observingWallets(user, record.main.ownerId, record.privyUserId, taken),
+    ],
+    loginMethods: loginMethodsFromUser(user),
+  };
+}
+
 function recordsFromEmbedded(embedded, ownerId, privyUserId) {
   if (embedded.length < 1) return null;
   const [first, ...rest] = embedded;
@@ -404,13 +528,13 @@ export function createPrivyWalletClient({
     const owner = assertOwnerId(ownerId || resolved || user?.id);
     const embedded = solanaEmbedded(user);
     const existing = recordsFromEmbedded(embedded, owner, privyUserId);
-    if (existing) return { privyUserId, ...existing, created: false };
+    if (existing) return attachLinked({ privyUserId, ...existing, created: false }, user);
 
     // createOnLogin may have linked a wallet with id:null — recover via Wallet API.
     // List is best-effort: a 403 here (auth signature / permissions) must not block create.
     const listed = await listSolanaWallets(privyUserId, { required: false });
     const fromList = recordsFromServerWallets(listed, owner, privyUserId);
-    if (fromList) return { privyUserId, ...fromList, created: false };
+    if (fromList) return attachLinked({ privyUserId, ...fromList, created: false }, user);
 
     try {
       const created = await privy('POST', '/v1/wallets', {
@@ -418,19 +542,19 @@ export function createPrivyWalletClient({
         owner: { user_id: privyUserId },
         display_name: 'Main',
       }, idempotencyKey('main-solana', privyUserId));
-      return {
+      return attachLinked({
         privyUserId,
         main: createdRecord(created, owner, privyUserId, 'main'),
         additional: [],
         created: true,
-      };
+      }, user);
     } catch (error) {
       const retry = recordsFromServerWallets(
         await listSolanaWallets(privyUserId, { required: false }),
         owner,
         privyUserId,
       );
-      if (retry) return { privyUserId, ...retry, created: false };
+      if (retry) return attachLinked({ privyUserId, ...retry, created: false }, user);
       if (
         error instanceof WalletError
         && error.code === 'privy_failed'
@@ -504,7 +628,7 @@ export function createPrivyWalletClient({
   }
 
   return {
-    async acceptLogin({ accessToken, ownerId, origin } = {}) {
+    async readSession({ accessToken, ownerId, origin } = {}) {
       const token = assertHeaderSafe(accessToken, 'Privy access token');
       const headers = {
         Authorization: `Bearer ${token}`,
@@ -528,7 +652,21 @@ export function createPrivyWalletClient({
         ? await loadUser(resolvedId).catch(() => user)
         : user;
       if (resolvedId && !hydrated.id) hydrated.id = resolvedId;
-      return syncWallets(hydrated, ownerId || resolvedId || hydrated.id, token);
+      return {
+        user: hydrated,
+        ownerId: ownerId || resolvedId || hydrated.id,
+        accessToken: token,
+      };
+    },
+
+    async readLoginUser({ accessToken, ownerId, origin } = {}) {
+      const session = await this.readSession({ accessToken, ownerId, origin });
+      return session.user;
+    },
+
+    async acceptLogin({ accessToken, ownerId, origin } = {}) {
+      const session = await this.readSession({ accessToken, ownerId, origin });
+      return syncWallets(session.user, session.ownerId, session.accessToken);
     },
 
     ensureMainWallet({ privyUserId, ownerId } = {}) {

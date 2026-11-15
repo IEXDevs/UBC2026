@@ -54,7 +54,7 @@ export function describeWallets(wallets, bots) {
 }
 
 function txSignature(signature, cluster) {
-  if (cluster !== 'devnet' && cluster !== 'testnet') return null;
+  if (cluster !== 'devnet' && cluster !== 'testnet' && cluster !== 'mainnet') return null;
   if (typeof signature !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(signature)) return null;
   return signature;
 }
@@ -62,10 +62,12 @@ function txSignature(signature, cluster) {
 export function solscanTxUrl(signature, cluster = 'devnet') {
   const clean = txSignature(signature, cluster);
   if (!clean) return null;
+  if (cluster === 'mainnet') return `https://solscan.io/tx/${clean}`;
   return `https://solscan.io/tx/${clean}?cluster=${cluster}`;
 }
 
 export function solanaExplorerTxUrl(signature, cluster = 'devnet') {
+  if (cluster !== 'devnet' && cluster !== 'testnet') return null;
   const clean = txSignature(signature, cluster);
   if (!clean) return null;
   return `https://explorer.solana.com/tx/${clean}?cluster=${cluster}`;
@@ -98,7 +100,7 @@ export function describeHistory(payments, bots) {
 
 export function shortAddress(address) {
   if (typeof address !== 'string' || address.length < 12) return address ?? '';
-  return `${address.slice(0, 4)}…${address.slice(-4)}`;
+  return `${address.slice(0, 5)}...${address.slice(-5)}`;
 }
 
 export function glanceBalance(positions) {

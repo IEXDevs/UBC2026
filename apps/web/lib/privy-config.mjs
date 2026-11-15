@@ -99,6 +99,72 @@ export function privyProviderProps({ appId, clientId } = {}) {
   return props;
 }
 
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+const ACCOUNT_METHODS = Object.freeze([
+  Object.freeze({ id: 'email', label: 'Email', types: Object.freeze(['email']) }),
+  Object.freeze({ id: 'google', label: 'Google', types: Object.freeze(['google_oauth', 'google']) }),
+  Object.freeze({ id: 'github', label: 'GitHub', types: Object.freeze(['github_oauth', 'github']) }),
+  Object.freeze({ id: 'discord', label: 'Discord', types: Object.freeze(['discord_oauth', 'discord']) }),
+]);
+
+function linkedAccountList(user) {
+  if (Array.isArray(user?.linkedAccounts)) return user.linkedAccounts;
+  if (Array.isArray(user?.linked_accounts)) return user.linked_accounts;
+  return [];
+}
+
+function accountDetail(account) {
+  return textField(
+    account.email,
+    account.address && account.type !== 'wallet' ? account.address : '',
+    account.username,
+    account.name,
+    account.subject,
+  );
+}
+
+/**
+ * One Privy user is the account. Wallets can be added without a cap.
+ * Email and each social login can be linked once. Signing in with any
+ * linked method returns this same user id.
+ */
+export function describeLoginMethods(user) {
+  const accounts = linkedAccountList(user);
+  const wallets = [];
+  const seen = new Set();
+  const linked = new Map();
+  for (const account of accounts) {
+    if (!account || typeof account !== 'object') continue;
+    const type = typeof account.type === 'string' ? account.type : '';
+    if (!linked.has(type)) linked.set(type, accountDetail(account));
+    if (type !== 'wallet') continue;
+    const chain = account.chainType ?? account.chain_type;
+    const address = typeof account.address === 'string' ? account.address.trim() : '';
+    if ((chain && chain !== 'solana') || !BASE58.test(address) || seen.has(address)) continue;
+    seen.add(address);
+    const client = account.walletClientType ?? account.wallet_client_type ?? 'wallet';
+    wallets.push({
+      address,
+      client: typeof client === 'string' ? client : 'wallet',
+      spendable: client === 'privy',
+    });
+  }
+  return {
+    userId: typeof user?.id === 'string' ? user.id : '',
+    wallets,
+    methods: ACCOUNT_METHODS.map(method => {
+      const match = method.types.find(type => linked.has(type));
+      return {
+        id: method.id,
+        label: method.label,
+        linked: Boolean(match),
+        detail: match ? linked.get(match) : '',
+      };
+    }),
+  };
+}
+
 export function ownerIdFromPrivyUser(user, authenticated) {
   if (authenticated !== true || !user || typeof user.id !== 'string') return null;
   const id = user.id.trim();
@@ -133,7 +199,7 @@ export function privyAccountLabel(user) {
 
   const address = user?.wallet?.address;
   if (typeof address === 'string' && address.length >= 8) {
-    return `${address.slice(0, 4)}…${address.slice(-4)}`;
+    return `${address.slice(0, 5)}...${address.slice(-5)}`;
   }
   if (typeof user?.id === 'string' && user.id.trim()) return user.id.trim();
   return 'Signed in';

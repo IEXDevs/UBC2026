@@ -81,5 +81,29 @@ export function assertSpendAllowed({ bot, wallet }) {
   return { allowed: true };
 }
 
+/** Rows for the same owner: agent wallets plus every linked Solana wallet and sign-in method. */
+export function accountWriteBodies(login, ownerId) {
+  const owner = ownerId || login?.main?.ownerId;
+  if (!owner || !login?.main) return null;
+  const wallets = [login.main, ...(login.additional || [])].filter(Boolean).map(wallet => ({
+    id: wallet.id,
+    owner_id: owner,
+    kind: wallet.kind,
+    label: wallet.label,
+    address: wallet.address,
+    provider: 'privy',
+    frozen: wallet.frozen === true,
+    spendable: wallet.spendable !== false,
+  }));
+  return {
+    user: {
+      id: owner,
+      privy_user_id: login.privyUserId || login.main.privyUserId || owner,
+      login_methods: Array.isArray(login.loginMethods) ? login.loginMethods : [],
+    },
+    wallets,
+  };
+}
+
 // Privy HTTP + node:crypto signing live in `./privy.mjs`.
 // Import `@ubc2026/wallets/privy` from Workers/Node only — never from the Next.js client bundle.

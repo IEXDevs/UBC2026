@@ -14,6 +14,9 @@ import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
 import ProfileSheet from '../components/ProfileSheet';
 import WalletsSheet from '../components/WalletsSheet';
+import ClaimHandle from '../components/ClaimHandle';
+import RecoveryCeremony from '../components/RecoveryCeremony';
+import SlideCommit from '../components/bits/SlideCommit';
 import PartySheet from '../components/PartySheet';
 import PluginsSheet from '../components/PluginsSheet';
 import StatisticsSheet from '../components/StatisticsSheet';
@@ -42,7 +45,8 @@ import { deleteOwnerBot, emptyMoneyState, fetchOwnerLists, shellBotFromRemote, s
 import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
-import { walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
+import { mergeObservedWallets, walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
+import { accountSetupStep, clipAddress, readRecoveryAck, writeRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
@@ -159,7 +163,7 @@ function AuthedShell() {
           }
           return;
         }
-        setLiveWallets(body.wallets);
+        setLiveWallets(mergeObservedWallets(body.wallets, user, ownerIdFromPrivyUser(user, true)));
         setWalletNote(walletProvisionNote(body, { ok: true }));
       } catch {
         if (!stopped) {
@@ -194,6 +198,27 @@ function profileKey(ownerId) {
   return ownerId ? `maelstrom.profile.${ownerId}` : '';
 }
 
+async function resolveSnsProxy(domain) {
+  try {
+    const response = await fetch(`/api/sns/resolve?domain=${encodeURIComponent(domain)}`, { cache: 'no-store' });
+    const body = await response.json().catch(() => ({}));
+    if (typeof body.address === 'string' && body.address) {
+      return { kind: 'sns', domain: body.domain || domain, address: body.address };
+    }
+    return { kind: 'sns', domain, error: body.error || 'sns_not_found' };
+  } catch {
+    return { kind: 'sns', domain, error: 'sns_failed' };
+  }
+}
+
+function transferFailure(body, handle) {
+  if (body?.error === 'handle_missing') return `@${handle} is not on Maelstrom.`;
+  if (body?.error === 'wallet_frozen') return 'That wallet is frozen.';
+  if (body?.error === 'recipient_wallet_missing') return `@${handle} does not have a wallet yet.`;
+  if (body?.error === 'policy_blocked') return 'The agent policy blocked this send.';
+  return 'The send did not post.';
+}
+
 function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', getAccessToken = null }) {
   const toast = useToast();
   const [looks, setLooks] = useState({});
@@ -222,7 +247,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [botRecords, setBotRecords] = useState([]);
   const [remoteLists, setRemoteLists] = useState(() => emptyMoneyState());
   const [profile, setProfile] = useState(null);
+  const [profileReady, setProfileReady] = useState(false);
+  const [recoveryAck, setRecoveryAck] = useState(null);
   const [transfers, setTransfers] = useState([]);
+  const [receipts, setReceipts] = useState([]);
+  const pushReceipt = useCallback((receipt) => {
+    if (!receipt || typeof receipt.id !== 'string' || !receipt.id) return;
+    setReceipts(current => [receipt, ...current.filter(item => item.id !== receipt.id)].slice(0, 40));
+  }, []);
   const [party, setParty] = useState(null);
   const [statsOpen, setStatsOpen] = useState(false);
   const [computerOpen, setComputerOpen] = useState(false);
@@ -322,21 +354,35 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }, [ownerId]);
 
   useEffect(() => {
+    try {
+      setRecoveryAck(ownerId ? readRecoveryAck(localStorage, ownerId) : false);
+    } catch {
+      setRecoveryAck(false);
+    }
+  }, [ownerId]);
+
+  useEffect(() => {
     const key = profileKey(ownerId);
     if (!key) {
       setProfile(null);
+      setProfileReady(false);
       return undefined;
     }
+    setProfileReady(false);
     try {
       const raw = localStorage.getItem(key);
       const local = raw ? JSON.parse(raw) : null;
       if (local?.handle && local?.displayName) setProfile(local);
+      else setProfile(null);
     } catch {
       setProfile(null);
     }
     const profileUrl = shellRuntimeUrl('/api/profiles/me');
     const accountUrl = shellRuntimeUrl('/api/me');
-    if (!profileUrl) return undefined;
+    if (!profileUrl) {
+      setProfileReady(true);
+      return undefined;
+    }
     let stop = false;
     (async () => {
       try {
@@ -346,12 +392,18 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           accountUrl ? fetch(accountUrl, { headers, cache: 'no-store' }).catch(() => null) : null,
         ]);
         const body = await response.json();
-        if (!stop && body.profile?.handle) {
+        if (stop) return;
+        if (body.profile?.handle) {
           setProfile(body.profile);
           localStorage.setItem(key, JSON.stringify(body.profile));
+        } else if (body.source === 'supabase') {
+          setProfile(null);
+          localStorage.removeItem(key);
         }
       } catch {
         // Keep the profile stored on this device.
+      } finally {
+        if (!stop) setProfileReady(true);
       }
     })();
     return () => { stop = true; };
@@ -437,8 +489,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         const url = lookupPath;
         const response = await fetch(url, { headers: { 'x-owner-id': ownerId }, cache: 'no-store' });
         const body = await response.json().catch(() => ({}));
-        if (body.recipient) return body.recipient;
-        if (parsed.kind === 'sns') return { ...parsed, error: body.error || 'sns_not_found' };
+        if (body.recipient?.address) return body.recipient;
+        if (parsed.kind === 'sns') return resolveSnsProxy(parsed.domain);
       } catch {
         // Fall through to the profile stored on this device.
       }
@@ -446,7 +498,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     if (parsed.kind === 'handle' && profile?.handle === parsed.handle) {
       return { kind: 'handle', handle: profile.handle, displayName: profile.displayName, self: true };
     }
-    if (parsed.kind === 'sns') return parsed;
+    if (parsed.kind === 'sns') return resolveSnsProxy(parsed.domain);
     return { kind: 'handle', handle: parsed.handle, missing: true };
   }, [ownerId, profile]);
 
@@ -482,6 +534,133 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
   const glance = walletGlance(wallets, positions, transfers);
+  const setupStep = accountSetupStep({
+    signedIn,
+    profileReady,
+    handle: profile?.handle || '',
+    walletsReady: liveWallets !== null,
+    walletCount: Array.isArray(liveWallets) ? liveWallets.length : 0,
+    recoveryConfirmed: recoveryAck === true,
+  });
+  const onWalletSend = useCallback(async (pending) => {
+    const target = pending?.target;
+    if (target?.kind === 'sns') {
+      const main = (Array.isArray(liveWallets) ? liveWallets : wallets).find(item => item?.kind === 'main') || null;
+      if (!main) return { ok: false, message: 'The main wallet is not ready.' };
+      try {
+        if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
+        const token = await getAccessToken?.();
+        const response = await fetch('/api/sns/send', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+            'x-owner-id': ownerId,
+          },
+          body: JSON.stringify({ domain: target.domain, amount: pending.amount, wallet: main }),
+        });
+        const body = await response.json().catch(() => ({}));
+        const where = body.address ? clipAddress(body.address) : target.domain;
+        if (body.error === 'missing_config') {
+          const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'QUICKNODE_DEVNET_RPC_URL';
+          return { ok: false, message: `${target.domain} is ${where}. The devnet send needs ${names}.` };
+        }
+        if (body.error === 'sns_not_found' || body.error === 'sns_failed') {
+          return { ok: false, message: 'Failed.' };
+        }
+        if (!response.ok || !body.signature) {
+          return { ok: false, message: `The send to ${where} did not post.` };
+        }
+        const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
+        return {
+          ok: true,
+          message: `Sent ${amountLabel} to ${target.domain}(${where}).`,
+          signature: body.signature,
+          receipt: {
+            id: `sns_${body.signature}`,
+            at: new Date().toISOString(),
+            title: `Send ${amountLabel}`,
+            lines: [
+              { label: 'To', value: `${target.domain} (${where})` },
+              { label: 'Amount', value: amountLabel },
+              { label: 'Signature', value: body.signature },
+              { label: 'Network', value: 'devnet execution, mainnet pricing' },
+            ],
+            signature: body.signature,
+            cluster: 'devnet',
+          },
+        };
+      } catch {
+        return { ok: false, message: 'The send did not post.' };
+      }
+    }
+    if (target?.kind !== 'handle' || pending?.asset !== 'USDC') {
+      return { ok: false, message: 'Platform sends are USDC to a @handle.' };
+    }
+    const transfersUrl = shellRuntimeUrl('/api/transfers');
+    if (!transfersUrl) return { ok: false, message: 'Platform sends need the agent runtime.' };
+    try {
+      if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
+      const token = await getAccessToken?.();
+      const idempotencyKey = `wallet_${target.handle}_${pending.amount}_${Date.now()}`.replace(/[^a-zA-Z0-9:_-]/g, '_').slice(0, 128);
+      const response = await fetch(transfersUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          'x-owner-id': ownerId,
+        },
+        body: JSON.stringify({
+          handle: target.handle,
+          amount: pending.amount,
+          idempotencyKey,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.transfer) {
+        const message = body.error === 'handle_missing'
+          ? `@${target.handle} is not on Maelstrom.`
+          : body.error === 'recipient_wallet_missing'
+            ? `@${target.handle} does not have a wallet yet.`
+            : body.error === 'wallet_frozen'
+              ? 'That wallet is frozen.'
+              : 'The send did not post.';
+        return { ok: false, message };
+      }
+      setTransfers(current => [body.transfer, ...current.filter(item => item.id !== body.transfer.id)]);
+      const amountLabel = `${formatBaseUnits(body.transfer.amount)} USDC`;
+      return {
+        ok: true,
+        message: `Sent ${amountLabel} to @${body.transfer.handle}.`,
+        receipt: {
+          id: body.transfer.id,
+          at: body.transfer.createdAt || new Date().toISOString(),
+          title: `Sent ${amountLabel}`,
+          lines: [
+            { label: 'To', value: `@${body.transfer.handle}` },
+            { label: 'Amount', value: amountLabel },
+            { label: 'Network', value: 'Platform ledger · devnet execution, mainnet pricing' },
+          ],
+          cluster: 'devnet',
+        },
+      };
+    } catch {
+      return { ok: false, message: 'The send did not post.' };
+    }
+  }, [liveWallets, wallets, signedIn, user, getAccessToken, ownerId]);
+  const confirmResolve = useRef(null);
+  const [slideConfirm, setSlideConfirm] = useState(null);
+  const askSlideConfirm = useCallback((prompt) => new Promise((resolve) => {
+    confirmResolve.current = resolve;
+    const text = typeof prompt === 'string' ? prompt.trim() : '';
+    setSlideConfirm(text || 'Confirm this action?');
+  }), []);
+  const finishSlideConfirm = useCallback((accepted) => {
+    const resolve = confirmResolve.current;
+    confirmResolve.current = null;
+    setSlideConfirm(null);
+    if (resolve) resolve(accepted === true);
+  }, []);
   const clientTools = useMemo(() => createVoiceClientTools({
     bots,
     activeBotId: activeBot,
@@ -492,7 +671,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       setPane('Main');
       setComputerOpen(true);
     },
-  }), [bots, activeBot, pane]);
+    confirm: askSlideConfirm,
+  }), [bots, activeBot, pane, askSlideConfirm]);
 
   function choosePane(next, direction) {
     if (next === pane) return;
@@ -766,7 +946,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               )
             ) : null}
             {money ? <MoneyPane pane={money} state={{ bots, wallets, payments, positions, transfers }} onParty={setParty} /> : null}
-            {pane === 'Logs' ? <LogsPanel bots={bots} ownerId={ownerId} onParty={setParty} /> : null}
+            {pane === 'Logs' ? (
+              <LogsPanel
+                bots={bots}
+                ownerId={ownerId}
+                onParty={setParty}
+                receipts={receipts}
+                payments={payments}
+                transfers={transfers}
+              />
+            ) : null}
             {pane === 'Security' ? (
               <SecurityPanel
                 bots={bots}
@@ -840,7 +1029,41 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         />
       ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
-      <WalletsSheet open={walletsOpen} onClose={closeWallets} state={{ bots, wallets, payments, positions }} note={walletNote} transfers={transfers} bot={bot} onParty={setParty} signedIn={signedIn} />
+      {setupStep === 'loading' ? (
+        <div className="backdrop is-center">
+          <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-label="Setting up your account">
+            <h2>Setting up your account</h2>
+            <p className="quiet">Checking your handle and wallet.</p>
+          </section>
+        </div>
+      ) : null}
+      {setupStep === 'handle' ? (
+        <ClaimHandle accountLabel={profile?.displayName || accountLabel} onSave={saveProfile} />
+      ) : null}
+      {setupStep === 'recovery' ? (
+        <RecoveryCeremony
+          wallets={liveWallets || []}
+          handle={profile?.handle || ''}
+          onDone={() => {
+            try { writeRecoveryAck(localStorage, ownerId); } catch { /* the phrase stays in the download only */ }
+            setRecoveryAck(true);
+          }}
+        />
+      ) : null}
+      <WalletsSheet
+        open={walletsOpen}
+        onClose={closeWallets}
+        state={{ bots, wallets, payments, positions }}
+        note={walletNote}
+        transfers={transfers}
+        bot={bot}
+        onParty={setParty}
+        signedIn={signedIn}
+        ownerId={ownerId || ''}
+        handle={profile?.handle || ''}
+        onSend={onWalletSend}
+        onReceipt={pushReceipt}
+      />
       <PartySheet
         open={Boolean(party)}
         party={party}
@@ -861,6 +1084,22 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         payments={payments}
         transfers={transfers}
       />
+      {slideConfirm ? (
+        <div className="backdrop is-center" onMouseDown={() => finishSlideConfirm(false)}>
+          <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Confirm" onMouseDown={event => event.stopPropagation()}>
+            <h2>Confirm</h2>
+            <p className="quiet">{slideConfirm}</p>
+            <div className="spend-actions">
+              <button type="button" className="ghost" onClick={() => finishSlideConfirm(false)}>Cancel</button>
+            </div>
+            <SlideCommit
+              label="Slide to confirm"
+              doneLabel="Confirmed"
+              onCommit={() => finishSlideConfirm(true)}
+            />
+          </section>
+        </div>
+      ) : null}
       {pendingSend ? (
         <div className="backdrop is-center" onMouseDown={() => setPendingSend(null)}>
           <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Transaction summary" onMouseDown={event => event.stopPropagation()}>
@@ -883,7 +1122,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               >
                 Cancel
               </button>
-              <button type="button" className="solid" onClick={() => {
+            </div>
+            <SlideCommit
+              label="Slide to send"
+              doneLabel="Sending"
+              onCommit={() => {
                 const pending = pendingSend;
                 setPendingSend(null);
                 const transfersUrl = shellRuntimeUrl('/api/transfers');
@@ -912,21 +1155,25 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                     });
                     const body = await response.json().catch(() => ({}));
                     if (!response.ok || !body.transfer) {
-                      const reason = body.error === 'handle_missing'
-                        ? `@${pending.command.handle} is not on Maelstrom.`
-                        : body.error === 'wallet_frozen'
-                          ? 'That wallet is frozen.'
-                          : body.error === 'recipient_wallet_missing'
-                            ? `@${pending.command.handle} does not have a wallet yet.`
-                            : body.error === 'policy_blocked'
-                              ? 'The agent policy blocked this send.'
-                              : 'The send did not post.';
+                      const reason = transferFailure(body, pending.command.handle);
                       reply(reason);
                       toast?.(reason);
                       return;
                     }
                     setTransfers(current => [body.transfer, ...current.filter(item => item.id !== body.transfer.id)]);
-                    reply(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}. It is in their wallet.`);
+                    const amountLabel = `${formatBaseUnits(body.transfer.amount)} USDC`;
+                    pushReceipt({
+                      id: body.transfer.id,
+                      at: body.transfer.createdAt || new Date().toISOString(),
+                      title: `Sent ${amountLabel}`,
+                      lines: [
+                        { label: 'To', value: `@${body.transfer.handle}` },
+                        { label: 'Amount', value: amountLabel },
+                        { label: 'Network', value: 'Platform ledger · devnet execution, mainnet pricing' },
+                      ],
+                      cluster: 'devnet',
+                    });
+                    reply(`Sent ${amountLabel} to @${body.transfer.handle}. It is in their wallet.`);
                     toast?.(`Sent ${formatBaseUnits(body.transfer.amount)} USDC to @${body.transfer.handle}`);
                   } catch {
                     reply('The send did not post.');
@@ -934,10 +1181,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                   }
                 })();
               }}
-              >
-                Confirm
-              </button>
-            </div>
+            />
           </section>
         </div>
       ) : null}

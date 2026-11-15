@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
 import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
+import AddressCopy from './AddressCopy';
 
 const PLACE_KEY = 'maelstrom.cardPlaces';
 const DRAG_PX = 7;
@@ -608,7 +609,7 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
             kicker: 'Subaccount',
             rows: [
               ['Wallet', owner?.label ?? account.walletId],
-              ['Address', owner?.address ?? ''],
+              ['Address', owner?.fullAddress || owner?.address || ''],
               ['Positions', String(account.count)],
             ].filter(([, value]) => value),
             sections: [
@@ -940,12 +941,12 @@ export default function PositionBook({ positions, bots, wallets = [] }) {
           >
             <p>{detail.kicker}</p>
             <h2>{detail.title}</h2>
-            {detail.address ? <p className="book-modal-address">{detail.address}</p> : null}
+            {detail.address ? <AddressCopy address={detail.address} /> : null}
             <dl>
               {detail.rows.map(([label, value]) => (
                 <div key={label}>
                   <dt>{label}</dt>
-                  <dd>{value}</dd>
+                  <dd>{label === 'Address' ? <AddressCopy address={value} /> : value}</dd>
                 </div>
               ))}
             </dl>

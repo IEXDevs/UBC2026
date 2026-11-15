@@ -356,6 +356,28 @@ button:focus-visible, input:focus-visible {
 .account-item:hover { background: var(--hover); }
 
 .logs-page .quiet-list span { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.logs-page .log-link { display: inline-block; margin-top: 6px; color: #8ee7dc; }
+
+.txn-preview {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #2a2a2a;
+  border-radius: 14px;
+  background: #121212;
+  color: inherit;
+}
+.txn-preview h3 { margin: 0; font-size: 15px; }
+.txn-preview dl { display: grid; gap: 6px; margin: 0; }
+.txn-preview div { display: flex; justify-content: space-between; gap: 12px; }
+.txn-preview dt { color: var(--muted); }
+.txn-preview dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.txn-preview.is-min {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
 
 .agent-dock.dock {
   position: relative;
@@ -865,10 +887,10 @@ button:focus-visible, input:focus-visible {
 }
 
 .sheet.wallets-sheet {
-  width: min(1120px, calc(100vw - 48px));
-  height: min(520px, calc(100vh - 64px), calc((100vw - 48px) * 0.58));
+  width: min(980px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 48px));
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: 168px minmax(0, 1fr);
   padding: 0;
   overflow: hidden;
 }
@@ -912,8 +934,253 @@ button:focus-visible, input:focus-visible {
 .wallet-figure {
   margin: 8px 0 0;
   font-size: 40px;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.03em;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wallet-figure-sm { font-size: 28px; }
+.portfolio { display: grid; gap: 16px; }
+.portfolio-actions { display: grid; gap: 8px; justify-items: start; }
+.portfolio-layout {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+.portfolio-ring { width: 168px; height: 168px; }
+.portfolio-legend {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.portfolio-legend li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.portfolio-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+.portfolio-legend span, .portfolio-legend small { color: #a3a3a3; font-variant-numeric: tabular-nums; }
+.portfolio-wallet-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.portfolio-remove {
+  border: 0;
+  background: transparent;
+  color: #a3a3a3;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.portfolio-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #2a2a2a;
+}
+.portfolio-bar i { display: block; height: 100%; }
+.token-screen, .token-detail { display: grid; gap: 12px; }
+.token-title { display: flex; align-items: center; gap: 10px; }
+.token-title h3 { margin: 0; font-size: 22px; letter-spacing: -0.03em; }
+.token-score {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #1c1c1c;
+  color: #d4d4d4;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.token-up { margin: 0; color: #3dbe6a; font-variant-numeric: tabular-nums; }
+.token-down { margin: 0; color: #e10600; font-variant-numeric: tabular-nums; }
+.token-up span, .token-down span { color: #a3a3a3; }
+.token-chart { position: relative; min-height: 160px; }
+.token-chart svg { width: 100%; height: 180px; display: block; }
+.token-tip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: grid;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #141414;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+}
+.token-tip strong { font-size: 13px; }
+.token-tip span { color: #a3a3a3; font-size: 12px; }
+.token-position, .token-info {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.token-position p, .token-info div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #141414;
+}
+.token-position span, .token-info dt { color: #a3a3a3; }
+.token-info dd { margin: 0; }
+.token-back, .token-solscan {
+  width: fit-content;
+  color: #d4d4d4;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.token-solscan { text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 720px) {
+  .portfolio-layout { grid-template-columns: 1fr; }
+}
+.wallet-active,
+.wallet-form,
+.wallet-keys { display: grid; gap: 12px; }
+.wallet-active { margin-top: 16px; }
+.wallet-handle {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+.wallet-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wallet-switch button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #d4d4d4;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+}
+.wallet-switch button.is-on { background: #f5f5f5; color: #141414; box-shadow: none; }
+.token-rows {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+}
+.token-rows li { border-top: 1px solid #2a2a2a; }
+.token-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.token-row span { display: grid; gap: 2px; }
+.token-row small, .token-settings small { color: #a3a3a3; font-size: 12px; }
+.token-row b { font-variant-numeric: tabular-nums; font-weight: 600; }
+.token-row.is-on strong { text-decoration: underline; text-underline-offset: 3px; }
+.token-settings {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+}
+.price-graph { margin: 18px 0 0; }
+.price-graph svg { display: block; width: 100%; height: 120px; }
+.price-graph figcaption, .price-graph-empty {
+  color: #a3a3a3;
+  font-size: 12px;
+}
+.price-graph-empty { height: 72px; }
+.address-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  border: 0;
+  border-radius: 999px;
+  background: #1c1c1c;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+  padding: 6px 10px 6px 12px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.address-copy small { color: #a3a3a3; font-size: 12px; }
+.address-copy.is-empty { box-shadow: none; background: transparent; padding-left: 0; }
+.sheet.wallet-gate {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+}
+.sheet.wallet-gate h2 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+.phrase-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.phrase-grid li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #101010;
+}
+.phrase-grid span { color: #a3a3a3; font-size: 12px; font-variant-numeric: tabular-nums; }
+.phrase-grid.is-hidden b { filter: blur(7px); user-select: none; }
+.phrase-pick, .phrase-built { display: flex; flex-wrap: wrap; gap: 8px; }
+.phrase-pick button, .phrase-built span {
+  border: 0;
+  border-radius: 999px;
+  background: #1c1c1c;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+  padding: 8px 12px;
+  font: inherit;
+}
+.phrase-pick button.is-used { opacity: 0.35; }
+.recovery-wallets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.recovery-wallets li { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+@media (max-width: 720px) {
+  .sheet.wallets-sheet {
+    grid-template-columns: 1fr;
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+  }
+  .wallet-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid #2e2e2e;
+    padding: 10px;
+  }
+  .wallet-nav strong { margin: 0 8px 0 0; align-self: center; }
+  .phrase-grid { grid-template-columns: 1fr 1fr; }
 }
 .wallet-list {
   list-style: none;
@@ -3333,6 +3600,7 @@ button:focus-visible, input:focus-visible {
   color: var(--text);
 }
 
+.linked-logins { display: grid; gap: 10px; margin-top: 8px; }
 .profile-wallets {
   list-style: none;
   margin: 18px 0 28px;
@@ -3794,6 +4062,7 @@ button:focus-visible, input:focus-visible {
 }
 
 .security-actions .live-actions { margin-top: 0.55rem; }
+.security-confirm { display: grid; gap: 10px; margin-top: 14px; max-width: 420px; }
 
 .talk-panel .talk-tools {
   list-style: none;

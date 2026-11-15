@@ -6,7 +6,9 @@ import AccountStats from './AccountStats';
 import { profileStats } from '../lib/statistics.mjs';
 import { motion } from 'motion/react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
+import AddressCopy from './AddressCopy';
 import ProfileMark from './ProfileMark';
+import LinkedLogins from './LinkedLogins';
 import { usePresence } from './usePresence';
 
 export default function ProfileSheet({
@@ -126,16 +128,17 @@ export default function ProfileSheet({
             <>
               <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>
               <p className="quiet">{wallets?.length ? glance.label : 'Sign-in provisions the main Privy wallet'}</p>
-              <p className="profile-address">{glance.address || 'No wallet yet'}</p>
-              <p className="quiet">Balance is from live positions when bots open them — not a preview ledger.</p>
+              <AddressCopy address={glance.address} />
+              <p className="quiet">Balance is from live positions when bots open them. devnet execution, mainnet pricing.</p>
               <ul className="profile-wallets">
                 {(wallets || []).map(wallet => (
                   <li key={wallet.id}>
                     <strong>{wallet.label}</strong>
-                    <span>{wallet.address}</span>
+                    <AddressCopy address={wallet.address} />
                   </li>
                 ))}
               </ul>
+              <LinkedLogins />
             </>
           ) : (
             <>

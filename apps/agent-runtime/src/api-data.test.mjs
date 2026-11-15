@@ -81,6 +81,18 @@ test('supabase mappers turn rows into bot/wallet/ledger records', () => {
     provider: 'privy',
     frozen: false,
   }).privyWalletId, 'wal_1');
+  const linked = mapWalletRow({
+    id: 'linked_So11111111111111111111111111111111111111112',
+    owner_id: 'user_1',
+    kind: 'additional',
+    label: 'Phantom',
+    address: 'So11111111111111111111111111111111111111112',
+    provider: 'privy',
+    frozen: false,
+    spendable: false,
+  });
+  assert.equal(linked.spendable, false);
+  assert.equal(linked.privyWalletId, undefined);
   assert.deepEqual(mapLedgerRow({ asset: 'USDC', spent: 1, reserved: 2, realized_loss: 3 }, 'bot_1'), {
     botId: 'bot_1',
     asset: 'USDC',

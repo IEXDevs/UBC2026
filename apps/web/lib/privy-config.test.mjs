@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from './privy-config.mjs';
+import {
+  describeLoginMethods,
+  ownerIdFromPrivyUser,
+  privyAccountLabel,
+  privyProviderProps,
+  sessionReadyForWallets,
+} from './privy-config.mjs';
 
 test('Privy provider props stay public and Solana-only', () => {
   assert.equal(privyProviderProps({ appId: '  ' }), null);
@@ -35,6 +41,29 @@ test('Privy provider props stay public and Solana-only', () => {
   assert.equal(serialized.includes('http'), false);
 });
 
+test('linked wallets and login methods stay on one user', () => {
+  const phantom = 'So11111111111111111111111111111111111111112';
+  const extra = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const described = describeLoginMethods({
+    id: 'did:privy:one',
+    linkedAccounts: [
+      { type: 'email', address: 'a@example.com' },
+      { type: 'google_oauth', email: 'g@example.com' },
+      { type: 'wallet', address: phantom, chainType: 'solana', walletClientType: 'phantom' },
+      { type: 'wallet', address: extra, chainType: 'solana', walletClientType: 'solflare' },
+      { type: 'wallet', address: phantom, chainType: 'solana', walletClientType: 'phantom' },
+      { type: 'wallet', address: '0xabc', chainType: 'ethereum', walletClientType: 'metamask' },
+    ],
+  });
+  assert.equal(described.userId, 'did:privy:one');
+  assert.deepEqual(described.wallets.map(wallet => wallet.client), ['phantom', 'solflare']);
+  assert.equal(described.wallets[0].spendable, false);
+  assert.equal(described.methods.find(method => method.id === 'email').linked, true);
+  assert.equal(described.methods.find(method => method.id === 'email').detail, 'a@example.com');
+  assert.equal(described.methods.find(method => method.id === 'github').linked, false);
+  assert.equal(described.methods.find(method => method.id === 'discord').linked, false);
+});
+
 test('wallet provisioning runs once Privy reports a signed-in user', () => {
   const user = { id: 'did:privy:abc', hasAcceptedTerms: false };
   assert.equal(sessionReadyForWallets(false, user), false);
@@ -57,5 +86,5 @@ test('owner id comes from an authenticated Privy user', () => {
     }),
     '@linked-gh',
   );
-  assert.equal(privyAccountLabel({ wallet: { address: 'So11111111111111111111111111111111111111112' } }), 'So11…1112');
+  assert.equal(privyAccountLabel({ wallet: { address: 'So11111111111111111111111111111111111111112' } }), 'So111...11112');
 });

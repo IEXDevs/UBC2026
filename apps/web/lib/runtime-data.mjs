@@ -82,7 +82,7 @@ export function ownerApiUrl(path, runtimeBase) {
 
 function shortMint(mint) {
   if (typeof mint !== 'string' || mint.length < 8) return 'asset';
-  return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+  return `${mint.slice(0, 5)}...${mint.slice(-5)}`;
 }
 
 /** Paper rows from GET /bots/:id/status `positionCheck`. Drops unusable amounts. */

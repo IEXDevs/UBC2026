@@ -124,11 +124,16 @@ export const ACCOUNT_VENDORS = Object.freeze([
   {
     id: 'quicknode',
     dashboard: 'https://dashboard.quicknode.com',
-    names: Object.freeze([...SECRET_GROUPS.quicknode, ...SECRET_GROUPS.quicknodeWebhook]),
+    names: Object.freeze([
+      ...SECRET_GROUPS.quicknode,
+      ...SECRET_GROUPS.quicknodePortfolio,
+      ...SECRET_GROUPS.quicknodeWebhook,
+    ]),
     steps: Object.freeze([
       'Sign in to QuickNode and claim any hackathon credits from the sponsor instructions.',
       'Create an endpoint with chain Solana and network Devnet.',
       'Store the HTTP provider URL as QUICKNODE_DEVNET_RPC_URL.',
+      'Optional: create a Solana Mainnet endpoint and store it as QUICKNODE_MAINNET_RPC_URL. The portfolio graph reads it and never signs or broadcasts.',
       'QUICKNODE_WEBHOOK_SECRET is for Streams later. Leave it empty until that chunk.',
     ]),
   },

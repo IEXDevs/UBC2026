@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  mergeObservedWallets,
   missingWalletSecrets,
   resolvePrivyAppId,
   walletConfigNote,
@@ -71,8 +72,33 @@ test('walletsFromPrivyUser also keeps connected external Solana wallets', () => 
   }, 'did:privy:user1');
   assert.equal(wallets.length, 2);
   assert.equal(wallets[0].address, embedded);
+  assert.equal(wallets[0].spendable, true);
   assert.equal(wallets[1].address, phantom);
   assert.equal(wallets[1].walletClientType, 'phantom');
+  assert.equal(wallets[1].label, 'Phantom');
+  assert.equal(wallets[1].spendable, false);
+});
+
+test('mergeObservedWallets keeps the agent wallet and appends linked wallets', () => {
+  const agent = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const phantom = 'So11111111111111111111111111111111111111112';
+  const merged = mergeObservedWallets(
+    [{ id: 'w_main', kind: 'main', label: 'Main', address: agent, frozen: false, provider: 'privy' }],
+    {
+      linkedAccounts: [
+        { type: 'wallet', address: agent, chainType: 'solana', walletClientType: 'privy' },
+        { type: 'wallet', address: phantom, chainType: 'solana', walletClientType: 'phantom' },
+      ],
+    },
+    'did:privy:user1',
+  );
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, 'w_main');
+  assert.equal(merged[0].kind, 'main');
+  assert.equal(merged[0].spendable, true);
+  assert.equal(merged[1].address, phantom);
+  assert.equal(merged[1].kind, 'additional');
+  assert.equal(merged[1].spendable, false);
 });
 
 test('wallet provision notes stay actionable and secret-free', () => {

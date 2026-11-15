@@ -7,6 +7,7 @@ import {
 } from '../lib/security.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import AnimatedList from './AnimatedList';
+import SlideCommit from './bits/SlideCommit';
 import { listLook } from './listLook';
 
 export default function SecurityPanel({
@@ -17,11 +18,12 @@ export default function SecurityPanel({
   wallets = null,
 }) {
   const [pending, setPending] = useState(null);
+  const [armed, setArmed] = useState(null);
   const [message, setMessage] = useState(null);
   const page = buildSecurityPage({ ownerId, accountLabel, bots });
 
   async function runAction(action) {
-    if (!window.confirm(action.confirm)) return;
+    setArmed(null);
     setPending(action.id);
     setMessage(null);
 
@@ -123,12 +125,24 @@ export default function SecurityPanel({
               type="button"
               className={action.kind === 'danger' ? 'cta danger' : action.kind === 'warn' ? 'ghost warn' : 'ghost'}
               disabled={pending != null}
-              onClick={() => runAction(action)}
+              onClick={() => setArmed(action)}
             >
               {pending === action.id ? 'Working…' : action.label}
             </button>
           ))}
         </div>
+        {armed ? (
+          <div className="security-confirm">
+            <p>{armed.confirm}</p>
+            <SlideCommit
+              label="Slide to confirm"
+              doneLabel="Working"
+              resetKey={armed.id}
+              onCommit={() => runAction(armed)}
+            />
+            <button type="button" className="ghost" onClick={() => setArmed(null)}>Cancel</button>
+          </div>
+        ) : null}
         {message ? <p className="hint" role="status">{message}</p> : null}
       </section>
 
