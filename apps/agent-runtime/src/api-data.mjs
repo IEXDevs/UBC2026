@@ -167,6 +167,51 @@ async function persistLogin(env, login, ownerId) {
   );
 }
 
+/** Format USDC base units (6 decimals) for agent speech — never invent values. */
+export function formatUsdcLabel(amount) {
+  if (typeof amount !== 'string' || !/^-?(0|[1-9][0-9]{0,39})$/.test(amount)) return null;
+  const negative = amount.startsWith('-');
+  const digits = negative ? amount.slice(1) : amount;
+  const padded = digits.padStart(7, '0');
+  const whole = padded.slice(0, -6);
+  const fraction = padded.slice(-6).replace(/0+$/, '');
+  const shown = fraction ? `${whole}.${fraction}` : whole;
+  return `${negative ? '-' : ''}${shown} USDC`;
+}
+
+function mapTransferDirection(row, ownerId) {
+  if (!row || row.asset !== 'USDC') return null;
+  const amount = typeof row.amount === 'number' ? String(row.amount) : String(row.amount ?? '');
+  if (!/^(0|[1-9][0-9]{0,39})$/.test(amount)) return null;
+  if (row.to_owner_id === ownerId || row.toOwnerId === ownerId) return { direction: 'in', amount };
+  if (row.from_owner_id === ownerId || row.fromOwnerId === ownerId) return { direction: 'out', amount };
+  return null;
+}
+
+/** Same net the shell wallet glance uses (platform transfers). */
+async function platformUsdcNet(env, ownerId, fetcher) {
+  if (!supabaseConfig(env) || !ownerId) {
+    return { amount: null, label: null, transferCount: 0 };
+  }
+  const result = await supabaseGet(
+    env,
+    `platform_transfers?or=(from_owner_id.eq.${encodeURIComponent(ownerId)},to_owner_id.eq.${encodeURIComponent(ownerId)})&select=*&order=created_at.desc&limit=100`,
+    fetcher,
+  );
+  const rows = Array.isArray(result.rows) ? result.rows : [];
+  let net = 0n;
+  let count = 0;
+  for (const row of rows) {
+    const entry = mapTransferDirection(row, ownerId);
+    if (!entry) continue;
+    count += 1;
+    const units = BigInt(entry.amount);
+    net += entry.direction === 'in' ? units : -units;
+  }
+  const amount = net.toString();
+  return { amount, label: formatUsdcLabel(amount), transferCount: count };
+}
+
 /** Attach Solana-devnet USDC balances for agent get_wallets (RPC URL never returned). */
 async function withUsdcBalances(env, wallets) {
   const list = Array.isArray(wallets) ? wallets : [];
@@ -175,6 +220,7 @@ async function withUsdcBalances(env, wallets) {
     return list.map((wallet) => ({
       ...wallet,
       usdcBalance: null,
+      usdcBalanceLabel: null,
       usdcBalanceDecimals: 6,
       balanceStatus: 'rpc_not_configured',
       cluster: 'devnet',
@@ -188,9 +234,11 @@ async function withUsdcBalances(env, wallets) {
       address: wallet.address,
       fetcher,
     });
+    const amount = bal.ok === true ? bal.amount : null;
     return {
       ...wallet,
-      usdcBalance: bal.ok === true ? bal.amount : null,
+      usdcBalance: amount,
+      usdcBalanceLabel: amount != null ? formatUsdcLabel(amount) : null,
       usdcBalanceDecimals: 6,
       balanceStatus: bal.ok === true ? 'ok' : (bal.code || 'rpc_failed'),
       cluster: 'devnet',
@@ -199,11 +247,32 @@ async function withUsdcBalances(env, wallets) {
   const rest = list.slice(BALANCE_CAP).map((wallet) => ({
     ...wallet,
     usdcBalance: null,
+    usdcBalanceLabel: null,
     usdcBalanceDecimals: 6,
     balanceStatus: 'capped',
     cluster: 'devnet',
   }));
   return [...enriched, ...rest];
+}
+
+function walletBalanceSummary(items, platform) {
+  const onchainTotal = (Array.isArray(items) ? items : []).reduce((sum, wallet) => {
+    if (typeof wallet?.usdcBalance !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(wallet.usdcBalance)) return sum;
+    return sum + BigInt(wallet.usdcBalance);
+  }, 0n).toString();
+  const hasPlatform = platform.transferCount > 0 && platform.amount != null;
+  const displayAmount = hasPlatform ? platform.amount : onchainTotal;
+  const displaySource = hasPlatform ? 'platform' : 'onchain';
+  return {
+    platformUsdc: platform.amount,
+    platformUsdcLabel: platform.label,
+    platformTransferCount: platform.transferCount,
+    onchainUsdc: onchainTotal,
+    onchainUsdcLabel: formatUsdcLabel(onchainTotal),
+    displayUsdc: displayAmount,
+    displayUsdcLabel: formatUsdcLabel(displayAmount),
+    displaySource,
+  };
 }
 
 export async function handleApiData(request, env, matched) {
@@ -234,20 +303,40 @@ export async function handleApiData(request, env, matched) {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
-    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
+    if (!supabaseConfig(env)) {
+      return json({
+        ok: true,
+        source: 'unconfigured',
+        items: [],
+        balances: walletBalanceSummary([], { amount: null, label: null, transferCount: 0 }),
+      });
+    }
     const result = await supabaseGet(
       env,
       `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=created_at.asc`,
       fetcher,
     );
-    const items = await withUsdcBalances(
-      env,
-      (result.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
-    );
+    const [items, platform] = await Promise.all([
+      withUsdcBalances(
+        env,
+        (result.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
+      ),
+      platformUsdcNet(env, ownerId, fetcher),
+    ]);
+    const balances = walletBalanceSummary(items, platform);
     return json({
       ok: true,
       source: 'supabase',
-      items,
+      items: items.map((wallet) => ({
+        ...wallet,
+        // Prefer the same figure the shell glance shows when platform transfers exist.
+        displayUsdc: balances.displaySource === 'platform' ? balances.displayUsdc : wallet.usdcBalance,
+        displayUsdcLabel: balances.displaySource === 'platform'
+          ? balances.displayUsdcLabel
+          : wallet.usdcBalanceLabel,
+        displaySource: balances.displaySource,
+      })),
+      balances,
     });
   }
 

@@ -852,6 +852,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
             ownerId={ownerId}
             shellBots={bots}
             shellWallets={wallets}
+            shellBalanceLabel={glance.balanceLabel}
             clientTools={clientTools}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {

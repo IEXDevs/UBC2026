@@ -53,6 +53,7 @@ export default function Composer({
   ownerId = null,
   shellBots = null,
   shellWallets = null,
+  shellBalanceLabel = null,
   lines = [],
   onLine,
   onThinking,
@@ -325,6 +326,7 @@ export default function Composer({
         permission,
         shellBots,
         shellWallets,
+        shellBalanceLabel,
       });
       if (result.ok) {
         pushLine('agent', result.reply, botId, result.tokens);
@@ -365,6 +367,7 @@ export default function Composer({
         permission,
         shellBots,
         shellWallets,
+        shellBalanceLabel,
       });
       pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error), botId, result.ok ? result.tokens : 0);
     } catch {
