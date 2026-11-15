@@ -42,6 +42,29 @@ async function rest(fetcher, origin, key, path, options = {}) {
   });
 }
 
+/** Postgres SQLSTATE or PostgREST code. Anything else stays off the response. */
+function safeDbCode(parsed) {
+  const code = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof parsed.code === 'string'
+    ? parsed.code
+    : '';
+  if (/^[0-9A-Z]{5}$/.test(code) || /^PGRST[0-9]{3}$/.test(code)) return code;
+  return '';
+}
+
+async function failureCode(response) {
+  try {
+    return safeDbCode(await response.json());
+  } catch {
+    return '';
+  }
+}
+
+export function useLocalProfileDirectory(env = {}) {
+  return Boolean(supabaseOrigin(env.SUPABASE_URL)
+    && typeof env.SUPABASE_SERVICE_ROLE_KEY === 'string'
+    && env.SUPABASE_SERVICE_ROLE_KEY.trim());
+}
+
 export async function localProfileResponse(request, { env = {}, fetcher = fetch } = {}) {
   const ownerId = (request.headers.get('x-owner-id') || '').trim();
   if (!OWNER.test(ownerId)) return json({ error: 'owner_required' }, 401);
@@ -89,7 +112,7 @@ export async function localProfileResponse(request, { env = {}, fetcher = fetch 
       prefer: 'resolution=merge-duplicates,return=minimal',
       body: { id: ownerId, privy_user_id: ownerId },
     });
-    if (!userWrite.ok) return json({ error: 'profile_save_failed' }, 502);
+    if (!userWrite.ok) return json({ error: (await failureCode(userWrite)) || 'profile_save_failed' }, 502);
     const saved = await rest(fetcher, origin, key, 'profiles?on_conflict=owner_id', {
       method: 'POST',
       prefer: 'resolution=merge-duplicates,return=representation',
@@ -102,7 +125,17 @@ export async function localProfileResponse(request, { env = {}, fetcher = fetch 
       },
     });
     if (saved.status === 409) return json({ error: 'handle_taken' }, 409);
-    if (!saved.ok) return json({ error: 'profile_save_failed' }, 502);
+    if (!saved.ok) return json({ error: (await failureCode(saved)) || 'profile_save_failed' }, 502);
+    const read = await rest(
+      fetcher,
+      origin,
+      key,
+      `profiles?owner_id=eq.${encodeURIComponent(ownerId)}&select=handle,display_name,avatar_url`,
+    );
+    if (!read.ok) return json({ error: 'profile_save_failed' }, 502);
+    const rows = await read.json().catch(() => []);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row?.handle) return json({ error: 'profile_save_failed' }, 502);
   } catch {
     return json({ error: 'profile_save_failed' }, 502);
   }

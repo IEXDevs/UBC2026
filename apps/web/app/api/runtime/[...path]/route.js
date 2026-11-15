@@ -1,5 +1,5 @@
 import { readRootEnv } from '../../../../lib/root-env.mjs';
-import { localProfileResponse } from '../../../../lib/profile-directory.mjs';
+import { localProfileResponse, useLocalProfileDirectory } from '../../../../lib/profile-directory.mjs';
 import { runtimeProxyTarget } from '../../../../lib/runtime-proxy.mjs';
 
 export const runtime = 'nodejs';
@@ -33,14 +33,18 @@ async function proxy(request, context) {
   const pathname = `/${parts.map((part) => {
     try { return decodeURIComponent(part); } catch { return ''; }
   }).join('/')}`;
+  const directoryEnv = {
+    SUPABASE_URL: readRootEnv('SUPABASE_URL'),
+    SUPABASE_SERVICE_ROLE_KEY: readRootEnv('SUPABASE_SERVICE_ROLE_KEY'),
+  };
+  // Claims are stored in this app's Supabase project. A configured Worker
+  // origin must not skip that write.
+  if (pathname === '/api/profiles/me' && useLocalProfileDirectory(directoryEnv)) {
+    return localProfileResponse(request, { env: directoryEnv });
+  }
   const target = runtimeProxyTarget(await runtimeOrigin(), pathname, new URL(request.url).search);
   if (target.error === 'runtime_unconfigured' && pathname === '/api/profiles/me') {
-    return localProfileResponse(request, {
-      env: {
-        SUPABASE_URL: readRootEnv('SUPABASE_URL'),
-        SUPABASE_SERVICE_ROLE_KEY: readRootEnv('SUPABASE_SERVICE_ROLE_KEY'),
-      },
-    });
+    return localProfileResponse(request, { env: directoryEnv });
   }
   if (target.error === 'runtime_unconfigured') {
     return noStore({ ok: false, error: 'runtime_unconfigured', source: 'unconfigured' }, 503);
