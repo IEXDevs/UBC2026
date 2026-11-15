@@ -58,7 +58,7 @@ test('only the Privy terms POST is treated as the accept-terms request', () => {
   assert.equal(isPrivyTokenStorageKey('privy:refresh_token'), false);
 });
 
-test('terms Accept keeps a bearer after a blocked session wipe', async () => {
+test('terms Accept keeps a bearer after Privy wipes session keys', async () => {
   const storage = memoryStorage();
   const session = memoryStorage();
   const seen = [];
@@ -76,13 +76,15 @@ test('terms Accept keeps a bearer after a blocked session wipe', async () => {
     },
   };
   installAcceptTermsAuth(target);
-  storage.setItem('privy:pat', JSON.stringify(TOKEN));
+  storage.setItem('privy:token', JSON.stringify(TOKEN));
   storage.setItem('privy:refresh_token', JSON.stringify(REFRESH));
-  // Privy destroyLocalState tries to delete session keys; we keep them.
-  storage.removeItem('privy:pat');
+  // Privy destroyLocalState deletes session keys; OAuth must be allowed to.
+  // Maelstrom backups still supply the accept_terms bearer.
+  storage.removeItem('privy:token');
   storage.removeItem('privy:refresh_token');
-  assert.equal(unwrap(storage.getItem('privy:pat')), TOKEN);
-  assert.equal(unwrap(storage.getItem('privy:refresh_token')), REFRESH);
+  assert.equal(storage.getItem('privy:token'), null);
+  assert.equal(storage.getItem('privy:refresh_token'), null);
+  assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN);
 
   await target.fetch(new Request('https://auth.privy.io/api/v1/users/me/accept_terms', {
     method: 'POST',
@@ -91,6 +93,8 @@ test('terms Accept keeps a bearer after a blocked session wipe', async () => {
   assert.equal(seen[0].authorization, `Bearer ${TOKEN}`);
   assert.equal(session.getItem(MAELSTROM_TOKEN_KEY), TOKEN);
   assert.equal(session.getItem(MAELSTROM_REFRESH_KEY), REFRESH);
+  // Accept path may rehydrate privy:* from the backup for the next Privy call.
+  assert.equal(unwrap(storage.getItem('privy:token')), TOKEN);
 });
 
 function unwrap(value) {
@@ -103,9 +107,9 @@ function unwrap(value) {
   }
 }
 
-test('explicit logout is allowed to clear Privy session keys', () => {
+test('explicit logout clears Privy session keys and Maelstrom backups', () => {
   const storage = memoryStorage({
-    'privy:pat': JSON.stringify(TOKEN),
+    'privy:token': JSON.stringify(TOKEN),
     'privy:refresh_token': JSON.stringify(REFRESH),
   });
   const target = {
@@ -115,17 +119,20 @@ test('explicit logout is allowed to clear Privy session keys', () => {
     fetch: async () => new Response('{}'),
   };
   installAcceptTermsAuth(target);
+  assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN);
   allowPrivyLogout(target, true);
-  storage.removeItem('privy:pat');
+  storage.removeItem('privy:token');
   storage.removeItem('privy:refresh_token');
   allowPrivyLogout(target, false);
-  assert.equal(storage.getItem('privy:pat'), null);
+  assert.equal(storage.getItem('privy:token'), null);
   assert.equal(storage.getItem('privy:refresh_token'), null);
+  assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), null);
+  assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), null);
 });
 
-test('clear keeps Privy session keys so refresh still restores login', () => {
+test('clear drops privy keys but keeps Maelstrom backups for rehydrate', () => {
   const storage = memoryStorage({
-    'privy:pat': JSON.stringify(TOKEN),
+    'privy:token': JSON.stringify(TOKEN),
     'privy:refresh_token': JSON.stringify(REFRESH),
     other: 'gone',
   });
@@ -138,9 +145,13 @@ test('clear keeps Privy session keys so refresh still restores login', () => {
   installAcceptTermsAuth(target);
   storage.clear();
   assert.equal(storage.getItem('other'), null);
-  assert.equal(unwrap(storage.getItem('privy:pat')), TOKEN);
-  assert.equal(unwrap(storage.getItem('privy:refresh_token')), REFRESH);
+  assert.equal(storage.getItem('privy:token'), null);
+  assert.equal(storage.getItem('privy:refresh_token'), null);
   assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN);
+  assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), REFRESH);
+  assert.equal(restorePrivySession(storage, target.__maelstromAcceptTermsAuth), true);
+  assert.equal(unwrap(storage.getItem('privy:token')), TOKEN);
+  assert.equal(unwrap(storage.getItem('privy:refresh_token')), REFRESH);
 });
 
 test('restorePrivySession rehydrates missing Privy keys from backups', () => {
@@ -152,8 +163,39 @@ test('restorePrivySession rehydrates missing Privy keys from backups', () => {
   auth.remember(TOKEN);
   auth.rememberRefresh(REFRESH);
   assert.equal(restorePrivySession(storage, auth), true);
-  assert.equal(unwrap(storage.getItem('privy:pat')), TOKEN);
+  assert.equal(unwrap(storage.getItem('privy:token')), TOKEN);
   assert.equal(unwrap(storage.getItem('privy:refresh_token')), REFRESH);
+});
+
+test('a live privy:token wins over a stale privy:pat backup', () => {
+  const fresh = 'fresh.payload.sig';
+  const storage = memoryStorage({
+    'privy:pat': JSON.stringify(TOKEN),
+    'privy:token': JSON.stringify(fresh),
+  });
+  assert.equal(readPrivyAccessToken(storage), fresh);
+});
+
+test('OAuth can rotate session keys without a logout flag', () => {
+  const storage = memoryStorage({
+    'privy:token': JSON.stringify(TOKEN),
+    'privy:refresh_token': JSON.stringify(REFRESH),
+  });
+  const target = {
+    Request,
+    localStorage: storage,
+    sessionStorage: memoryStorage(),
+    fetch: async () => new Response('{}'),
+  };
+  installAcceptTermsAuth(target);
+  const next = 'next.payload.sig';
+  storage.removeItem('privy:token');
+  storage.removeItem('privy:refresh_token');
+  assert.equal(storage.getItem('privy:token'), null);
+  storage.setItem('privy:token', JSON.stringify(next));
+  storage.setItem('privy:refresh_token', JSON.stringify('next-refresh'));
+  assert.equal(readPrivyAccessToken(storage), next);
+  assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), next);
 });
 
 test('auth.privy.io JSON responses refill the token cache', async () => {
@@ -184,8 +226,9 @@ test('auth.privy.io JSON responses refill the token cache', async () => {
     method: 'POST',
     body: '{}',
   });
-  assert.equal(unwrap(storage.getItem('privy:pat')), TOKEN);
-  assert.equal(unwrap(storage.getItem('privy:refresh_token')), REFRESH);
+  // Sessions responses update Maelstrom backups only — do not force-write privy:*.
+  assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN);
+  assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), REFRESH);
   await target.fetch('https://auth.privy.io/api/v1/users/me/accept_terms', {
     method: 'POST',
     body: '{}',

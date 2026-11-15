@@ -6,6 +6,7 @@ import {
   installAcceptTermsAuth,
   postAcceptTerms,
   resolveAcceptTermsToken,
+  restorePrivySession,
   withPrivyLogout,
 } from '../lib/accept-terms-auth.mjs';
 
@@ -39,6 +40,8 @@ export default function AcceptTermsGate({ children }) {
   async function onAccept() {
     setBusy(true);
     setError('');
+    const auth = window.__maelstromAcceptTermsAuth;
+    if (auth) restorePrivySession(window.localStorage, auth);
     const token = resolveAcceptTermsToken(window);
     if (!token) {
       setError('Session token missing. Sign out and sign in again.');
@@ -57,6 +60,7 @@ export default function AcceptTermsGate({ children }) {
       setBusy(false);
       return;
     }
+    if (auth) restorePrivySession(window.localStorage, auth);
     window.location.reload();
   }
 
