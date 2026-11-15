@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { filterBotHistory } from '../lib/bot-history.mjs';
 import {
@@ -8,6 +8,7 @@ import {
   describeWallets,
   SOLSCAN_DEVNET,
 } from '../lib/money-views.mjs';
+import { buildEarningsSeries, mergeConnectedPositions } from '../lib/earnings-chart.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
 import AddressCopy from './AddressCopy';
 import GlideSelect from './GlideSelect';
@@ -27,10 +28,10 @@ const VALUES = [
   { id: '10000000', label: '≥ 10 USDC' },
 ];
 
-export default function MoneyPane({ pane, state, onParty }) {
+export default function MoneyPane({ pane, state, onParty, ownerId, getAccessToken }) {
   if (pane === 'history') return <History state={state} onParty={onParty} />;
   if (pane === 'wallets') return <Wallets state={state} />;
-  return <Positions state={state} />;
+  return <Positions state={state} ownerId={ownerId} getAccessToken={getAccessToken} />;
 }
 
 function historyRows(state) {
@@ -177,6 +178,49 @@ function Wallets({ state }) {
   );
 }
 
-function Positions({ state }) {
-  return <PositionBook positions={state.positions} bots={state.bots} wallets={state.wallets} />;
+function Positions({ state, ownerId, getAccessToken }) {
+  const [portfolio, setPortfolio] = useState(null);
+  useEffect(() => {
+    if (typeof getAccessToken !== 'function') return undefined;
+    let stopped = false;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        if (stopped || !token) return;
+        const response = await fetch('/api/portfolio', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(ownerId ? { 'x-owner-id': ownerId } : {}),
+          },
+          cache: 'no-store',
+        });
+        const body = await response.json().catch(() => null);
+        if (stopped || !response.ok || !body || typeof body !== 'object') return;
+        setPortfolio(body);
+      } catch {
+        // Paper lots stay on the book when the balance read fails.
+      }
+    })();
+    return () => { stopped = true; };
+  }, [getAccessToken, ownerId]);
+
+  const merged = useMemo(() => mergeConnectedPositions({
+    positions: state.positions,
+    wallets: state.wallets,
+    portfolio,
+  }), [state.positions, state.wallets, portfolio]);
+  const earnings = useMemo(() => buildEarningsSeries({
+    positions: state.positions,
+    payments: state.payments,
+    transfers: state.transfers,
+  }), [state.positions, state.payments, state.transfers]);
+
+  return (
+    <PositionBook
+      positions={merged.positions}
+      bots={state.bots}
+      wallets={merged.wallets}
+      earnings={earnings}
+    />
+  );
 }

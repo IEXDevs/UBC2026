@@ -142,6 +142,8 @@ export function describePositions(positions, bots) {
       ? position.decimals
       : USDC_DECIMALS;
     const notional = typeof position.notionalMicroUsdc === 'string' ? position.notionalMicroUsdc : null;
+    const named = bots.find(bot => bot.id === position.botId)?.name;
+    const holder = typeof position.holder === 'string' && position.holder.trim() ? position.holder.trim() : null;
     return {
       id: position.id,
       asset: position.asset,
@@ -151,7 +153,7 @@ export function describePositions(positions, bots) {
       pnlMicroUsdc: position.pnlMicroUsdc,
       notionalMicroUsdc: notional,
       notionalLabel: notional ? `${formatBaseUnits(notional)} USDC` : null,
-      botName: botName(bots, position.botId),
+      botName: named ?? holder ?? botName(bots, position.botId),
       venue: typeof position.venue === 'string' && position.venue.trim() ? position.venue.trim() : 'Book',
       market: typeof position.market === 'string' && position.market.trim() ? position.market.trim() : position.asset,
       side: typeof position.side === 'string' ? position.side : null,
