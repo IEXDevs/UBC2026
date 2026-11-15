@@ -100,12 +100,12 @@ export function ownerIdFromPrivyUser(user, authenticated) {
 }
 
 /**
- * Wallet provisioning calls getAccessToken(). Privy can wipe the session from
- * that call when terms are still unaccepted, so the terms POST then has no bearer.
+ * Wallet provisioning calls getAccessToken() once Privy reports a signed-in
+ * user. Require-terms is off in the dashboard, so we no longer gate on
+ * hasAcceptedTerms (that blocked provision and fought refresh).
  */
 export function sessionReadyForWallets(signedIn, user) {
-  if (signedIn !== true || !user) return false;
-  return user.hasAcceptedTerms !== false;
+  return signedIn === true && Boolean(user);
 }
 
 export function privyAccountLabel(user) {
