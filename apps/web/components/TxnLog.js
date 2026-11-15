@@ -68,6 +68,7 @@ export default function TxnLog({ rows = [], onParty, onToggle, openId = null, re
                     <button type="button" className="party-link" onClick={() => onParty(row.party)}>{row.title}</button>
                   ) : <strong>{row.title}</strong>}
                   {row.detail ? <small>{row.detail}</small> : null}
+                  {row.badge === 'confirmed' ? <span className="txn-badge">Confirmed</span> : null}
                 </div>
                 {row.explorerUrl ? (
                   <a className={figureClass} href={row.explorerUrl} target="_blank" rel="noreferrer">

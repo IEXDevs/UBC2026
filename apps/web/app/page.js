@@ -585,6 +585,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const bots = assigned.bots;
   const wallets = pickWalletList(assigned.wallets, remoteLists.wallets);
   const payments = remoteLists.payments || [];
+  const paymentCrossCheck = remoteLists.paymentCrossCheck || [];
   const positions = remoteLists.positions || [];
   const visible = bots.filter(bot => bot.name.toLowerCase().includes(query.trim().toLowerCase()));
   const bot = bots.find(item => item.id === activeBot) ?? null;
@@ -1186,7 +1187,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
             {money ? (
               <MoneyPane
                 pane={money}
-                state={{ bots, wallets, payments, positions, transfers }}
+                state={{ bots, wallets, payments, positions, transfers, paymentCrossCheck }}
                 onParty={setParty}
                 ownerId={ownerId}
                 getAccessToken={getAccessToken}

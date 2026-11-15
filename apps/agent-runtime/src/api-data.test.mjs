@@ -656,3 +656,100 @@ test('health reports signing and supabase readiness flags', async () => {
   assert.equal(body.supabase, true);
   assert.equal(body.secrets.SUPABASE_URL.set, true);
 });
+
+test('payments feed stays empty without Supabase and does not pretend to read it', async () => {
+  let called = false;
+  const env = fakeEnv({
+    fetch: async () => {
+      called = true;
+      return Response.json([]);
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/payments', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.source, 'unconfigured');
+  assert.deepEqual(body.items, []);
+  assert.deepEqual(body.crossCheck, []);
+  assert.equal(body.stub, undefined);
+  assert.equal(called, false);
+});
+
+test('payments feed lists stream-confirmed x402 rows and cross-checks the ledger', async () => {
+  const wallet = 'So11111111111111111111111111111111111111112';
+  const signature = '5'.repeat(64);
+  const urls = [];
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url) => {
+      const href = String(url);
+      urls.push(href);
+      if (href.includes('/rest/v1/bots?')) {
+        return Response.json([{ id: 'bot_1', wallet_id: 'w1' }]);
+      }
+      if (href.includes('/rest/v1/wallets?')) {
+        return Response.json([{ id: 'w1', address: wallet, owner_id: 'user_1' }]);
+      }
+      if (href.includes('/rest/v1/stream_events?')) {
+        return Response.json([
+          {
+            signature,
+            wallet,
+            bot_id: 'bot_1',
+            event_type: 'x402-out',
+            amount: '12',
+            token: 'USDC',
+            cluster: 'devnet',
+          },
+          {
+            signature: '6'.repeat(64),
+            wallet,
+            bot_id: 'bot_1',
+            event_type: 'deposit',
+            amount: '99',
+            token: 'USDC',
+            cluster: 'devnet',
+          },
+        ]);
+      }
+      if (href.includes('/rest/v1/payments')) {
+        return Response.json([{
+          id: 'invented',
+          bot_id: 'bot_1',
+          direction: 'paid',
+          protocol: 'x402',
+          amount: '1',
+          asset: 'USDC',
+          counterparty: 'not-from-stream',
+          cluster: 'devnet',
+        }]);
+      }
+      if (href.includes('/rest/v1/spend_ledgers')) {
+        return Response.json([{ bot_id: 'bot_1', asset: 'USDC', spent: '2', reserved: '0' }]);
+      }
+      return Response.json([]);
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/payments', {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.source, 'supabase');
+  assert.equal(body.stub, undefined);
+  assert.equal(urls.some((href) => href.includes('/rest/v1/payments')), false);
+  assert.equal(body.items.length, 1);
+  assert.equal(body.items[0].badge, 'confirmed');
+  assert.equal(body.items[0].streamConfirmed, true);
+  assert.equal(body.items[0].direction, 'paid');
+  assert.equal(body.items[0].amount, '12');
+  assert.equal(body.items[0].txSignature, signature);
+  assert.equal(body.crossCheck.length, 1);
+  assert.equal(body.crossCheck[0].alert, 'unapproved_spend');
+  assert.equal(body.crossCheck[0].walletId, 'w1');
+  assert.equal(body.crossCheck[0].excess, '10');
+  assert.equal(JSON.stringify(body).includes('service-role-test'), false);
+});

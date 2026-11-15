@@ -32,6 +32,11 @@ function botName(bots, botId) {
   return bots.find(bot => bot.id === botId)?.name ?? botId;
 }
 
+export function confirmationBadge(payment) {
+  if (!payment || payment.streamConfirmed !== true) return null;
+  return payment.badge == null || payment.badge === 'confirmed' ? 'confirmed' : null;
+}
+
 export function describePayments(payments, bots) {
   return payments.map(payment => ({
     id: payment.id,
@@ -39,7 +44,25 @@ export function describePayments(payments, bots) {
     amountLabel: `${formatBaseUnits(payment.amount)} ${payment.asset}`,
     title: payment.counterparty,
     detail: `${botName(bots, payment.botId)} · ${payment.protocol} · ${payment.cluster}`,
+    badge: confirmationBadge(payment),
   }));
+}
+
+export function describeSpendAlerts(checks) {
+  if (!Array.isArray(checks)) return [];
+  const alerts = [];
+  for (const row of checks) {
+    if (!row || row.alert !== 'unapproved_spend' || row.freeze !== true) continue;
+    if (typeof row.walletId !== 'string' || !row.walletId) continue;
+    if (typeof row.excess !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(row.excess)) continue;
+    const asset = typeof row.asset === 'string' && row.asset.trim() ? row.asset.trim() : 'USDC';
+    alerts.push({
+      walletId: row.walletId,
+      asset,
+      excessLabel: formatBaseUnits(row.excess),
+    });
+  }
+  return alerts;
 }
 
 export function describeWallets(wallets, bots) {

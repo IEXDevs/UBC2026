@@ -29,6 +29,7 @@ export function botHistoryRows({ payments = [], transfers = [], bots = [] } = {}
       party: partyFromToken(payment.counterparty),
       explorerUrl: solanaExplorerTxUrl(payment.txSignature, payment.cluster),
       legs: Array.isArray(payment.netLegs) ? payment.netLegs : null,
+      badge: payment.streamConfirmed === true ? 'confirmed' : null,
     });
   }
   for (const transfer of transfers) {

@@ -5,6 +5,7 @@ import { getDemoShellState } from './demo-state.mjs';
 import {
   describeHistory,
   describePayments,
+  describeSpendAlerts,
   describePositions,
   describeWallets,
   formatBaseUnits,
@@ -38,6 +39,7 @@ test('demo money rows match the contract shapes', () => {
   const payments = describePayments(state.payments, state.bots);
   assert.equal(payments[0].direction, 'paid');
   assert.equal(payments[0].amountLabel, '0.01 USDC');
+  assert.equal(payments[0].badge, null);
   assert.match(payments[1].detail, /Meteora · x402 · devnet/);
 
   const wallets = describeWallets(state.wallets, state.bots);
@@ -83,4 +85,32 @@ test('solscan links cover devnet, testnet, and mainnet signatures', () => {
   assert.equal(solscanTxUrl(null, 'devnet'), null);
   assert.equal(solscanTxUrl(signature, 'mainnet-beta'), null);
   assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta'), null);
+});
+
+test('stream-confirmed payments show the badge and unapproved spend is an alert', () => {
+  const signature = '5'.repeat(64);
+  const payment = {
+    id: `stream:${signature}`,
+    botId: 'bot_shop',
+    direction: 'paid',
+    protocol: 'x402',
+    amount: '1500000',
+    asset: 'USDC',
+    counterparty: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    cluster: 'devnet',
+    txSignature: signature,
+    streamConfirmed: true,
+    badge: 'confirmed',
+  };
+  const [row] = describeHistory([payment], [{ id: 'bot_shop', name: 'Sandbox shopper' }]);
+  assert.equal(row.badge, 'confirmed');
+  assert.equal(row.flow, 'out');
+  assert.equal(row.solscanUrl, `https://solscan.io/tx/${signature}?cluster=devnet`);
+  const alerts = describeSpendAlerts([
+    { walletId: 'w1', alert: 'unapproved_spend', freeze: true, excess: '1500000', asset: 'USDC' },
+    { walletId: 'w2', alert: null, freeze: false, excess: '0' },
+    { alert: 'unapproved_spend', freeze: true, excess: '1' },
+  ]);
+  assert.deepEqual(alerts, [{ walletId: 'w1', asset: 'USDC', excessLabel: '1.5' }]);
+  assert.deepEqual(describeSpendAlerts([]), []);
 });

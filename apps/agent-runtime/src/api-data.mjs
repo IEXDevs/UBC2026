@@ -30,6 +30,7 @@ import {
   transferRequest,
 } from './platform-transfer.mjs';
 import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
+import { spendLedgerCrossCheck, streamConfirmedPayments } from '@ubc2026/quicknode-streams';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -971,35 +972,68 @@ export async function handleApiData(request, env, matched) {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
-    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
-    const bots = await supabaseGet(
+    // Empty until a QuickNode Stream row exists. No Supabase config means no read and no invented rows.
+    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [], crossCheck: [] });
+    const botsResult = await supabaseGet(
       env,
-      `bots?owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+      `bots?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,wallet_id`,
       fetcher,
     );
-    const ids = (bots.rows || []).map((row) => row.id).filter(Boolean);
-    if (!ids.length) return json({ ok: true, source: 'supabase', items: [] });
+    const walletsResult = await supabaseGet(
+      env,
+      `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,address,owner_id`,
+      fetcher,
+    );
+    const bots = (botsResult.rows || []).filter((row) => row?.id);
+    const wallets = (walletsResult.rows || []).filter((row) => row?.id && row?.address);
     const url = new URL(request.url);
-    const botId = url.searchParams.get('botId');
-    const path = botId && ids.includes(botId)
-      ? `payments?bot_id=eq.${encodeURIComponent(botId)}&select=*&order=created_at.desc&limit=100`
-      : `payments?bot_id=in.(${ids.map(encodeURIComponent).join(',')})&select=*&order=created_at.desc&limit=100`;
-    const result = await supabaseGet(env, path, fetcher);
+    const requestedBot = url.searchParams.get('botId');
+    const visibleBots = requestedBot && bots.some((row) => row.id === requestedBot)
+      ? bots.filter((row) => row.id === requestedBot)
+      : bots;
+    if (!visibleBots.length && !wallets.length) {
+      return json({ ok: true, source: 'supabase', items: [], crossCheck: [] });
+    }
+    const botIds = bots.map((row) => row.id);
+    const addresses = [...new Set(wallets.map((row) => row.address))];
+    const filters = [];
+    if (addresses.length) filters.push(`wallet.in.(${addresses.map(encodeURIComponent).join(',')})`);
+    if (botIds.length) filters.push(`bot_id.in.(${botIds.map(encodeURIComponent).join(',')})`);
+    const eventsResult = filters.length
+      ? await supabaseGet(
+        env,
+        `stream_events?or=(${filters.join(',')})&select=signature,wallet,bot_id,event_type,amount,token,cluster&order=processed_at.desc&limit=200`,
+        fetcher,
+      )
+      : { rows: [] };
+    const events = eventsResult.rows || [];
+    const botLinks = bots.map((bot) => ({
+      id: bot.id,
+      walletAddress: wallets.find((wallet) => wallet.id === bot.wallet_id)?.address || null,
+    }));
+    const items = streamConfirmedPayments(events, { bots: botLinks })
+      .filter((row) => !requestedBot || row.botId === requestedBot);
+    const ledgerResult = botIds.length
+      ? await supabaseGet(
+        env,
+        `spend_ledgers?bot_id=in.(${botIds.map(encodeURIComponent).join(',')})&select=bot_id,asset,spent,reserved`,
+        fetcher,
+      )
+      : { rows: [] };
+    const crossCheck = spendLedgerCrossCheck({
+      events,
+      wallets: wallets.map((wallet) => ({
+        id: wallet.id,
+        address: wallet.address,
+        botIds: bots.filter((bot) => bot.wallet_id === wallet.id).map((bot) => bot.id),
+      })),
+      ledgers: ledgerResult.rows || [],
+    });
     return json({
       ok: true,
       source: 'supabase',
-      items: (result.rows || []).map((row) => ({
-        id: row.id,
-        botId: row.bot_id,
-        direction: row.direction,
-        protocol: row.protocol,
-        amount: amountText(row.amount),
-        asset: row.asset,
-        counterparty: row.counterparty,
-        cluster: row.cluster,
-        txSignature: row.tx_signature,
-        createdAt: row.created_at,
-      })),
+      items,
+      crossCheck,
     });
   }
 
