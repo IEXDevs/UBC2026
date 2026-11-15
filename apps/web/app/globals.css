@@ -1131,7 +1131,19 @@ button:focus-visible, input:focus-visible {
 }
 .address-copy small { color: #a3a3a3; font-size: 12px; }
 .address-copy.is-empty { box-shadow: none; background: transparent; padding-left: 0; }
-.backdrop.desk-lock { z-index: 80; }
+.backdrop.desk-lock {
+  z-index: 80;
+  backdrop-filter: blur(18px);
+  pointer-events: none;
+}
+.backdrop.desk-lock .sheet { pointer-events: auto; }
+.desk-unlock {
+  -webkit-text-security: disc;
+}
+.shell.is-locked .composer {
+  position: relative;
+  z-index: 90;
+}
 .sheet.wallet-gate {
   width: min(520px, calc(100vw - 32px));
   max-height: min(760px, calc(100vh - 32px));

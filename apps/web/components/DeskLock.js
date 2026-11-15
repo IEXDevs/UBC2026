@@ -88,10 +88,10 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
         <p className="quiet">
           {who ? `Signed in as ${who}. ` : 'You stay signed in. '}
           {setting
-            ? `This password unlocks wallets, sends, and agents. A reload asks for it again, and so does ${idleMinutes} minutes of idle time.`
-            : `Enter it to use wallets, sends, and agents. A reload asks again, and so does ${idleMinutes} minutes of idle time.`}
+            ? `Choose a password for wallets and sends. Chat stays open. A reload asks for it again, and so does ${idleMinutes} minutes of idle time.`
+            : `Enter it to use wallets and sends. You can keep talking. A reload asks again, and so does ${idleMinutes} minutes of idle time.`}
         </p>
-        <form className="field" onSubmit={submit}>
+        <form className="field" autoComplete="off" onSubmit={submit}>
           {setting ? (
             <SecretDraft
               kind="password"
@@ -113,10 +113,18 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
             <label>
               Password
               <input
-                type="password"
-                name="desk-password"
+                className="desk-unlock"
+                type="text"
+                name="maelstrom-desk-unlock"
                 autoFocus
-                autoComplete="current-password"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                inputMode="text"
+                data-1p-ignore="true"
+                data-lpignore="true"
+                data-form-type="other"
                 value={password}
                 disabled={record === undefined || pending}
                 onChange={event => setPassword(event.target.value)}
