@@ -20,11 +20,39 @@ export function profileAfterDirectoryRead(local, body) {
   if (typeof body?.profile?.handle === 'string' && body.profile.handle.trim()) {
     return { profile: body.profile, persist: 'write' };
   }
-  if (body?.source === 'supabase') {
-    if (saved) return { profile: saved, persist: 'keep' };
-    return { profile: null, persist: 'clear' };
+  if (saved || (typeof local?.handle === 'string' && local.handle.trim())) {
+    return { profile: saved || local, persist: 'keep' };
   }
-  return { profile: saved, persist: 'keep' };
+  if (body?.source === 'supabase') return { profile: null, persist: 'clear' };
+  return { profile: null, persist: 'keep' };
+}
+
+/**
+ * A 200 is a saved claim only when the response includes the stored handle.
+ * An echoed handle with source unconfigured, or a body with no handle, is not stored.
+ */
+export function profileSaveResult(status, body, claimedHandle = '') {
+  const code = typeof body?.error === 'string' && ERROR_CODE.test(body.error) ? body.error : '';
+  if (status === 409 || code === 'handle_taken') return { ok: false, error: 'handle_taken', status };
+  if (!Number.isInteger(status) || status < 200 || status >= 300) {
+    return { ok: false, error: code || 'profile_save_failed', status: Number.isInteger(status) ? status : 502 };
+  }
+  const handle = typeof body?.profile?.handle === 'string' ? body.profile.handle.trim() : '';
+  const expected = typeof claimedHandle === 'string' ? claimedHandle.trim() : '';
+  if (!handle || (expected && handle !== expected) || body?.source === 'unconfigured' || body?.ok === false) {
+    return { ok: false, error: code || 'profile_save_failed', status };
+  }
+  return {
+    ok: true,
+    status,
+    profile: {
+      handle,
+      displayName: typeof body.profile.displayName === 'string' && body.profile.displayName.trim()
+        ? body.profile.displayName
+        : '',
+      avatarUrl: body.profile.avatarUrl || null,
+    },
+  };
 }
 
 /** Claim-screen note. Status and error code only — never a provider body. */
