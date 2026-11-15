@@ -96,6 +96,9 @@ export default function Composer({
   const settingsRef = useRef(settings);
   const permissionRef = useRef(permission);
   const botIdRef = useRef(botId);
+  const botNameRef = useRef(botName);
+  const botGoalRef = useRef(botGoal);
+  const botTypeRef = useRef(botType);
   const callBotRef = useRef(null);
   const presenceRef = useRef('off');
   const sessionRef = useRef(null);
@@ -118,6 +121,9 @@ export default function Composer({
   settingsRef.current = settings;
   permissionRef.current = permission;
   botIdRef.current = botId;
+  botNameRef.current = botName;
+  botGoalRef.current = botGoal;
+  botTypeRef.current = botType;
   placeRef.current = place;
 
   function setPhase(next) {
@@ -511,7 +517,12 @@ export default function Composer({
         overrides: payload.overrides ?? voiceOverrides(payload),
         // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
         ...(owner ? { dynamicVariables: { owner_id: owner, spend_permission: permissionRef.current } } : {}),
-        customLlmExtraBody: { ownerPermission: permissionRef.current },
+        customLlmExtraBody: {
+          ownerPermission: permissionRef.current,
+          botName: botNameRef.current,
+          botGoal: botGoalRef.current,
+          botType: botTypeRef.current,
+        },
         ...(tools && typeof tools === 'object' ? { clientTools: tools } : {}),
         onMessage: ({ message, role }) => {
           if (sessionRef.current !== live) return;
