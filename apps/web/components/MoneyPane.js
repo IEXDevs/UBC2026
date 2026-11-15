@@ -14,8 +14,6 @@ import PositionBook from './PositionBook';
 import TxnLog from './TxnLog';
 import { listLook } from './listLook';
 
-const PREVIEW = 'Preview rows. Live payments, wallets, and positions stay empty until the Worker API leaves stub status.';
-
 const FLOWS = [
   { id: 'all', label: 'All' },
   { id: 'in', label: 'Inflow' },
@@ -106,7 +104,6 @@ function History({ state, onParty }) {
           </select>
         </label>
       </div>
-      <p className="preview-note">{PREVIEW}</p>
       <TxnLog
         rows={shown}
         onParty={onParty}
@@ -159,16 +156,17 @@ function Wallets({ state }) {
   return (
     <section className="panel" aria-label="Wallets">
       <h2>Wallets</h2>
-      <p className="preview-note">{PREVIEW}</p>
-      <AnimatedList
-        {...listLook()}
-        items={rows.map(row => ({
-          id: row.id,
-          title: row.label,
-          description: `${row.address} · ${row.bots.length ? row.bots.join(', ') : 'No agents assigned'}`,
-          meta: row.frozen ? 'Frozen' : row.kind,
-        }))}
-      />
+      {rows.length === 0 ? <p className="preview-note">No wallet yet.</p> : (
+        <AnimatedList
+          {...listLook()}
+          items={rows.map(row => ({
+            id: row.id,
+            title: row.label,
+            description: `${row.address} · ${row.bots.length ? row.bots.join(', ') : 'No agents assigned'}`,
+            meta: row.frozen ? 'Frozen' : row.kind,
+          }))}
+        />
+      )}
       <p className="preview-note">Freeze calls the policy API when that route is live.</p>
     </section>
   );

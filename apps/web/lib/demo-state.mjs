@@ -1,6 +1,6 @@
 import { createBuiltinTemplates } from '@ubc2026/contracts';
 import { demoBotExperiences } from './bot-experience.mjs';
-import { composioConnectors, composioLogo } from './composio-catalog.mjs';
+import { shellConnectors } from './shell-chrome.mjs';
 
 /** Placeholder shell chrome. Money panes are filled by Sid's book; Overview/Security keep Isaac labels. */
 export function panePlaceholder(name) {
@@ -132,14 +132,7 @@ export function getDemoShellState() {
         frozen: true,
       },
     ],
-    connectors: [
-      { id: 'solana', name: 'Solana', detail: 'Devnet only. Mainnet execution stays off.', category: 'Chain', popular: true, builtin: true, linked: true },
-      { id: 'privy', name: 'Privy', detail: 'Owner sign-in and the agent wallet.', category: 'Identity', popular: true, builtin: true, linked: true },
-      { id: 'firecrawl', name: 'Firecrawl', detail: 'Research pages for the decision loop.', category: 'Research', popular: true, builtin: true, linked: true, logo: composioLogo('firecrawl') },
-      { id: 'browser-run', name: 'Browser Run', detail: 'Cloudflare browser session for the live view.', category: 'Research', popular: true, builtin: true, linked: true },
-      { id: 'x402', name: 'x402', detail: 'Paid fetches. A spend still needs approval.', category: 'Payments', popular: true, builtin: true, linked: true },
-      ...composioConnectors(),
-    ],
+    connectors: shellConnectors(),
     positions: [
       {
         id: 'pos_usdc',
