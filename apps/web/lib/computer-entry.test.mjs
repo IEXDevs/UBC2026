@@ -19,6 +19,8 @@ test('the live browser opens from the sidebar computer card', () => {
   assert.equal(thread.includes('LiveViewPanel'), false);
   assert.match(library, /className="side-computer"/);
   assert.match(library, /Bot&apos;s computer/);
+  assert.match(library, /countOpenBrowserSessions/);
+  assert.match(library, /computerStatus\(\{ openSessionCount/);
   assert.match(sheet, /browser-preview/);
   assert.match(sheet, /LiveViewPanel/);
   assert.match(panel, /Take control/);

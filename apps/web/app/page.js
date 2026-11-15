@@ -823,6 +823,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           bot={bot}
           files={library[bot.id] ?? []}
           balanceLabel={glance.balanceLabel}
+          ownerId={ownerId}
           onResize={event => dragPane(event, 'right')}
           onWallet={() => { setCreateOpen(false); setProfileOpen(false); setPluginsOpen(false); setStatsOpen(false); setWalletsOpen(true); }}
           onComputer={() => onAccount('computer')}

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { FileText, Film, Globe, Image as ImageIcon, MoreHorizontal, Music } from 'lucide-react';
+import { computerStatus, countOpenBrowserSessions } from '../lib/computer-status.mjs';
 import { fileKind, filterLibrary, libraryGroups } from '../lib/file-library.mjs';
+import { browserSessionUrl } from '../lib/live-view.mjs';
 import BotMark from './BotMark';
 
 const FILTERS = [
@@ -14,12 +16,6 @@ const FILTERS = [
 ];
 
 const PREVIEW_COUNT = 4;
-
-function computerStatus(status) {
-  if (status === 'watching') return 'Awake';
-  if (status === 'paused') return 'Paused';
-  return 'Asleep';
-}
 
 function FileGlyph({ file }) {
   const kind = fileKind(file);
@@ -60,13 +56,15 @@ function FileGroup({ label, files, onOpen }) {
   );
 }
 
-export default function FileLibrary({ bot, files = [], onComputer, onEdit }) {
+export default function FileLibrary({ bot, files = [], ownerId = null, onComputer, onEdit }) {
   const [filter, setFilter] = useState('all');
   const [preview, setPreview] = useState(null);
   const [menu, setMenu] = useState(false);
+  const [openSessionCount, setOpenSessionCount] = useState(0);
   const rows = filterLibrary(files, filter);
   const { fresh, older } = libraryGroups(rows);
   const settingsOpen = filter === 'settings';
+  const status = computerStatus({ openSessionCount, botStatus: bot.status });
 
   useEffect(() => {
     if (!settingsOpen) return undefined;
@@ -74,6 +72,32 @@ export default function FileLibrary({ bot, files = [], onComputer, onEdit }) {
     window.dispatchEvent(new CustomEvent('detail-settings', { detail: node }));
     return () => window.dispatchEvent(new CustomEvent('detail-settings', { detail: null }));
   }, [settingsOpen]);
+
+  useEffect(() => {
+    setOpenSessionCount(0);
+    const url = browserSessionUrl('shell', bot?.id);
+    if (!url || !ownerId) return undefined;
+    let stop = false;
+    async function load() {
+      try {
+        const response = await fetch(url, {
+          headers: { 'x-owner-id': ownerId },
+          cache: 'no-store',
+        });
+        const data = await response.json().catch(() => ({}));
+        if (stop || !response.ok) return;
+        setOpenSessionCount(countOpenBrowserSessions(data));
+      } catch {
+        // Keep the last known computer label when the runtime is unreachable.
+      }
+    }
+    load();
+    const timer = setInterval(load, 4000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [bot?.id, ownerId]);
 
   return (
     <div className="file-library">
@@ -96,11 +120,11 @@ export default function FileLibrary({ bot, files = [], onComputer, onEdit }) {
         <button type="button" className="side-option" onClick={() => onComputer?.()}>
           <span>
             <strong>Bot&apos;s computer</strong>
-            <small>{computerStatus(bot.status)}</small>
+            <small>{status}</small>
           </span>
-          <span className={`side-option-mark${computerStatus(bot.status) === 'Asleep' ? ' is-asleep' : ''}`}>
+          <span className={`side-option-mark${status === 'Asleep' ? ' is-asleep' : ''}`}>
             <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={28} />
-            {computerStatus(bot.status) === 'Asleep' ? <span className="side-option-sleep">z</span> : null}
+            {status === 'Asleep' ? <span className="side-option-sleep">z</span> : null}
           </span>
         </button>
       </section>
