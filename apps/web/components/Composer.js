@@ -23,6 +23,7 @@ import {
   VOICES,
   parseVoiceSettings,
 } from '../lib/voice-settings.mjs';
+import { sendBotChat } from '../lib/runtime-data.mjs';
 
 const LEAVE_MS = 760;
 const PROMPT_SOURCES = [
@@ -38,7 +39,21 @@ const SUGGESTIONS = [
   'Show the open positions',
 ];
 
-export default function Composer({ botName, lines = [], onLine, onThinking, onVoiceSpan = null, hidden = false, resolveMention = null, usage = null, onAttach = null, onSuggest = null }) {
+export default function Composer({
+  botId = null,
+  botName,
+  botGoal = '',
+  botType = 'trading',
+  ownerId = null,
+  lines = [],
+  onLine,
+  onThinking,
+  onVoiceSpan = null,
+  hidden = false,
+  resolveMention = null,
+  usage = null,
+  onAttach = null,
+}) {
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
   const [note, setNote] = useState('');
@@ -63,6 +78,7 @@ export default function Composer({ botName, lines = [], onLine, onThinking, onVo
   const modeRef = useRef('listening');
   const vadRef = useRef(0);
   const connectingRef = useRef(false);
+  const sendingRef = useRef(false);
   const placeRef = useRef(place);
   const leaveTimer = useRef(0);
   const thinkTimer = useRef(0);
@@ -200,11 +216,12 @@ export default function Composer({ botName, lines = [], onLine, onThinking, onVo
     });
   }
 
-  function sendMessage(text) {
+  async function sendMessage(text) {
     const spokenText = typeof text === 'string' ? text.trim() : draft.trim();
     const attached = files.map(file => file.name).join(', ');
     const spoken = attached ? `${spokenText}${spokenText ? '\n' : ''}${attached}` : spokenText;
-    if (!spoken) return;
+    if (!spoken || sendingRef.current) return;
+    const prior = lines;
     pushLine('user', spoken);
     if (mention) pushLine('assistant', mention);
     setDraft('');
@@ -213,10 +230,35 @@ export default function Composer({ botName, lines = [], onLine, onThinking, onVo
     setThinking(true);
     onThinking?.(true);
     window.clearTimeout(thinkTimer.current);
-    thinkTimer.current = window.setTimeout(() => {
+    sendingRef.current = true;
+    try {
+      if (!ownerId || !botId) {
+        pushLine('agent', ownerId
+          ? 'Pick a bot before chatting.'
+          : 'Sign in to chat with this bot.');
+        return;
+      }
+      const result = await sendBotChat({
+        ownerId,
+        botId,
+        message: spoken,
+        history: prior,
+        name: botName,
+        goal: botGoal,
+        type: botType,
+      });
+      if (result.ok) {
+        pushLine('agent', result.reply);
+      } else {
+        pushLine('agent', chatFailureNote(result.error));
+      }
+    } catch {
+      pushLine('agent', chatFailureNote('network'));
+    } finally {
+      sendingRef.current = false;
       setThinking(false);
       onThinking?.(false);
-    }, 1400);
+    }
   }
 
   function pushLine(role, text) {
@@ -432,10 +474,10 @@ export default function Composer({ botName, lines = [], onLine, onThinking, onVo
       {floatNode}
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mention ? <p className="mention-hint" role="status">{mention}</p> : null}
-      {lines.length === 0 && onSuggest ? (
+      {lines.length === 0 ? (
         <div className="entry-suggestions">
           {SUGGESTIONS.map((text) => (
-            <Suggestion key={text} onClick={() => onSuggest(text)}>{text}</Suggestion>
+            <Suggestion key={text} onClick={() => { void sendMessage(text); }}>{text}</Suggestion>
           ))}
         </div>
       ) : null}
@@ -583,4 +625,21 @@ function voiceFailureNote(error) {
   if (error?.message === 'voice_rejected') return 'The voice service refused the session. Publish the agent and turn on Voice ID and Speed overrides.';
   if (error?.message === 'voice_unreachable') return 'The voice service did not respond.';
   return 'The voice session did not start.';
+}
+
+function chatFailureNote(code) {
+  if (code === 'openrouter_not_configured') {
+    return 'Add MODEL_API_KEY=LLM_… (Meta Model API) to the root .env.local and restart Next.';
+  }
+  if (code === 'openrouter_unauthorized') {
+    return 'Meta Model API rejected the key. Check MODEL_API_KEY in root .env.local (should start with LLM_).';
+  }
+  if (code === 'openrouter_bad_request') return 'The model request was invalid. Try a shorter message.';
+  if (code === 'openrouter_failed' || code === 'openrouter_unavailable') {
+    return 'The model call failed. Try again in a moment.';
+  }
+  if (code === 'not_found' || code === 'bot_not_found') return 'This bot was not found for your account.';
+  if (code === 'invalid_request') return 'Sign in to chat with this bot.';
+  if (code === 'network') return 'Could not reach the chat API for a reply.';
+  return 'I could not reply just now.';
 }

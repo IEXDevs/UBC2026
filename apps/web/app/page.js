@@ -628,7 +628,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           <Composer
             key={bot.id}
             hidden={pane !== 'Main'}
+            botId={bot.id}
             botName={bot.name}
+            botGoal={bot.goal}
+            botType={bot.type}
+            ownerId={ownerId}
             lines={talks[bot.id] ?? []}
             onLine={line => {
               appendTalk(bot.id, line);
@@ -686,11 +690,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
             onVoiceSpan={addVoice}
             resolveMention={resolveMention}
             usage={contextUsage(talks[bot.id] ?? [])}
-            onSuggest={(text) => {
-              appendTalk(bot.id, { id: `${Date.now()}-suggest`, role: 'user', text });
-              setThinkingBot(bot.id);
-              window.setTimeout(() => setThinkingBot((current) => (current === bot.id ? null : current)), 1400);
-            }}
             onAttach={items => {
               setLibrary(current => {
                 const prev = current[bot.id] ?? [];
