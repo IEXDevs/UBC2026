@@ -10,6 +10,7 @@ const REC = '[a-zA-Z0-9:_-]{1,128}';
 const ALLOWED = Object.freeze([
   /^\/api\/me$/,
   /^\/api\/wallets$/,
+  /^\/api\/wallets\/persist$/,
   /^\/api\/bots$/,
   new RegExp(`^/api/bots/${BOT}$`),
   /^\/api\/events$/,

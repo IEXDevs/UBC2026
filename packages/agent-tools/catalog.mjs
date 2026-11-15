@@ -34,7 +34,13 @@ function call(method, path, extra = {}) {
 export const DASHBOARD_TOOLS = Object.freeze([
   dashboard('list_bots', 'List this user\'s bots.', [], {}, [call('GET', '/api/bots')]),
   dashboard('get_bot_status', 'Status for one bot.', ['botId'], { botId }, [call('GET', '/bots/:botId/status')]),
-  dashboard('get_wallets', 'List wallets for this owner.', [], {}, [call('GET', '/api/wallets')]),
+  dashboard(
+    'get_wallets',
+    'List wallets for this owner, including Solana-devnet USDC balances (usdcBalance as base units, 6 decimals).',
+    [],
+    {},
+    [call('GET', '/api/wallets')],
+  ),
   dashboard('get_overview', 'Overview metrics, including PnL.', [], {}, [call('GET', '/api/metrics')]),
   dashboard('get_activity', 'Recent activity for one bot.', ['botId'], { botId }, [
     call('GET', '/api/events', { query: ['botId'] }),
@@ -103,7 +109,7 @@ export function sharedToolsInstruction() {
   return [
     'You have the same tools on text and voice: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, sns_send).',
     'When the owner asks you to look something up: call web_search first, pick a real https result url, then browser_navigate (or browser_open with that url).',
-    'Do not invent balances, positions, or decisions — call a dashboard tool.',
+    'Do not invent balances, positions, or decisions — call get_wallets (usdcBalance) or another dashboard tool.',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
     'Do not send funds, approve spends, raise limits, or freeze wallets from tools. Those stay on the app approval UI.',

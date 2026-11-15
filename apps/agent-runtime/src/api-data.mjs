@@ -28,6 +28,7 @@ import {
   transferErrorCode,
   transferRequest,
 } from './platform-transfer.mjs';
+import { readDevnetUsdcBalance } from './schedules.mjs';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -94,6 +95,10 @@ async function resolveOwner(request, env) {
   }
 }
 
+const WALLET_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
+const WALLET_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const BALANCE_CAP = 8;
+
 function publicWallet(wallet) {
   return {
     id: wallet.id,
@@ -106,35 +111,99 @@ function publicWallet(wallet) {
   };
 }
 
-async function persistLogin(env, login, ownerId) {
-  if (!supabaseConfig(env) || !login?.main) return;
-  const owner = ownerId || login.main.ownerId;
-  const fetcher = env.fetch ?? fetch;
+function walletRowFromPublic(wallet, ownerId) {
+  if (!wallet || typeof wallet !== 'object') return null;
+  const id = typeof wallet.id === 'string' ? wallet.id.trim() : '';
+  const address = typeof wallet.address === 'string' ? wallet.address.trim() : '';
+  const kind = wallet.kind === 'additional' ? 'additional' : 'main';
+  const label = typeof wallet.label === 'string' && wallet.label.trim()
+    ? wallet.label.trim().slice(0, 64)
+    : (kind === 'main' ? 'Main' : 'Wallet');
+  if (!WALLET_ID.test(id) || !WALLET_ADDRESS.test(address)) return null;
+  return {
+    id,
+    owner_id: ownerId,
+    kind,
+    label,
+    address,
+    provider: wallet.provider === 'privy' || !wallet.provider ? 'privy' : 'privy',
+    frozen: wallet.frozen === true,
+  };
+}
+
+async function persistWalletRows(env, ownerId, wallets, fetcher) {
+  if (!supabaseConfig(env) || !ownerId) return { wrote: 0 };
+  const rows = (Array.isArray(wallets) ? wallets : [])
+    .map((wallet) => walletRowFromPublic(wallet, ownerId))
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!rows.length) return { wrote: 0 };
   await supabaseWrite(env, {
     path: 'users',
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=minimal',
-    body: { id: owner, privy_user_id: login.main.ownerId || owner },
+    body: { id: ownerId, privy_user_id: ownerId },
     fetcher,
   });
-  const rows = [login.main, ...(login.additional || [])].filter(Boolean).map((wallet) => ({
-    id: wallet.id,
-    owner_id: owner,
-    kind: wallet.kind,
-    label: wallet.label,
-    address: wallet.address,
-    provider: wallet.provider || 'privy',
-    frozen: wallet.frozen === true,
-  }));
-  if (rows.length) {
-    await supabaseWrite(env, {
-      path: 'wallets',
-      method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=minimal',
-      body: rows,
+  await supabaseWrite(env, {
+    path: 'wallets',
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=minimal',
+    body: rows,
+    fetcher,
+  });
+  return { wrote: rows.length };
+}
+
+async function persistLogin(env, login, ownerId) {
+  if (!supabaseConfig(env) || !login?.main) return;
+  const owner = ownerId || login.main.ownerId;
+  const fetcher = env.fetch ?? fetch;
+  await persistWalletRows(
+    env,
+    owner,
+    [login.main, ...(login.additional || [])].filter(Boolean),
+    fetcher,
+  );
+}
+
+/** Attach Solana-devnet USDC balances for agent get_wallets (RPC URL never returned). */
+async function withUsdcBalances(env, wallets) {
+  const list = Array.isArray(wallets) ? wallets : [];
+  const rpcUrl = typeof env.QUICKNODE_DEVNET_RPC_URL === 'string' ? env.QUICKNODE_DEVNET_RPC_URL : '';
+  if (!rpcUrl.trim()) {
+    return list.map((wallet) => ({
+      ...wallet,
+      usdcBalance: null,
+      usdcBalanceDecimals: 6,
+      balanceStatus: 'rpc_not_configured',
+      cluster: 'devnet',
+    }));
+  }
+  const fetcher = env.fetch ?? fetch;
+  const head = list.slice(0, BALANCE_CAP);
+  const enriched = await Promise.all(head.map(async (wallet) => {
+    const bal = await readDevnetUsdcBalance({
+      rpcUrl,
+      address: wallet.address,
       fetcher,
     });
-  }
+    return {
+      ...wallet,
+      usdcBalance: bal.ok === true ? bal.amount : null,
+      usdcBalanceDecimals: 6,
+      balanceStatus: bal.ok === true ? 'ok' : (bal.code || 'rpc_failed'),
+      cluster: 'devnet',
+    };
+  }));
+  const rest = list.slice(BALANCE_CAP).map((wallet) => ({
+    ...wallet,
+    usdcBalance: null,
+    usdcBalanceDecimals: 6,
+    balanceStatus: 'capped',
+    cluster: 'devnet',
+  }));
+  return [...enriched, ...rest];
 }
 
 export async function handleApiData(request, env, matched) {
@@ -171,16 +240,52 @@ export async function handleApiData(request, env, matched) {
       `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=created_at.asc`,
       fetcher,
     );
+    const items = await withUsdcBalances(
+      env,
+      (result.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
+    );
     return json({
       ok: true,
       source: 'supabase',
-      items: (result.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
+      items,
+    });
+  }
+
+  if (routeId === 'wallets.persist') {
+    // Cloudflare Workers strip Origin on outbound Privy calls — Next provisions
+    // wallets, then posts them here so Supabase (and agents) see the same rows.
+    // Skip Privy here: require bearer + x-owner-id (same trust as list when Privy fails).
+    const ownerId = ownerHeader(request);
+    const token = bearerToken(request);
+    if (!token) return json({ error: 'login_required' }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const body = await request.json().catch(() => null);
+    const wallets = Array.isArray(body?.wallets) ? body.wallets : [];
+    const { wrote } = await persistWalletRows(env, ownerId, wallets, fetcher);
+    if (!wrote) return json({ error: 'invalid_wallets' }, 400);
+    const listed = await supabaseGet(
+      env,
+      `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=created_at.asc`,
+      fetcher,
+    );
+    return json({
+      ok: true,
+      source: 'supabase',
+      wrote,
+      wallets: (listed.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
     });
   }
 
   if (routeId === 'wallets.create') {
     const { ownerId, user, token, error } = await resolveOwner(request, env);
-    if (error) return json({ error }, error === 'missing_origin' ? 503 : 502);
+    if (error) {
+      const status = error === 'missing_origin' ? 503 : 502;
+      const detail = error === 'privy_failed' || error === 'missing_origin'
+        ? 'Worker cannot set Origin for Privy; use POST /api/wallets on Next then /api/wallets/persist'
+        : undefined;
+      return json(detail ? { error, detail } : { error }, status);
+    }
     if (!token) return json({ error: 'login_required' }, 401);
     const client = privyClient(env);
     if (!client) return json({ error: 'signer_not_configured' }, 503);
@@ -201,7 +306,10 @@ export async function handleApiData(request, env, matched) {
     } catch (err) {
       const code = err instanceof WalletError ? err.code : 'wallet_failed';
       const status = code === 'missing_config' || code === 'missing_secrets' || code === 'missing_origin' ? 503 : 502;
-      return json({ error: code }, status);
+      const detail = typeof err?.message === 'string'
+        ? err.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
+        : undefined;
+      return json(detail ? { error: code, detail } : { error: code }, status);
     }
   }
 

@@ -268,7 +268,13 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
       cache: 'no-store',
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: body.error || `http_${response.status}`,
+      };
+    }
     return { ok: true, bot: body.bot || null, source: body.source || 'supabase' };
   } catch {
     return { ok: false, error: 'network' };
