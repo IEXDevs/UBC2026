@@ -30,12 +30,9 @@ const SOLANA_LOGIN = Object.freeze({
     solana: Object.freeze({ createOnLogin: 'off' }),
   }),
   mfa: Object.freeze({ noPromptOnMfaRequired: false }),
-  // Do not mirror the session into document cookies. On localhost those
-  // Secure cookie writes vanish on refresh and look like a wiped login.
-  // Auth stays in localStorage (`privy:pat` / `privy:token` / `privy:refresh_token`).
-  sessions: Object.freeze({
-    cookieWriteBehavior: 'never',
-  }),
+  // Use Privy defaults for session cookies + localStorage. Forcing cookies
+  // off left refresh credentials missing when the dashboard expected them,
+  // and getAccessToken then wiped the customer access token.
 });
 
 function publicId(value) {
@@ -91,7 +88,6 @@ export function privyProviderProps({ appId, clientId } = {}) {
         solana: { ...SOLANA_LOGIN.embeddedWallets.solana },
       },
       mfa: { ...SOLANA_LOGIN.mfa },
-      sessions: { ...SOLANA_LOGIN.sessions },
     },
   };
   const client = publicId(clientId);

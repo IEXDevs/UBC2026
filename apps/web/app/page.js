@@ -63,16 +63,10 @@ import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
 import { showSignInGate } from '../lib/sign-in-gate.mjs';
 import { idleLockDue } from '../lib/desk-lock.mjs';
-import { clearPrivySessionBackups, ensurePrivyRefreshOnly } from '../lib/privy-session.mjs';
+import { clearPrivySessionBackups, safePrivyAccessToken } from '../lib/privy-session.mjs';
 
 function readAccessToken(getAccessToken) {
-  try {
-    // Only fill a missing refresh_token — never resurrect wiped access tokens.
-    ensurePrivyRefreshOnly(window.localStorage, window.sessionStorage);
-  } catch {
-    /* private mode */
-  }
-  return Promise.resolve(getAccessToken?.()).catch(() => '');
+  return safePrivyAccessToken(getAccessToken, window.localStorage, window.sessionStorage);
 }
 
 const CONNECTORS = shellConnectors();
