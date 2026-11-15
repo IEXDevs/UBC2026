@@ -1,4 +1,5 @@
 import { readRootEnv } from '../../../../lib/root-env.mjs';
+import { localProfileResponse } from '../../../../lib/profile-directory.mjs';
 import { runtimeProxyTarget } from '../../../../lib/runtime-proxy.mjs';
 
 export const runtime = 'nodejs';
@@ -33,6 +34,14 @@ async function proxy(request, context) {
     try { return decodeURIComponent(part); } catch { return ''; }
   }).join('/')}`;
   const target = runtimeProxyTarget(await runtimeOrigin(), pathname, new URL(request.url).search);
+  if (target.error === 'runtime_unconfigured' && pathname === '/api/profiles/me') {
+    return localProfileResponse(request, {
+      env: {
+        SUPABASE_URL: readRootEnv('SUPABASE_URL'),
+        SUPABASE_SERVICE_ROLE_KEY: readRootEnv('SUPABASE_SERVICE_ROLE_KEY'),
+      },
+    });
+  }
   if (target.error === 'runtime_unconfigured') {
     return noStore({ ok: false, error: 'runtime_unconfigured', source: 'unconfigured' }, 503);
   }
