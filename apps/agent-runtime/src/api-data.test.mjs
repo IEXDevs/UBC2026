@@ -136,6 +136,57 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   assert.equal(snsBody.recipient.address, address);
 });
 
+test('bots.create upserts a shell bot when the wallet belongs to the owner', async () => {
+  const writes = [];
+  const fetcher = async (url, init = {}) => {
+    const href = String(url);
+    if (init.method === 'POST') {
+      writes.push({ href, body: JSON.parse(init.body), prefer: init.headers?.prefer });
+      if (href.includes('/rest/v1/bots')) {
+        return new Response(JSON.stringify([JSON.parse(init.body)]), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 201 });
+    }
+    if (href.includes('/rest/v1/wallets?')) {
+      return Response.json([{ id: 'w_main', frozen: false }]);
+    }
+    return Response.json([]);
+  };
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: fetcher,
+  });
+  const missingWallet = await worker.fetch(new Request('https://runtime/api/bots', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ id: 'bot_local', name: 'Local' }),
+  }), env);
+  assert.equal(missingWallet.status, 400);
+
+  const created = await worker.fetch(new Request('https://runtime/api/bots', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({
+      id: 'bot_local',
+      name: 'Local',
+      goal: 'Watch',
+      type: 'trading',
+      walletId: 'w_main',
+    }),
+  }), env);
+  assert.equal(created.status, 200);
+  const body = await created.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.bot.id, 'bot_local');
+  assert.equal(body.bot.walletId, 'w_main');
+  assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/bots')), true);
+  assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/spend_ledgers')), true);
+});
+
 test('bot text chat requires owner and OpenRouter', async () => {
   const denied = await worker.fetch(new Request('https://runtime/api/bots/bot_1/chat', {
     method: 'POST',

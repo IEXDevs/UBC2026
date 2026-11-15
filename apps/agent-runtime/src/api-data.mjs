@@ -229,6 +229,105 @@ export async function handleApiData(request, env, matched) {
     });
   }
 
+  if (routeId === 'bots.create') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'invalid_body' }, 400);
+
+    const botId = typeof body.id === 'string' ? body.id.trim() : '';
+    const name = typeof body.name === 'string' ? body.name.trim().slice(0, 80) : '';
+    const goal = typeof body.goal === 'string' && body.goal.trim()
+      ? body.goal.trim().slice(0, 2000)
+      : 'Waiting for a goal.';
+    const type = typeof body.type === 'string' ? body.type.trim() : 'trading';
+    const walletId = typeof body.walletId === 'string' ? body.walletId.trim() : '';
+    const approvalMode = typeof body.approvalMode === 'string' ? body.approvalMode.trim() : 'ask';
+    const TYPES = new Set(['trading', 'shopping', 'position-management']);
+    const MODES = new Set(['ask', 'fully-automatic', 'capped-automatic']);
+    if (!/^[a-zA-Z0-9:_-]{1,128}$/.test(botId) || !name || !TYPES.has(type) || !MODES.has(approvalMode)) {
+      return json({ error: 'invalid_bot' }, 400);
+    }
+    if (!/^[a-zA-Z0-9:_-]{1,128}$/.test(walletId)) return json({ error: 'wallet_required' }, 400);
+
+    const walletLookup = await supabaseGet(
+      env,
+      `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,frozen`,
+      fetcher,
+    );
+    const walletRow = walletLookup.rows?.[0];
+    if (!walletRow?.id) return json({ error: 'wallet_not_found' }, 404);
+    if (walletRow.frozen === true) return json({ error: 'wallet_frozen' }, 400);
+
+    await supabaseWrite(env, {
+      path: 'users',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: { id: ownerId, privy_user_id: ownerId },
+      fetcher,
+    });
+
+    const capMode = body.cap?.mode === 'unlimited' ? 'unlimited' : 'limited';
+    const capAsset = typeof body.cap?.asset === 'string' && body.cap.asset.trim()
+      ? body.cap.asset.trim().slice(0, 32)
+      : 'USDC';
+    const row = {
+      id: botId,
+      owner_id: ownerId,
+      wallet_id: walletId,
+      name,
+      goal,
+      type,
+      approval_mode: approvalMode,
+      auto_approve_cap: body.autoApproveCap != null ? body.autoApproveCap : null,
+      template_id: typeof body.templateId === 'string' ? body.templateId : null,
+      enabled: body.enabled !== false,
+      frozen: body.frozen === true,
+      policy_version: 1,
+      cap_mode: capMode,
+      cap_asset: capAsset,
+      max_outflow: capMode === 'limited' && type !== 'position-management'
+        ? (body.cap?.maxOutflow ?? '1000000')
+        : null,
+      max_per_transaction: capMode === 'limited' && type !== 'position-management'
+        ? (body.cap?.maxPerTransaction ?? '1000000')
+        : null,
+      max_loss: type === 'position-management'
+        ? (body.cap?.maxLoss ?? '1000000')
+        : null,
+    };
+
+    const written = await supabaseWrite(env, {
+      path: 'bots',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=representation',
+      body: row,
+      fetcher,
+    });
+    if (written.ok === false) return json({ error: 'persist_failed' }, 502);
+
+    await supabaseWrite(env, {
+      path: 'spend_ledgers',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: {
+        bot_id: botId,
+        asset: capAsset,
+        spent: 0,
+        reserved: 0,
+        realized_loss: 0,
+      },
+      fetcher,
+    });
+
+    const persisted = Array.isArray(written.rows) && written.rows[0]
+      ? mapBotRow(written.rows[0])
+      : mapBotRow(row);
+    return json({ ok: true, source: 'supabase', bot: persisted });
+  }
+
   if (routeId === 'bots.delete') {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);

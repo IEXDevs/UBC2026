@@ -127,6 +127,7 @@ async function dispatch(request, env, rawEnv = env) {
       'wallets.create',
       'wallets.sign',
       'bots.list',
+      'bots.create',
       'bots.delete',
       'bots.chat',
       'events.list',

@@ -38,7 +38,15 @@ import {
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileRailLabel } from '../lib/profile.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
-import { deleteOwnerBot, emptyMoneyState, fetchOwnerLists, shellBotFromRemote, shellRuntimeUrl } from '../lib/runtime-data.mjs';
+import {
+  deleteOwnerBot,
+  emptyMoneyState,
+  fetchOwnerLists,
+  firstAssignableWalletId,
+  shellBotFromRemote,
+  shellRuntimeUrl,
+  upsertOwnerBot,
+} from '../lib/runtime-data.mjs';
 import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
 import { parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
@@ -406,6 +414,35 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     return () => { stop = true; };
   }, [ownerId, signedIn, user, getAccessToken]);
 
+  // Backfill local-only roster bots into Supabase once a real wallet exists.
+  useEffect(() => {
+    if (!ownerId || !rosterReady || !signedIn) return undefined;
+    const walletId = firstAssignableWalletId(remoteLists.wallets);
+    if (!walletId) return undefined;
+    const remoteIds = new Set((remoteLists.bots || []).map((bot) => bot?.id).filter(Boolean));
+    const localBots = mergeRoster([], withoutPlaceholderBots(roster)).bots
+      .filter((bot) => bot?.id && !isPlaceholderBotId(bot.id));
+    const missing = localBots.filter((bot) => bot?.id && !remoteIds.has(bot.id));
+    if (missing.length === 0) return undefined;
+    let stop = false;
+    (async () => {
+      let accessToken = '';
+      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+      let wrote = 0;
+      for (const bot of missing.slice(0, 20)) {
+        if (stop) return;
+        const saved = await upsertOwnerBot(ownerId, bot, { walletId, accessToken });
+        if (saved.ok) wrote += 1;
+      }
+      if (!wrote || stop) return;
+      try {
+        const lists = await fetchOwnerLists(ownerId, { accessToken });
+        if (!stop && lists) setRemoteLists(lists);
+      } catch { /* keep local */ }
+    })();
+    return () => { stop = true; };
+  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, getAccessToken]);
+
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
     const key = profileKey(ownerId);
@@ -534,6 +571,20 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     setSlide('right');
     setPane('Main');
     setCreateOpen(false);
+    // Shell create is local-first; persist so voice/text list_bots can see the bot.
+    const walletId = firstAssignableWalletId(remoteLists.wallets) || firstAssignableWalletId(wallets);
+    if (walletId) {
+      void (async () => {
+        let accessToken = '';
+        try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+        const saved = await upsertOwnerBot(ownerId, created, { walletId, accessToken });
+        if (!saved.ok) return;
+        try {
+          const lists = await fetchOwnerLists(ownerId, { accessToken });
+          if (lists) setRemoteLists(lists);
+        } catch { /* keep local roster */ }
+      })();
+    }
   }
 
   function onEditLook(id, patch) {
