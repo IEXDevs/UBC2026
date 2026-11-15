@@ -108,11 +108,14 @@ async function wake(machine) {
 }
 
 async function postLoop(machine, env, body, owner = 'user_1') {
+  const runtime = env && Object.prototype.hasOwnProperty.call(env, 'lookupPrice')
+    ? env
+    : { ...env, lookupPrice: null };
   return machine.handle(new Request('https://bot/loop', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-owner-id': owner },
     body: JSON.stringify(body),
-  }), env);
+  }), runtime);
 }
 
 function stepOrder(run) {
@@ -123,6 +126,61 @@ function stepOrder(run) {
   }
   return seen;
 }
+
+test('a missing lookupPrice reads DexScreener instead of asking the model for a price', async () => {
+  const machine = new BotStateMachine();
+  await wake(machine);
+  const models = scriptedOpenRouter();
+  const transfer = transferDouble();
+  const seen = [];
+  const response = await machine.handle(new Request('https://bot/loop', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify(payload()),
+  }), {
+    OPENROUTER_API_KEY: API_KEY,
+    openRouter: models.openRouter,
+    transferClient: transfer.client,
+    search: async () => [{ title: 'Pool', url: 'https://example.com/pool', snippet: 'devnet apy' }],
+    fetch: async (url) => {
+      seen.push(String(url));
+      if (!String(url).includes('api.dexscreener.com')) throw new Error('unexpected price host');
+      return Response.json([{
+        baseToken: { address: facts.mint },
+        priceUsd: '1.50',
+        liquidity: { usd: 10 },
+        pairAddress: 'pair111',
+      }]);
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.done, true);
+  assert.equal(seen.length, 2);
+  assert.equal(seen.every(url => url.startsWith('https://api.dexscreener.com/')), true);
+  const roles = models.calls.map(call => {
+    const text = call.messages.map(message => message.content).join('\n');
+    if (text.includes('Role: decide')) return 'decide';
+    if (text.includes('Role: verify')) return 'verify';
+    if (text.includes('Role: monitor')) return 'monitor';
+    return 'research';
+  });
+  assert.deepEqual(roles, ['research', 'decide', 'monitor']);
+  const quote = body.run.checkpoints.verify.priceQuote;
+  assert.equal(quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(quote.pricingCluster, 'mainnet');
+  assert.equal(quote.executionCluster, 'devnet');
+  assert.equal(quote.quoteSource, 'dexscreener');
+  assert.equal(quote.priceUsd, '1.50');
+  assert.equal(quote.authorizesTransaction, false);
+  assert.equal(quote.paperPnl, true);
+  assert.equal(body.run.checkpoints.verify.decisionRecord.facts.price, '1500000');
+  assert.equal(transfer.calls.length, 1);
+  assert.equal(typeof transfer.calls[0].transaction, 'string');
+  assert.equal(body.run.checkpoints.execute.signature, 'sig_devnet_1');
+  assert.equal(JSON.stringify(transfer.calls).includes('authorizesTransaction'), false);
+  assert.equal(JSON.stringify(quote).includes('signature'), false);
+});
 
 test('the bot loop checkpoints every step and calls OpenRouter without a live key', async () => {
   const machine = new BotStateMachine();

@@ -169,6 +169,7 @@ export const SECRET_NAMES = Object.freeze([
   'FIRECRAWL_API_KEY',
   'QUICKNODE_DEVNET_RPC_URL',
   'QUICKNODE_MAINNET_RPC_URL',
+  'QUICKNODE_TESTNET_RPC_URL',
   'QUICKNODE_WEBHOOK_SECRET',
   'ELEVENLABS_API_KEY',
   'ELEVENLABS_AGENT_ID',
@@ -191,6 +192,7 @@ export const SECRET_GROUPS = Object.freeze({
   firecrawl: Object.freeze(['FIRECRAWL_API_KEY']),
   quicknode: Object.freeze(['QUICKNODE_DEVNET_RPC_URL']),
   quicknodePortfolio: Object.freeze(['QUICKNODE_MAINNET_RPC_URL']),
+  quicknodeTestnet: Object.freeze(['QUICKNODE_TESTNET_RPC_URL']),
   quicknodeWebhook: Object.freeze(['QUICKNODE_WEBHOOK_SECRET']),
   elevenlabs: Object.freeze(['ELEVENLABS_API_KEY', 'ELEVENLABS_AGENT_ID', 'ELEVENLABS_WEBHOOK_SECRET']),
   serverSigning: Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']),
@@ -288,14 +290,70 @@ export function profileInitials(label) {
   return (letters || text[0]).toUpperCase();
 }
 
+export const OWNER_SPEND_PERMISSIONS = Object.freeze(['ask', 'review', 'full']);
+export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay']);
+export const PERMISSIONED_SPEND_PATH = '/api/spend';
+
+function sanitizeSpendQuote(quote) {
+  if (quote == null) return null;
+  if (typeof quote !== 'object' || Array.isArray(quote)) return undefined;
+  const pricingCluster = quote.pricingCluster === 'mainnet' || quote.pricingCluster === 'devnet' ? quote.pricingCluster : null;
+  const cluster = quote.cluster === 'mainnet' || quote.cluster === 'devnet' ? quote.cluster : null;
+  if (quote.pricingCluster != null && !pricingCluster) return undefined;
+  if (quote.cluster != null && !cluster) return undefined;
+  return {
+    ...(pricingCluster ? { pricingCluster } : {}),
+    ...(cluster ? { cluster } : {}),
+    ...(quote.paperPnl === true ? { paperPnl: true } : {}),
+    ...(quote.authorizesTransaction === true ? { authorizesTransaction: true } : {}),
+  };
+}
+
+/** Shared body for voice, the glass UI, and Grok Bot. Returns null when the body cannot be a spend. */
+export function parsePermissionedSpendBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  if (!OWNER_SPEND_PERMISSIONS.includes(body.permission)) return null;
+  if (!idOk(body.botId)) return null;
+  if (body.action != null && !FUND_ACTIONS.includes(body.action)) return null;
+  let units;
+  try { units = amount(body.amount); } catch { return null; }
+  if (units === '0') return null;
+  const destination = typeof body.destination === 'string' && base58.test(body.destination) ? body.destination : null;
+  const handle = typeof body.handle === 'string' ? normalizeHandle(body.handle) : null;
+  if (!destination && !handle) return null;
+  if (body.asset != null && body.asset !== 'USDC') return null;
+  const quote = sanitizeSpendQuote(body.quote);
+  if (body.quote != null && quote == null && body.quote !== null) return null;
+  return {
+    permission: body.permission,
+    botId: body.botId,
+    action: FUND_ACTIONS.includes(body.action) ? body.action : 'spend',
+    amount: units,
+    asset: 'USDC',
+    destination,
+    handle,
+    confirmed: body.confirmed === true,
+    quote,
+    idempotencyKey: typeof body.idempotencyKey === 'string' && idOk(body.idempotencyKey) ? body.idempotencyKey : null,
+  };
+}
+
+export function buildPermissionedSpendRequest(input) {
+  const parsed = parsePermissionedSpendBody(input);
+  if (!parsed) fail('Permissioned spend needs ask, review, or full, plus a bot, amount, and handle or destination');
+  return { method: 'POST', path: PERMISSIONED_SPEND_PATH, body: parsed };
+}
+
 export const API_ROUTES = Object.freeze([
   { id: 'health', method: 'GET', path: '/health', phase: 1, auth: 'none', status: 'live' },
   { id: 'routes.list', method: 'GET', path: '/api/routes', phase: 0, auth: 'none', status: 'live' },
   { id: 'me', method: 'GET', path: '/api/me', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.list', method: 'GET', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.create', method: 'POST', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'wallets.persist', method: 'POST', path: '/api/wallets/persist', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.sign', method: 'POST', path: '/api/wallets/:walletId/sign', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.list', method: 'GET', path: '/api/bots', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'bots.create', method: 'POST', path: '/api/bots', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.delete', method: 'DELETE', path: '/api/bots/:botId', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.chat', method: 'POST', path: '/api/bots/:botId/chat', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.status', method: 'GET', path: '/bots/:botId/status', phase: 1, auth: 'none', status: 'live', action: 'status' },
@@ -327,8 +385,10 @@ export const API_ROUTES = Object.freeze([
   { id: 'profiles.lookup', method: 'GET', path: '/api/profiles/lookup', phase: 1, auth: 'privy', status: 'live' },
   { id: 'transfers.list', method: 'GET', path: '/api/transfers', phase: 1, auth: 'privy', status: 'live' },
   { id: 'transfers.create', method: 'POST', path: '/api/transfers', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'spend.create', method: 'POST', path: '/api/spend', phase: 2, auth: 'privy', status: 'live' },
   { id: 'quicknode.webhook', method: 'POST', path: '/webhooks/quicknode', phase: 1, auth: 'webhook', status: 'live' },
   { id: 'voice.agent', method: 'GET', path: '/voice/agent', phase: 8, auth: 'none', status: 'live' },
+  { id: 'voice.session-owner', method: 'POST', path: '/voice/session-owner', phase: 8, auth: 'webhook', status: 'live' },
   { id: 'voice.tools', method: 'POST', path: '/voice/tools/:name', phase: 8, auth: 'webhook', status: 'live' },
   { id: 'voice.llm', method: 'POST', path: '/voice/llm/chat/completions', phase: 8, auth: 'webhook', status: 'live' },
   { id: 'cron.hourly', method: 'CRON', path: '0 * * * *', phase: 5, auth: 'platform', status: 'live' },

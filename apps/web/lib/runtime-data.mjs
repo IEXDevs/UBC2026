@@ -222,6 +222,77 @@ export async function deleteOwnerBot(ownerId, botId, runtimeBaseOrOptions = 'she
 }
 
 /**
+ * Persist a shell / local-roster bot into Supabase so voice and text tools can list it.
+ * Requires a wallet that already belongs to the owner.
+ */
+export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell') {
+  const options = runtimeBaseOrOptions && typeof runtimeBaseOrOptions === 'object'
+    ? runtimeBaseOrOptions
+    : { runtimeBase: runtimeBaseOrOptions };
+  const runtimeBase = options.runtimeBase === undefined ? 'shell' : options.runtimeBase;
+  const url = ownerApiUrl('/api/bots', runtimeBase);
+  const walletId = typeof options.walletId === 'string' && options.walletId.trim()
+    ? options.walletId.trim()
+    : (typeof bot?.walletId === 'string' ? bot.walletId.trim() : '');
+  if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId) || !bot || typeof bot !== 'object') {
+    return { ok: false, error: 'invalid_request' };
+  }
+  if (!BOT_ID.test(typeof bot.id === 'string' ? bot.id : '') || !walletId || !BOT_ID.test(walletId)) {
+    return { ok: false, error: 'wallet_required' };
+  }
+  const name = typeof bot.name === 'string' ? bot.name.trim().slice(0, 80) : '';
+  if (!name) return { ok: false, error: 'invalid_bot' };
+  const fetcher = typeof options.fetcher === 'function' ? options.fetcher : fetch;
+  try {
+    const response = await fetcher(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...ownerHeaders(ownerId, options.accessToken),
+      },
+      body: JSON.stringify({
+        id: bot.id,
+        name,
+        goal: typeof bot.goal === 'string' && bot.goal.trim() ? bot.goal.trim().slice(0, 2000) : 'Waiting for a goal.',
+        type: bot.type === 'shopping' || bot.type === 'position-management' ? bot.type : 'trading',
+        walletId,
+        approvalMode: bot.approvalMode === 'fully-automatic' || bot.approvalMode === 'capped-automatic'
+          ? bot.approvalMode
+          : 'ask',
+        enabled: bot.enabled !== false,
+        frozen: bot.frozen === true,
+        cap: bot.cap && typeof bot.cap === 'object'
+          ? bot.cap
+          : { mode: 'limited', asset: 'USDC', maxOutflow: '1000000', maxPerTransaction: '1000000' },
+      }),
+      cache: 'no-store',
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: body.error || `http_${response.status}`,
+      };
+    }
+    return { ok: true, bot: body.bot || null, source: body.source || 'supabase' };
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+}
+
+/** First non-frozen wallet id from a list (shell or remote). */
+export function firstAssignableWalletId(wallets = []) {
+  if (!Array.isArray(wallets)) return '';
+  for (const wallet of wallets) {
+    if (!wallet || typeof wallet !== 'object') continue;
+    if (wallet.frozen === true) continue;
+    if (typeof wallet.id === 'string' && BOT_ID.test(wallet.id)) return wallet.id;
+  }
+  return '';
+}
+
+/**
  * Same-origin Next route — works without redeploying the agent-runtime Worker.
  * (Worker also exposes the same path after deploy; the shell prefers Next.)
  */
@@ -243,6 +314,9 @@ export async function sendBotChat({
   goal,
   type,
   permission,
+  shellBots = null,
+  shellWallets = null,
+  shellBalanceLabel = null,
   runtimeBase = runtimeBaseUrl(),
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
@@ -275,6 +349,11 @@ export async function sendBotChat({
         ...(typeof goal === 'string' && goal.trim() ? { goal: goal.trim().slice(0, 2000) } : {}),
         ...(typeof type === 'string' && type.trim() ? { type: type.trim().slice(0, 40) } : {}),
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
+        ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),
+        ...(Array.isArray(shellWallets) ? { shellWallets: shellWallets.slice(0, 40) } : {}),
+        ...(typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
+          ? { shellBalanceLabel: shellBalanceLabel.trim().slice(0, 64) }
+          : {}),
       }),
       cache: 'no-store',
     });

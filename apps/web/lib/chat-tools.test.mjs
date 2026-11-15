@@ -9,11 +9,38 @@ import {
 
 test('openAiAgentTools maps shared research and dashboard schemas', () => {
   const tools = openAiAgentTools();
+  assert.ok(tools.some(tool => tool.function.name === 'get_price'));
   assert.ok(tools.some(tool => tool.function.name === 'web_search'));
   assert.ok(tools.some(tool => tool.function.name === 'browser_open'));
   assert.ok(tools.some(tool => tool.function.name === 'list_bots'));
   assert.ok(tools.some(tool => tool.function.name === 'pause_bot'));
   assert.match(chatToolsInstruction(), /same tools on text and voice/);
+  assert.match(chatToolsInstruction(), /get_price/);
+  assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/);
+});
+
+test('get_price returns a paper quote and does not sign', async () => {
+  const calls = [];
+  const mint = 'So11111111111111111111111111111111111111112';
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: { JUPITER_API_KEY: 'jupiter-test-key' },
+    fetcher: async (url, options) => {
+      calls.push({ url: String(url), key: options?.headers?.['x-api-key'] ?? null });
+      if (String(url).includes('dexscreener')) return Response.json([]);
+      return Response.json({ [mint]: { usdPrice: 2, liquidity: 1, blockId: 1 } });
+    },
+  });
+  const result = await invoke('get_price', { mint });
+  assert.equal(result.ok, true);
+  assert.equal(result.quote.quoteSource, 'jupiter-price-v3');
+  assert.equal(result.quote.fallbackFrom, 'dexscreener');
+  assert.equal(result.quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(result.quote.authorizesTransaction, false);
+  assert.equal(result.quote.executionCluster, 'devnet');
+  assert.equal(JSON.stringify(result).includes('jupiter-test-key'), false);
+  assert.equal(calls.some(call => call.key === 'jupiter-test-key'), true);
 });
 
 test('serializeToolResult strips viewerUrl', () => {
@@ -153,6 +180,97 @@ test('createChatToolInvoker lists bots via Worker dashboard tools', async () => 
   assert.match(calls[0].url, /\/api\/bots$/);
   assert.equal(calls[0].method, 'GET');
   assert.equal(calls[0].owner, 'did:privy:owner1');
+});
+
+test('createChatToolInvoker falls back to shell bots and wallets when Worker is empty', async () => {
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_local',
+    runtimeBase: 'https://runtime.example',
+    shellBots: [{ id: 'bot_local', name: 'Local', type: 'trading', status: 'idle', goal: 'Watch' }],
+    shellWallets: [{ id: 'w_main', label: 'Main', address: 'Addr1111111111111111111111111111111111', kind: 'main' }],
+    shellBalanceLabel: '12.5 USDC',
+    fetcher: async (url) => {
+      if (String(url).includes('/api/transfers')) {
+        return Response.json({
+          ok: true,
+          items: [{ asset: 'USDC', amount: '12500000', direction: 'in', toOwnerId: 'did:privy:owner1' }],
+        });
+      }
+      return Response.json({ ok: true, source: 'supabase', items: [] });
+    },
+  });
+  const bots = await invoke('list_bots', {});
+  assert.equal(bots.source, 'shell');
+  assert.equal(bots.items[0].id, 'bot_local');
+  const wallets = await invoke('get_wallets', {});
+  assert.equal(wallets.source, 'shell');
+  assert.equal(wallets.items[0].id, 'w_main');
+  assert.match(wallets.balances.displayBalanceLabel, /12\.5 USDC/);
+  assert.match(wallets.clusterNote, /devnet/);
+});
+
+test('createChatToolInvoker enriches shell wallet addresses via QuickNode', async () => {
+  const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const { TESTNET_GENESIS_HASH } = await import('@ubc2026/wallets/balances');
+  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_local',
+    runtimeBase: 'https://runtime.example',
+    env: {
+      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
+    },
+    shellWallets: [{ id: 'w_main', label: 'Main', address, kind: 'main' }],
+    fetcher: async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('/api/wallets') || href.includes('/api/transfers') || href.includes('/api/bots')) {
+        return Response.json({ ok: true, source: 'supabase', items: [] });
+      }
+      if (href.includes('example.invalid')) {
+        const body = JSON.parse(init.body || '{}');
+        const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : DEVNET_GENESIS_HASH;
+        if (body.method === 'getGenesisHash') {
+          return Response.json({ jsonrpc: '2.0', id: 1, result: genesis });
+        }
+        if (body.method === 'getBalance') {
+          const value = href.includes('testnet') ? 0 : 2_500_000_000;
+          return Response.json({ jsonrpc: '2.0', id: 1, result: { value } });
+        }
+        if (body.method === 'getTokenAccountsByOwner') {
+          if (href.includes('testnet') || body.params?.[1]?.programId === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') {
+            return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
+          }
+          return Response.json({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              value: [{
+                account: {
+                  data: {
+                    parsed: {
+                      info: {
+                        mint: DEVNET_USDC_MINT,
+                        tokenAmount: { amount: '750000', decimals: 6 },
+                      },
+                    },
+                  },
+                },
+              }],
+            },
+          });
+        }
+      }
+      return new Response('nope', { status: 404 });
+    },
+  });
+  const wallets = await invoke('get_wallets', {});
+  assert.equal(wallets.items[0].solLamports, '2500000000');
+  assert.equal(wallets.items[0].tokens[0].symbol, 'USDC');
+  assert.match(wallets.balances.displayBalanceLabel, /2\.5 SOL/);
+  assert.match(wallets.balances.displayBalanceLabel, /0\.75 USDC/);
+  assert.ok(wallets.items[0].holdings.some((row) => row.cluster === 'devnet'));
 });
 
 test('createChatToolInvoker pauses a bot via Worker', async () => {

@@ -52,6 +52,9 @@ export default function Composer({
   botGoal = '',
   botType = 'trading',
   ownerId = null,
+  shellBots = null,
+  shellWallets = null,
+  shellBalanceLabel = null,
   lines = [],
   onLine,
   onThinking,
@@ -336,6 +339,9 @@ export default function Composer({
         goal: botGoal,
         type: botType,
         permission,
+        shellBots,
+        shellWallets,
+        shellBalanceLabel,
       });
       if (result.ok) {
         pushLine('agent', result.reply, botId, result.tokens);
@@ -374,6 +380,9 @@ export default function Composer({
         goal: botGoal,
         type: botType,
         permission,
+        shellBots,
+        shellWallets,
+        shellBalanceLabel,
       });
       pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error), botId, result.ok ? result.tokens : 0);
     } catch {
@@ -472,9 +481,12 @@ export default function Composer({
       if (!response.ok) throw new Error(payload.error || 'voice_failed');
       const { Conversation } = await import('@elevenlabs/client');
       const tools = clientToolsRef.current;
+      const owner = typeof ownerId === 'string' ? ownerId.trim() : '';
       const live = await Conversation.startSession({
         conversationToken: payload.token,
         overrides: payload.overrides ?? voiceOverrides(payload),
+        // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
+        ...(owner ? { dynamicVariables: { owner_id: owner, spend_permission: permissionRef.current } } : {}),
         customLlmExtraBody: { ownerPermission: permissionRef.current },
         ...(tools && typeof tools === 'object' ? { clientTools: tools } : {}),
         onMessage: ({ message, role }) => {
@@ -508,6 +520,21 @@ export default function Composer({
       live.setVolume?.({ volume: 1 });
       sealMic(live);
       voiceStarted.current = performance.now();
+      // Bind conversation → Privy owner so Worker tool webhooks can resolve owner_id
+      // even when ElevenLabs does not substitute {{owner_id}} in headers.
+      try {
+        const conversationId = typeof live.getId === 'function' ? live.getId() : '';
+        if (owner && conversationId) {
+          void fetch('/api/voice/bind', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationId, ownerId: owner }),
+            cache: 'no-store',
+          }).catch(() => {});
+        }
+      } catch {
+        /* tools may still work via dynamicVariables */
+      }
     } catch (error) {
       micGate.current.disarm();
       setNote(voiceFailureNote(error));

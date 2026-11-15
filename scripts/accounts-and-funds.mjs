@@ -127,6 +127,7 @@ export const ACCOUNT_VENDORS = Object.freeze([
     names: Object.freeze([
       ...SECRET_GROUPS.quicknode,
       ...SECRET_GROUPS.quicknodePortfolio,
+      ...SECRET_GROUPS.quicknodeTestnet,
       ...SECRET_GROUPS.quicknodeWebhook,
     ]),
     steps: Object.freeze([

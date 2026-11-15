@@ -19,6 +19,7 @@ import {
 import './PromptBar.css';
 import GlideSelect from './GlideSelect';
 import { PERMISSIONS, permissionById } from '../lib/spend-permission.mjs';
+import { shouldClosePermitMenu } from './permit-menu.mjs';
 
 const ARROW_UP = [12, 4.5, 18.5, 11, 14.25, 11, 14.25, 19.5, 9.75, 19.5, 9.75, 11, 5.5, 11];
 const SQUARE = [12, 6, 18, 6, 18, 12, 18, 18, 6, 18, 6, 12, 6, 6];
@@ -176,6 +177,7 @@ export default function PromptBar({
   const [listening, setListening] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [permitOpen, setPermitOpen] = useState(false);
+  const permitRef = useRef(null);
   const permit = permission ? permissionById(permission) : null;
 
   const model = models.find((m) => m.key === modelKey) ?? models[0];
@@ -230,6 +232,15 @@ export default function PromptBar({
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
   }, [plusOpen, effortOpen, closeMenus]);
+
+  useEffect(() => {
+    if (!permitOpen) return undefined;
+    const onDown = (event) => {
+      if (shouldClosePermitMenu(permitOpen, event.target, permitRef.current)) setPermitOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [permitOpen]);
 
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -648,7 +659,7 @@ export default function PromptBar({
             </button>
           ) : null}
           {permit ? (
-            <span className="permit" onMouseDown={(event) => event.preventDefault()} onClick={(event) => event.stopPropagation()}>
+            <span ref={permitRef} className="permit" onMouseDown={(event) => event.preventDefault()} onClick={(event) => event.stopPropagation()}>
               <button
                 type="button"
                 className="permit-chip"

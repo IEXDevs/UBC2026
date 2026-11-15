@@ -83,7 +83,7 @@ Funding and top-ups from the main wallet are specified as always needing the own
 
 ## Solana usage and program IDs
 
-Execution is Solana devnet. This repo does not deploy a program. `packages/transfers` builds a devnet USDC `transferChecked`, an idempotent associated-token account when needed, and a Memo instruction. Privy signs bot spends and owner moves. A Wallet Adapter signs deposits. Nothing in that package opens a connection. The caller broadcasts only when the QuickNode genesis hash is devnet (`EtWTRABZaYq6iMfeYKouRu166VU2xqa1`).
+Execution is Solana devnet. This repo does not deploy a program. `packages/transfers` builds a devnet USDC `transferChecked`, an idempotent associated-token account when needed, and a Memo instruction. Privy signs bot spends and owner moves. A Wallet Adapter signs deposits. Nothing in that package opens a connection. The caller broadcasts only when the QuickNode genesis hash is devnet (`EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`).
 
 | Program | ID | Use |
 | --- | --- | --- |

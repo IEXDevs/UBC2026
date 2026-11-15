@@ -6,6 +6,8 @@ import {
   createMainnetPriceProvider,
   formatUsdPrice,
   PriceError,
+  readAgentPriceQuote,
+  usdPriceBaseUnits,
 } from './prices.mjs';
 
 const mint = 'So11111111111111111111111111111111111111112';
@@ -143,4 +145,25 @@ test('price fallback skips invalid mints and surfaces the Jupiter error', async 
     fallback: async () => { throw new PriceError('price_not_found', 404); },
   });
   await assert.rejects(limited(mint), (error) => error.code === 'price_not_found' && error.status === 404);
+});
+
+test('agent price quote is paper PnL and does not authorize a transaction', async () => {
+  assert.equal(usdPriceBaseUnits('1.50'), '1500000');
+  const quote = await readAgentPriceQuote(mint, {
+    fetcher: async (url) => {
+      if (String(url).includes('dexscreener')) return Response.json([]);
+      return Response.json({ [mint]: { usdPrice: 1.5, liquidity: 4, blockId: 3 } });
+    },
+  });
+  assert.equal(quote.quoteSource, 'jupiter-price-v3');
+  assert.equal(quote.fallbackFrom, 'dexscreener');
+  assert.equal(quote.priceUsd, '1.5');
+  assert.equal(quote.priceBaseUnits, '1500000');
+  assert.equal(quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(quote.pricingCluster, 'mainnet');
+  assert.equal(quote.executionCluster, 'devnet');
+  assert.equal(quote.paperPnl, true);
+  assert.equal(quote.authorizesTransaction, false);
+  assert.equal(Object.hasOwn(quote, 'signature'), false);
+  assert.equal(Object.hasOwn(quote, 'apiKey'), false);
 });

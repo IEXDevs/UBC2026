@@ -4,7 +4,14 @@
  * over RPC when QuickNode Streams has gone quiet, so a dropped stream is
  * not the only way a wallet is observed. This module does not sign or spend.
  */
-import { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+export {
+  SPL_TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  parseTokenAccountsByMint,
+  readDevnetWalletBalances,
+  readDevnetUsdcBalance,
+} from '@ubc2026/wallets/balances';
 
 export const HOURLY_CRON = '0 * * * *';
 export const STREAM_FALLBACK_CRON = '5,20,35,50 * * * *';
@@ -264,85 +271,3 @@ export async function readStreamHealthFromSupabase(env, fetcher = fetch) {
   return { lastEventAt, status: 'up', source: 'supabase' };
 }
 
-async function rpcCall(fetcher, rpcUrl, method, params) {
-  let response;
-  try {
-    response = await fetcher(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      redirect: 'error',
-      signal: AbortSignal.timeout(15000),
-    });
-  } catch {
-    const error = new Error('rpc_failed');
-    error.code = 'rpc_failed';
-    throw error;
-  }
-  let payload = null;
-  try { payload = await response.json(); } catch { payload = null; }
-  if (!response.ok || !payload || payload.error) {
-    const error = new Error('rpc_failed');
-    error.code = 'rpc_failed';
-    throw error;
-  }
-  return payload.result;
-}
-
-/**
- * Read devnet USDC for one wallet. Refuses any RPC whose genesis hash is not devnet.
- * The RPC URL is never copied into the result.
- */
-export async function readDevnetUsdcBalance({ rpcUrl, address, fetcher = fetch } = {}) {
-  if (typeof address !== 'string' || !base58.test(address)) {
-    return { ok: false, code: 'invalid_address', cluster: 'devnet', address: null, amount: null };
-  }
-  if (typeof rpcUrl !== 'string' || rpcUrl.trim() === '') {
-    return { ok: false, code: 'rpc_not_configured', cluster: 'devnet', address, amount: null };
-  }
-  let endpoint;
-  try { endpoint = new URL(rpcUrl.trim()); } catch {
-    return { ok: false, code: 'invalid_rpc', cluster: 'devnet', address, amount: null };
-  }
-  if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) {
-    return { ok: false, code: 'invalid_rpc', cluster: 'devnet', address, amount: null };
-  }
-  const target = endpoint.toString();
-  try {
-    const genesis = await rpcCall(fetcher, target, 'getGenesisHash');
-    if (genesis !== DEVNET_GENESIS_HASH) {
-      return { ok: false, code: 'wrong_cluster', cluster: 'devnet', address, amount: null };
-    }
-    const listed = await rpcCall(fetcher, target, 'getTokenAccountsByOwner', [
-      address,
-      { mint: DEVNET_USDC_MINT },
-      { encoding: 'jsonParsed' },
-    ]);
-    const accounts = listed?.value;
-    if (!Array.isArray(accounts)) {
-      return { ok: false, code: 'rpc_rejected', cluster: 'devnet', address, amount: null };
-    }
-    let total = 0n;
-    for (const account of accounts) {
-      const info = account?.account?.data?.parsed?.info;
-      const tokenAmount = info?.tokenAmount;
-      if (!info || info.mint !== DEVNET_USDC_MINT || tokenAmount?.decimals !== 6) {
-        return { ok: false, code: 'rpc_rejected', cluster: 'devnet', address, amount: null };
-      }
-      if (typeof tokenAmount.amount !== 'string' || !integerAmount.test(tokenAmount.amount)) {
-        return { ok: false, code: 'rpc_rejected', cluster: 'devnet', address, amount: null };
-      }
-      total += BigInt(tokenAmount.amount);
-    }
-    return {
-      ok: true,
-      code: null,
-      cluster: 'devnet',
-      mint: DEVNET_USDC_MINT,
-      address,
-      amount: total.toString(),
-    };
-  } catch {
-    return { ok: false, code: 'rpc_failed', cluster: 'devnet', address, amount: null };
-  }
-}

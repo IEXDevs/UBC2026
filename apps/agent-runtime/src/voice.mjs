@@ -10,10 +10,12 @@ import { SECRET_NAMES } from '@ubc2026/contracts';
 import { createScrape, createSearch } from '@ubc2026/browser-search';
 import {
   DASHBOARD_TOOLS,
+  PRICE_TOOLS,
   VOICE_BROWSER_ALIASES,
   VOICE_RESEARCH_WEBHOOKS,
   sharedToolsInstruction,
 } from '@ubc2026/agent-tools';
+import { readAgentPriceQuote } from '@ubc2026/prices';
 import { META_SPARK_MODEL, resolveModelProvider } from './openrouter.mjs';
 
 export const DEFAULT_VOICE_MODEL = META_SPARK_MODEL;
@@ -23,17 +25,21 @@ export const OPENROUTER_CHAT_COMPLETIONS = 'https://api.meta.ai/v1/chat/completi
 const WEBHOOK_HEADER = 'x-elevenlabs-webhook-secret';
 const SECRET_PLACEHOLDER = '{{ELEVENLABS_WEBHOOK_SECRET}}';
 const ID = /^[a-zA-Z0-9:_-]{1,128}$/;
+const OWNER_ID = /^[a-zA-Z0-9:_.-]{1,256}$/;
 const MODEL_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+
+/** conversation_id → ownerId for the life of this isolate (plus Cache API when available). */
+const voiceOwners = new Map();
 
 export function ownerPermissionNote(value) {
   if (value === 'full') {
-    return 'The owner set full permission. Research and prepare without asking. A transaction is never sent until the owner confirms the net changes.';
+    return 'The owner set full permissions and let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay. Infer the action and call request_spend. A mainnet price quote never authorizes a transaction. Execution stays on Solana devnet.';
   }
   if (value === 'review') {
-    return 'The owner set review by AI. State what would change and wait before a trade or state change. A transaction is never sent until the owner confirms the net changes.';
+    return 'The owner set review by AI. State what would change and wait before a trade or a spend. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. A transaction is not sent until they confirm.';
   }
   if (value === 'ask') {
-    return 'The owner set ask every time. Ask before a trade, a spend, or a state change. A transaction is never sent until the owner confirms the net changes.';
+    return 'The owner set ask every time. Ask before a trade or a spend. If it is ambiguous, ask whether they mean buy, sell, spend, or pay. Do not call request_spend until they confirm.';
   }
   return '';
 }
@@ -42,11 +48,13 @@ export const VOICE_SYSTEM_PROMPT = [
   'You are the voice remote for this user\'s Maelstrom Solana agent dashboard.',
   'Prefer short confirmations.',
   'Always name the active bot before an action. If it is unclear, call list_bots and ask.',
-  'Never invent balances, addresses, trust scores, positions, or decisions. Call a tool.',
+  'Never invent balances, addresses, trust scores, positions, or decisions. Call get_wallets and read balances.displayBalanceLabel / holdings (whatever non-zero SOL or SPL is on the address).',
   'If a tool result has stub set to true, or items is empty, say the data is not available yet. Do not fill the gap.',
   'Pause and resume affect one bot. stop_all pauses every bot the list route returns. Before stop_all, say "Stopping all bots now".',
   'Pause, resume, and stop_all only make the fleet safer.',
-  'Do not send funds, approve spends, raise limits, or freeze wallets. Those stay on the app\'s existing approval screen. If the user asks, say the preview has to appear in the app first.',
+  'Fund movements go through request_spend only. That route runs trust, verify, wallet freeze, bot policy, approval mode, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.',
+  'When the owner set full permissions, they let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay.',
+  'In ask or review, wait for the owner before request_spend. Do not raise limits or freeze wallets from tools.',
   'Do not ask for seed phrases, private keys, passwords, or API keys.',
   'Never read out Live View URLs, tokens, or secrets. If a tool hides them, leave them hidden.',
   'If a tool returns confirmation-required or manual-review, say so and stop.',
@@ -83,6 +91,7 @@ function toVoiceTool(def) {
  */
 export const VOICE_TOOLS = Object.freeze([
   ...VOICE_RESEARCH_WEBHOOKS.map(toVoiceTool),
+  ...PRICE_TOOLS.map(toVoiceTool),
   ...DASHBOARD_TOOLS.map(toVoiceTool),
   ...VOICE_BROWSER_ALIASES.map(toVoiceTool),
 ]);
@@ -106,6 +115,7 @@ function webhookHeaders() {
   return Object.freeze({
     [WEBHOOK_HEADER]: SECRET_PLACEHOLDER,
     'x-owner-id': '{{owner_id}}',
+    'x-spend-permission': '{{spend_permission}}',
   });
 }
 
@@ -226,10 +236,69 @@ function authorize(request, env) {
   return null;
 }
 
-function ownerId(request) {
-  const value = request.headers.get('x-owner-id');
-  if (typeof value !== 'string' || !ID.test(value)) return null;
-  return value;
+function readOwnerCandidate(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.includes('{{') || trimmed.includes('}}')) return null;
+  if (!OWNER_ID.test(trimmed)) return null;
+  return trimmed;
+}
+
+function ownerIdFromHeader(request) {
+  return readOwnerCandidate(request.headers.get('x-owner-id'));
+}
+
+function ownerIdFromBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const direct = readOwnerCandidate(body.owner_id) || readOwnerCandidate(body.ownerId);
+  if (direct) return direct;
+  const dyn = body.dynamic_variables && typeof body.dynamic_variables === 'object'
+    ? body.dynamic_variables
+    : null;
+  if (dyn) {
+    const fromDyn = readOwnerCandidate(dyn.owner_id) || readOwnerCandidate(dyn.ownerId);
+    if (fromDyn) return fromDyn;
+  }
+  const parameters = body.parameters && typeof body.parameters === 'object' && !Array.isArray(body.parameters)
+    ? body.parameters
+    : null;
+  if (parameters) {
+    return readOwnerCandidate(parameters.owner_id) || readOwnerCandidate(parameters.ownerId);
+  }
+  return null;
+}
+
+function voiceOwnerCacheKey(conversationId) {
+  return new Request(`https://maelstrom.voice/owner/${encodeURIComponent(conversationId)}`);
+}
+
+async function rememberVoiceOwner(conversationId, owner) {
+  voiceOwners.set(conversationId, owner);
+  try {
+    if (typeof caches === 'undefined' || !caches?.default?.put) return;
+    await caches.default.put(
+      voiceOwnerCacheKey(conversationId),
+      new Response(owner, {
+        headers: { 'cache-control': 'max-age=86400', 'content-type': 'text/plain;charset=utf-8' },
+      }),
+    );
+  } catch {
+    // Isolate map is enough for same-worker tool calls after bind.
+  }
+}
+
+async function recallVoiceOwner(conversationId) {
+  if (voiceOwners.has(conversationId)) return voiceOwners.get(conversationId);
+  try {
+    if (typeof caches === 'undefined' || !caches?.default?.match) return null;
+    const hit = await caches.default.match(voiceOwnerCacheKey(conversationId));
+    if (!hit) return null;
+    const text = readOwnerCandidate(await hit.text());
+    if (text) voiceOwners.set(conversationId, text);
+    return text;
+  } catch {
+    return null;
+  }
 }
 
 function parameterBag(body, name) {
@@ -321,6 +390,21 @@ async function speakable(response, secrets) {
   };
 }
 
+async function runPriceTool(parameters, env) {
+  const rawKey = env.JUPITER_API_KEY;
+  const apiKey = typeof rawKey === 'string' && rawKey.trim() ? rawKey.trim() : null;
+  try {
+    const quote = await readAgentPriceQuote(parameters.mint, {
+      fetcher: typeof env.fetch === 'function' ? env.fetch : fetch,
+      apiKey,
+    });
+    return { handler: 'price', quote };
+  } catch (error) {
+    const code = typeof error?.code === 'string' ? error.code : 'price_unavailable';
+    return { error: code };
+  }
+}
+
 async function runResearchTool(name, parameters, env) {
   const secrets = knownSecrets(env);
   try {
@@ -360,7 +444,11 @@ async function resolveSessionId(parameters, owner, fetchApi, env) {
   return open[0]?.sessionRecordId || '';
 }
 
-async function runCalls(toolDef, parameters, owner, fetchApi, env) {
+function trustedSpendPermission(value) {
+  return value === 'ask' || value === 'review' || value === 'full' ? value : 'ask';
+}
+
+async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {}) {
   const secrets = knownSecrets(env);
   if (toolDef.name === 'stop_all') {
     const listRequest = requestFor(toolDef.calls[0], parameters, owner);
@@ -378,6 +466,34 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env) {
     return { calls: toolDef.calls.map(entry => ({ method: entry.method, path: entry.path })), list: summary, paused };
   }
   let params = { ...parameters };
+  if (toolDef.name === 'request_spend') {
+    const body = {
+      botId: params.botId,
+      action: params.action,
+      amount: params.amount,
+      permission: trustedSpendPermission(options.spendPermission),
+      confirmed: false,
+    };
+    if (typeof params.destination === 'string') body.destination = params.destination;
+    if (typeof params.handle === 'string') body.handle = params.handle;
+    if (typeof params.asset === 'string') body.asset = params.asset;
+    if (params.quoteCluster === 'mainnet') {
+      body.quote = { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false };
+    }
+    const outbound = new Request('https://runtime.internal/api/spend', {
+      method: 'POST',
+      headers: {
+        'x-owner-id': owner,
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const response = await fetchApi(outbound, env);
+    return {
+      calls: [{ method: 'POST', path: '/api/spend', ...(await speakable(response, secrets)) }],
+    };
+  }
   if (
     (toolDef.name === 'browser_navigate' || toolDef.name === 'browser_live_view' || toolDef.name === 'browser_release')
     && !ID.test(params.sessionRecordId || '')
@@ -434,6 +550,21 @@ function validateParameters(toolDef, parameters) {
   if (toolDef.properties.from && parameters.from != null) {
     if (typeof parameters.from !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.from)) return false;
   }
+  if (toolDef.properties.mint && parameters.mint != null) {
+    if (typeof parameters.mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.mint)) return false;
+  }
+  if (toolDef.properties.action && parameters.action != null) {
+    if (!['buy', 'sell', 'spend', 'pay'].includes(parameters.action)) return false;
+  }
+  if (toolDef.properties.handle && parameters.handle != null) {
+    if (typeof parameters.handle !== 'string' || !/^[a-z0-9][a-z0-9_]{1,31}$/.test(parameters.handle)) return false;
+  }
+  if (toolDef.properties.destination && parameters.destination != null) {
+    if (typeof parameters.destination !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.destination)) return false;
+  }
+  if (toolDef.properties.quoteCluster && parameters.quoteCluster != null) {
+    if (parameters.quoteCluster !== 'mainnet' && parameters.quoteCluster !== 'devnet') return false;
+  }
   return true;
 }
 
@@ -443,6 +574,9 @@ export async function handleVoiceRequest(request, env = {}, { fetchApi, fetcher 
   if (url.pathname === '/voice/llm/chat/completions' && request.method === 'POST') {
     return handleCustomLlm(request, env, fetcher);
   }
+  if (url.pathname === '/voice/session-owner' && request.method === 'POST') {
+    return handleSessionOwner(request, env);
+  }
   const toolMatch = url.pathname.match(/^\/voice\/tools\/([^/]+)$/);
   if (toolMatch && request.method === 'POST') {
     return handleTool(toolMatch[1], request, env, fetchApi);
@@ -450,24 +584,51 @@ export async function handleVoiceRequest(request, env = {}, { fetchApi, fetcher 
   return json({ error: 'not_found' }, 404);
 }
 
+async function handleSessionOwner(request, env) {
+  const denied = authorize(request, env);
+  if (denied) return denied;
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'invalid_body' }, 400);
+  const conversationId = typeof body.conversationId === 'string' ? body.conversationId.trim().slice(0, 128) : '';
+  const owner = readOwnerCandidate(body.ownerId) || readOwnerCandidate(body.owner_id);
+  if (!ID.test(conversationId) || !owner) return json({ error: 'invalid_body' }, 400);
+  await rememberVoiceOwner(conversationId, owner);
+  return json({ ok: true, conversationId, ownerId: owner });
+}
+
+async function resolveToolOwner(request, body) {
+  const fromHeader = ownerIdFromHeader(request);
+  if (fromHeader) return fromHeader;
+  const fromBody = ownerIdFromBody(body);
+  if (fromBody) return fromBody;
+  const conversationId = typeof body?.conversation_id === 'string' ? body.conversation_id.trim().slice(0, 128) : '';
+  if (conversationId) return recallVoiceOwner(conversationId);
+  return null;
+}
+
 async function handleTool(name, request, env, fetchApi) {
   const denied = authorize(request, env);
   if (denied) return denied;
-  const owner = ownerId(request);
-  if (!owner) return json({ error: 'owner_required' }, 400);
   const toolDef = VOICE_TOOLS.find(item => item.name === name);
   if (!toolDef) return json({ error: 'unknown_tool' }, 404);
   const body = await request.json().catch(() => null);
   const parsed = parameterBag(body, name);
   if (parsed.error) return json({ error: parsed.error }, 400);
   if (!validateParameters(toolDef, parsed.parameters)) return json({ error: 'invalid_parameters' }, 400);
+  const owner = await resolveToolOwner(request, body);
+  if (!owner) return json({ error: 'owner_required' }, 400);
+  if (parsed.conversationId) await rememberVoiceOwner(parsed.conversationId, owner);
   let result;
   try {
     if (toolDef.handler === 'research') {
       result = await runResearchTool(name, parsed.parameters, env);
+    } else if (toolDef.handler === 'price') {
+      result = await runPriceTool(parsed.parameters, env);
     } else {
       if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
-      result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env);
+      result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env, {
+        spendPermission: request.headers.get('x-spend-permission'),
+      });
     }
   } catch {
     return json({ error: 'voice_api_failed' }, 502);

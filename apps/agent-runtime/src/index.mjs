@@ -1,5 +1,6 @@
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
-import { createDexScreenerPriceProvider } from '@ubc2026/prices';
+import { handleSpend } from './spend-route.mjs';
+import { resolvePriceLookup } from './price-lookup.mjs';
 import { BotDurableObject } from './bot-do.mjs';
 import {
   processQuickNodeWebhook,
@@ -109,6 +110,7 @@ async function dispatch(request, env, rawEnv = env) {
     }
 
     const matched = matchApiRoute(request.method, url.pathname);
+    if (matched?.route.id === 'spend.create') return handleSpend(request, env);
     if (matched?.route.action && matched.params.botId) {
       const stub = botStub(env, matched.params.botId);
       const botId = matched.params.botId;
@@ -125,8 +127,10 @@ async function dispatch(request, env, rawEnv = env) {
       'me',
       'wallets.list',
       'wallets.create',
+      'wallets.persist',
       'wallets.sign',
       'bots.list',
+      'bots.create',
       'bots.delete',
       'bots.chat',
       'events.list',
@@ -244,9 +248,7 @@ function logCron(env, ctx, detail) {
 export default worker;
 
 function priceLookup(env) {
-  if (env.lookupPrice === null) return null;
-  if (typeof env.lookupPrice === 'function') return env.lookupPrice;
-  return createDexScreenerPriceProvider({ fetcher: env.fetch ?? fetch });
+  return resolvePriceLookup(env);
 }
 
 async function quotePositions(lookup, positions) {

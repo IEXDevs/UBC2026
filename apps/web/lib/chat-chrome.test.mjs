@@ -10,16 +10,19 @@ const rail = readFileSync(join(root, 'components/AnimatedList.css'), 'utf8');
 const bubbles = readFileSync(join(root, 'components/ChatBubbles.js'), 'utf8');
 const page = readFileSync(join(root, 'app/page.js'), 'utf8');
 
-test('message edit stays hidden until hover or focus on devices that can hover', () => {
-  const gate = css.slice(css.indexOf("@media (hover: hover) and (pointer: fine) {\n  [data-slot='message'] .chat-edit"));
-  assert.notEqual(gate, '');
-  assert.match(gate, /\[data-slot='message'\] \.chat-edit \{\s*opacity: 0;/);
-  assert.match(gate, /\[data-slot='message'\]:hover \.chat-edit/);
-  assert.match(gate, /\[data-slot='message'\]:focus \.chat-edit/);
-  assert.match(gate, /\[data-slot='message'\]:focus-within \.chat-edit/);
-  assert.match(gate, /opacity: 0\.7/);
-  const resting = css.slice(css.indexOf('.chat-edit {'), css.indexOf('.chat-edit:hover'));
-  assert.match(resting, /opacity: 0\.7/);
+test('the edit button stays hidden until the message is hovered or focused', () => {
+  const start = css.indexOf('button.chat-edit {');
+  const block = css.slice(start, css.indexOf('.chat-revise {', start));
+  assert.match(block, /button\.chat-edit \{\s*[^}]*opacity: 0;/);
+  assert.match(block, /button\.chat-edit:disabled \{\s*opacity: 0;/);
+  assert.doesNotMatch(block, /@media \(hover: hover\)/);
+  assert.match(block, /\[data-slot='message'\]:hover button\.chat-edit/);
+  assert.match(block, /\[data-slot='message'\]:focus button\.chat-edit/);
+  assert.match(block, /\[data-slot='message'\]:focus-within button\.chat-edit/);
+  assert.match(block, /button\.chat-edit:focus/);
+  assert.match(block, /button\.chat-edit:focus-visible/);
+  assert.match(bubbles, /className="chat-edit"/);
+  assert.match(bubbles, /aria-label="Edit message"/);
   assert.match(bubbles, /tabIndex=\{onEdit && !editing \? 0 : undefined\}/);
 });
 
@@ -39,4 +42,29 @@ test('chat message lists reuse the agent rail scrollbar', () => {
   assert.match(chat, /border-radius: 3px;\s*background: var\(--al-thumb\);/);
   assert.match(page, /pane === 'Main' \? ' is-chat'/);
   assert.doesNotMatch(css, /\.voice-script,\s*\.voice-script \.chat-log/);
+});
+
+test('the chat top bar does not cover messages or the scrollbar', () => {
+  const topbar = css.slice(css.indexOf('.stage:not(.is-book) .topbar {'), css.indexOf('.stage:not(.is-book) .topbar .dock-slot'));
+  assert.match(topbar, /position: absolute;/);
+  assert.match(topbar, /background: transparent;/);
+  assert.match(topbar, /pointer-events: none;/);
+  assert.match(css, /\.stage:not\(\.is-book\) \.topbar \.dock-slot \{\s*pointer-events: auto;/);
+  const chat = css.slice(css.indexOf('.thread.is-chat {'), css.indexOf('.thread.is-chat::-webkit-scrollbar'));
+  assert.match(chat, /background: transparent;/);
+  assert.doesNotMatch(chat, /background:\s*#000/);
+  const bubble = css.slice(css.indexOf('.thread.is-chat .bubble {'), css.indexOf('.thread.is-chat::-webkit-scrollbar'));
+  assert.match(bubble, /background: transparent;/);
+  assert.doesNotMatch(bubble, /background:\s*#000/);
+});
+
+test('a chat message stays on its own side of the midline', () => {
+  const block = css.slice(
+    css.indexOf(".agent-thread [data-slot='message-content']"),
+    css.indexOf('.voice-dock'),
+  );
+  assert.match(block, /\.agent-thread \[data-slot='message-content'\] \{\s*width: auto;\s*max-width: 50%;/);
+  assert.match(block, /\[data-align='end'\] \[data-slot='message-content'\] \{\s*margin-left: auto;/);
+  assert.match(block, /\.agent-thread \[data-slot='bubble'\] \{\s*max-width: 100%;/);
+  assert.doesNotMatch(block, /max-width: min\(72%/);
 });

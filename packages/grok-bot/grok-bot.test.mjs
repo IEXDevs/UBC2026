@@ -6,6 +6,7 @@ import {
   GROK_BOT_ROLE,
   GrokBotError,
   exportGrokChat,
+  grokSpendRequest,
   prepareNotablePosts,
   redactSecrets,
   selectNotableOnchainEvents,
@@ -167,6 +168,22 @@ test('chat export redacts secrets and can render markdown', () => {
   assert.match(exported.markdown, /## assistant · 2023-11-14T22:14:10.000Z/);
   assert.match(exported.markdown, /## tool · /);
   assert.match(redactSecrets(`Authorization: Bearer ${SECRET} more`), /Bearer \[redacted\]/);
+});
+
+test('Grok Bot spend uses the same permissioned spend request as the app', () => {
+  const request = grokSpendRequest({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'pay',
+    amount: '1000',
+    destination: '11111111111111111111111111111111',
+  });
+  assert.equal(request.method, 'POST');
+  assert.equal(request.path, '/api/spend');
+  assert.equal(request.body.permission, 'full');
+  assert.equal(request.body.action, 'pay');
+  assert.equal(request.body.confirmed, false);
+  assert.equal(JSON.stringify(request).includes('signature'), false);
 });
 
 test('the module source has no X client', () => {

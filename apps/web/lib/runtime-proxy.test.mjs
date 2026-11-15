@@ -5,9 +5,11 @@ import { isAllowedRuntimePath, runtimeProxyTarget, safeRuntimeSearch } from './r
 test('runtime proxy allowlist is the live owner and bot routes', () => {
   assert.equal(isAllowedRuntimePath('/api/bots'), true);
   assert.equal(isAllowedRuntimePath('/api/wallets'), true);
+  assert.equal(isAllowedRuntimePath('/api/wallets/persist'), true);
   assert.equal(isAllowedRuntimePath('/api/payments'), true);
   assert.equal(isAllowedRuntimePath('/api/profiles/me'), true);
   assert.equal(isAllowedRuntimePath('/api/transfers'), true);
+  assert.equal(isAllowedRuntimePath('/api/spend'), true);
   assert.equal(isAllowedRuntimePath('/api/me'), true);
   assert.equal(isAllowedRuntimePath('/api/metrics'), true);
   assert.equal(isAllowedRuntimePath('/api/logs'), true);

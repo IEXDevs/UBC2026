@@ -1,6 +1,7 @@
 /**
- * Owner permission for agent actions. A transaction always waits for the person,
- * no matter which mode is selected.
+ * Owner permission for agent actions.
+ * Full permissions lets the agent manage funds. Ask and review still wait
+ * for the person. Every mode uses the same spend API.
  */
 import { formatBaseUnits } from './money-views.mjs';
 
@@ -22,21 +23,33 @@ export function permissionById(id) {
   return PERMISSIONS.find(item => item.id === parsePermission(id));
 }
 
-/** Transactions are never auto-sent. */
-export function transactionNeedsPerson() {
-  return true;
+/** Ask and review wait for the person. Full permissions manages funds. */
+export function transactionNeedsPerson(id) {
+  return parsePermission(id) !== 'full';
+}
+
+export function managesFunds(id) {
+  return parsePermission(id) === 'full';
+}
+
+export function readStoredPermission(storage) {
+  try {
+    return parsePermission(storage?.getItem?.(SPEND_PERMISSION_KEY));
+  } catch {
+    return 'ask';
+  }
 }
 
 export function permissionInstruction(id) {
   const mode = parsePermission(id);
-  const shared = 'A transaction, trade, or transfer is never sent until the owner confirms a summary of the net changes.';
+  const shared = 'Fund movements go through the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.';
   if (mode === 'full') {
-    return `Permission is full. You may research, browse, and prepare actions without asking. ${shared}`;
+    return `Permission is full. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay. Infer the action and call the spend API. ${shared}`;
   }
   if (mode === 'review') {
-    return `Permission is review by AI. Research freely, then state what you would change and wait before any trade or state change. ${shared}`;
+    return `Permission is review by AI. State what would change and wait before a trade or a spend. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. ${shared}`;
   }
-  return `Permission is ask every time. Ask the owner before a trade, a spend, or any action that changes state. ${shared}`;
+  return `Permission is ask every time. Ask the owner before a trade or a spend. If it is ambiguous, ask whether they mean buy, sell, spend, or pay. ${shared}`;
 }
 
 function units(value) {

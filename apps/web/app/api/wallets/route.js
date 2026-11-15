@@ -142,9 +142,32 @@ export async function POST(request) {
     } catch {
       console.error('[api/wallets]', 'account_persist_failed');
     }
+    const wallets = [result.main, ...result.additional].filter(Boolean).map(publicWallet);
+    const runtime = readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL');
+    if (runtime && typeof runtime === 'string' && runtime.trim() && wallets.length) {
+      try {
+        const base = new URL(runtime.trim());
+        if (base.protocol === 'https:' || base.protocol === 'http:') {
+          await fetch(new URL('/api/wallets/persist', base), {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'content-type': 'application/json',
+              ...(typeof ownerHeader === 'string' && ownerHeader.trim()
+                ? { 'x-owner-id': ownerHeader.trim() }
+                : {}),
+            },
+            body: JSON.stringify({ wallets }),
+            cache: 'no-store',
+          }).catch(() => null);
+        }
+      } catch {
+        /* local Privy wallets still return below */
+      }
+    }
     return Response.json({
       created: result.created === true,
-      wallets: [result.main, ...result.additional].filter(Boolean).map(publicWallet),
+      wallets,
       loginMethods: result.loginMethods || [],
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
