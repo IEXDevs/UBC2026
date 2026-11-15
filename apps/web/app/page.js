@@ -39,7 +39,7 @@ import {
   writeRoster,
 } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
-import { profileRailLabel } from '../lib/profile.mjs';
+import { profileAfterDirectoryRead, profileRailLabel } from '../lib/profile.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import {
   deleteOwnerBot,
@@ -412,12 +412,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       return undefined;
     }
     setProfileReady(false);
+    let local = null;
     try {
       const raw = localStorage.getItem(key);
-      const local = raw ? JSON.parse(raw) : null;
+      local = raw ? JSON.parse(raw) : null;
       if (local?.handle && local?.displayName) setProfile(local);
       else setProfile(null);
     } catch {
+      local = null;
       setProfile(null);
     }
     const profileUrl = shellRuntimeUrl('/api/profiles/me');
@@ -436,12 +438,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         ]);
         const body = await response.json();
         if (stop) return;
-        if (body.profile?.handle) {
-          setProfile(body.profile);
-          localStorage.setItem(key, JSON.stringify(body.profile));
-        } else if (body.source === 'supabase') {
+        const next = profileAfterDirectoryRead(local, body);
+        if (next.persist === 'write' && next.profile) {
+          setProfile(next.profile);
+          localStorage.setItem(key, JSON.stringify(next.profile));
+        } else if (next.persist === 'clear') {
           setProfile(null);
           localStorage.removeItem(key);
+        } else if (next.profile) {
+          setProfile(next.profile);
         }
       } catch {
         // Keep the profile stored on this device.
@@ -544,8 +549,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         body: JSON.stringify(stored),
       });
       const body = await response.json().catch(() => ({}));
-      if (response.status === 409) return { error: 'handle_taken' };
-      if (!response.ok) throw new Error('profile_save_failed');
+      if (response.status === 409 || body.error === 'handle_taken') return { error: 'handle_taken', status: response.status };
+      if (!response.ok) {
+        const code = typeof body.error === 'string' && /^[a-z0-9_]{1,64}$/i.test(body.error)
+          ? body.error
+          : 'profile_save_failed';
+        const error = new Error(code);
+        error.code = code;
+        error.status = response.status;
+        throw error;
+      }
       setProfile(stored);
       if (key) localStorage.setItem(key, JSON.stringify(stored));
       return body;

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
+import { claimSaveNote } from '../lib/profile.mjs';
 
 export default function ClaimHandle({ accountLabel = '', onSave }) {
   const [displayName, setDisplayName] = useState(accountLabel || '');
@@ -30,13 +31,13 @@ export default function ClaimHandle({ accountLabel = '', onSave }) {
               handle: nextHandle,
             })).then((saved) => {
               if (saved?.error === 'handle_taken') {
-                setNote('That handle is already taken.');
+                setNote(claimSaveNote(saved));
                 setPending(false);
                 return;
               }
               setNote('');
-            }).catch(() => {
-              setNote('The directory did not update. Try the claim again.');
+            }).catch((error) => {
+              setNote(claimSaveNote(error));
               setPending(false);
             });
           }}
