@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   META_SPARK_MODEL,
+  OPENROUTER_FREE_MODEL,
   OPENROUTER_SPARK_MODEL,
   buildTextChatMessages,
   completeTextChat,
@@ -43,7 +44,9 @@ test('LLM_ keys resolve to Meta Model API', () => {
   assert.equal(fromOpenrouterSlot.provider, 'meta');
   const or = resolveTextChatProvider({ openrouterApiKey: OR_KEY });
   assert.equal(or.provider, 'openrouter');
-  assert.equal(or.model, OPENROUTER_SPARK_MODEL);
+  assert.equal(or.model, OPENROUTER_FREE_MODEL);
+  assert.equal(or.model.endsWith(':free'), true);
+  assert.notEqual(or.model, OPENROUTER_SPARK_MODEL);
 });
 
 test('completeTextChat hits Meta and never puts the key in the body', async () => {
@@ -77,6 +80,22 @@ test('completeTextChat keeps the provider token total', async () => {
     }),
   });
   assert.deepEqual(result.usage, { prompt: 11, completion: 4, total: 15 });
+});
+
+test('OpenRouter text chat skips a paid model id', async () => {
+  let seen;
+  const result = await completeTextChat({
+    openrouterApiKey: OR_KEY,
+    model: 'openai/gpt-4o',
+    message: 'status?',
+    fetcher: async (_url, options) => {
+      seen = JSON.parse(options.body);
+      return Response.json({ choices: [{ message: { content: 'free reply' } }] });
+    },
+  });
+  assert.equal(result.model, OPENROUTER_FREE_MODEL);
+  assert.equal(seen.model, OPENROUTER_FREE_MODEL);
+  assert.equal(seen.model.endsWith(':free'), true);
 });
 
 test('missing model key does not call the network', async () => {

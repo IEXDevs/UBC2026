@@ -23,6 +23,9 @@ import {
   normalizeHandle,
   parseRecipient,
   profileInitials,
+  OPENROUTER_FREE_MODEL,
+  isFreeOpenRouterModel,
+  selectFreeOpenRouterModel,
 } from './contracts.mjs';
 
 const wallet = {
@@ -213,6 +216,23 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.deepEqual(parseRecipient('@richclub.sol'), { kind: 'sns', domain: 'richclub.sol' });
   assert.equal(parseRecipient('not a handle'), null);
   assert.equal(profileInitials('Alex Rivera'), 'AR');
+});
+
+test('OpenRouter accepts only :free ids or a zero price', () => {
+  assert.equal(OPENROUTER_FREE_MODEL.endsWith(':free'), true);
+  assert.equal(isFreeOpenRouterModel('meta-llama/llama-3.3-70b-instruct:free'), true);
+  assert.equal(isFreeOpenRouterModel('vendor/zero', { prompt: '0', completion: '0.0', request: 0 }), true);
+  assert.equal(isFreeOpenRouterModel('openai/gpt-4o'), false);
+  assert.equal(isFreeOpenRouterModel('openai/gpt-4o', { prompt: '0.000002', completion: '0' }), false);
+  assert.equal(isFreeOpenRouterModel('vendor/blank', {}), false);
+  assert.equal(isFreeOpenRouterModel('  paid-model  '), false);
+  assert.equal(selectFreeOpenRouterModel('openai/gpt-4o'), OPENROUTER_FREE_MODEL);
+  assert.equal(selectFreeOpenRouterModel('google/gemma-2-9b-it:free'), 'google/gemma-2-9b-it:free');
+  assert.equal(
+    selectFreeOpenRouterModel('vendor/zero', { pricing: { prompt: '0', completion: '0' } }),
+    'vendor/zero',
+  );
+  assert.equal(selectFreeOpenRouterModel('openai/gpt-4o', { fallback: 'openai/gpt-4o-mini' }), null);
 });
 
 test('builtin templates are locked and non-deletable', () => {

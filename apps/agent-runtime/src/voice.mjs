@@ -6,7 +6,7 @@
  * No secret values are written into the agent payload.
  */
 import { timingSafeEqual } from 'node:crypto';
-import { SECRET_NAMES } from '@ubc2026/contracts';
+import { OPENROUTER_FREE_MODEL, SECRET_NAMES, selectFreeOpenRouterModel } from '@ubc2026/contracts';
 import { createScrape, createSearch } from '@ubc2026/browser-search';
 import {
   DASHBOARD_TOOLS,
@@ -101,8 +101,12 @@ export const VOICE_TOOLS = Object.freeze([
 
 export function grokVoiceModel(env = {}) {
   const override = typeof env.OPENROUTER_MODEL_VOICE === 'string' ? env.OPENROUTER_MODEL_VOICE.trim() : '';
-  if (MODEL_ID.test(override) && override.length <= 128) return override;
-  return resolveModelProvider(env).defaultModel || DEFAULT_VOICE_MODEL;
+  const resolved = resolveModelProvider(env);
+  const candidate = MODEL_ID.test(override) && override.length <= 128
+    ? override
+    : (resolved.defaultModel || DEFAULT_VOICE_MODEL);
+  if (resolved.provider !== 'openrouter') return candidate;
+  return selectFreeOpenRouterModel(candidate) || OPENROUTER_FREE_MODEL;
 }
 
 export function voiceChatCompletionsUrl(env = {}) {
@@ -749,8 +753,14 @@ async function handleCustomLlm(request, env, fetcher) {
       content: permissionNote,
     });
   }
+  let model = grokVoiceModel(env);
+  if (resolved.provider === 'openrouter') {
+    const selected = selectFreeOpenRouterModel(model);
+    if (!selected) return json({ error: 'openrouter_paid_model' }, 400);
+    model = selected;
+  }
   const payload = {
-    model: grokVoiceModel(env),
+    model,
     messages: adapted,
     stream: true,
   };

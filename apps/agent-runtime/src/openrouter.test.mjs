@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
-import { MODEL_ROLES, buildChatMessages, buildModelMessages, createOpenRouter } from './openrouter.mjs';
+import {
+  MODEL_ROLES,
+  OPENROUTER_FREE_MODEL,
+  buildChatMessages,
+  buildModelMessages,
+  createOpenRouter,
+  createOpenRouterFromEnv,
+} from './openrouter.mjs';
 
 const API_KEY = 'test-openrouter-key-value';
 
@@ -124,4 +131,45 @@ test('chat completion uses Muse Spark and returns a reply', async () => {
   assert.equal(seen[0].messages[0].role, 'developer');
   assert.equal(seen[0].messages[0].content, PLATFORM_PROMPT);
   assert.equal(seen[0].reasoning_effort, 'minimal');
+});
+
+test('OpenRouter skips paid models and sends a free or zero-price model', async () => {
+  const seen = [];
+  const fetcher = async (_url, options) => {
+    seen.push(JSON.parse(options.body).model);
+    return Response.json({ choices: [{ message: { content: 'ok' } }] });
+  };
+  const client = createOpenRouter({
+    apiKey: API_KEY,
+    provider: 'openrouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'meta/muse-spark-1.3-contributor',
+    models: { decide: 'openai/gpt-4o', research: 'google/gemma-2-9b-it:free' },
+    fetcher,
+  });
+  const decided = await client.complete({ role: 'decide', goal: 'yield', task: 'Role: decide' });
+  const researched = await client.complete({ role: 'research', goal: 'yield', task: 'Role: research' });
+  assert.equal(decided.model, OPENROUTER_FREE_MODEL);
+  assert.equal(researched.model, 'google/gemma-2-9b-it:free');
+  assert.equal(seen.includes('openai/gpt-4o'), false);
+  assert.equal(seen.includes('meta/muse-spark-1.3-contributor'), false);
+
+  const priced = createOpenRouter({
+    apiKey: API_KEY,
+    provider: 'openrouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    models: { research: 'vendor/zero' },
+    modelPricing: { 'vendor/zero': { prompt: '0', completion: '0', request: '0' } },
+    fetcher,
+  });
+  const zero = await priced.complete({ role: 'research', goal: 'yield', task: 'Role: research' });
+  assert.equal(zero.model, 'vendor/zero');
+
+  const fromEnv = createOpenRouterFromEnv({
+    OPENROUTER_API_KEY: API_KEY,
+    OPENROUTER_MODEL_DECIDE: 'openai/gpt-4o',
+    OPENROUTER_MODEL_RESEARCH: 'qwen/qwen3-next:free',
+  }, fetcher);
+  assert.equal(fromEnv.modelFor('decide'), OPENROUTER_FREE_MODEL);
+  assert.equal(fromEnv.modelFor('research'), 'qwen/qwen3-next:free');
 });

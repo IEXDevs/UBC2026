@@ -5,7 +5,14 @@
  * Falls back to OPENROUTER_API_KEY (sk-or-…) → OpenRouter.
  * Tests inject `fetcher` and pass without a live key.
  */
-import { SECRET_NAMES } from '@ubc2026/contracts';
+import {
+  OPENROUTER_FREE_MODEL,
+  SECRET_NAMES,
+  isFreeOpenRouterModel,
+  selectFreeOpenRouterModel,
+} from '@ubc2026/contracts';
+
+export { OPENROUTER_FREE_MODEL, isFreeOpenRouterModel, selectFreeOpenRouterModel };
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
 
 export class OpenRouterError extends Error {
@@ -22,7 +29,10 @@ export const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
 /** Meta Model API id (Contributor tier). */
 export const META_SPARK_MODEL = 'muse-spark-1.3-contributor';
-/** OpenRouter slug for the same checkpoint, if falling back. */
+/**
+ * OpenRouter slug for Muse Spark. Paid. Never sent: the OpenRouter path
+ * uses OPENROUTER_FREE_MODEL instead.
+ */
 export const OPENROUTER_SPARK_MODEL = 'meta/muse-spark-1.3-contributor';
 
 /** Default model per loop role. */
@@ -89,7 +99,7 @@ export function resolveModelProvider(env = {}) {
       provider: 'openrouter',
       apiKey: openrouterKey,
       baseUrl: OPENROUTER_BASE,
-      defaultModel: OPENROUTER_SPARK_MODEL,
+      defaultModel: OPENROUTER_FREE_MODEL,
     };
   }
   return {
@@ -199,6 +209,7 @@ async function postChat({
   payload,
   hidden,
   timeoutMs = 60000,
+  modelPricing = null,
 }) {
   if (typeof apiKey !== 'string' || apiKey.trim() === '') throw new OpenRouterError('openrouter_not_configured', 503);
   const body = {
@@ -209,6 +220,14 @@ async function postChat({
     // Muse Spark is tuned for default temperature; omit unless explicitly set.
     if (body.temperature == null) delete body.temperature;
     if (body.reasoning_effort == null) body.reasoning_effort = 'minimal';
+  } else if (provider === 'openrouter') {
+    const allowed = selectFreeOpenRouterModel(body.model, {
+      pricing: modelPricing?.[body.model],
+    });
+    if (!allowed || !isFreeOpenRouterModel(allowed, modelPricing?.[allowed])) {
+      throw new OpenRouterError('openrouter_paid_model', 400);
+    }
+    body.model = allowed;
   }
   let response;
   try {
@@ -270,19 +289,30 @@ export function createOpenRouter({
   provider = 'meta',
   models = {},
   defaultModel = META_SPARK_MODEL,
+  modelPricing = null,
   secrets = [],
 } = {}) {
   const hidden = [apiKey, ...secrets].filter(value => typeof value === 'string' && value.length >= 8);
+  const catalog = modelPricing && typeof modelPricing === 'object' ? modelPricing : null;
+  function useModel(modelId) {
+    if (provider !== 'openrouter') return modelId;
+    const id = typeof modelId === 'string' ? modelId.trim() : '';
+    const selected = selectFreeOpenRouterModel(id, { pricing: catalog?.[id] });
+    if (!selected || !isFreeOpenRouterModel(selected, catalog?.[selected])) {
+      throw new OpenRouterError('openrouter_paid_model', 400);
+    }
+    return selected;
+  }
   return {
     provider,
     modelFor(role) {
       if (!ROLES.includes(role)) throw new OpenRouterError('unknown_model_role', 400);
-      return modelFor(role, models, defaultModel);
+      return useModel(modelFor(role, models, defaultModel));
     },
     async complete({ role, goal = '', task = '', untrusted = [], images = [] }) {
       const resolved = role === 'research' && images.length > 0 ? 'vision' : role;
       if (!ROLES.includes(resolved)) throw new OpenRouterError('unknown_model_role', 400);
-      const model = modelFor(resolved, models, defaultModel);
+      const model = useModel(modelFor(resolved, models, defaultModel));
       const messages = buildModelMessages({ goal, task, untrusted, secrets: hidden });
       if (images.length > 0) {
         if (images.length > 3) throw new OpenRouterError('invalid_image', 400);
@@ -308,13 +338,14 @@ export function createOpenRouter({
         fetcher,
         payload,
         hidden,
+        modelPricing: catalog,
       });
       return { role: resolved, model: result.model, text: result.text };
     },
     async chat({ botName, botGoal, botType, history = [], message = '' } = {}) {
       const latest = typeof message === 'string' ? message.trim() : '';
       if (!latest) throw new OpenRouterError('message_required', 400);
-      const model = modelFor('research', models, defaultModel);
+      const model = useModel(modelFor('research', models, defaultModel));
       const messages = buildChatMessages({
         botName,
         botGoal,
@@ -332,6 +363,7 @@ export function createOpenRouter({
         fetcher,
         payload,
         hidden,
+        modelPricing: catalog,
       });
     },
   };
@@ -339,17 +371,24 @@ export function createOpenRouter({
 
 export function createOpenRouterFromEnv(env = {}, fetcher = fetch) {
   const resolved = resolveModelProvider(env);
+  const provider = resolved.provider === 'none' ? 'meta' : resolved.provider;
   const models = {};
   for (const [role, name] of Object.entries(ROLE_ENV)) {
-    if (typeof env[name] === 'string' && env[name].trim()) models[role] = env[name].trim();
+    if (typeof env[name] !== 'string' || !env[name].trim()) continue;
+    const value = env[name].trim();
+    if (provider === 'openrouter' && !isFreeOpenRouterModel(value)) continue;
+    models[role] = value;
   }
+  const defaultModel = provider === 'openrouter'
+    ? (selectFreeOpenRouterModel(resolved.defaultModel) || OPENROUTER_FREE_MODEL)
+    : resolved.defaultModel;
   return createOpenRouter({
     apiKey: resolved.apiKey,
     fetcher,
     baseUrl: resolved.baseUrl,
-    provider: resolved.provider === 'none' ? 'meta' : resolved.provider,
+    provider,
     models,
-    defaultModel: resolved.defaultModel,
+    defaultModel,
     secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string'),
   });
 }
