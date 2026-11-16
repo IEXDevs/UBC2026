@@ -37,8 +37,19 @@ export function showSignInGate({ privyConfigured, ready, authenticated }) {
 
 /**
  * Desk preview without Privy. Requires DEV_PREVIEW=1 and a non-production build.
- * Production inlines the flag off, so the button cannot render there.
+ * Production inlines the flag off, so the bypass button cannot render there.
+ * `next dev` keeps the flag when the shell already exported NODE_ENV=production.
  */
+export function publicDevPreviewValue({
+  nodeEnv = process.env.NODE_ENV,
+  argv = process.argv,
+  devPreview = '',
+} = {}) {
+  const nextDev = Array.isArray(argv) && argv.includes('dev');
+  if (nodeEnv === 'production' && !nextDev) return '';
+  return devPreview === '1' ? '1' : '';
+}
+
 export function developerPreviewAllowed({
   nodeEnv = process.env.NODE_ENV,
   devPreview = process.env.NEXT_PUBLIC_DEV_PREVIEW,

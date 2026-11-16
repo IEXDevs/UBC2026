@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { localProfileResponse, useLocalProfileDirectory } from './profile-directory.mjs';
+import { localHandleLookup, localProfileResponse, useLocalProfileDirectory } from './profile-directory.mjs';
 
 const KEY = 'service-role-test-value';
 const ENV = {
@@ -37,6 +37,24 @@ test('a handle claim writes the directory and keeps the service role out of the 
   assert.equal(calls[1].body.display_name, 'jimothy67');
   assert.equal(JSON.stringify(body).includes(KEY), false);
   assert.equal(calls.every(call => call.auth === `Bearer ${KEY}`), true);
+});
+
+test('a handle lookup refuses a name another owner already stored', async () => {
+  const response = await localHandleLookup(new Request('https://app.local/api/profiles/lookup?q=%40Alex', {
+    headers: { 'x-owner-id': 'did:privy:user_2' },
+  }), {
+    env: ENV,
+    fetcher: async () => Response.json([{ owner_id: 'did:privy:user_1', handle: 'alex' }]),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).recipient.missing, false);
+  const open = await localHandleLookup(new Request('https://app.local/api/profiles/lookup?q=%40sid', {
+    headers: { 'x-owner-id': 'did:privy:user_2' },
+  }), {
+    env: ENV,
+    fetcher: async () => Response.json([]),
+  });
+  assert.equal((await open.json()).recipient.missing, true);
 });
 
 test('a taken handle stays a conflict and does not look like a saved claim', async () => {

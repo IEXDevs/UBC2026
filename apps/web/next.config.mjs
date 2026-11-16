@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
 import { resolveBuildId } from './lib/build-id.mjs';
 import { applyRootPublicEnv, readRootEnv } from './lib/root-env.mjs';
+import { publicDevPreviewValue } from './lib/sign-in-gate.mjs';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const fromApp = (name) => path.join(appDir, 'node_modules', name);
@@ -12,11 +13,9 @@ const fromApp = (name) => path.join(appDir, 'node_modules', name);
 applyRootPublicEnv();
 
 const buildId = resolveBuildId();
-// DEV_PREVIEW=1 in the root env turns on the local desk bypass.
+// DEV_PREVIEW=1 in the root env shows the developer bypass on the login page.
 // Production builds drop it even if the variable is set.
-const devPreview = process.env.NODE_ENV === 'production'
-  ? ''
-  : (readRootEnv('DEV_PREVIEW') === '1' ? '1' : '');
+const devPreview = publicDevPreviewValue({ devPreview: readRootEnv('DEV_PREVIEW') });
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

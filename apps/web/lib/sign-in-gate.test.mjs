@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
+import { developerPreviewAllowed, hasStoredPrivySession, publicDevPreviewValue, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
 
 function storage(entries) {
   const keys = Object.keys(entries);
@@ -32,6 +32,14 @@ test('developer preview needs DEV_PREVIEW=1 and stays off in production', () => 
   assert.equal(developerPreviewAllowed({ nodeEnv: 'production', devPreview: '' }), false);
 });
 
+test('next dev keeps DEV_PREVIEW when NODE_ENV is already production', () => {
+  assert.equal(publicDevPreviewValue({ nodeEnv: 'production', argv: ['node', 'next', 'dev'], devPreview: '1' }), '1');
+  assert.equal(publicDevPreviewValue({ nodeEnv: 'development', argv: ['node', 'next', 'dev'], devPreview: '1' }), '1');
+  assert.equal(publicDevPreviewValue({ nodeEnv: 'development', argv: ['node', 'next', 'dev'], devPreview: '' }), '');
+  assert.equal(publicDevPreviewValue({ nodeEnv: 'production', argv: ['node', 'next', 'build'], devPreview: '1' }), '');
+  assert.equal(publicDevPreviewValue({ nodeEnv: 'production', argv: ['node', 'next', 'start'], devPreview: '1' }), '');
+});
+
 test('without Privy the shell stays available', () => {
   assert.equal(showSignInGate({ privyConfigured: false, ready: false, authenticated: false }), false);
   assert.equal(showSessionHold({ privyConfigured: false, ready: false }), false);
@@ -52,6 +60,7 @@ test('refresh keeps a stored session off the login page and the unlock field is 
   const config = readFileSync(join(root, 'lib/privy-config.mjs'), 'utf8');
   assert.match(page, /showSessionHold/);
   assert.match(page, /hasStoredPrivySession/);
+  assert.match(page, /onDeveloperPreview=\{devAllowed \? enterDevPreview : null\}/);
   assert.doesNotMatch(page, /inert=\{locked/);
   assert.doesNotMatch(config, /cookieWriteBehavior/);
   assert.match(desk, /autoComplete="off"/);

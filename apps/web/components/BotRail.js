@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { PencilEdit01Icon } from '@hugeicons/core-free-icons';
 import Dock from './Dock';
 import AnimatedList from './AnimatedList';
 import BotMark from './BotMark';
@@ -33,7 +34,7 @@ function agentIcon(bot, size, onPhoto) {
           onPhoto(bot);
         }}
       >
-        <Pencil size={13} strokeWidth={1.75} />
+        <HugeiconsIcon icon={PencilEdit01Icon} size={13} color="#ffffff" strokeWidth={2.25} />
       </button>
     </span>
   );

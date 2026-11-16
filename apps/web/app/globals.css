@@ -38,6 +38,9 @@ html, body {
   font-family: var(--font);
   font-size: 15px;
   line-height: 1.45;
+  word-break: normal;
+  overflow-wrap: normal;
+  hyphens: none;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -361,7 +364,7 @@ button:focus-visible, input:focus-visible {
 
 .account-item:hover { background: var(--hover); }
 
-.logs-page .quiet-list span { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.logs-page .quiet-list span { display: block; margin-top: 4px; overflow-wrap: normal; }
 .logs-page .log-link { display: inline-block; margin-top: 6px; color: #8ee7dc; }
 
 .txn-preview {
@@ -378,7 +381,7 @@ button:focus-visible, input:focus-visible {
 .txn-preview dl { display: grid; gap: 6px; margin: 0; }
 .txn-preview div { display: flex; justify-content: space-between; gap: 12px; }
 .txn-preview dt { color: var(--muted); }
-.txn-preview dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.txn-preview dd { margin: 0; text-align: right; overflow-wrap: normal; }
 .txn-preview.is-min {
   width: 100%;
   text-align: left;
@@ -481,8 +484,8 @@ button:focus-visible, input:focus-visible {
 
 .agent-pencil {
   position: absolute;
-  right: -4px;
-  bottom: -4px;
+  right: 4px;
+  bottom: 4px;
   z-index: 2;
   display: grid;
   place-items: center;
@@ -490,25 +493,17 @@ button:focus-visible, input:focus-visible {
   height: 22px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
-  background: #f4f1fb;
-  color: #120f17;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  opacity: 0;
-  transform: scale(0.82);
-  pointer-events: none;
-  transition: opacity 160ms ease, transform 160ms ease;
+  border-radius: 5px;
+  background: #120f17;
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  opacity: 1;
+  pointer-events: auto;
 }
 
-.agent-mark:hover .agent-pencil,
-.agent-mark:focus-within .agent-pencil,
-.agent-photo:hover .agent-pencil,
-.agent-photo:focus-within .agent-pencil,
-.rail-list .animated-list__item:hover .agent-pencil,
-.dock-item:hover .agent-pencil {
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
+.agent-pencil svg {
+  position: relative;
+  z-index: 1;
 }
 
 .agent-mark:hover .agent-status,
@@ -581,7 +576,19 @@ button:focus-visible, input:focus-visible {
 
 .rail-empty { color: var(--muted); padding: 12px; }
 
-.mark { display: block; flex: none; filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.08)); }
+.mark {
+  display: block;
+  flex: none;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.08));
+  transform-origin: center;
+  transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mark:hover,
+.agent-mark:hover .mark,
+.agent-photo:hover .mark {
+  transform: rotate(180deg);
+}
 
 .look-editor {
   position: absolute;
@@ -940,6 +947,15 @@ button:focus-visible, input:focus-visible {
   display: grid;
   justify-items: center;
   gap: 28px;
+  transition:
+    opacity 480ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 480ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.empty-hold.is-away {
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
+  pointer-events: none;
 }
 
 .empty-hold::before {
@@ -2180,7 +2196,7 @@ button:focus-visible, input:focus-visible {
 .book-modal-card h2 { margin: 0 0 12px; font-size: 1.6rem; letter-spacing: -0.04em; }
 .book-modal-section { margin-top: 14px; }
 .book-modal-section h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a3a3; font-weight: 600; }
-.book-modal-address, .book-modal-note { text-transform: none; letter-spacing: 0; word-break: break-all; }
+.book-modal-address, .book-modal-note { text-transform: none; letter-spacing: 0; word-break: normal; overflow-wrap: normal; }
 .book-modal-card dl { margin: 0; display: grid; gap: 8px; }
 .book-modal-card dl div { display: flex; justify-content: space-between; gap: 16px; }
 .book-modal-card dt { color: #a3a3a3; }
@@ -2917,7 +2933,7 @@ button.chat-edit:disabled:focus-visible {
   letter-spacing: inherit;
   color: #fff;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
 }
 
 .chat-row.is-fresh { animation: voice-line-in 420ms cubic-bezier(0.22, 1, 0.36, 1); }
@@ -3720,7 +3736,7 @@ button.chat-edit:disabled:focus-visible {
 .ledger-meta dd {
   margin: 3px 0 0;
   font-size: 13px;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
 }
 .ledger-meta-link a {
   display: inline-flex;
@@ -3912,7 +3928,7 @@ button.chat-edit:disabled:focus-visible {
 .profile-address {
   margin: 12px 0;
   font-size: 14px;
-  word-break: break-all;
+  word-break: normal; overflow-wrap: normal;
   color: var(--text);
 }
 
@@ -3933,7 +3949,7 @@ button.chat-edit:disabled:focus-visible {
 .profile-wallets span {
   color: var(--muted);
   font-size: 13px;
-  word-break: break-all;
+  word-break: normal; overflow-wrap: normal;
 }
 
 .you-mark.is-huge {
@@ -4102,11 +4118,11 @@ button.chat-edit:disabled:focus-visible {
 
 .sheet.is-create {
   position: relative;
+  z-index: 1;
   overflow: visible;
   background: #121212;
 }
 
-.create-splash,
 .create-scrim,
 .create-confetti {
   position: absolute;
@@ -4114,18 +4130,39 @@ button.chat-edit:disabled:focus-visible {
   pointer-events: none;
 }
 
-.create-splash { overflow: visible; z-index: 0; }
+.create-splash {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: visible;
+  pointer-events: none;
+}
 
 .create-shape { pointer-events: auto; }
 
 .create-shape {
   position: absolute;
-  left: var(--x);
-  top: var(--y);
+  top: clamp(calc(var(--size) / 2 + 16px), var(--y), calc(100% - var(--size) / 2 - 16px));
   width: var(--size);
   height: var(--size);
   transform: translate(-50%, -50%) rotate(var(--rot));
   animation: create-shape-in 520ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
+.create-shape.is-left {
+  left: clamp(
+    calc(var(--size) / 2 + 16px),
+    calc(50% - 220px - var(--gap) - var(--size) / 2),
+    calc(100% - var(--size) / 2 - 16px)
+  );
+}
+
+.create-shape.is-right {
+  left: clamp(
+    calc(var(--size) / 2 + 16px),
+    calc(50% + 220px + var(--gap) + var(--size) / 2),
+    calc(100% - var(--size) / 2 - 16px)
+  );
 }
 
 .create-shape.is-circle { border-radius: 50%; }
@@ -4152,7 +4189,7 @@ button.chat-edit:disabled:focus-visible {
 .create-confetti i.is-circle { border-radius: 50%; }
 .create-confetti i.is-triangle { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 
-.sheet.is-create > :not(.create-splash):not(.create-scrim):not(.create-confetti) {
+.sheet.is-create > :not(.create-scrim):not(.create-confetti) {
   position: relative;
   z-index: 1;
 }
@@ -4169,6 +4206,11 @@ button.chat-edit:disabled:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .empty-hold { transition: none; }
+  .mark { transition: none; }
+  .mark:hover,
+  .agent-mark:hover .mark,
+  .agent-photo:hover .mark { transform: none; }
   .create-shape { animation: none; }
   .create-confetti { display: none; }
 }
@@ -4248,7 +4290,7 @@ button.chat-edit:disabled:focus-visible {
 .solid:disabled { background: #2a2a2a; color: #8a8a8a; }
 
 .glance-line { display: flex; justify-content: space-between; gap: 12px; margin: 16px 0 6px; }
-.quiet { color: var(--muted); margin: 0 0 8px; word-break: break-all; font-size: 13px; }
+.quiet { color: var(--muted); margin: 0 0 8px; word-break: normal; overflow-wrap: normal; font-size: 13px; }
 
 .quiet-list {
   list-style: none;
@@ -4363,10 +4405,10 @@ button.chat-edit:disabled:focus-visible {
 
 .approval-facts div { display: grid; gap: 0.15rem; }
 .approval-facts dt { color: var(--muted); font-size: 0.8rem; }
-.approval-facts dd { margin: 0; overflow-wrap: anywhere; }
+.approval-facts dd { margin: 0; overflow-wrap: normal; }
 .approval-facts code, .memo code {
   font-size: 0.78rem;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
 }
 
 .raise-form { display: grid; gap: 0.7rem; }

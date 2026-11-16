@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   claimSaveNote,
+  handleAlreadyClaimed,
   mentionIn,
   profileAfterDirectoryRead,
   profileRailLabel,
@@ -70,6 +71,9 @@ test('a 200 without a stored handle is not a saved claim', () => {
 });
 
 test('a failed claim names the status and error code', () => {
+  assert.equal(handleAlreadyClaimed({ recipient: { kind: 'handle', handle: 'alex', missing: true } }), false);
+  assert.equal(handleAlreadyClaimed({ recipient: { kind: 'handle', handle: 'alex', missing: false } }), true);
+  assert.equal(handleAlreadyClaimed({ recipient: { kind: 'sns', domain: 'alex.sol' } }), false);
   assert.equal(claimSaveNote({ error: 'handle_taken' }), 'That handle is already taken.');
   assert.equal(
     claimSaveNote({ status: 502, code: 'profile_save_failed' }),

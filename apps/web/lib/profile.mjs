@@ -56,6 +56,13 @@ export function profileSaveResult(status, body, claimedHandle = '') {
 }
 
 /** Claim-screen note. Status and error code only — never a provider body. */
+/** A directory row for this handle belongs to someone else. */
+export function handleAlreadyClaimed(body) {
+  const recipient = body?.recipient;
+  if (!recipient || recipient.kind !== 'handle') return false;
+  return recipient.missing !== true;
+}
+
 export function claimSaveNote(error) {
   const raw = typeof error?.code === 'string' ? error.code : (typeof error?.error === 'string' ? error.error : '');
   if (raw === 'handle_taken') return 'That handle is already taken.';
