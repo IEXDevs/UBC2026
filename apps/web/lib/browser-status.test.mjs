@@ -11,7 +11,7 @@ test('browser status explains missing runtime and secrets', () => {
       runtimeBase: 'https://runtime.example',
       sessionUrl: 'https://runtime.example/bots/b1/browser/sessions',
     }),
-    /CLOUDFLARE_ACCOUNT_ID/,
+    /No browser session yet/,
   );
   assert.match(
     browserStatusNote({

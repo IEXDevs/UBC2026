@@ -456,6 +456,8 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   assert.equal(handleBody.recipient.kind, 'handle');
   assert.equal(handleBody.recipient.displayName, 'Alex');
   assert.equal(handleBody.recipient.address, address);
+  assert.equal(handleBody.recipient.missing, false);
+  assert.equal(handleBody.recipient.self, false);
 
   const sns = await worker.fetch(new Request('https://runtime/api/profiles/lookup?q=%40richclub.sol', {
     headers: { 'x-owner-id': 'user_1' },

@@ -55,13 +55,14 @@ import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBot
 import { buildPermissionedSpendRequest, parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { mergeObservedWallets, walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
-import { accountSetupStep, clipAddress, readRecoveryAck, writeRecoveryAck } from '../lib/wallet-desk.mjs';
+import { SETUP_CARD_MS, accountSetupStep, clipAddress, readRecoveryAck, writeRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
+import { useHostedPreview } from '../components/HostedPreview';
 import { usePrivyPublic } from '../components/PrivyRoot';
 import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
 import { clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
@@ -104,17 +105,16 @@ function linkedAccountsKey(user) {
     .join('|');
 }
 
-function applyWalletFallback(user, body, setLiveWallets, setWalletNote) {
+function applyWalletFallback(user, body, setLiveWallets, setWalletNote, setWalletError) {
   const ownerId = ownerIdFromPrivyUser(user, true);
   const fallback = walletsFromPrivyUser(user, ownerId);
   const note = walletProvisionNote(body || {}, { ok: false });
-  if (fallback.length > 0) {
-    setLiveWallets(fallback);
-    setWalletNote(`${note} Showing the Privy client wallet until server create succeeds.`);
-    return;
-  }
-  setLiveWallets([]);
-  setWalletNote(note);
+  const message = fallback.length > 0
+    ? `${note} Showing the Privy client wallet until server create succeeds.`
+    : note;
+  setLiveWallets(fallback.length > 0 ? fallback : []);
+  setWalletNote(message);
+  setWalletError?.(message);
 }
 
 function SessionHold() {
@@ -128,10 +128,12 @@ function SessionHold() {
 function AuthedShell() {
   const { ready, authenticated, user, login, logout, getAccessToken: privyGetAccessToken } = usePrivy();
   const signedIn = ready && authenticated;
-  const devAllowed = developerPreviewAllowed();
+  const hostedPreview = useHostedPreview();
+  const devAllowed = developerPreviewAllowed() || hostedPreview;
   const [devPreview, setDevPreview] = useState(false);
   const [liveWallets, setLiveWallets] = useState(null);
   const [walletNote, setWalletNote] = useState('');
+  const [walletError, setWalletError] = useState('');
   const accountsKey = linkedAccountsKey(user);
 
   const getAccessToken = useCallback(() => readAccessToken(privyGetAccessToken), [privyGetAccessToken]);
@@ -165,26 +167,43 @@ function AuthedShell() {
     if (!signedIn) {
       setLiveWallets(null);
       setWalletNote('');
+      setWalletError('');
       return undefined;
     }
-    if (!sessionReadyForWallets(signedIn, user)) return undefined;
     let stopped = false;
+    const release = setTimeout(() => {
+      if (stopped) return;
+      setLiveWallets((current) => (current == null ? [] : current));
+    }, SETUP_CARD_MS);
+    if (!sessionReadyForWallets(signedIn, user)) {
+      return () => {
+        stopped = true;
+        clearTimeout(release);
+      };
+    }
     setWalletNote('Provisioning Solana wallets…');
     (async () => {
       try {
-        const configResponse = await fetch('/api/wallets', { method: 'GET', cache: 'no-store' });
+        const configResponse = await fetch('/api/wallets', {
+          method: 'GET',
+          cache: 'no-store',
+          signal: AbortSignal.timeout(SETUP_CARD_MS),
+        });
         const config = await configResponse.json().catch(() => ({}));
         if (stopped) return;
         const configNote = walletConfigNote(config);
         if (configNote && Array.isArray(config.missing) && config.missing.length > 0) {
-          applyWalletFallback(user, { error: 'missing_config', missing: config.missing }, setLiveWallets, setWalletNote);
+          applyWalletFallback(user, { error: 'missing_config', missing: config.missing }, setLiveWallets, setWalletNote, setWalletError);
           return;
         }
 
-        const token = await getAccessToken();
+        const token = await Promise.race([
+          getAccessToken(),
+          new Promise((resolve) => setTimeout(() => resolve(''), SETUP_CARD_MS)),
+        ]);
         if (stopped) return;
         if (!token) {
-          applyWalletFallback(user, { error: 'token_missing' }, setLiveWallets, setWalletNote);
+          applyWalletFallback(user, { error: 'token_missing' }, setLiveWallets, setWalletNote, setWalletError);
           return;
         }
 
@@ -201,6 +220,7 @@ function AuthedShell() {
               Authorization: `Bearer ${token}`,
               ...(user?.id ? { 'x-owner-id': user.id } : {}),
             },
+            signal: AbortSignal.timeout(SETUP_CARD_MS),
           });
           body = await response.json().catch(() => ({}));
           if (stopped) return;
@@ -213,21 +233,27 @@ function AuthedShell() {
           });
         }
         if (!ok) {
-          applyWalletFallback(user, body, setLiveWallets, setWalletNote);
+          applyWalletFallback(user, body, setLiveWallets, setWalletNote, setWalletError);
           if (configNote && !body.error) {
-            setWalletNote(current => (current ? `${current} ${configNote}` : configNote));
+            const addNote = (current) => (current ? `${current} ${configNote}` : configNote);
+            setWalletNote(addNote);
+            setWalletError(addNote);
           }
           return;
         }
         setLiveWallets(mergeObservedWallets(body.wallets, user, ownerIdFromPrivyUser(user, true)));
         setWalletNote(walletProvisionNote(body, { ok: true }));
+        setWalletError('');
       } catch {
         if (!stopped) {
-          applyWalletFallback(user, {}, setLiveWallets, setWalletNote);
+          applyWalletFallback(user, {}, setLiveWallets, setWalletNote, setWalletError);
         }
       }
     })();
-    return () => { stopped = true; };
+    return () => {
+      stopped = true;
+      clearTimeout(release);
+    };
   }, [signedIn, user, user?.id, user?.hasAcceptedTerms, accountsKey, getAccessToken]);
 
   if (devPreview && devAllowed) {
@@ -267,6 +293,7 @@ function AuthedShell() {
       onLogout={onLogout}
       liveWallets={liveWallets}
       walletNote={walletNote}
+      walletError={walletError}
       getAccessToken={getAccessToken}
     />
   );
@@ -297,14 +324,13 @@ function transferFailure(body, handle) {
   return 'The send did not post.';
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', getAccessToken = null }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null }) {
   const toast = useToast();
   const [looks, setLooks] = useState({});
   const [roster, setRoster] = useState({ order: [], extra: [] });
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState('');
   const [railCollapsed, setRailCollapsed] = useState(false);
-  const [railIcons, setRailIcons] = useState(false);
   const [sideWidth, setSideWidth] = useState(300);
   const [detailWidth, setDetailWidth] = useState(280);
   const [paneDrag, setPaneDrag] = useState(false);
@@ -335,6 +361,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [profile, setProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
   const [recoveryAck, setRecoveryAck] = useState(null);
+  const [hideWalletError, setHideWalletError] = useState(false);
   const [claimWelcome, setClaimWelcome] = useState(false);
   const [transfers, setTransfers] = useState([]);
   const [receipts, setReceipts] = useState([]);
@@ -477,8 +504,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       try {
         const headers = { 'x-owner-id': ownerId };
         const [response] = await Promise.all([
-          fetch(profileUrl, { headers, cache: 'no-store' }),
-          accountUrl ? fetch(accountUrl, { headers, cache: 'no-store' }).catch(() => null) : null,
+          fetch(profileUrl, { headers, cache: 'no-store', signal: AbortSignal.timeout(SETUP_CARD_MS) }),
+          accountUrl ? fetch(accountUrl, { headers, cache: 'no-store', signal: AbortSignal.timeout(SETUP_CARD_MS) }).catch(() => null) : null,
         ]);
         const body = await response.json();
         if (stop) return;
@@ -624,6 +651,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         const url = lookupPath;
         const response = await fetch(url, { headers: { 'x-owner-id': ownerId }, cache: 'no-store' });
         const body = await response.json().catch(() => ({}));
+        if (body.recipient?.kind === 'handle' && body.recipient.missing === false) return body.recipient;
         if (body.recipient?.address) return body.recipient;
         if (parsed.kind === 'sns') return resolveSnsProxy(parsed.domain);
       } catch {
@@ -678,6 +706,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     walletCount: Array.isArray(liveWallets) ? liveWallets.length : 0,
     recoveryConfirmed: recoveryAck === true,
   });
+  useEffect(() => {
+    setHideWalletError(false);
+  }, [walletError]);
   const grantDesk = useCallback(() => {
     const until = deskSessionUntil(Date.now());
     unlockUntilRef.current = until;
@@ -1243,15 +1274,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     toast?.(`Sent ${amountLabel} to @${body.transfer.handle}`);
   }
 
-  useEffect(() => {
-    if (!railCollapsed) {
-      setRailIcons(false);
-      return undefined;
-    }
-    const timer = setTimeout(() => setRailIcons(true), 420);
-    return () => clearTimeout(timer);
-  }, [railCollapsed]);
-
   const sideColumn = railCollapsed ? 88 : sideWidth;
   const noAgents = bots.length === 0;
   return (
@@ -1260,7 +1282,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       className={`shell${noAgents ? ' is-empty' : ''}${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}${setupStep === 'handle' || claimWelcome ? ' is-claim' : ''}`}
       style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
-      <aside className={`side${railIcons ? ' is-collapsed' : ''}`}>
+      <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
         {noAgents ? null : (
         <div
           className="pane-resize"
@@ -1299,7 +1321,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           bots={visible}
           activeId={bot?.id}
           canDrag={!query.trim()}
-          collapsed={railIcons}
+          collapsed={railCollapsed}
           onSelect={openChat}
           onReorder={onReorder}
           onDelete={onDelete}
@@ -1314,7 +1336,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               fallback: accountLabel,
             })}
             avatarUrl={avatarUrl}
-            collapsed={railIcons}
+            collapsed={railCollapsed}
             signedIn={signedIn}
             loginDisabled={loginDisabled}
             walletUnlocked={unlocked}
@@ -1472,11 +1494,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         />
       ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} first={bots.length === 0} />
-      {setupStep === 'loading' ? (
+      {walletError && !hideWalletError ? (
         <div className="backdrop is-center">
-          <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-label="Setting up your account">
-            <h2>Setting up your account</h2>
-            <p className="quiet">Checking your handle and wallet.</p>
+          <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-label="Wallet setup">
+            <h2>Wallet setup did not finish</h2>
+            <p className="quiet">{walletError}</p>
+            <button type="button" className="solid" onClick={() => setHideWalletError(true)}>Continue</button>
           </section>
         </div>
       ) : null}

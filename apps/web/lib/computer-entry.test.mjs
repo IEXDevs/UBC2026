@@ -10,20 +10,26 @@ function source(path) {
   return readFileSync(join(root, path), 'utf8');
 }
 
-test('the live browser opens from the sidebar computer card', () => {
+test('the live browser opens from the sidebar computer screen', () => {
   const thread = source('components/AgentThread.js');
   const library = source('components/FileLibrary.js');
   const sheet = source('components/ComputerSheet.js');
   const panel = source('components/LiveViewPanel.js');
 
   assert.equal(thread.includes('LiveViewPanel'), false);
+  assert.equal(library.includes('library-menu'), false);
+  assert.equal(library.includes('Bot&apos;s computer'), false);
   assert.match(library, /className="side-computer"/);
-  assert.match(library, /Bot&apos;s computer/);
-  assert.match(library, /countOpenBrowserSessions/);
-  assert.match(library, /computerStatus\(\{ openSessionCount/);
+  assert.match(library, /<LiveViewPanel[\s\S]*screen/);
+  assert.match(library, /onExpand=\{/);
   assert.match(sheet, /browser-preview/);
+  assert.match(sheet, /autoStart/);
   assert.match(sheet, /LiveViewPanel/);
   assert.match(sheet, /LoopSteps/);
+  assert.match(panel, /computer-screen/);
+  assert.match(panel, /is-off/);
+  assert.match(panel, /Start Browser/);
+  assert.match(panel, /framed \? 'Watch' : 'Start Browser'/);
   assert.match(panel, /Take control/);
   assert.match(panel, /Return control/);
   assert.match(panel, /You can interact/);

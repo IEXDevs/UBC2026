@@ -27,6 +27,7 @@ precision highp int;
 
 uniform float uFrequency;
 uniform vec2 uMorph;
+uniform ivec2 uSeed;
 uniform sampler2D uSculpt;
 uniform float uSculptOn;
 uniform vec4 uPulses[${MAX_PULSES}];
@@ -35,7 +36,7 @@ uniform vec3 uForward;
 uniform vec3 uNear;
 
 uint lattice(ivec2 p) {
-  uvec2 q = uvec2(p + 1073741824);
+  uvec2 q = uvec2(p + uSeed + 1073741824);
   uint h = q.x * 2654435761u + q.y * 2246822519u;
   h = (h ^ (h >> 15u)) * 739982445u;
   h = (h ^ (h >> 12u)) * 695872825u;
@@ -529,8 +530,10 @@ const smoother = x => {
   return t * t * t * (t * (t * 6 - 15) + 10);
 };
 
+const terrainSeed = [0, 0];
+
 const lattice = (x, y) => {
-  let h = (Math.imul(x + 1073741824, 2654435761) + Math.imul(y + 1073741824, 2246822519)) >>> 0;
+  let h = (Math.imul(x + terrainSeed[0] + 1073741824, 2654435761) + Math.imul(y + terrainSeed[1] + 1073741824, 2246822519)) >>> 0;
   h = Math.imul(h ^ (h >>> 15), 739982445) >>> 0;
   h = Math.imul(h ^ (h >>> 12), 695872825) >>> 0;
   return (h ^ (h >>> 15)) >>> 0;
@@ -700,6 +703,11 @@ const Topography = ({
   style
 }) => {
   const containerRef = useRef(null);
+  const seedRef = useRef(null);
+  if (!seedRef.current) {
+    const roll = () => 1 + Math.floor(Math.random() * 999983);
+    seedRef.current = [roll(), roll()];
+  }
   const canvasRef = useRef(null);
   const wakeRef = useRef(null);
   const releaseRef = useRef(0);
@@ -751,6 +759,10 @@ const Topography = ({
       powerPreference: 'high-performance'
     });
     if (!container || !canvas || !gl) return undefined;
+    const [seedX, seedY] = seedRef.current;
+    terrainSeed[0] = seedX;
+    terrainSeed[1] = seedY;
+    const applySeed = (uniforms) => gl.uniform2i(uniforms.uSeed, seedX, seedY);
     cancelAnimationFrame(releaseRef.current);
     releaseRef.current = 0;
 
@@ -1077,6 +1089,7 @@ const Topography = ({
         gl.uniform1i(f.uSculpt, 0);
         gl.uniform1f(f.uSculptOn, sculpt ? 1 : 0);
         gl.uniform1f(f.uFrequency, FREQUENCY / state.scale);
+        applySeed(f);
         gl.uniform2f(f.uMorph, state.morph * 0.37, state.morph * 0.23);
         gl.uniform4fv(f.uPulses, pulseData);
         gl.uniform2i(f.uBase, layout.k0 - 2 + layout.camX, layout.m0 - 2 + layout.camZ);
@@ -1096,6 +1109,7 @@ const Topography = ({
         bind(1, fieldProgram ? field.heights : blank);
         gl.uniform1i(u.uHeightField, 1);
         gl.uniform1f(u.uFrequency, FREQUENCY / state.scale);
+        applySeed(u);
         gl.uniform2f(u.uMorph, state.morph * 0.37, state.morph * 0.23);
         gl.uniform4fv(u.uPulses, pulseData);
         gl.uniform2i(u.uOrigin, layout.k0, layout.m0);
@@ -1146,6 +1160,7 @@ const Topography = ({
           gl.uniform1i(m.uSculpt, 2);
           gl.uniform1f(m.uSculptOn, sculpt ? 1 : 0);
           gl.uniform1f(m.uFrequency, FREQUENCY / state.scale);
+          applySeed(m);
           gl.uniform2f(m.uMorph, state.morph * 0.37, state.morph * 0.23);
           gl.uniform4fv(m.uPulses, pulseData);
           gl.uniform3fv(m.uEye, cam.eye);

@@ -17,6 +17,8 @@ test('a message can name a handle or an SNS name', () => {
   assert.equal(mentionIn('hello'), null);
   assert.equal(recipientHint({ kind: 'handle', handle: 'alex', displayName: 'Alex', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' }), 'Alex(4zMMC...DncDU)');
   assert.equal(recipientHint({ kind: 'handle', handle: 'alex', missing: true }), '@alex is not on Maelstrom');
+  assert.equal(recipientHint({ kind: 'handle', handle: 'royce', missing: false, self: true }), '@royce');
+  assert.equal(recipientHint({ kind: 'handle', handle: 'royce', missing: false }), '@royce does not have a wallet yet.');
   assert.equal(recipientHint({ kind: 'sns', domain: 'richclub.sol', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' }), 'richclub.sol(4zMMC...DncDU)');
   assert.equal(recipientHint({ kind: 'sns', domain: 'richclub.sol', error: 'sns_not_found' }), 'Failed.');
   assert.equal(profileRailLabel({ handle: 'sid', displayName: 'Sid Chevvan' }), '@sid');
@@ -74,6 +76,7 @@ test('a 200 without a stored handle is not a saved claim', () => {
 test('a failed claim names the status and error code', () => {
   assert.equal(handleAlreadyClaimed({ recipient: { kind: 'handle', handle: 'alex', missing: true } }), false);
   assert.equal(handleAlreadyClaimed({ recipient: { kind: 'handle', handle: 'alex', missing: false } }), true);
+  assert.equal(handleAlreadyClaimed({ recipient: { kind: 'handle', handle: 'royce', missing: false, self: true } }), false);
   assert.equal(handleAlreadyClaimed({ recipient: { kind: 'sns', domain: 'alex.sol' } }), false);
   assert.equal(claimSaveNote({ error: 'handle_taken' }), 'That handle is already taken.');
   assert.equal(

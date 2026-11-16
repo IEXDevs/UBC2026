@@ -56,11 +56,11 @@ export function profileSaveResult(status, body, claimedHandle = '') {
 }
 
 /** Claim-screen note. Status and error code only — never a provider body. */
-/** A directory row for this handle belongs to someone else. */
+/** A directory row for this handle belongs to someone else. The caller's own row is still theirs. */
 export function handleAlreadyClaimed(body) {
   const recipient = body?.recipient;
-  if (!recipient || recipient.kind !== 'handle') return false;
-  return recipient.missing !== true;
+  if (!recipient || recipient.kind !== 'handle' || recipient.self === true) return false;
+  return recipient.missing === false;
 }
 
 /** Live claim check. `open` may submit. `taken` and `error` keep the button closed. */
@@ -103,6 +103,7 @@ export function recipientHint(recipient) {
     return recipient.domain;
   }
   if (recipient.missing) return `@${recipient.handle} is not on Maelstrom`;
+  if (!recipient.address && recipient.self !== true) return `@${recipient.handle} does not have a wallet yet.`;
   const who = recipient.displayName || `@${recipient.handle}`;
   const where = shortAddress(recipient.address);
   return where ? `${who}(${where})` : who;

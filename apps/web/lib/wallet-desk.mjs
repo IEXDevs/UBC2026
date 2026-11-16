@@ -359,6 +359,13 @@ export function swapQuoteUrl(venue, rows, { inputSymbol, outputSymbol, amount } 
   return { url, broadcast: false, cluster: 'devnet', pricing: 'mainnet', label: 'devnet execution, mainnet pricing' };
 }
 
+export const SETUP_CARD_MS = 4000;
+
+export function setupCardVisible(step) {
+  if (step === 'loading') return null;
+  return step ?? null;
+}
+
 export function accountSetupStep({
   signedIn,
   profileReady,

@@ -30,7 +30,7 @@ async function ownerFetch(url, ownerId, method, body) {
  * or a link href, never copied into the timeline or button text.
  * Chat-opened sessions live in the same Worker store — adopt them on load.
  */
-export default function LiveViewPanel({ botId, ownerId = null, fill = false }) {
+export default function LiveViewPanel({ botId, ownerId = null, fill = false, screen = false, autoStart = false, onExpand = null }) {
   const [sessionRecordId, setSessionRecordId] = useState(null);
   const [openCount, setOpenCount] = useState(0);
   const [frame, setFrame] = useState(null);
@@ -38,6 +38,7 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const shown = useRef(null);
+  const started = useRef(false);
   const sessionUrl = browserSessionUrl(runtimeBase, botId);
   const status = browserStatusNote({
     ownerId,
@@ -68,12 +69,16 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false }) {
   useEffect(() => {
     let stopped = false;
     (async () => {
+      let id = null;
       try {
         if (stopped) return;
-        await syncSessions();
+        id = await syncSessions();
       } catch {
         /* Listing is best-effort until the owner opens or views. */
       }
+      if (stopped || !autoStart || id || started.current) return;
+      started.current = true;
+      run('open');
     })();
     const timer = setInterval(() => {
       syncSessions().catch(() => {});
@@ -113,7 +118,7 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false }) {
           if (code === 'concurrency_limit') {
             const adopted = await syncSessions().catch(() => null);
             if (adopted) {
-              setError(browserErrorNote('concurrency_limit'));
+              setSessionRecordId(adopted);
               return;
             }
           }
@@ -157,6 +162,36 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false }) {
   const driving = control === 'owner';
   const framed = Boolean(frame?.embed && frame.src);
 
+  if (screen) {
+    return (
+      <div className="live-view is-screen">
+        <div className={`computer-screen${framed ? '' : ' is-off'}`}>
+          {framed ? (
+            <iframe
+              className="live-frame"
+              title="Browser live view"
+              src={frame.src}
+              referrerPolicy={frame.referrerPolicy}
+            />
+          ) : (busy ? <LatticeLoader label="Browser" /> : null)}
+          <button
+            type="button"
+            className="computer-screen-hit"
+            aria-label={framed ? 'Watch' : 'Start Browser'}
+            disabled={busy}
+            onClick={() => {
+              if (!framed) run('open');
+              onExpand?.();
+            }}
+          >
+            {busy ? null : <span className="computer-screen-label">{framed ? 'Watch' : 'Start Browser'}</span>}
+          </button>
+          {error ? <p className="preview-note" role="alert">{error}</p> : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`live-view${fill ? ' is-fill' : ''}`}>
       <div className="live-stage">
@@ -174,9 +209,11 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false }) {
               <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
                 Open browser session
               </button>
-              <button className="ghost" type="button" disabled={!ready || busy || !sessionRecordId} onClick={() => run('release')}>
-                Release session
-              </button>
+              {sessionRecordId ? (
+                <button className="ghost" type="button" disabled={!ready || busy} onClick={() => run('release')}>
+                  Release session
+                </button>
+              ) : null}
             </div>
           </div>
         )}

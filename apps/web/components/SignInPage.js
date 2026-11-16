@@ -20,15 +20,16 @@ export default function SignInPage({ disabled = false, onLogin, onDeveloperPrevi
     <div className="sign-in">
       <div className="sign-in-field" aria-hidden="true">
         <Topography
-          color="#ff8fa3"
-          elevation={1.6}
-          scale={0.9}
-          tilt={15}
-          fog={0.5}
-          clickEffect="peak"
-          lineCount={30}
-          brightness={1.55}
-          mouseStrength={0.2}
+          color="#ff7a62"
+          tilt={27}
+          foreground={1}
+          lineCount={20}
+          lineWidth={1.5}
+          depthOfField={0}
+          trail={1}
+          detail={1}
+          morph={1}
+          fog={0}
         />
       </div>
       <main className="sign-in-stage">
@@ -38,7 +39,7 @@ export default function SignInPage({ disabled = false, onLogin, onDeveloperPrevi
           <div className="sign-in-actions">
             <SpecularButton
               size="lg"
-              radius={999}
+              radius={20}
               tint="#f4f1fb"
               tintOpacity={0.94}
               textColor="#120f17"

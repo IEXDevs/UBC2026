@@ -1191,6 +1191,8 @@ export async function handleApiData(request, env, matched) {
         handle: row.handle,
         displayName: row.display_name,
         avatarUrl: row.avatar_url || null,
+        self: row.owner_id === ownerId,
+        missing: false,
         address: wallet.rows?.[0]?.address || null,
       },
     });

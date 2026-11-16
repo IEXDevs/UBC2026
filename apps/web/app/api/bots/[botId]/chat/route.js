@@ -91,6 +91,7 @@ export async function POST(request, context) {
         model: reply.model,
         provider: reply.provider,
         toolRounds: reply.toolRounds ?? 0,
+        ...(Array.isArray(reply.activity) && reply.activity.length > 0 ? { activity: reply.activity } : {}),
         ...(reply.usage ? { usage: reply.usage } : {}),
       },
       { headers: { 'Cache-Control': 'no-store' } },

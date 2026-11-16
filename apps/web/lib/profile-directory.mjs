@@ -80,7 +80,7 @@ export async function localHandleLookup(request, { env = {}, fetcher = fetch } =
       fetcher,
       origin,
       key,
-      `profiles?handle=eq.${encodeURIComponent(handle)}&select=owner_id,handle&limit=1`,
+      `profiles?handle=eq.${encodeURIComponent(handle)}&select=owner_id,handle,display_name,avatar_url&limit=1`,
     );
   } catch {
     return json({ error: 'profile_read_failed' }, 502);
@@ -88,10 +88,20 @@ export async function localHandleLookup(request, { env = {}, fetcher = fetch } =
   if (!response.ok) return json({ error: 'profile_read_failed' }, 502);
   const rows = await response.json().catch(() => []);
   const row = Array.isArray(rows) ? rows[0] : null;
-  if (!row || row.owner_id === ownerId) {
+  if (!row?.handle) {
     return json({ ok: true, recipient: { kind: 'handle', handle, missing: true } });
   }
-  return json({ ok: true, recipient: { kind: 'handle', handle: row.handle, missing: false } });
+  return json({
+    ok: true,
+    recipient: {
+      kind: 'handle',
+      handle: row.handle,
+      displayName: row.display_name || '',
+      avatarUrl: row.avatar_url || null,
+      self: row.owner_id === ownerId,
+      missing: false,
+    },
+  });
 }
 
 export async function localProfileResponse(request, { env = {}, fetcher = fetch } = {}) {

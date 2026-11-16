@@ -31,6 +31,7 @@ export function contextUsage(lines, limit = CONTEXT_LIMIT) {
   for (const line of rows) {
     if (line?.compacted) compacted += 1;
     const tokens = estimateTokens(line?.text);
+    if (line?.role === 'note') continue;
     if (line?.role === 'user') {
       input += tokens;
       messages += 1;

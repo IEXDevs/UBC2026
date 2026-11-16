@@ -55,6 +55,16 @@ test('a handle lookup refuses a name another owner already stored', async () => 
     fetcher: async () => Response.json([]),
   });
   assert.equal((await open.json()).recipient.missing, true);
+  const own = await localHandleLookup(new Request('https://app.local/api/profiles/lookup?q=%40royce', {
+    headers: { 'x-owner-id': 'did:privy:user_1' },
+  }), {
+    env: ENV,
+    fetcher: async () => Response.json([{ owner_id: 'did:privy:user_1', handle: 'royce', display_name: 'Royce' }]),
+  });
+  const ownBody = await own.json();
+  assert.equal(ownBody.recipient.missing, false);
+  assert.equal(ownBody.recipient.self, true);
+  assert.equal(ownBody.recipient.handle, 'royce');
 });
 
 test('a taken handle stays a conflict and does not look like a saved claim', async () => {

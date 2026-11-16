@@ -40,6 +40,20 @@ test('normalizeTalks drops junk and caps lines', () => {
     '': [{ id: '4', role: 'user', text: 'bad bot' }],
   });
   assert.deepEqual(talks.bot_1.map(line => line.id), ['1', '3']);
+  const kept = normalizeTalks({
+    bot_1: [{
+      id: 'n',
+      role: 'note',
+      text: 'Permissions set to Ask every time',
+    }, {
+      id: 'a',
+      role: 'agent',
+      text: 'done',
+      activity: [{ kind: 'search', query: 'USDC', sites: [{ title: 'Circle', url: 'https://circle.com', host: 'circle.com' }] }],
+    }],
+  });
+  assert.equal(kept.bot_1[0].role, 'note');
+  assert.equal(kept.bot_1[1].activity[0].sites[0].host, 'circle.com');
   assert.equal(talks[''], undefined);
 });
 

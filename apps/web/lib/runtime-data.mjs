@@ -4,6 +4,7 @@
  * Worker URL is configured on the server. Empty arrays when unsigned or unconfigured.
  * Never invent PreviewMain / demo bots.
  */
+import { sanitizeActivity } from './chat-activity.mjs';
 import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
 
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -370,7 +371,8 @@ export async function sendBotChat({
     if (!reply) return { ok: false, error: 'empty_reply' };
     const reported = Number(body.usage?.total);
     const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
-    return { ok: true, reply, model: body.model || null, tokens };
+    const activity = sanitizeActivity(body.activity);
+    return { ok: true, reply, model: body.model || null, tokens, activity };
   } catch {
     return { ok: false, error: 'network' };
   }

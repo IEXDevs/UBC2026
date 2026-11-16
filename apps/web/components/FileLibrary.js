@@ -1,11 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FileText, Film, Globe, Image as ImageIcon, MoreHorizontal, Music } from 'lucide-react';
-import { computerStatus, countOpenBrowserSessions } from '../lib/computer-status.mjs';
+import { FileText, Film, Globe, Image as ImageIcon, Music } from 'lucide-react';
 import { fileKind, filterLibrary, libraryGroups } from '../lib/file-library.mjs';
-import { browserSessionUrl } from '../lib/live-view.mjs';
 import BotMark from './BotMark';
+import LiveViewPanel from './LiveViewPanel';
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -59,12 +58,9 @@ function FileGroup({ label, files, onOpen }) {
 export default function FileLibrary({ bot, files = [], ownerId = null, onComputer, onEdit }) {
   const [filter, setFilter] = useState('all');
   const [preview, setPreview] = useState(null);
-  const [menu, setMenu] = useState(false);
-  const [openSessionCount, setOpenSessionCount] = useState(0);
   const rows = filterLibrary(files, filter);
   const { fresh, older } = libraryGroups(rows);
   const settingsOpen = filter === 'settings';
-  const status = computerStatus({ openSessionCount, botStatus: bot.status });
 
   useEffect(() => {
     if (!settingsOpen) return undefined;
@@ -73,60 +69,15 @@ export default function FileLibrary({ bot, files = [], ownerId = null, onCompute
     return () => window.dispatchEvent(new CustomEvent('detail-settings', { detail: null }));
   }, [settingsOpen]);
 
-  useEffect(() => {
-    setOpenSessionCount(0);
-    const url = browserSessionUrl('shell', bot?.id);
-    if (!url || !ownerId) return undefined;
-    let stop = false;
-    async function load() {
-      try {
-        const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
-          cache: 'no-store',
-        });
-        const data = await response.json().catch(() => ({}));
-        if (stop || !response.ok) return;
-        setOpenSessionCount(countOpenBrowserSessions(data));
-      } catch {
-        // Keep the last known computer label when the runtime is unreachable.
-      }
-    }
-    load();
-    const timer = setInterval(load, 4000);
-    return () => {
-      stop = true;
-      clearInterval(timer);
-    };
-  }, [bot?.id, ownerId]);
-
   return (
     <div className="file-library">
-      <div className="library-menu">
-        <button type="button" aria-label="Library menu" aria-expanded={menu} onClick={() => setMenu(value => !value)}>
-          <MoreHorizontal size={16} strokeWidth={1.75} />
-        </button>
-        {menu ? (
-          <div role="menu">
-            <button type="button" role="menuitem" onClick={() => { setMenu(false); onComputer?.(); }}>Computer</button>
-          </div>
-        ) : null}
-      </div>
       <header onContextMenu={(event) => { event.preventDefault(); onEdit?.(event); }}>
         <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={72} />
         <strong>{bot.name}</strong>
       </header>
       <section className="side-computer">
         <h3>Computer</h3>
-        <button type="button" className="side-option" onClick={() => onComputer?.()}>
-          <span>
-            <strong>Bot&apos;s computer</strong>
-            <small>{status}</small>
-          </span>
-          <span className={`side-option-mark${status === 'Asleep' ? ' is-asleep' : ''}`}>
-            <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={28} />
-            {status === 'Asleep' ? <span className="side-option-sleep">z</span> : null}
-          </span>
-        </button>
+        <LiveViewPanel botId={bot.id} ownerId={ownerId} screen onExpand={() => onComputer?.()} />
       </section>
       <div className="library-filters" role="tablist" aria-label="Library">
         {FILTERS.map(item => (

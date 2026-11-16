@@ -4,6 +4,7 @@
  * OpenRouter calls use a free model only.
  */
 import { OPENROUTER_FREE_MODEL, selectFreeOpenRouterModel } from '@ubc2026/contracts';
+import { thinkStep, toolStep } from './chat-activity.mjs';
 
 export { OPENROUTER_FREE_MODEL };
 
@@ -133,6 +134,16 @@ function parseToolArgs(raw) {
   } catch {
     return {};
   }
+}
+
+function reasoningText(message) {
+  const raw = message?.reasoning_content ?? message?.reasoning;
+  if (typeof raw === 'string') return raw;
+  if (!Array.isArray(message?.reasoning_details)) return '';
+  return message.reasoning_details
+    .map(item => (typeof item?.text === 'string' ? item.text : ''))
+    .filter(Boolean)
+    .join('\n');
 }
 
 function assistantToolMessage(message) {
@@ -322,6 +333,7 @@ export async function completeTextChat({
     : 4;
   let toolRounds = 0;
   let usage = { prompt: 0, completion: 0, total: 0 };
+  const activity = [];
   while (true) {
     const completion = await postCompletion({
       resolved,
@@ -335,6 +347,8 @@ export async function completeTextChat({
       ? completion.message.tool_calls.filter(call => call?.function?.name)
       : [];
     usage = addUsage(usage, completion.usage);
+    const thought = thinkStep(redact(reasoningText(completion.message), secrets));
+    if (thought && activity.length < 12) activity.push(thought);
     const wantsTools = completion.finishReason === 'tool_calls' || calls.length > 0;
     if (!toolList || !wantsTools || toolRounds >= rounds) {
       const content = completion.message?.content;
@@ -345,6 +359,7 @@ export async function completeTextChat({
         text,
         provider: resolved.provider,
         toolRounds,
+        ...(activity.length > 0 ? { activity } : {}),
         ...(usage.total > 0 ? { usage } : {}),
       };
     }
@@ -362,6 +377,8 @@ export async function completeTextChat({
       const content = typeof result === 'string'
         ? clip(redact(result, secrets), 6000)
         : clip(redact(JSON.stringify(result), secrets), 6000);
+      const step = toolStep(name, args, result);
+      if (step && activity.length < 12) activity.push(step);
       messages.push({
         role: 'tool',
         tool_call_id: id,

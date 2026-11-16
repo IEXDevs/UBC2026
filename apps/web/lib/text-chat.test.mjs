@@ -152,11 +152,18 @@ test('completeTextChat runs a tool round then answers', async () => {
       assert.ok(roles.includes('tool'));
       assert.ok(body.messages.some(item => item.role === 'assistant' && Array.isArray(item.tool_calls)));
       return Response.json({
-        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'USDC looks stable.' } }],
+        choices: [{
+          finish_reason: 'stop',
+          message: { role: 'assistant', content: 'USDC looks stable.', reasoning_content: 'Checked the published rate.' },
+        }],
       });
     },
   });
   assert.equal(result.text, 'USDC looks stable.');
   assert.equal(result.toolRounds, 1);
   assert.deepEqual(seen, [{ name: 'web_search', args: { query: 'USDC rates' } }]);
+  assert.equal(result.activity[0].kind, 'search');
+  assert.equal(result.activity[0].sites[0].host, 'example.com');
+  assert.equal(result.activity[1].kind, 'think');
+  assert.match(result.activity[1].text, /published rate/);
 });

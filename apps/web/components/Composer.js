@@ -33,7 +33,7 @@ import {
   parseVoiceSettings,
   voiceOverrides,
 } from '../lib/voice-settings.mjs';
-import { SPEND_PERMISSION_KEY, parsePermission } from '../lib/spend-permission.mjs';
+import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/spend-permission.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
 
 const LEAVE_MS = 760;
@@ -95,6 +95,7 @@ export default function Composer({
   const dockRef = useRef(null);
   const settingsRef = useRef(settings);
   const permissionRef = useRef(permission);
+  const modelRef = useRef(PROMPT_MODELS[0]?.key || '');
   const botIdRef = useRef(botId);
   const botNameRef = useRef(botName);
   const botGoalRef = useRef(botGoal);
@@ -355,7 +356,7 @@ export default function Composer({
         shellBalanceLabel,
       });
       if (result.ok) {
-        pushLine('agent', result.reply, botId, result.tokens);
+        pushLine('agent', result.reply, botId, result.tokens, result.activity);
       } else {
         pushLine('agent', chatFailureNote(result.error));
       }
@@ -395,7 +396,7 @@ export default function Composer({
         shellWallets,
         shellBalanceLabel,
       });
-      pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error), botId, result.ok ? result.tokens : 0);
+      pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error), botId, result.ok ? result.tokens : 0, result.ok ? result.activity : []);
     } catch {
       pushLine('agent', chatFailureNote('network'));
     } finally {
@@ -405,11 +406,12 @@ export default function Composer({
     }
   }
 
-  function pushLine(role, text, targetId = botIdRef.current, tokens = 0) {
+  function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = []) {
     const spoken = typeof text === 'string' ? text.trim() : '';
     if (!spoken) return;
     const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
     if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
+    if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
     onLine?.(line, targetId);
   }
 
@@ -743,10 +745,18 @@ export default function Composer({
           onSend={(text) => sendMessage(text)}
           onDictate={live ? undefined : runDictation}
           permission={permission}
+          onModelChange={(key) => {
+            const item = PROMPT_MODELS.find(model => model.key === key);
+            if (!item || item.key === modelRef.current) return;
+            modelRef.current = item.key;
+            pushLine('note', `Model set to ${item.name}`);
+          }}
           onPermissionChange={(next) => {
             const mode = parsePermission(next);
+            if (mode === permissionRef.current) return;
             setPermission(mode);
             localStorage.setItem(SPEND_PERMISSION_KEY, mode);
+            pushLine('note', `Permissions set to ${permissionById(mode).label}`);
           }}
           accessory={usage ? <ContextUsage usage={usage} /> : null}
           endSlot={(

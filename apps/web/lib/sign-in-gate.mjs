@@ -57,3 +57,8 @@ export function developerPreviewAllowed({
   if (nodeEnv === 'production') return false;
   return devPreview === '1';
 }
+
+/** Runtime worker binding. A production bundle does not inline this. */
+export function hostedDevPreview(value) {
+  return value === '1';
+}

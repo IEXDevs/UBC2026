@@ -71,15 +71,21 @@
 
 .sign-in-alt {
   border: 0;
+  border-radius: 20px;
   background: transparent;
   color: #ddd4f2;
   font: inherit;
   font-size: 1.0625rem;
   font-weight: 500;
-  padding: 12px 4px;
+  padding: 18px 28px;
 }
 
-.sign-in-alt:hover {
+.sign-in button.specular-button:not(:disabled):hover {
+  background-color: #ffffff;
+}
+
+.sign-in button.sign-in-alt:not(:disabled):hover {
+  background-color: rgba(244, 241, 251, 0.16);
   color: #f4f1fb;
 }
 
@@ -92,7 +98,7 @@
   display: inline-flex;
   margin: 22px 0 0;
   border: 1px solid rgba(244, 241, 251, 0.28);
-  border-radius: 999px;
+  border-radius: 20px;
   background: transparent;
   color: #ddd4f2;
   font: inherit;
@@ -101,7 +107,11 @@
   padding: 8px 16px;
 }
 
-.sign-in-dev:hover { color: #f4f1fb; border-color: rgba(244, 241, 251, 0.7); }
+.sign-in button.sign-in-dev:not(:disabled):hover {
+  background-color: rgba(244, 241, 251, 0.1);
+  color: #f4f1fb;
+  border-color: rgba(244, 241, 251, 0.7);
+}
 
 @keyframes sign-in-in {
   from {

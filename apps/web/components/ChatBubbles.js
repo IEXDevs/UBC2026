@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { withHeads } from '../lib/voice-float.mjs';
 import MentionText from './MentionText';
-import { Reasoning, Sources } from './ai/elements';
+import { AgentTrace, Reasoning, Sources } from './ai/elements';
+import { sanitizeActivity } from '../lib/chat-activity.mjs';
 import { Bubble, BubbleContent } from './ui/bubble';
 import { Message, MessageContent, MessageGroup } from './ui/message';
 
@@ -27,6 +28,9 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
   return (
     <MessageGroup className={className}>
       {rows.map((line) => {
+        if (line.role === 'note') {
+          return <p key={line.id} className="chat-note" role="status">{line.text}</p>;
+        }
         if (line.role === 'user') {
           const editing = editingId === line.id;
           return (
@@ -93,9 +97,11 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
           );
         }
         const urls = urlsIn(line.text);
+        const steps = sanitizeActivity(line.activity);
         return (
           <Message key={line.id}>
             <MessageContent>
+              <AgentTrace steps={steps} />
               <Bubble align="start" variant="secondary">
                 <BubbleContent>
                   <MentionText text={line.text} onParty={onParty} />

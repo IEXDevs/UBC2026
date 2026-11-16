@@ -10,7 +10,6 @@ import {
   ChartLineData01Icon,
   File02Icon,
   Globe02Icon,
-  HelpCircleIcon,
   Mail01Icon,
   Mic01Icon,
   PlusSignIcon,
@@ -132,6 +131,7 @@ export default function PromptBar({
   endSlot = null,
   permission = '',
   onPermissionChange,
+  onModelChange,
   chips = null,
   extraReady = false,
   label = 'Prompt',
@@ -152,13 +152,10 @@ export default function PromptBar({
   const reduce = useReducedMotion();
   const rootRef = useRef(null);
   const inputRef = useRef(null);
-  const glowRef = useRef(null);
   const sparkRef = useRef(null);
   const typing = useRef({ energy: 0, strokes: 0 });
   const boost = useRef(sparkBoost);
   boost.current = sparkBoost;
-  const rowRefs = useRef([]);
-  const lastOpen = useRef(null);
   const dictation = useRef(0);
   const dictationJob = useRef(null);
   const dictateBase = useRef('');
@@ -202,29 +199,6 @@ export default function PromptBar({
     setPlusOpen(false);
     setEffortOpen(false);
   }, []);
-
-  useLayoutEffect(() => {
-    const glow = glowRef.current;
-    if (!glow || !open) return;
-    const row = rowRefs.current[cursor];
-    if (!row) {
-      glow.style.opacity = '0';
-      return;
-    }
-    const fresh = lastOpen.current !== open;
-    lastOpen.current = open;
-    if (fresh) glow.style.transition = 'none';
-    glow.style.top = `${row.offsetTop}px`;
-    glow.style.height = `${row.offsetHeight}px`;
-    glow.style.opacity = '1';
-    if (fresh) {
-      void glow.offsetHeight;
-      glow.style.transition = '';
-    }
-  }, [open, cursor, list]);
-  useEffect(() => {
-    if (!open) lastOpen.current = null;
-  }, [open]);
 
   useEffect(() => {
     if (!plusOpen && !effortOpen) return undefined;
@@ -499,9 +473,6 @@ export default function PromptBar({
               <div className="prompt-bar__effort-head">
                 <span className="prompt-bar__effort-title">Effort</span>
                 <span className="prompt-bar__effort-level">{level}</span>
-                <span className="prompt-bar__effort-help" title="Higher effort thinks longer before answering">
-                  <HugeiconsIcon icon={HelpCircleIcon} size={16} strokeWidth={1.8} />
-                </span>
               </div>
               <div className="prompt-bar__effort-ends">
                 <span>Faster</span>
@@ -544,13 +515,9 @@ export default function PromptBar({
             </>
           ) : (
             <>
-              <span ref={glowRef} className="prompt-bar__glow" aria-hidden="true" />
               {list.map((row, i) => (
                 <button
                   key={row.key}
-                  ref={(el) => {
-                    rowRefs.current[i] = el;
-                  }}
                   type="button"
                   role="option"
                   aria-selected={i === cursor}
@@ -649,7 +616,10 @@ export default function PromptBar({
               <GlideSelect
                 options={models.map((item) => ({ value: item.key, label: item.name, tag: item.tag }))}
                 value={model?.key ?? ''}
-                onChange={(key) => setModelKey(key)}
+                onChange={(key) => {
+                  setModelKey(key);
+                  onModelChange?.(key);
+                }}
                 showTags
                 size="sm"
                 menuWidth={210}
@@ -689,7 +659,6 @@ export default function PromptBar({
                 aria-expanded={permitOpen}
                 onClick={() => setPermitOpen(value => !value)}
               >
-                <i />
                 <span>{permit.label}</span>
               </button>
               {permitOpen ? (
@@ -706,7 +675,6 @@ export default function PromptBar({
                         setPermitOpen(false);
                       }}
                     >
-                      <i />
                       <span>{item.label}</span>
                     </button>
                   ))}

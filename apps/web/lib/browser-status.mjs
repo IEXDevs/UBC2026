@@ -21,7 +21,7 @@ export function browserStatusNote({
   if (openCount > 0) {
     return 'An open browser session was found for this bot. Use Show live view, or Release if you want a fresh one.';
   }
-  return 'Live View needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on the Worker. Open a session here or ask the bot in chat.';
+  return 'No browser session yet.';
 }
 
 export function browserErrorNote(code) {

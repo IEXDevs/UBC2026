@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { developerPreviewAllowed, hasStoredPrivySession, publicDevPreviewValue, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
+import { developerPreviewAllowed, hasStoredPrivySession, hostedDevPreview, publicDevPreviewValue, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
 
 function storage(entries) {
   const keys = Object.keys(entries);
@@ -30,6 +30,10 @@ test('developer preview needs DEV_PREVIEW=1 and stays off in production', () => 
   assert.equal(developerPreviewAllowed({ nodeEnv: 'test', devPreview: '1' }), true);
   assert.equal(developerPreviewAllowed({ nodeEnv: 'production', devPreview: '1' }), false);
   assert.equal(developerPreviewAllowed({ nodeEnv: 'production', devPreview: '' }), false);
+  assert.equal(hostedDevPreview('1'), true);
+  assert.equal(hostedDevPreview(''), false);
+  assert.equal(hostedDevPreview('0'), false);
+  assert.equal(hostedDevPreview(undefined), false);
 });
 
 test('next dev keeps DEV_PREVIEW when NODE_ENV is already production', () => {
@@ -61,6 +65,8 @@ test('refresh keeps a stored session off the login page and the unlock field is 
   assert.match(page, /showSessionHold/);
   assert.match(page, /hasStoredPrivySession/);
   assert.match(page, /onDeveloperPreview=\{devAllowed \? enterDevPreview : null\}/);
+  assert.match(page, /const hostedPreview = useHostedPreview\(\)/);
+  assert.match(readFileSync(join(root, 'app/layout.js'), 'utf8'), /readHostedDevPreview/);
   assert.doesNotMatch(page, /inert=\{locked/);
   assert.doesNotMatch(config, /cookieWriteBehavior/);
   assert.match(desk, /autoComplete="off"/);

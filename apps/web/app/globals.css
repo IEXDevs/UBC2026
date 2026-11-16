@@ -53,6 +53,9 @@ input, textarea, [contenteditable='true'] {
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.45; }
+button:not(:disabled):hover {
+  background-color: var(--hover);
+}
 button:focus-visible, input:focus-visible {
   outline: 1px solid #fff;
   outline-offset: 2px;
@@ -75,9 +78,7 @@ button:focus-visible, input:focus-visible {
   .shell {
     height: 100vh;
     overflow: hidden;
-    transition:
-      grid-template-columns 420ms cubic-bezier(0.22, 1, 0.36, 1),
-      opacity 480ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: opacity 480ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .shell.is-collapsed { grid-template-columns: var(--side-w, 88px) minmax(0, 1fr); }
   .shell.is-dragging-pane { transition: none; }
@@ -270,10 +271,6 @@ button:focus-visible, input:focus-visible {
   display: flex;
   justify-content: center;
   overflow: visible;
-}
-
-.shell.is-collapsed .side:not(.is-collapsed) .rail {
-  overflow: hidden;
 }
 
 .rail-list {
@@ -592,9 +589,8 @@ button:focus-visible, input:focus-visible {
   transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.mark:hover,
-.agent-mark:hover .mark,
-.agent-photo:hover .mark {
+.side .mark:hover,
+.side .agent-mark:hover .mark {
   transform: rotate(180deg);
 }
 
@@ -1081,15 +1077,13 @@ button:focus-visible, input:focus-visible {
   padding: 0;
   min-width: 0;
   transform: translateX(-50%);
-  --dock-expand: 1000ms;
+  --dock-expand: 280ms;
+  --dock-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .dock-slot .pane-glass {
   overflow: visible;
   color: inherit;
-  transition:
-    width var(--dock-expand) cubic-bezier(0.22, 1, 0.36, 1),
-    height var(--dock-expand) cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .pane-glass .glass-surface__content {
@@ -2117,7 +2111,7 @@ button:focus-visible, input:focus-visible {
 .pane-nav .gooey-nav__list {
   flex-wrap: nowrap;
   width: max-content;
-  transition: gap var(--dock-expand) cubic-bezier(0.22, 1, 0.36, 1);
+  transition: gap var(--dock-expand) var(--dock-ease);
 }
 
 .pane-nav .gooey-nav__item {
@@ -2130,8 +2124,8 @@ button:focus-visible, input:focus-visible {
 
 .dock-slot.is-open .pane-nav .gooey-nav__item {
   transition:
-    max-width var(--dock-expand) cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 220ms ease 80ms,
+    max-width var(--dock-expand) var(--dock-ease),
+    opacity var(--dock-expand) var(--dock-ease),
     visibility 0s linear 0s;
 }
 
@@ -2141,8 +2135,8 @@ button:focus-visible, input:focus-visible {
 
 .dock-slot:not(.is-open) .pane-nav .gooey-nav__item {
   transition:
-    max-width var(--dock-expand) cubic-bezier(0.22, 1, 0.36, 1),
-    opacity calc(var(--dock-expand) * 0.72) cubic-bezier(0.22, 1, 0.36, 1),
+    max-width var(--dock-expand) var(--dock-ease),
+    opacity calc(var(--dock-expand) * 0.72) var(--dock-ease),
     visibility 0s linear var(--dock-expand);
 }
 
@@ -2150,7 +2144,7 @@ button:focus-visible, input:focus-visible {
   max-width: 14rem;
   opacity: 1;
   visibility: visible;
-  transition: max-width var(--dock-expand) cubic-bezier(0.22, 1, 0.36, 1);
+  transition: max-width var(--dock-expand) var(--dock-ease);
 }
 
 .dock-slot:not(.is-open) .pane-nav .gooey-nav__item:not([data-active]) {
@@ -4355,9 +4349,8 @@ button.chat-edit:disabled:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .empty-hold, .shell { transition: none; }
   .mark { transition: none; }
-  .mark:hover,
-  .agent-mark:hover .mark,
-  .agent-photo:hover .mark { transform: none; }
+  .side .mark:hover,
+  .side .agent-mark:hover .mark { transform: none; }
   .create-shape { animation: none; }
   .create-confetti { display: none; }
   .claim-confetti { display: none; }
@@ -5241,14 +5234,24 @@ legend {
 }
 
 .agent-detail-head span,
-.detail-block h2,
-.live-status {
+.detail-block h2 {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.live-status {
+  margin: 0 0 14px;
+  max-width: 36rem;
+  color: #d4d4d4;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-align: center;
+  text-transform: none;
 }
 
 .detail-block { margin: 0 0 22px; }
@@ -5393,6 +5396,80 @@ legend {
 }
 
 .side-computer { gap: 8px; }
+
+.live-view.is-screen { margin: 0; }
+
+.computer-screen {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  background: #0a0a0a;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.computer-screen.is-off {
+  border-color: #4a4a4a;
+  background: #5c5c5c;
+}
+
+.computer-screen .live-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  border-radius: 0;
+}
+
+.computer-screen .lattice,
+.computer-screen .preview-note {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+}
+
+.computer-screen .lattice {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.computer-screen .preview-note {
+  right: 10px;
+  bottom: 10px;
+  left: 10px;
+  color: #d4d4d4;
+  font-size: 12px;
+}
+
+.computer-screen-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #f5f5f5;
+  cursor: pointer;
+}
+
+.computer-screen-label {
+  color: #f5f5f5;
+  font-size: 14px;
+  font-weight: 500;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.65);
+}
+
+.computer-screen.is-off .computer-screen-hit:hover,
+.computer-screen.is-off .computer-screen-hit:focus-visible {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.computer-screen-hit:disabled { cursor: progress; }
 
 .side-computer h3,
 .side-options h3 {

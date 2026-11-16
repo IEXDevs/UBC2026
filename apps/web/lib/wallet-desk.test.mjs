@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   accountSetupStep,
+  SETUP_CARD_MS,
+  setupCardVisible,
   chartLine,
   createRecoveryPhrase,
   deskTokens,
@@ -161,4 +163,8 @@ test('swap quotes skip restricted tokens and signup claims a handle before recov
   assert.equal(accountSetupStep({ ...base, handle: 'alex', walletCount: 0 }), null);
   assert.equal(accountSetupStep({ ...base, handle: 'alex' }), 'recovery');
   assert.equal(accountSetupStep({ ...base, handle: 'alex', recoveryConfirmed: true }), null);
+  assert.equal(SETUP_CARD_MS, 4000);
+  assert.equal(setupCardVisible('loading'), null);
+  assert.equal(setupCardVisible('handle'), 'handle');
+  assert.equal(setupCardVisible(null), null);
 });

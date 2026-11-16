@@ -1,6 +1,7 @@
 /**
  * Persist shell chat threads in localStorage, keyed by owner + bot.
  */
+import { sanitizeActivity } from './chat-activity.mjs';
 
 export const TALK_KEY_PREFIX = 'maelstrom.talks.';
 const MAX_BOTS = 40;
@@ -16,13 +17,15 @@ export function talkStorageKey(ownerId) {
 function cleanLine(line) {
   if (!line || typeof line !== 'object') return null;
   const id = typeof line.id === 'string' ? line.id.trim().slice(0, 128) : '';
-  const role = line.role === 'user' || line.role === 'agent' || line.role === 'assistant'
+  const role = line.role === 'user' || line.role === 'agent' || line.role === 'assistant' || line.role === 'note'
     ? line.role
     : '';
   const text = typeof line.text === 'string' ? line.text.slice(0, 8000) : '';
   if (!id || !role || !text.trim()) return null;
   const next = { id, role, text };
   if (line.compacted === true) next.compacted = true;
+  const activity = sanitizeActivity(line.activity);
+  if (activity.length > 0) next.activity = activity;
   return next;
 }
 

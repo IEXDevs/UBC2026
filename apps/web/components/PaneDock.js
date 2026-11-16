@@ -239,8 +239,8 @@ export default function PaneDock({ panes, pane, onChange }) {
             size="md"
             particleCount={15}
             spread={56}
-            animationTime={1000}
-            timeVariance={300}
+            animationTime={280}
+            timeVariance={60}
             gooeyness={0.5}
             wobble={0.5}
             hoverEffect

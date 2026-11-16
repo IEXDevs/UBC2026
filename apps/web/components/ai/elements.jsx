@@ -99,6 +99,61 @@ export function TaskList({ items }) {
   );
 }
 
+function faviconFor(host) {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
+}
+
+function SiteChip({ site }) {
+  const label = site.title || site.host;
+  return (
+    <a className="agent-site" href={site.url} target="_blank" rel="noreferrer">
+      <img
+        alt=""
+        width="16"
+        height="16"
+        src={faviconFor(site.host)}
+        onError={(event) => { event.currentTarget.hidden = true; }}
+      />
+      <span>{label}</span>
+    </a>
+  );
+}
+
+export function AgentTrace({ steps = [] }) {
+  if (!steps.length) return null;
+  return (
+    <div className="agent-trace">
+      {steps.map((step, index) => {
+        const key = `${step.kind}-${index}`;
+        if (step.kind === 'think') return <Reasoning key={key} text={step.text} />;
+        if (step.kind === 'search') {
+          return (
+            <div key={key} className="agent-search">
+              <p className="agent-search-label">{step.query ? `Searched ${step.query}` : 'Searched the web'}</p>
+              {step.sites.length > 0 ? (
+                <div className="agent-sites">
+                  {step.sites.map((site) => <SiteChip key={site.url} site={site} />)}
+                </div>
+              ) : null}
+            </div>
+          );
+        }
+        if (step.kind === 'page') {
+          return (
+            <div key={key} className="agent-search">
+              <p className="agent-search-label">{step.label}</p>
+              <div className="agent-sites">
+                <SiteChip site={step} />
+              </div>
+            </div>
+          );
+        }
+        return <ToolCall key={key} name={step.label} input={step.detail} status={step.status === 'error' ? 'error' : undefined} />;
+      })}
+    </div>
+  );
+}
+
 export function Sources({ urls = [] }) {
   if (urls.length === 0) return null;
   return (

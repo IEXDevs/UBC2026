@@ -47,20 +47,6 @@
   }
 }
 
-.prompt-bar__glow {
-  position: absolute;
-  right: 4px;
-  left: 4px;
-  border-radius: 8px;
-  background: var(--pb-hover);
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    top 220ms var(--pb-ease-out),
-    height 220ms var(--pb-ease-out),
-    opacity 150ms ease;
-}
-
 .prompt-bar__row {
   position: relative;
   z-index: 1;
@@ -226,7 +212,6 @@
 }
 
 .prompt-bar__chip-x:hover {
-  background: color-mix(in srgb, var(--pb-ink) 10%, transparent);
   opacity: 1;
 }
 
@@ -316,16 +301,25 @@
 }
 
 .prompt-bar__tool[data-on],
-.prompt-bar__pick[data-on] {
-  background: var(--pb-hover);
+.prompt-bar__pick[data-on],
+.prompt-bar__row[aria-selected='true'] {
+  background: #3f3f46;
   color: var(--pb-ink);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .prompt-bar__tool:hover,
-  .prompt-bar__pick:hover {
-    background: var(--pb-hover);
+  button.prompt-bar__tool:not(:disabled):hover,
+  button.prompt-bar__pick:not(:disabled):hover,
+  button.prompt-bar__row:not(:disabled):hover,
+  button.prompt-bar__chip-x:not(:disabled):hover,
+  button.prompt-bar__send:not(:disabled):hover {
+    background: #3f3f46;
     color: var(--pb-ink);
+  }
+
+  button.prompt-bar__send[data-armed]:not(:disabled):hover {
+    background: var(--pb-ink);
+    color: var(--pb-bg);
   }
 }
 
@@ -354,12 +348,6 @@
 
 .prompt-bar__effort-level {
   font-weight: 500;
-}
-
-.prompt-bar__effort-help {
-  display: inline-flex;
-  margin-left: auto;
-  color: var(--pb-muted);
 }
 
 .prompt-bar__effort-ends {
@@ -529,14 +517,6 @@
   cursor: pointer;
 }
 
-.permit-chip i,
-.permit-menu button i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--permit);
-}
-
 .permit-menu {
   position: absolute;
   z-index: 30;
@@ -589,10 +569,6 @@
   .prompt-bar__menu,
   .prompt-bar__chip {
     animation: none;
-  }
-
-  .prompt-bar__glow {
-    transition: opacity 150ms ease;
   }
 
   .prompt-bar__effort-fill,

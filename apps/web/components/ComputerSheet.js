@@ -14,6 +14,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
   const [shown, setShown] = useState(false);
   const [steps, setSteps] = useState(() => loopStepsFromRun(null));
   const [loopNote, setLoopNote] = useState('');
+  const [hasRun, setHasRun] = useState(false);
 
   useEffect(() => {
     if (!mounted) {
@@ -49,11 +50,13 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
         const data = await response.json().catch(() => ({}));
         if (stop) return;
         if (!response.ok) {
+          setHasRun(false);
           setLoopNote('Could not load the loop from the Worker.');
           return;
         }
         setSteps(loopStepsFromRun(data.run));
-        setLoopNote(data.run ? '' : 'No checkpointed run yet. The steps stay beside the browser.');
+        setHasRun(Boolean(data.run));
+        setLoopNote('');
       } catch {
         if (!stop) setLoopNote('Could not reach the Worker for the loop.');
       }
@@ -80,8 +83,8 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
         <X size={18} strokeWidth={1.75} />
       </button>
       <div className="browser-preview-stage" onMouseDown={event => event.stopPropagation()}>
-        <LoopSteps steps={steps} note={loopNote} />
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} fill />
+        {hasRun ? <LoopSteps steps={steps} note={loopNote} /> : null}
+        <LiveViewPanel botId={bot.id} ownerId={ownerId} fill autoStart />
       </div>
     </div>,
     document.body,

@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { DOCK_EXPAND_MS, DOCK_SWITCH_MS, dockCollapseDelay, dockHoldDelay, dockShouldStayOpen, pillAnchor } from './dock-hold.mjs';
+
+test('dock expand duration matches the navbar stylesheet', () => {
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, new RegExp(`--dock-expand:\\s*${DOCK_EXPAND_MS}ms`));
+  assert.doesNotMatch(css, /opacity 220ms ease 80ms/);
+});
 
 test('dock stays open until the expand animation has finished', () => {
   const openedAt = 1_000;
