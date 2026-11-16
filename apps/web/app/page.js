@@ -22,6 +22,7 @@ import PluginsSheet from '../components/PluginsSheet';
 import StatisticsSheet from '../components/StatisticsSheet';
 import AgentDetail from '../components/AgentDetail';
 import AgentEdit from '../components/AgentEdit';
+import HoldButton from '../components/HoldButton';
 import ComputerSheet from '../components/ComputerSheet';
 import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
@@ -305,6 +306,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState('');
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const [railIcons, setRailIcons] = useState(false);
   const [sideWidth, setSideWidth] = useState(300);
   const [detailWidth, setDetailWidth] = useState(280);
   const [paneDrag, setPaneDrag] = useState(false);
@@ -1242,14 +1244,25 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     toast?.(`Sent ${amountLabel} to @${body.transfer.handle}`);
   }
 
+  useEffect(() => {
+    if (!railCollapsed) {
+      setRailIcons(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setRailIcons(true), 420);
+    return () => clearTimeout(timer);
+  }, [railCollapsed]);
+
   const sideColumn = railCollapsed ? 88 : sideWidth;
+  const noAgents = bots.length === 0;
   return (
     <>
     <div
-      className={`shell${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
+      className={`shell${noAgents ? ' is-empty' : ''}${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
       style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
-      <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
+      <aside className={`side${railIcons ? ' is-collapsed' : ''}`}>
+        {noAgents ? null : (
         <div
           className="pane-resize"
           role="separator"
@@ -1257,7 +1270,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           aria-label="Resize agents"
           onPointerDown={event => dragPane(event, 'left')}
         />
-        <div className="side-tools">
+        )}
+        {noAgents ? null : <div className="side-tools">
           <button
             type="button"
             className="icon-btn rail-toggle"
@@ -1281,19 +1295,19 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setPluginsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
-        </div>
-        <BotRail
+        </div>}
+        {noAgents ? null : <BotRail
           bots={visible}
           activeId={bot?.id}
           canDrag={!query.trim()}
-          collapsed={railCollapsed}
+          collapsed={railIcons}
           onSelect={openChat}
           onReorder={onReorder}
           onDelete={onDelete}
           onEdit={onEditLook}
           onCreate={() => setCreateOpen(true)}
-        />
-        <footer className="you">
+        />}
+        {noAgents ? null : <footer className="you">
           <AccountMenu
             accountLabel={profileRailLabel({
               handle: profile?.handle,
@@ -1301,26 +1315,48 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               fallback: accountLabel,
             })}
             avatarUrl={avatarUrl}
-            collapsed={railCollapsed}
+            collapsed={railIcons}
             signedIn={signedIn}
             loginDisabled={loginDisabled}
             walletUnlocked={unlocked}
             onLogin={onLogin}
             onPick={onAccount}
           />
-        </footer>
+        </footer>}
       </aside>
 
       <section className={`stage${pane === 'Positions' ? ' is-book' : ''}`}>
+        {noAgents ? null : (
         <header className="topbar">
           <span className="topbar-side" />
           <PaneDock panes={SHELL_PANES} pane={pane} onChange={choosePane} />
           <span />
         </header>
+        )}
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' ? ' is-chat' : ''}`}>
           <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}`} aria-label={pane}>
-            {pane === 'Main' ? (
-              bot ? (
+            {noAgents ? (
+                <div className="empty-hold">
+                  <p className="empty-hold__title">Create your first agent</p>
+                  <div className="empty-hold__control">
+                  <HoldButton
+                    className="empty-create"
+                    doneLabel="Create"
+                    backgroundColor="#f4f1fb"
+                    fillColor="#7c5cff"
+                    textColor="#120f17"
+                    fillTextColor="#f7f4ff"
+                    size="lg"
+                    radius={999}
+                    holdTime={1200}
+                    onHold={() => setCreateOpen(true)}
+                  >
+                    Create
+                  </HoldButton>
+                  <span className="empty-hold__hint">Hold to create</span>
+                  </div>
+                </div>
+            ) : pane === 'Main' && bot ? (
                 <AgentThread
                   key={bot.id}
                   bot={bot}
@@ -1330,15 +1366,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                   onParty={setParty}
                   onEdit={onEditLine}
                 />
-              ) : (
-                <>
-                  <h1>Make your first Agent!</h1>
-                  <p>The list stays empty until you create one.</p>
-                  <button type="button" className="solid" onClick={() => setCreateOpen(true)}>Create</button>
-                </>
-              )
             ) : null}
-            {money ? (
+            {!noAgents && money ? (
               <MoneyPane
                 pane={money}
                 state={{ bots, wallets, payments, positions, transfers, paymentCrossCheck }}
@@ -1347,7 +1376,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                 getAccessToken={getAccessToken}
               />
             ) : null}
-            {pane === 'Logs' ? (
+            {!noAgents && pane === 'Logs' ? (
               <LogsPanel
                 bots={bots}
                 ownerId={ownerId}
@@ -1357,7 +1386,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                 transfers={transfers}
               />
             ) : null}
-            {pane === 'Security' ? (
+            {!noAgents && pane === 'Security' ? (
               <SecurityPanel
                 bots={bots}
                 ownerId={ownerId}
@@ -1443,7 +1472,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           onDelete={(id) => { onDelete(id); setCornerEdit(null); }}
         />
       ) : null}
-      <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} />
+      <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} first={bots.length === 0} />
       {setupStep === 'loading' ? (
         <div className="backdrop is-center">
           <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-label="Setting up your account">

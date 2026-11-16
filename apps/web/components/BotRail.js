@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { Pencil } from 'lucide-react';
 import Dock from './Dock';
 import AnimatedList from './AnimatedList';
 import BotMark from './BotMark';
-import AgentEdit from './AgentEdit';
+import AgentEdit, { readAgentImage } from './AgentEdit';
 import { listLook } from './listLook';
 
 function statusMark(status) {
@@ -18,11 +19,22 @@ function statusMark(status) {
   );
 }
 
-function agentIcon(bot, size) {
+function agentIcon(bot, size, onPhoto) {
   return (
     <span className="agent-mark" style={{ width: size, height: size }}>
       <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={size} />
       {statusMark(bot.status)}
+      <button
+        type="button"
+        className="agent-pencil"
+        aria-label={`Change photo for ${bot.name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onPhoto(bot);
+        }}
+      >
+        <Pencil size={13} strokeWidth={1.75} />
+      </button>
     </span>
   );
 }
@@ -38,16 +50,33 @@ function placeMenu(event) {
 export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, onReorder, onDelete, onEdit, onCreate }) {
   const activeIndex = bots.findIndex(bot => bot.id === activeId);
   const [menu, setMenu] = useState(null);
+  const fileRef = useRef(null);
+  const photoBot = useRef(null);
   const closeMenu = () => setMenu(null);
   const editing = menu ? bots.find(item => item.id === menu.id) : null;
 
+  function startPhoto(bot) {
+    photoBot.current = bot;
+    if (fileRef.current) {
+      fileRef.current.value = '';
+      fileRef.current.click();
+    }
+  }
+
+  async function onPhoto(event) {
+    const bot = photoBot.current;
+    const next = await readAgentImage(event.target.files?.[0]);
+    event.target.value = '';
+    if (!bot || !next) return;
+    onEdit(bot.id, { name: bot.name, color: bot.color, shape: bot.shape, image: next });
+  }
+
+  const photoInput = (
+    <input ref={fileRef} className="agent-file" type="file" accept="image/*" tabIndex={-1} aria-hidden="true" onChange={onPhoto} />
+  );
+
   if (bots.length === 0) {
-    if (collapsed) return null;
-    return (
-      <button type="button" className="empty-rail" onClick={onCreate} onContextMenu={blockNativeMenu}>
-        Make your first Agent!
-      </button>
-    );
+    return <div className="rail" />;
   }
 
   if (collapsed) {
@@ -70,7 +99,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
       }
       rows.push({ label: 'Edit', onClick: () => setMenu({ id: bot.id, x: 88, y: 80 + index * 48 }) });
       return {
-        icon: agentIcon(bot, 54),
+        icon: agentIcon(bot, 54, startPhoto),
         label: bot.name,
         active: bot.id === activeId,
         onClick: () => onSelect(bot.id),
@@ -97,6 +126,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
           accentColor="#f4f4f5"
         />
         {editing ? <AgentEdit bot={editing} x={menu.x} y={menu.y} onClose={closeMenu} onSave={onEdit} onDelete={onDelete} /> : null}
+        {photoInput}
       </div>
     );
   }
@@ -116,7 +146,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
         className="rail-list"
         items={bots.map(bot => ({
           id: bot.id,
-          icon: agentIcon(bot, 60),
+          icon: agentIcon(bot, 60, startPhoto),
           title: bot.name,
           description: bot.goal,
         }))}
@@ -127,6 +157,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
         }}
       />
       {editing ? <AgentEdit bot={editing} x={menu.x} y={menu.y} onClose={closeMenu} onSave={onEdit} onDelete={onDelete} /> : null}
+      {photoInput}
     </div>
   );
 }
