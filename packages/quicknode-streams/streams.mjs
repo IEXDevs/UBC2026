@@ -243,8 +243,16 @@ export function createQuickNodeKvClient({ apiKey, listKey, fetchImpl = fetch, ba
     listKey,
     async list() {
       const data = await req('GET', `/lists/${encodeURIComponent(listKey)}`);
-      const items = Array.isArray(data) ? data : data?.data ?? data?.items ?? [];
-      return items.map(String);
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(data?.data)
+            ? data.data
+            : Array.isArray(data?.data?.items)
+              ? data.data.items
+              : [];
+      return items.map(item => (typeof item === 'string' ? item : '')).filter(Boolean);
     },
     async add(address) {
       if (!base58.test(address)) fail('invalid_wallet');

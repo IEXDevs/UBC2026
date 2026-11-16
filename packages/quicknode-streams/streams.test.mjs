@@ -128,6 +128,25 @@ test('syncWalletsToKv applies plan against memory and QuickNode list client', as
   assert.equal(calls.some((c) => c.method === 'PATCH'), true);
 });
 
+test('a QuickNode list wrapped as data.items is not added again', async () => {
+  const calls = [];
+  const qn = createQuickNodeKvClient({
+    apiKey: 'qn_key',
+    listKey: 'maelstrom-wallets',
+    fetchImpl: async (url, init) => {
+      calls.push(init.method);
+      if (init.method === 'GET') {
+        return new Response(JSON.stringify({ data: { items: [wallet] } }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    },
+  });
+  const synced = await syncWalletsToKv({ wallets: [wallet], walletKv: qn });
+  assert.deepEqual(synced.add, []);
+  assert.deepEqual(synced.remove, []);
+  assert.equal(calls.includes('PATCH'), false);
+});
+
 test('supabase store resolves bots, persists, and backfill wakes with afterWake', async () => {
   const rest = [];
   const store = createSupabaseStreamStore({
