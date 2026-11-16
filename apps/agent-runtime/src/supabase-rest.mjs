@@ -3,6 +3,7 @@
  * Uses the service role when present. Returns null / empty when not configured
  * so offline tests stay secret-free.
  */
+import { directoryFailureCode } from '@ubc2026/contracts';
 
 export function supabaseConfig(env) {
   const rawUrl = env?.SUPABASE_URL;
@@ -38,7 +39,12 @@ export async function supabaseGet(env, path, fetcher = fetch) {
   } catch {
     return { configured: true, rows: null, status: 0 };
   }
-  if (!response.ok) return { configured: true, rows: null, status: response.status };
+  if (!response.ok) {
+    let parsed = null;
+    try { parsed = await response.json(); } catch { parsed = null; }
+    const code = directoryFailureCode(response.status, parsed);
+    return { configured: true, rows: null, status: response.status, ...(code ? { code } : {}) };
+  }
   try {
     const rows = await response.json();
     return { configured: true, rows: Array.isArray(rows) ? rows : null, status: response.status };
@@ -71,16 +77,10 @@ export async function supabaseWrite(env, {
   } catch {
     return { configured: true, rows: null, status: 0, ok: false };
   }
-  let rows = null;
-  let code = '';
-  try {
-    const parsed = await response.json();
-    rows = Array.isArray(parsed) ? parsed : parsed == null ? null : [parsed];
-    const raw = parsed && !Array.isArray(parsed) && typeof parsed.code === 'string' ? parsed.code : '';
-    if (/^[0-9A-Z]{5}$/.test(raw) || /^PGRST[0-9]{3}$/.test(raw)) code = raw;
-  } catch {
-    rows = null;
-  }
+  let parsed = null;
+  try { parsed = await response.json(); } catch { parsed = null; }
+  const rows = Array.isArray(parsed) ? parsed : parsed == null ? null : [parsed];
+  const code = response.ok ? '' : directoryFailureCode(response.status, parsed);
   return { configured: true, rows, status: response.status, ok: response.ok, ...(code ? { code } : {}) };
 }
 

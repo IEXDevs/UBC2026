@@ -803,5 +803,51 @@ test('a profile claim upserts the user and stays readable', async () => {
     fetch: async () => Response.json({ code: '42501' }, { status: 401 }),
   }));
   assert.equal(unread.status, 502);
-  assert.equal((await unread.json()).error, 'profile_read_failed');
+  assert.equal((await unread.json()).error, '42501');
+});
+
+test('a claim for @alex quotes the Privy owner id on the confirm read', async () => {
+  const profiles = new Map();
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      const method = init.method || 'GET';
+      if (href.includes('/rest/v1/users')) return new Response('', { status: 201 });
+      if (method === 'POST' && href.includes('/rest/v1/profiles')) {
+        const body = JSON.parse(init.body);
+        profiles.set(body.owner_id, body);
+        assert.match(href, /on_conflict=owner_id/);
+        return Response.json([body], { status: 201 });
+      }
+      const filter = new URL(href).searchParams.get('owner_id') || '';
+      if (!filter.startsWith('eq."')) return Response.json({ code: 'PGRST100' }, { status: 400 });
+      const owner = filter.slice(4, -1);
+      const row = profiles.get(owner);
+      return Response.json(row ? [{ handle: row.handle, display_name: row.display_name, avatar_url: null }] : []);
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/profiles/me', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'did:privy:ada' },
+    body: JSON.stringify({ displayName: 'ada@example.com', handle: 'alex' }),
+  }), env);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).profile.handle, 'alex');
+  assert.equal(profiles.get('did:privy:ada').display_name, 'ada@example.com');
+
+  const rejected = await worker.fetch(new Request('https://runtime/api/profiles/me', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'did:privy:ada' },
+    body: JSON.stringify({ displayName: 'ada@example.com', handle: 'alex' }),
+  }), fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => Response.json({ message: 'Invalid API key', hint: 'service-role-secret' }, { status: 401 }),
+  }));
+  assert.equal(rejected.status, 502);
+  const body = await rejected.json();
+  assert.equal(body.error, 'supabase_http_401');
+  assert.equal(JSON.stringify(body).includes('service-role-secret'), false);
 });

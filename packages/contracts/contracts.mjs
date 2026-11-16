@@ -306,6 +306,26 @@ export function normalizeHandle(value) {
   return handle;
 }
 
+/**
+ * PostgREST `eq` filter. A Privy DID contains colons, which PostgREST treats
+ * as reserved unless the value is quoted.
+ */
+export function postgrestEq(column, value) {
+  if (typeof column !== 'string' || !/^[a-z_][a-z0-9_]*$/i.test(column)) return '';
+  const text = String(value ?? '').replaceAll('"', '""');
+  return `${column}=eq.${encodeURIComponent(`"${text}"`)}`;
+}
+
+/** SQLSTATE / PGRST code, else the HTTP status. Never the provider message. */
+export function directoryFailureCode(status, parsed) {
+  const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof parsed.code === 'string'
+    ? parsed.code
+    : '';
+  if (/^[0-9A-Z]{5}$/.test(raw) || /^PGRST[0-9]{3}$/.test(raw)) return raw;
+  if (Number.isInteger(status) && status >= 400 && status <= 599) return `supabase_http_${status}`;
+  return '';
+}
+
 /** `@alex` is a Maelstrom handle. `@richclub.sol` is an SNS name. */
 export function parseRecipient(value) {
   if (typeof value !== 'string') return null;

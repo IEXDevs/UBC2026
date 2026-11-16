@@ -9,6 +9,7 @@ import {
   normalizeDisplayName,
   normalizeHandle,
   parseRecipient,
+  postgrestEq,
 } from '@ubc2026/contracts';
 import { createSnsResolver, resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { accountWriteBodies, WalletError } from '@ubc2026/wallets';
@@ -1074,11 +1075,11 @@ export async function handleApiData(request, env, matched) {
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', profile: null });
     const result = await supabaseGet(
       env,
-      `profiles?owner_id=eq.${encodeURIComponent(ownerId)}&select=handle,display_name,avatar_url`,
+      `profiles?${postgrestEq('owner_id', ownerId)}&select=handle,display_name,avatar_url`,
       fetcher,
     );
     if (result.status !== 200 || !Array.isArray(result.rows)) {
-      return json({ error: 'profile_read_failed' }, 502);
+      return json({ error: result.code || 'profile_read_failed' }, 502);
     }
     const row = result.rows[0];
     return json({
@@ -1132,10 +1133,12 @@ export async function handleApiData(request, env, matched) {
     if (saved?.ok !== true) return json({ error: saved?.code || 'profile_save_failed' }, 502);
     const stored = await supabaseGet(
       env,
-      `profiles?owner_id=eq.${encodeURIComponent(ownerId)}&select=handle,display_name,avatar_url`,
+      `profiles?${postgrestEq('owner_id', ownerId)}&select=handle,display_name,avatar_url`,
       fetcher,
     );
-    if (stored.rows?.[0]?.handle !== handle) return json({ error: 'profile_save_failed' }, 502);
+    if (stored.status !== 200 || stored.rows?.[0]?.handle !== handle) {
+      return json({ error: stored.code || 'profile_save_failed' }, 502);
+    }
     return json({ ok: true, source: 'supabase', profile: { handle, displayName, avatarUrl } });
   }
 
