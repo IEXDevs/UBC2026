@@ -39,6 +39,33 @@ const fail = (message, code = 'wallet_error') => {
   throw new WalletError(message, code);
 };
 
+const HPKE_B64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function assertHpkeField(value, label) {
+  if (typeof value !== 'string' || value.length < 43 || value.length > 4096 || !HPKE_B64.test(value)) {
+    fail(`${label} is required`, 'invalid_export');
+  }
+  const bytes = Buffer.from(value, 'base64');
+  if (bytes.length < 32 || bytes.length > 3072) fail(`${label} is required`, 'invalid_export');
+  return value;
+}
+
+function acceptHpkeExport(payload) {
+  if (!payload || typeof payload !== 'object') fail('Privy export failed', 'invalid_provider_response');
+  for (const key of Object.keys(payload)) {
+    const normalized = key.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    if (normalized === 'privatekey' || normalized === 'seed' || normalized === 'mnemonic' || normalized === 'secretkey') {
+      fail('Privy export included a plaintext key', 'plaintext_key');
+    }
+  }
+  if (payload.encryption_type !== 'HPKE') fail('Privy export was not encrypted', 'invalid_provider_response');
+  return {
+    encryptionType: 'HPKE',
+    encapsulatedKey: assertHpkeField(payload.encapsulated_key, 'Encapsulated key'),
+    ciphertext: assertHpkeField(payload.ciphertext, 'Ciphertext'),
+  };
+}
+
 function assertHeaderSafe(value, label) {
   if (typeof value !== 'string' || value.trim() === '' || /[\r\n]/.test(value) || value.length > 8192) {
     fail(`${label} is required`, 'missing_config');
@@ -775,6 +802,31 @@ export function createPrivyWalletClient({
       const signedTransaction = await signWithPrivy(walletId, transaction);
       const signature = await sendSigned(signedTransaction, { privy: true });
       return { cluster: 'devnet', signature, privyWalletId: walletId };
+    },
+
+    /**
+     * Export a user-owned server wallet. Privy encrypts the key to the caller's
+     * HPKE public key. The plaintext key is never read or returned.
+     */
+    async exportOwnerWallet({ ownerId, wallet, recipientPublicKey } = {}) {
+      const owner = assertOwnerId(ownerId);
+      try {
+        validateWallet(wallet);
+      } catch (error) {
+        if (error instanceof ContractError) fail(error.message, 'invalid_wallet');
+        throw error;
+      }
+      if (wallet.ownerId !== owner) fail('Wallet owner must match', 'owner_mismatch');
+      if (wallet.spendable === false || String(wallet.id).startsWith('linked_')) {
+        fail('Observing wallets cannot be exported', 'observing_wallet');
+      }
+      const walletId = assertPrivyWalletId(wallet.privyWalletId);
+      assertHpkeField(recipientPublicKey, 'Recipient public key');
+      const payload = await privy('POST', `/v1/wallets/${encodeURIComponent(walletId)}/export`, {
+        encryption_type: 'HPKE',
+        recipient_public_key: recipientPublicKey,
+      });
+      return acceptHpkeExport(payload);
     },
 
     /** Broadcast a transaction the Wallet Adapter already signed. No Privy call. */

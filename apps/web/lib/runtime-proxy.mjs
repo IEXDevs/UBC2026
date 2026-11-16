@@ -11,6 +11,7 @@ const ALLOWED = Object.freeze([
   /^\/api\/me$/,
   /^\/api\/wallets$/,
   /^\/api\/wallets\/persist$/,
+  /^\/api\/wallets\/[A-Za-z0-9_-]{10,128}\/export$/,
   /^\/api\/bots$/,
   /^\/api\/bots\/freeze$/,
   /^\/api\/desk$/,

@@ -61,6 +61,7 @@ export default function WalletsSheet({
   onSend,
   onReceipt,
   focusId = '',
+  getAccessToken,
 }) {
   const { mounted, leaving } = usePresence(open);
   const [pane, setPane] = useState('assets');
@@ -205,8 +206,14 @@ export default function WalletsSheet({
           ) : null}
           {pane === 'keys' ? (
             <div className="wallet-keys">
-              <p>The private key stays in Privy. This screen never reads it, stores it, or shows it.</p>
-              <PrivyKeyButton signedIn={signedIn} address={active?.address || glance.address} />
+              <p>The key stays encrypted until this browser decrypts the download. Maelstrom does not store it.</p>
+              <PrivyKeyButton
+                signedIn={signedIn}
+                address={active?.address || glance.address}
+                walletId={activeRaw?.privyWalletId || ''}
+                ownerId={ownerId}
+                getAccessToken={getAccessToken}
+              />
             </div>
           ) : null}
         </div>
