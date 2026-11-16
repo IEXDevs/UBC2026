@@ -668,8 +668,27 @@ export function createPrivyWalletClient({
       return session.user;
     },
 
+    /**
+     * Provision / sync Solana wallets after Privy login.
+     * Prefer the app-secret `/v1/users/:id` path when the access token JWT has a
+     * `sub` — Cloudflare Workers strip outbound `Origin`, so `/users/me` 403s on
+     * the hosted web and agent-runtime Workers (invalid_origin / must_specify_origin).
+     * Fall back to `/users/me` only when the token has no usable `sub`.
+     */
     async acceptLogin({ accessToken, ownerId, origin } = {}) {
-      const session = await this.readSession({ accessToken, ownerId, origin });
+      const token = assertHeaderSafe(accessToken, 'Privy access token');
+      const fromJwt = jwtSub(token);
+      const headerOwner = typeof ownerId === 'string' && ownerIdPattern.test(ownerId.trim())
+        ? ownerId.trim()
+        : '';
+      if (fromJwt) {
+        if (headerOwner && headerOwner !== fromJwt) {
+          fail('Owner id does not match access token', 'owner_mismatch');
+        }
+        const user = await loadUser(fromJwt);
+        return syncWallets(user, headerOwner || fromJwt, token);
+      }
+      const session = await this.readSession({ accessToken: token, ownerId, origin });
       return syncWallets(session.user, session.ownerId, session.accessToken);
     },
 

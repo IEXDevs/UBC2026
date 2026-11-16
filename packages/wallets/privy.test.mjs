@@ -143,12 +143,12 @@ test('readLoginUser returns linked wallets and does not create one', async () =>
   assert.equal(calls.some(call => String(call.url).includes('/v1/wallets')), false);
 });
 
-test('login recovers owner id from JWT sub when users/me omits id', async () => {
+test('login recovers owner id from JWT sub without users/me (Worker-safe)', async () => {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
   const token = `${header}.${body}.sig`;
   const { fetcher, calls } = mockFetch([
-    { match: url => url.endsWith('/api/v1/users/me'), body: { linked_accounts: [] } },
+    { match: url => url.includes(`/v1/users/${encodeURIComponent(privyUserId)}`), body: { id: privyUserId, linked_accounts: [] } },
     { match: url => url.includes('/v1/wallets?'), body: { data: [] } },
     {
       match: (url, reqBody) => url.endsWith('/v1/wallets') && reqBody?.display_name === 'Main',
@@ -157,11 +157,27 @@ test('login recovers owner id from JWT sub when users/me omits id', async () => 
   ]);
   const result = await client({ fetcher }).acceptLogin({
     accessToken: token,
-    origin: 'http://localhost:3000',
+    ownerId: privyUserId,
+    // No origin — Cloudflare Workers strip it on outbound Privy calls.
   });
   assert.equal(result.created, true);
   assert.equal(result.main.ownerId, privyUserId);
+  assert.equal(calls.some(call => String(call.url).includes('/users/me')), false);
   assert.equal(calls[2].body.owner.user_id, privyUserId);
+});
+
+test('login rejects owner id that does not match JWT sub', async () => {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
+  const token = `${header}.${body}.sig`;
+  const { fetcher } = mockFetch([]);
+  await assert.rejects(
+    () => client({ fetcher }).acceptLogin({
+      accessToken: token,
+      ownerId: 'did:privy:other',
+    }),
+    error => error instanceof WalletError && error.code === 'owner_mismatch',
+  );
 });
 
 test('login keeps linked wallets and sign-in methods on the same owner', async () => {
