@@ -30,6 +30,7 @@ export default function ProfileSheet({
   onLogin,
   onLogout,
   onSave,
+  onWallet,
 }) {
   const { mounted, leaving } = usePresence(open);
   const [displayName, setDisplayName] = useState(profile?.displayName || accountLabel || '');
@@ -130,6 +131,7 @@ export default function ProfileSheet({
           <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
           <p className="quiet">Talk time is seconds on this device. Net PnL is inflows minus outflows. devnet execution, mainnet pricing.</p>
           <p className="plugin-kicker">Wallet</p>
+          <button type="button" className="ghost" onClick={onWallet}>Open wallet</button>
           {signedIn ? (
             <>
               <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>

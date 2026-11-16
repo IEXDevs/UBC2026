@@ -9,8 +9,11 @@ import {
   deskTokens,
   displayToUnits,
   normalizeTokenPrefs,
+  parseImportKey,
   parseSendTarget,
   phraseComplete,
+  phraseMatches,
+  swapDraft,
   phraseFromEntropy,
   quoteUrl,
   readQuoteOut,
@@ -18,6 +21,8 @@ import {
   recoveryAcknowledged,
   recoveryAckRecord,
   recoveryCard,
+  recoveryResume,
+  recoveryStepRecord,
   recoveryWords,
   shuffledPhrase,
   SOL_MINT,
@@ -103,6 +108,8 @@ test('recovery phrases are confirmed in order and never stored in the ack', () =
   const shuffled = shuffledPhrase(PHRASE, () => 0);
   assert.equal(shuffled.length, 12);
   assert.notEqual(shuffled[0].index, 0);
+  assert.equal(phraseMatches(PHRASE.join(' '), PHRASE), true);
+  assert.equal(phraseMatches('alpha bravo', PHRASE), false);
   assert.equal(phraseComplete([0, 1, 2], 3), true);
   assert.equal(phraseComplete([0, 2, 1], 3), false);
   const card = recoveryCard({
@@ -117,7 +124,13 @@ test('recovery phrases are confirmed in order and never stored in the ack', () =
   assert.match(plain, /not a seed phrase/);
   assert.equal(recoveryAcknowledged(recoveryAckRecord()), true);
   assert.equal(recoveryAcknowledged(JSON.stringify({ downloaded: true, confirmed: true, words: PHRASE })), false);
-  assert.match(recoveryCard({ words: PHRASE, passphrase: 'correct horse' }), /Passphrase:\ncorrect horse/);
+  assert.deepEqual(recoveryResume(recoveryStepRecord('pass')), { step: 'pass', lost: false });
+  assert.deepEqual(recoveryResume(recoveryStepRecord('confirm')), { step: 'pass', lost: true });
+  assert.deepEqual(recoveryResume(JSON.stringify({ step: 'save', seed: PHRASE.join(' ') })), { step: 'tell', lost: true });
+  assert.equal(recoveryStepRecord('save').includes('alpha'), false);
+  assert.equal(parseImportKey('not-a-key'), null);
+  assert.equal(parseImportKey(`${'1'.repeat(64)}`), '1'.repeat(64));
+  assert.match(recoveryCard({ words: PHRASE, passphrase: 'correct horse' }), /Password:\ncorrect horse/);
 });
 
 test('a recovery phrase is a real 12-word BIP39 mnemonic and the ack stores no words', async () => {
@@ -151,6 +164,11 @@ test('swap quotes skip restricted tokens and signup claims a handle before recov
   });
   assert.equal(open.broadcast, false);
   assert.match(open.url, /^https:\/\/quote-api\.dflow\.net\/quote\?/);
+  const draft = swapDraft(deskTokens({}), { from: 'USDC', to: 'SOL', amountText: '1' });
+  assert.equal(draft.broadcast, false);
+  assert.match(draft.url, /^https:\/\/lite-api\.jup\.ag\/swap\/v1\/quote\?/);
+  assert.equal(swapDraft(deskTokens({}), { from: 'USDC', to: 'USDC', amountText: '1' }).error, 'invalid_quote');
+  assert.equal(swapDraft(deskTokens({}), { from: 'USDC', to: 'SOL', amountText: '0' }).error, 'invalid_amount');
   const base = {
     signedIn: true,
     profileReady: true,

@@ -122,6 +122,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
             <span className="claim-plate__shine" aria-hidden="true" />
             <p className="claim-plate__handle">@{welcome.handle}</p>
           </div>
+          <p className="quiet">Next you will set a password and save the seed phrase for this wallet.</p>
           <button type="button" className="solid" onClick={onContinue}>Continue</button>
         </div>
       </div>

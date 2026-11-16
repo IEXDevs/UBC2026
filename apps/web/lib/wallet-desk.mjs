@@ -82,18 +82,41 @@ export function recoveryStorageKey(ownerId) {
   return typeof ownerId === 'string' && ownerId.trim() ? `maelstrom.recovery.${ownerId.trim()}` : '';
 }
 
-/** Ack records store flags only. A phrase in the blob is rejected. */
-export function recoveryAcknowledged(raw) {
-  if (typeof raw !== 'string' || !raw) return false;
+const RECOVERY_STEPS = new Set(['tell', 'pass', 'save', 'confirm']);
+const RECOVERY_SECRET_KEYS = ['words', 'phrase', 'mnemonic', 'seed', 'passphrase', 'seedPhrase', 'password', 'privateKey', 'key'];
+
+function recoveryBody(raw) {
+  if (typeof raw !== 'string' || !raw) return null;
   try {
     const body = JSON.parse(raw);
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
-    const secret = ['words', 'phrase', 'mnemonic', 'seed', 'passphrase', 'seedPhrase'];
-    if (secret.some(key => key in body)) return false;
-    return body.downloaded === true && body.confirmed === true;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+    if (RECOVERY_SECRET_KEYS.some(key => key in body)) return { secret: true };
+    return body;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Ack records store flags only. A phrase in the blob is rejected. */
+export function recoveryAcknowledged(raw) {
+  const body = recoveryBody(raw);
+  if (!body || body.secret) return false;
+  return body.downloaded === true && body.confirmed === true;
+}
+
+/** The step name only. A saved phrase or key is rejected and the visit starts over. */
+export function recoveryResume(raw) {
+  const body = recoveryBody(raw);
+  if (!body || body.secret) return { step: 'tell', lost: true };
+  if (body.downloaded === true && body.confirmed === true) return { step: 'done', lost: false };
+  if (body.step === 'save' || body.step === 'confirm') return { step: 'pass', lost: true };
+  if (RECOVERY_STEPS.has(body.step)) return { step: body.step, lost: false };
+  return { step: 'tell', lost: false };
+}
+
+export function recoveryStepRecord(step) {
+  if (!RECOVERY_STEPS.has(step)) throw new Error('step');
+  return JSON.stringify({ step });
 }
 
 export function recoveryAckRecord() {
@@ -331,6 +354,19 @@ export function writeRecoveryAck(storage, ownerId) {
   storage.setItem(key, recoveryAckRecord());
 }
 
+export function writeRecoveryStep(storage, ownerId, step) {
+  const key = recoveryStorageKey(ownerId);
+  if (!storage || !key) throw new Error('owner');
+  storage.setItem(key, recoveryStepRecord(step));
+}
+
+const IMPORT_KEY = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/;
+
+export function parseImportKey(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return IMPORT_KEY.test(text) ? text : null;
+}
+
 export function readTokenPrefs(storage, ownerId) {
   const key = tokenStorageKey(ownerId);
   if (!storage || !key) return emptyTokenPrefs();
@@ -382,6 +418,27 @@ export function accountSetupStep({
   return null;
 }
 
+export function phraseMatches(typed, words) {
+  const expected = recoveryWords(words);
+  const given = recoveryWords(typeof typed === 'string' ? typed : '');
+  if (!expected || !given || expected.length !== given.length) return false;
+  return expected.every((word, index) => word === given[index]);
+}
+
+export function swapDraft(rows, { from, to, amountText } = {}) {
+  const input = (rows || []).find(row => row.symbol === from) || null;
+  const output = (rows || []).find(row => row.symbol === to) || null;
+  if (!input || !output || input.symbol === output.symbol) return { error: 'invalid_quote' };
+  const amount = displayToUnits(typeof amountText === 'string' ? amountText : '', input.decimals);
+  if (!amount) return { error: 'invalid_amount' };
+  const quote = swapQuoteUrl('jupiter', rows, {
+    inputSymbol: input.symbol,
+    outputSymbol: output.symbol,
+    amount,
+  });
+  return { ...quote, amount, input, output };
+}
+
 export function phraseComplete(picked, length) {
   return Array.isArray(picked)
     && picked.length === length
@@ -395,8 +452,8 @@ export function recoveryCard({ words, wallets = [], handle = '', passphrase = ''
   if (phrase) {
     lines.push('Seed phrase:', phrase.join(' '), '');
     const pass = normalizePassphrase(passphrase);
-    if (pass) lines.push('Passphrase:', pass, '');
-    lines.push('Maelstrom does not keep a copy of this phrase.', 'Privy still signs. This phrase is the backup you save on this device.', '');
+    if (pass) lines.push('Password:', pass, '');
+    lines.push('Maelstrom does not store this seed or password.', 'If this file is gone, the phrase is gone.', 'Privy still signs. This file is the backup on your device.', '');
   } else {
     lines.push('Signing keys stay in Privy. This card lists addresses. It is not a seed phrase.', '');
   }

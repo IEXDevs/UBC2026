@@ -39,7 +39,10 @@ test('each create screen keeps one generator beside the field and a copy icon in
   assert.match(desk, /kind="password"/);
   assert.equal(desk.includes('Generate passphrase'), false);
   assert.equal(desk.includes('acknowledged'), false);
-  assert.match(recovery, /kind="passphrase"/);
+  assert.match(recovery, /Password/);
+  assert.match(recovery, /Repeat password/);
+  assert.match(recovery, /Download seed/);
+  assert.match(recovery, /Type the 12 words/);
   assert.equal(recovery.includes('Generate password'), false);
   assert.equal(recovery.includes('acknowledged'), false);
 });

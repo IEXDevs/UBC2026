@@ -251,16 +251,18 @@ function starTexture() {
   return canvas;
 }
 
-export default function PositionBook({ positions, bots, wallets = [], earnings = null }) {
+export default function PositionBook({ positions, bots, wallets = [], earnings = null, onWallet }) {
   const book = useMemo(() => layoutPositionBook(positions, bots, wallets), [positions, bots, wallets]);
   const mountRef = useRef(null);
   const cameraRef = useRef(null);
   const openRef = useRef(null);
+  const walletRef = useRef(onWallet);
   const [detail, setDetail] = useState(null);
   const [drifted, setDrifted] = useState(false);
   const driftedRef = useRef(false);
   const setDriftedRef = useRef(setDrifted);
   openRef.current = setDetail;
+  walletRef.current = onWallet;
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -809,8 +811,11 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           if (!gesture.moved) {
             const body = bodyById.get(gesture.id);
             if (body) body.pin = false;
-            const payload = detailPayload(gesture.id);
-            if (payload) openRef.current?.(payload);
+            if (element?.dataset.kind === 'wallet') walletRef.current?.(gesture.id);
+            else {
+              const payload = detailPayload(gesture.id);
+              if (payload) openRef.current?.(payload);
+            }
           }
           const state = tiltState.get(gesture.id);
           if (state) {
