@@ -207,14 +207,14 @@ function AuthedShell() {
           return;
         }
 
-        // Prefer Next Privy provision (Workers strip Origin on outbound Privy).
-        // Next mirrors wallets into Supabase via /api/wallets/persist.
-        const runtimeWallets = shellRuntimeUrl('/api/wallets');
-        const provisionUrls = runtimeWallets ? ['/api/wallets', runtimeWallets] : ['/api/wallets'];
+        // Provision only via Next `/api/wallets`. The agent-runtime Worker
+        // cannot set Origin for Privy users/me, so POST /api/runtime/api/wallets
+        // always 502s and used to overwrite a useful Next error in the console.
+        // Next already mirrors rows to Supabase with /api/wallets/persist.
         let body = {};
         let ok = false;
-        for (const url of provisionUrls) {
-          const response = await fetch(url, {
+        try {
+          const response = await fetch('/api/wallets', {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${token}`,
@@ -225,11 +225,18 @@ function AuthedShell() {
           body = await response.json().catch(() => ({}));
           if (stopped) return;
           ok = response.ok && Array.isArray(body.wallets) && body.wallets.length > 0;
-          if (ok) break;
-          console.error('[wallets] provision failed', url, response.status, {
-            error: body.error,
-            detail: body.detail,
-            missing: body.missing,
+          if (!ok) {
+            console.error('[wallets] provision failed', '/api/wallets', response.status, {
+              error: body.error,
+              detail: body.detail,
+              missing: body.missing,
+            });
+          }
+        } catch (error) {
+          if (stopped) return;
+          console.error('[wallets] provision failed', '/api/wallets', {
+            error: error?.name || 'fetch_failed',
+            detail: typeof error?.message === 'string' ? error.message.slice(0, 180) : undefined,
           });
         }
         if (!ok) {

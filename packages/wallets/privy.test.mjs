@@ -166,18 +166,33 @@ test('login recovers owner id from JWT sub without users/me (Worker-safe)', asyn
   assert.equal(calls[2].body.owner.user_id, privyUserId);
 });
 
-test('login rejects owner id that does not match JWT sub', async () => {
+test('login prefers JWT sub over a stale x-owner-id header', async () => {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
   const token = `${header}.${body}.sig`;
-  const { fetcher } = mockFetch([]);
-  await assert.rejects(
-    () => client({ fetcher }).acceptLogin({
-      accessToken: token,
-      ownerId: 'did:privy:other',
-    }),
-    error => error instanceof WalletError && error.code === 'owner_mismatch',
-  );
+  const { fetcher, calls } = mockFetch([
+    { match: url => url.includes(`/v1/users/${encodeURIComponent(privyUserId)}`), body: { id: privyUserId, linked_accounts: [embedded(walletId, 0)] } },
+  ]);
+  const result = await client({ fetcher }).acceptLogin({
+    accessToken: token,
+    ownerId: 'did:privy:other',
+  });
+  assert.equal(result.main.ownerId, privyUserId);
+  assert.equal(calls.length, 1);
+  assert.equal(String(calls[0].url).includes(encodeURIComponent(privyUserId)), true);
+});
+
+test('Worker-safe login loads the user with app secret and no authorization signature', async () => {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
+  const token = `${header}.${body}.sig`;
+  const { fetcher, calls } = mockFetch([
+    { match: url => url.includes(`/v1/users/${encodeURIComponent(privyUserId)}`), body: { id: privyUserId, linked_accounts: [embedded(walletId, 0)] } },
+  ]);
+  await client({ fetcher, authorizationKey }).acceptLogin({ accessToken: token, ownerId: privyUserId });
+  const userCall = calls[0];
+  assert.equal(userCall.init.headers.Authorization.startsWith('Basic '), true);
+  assert.equal(userCall.init.headers['privy-authorization-signature'], undefined);
 });
 
 test('login keeps linked wallets and sign-in methods on the same owner', async () => {
@@ -224,7 +239,7 @@ test('login keeps linked wallets and sign-in methods on the same owner', async (
 
 test('login creates the main Solana wallet when Privy has none', async () => {
   const { fetcher, calls } = mockFetch([
-    { match: url => url.endsWith('/api/v1/users/me'), body: userWith([]) },
+    { match: url => url.includes('/v1/users/'), body: userWith([]) },
     { match: url => url.includes('/v1/wallets?'), body: { data: [] } },
     {
       match: (url, body) => url.endsWith('/v1/wallets') && body?.display_name === 'Main',
@@ -245,9 +260,9 @@ test('login creates the main Solana wallet when Privy has none', async () => {
   assert.deepEqual(result.additional, []);
 
   const login = calls[0];
-  assert.equal(login.url, 'https://auth.privy.io/api/v1/users/me');
-  assert.equal(login.init.headers.Authorization, `Bearer ${accessToken}`);
-  assert.equal(login.init.headers.Origin, 'http://localhost:3000');
+  assert.equal(login.url, `https://api.privy.io/v1/users/${encodeURIComponent('user_1')}`);
+  assert.equal(login.init.headers.Authorization.startsWith('Basic '), true);
+  assert.equal(login.init.headers['privy-authorization-signature'], undefined);
   assert.equal(login.url.includes(accessToken), false);
   assert.equal(login.init.headers.Authorization.includes(appSecret), false);
 
@@ -343,7 +358,7 @@ test('login retries list after create fails when a server wallet already exists'
 test('login keeps an existing main wallet and maps later embedded wallets as additional', async () => {
   const { fetcher, calls } = mockFetch([
     {
-      match: url => url.endsWith('/api/v1/users/me'),
+      match: url => url.includes('/v1/users/'),
       body: userWith([
         { type: 'wallet', address, chain_type: 'solana', wallet_client_type: 'phantom', connector_type: 'solana_adapter', id: 'phantomwalletid1234567890' },
         embedded(otherWalletId, 1),
