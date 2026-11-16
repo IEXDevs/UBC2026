@@ -130,6 +130,7 @@ async function dispatch(request, env, rawEnv = env) {
       'wallets.create',
       'wallets.persist',
       'wallets.sign',
+      'wallets.export',
       'bots.list',
       'bots.create',
       'bots.delete',

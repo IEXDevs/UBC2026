@@ -649,6 +649,39 @@ export async function handleApiData(request, env, matched) {
     }
   }
 
+  if (routeId === 'wallets.export') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const denied = await deskDenied(request, env, ownerId, fetcher);
+    if (denied) return denied;
+    const client = privyClient(env);
+    if (!client?.exportOwnerWallet) return json({ error: 'signer_not_configured' }, 503);
+    const walletId = matched.params?.walletId;
+    const body = await request.json().catch(() => ({}));
+    const recipientPublicKey = typeof body?.recipientPublicKey === 'string' ? body.recipientPublicKey : '';
+    if (!supabaseConfig(env)) return json({ error: 'wallet_not_found' }, 404);
+    const loaded = await supabaseGet(
+      env,
+      `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
+      fetcher,
+    );
+    const wallet = mapWalletRow(loaded.rows?.[0]);
+    if (!wallet) return json({ error: 'wallet_not_found' }, 404);
+    try {
+      const exported = await client.exportOwnerWallet({ ownerId, wallet, recipientPublicKey });
+      return json({
+        ok: true,
+        encryptionType: 'HPKE',
+        encapsulatedKey: exported.encapsulatedKey,
+        ciphertext: exported.ciphertext,
+      });
+    } catch (err) {
+      const code = err instanceof WalletError ? err.code : 'export_failed';
+      return json({ error: code }, 400);
+    }
+  }
+
   if (routeId === 'bots.list') {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);

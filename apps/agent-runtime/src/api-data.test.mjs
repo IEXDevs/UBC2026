@@ -862,3 +862,71 @@ test('a claim for @alex quotes the Privy owner id on the confirm read', async ()
   assert.equal(body.error, 'supabase_http_401');
   assert.equal(JSON.stringify(body).includes('service-role-secret'), false);
 });
+
+test('a server wallet export returns HPKE fields and not a plaintext key', async () => {
+  const missing = await worker.fetch(new Request('https://runtime/api/wallets/fmfdj6yqly31huorjqzq38zc/export', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ recipientPublicKey: 'aa' }),
+  }), fakeEnv());
+  assert.equal(missing.status, 503);
+  assert.equal((await missing.json()).error, 'signer_not_configured');
+
+  const grant = 'cd'.repeat(32);
+  const grantHash = await sha256Hex(grant);
+  let exported = null;
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    transferClient: {
+      exportOwnerWallet: async (input) => {
+        exported = input;
+        return {
+          encryptionType: 'HPKE',
+          encapsulatedKey: 'enc',
+          ciphertext: 'ct',
+          privateKey: 'do-not-return',
+        };
+      },
+    },
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.includes('desk_locks')) {
+        return Response.json([{
+          grant_hash: grantHash,
+          grant_until: new Date(Date.now() + 60_000).toISOString(),
+        }]);
+      }
+      if (href.includes('/rest/v1/wallets')) {
+        return Response.json([{
+          id: 'fmfdj6yqly31huorjqzq38zc',
+          owner_id: 'user_1',
+          kind: 'main',
+          label: 'Main',
+          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          provider: 'privy',
+          frozen: false,
+          spendable: true,
+        }]);
+      }
+      return Response.json([]);
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/wallets/fmfdj6yqly31huorjqzq38zc/export', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-owner-id': 'user_1',
+      'x-desk-grant': grant,
+    },
+    body: JSON.stringify({ recipientPublicKey: 'recipient' }),
+  }), env);
+  assert.equal(res.status, 200);
+  const payload = await res.json();
+  assert.equal(payload.ciphertext, 'ct');
+  assert.equal(payload.privateKey, undefined);
+  assert.equal(JSON.stringify(payload).includes('do-not-return'), false);
+  assert.equal(exported.ownerId, 'user_1');
+  assert.equal(exported.recipientPublicKey, 'recipient');
+  assert.equal(exported.wallet.privyWalletId, 'fmfdj6yqly31huorjqzq38zc');
+});

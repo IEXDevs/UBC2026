@@ -635,3 +635,41 @@ test('devnet reads and owner sweeps stay off the public client surface and off m
   assert.equal(wallet.frozen, true);
   assert.equal(sweep.calls.at(-1).body.method, 'sendTransaction');
 });
+
+test('an owner export returns HPKE ciphertext and refuses a plaintext key', async () => {
+  const wallet = {
+    ...createMainWallet({ ownerId: 'user_1', address, id: walletId }),
+    privyWalletId: walletId,
+  };
+  const recipient = Buffer.alloc(65, 7).toString('base64');
+  const encapsulated = Buffer.alloc(65, 8).toString('base64');
+  const ciphertext = Buffer.alloc(48, 9).toString('base64');
+  const leaked = mockFetch([{
+    match: (url) => url.endsWith(`/v1/wallets/${walletId}/export`),
+    body: { encryption_type: 'HPKE', encapsulated_key: encapsulated, ciphertext, private_key: 'do-not-return' },
+  }]);
+  await assert.rejects(
+    () => client({ fetcher: leaked.fetcher }).exportOwnerWallet({
+      ownerId: 'user_1',
+      wallet,
+      recipientPublicKey: recipient,
+    }),
+    (error) => error instanceof WalletError && error.code === 'plaintext_key',
+  );
+  const clean = mockFetch([{
+    match: (url, body) => url.endsWith(`/v1/wallets/${walletId}/export`)
+      && body?.encryption_type === 'HPKE'
+      && body?.recipient_public_key === recipient,
+    body: { encryption_type: 'HPKE', encapsulated_key: encapsulated, ciphertext },
+  }]);
+  const exported = await client({ fetcher: clean.fetcher }).exportOwnerWallet({
+    ownerId: 'user_1',
+    wallet,
+    recipientPublicKey: recipient,
+  });
+  assert.equal(exported.encryptionType, 'HPKE');
+  assert.equal(exported.ciphertext, ciphertext);
+  assert.equal(exported.encapsulatedKey, encapsulated);
+  assert.equal(exported.privateKey, undefined);
+  assert.equal(JSON.stringify(exported).includes('do-not-return'), false);
+});

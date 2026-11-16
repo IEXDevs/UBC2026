@@ -407,6 +407,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'wallets.create', method: 'POST', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.persist', method: 'POST', path: '/api/wallets/persist', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.sign', method: 'POST', path: '/api/wallets/:walletId/sign', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'wallets.export', method: 'POST', path: '/api/wallets/:walletId/export', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.list', method: 'GET', path: '/api/bots', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.create', method: 'POST', path: '/api/bots', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.delete', method: 'DELETE', path: '/api/bots/:botId', phase: 1, auth: 'privy', status: 'live' },
