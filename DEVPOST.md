@@ -1,11 +1,11 @@
 # Devpost form answers — Maelstrom
 
-Copy source for the UBC 2026 Devpost form. Written from `dev` at `171dc21`. This file is not a submitted entry. It does not claim a prize or a metric.
+Copy source for the UBC 2026 Devpost form. Written from `dev` at `a45f458`. This file is not a submitted entry. It does not claim a prize or a metric.
 
 Still open, and not described below as finished:
 
-- A signed-in click check of the wallet sheet on the hosted page
-- One recorded live devnet USDC send and one recorded Streams wake
+- A signed-in click check of the wallet sheet. The hosted developer preview opens that sheet from the top-right balance, Profile, and a positions wallet card. A Privy session has not been checked.
+- One recorded live devnet USDC send and one recorded Streams wake. The hosted main wallet `8VPb8xEorh3yis3cnvJRUhFs5oZhYYyj3CNJoKGG7U42` holds 10 SOL and 20 USDC from the Circle faucet. The desk has no password yet, and the sign-in page is still up, so nothing has been broadcast. `stream_events` is empty. Repeating the wallet-list sync adds the same address again, so `QUICKNODE_API_KEY` or `QUICKNODE_WALLET_LIST_KEY` is empty on the Worker and the list does not stick.
 - Posting Grok Bot drafts to X. There is no X credential in the repo or the Worker secret list, and `packages/grok-bot` still returns `delivery: "offline"`
 - On-chain PDA caps and Cloudflare Queues. This repo does not deploy its own Solana program, and the Worker config does not bind a queue. Adding either would be a second path, so they stay out
 - The 2–3 minute demo video and the live pitch. The script is below. Do not submit the form from this file
@@ -77,7 +77,7 @@ Do not invent a recording. Say these facts only.
 2. Finish the handle, then the password and the seed download. Say that Maelstrom does not store the seed or the password. If the download is gone, it is gone.
 3. Create one agent with an ask-every-time permission and a USDC cap. Show the top-right balance opening the wallet sheet, then the same sheet from Profile and from a positions wallet card.
 4. Copy the address from the first-five, last-five line. Price a non-USDC send and point at the label "devnet execution, mainnet pricing". Say the quote is not broadcast. The slide sends the quoted USDC on the platform ledger.
-5. Unlock the desk and send devnet USDC to a handle. The same desk grant is what the Worker requires before a spend.
+5. Set the desk password, unlock, and send a small amount of the 20 devnet USDC already on `8VPb8xEorh3yis3cnvJRUhFs5oZhYYyj3CNJoKGG7U42`. The same desk grant is what the Worker requires before a spend.
 6. Freeze all agents and show that a frozen bot cannot spend. Unfreeze clears the freeze and leaves a paused bot paused.
-7. If a devnet deposit arrives, show the Streams wake on that bot. The hourly cron is only the fallback.
+7. A Streams wake needs a solana-devnet stream whose destination is `POST /webhooks/quicknode`, plus Worker values for `QUICKNODE_API_KEY` and `QUICKNODE_WALLET_LIST_KEY`. Those values are empty today, and `stream_events` has no rows. The hourly cron is only the fallback. Do not invent a webhook.
 8. Close on the order: trust gate, verifier, wallet freeze, bot policy, approval mode, then sign. Signing stays in the wallet package. A mainnet quote never authorizes a transaction.
