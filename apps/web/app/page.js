@@ -335,6 +335,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [profile, setProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
   const [recoveryAck, setRecoveryAck] = useState(null);
+  const [claimWelcome, setClaimWelcome] = useState(false);
   const [transfers, setTransfers] = useState([]);
   const [receipts, setReceipts] = useState([]);
   const pushReceipt = useCallback((receipt) => {
@@ -1256,7 +1257,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   return (
     <>
     <div
-      className={`shell${noAgents ? ' is-empty' : ''}${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
+      className={`shell${noAgents ? ' is-empty' : ''}${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}${setupStep === 'handle' || claimWelcome ? ' is-claim' : ''}`}
       style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
       <aside className={`side${railIcons ? ' is-collapsed' : ''}`}>
@@ -1479,10 +1480,19 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           </section>
         </div>
       ) : null}
-      {setupStep === 'handle' ? (
-        <ClaimHandle accountLabel={profile?.displayName || accountLabel} ownerId={ownerId} onSave={saveProfile} />
+      {setupStep === 'handle' || claimWelcome ? (
+        <ClaimHandle
+          accountLabel={profile?.displayName || accountLabel}
+          ownerId={ownerId}
+          onSave={async (next) => {
+            const saved = await saveProfile(next);
+            if (saved?.ok) setClaimWelcome(true);
+            return saved;
+          }}
+          onContinue={() => setClaimWelcome(false)}
+        />
       ) : null}
-      {setupStep === 'recovery' ? (
+      {setupStep === 'recovery' && !claimWelcome ? (
         <RecoveryCeremony
           wallets={liveWallets || []}
           handle={profile?.handle || ''}

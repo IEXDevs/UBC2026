@@ -32,7 +32,7 @@ export async function supabaseGet(env, path, fetcher = fetch) {
     response = await fetcher(`${config.origin}/rest/v1/${path}`, {
       method: 'GET',
       headers: supabaseHeaders(config.key),
-      redirect: 'error',
+      redirect: 'follow',
       signal: AbortSignal.timeout(15000),
     });
   } catch {
@@ -65,7 +65,7 @@ export async function supabaseWrite(env, {
         prefer,
       }),
       body: body == null ? undefined : JSON.stringify(body),
-      redirect: 'error',
+      redirect: 'follow',
       signal: AbortSignal.timeout(15000),
     });
   } catch {
@@ -93,7 +93,7 @@ export function createSupabaseRpc(env, fetcher = fetch) {
       method: 'POST',
       headers: supabaseHeaders(config.key, { 'content-type': 'application/json' }),
       body: JSON.stringify(payload ?? {}),
-      redirect: 'error',
+      redirect: 'follow',
       signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) {

@@ -38,7 +38,7 @@ async function rest(fetcher, origin, key, path, options = {}) {
     method,
     headers: headers(key, prefer),
     body: options.body == null ? undefined : JSON.stringify(options.body),
-    redirect: 'error',
+    redirect: 'follow',
   });
 }
 

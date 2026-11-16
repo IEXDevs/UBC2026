@@ -63,6 +63,14 @@ export function handleAlreadyClaimed(body) {
   return recipient.missing !== true;
 }
 
+/** Live claim check. `open` may submit. `taken` and `error` keep the button closed. */
+export function claimLookupVerdict(status, body) {
+  if (status === 503 && body?.error === 'runtime_unconfigured') return 'open';
+  if (!Number.isInteger(status) || status < 200 || status >= 300) return 'error';
+  if (handleAlreadyClaimed(body)) return 'taken';
+  return 'open';
+}
+
 export function claimSaveNote(error) {
   const raw = typeof error?.code === 'string' ? error.code : (typeof error?.error === 'string' ? error.error : '');
   if (raw === 'handle_taken') return 'That handle is already taken.';

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  claimLookupVerdict,
   claimSaveNote,
   handleAlreadyClaimed,
   mentionIn,
@@ -85,4 +86,12 @@ test('a failed claim names the status and error code', () => {
   );
   assert.equal(claimSaveNote({ status: 502, code: 'Bearer secret-value' }), 'The directory did not update (502 profile_save_failed). Try the claim again.');
   assert.equal(claimSaveNote(new Error('network')), 'The directory did not update (profile_save_failed). Try the claim again.');
+});
+
+test('a handle can be claimed only after the directory says it is open', () => {
+  assert.equal(claimLookupVerdict(200, { recipient: { kind: 'handle', handle: 'royce', missing: true } }), 'open');
+  assert.equal(claimLookupVerdict(200, { recipient: { kind: 'handle', handle: 'royce', missing: false } }), 'taken');
+  assert.equal(claimLookupVerdict(503, { error: 'runtime_unconfigured' }), 'open');
+  assert.equal(claimLookupVerdict(502, { error: 'profile_read_failed' }), 'error');
+  assert.equal(claimLookupVerdict(0, {}), 'error');
 });
