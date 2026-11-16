@@ -78,7 +78,7 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
 
   const view = statisticsView({
     bots,
-    ownerId: ownerId ?? 'demo_owner',
+    ownerId: ownerId || '',
     remoteMetric,
     voiceMs,
   });

@@ -24,6 +24,17 @@ test('root env reads a named value and ignores blanks', () => {
   });
 });
 
+test('worker process env overrides the local file', () => {
+  const previous = process.env.QUICKNODE_DEVNET_RPC_URL;
+  process.env.QUICKNODE_DEVNET_RPC_URL = 'https://example.invalid/devnet';
+  try {
+    assert.equal(readRootEnv('QUICKNODE_DEVNET_RPC_URL'), 'https://example.invalid/devnet');
+  } finally {
+    if (previous === undefined) delete process.env.QUICKNODE_DEVNET_RPC_URL;
+    else process.env.QUICKNODE_DEVNET_RPC_URL = previous;
+  }
+});
+
 test('applyRootPublicEnv copies only unset NEXT_PUBLIC_ values', () => {
   const source = {
     NEXT_PUBLIC_PRIVY_APP_ID: ' from-root ',

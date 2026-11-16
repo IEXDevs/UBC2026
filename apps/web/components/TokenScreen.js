@@ -3,14 +3,16 @@
 import { useEffect, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
+import { DEV_PREVIEW_OWNER, samplePortfolio } from '../lib/dev-preview.mjs';
+import { dexTokenView, enrichPortfolio, readDexTokens } from '../lib/dex-token.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
-import { formatUsdMicro } from '../lib/portfolio.mjs';
+import { formatUsdMicro, portfolioErrorNote } from '../lib/portfolio.mjs';
 import {
   CHART_RANGES,
   combineHoldings,
+  formatCompactUsd,
   formatTokenPrice,
 } from '../lib/token-market.mjs';
-import { portfolioErrorNote } from '../lib/portfolio.mjs';
 
 function linkedKey(user) {
   const accounts = Array.isArray(user?.linkedAccounts)
@@ -19,11 +21,12 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-export default function TokenScreen({ open, onSend, onReceive, onSwap }) {
+export default function TokenScreen({ open, preview = false, onSend, onReceive, onSwap }) {
   const { user, getAccessToken, linkWallet, ready, authenticated } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pricing, setPricing] = useState(false);
   const [selected, setSelected] = useState(null);
   const accounts = linkedKey(user);
 
@@ -31,6 +34,31 @@ export default function TokenScreen({ open, onSend, onReceive, onSwap }) {
     if (!open) return undefined;
     let stopped = false;
     setLoading(true);
+    if (preview) {
+      setError('');
+      setPricing(true);
+      (async () => {
+        try {
+          const enriched = await enrichPortfolio(samplePortfolio(), {
+            userId: DEV_PREVIEW_OWNER,
+            storage: window.localStorage,
+          });
+          if (stopped) return;
+          setPortfolio({
+            ...enriched.portfolio,
+            note: samplePortfolio().note,
+          });
+        } catch {
+          if (!stopped) setError('DexScreener did not price the preview.');
+        } finally {
+          if (!stopped) {
+            setLoading(false);
+            setPricing(false);
+          }
+        }
+      })();
+      return () => { stopped = true; };
+    }
     (async () => {
       try {
         const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
@@ -56,14 +84,23 @@ export default function TokenScreen({ open, onSend, onReceive, onSwap }) {
         }
         setPortfolio(body);
         setError('');
+        setPricing(true);
+        const enriched = await enrichPortfolio(body, {
+          userId: user?.id,
+          storage: window.localStorage,
+        });
+        if (!stopped) setPortfolio(enriched.portfolio);
       } catch {
         if (!stopped) setError(portfolioErrorNote({ error: 'rpc_failed' }));
       } finally {
-        if (!stopped) setLoading(false);
+        if (!stopped) {
+          setLoading(false);
+          setPricing(false);
+        }
       }
     })();
     return () => { stopped = true; };
-  }, [open, accounts, getAccessToken, user?.id]);
+  }, [open, preview, accounts, getAccessToken, user?.id]);
 
   const holdings = combineHoldings(portfolio);
   if (selected) {
@@ -73,6 +110,7 @@ export default function TokenScreen({ open, onSend, onReceive, onSwap }) {
         mint={selected}
         holding={holding}
         cluster={portfolio?.cluster || 'mainnet'}
+        userId={preview ? DEV_PREVIEW_OWNER : user?.id}
         onBack={() => setSelected(null)}
         onSend={() => onSend?.(holding?.symbol)}
         onReceive={onReceive}
@@ -86,6 +124,7 @@ export default function TokenScreen({ open, onSend, onReceive, onSwap }) {
       <p className="wallet-figure">{formatUsdMicro(portfolio?.totalUsdMicro || '0')}</p>
       <p className="quiet">{portfolio?.note || 'Balances from QuickNode. Dollar values use mainnet prices.'}</p>
       {loading ? <p className="quiet">Reading wallets from QuickNode…</p> : null}
+      {pricing ? <p className="quiet">Reading prices from DexScreener…</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
       <ul className="token-rows">
         {holdings.map(row => (
@@ -115,51 +154,54 @@ export default function TokenScreen({ open, onSend, onReceive, onSwap }) {
   );
 }
 
-function TokenDetail({ mint, holding, cluster, onBack, onSend, onReceive, onSwap }) {
+function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive, onSwap }) {
   const [range, setRange] = useState('1D');
-  const [view, setView] = useState(null);
+  const [token, setToken] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let stopped = false;
     setError('');
-    const params = new URLSearchParams({ mint, range, cluster });
-    fetch(`/api/token?${params}`, { cache: 'no-store' })
-      .then(response => response.json().then(body => ({ ok: response.ok, body })))
-      .then(({ ok, body }) => {
+    setToken(null);
+    readDexTokens({ mints: [mint], userId, storage: window.localStorage })
+      .then(book => {
         if (stopped) return;
-        if (!ok) {
-          setView(null);
-          setError('The token chart did not load.');
+        const row = book.tokens[0] || null;
+        if (!row?.symbol && row?.priceUsd == null && !row?.fromCache) {
+          setError(book.rateLimited
+            ? 'DexScreener is limiting this network. No saved details for this token yet.'
+            : 'DexScreener has no pair for this token.');
           return;
         }
-        setView(body);
+        setToken(row);
       })
       .catch(() => {
-        if (!stopped) setError('The token chart did not load.');
+        if (!stopped) setError('DexScreener did not return this token.');
       });
     return () => { stopped = true; };
-  }, [mint, range, cluster]);
+  }, [mint, userId]);
 
+  const view = token ? dexTokenView({ mint, range, cluster, token }) : null;
   const symbol = view?.symbol || holding?.symbol || 'Token';
   const price = typeof view?.price === 'number' ? formatTokenPrice(view.price) : '';
   const change = typeof view?.changePct === 'number' ? view.changePct : null;
   const down = change != null && change < 0;
+  const liquidity = formatCompactUsd(view?.liquidityUsd);
+  const marketCap = formatCompactUsd(view?.marketCap);
 
   return (
     <div className="token-detail">
       <button type="button" className="token-back" onClick={onBack}>Back</button>
       <div className="token-title">
+        {view?.imageUrl ? <img className="token-mark" src={view.imageUrl} alt="" /> : null}
         <h3>{symbol}</h3>
-        {view?.trustScore == null ? <span className="token-score">—/100</span> : (
-          <span className="token-score" title="Jupiter organic score">{view.trustScore}/100</span>
-        )}
+        <span className="token-score">{view?.dexId || 'DEX'}</span>
       </div>
       {price ? <p className="wallet-figure wallet-figure-sm">{price}</p> : null}
       {change != null ? (
         <p className={down ? 'token-down' : 'token-up'}>
           {down ? '' : '+'}{change.toFixed(2)}%
-          <span> {range}</span>
+          <span> {view?.changeLabel || range}</span>
         </p>
       ) : null}
       <TokenChart points={view?.points || []} range={range} />
@@ -183,7 +225,12 @@ function TokenDetail({ mint, holding, cluster, onBack, onSend, onReceive, onSwap
       <dl className="token-info">
         <div><dt>Name</dt><dd>{view?.name || symbol}</dd></div>
         <div><dt>Network</dt><dd>Solana</dd></div>
+        {liquidity ? <div><dt>Liquidity</dt><dd>{liquidity}</dd></div> : null}
+        {marketCap ? <div><dt>Market cap</dt><dd>{marketCap}</dd></div> : null}
       </dl>
+      {view?.pairUrl ? (
+        <a className="token-solscan" href={view.pairUrl} target="_blank" rel="noreferrer">View on DexScreener</a>
+      ) : null}
       {view?.solscanUrl ? (
         <a className="token-solscan" href={view.solscanUrl} target="_blank" rel="noreferrer">View on Solscan</a>
       ) : null}

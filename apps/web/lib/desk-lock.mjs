@@ -1,7 +1,7 @@
 /**
- * Site unlock for a signed-in session.
- * The password verifier lives in local storage. The unlocked flag does not,
- * so a reload asks again. Spend checks read that in-memory flag.
+ * Wallet password for a signed-in owner.
+ * The verifier lives in local storage. A successful unlock also stores an
+ * expiry, so a refresh stays open until that time, then the wallet locks.
  */
 
 export const DESK_LOCK_ITERATIONS = 120000;
@@ -44,15 +44,26 @@ async function deriveBits(password, salt, iterations) {
 export function deskLockStorageKey(ownerId) {
   if (typeof ownerId !== 'string') return '';
   const id = ownerId.trim();
-  if (!id || id.length > 200) return '';
+  if (!id || id.length > 256) return '';
   return `maelstrom.desk-lock.${id}`;
 }
 
+export function deskOpenStorageKey(ownerId) {
+  const lockKey = deskLockStorageKey(ownerId);
+  if (!lockKey) return '';
+  return lockKey.replace('maelstrom.desk-lock.', 'maelstrom.desk-open.');
+}
+
+export function normalizePassword(password) {
+  return typeof password === 'string' ? password.normalize('NFC') : '';
+}
+
 export function passwordProblem(password) {
-  if (typeof password !== 'string' || password.length < DESK_LOCK_MIN_LENGTH) {
+  const clean = normalizePassword(password);
+  if (clean.length < DESK_LOCK_MIN_LENGTH) {
     return `Use at least ${DESK_LOCK_MIN_LENGTH} characters.`;
   }
-  if (password.length > 128) return 'Use 128 characters or fewer.';
+  if (clean.length > 128) return 'Use 128 characters or fewer.';
   return '';
 }
 
@@ -75,14 +86,15 @@ export function parseDeskLock(value) {
 }
 
 export async function createDeskLock(password) {
-  const problem = passwordProblem(password);
+  const clean = normalizePassword(password);
+  const problem = passwordProblem(clean);
   if (problem) {
     const error = new Error(problem);
     error.code = 'weak_password';
     throw error;
   }
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await deriveBits(password, salt, DESK_LOCK_ITERATIONS);
+  const hash = await deriveBits(clean, salt, DESK_LOCK_ITERATIONS);
   return {
     v: 1,
     iterations: DESK_LOCK_ITERATIONS,
@@ -93,10 +105,11 @@ export async function createDeskLock(password) {
 
 export async function unlockDesk(password, record) {
   const parsed = parseDeskLock(record);
-  if (!parsed || typeof password !== 'string' || password.length === 0) return false;
+  const clean = normalizePassword(password);
+  if (!parsed || clean.length === 0) return false;
   const salt = hexToBytes(parsed.salt);
   const expected = hexToBytes(parsed.hash);
-  const actual = await deriveBits(password, salt, parsed.iterations);
+  const actual = await deriveBits(clean, salt, parsed.iterations);
   return sameBytes(actual, expected);
 }
 
@@ -114,8 +127,82 @@ export function writeDeskLock(storage, ownerId, record) {
   const key = deskLockStorageKey(ownerId);
   const parsed = parseDeskLock(record);
   if (!key || !parsed || !storage || typeof storage.setItem !== 'function') return false;
-  storage.setItem(key, JSON.stringify(parsed));
-  return true;
+  const body = JSON.stringify(parsed);
+  try {
+    storage.setItem(key, body);
+    return storage.getItem?.(key) === body;
+  } catch {
+    return false;
+  }
+}
+
+export function deskSessionUntil(now, windowMs = DESK_LOCK_IDLE_MS) {
+  if (!Number.isFinite(now) || !Number.isFinite(windowMs) || windowMs <= 0) return 0;
+  return now + windowMs;
+}
+
+export function parseDeskSession(value, now) {
+  let record = value;
+  if (typeof value === 'string') {
+    try {
+      record = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!record || typeof record !== 'object' || record.v !== 1) return null;
+  const until = record.until;
+  if (!Number.isFinite(until)) return null;
+  if (!Number.isFinite(now) || now >= until) return null;
+  return { v: 1, until };
+}
+
+export function readDeskSession(storage, ownerId, now) {
+  const key = deskOpenStorageKey(ownerId);
+  if (!key || !storage || typeof storage.getItem !== 'function') return null;
+  try {
+    return parseDeskSession(storage.getItem(key), now);
+  } catch {
+    return null;
+  }
+}
+
+export function writeDeskSession(storage, ownerId, until) {
+  const key = deskOpenStorageKey(ownerId);
+  if (!key || !Number.isFinite(until) || until <= 0 || !storage || typeof storage.setItem !== 'function') return false;
+  const body = JSON.stringify({ v: 1, until });
+  try {
+    storage.setItem(key, body);
+    return storage.getItem?.(key) === body;
+  } catch {
+    return false;
+  }
+}
+
+export function clearDeskSession(storage, ownerId) {
+  const key = deskOpenStorageKey(ownerId);
+  if (!key || !storage || typeof storage.removeItem !== 'function') return false;
+  try {
+    storage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Shift+L locks the wallet. Shift+U opens the unlock prompt. */
+export function walletHotkey(event) {
+  if (!event || event.shiftKey !== true || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return '';
+  if (event.code === 'KeyL') return 'lock';
+  if (event.code === 'KeyU') return 'unlock';
+  return '';
+}
+
+export function hotkeyTypingTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  if (target.isContentEditable) return true;
+  const tag = typeof target.tagName === 'string' ? target.tagName.toUpperCase() : '';
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
 export function idleLockDue(lastActivityAt, now, idleMs = DESK_LOCK_IDLE_MS) {

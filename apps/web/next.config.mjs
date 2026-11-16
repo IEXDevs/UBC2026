@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
 import { resolveBuildId } from './lib/build-id.mjs';
-import { applyRootPublicEnv } from './lib/root-env.mjs';
+import { applyRootPublicEnv, readRootEnv } from './lib/root-env.mjs';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const fromApp = (name) => path.join(appDir, 'node_modules', name);
@@ -12,11 +12,17 @@ const fromApp = (name) => path.join(appDir, 'node_modules', name);
 applyRootPublicEnv();
 
 const buildId = resolveBuildId();
+// DEV_PREVIEW=1 in the root env turns on the local desk bypass.
+// Production builds drop it even if the variable is set.
+const devPreview = process.env.NODE_ENV === 'production'
+  ? ''
+  : (readRootEnv('DEV_PREVIEW') === '1' ? '1' : '');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_ID: buildId,
+    NEXT_PUBLIC_DEV_PREVIEW: devPreview,
   },
   reactStrictMode: true,
   transpilePackages: [

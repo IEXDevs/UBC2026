@@ -34,3 +34,15 @@ export function showSignInGate({ privyConfigured, ready, authenticated }) {
   if (ready !== true) return false;
   return authenticated !== true;
 }
+
+/**
+ * Desk preview without Privy. Requires DEV_PREVIEW=1 and a non-production build.
+ * Production inlines the flag off, so the button cannot render there.
+ */
+export function developerPreviewAllowed({
+  nodeEnv = process.env.NODE_ENV,
+  devPreview = process.env.NEXT_PUBLIC_DEV_PREVIEW,
+} = {}) {
+  if (nodeEnv === 'production') return false;
+  return devPreview === '1';
+}

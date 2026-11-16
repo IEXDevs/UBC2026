@@ -6,6 +6,7 @@ import {
   resolvePrivyAppId,
   walletConfigNote,
   walletProvisionNote,
+  linkedWalletKey,
   walletsFromPrivyUser,
 } from './wallet-provision.mjs';
 
@@ -23,6 +24,17 @@ test('missing wallet secrets allow public app id as PRIVY_APP_ID', () => {
   );
   assert.equal(resolvePrivyAppId({ NEXT_PUBLIC_PRIVY_APP_ID: ' app_1 ' }), 'app_1');
   assert.equal(resolvePrivyAppId({ PRIVY_APP_ID: 'server', NEXT_PUBLIC_PRIVY_APP_ID: 'pub' }), 'server');
+});
+
+test('linkedWalletKey changes when another Solana wallet is added', () => {
+  const first = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const second = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  assert.equal(linkedWalletKey(null), '');
+  assert.equal(linkedWalletKey({ linkedAccounts: [{ address: first }] }), first);
+  assert.notEqual(
+    linkedWalletKey({ linkedAccounts: [{ address: first }] }),
+    linkedWalletKey({ linked_accounts: [{ address: first }, { address: second }] }),
+  );
 });
 
 test('walletsFromPrivyUser maps createOnLogin Solana embedded addresses', () => {

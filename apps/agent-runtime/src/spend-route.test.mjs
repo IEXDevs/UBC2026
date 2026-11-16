@@ -53,6 +53,7 @@ test('full permissions sign on devnet after every spend step', async () => {
   const calls = [];
   const response = await worker.fetch(spendRequest({
     permission: 'full',
+    confirmed: true,
     botId: 'bot_1',
     action: 'pay',
     amount: '1000',
@@ -91,6 +92,7 @@ test('a mainnet quote never authorizes a signature', async () => {
   let signed = false;
   const response = await worker.fetch(spendRequest({
     permission: 'full',
+    confirmed: true,
     botId: 'bot_1',
     action: 'buy',
     amount: '1000',

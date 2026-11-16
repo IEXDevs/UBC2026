@@ -1,4 +1,4 @@
-/** Places preview positions on an open plane, one cluster per venue. */
+/** Places live positions on an open plane, one cluster per venue. */
 
 import { describePositions, formatBaseUnits, shortAddress } from './money-views.mjs';
 

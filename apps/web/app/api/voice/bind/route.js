@@ -1,4 +1,5 @@
 import { readRootEnv } from '../../../../lib/root-env.mjs';
+import { fetchAgentRuntime } from '../../../../lib/runtime-fetch.mjs';
 
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
 const CONVERSATION = /^[a-zA-Z0-9:_-]{1,128}$/;
@@ -38,7 +39,7 @@ export async function POST(request) {
 
   const target = new URL('/voice/session-owner', base);
   try {
-    const response = await fetch(target, {
+    const response = await fetchAgentRuntime(target, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

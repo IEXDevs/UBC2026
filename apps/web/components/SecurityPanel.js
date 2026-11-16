@@ -16,6 +16,8 @@ export default function SecurityPanel({
   accountLabel = null,
   onBotsChange,
   wallets = null,
+  walletUnlocked = false,
+  onWalletLocked,
 }) {
   const [pending, setPending] = useState(null);
   const [armed, setArmed] = useState(null);
@@ -138,7 +140,13 @@ export default function SecurityPanel({
               label="Slide to confirm"
               doneLabel="Working"
               resetKey={armed.id}
-              onCommit={() => runAction(armed)}
+              onCommit={() => {
+                if (armed.id === 'request-grab-back' && walletUnlocked !== true) {
+                  onWalletLocked?.();
+                  return;
+                }
+                runAction(armed);
+              }}
             />
             <button type="button" className="ghost" onClick={() => setArmed(null)}>Cancel</button>
           </div>

@@ -1,6 +1,5 @@
 export const runtime = 'nodejs';
 
-import { createMainnetPriceProvider } from '@ubc2026/prices';
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { choosePortfolioRpc, loadPortfolio, PortfolioError } from '../../../lib/portfolio.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
@@ -76,10 +75,10 @@ export async function GET(request) {
       ? user.id.trim()
       : (typeof ownerHeader === 'string' ? ownerHeader.trim() : '');
     const wallets = walletsFromPrivyUser(user, ownerId);
+    // DexScreener prices are read in the browser so the limit applies to the visitor IP.
     const portfolio = await loadPortfolio({
       wallets,
       rpcUrl: rpc.rpcUrl,
-      lookupPrice: createMainnetPriceProvider(),
     });
     return Response.json(portfolio, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {

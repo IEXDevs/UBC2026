@@ -12,6 +12,8 @@ import SlideCommit from './bits/SlideCommit';
 import TxnLog from './TxnLog';
 import TxnPreview from './TxnPreview';
 import { usePresence } from './usePresence';
+import { DEV_PREVIEW_OWNER, samplePortfolio } from '../lib/dev-preview.mjs';
+import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { partyFromToken } from '../lib/party-book.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
 import { describeWallets, formatBaseUnits, walletGlance } from '../lib/money-views.mjs';
@@ -48,6 +50,7 @@ export default function WalletsSheet({
   bot = null,
   onParty,
   signedIn = false,
+  devPreview = false,
   ownerId = '',
   handle = '',
   sns = '',
@@ -157,6 +160,7 @@ export default function WalletsSheet({
               {signedIn ? (
                 <TokenScreen
                   open={open}
+                  preview={devPreview}
                   onSend={() => setPane('send')}
                   onReceive={() => setPane('receive')}
                   onSwap={() => setPane('swap')}
@@ -165,7 +169,7 @@ export default function WalletsSheet({
             </>
           ) : null}
           {pane === 'portfolio' ? (
-            signedIn ? <ConnectedPortfolio open={open} /> : <p className="quiet">Sign in to connect wallets and read balances.</p>
+            signedIn ? <ConnectedPortfolio open={open} preview={devPreview} /> : <p className="quiet">Sign in to connect wallets and read balances.</p>
           ) : null}
           {pane === 'send' ? (
             <SendPane
@@ -223,7 +227,7 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-function ConnectedPortfolio({ open }) {
+function ConnectedPortfolio({ open, preview = false }) {
   const { user, getAccessToken, linkWallet, unlinkWallet, ready, authenticated } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
@@ -236,6 +240,22 @@ function ConnectedPortfolio({ open }) {
     let stopped = false;
     setLoading(true);
     setError('');
+    if (preview) {
+      (async () => {
+        try {
+          const enriched = await enrichPortfolio(samplePortfolio(), {
+            userId: DEV_PREVIEW_OWNER,
+            storage: window.localStorage,
+          });
+          if (!stopped) setPortfolio({ ...enriched.portfolio, note: samplePortfolio().note });
+        } catch {
+          if (!stopped) setError('DexScreener did not price the preview.');
+        } finally {
+          if (!stopped) setLoading(false);
+        }
+      })();
+      return () => { stopped = true; };
+    }
     (async () => {
       try {
         const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
@@ -261,6 +281,11 @@ function ConnectedPortfolio({ open }) {
           return;
         }
         setPortfolio(body);
+        const enriched = await enrichPortfolio(body, {
+          userId: user?.id,
+          storage: window.localStorage,
+        });
+        if (!stopped) setPortfolio(enriched.portfolio);
       } catch {
         if (!stopped) {
           setPortfolio(null);
@@ -271,7 +296,7 @@ function ConnectedPortfolio({ open }) {
       }
     })();
     return () => { stopped = true; };
-  }, [open, accounts, getAccessToken, user?.id]);
+  }, [open, preview, accounts, getAccessToken, user?.id]);
 
   async function remove(address) {
     setRemoving(address);

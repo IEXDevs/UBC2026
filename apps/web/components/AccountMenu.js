@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChartColumn, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
+import { ChartColumn, Lock, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
 import { hasSeenLogin, markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
 import SpecularButton from './SpecularButton';
@@ -16,7 +16,7 @@ const ITEMS = [
   { id: 'computer', label: 'Computer', icon: Monitor },
 ];
 
-export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, onLogin, onPick }) {
+export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, onLogin, onPick }) {
   const [open, setOpen] = useState(false);
   const [returning, setReturning] = useState(false);
   const rootRef = useRef(null);
@@ -59,7 +59,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
   return (
     <div className={`account-menu${open ? ' is-open' : ''}`} ref={rootRef}>
       <div className="account-pop" role="menu" aria-label="Account" aria-hidden={!open}>
-        {ITEMS.map((item) => {
+        {[...ITEMS, ...(walletUnlocked ? [{ id: 'lock-wallet', label: 'Lock wallet', icon: Lock }] : [])].map((item) => {
           const Icon = item.icon;
           return (
             <button

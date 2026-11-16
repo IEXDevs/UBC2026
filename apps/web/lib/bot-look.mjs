@@ -22,16 +22,10 @@ export const BOT_COLORS = Object.freeze([
   { id: 'ash', value: '#8e8e8e' },
 ]);
 
-const DEFAULTS = Object.freeze({
-  bot_meteora: { shape: 'circle', color: '#7c5cff' },
-  bot_shop: { shape: 'triangle', color: '#3dbea5' },
-  bot_positions: { shape: 'square', color: '#8e8e8e' },
-});
-
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
-export function defaultLook(botId) {
-  return DEFAULTS[botId] ?? { shape: 'circle', color: '#7c5cff' };
+export function defaultLook() {
+  return { shape: 'circle', color: '#7c5cff' };
 }
 
 export function randomShape(seed = Math.random()) {
@@ -42,7 +36,7 @@ export function randomShape(seed = Math.random()) {
 const IMAGE = /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\s]+$/i;
 
 export function sanitizeLook(botId, patch) {
-  const base = defaultLook(botId);
+  const base = defaultLook();
   const next = { shape: base.shape, color: base.color };
   if (patch && SHAPES.includes(patch.shape)) next.shape = patch.shape;
   if (patch && typeof patch.color === 'string' && HEX.test(patch.color)) next.color = patch.color.toLowerCase();

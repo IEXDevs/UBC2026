@@ -41,22 +41,24 @@
   pointer-events: none;
 }
 
-.sign-in-note {
-  margin: -8px auto 28px;
-  max-width: 36rem;
-  color: #c9bddf;
-  font-size: 0.95rem;
-  line-height: 1.45;
+.sign-in-mark {
+  margin: 0 0 14px;
+  color: #f4f1fb;
+  font-family: var(--font-chat), ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(4.75rem, 13vw, 9rem);
+  font-weight: 600;
+  letter-spacing: -0.05em;
+  line-height: 0.88;
 }
 
-.sign-in-copy h1 {
-  margin: 0 0 16px;
+.sign-in-slogan {
+  margin: 0 0 32px;
+  color: #ddd4f2;
   font-family: var(--font-chat), ui-sans-serif, system-ui, sans-serif;
-  font-size: clamp(2.75rem, 6.4vw, 5.25rem);
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 0.96;
-  text-wrap: balance;
+  font-size: clamp(1.2rem, 2.4vw, 1.65rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 .sign-in-actions {
@@ -85,6 +87,21 @@
   outline: 1px solid #f4f1fb;
   outline-offset: 4px;
 }
+
+.sign-in-dev {
+  display: inline-flex;
+  margin: 22px 0 0;
+  border: 1px solid rgba(244, 241, 251, 0.28);
+  border-radius: 999px;
+  background: transparent;
+  color: #ddd4f2;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 8px 16px;
+}
+
+.sign-in-dev:hover { color: #f4f1fb; border-color: rgba(244, 241, 251, 0.7); }
 
 @keyframes sign-in-in {
   from {
