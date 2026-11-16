@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Pencil } from 'lucide-react';
 import { BOT_COLORS } from '../lib/bot-look.mjs';
 import BotMark from './BotMark';
 import HoldButton from './HoldButton';
@@ -13,6 +14,30 @@ function placePanel(x, y) {
     x: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
     y: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
   };
+}
+
+export function AgentPhoto({ shape, color, image, size, onImage, label = 'Change photo' }) {
+  const inputRef = useRef(null);
+  return (
+    <div className="agent-photo" style={{ width: size, height: size }}>
+      <BotMark shape={shape} color={color} image={image} size={size} />
+      <button type="button" className="agent-pencil" aria-label={label} onClick={() => inputRef.current?.click()}>
+        <Pencil size={size > 80 ? 16 : 13} strokeWidth={1.75} />
+      </button>
+      <input
+        ref={inputRef}
+        className="agent-file"
+        type="file"
+        accept="image/*"
+        tabIndex={-1}
+        onChange={async (event) => {
+          const next = await readAgentImage(event.target.files?.[0]);
+          event.target.value = '';
+          if (next) onImage(next);
+        }}
+      />
+    </div>
+  );
 }
 
 export function readAgentImage(file) {
@@ -78,7 +103,7 @@ export default function AgentEdit({ bot, x, y, onClose, onSave, onDelete }) {
       onMouseDown={event => event.stopPropagation()}
     >
       <div className="agent-edit-head">
-        <BotMark shape={bot.shape} color={color} image={image} size={48} />
+        <AgentPhoto shape={bot.shape} color={color} image={image} size={48} onImage={setImage} />
         <input aria-label="Agent name" value={name} maxLength={64} onChange={event => setName(event.target.value)} />
       </div>
       <div className="swatches" role="listbox" aria-label="Agent color">
@@ -94,18 +119,6 @@ export default function AgentEdit({ bot, x, y, onClose, onSave, onDelete }) {
           />
         ))}
       </div>
-      <label className="agent-edit-file">
-        Photo
-        <input
-          type="file"
-          accept="image/*"
-          aria-label="Agent photo"
-          onChange={async (event) => {
-            const next = await readAgentImage(event.target.files?.[0]);
-            if (next) setImage(next);
-          }}
-        />
-      </label>
       {image ? <button type="button" className="ghost" onClick={() => setImage('')}>Remove photo</button> : null}
       <div className="agent-edit-actions">
         <button type="submit" className="solid" disabled={!name.trim()}>Save</button>

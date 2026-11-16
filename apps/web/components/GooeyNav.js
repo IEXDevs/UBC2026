@@ -219,6 +219,7 @@ const GooeyNav = ({
   gooeyness = 0.5,
   wobble = 0.5,
   hoverEffect = true,
+  balanceActive = true,
   className = '',
   style
 }) => {
@@ -231,7 +232,9 @@ const GooeyNav = ({
   const fallbackRef = useRef(null);
   const engineRef = useRef(null);
   const indexRef = useRef(current);
+  const balanceRef = useRef(balanceActive);
   indexRef.current = current;
+  balanceRef.current = balanceActive;
   const palette = theme === 'light' ? 'light' : 'dark';
   const pillColor = color || PILLS[palette].color;
   const pillRgb = parse(pillColor);
@@ -291,7 +294,14 @@ const GooeyNav = ({
       const mid = Math.floor((list.children.length - 1) / 2);
       const active = list.querySelector(':scope > [data-active]');
       const activeIndex = active ? Array.prototype.indexOf.call(list.children, active) : -1;
-      if (drops.length === 0 && active && activeIndex === mid && list.children.length > 1) {
+      if (!balanceRef.current) {
+        if (list.style.paddingLeft || list.style.paddingRight) {
+          list.style.paddingLeft = '';
+          list.style.paddingRight = '';
+          overlay.style.paddingLeft = '';
+          overlay.style.paddingRight = '';
+        }
+      } else if (drops.length === 0 && active && activeIndex === mid && list.children.length > 1) {
         const first = list.children[0].getBoundingClientRect();
         const last = list.children[list.children.length - 1].getBoundingClientRect();
         const host = active.getBoundingClientRect();
