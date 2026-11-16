@@ -6,6 +6,7 @@
 export const SECURITY_ACTIONS = Object.freeze([
   'pause-all',
   'freeze-all-bots',
+  'unfreeze-all-bots',
   'request-grab-back',
 ]);
 
@@ -13,6 +14,7 @@ export function securityActionLabel(action) {
   switch (action) {
     case 'pause-all': return 'Pause every bot';
     case 'freeze-all-bots': return 'Freeze every bot';
+    case 'unfreeze-all-bots': return 'Unfreeze every bot';
     case 'request-grab-back': return 'Request grab-back';
     default: return action;
   }
@@ -60,8 +62,10 @@ export function buildSecurityPage({
       confirm: id === 'pause-all'
         ? 'Pause every running bot checkpoint? They can be resumed later.'
         : id === 'freeze-all-bots'
-          ? 'Freeze every bot so the loop refuses new spends until unfrozen?'
-          : 'Request grab-back of bot funds to the owner main wallet? Signing stays server-side.',
+          ? 'Freeze every bot so policy refuses new spends until you unfreeze them?'
+          : id === 'unfreeze-all-bots'
+            ? 'Clear the freeze on every bot? A paused bot stays paused until you resume it.'
+            : 'Request grab-back of bot funds to the owner main wallet? Signing stays server-side.',
     })),
     notes: [
       'Privy holds wallet keys. The model and this UI never receive private keys.',
@@ -87,7 +91,14 @@ export function applySecurityActionLocal(bots, actionId) {
       ...bot,
       frozen: true,
       status: bot.status === 'draft' ? bot.status : 'paused',
-      record: bot.record ? { ...bot.record, frozen: true } : bot.record,
+      record: bot.record ? { ...bot.record, frozen: true, enabled: false } : bot.record,
+    }));
+  }
+  if (actionId === 'unfreeze-all-bots') {
+    return bots.map((bot) => ({
+      ...bot,
+      frozen: false,
+      record: bot.record ? { ...bot.record, frozen: false } : bot.record,
     }));
   }
   // grab-back: no local mutation beyond returning the same list

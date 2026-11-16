@@ -511,6 +511,9 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
         'x-owner-id': owner,
         accept: 'application/json',
         'content-type': 'application/json',
+        ...(typeof env.ELEVENLABS_WEBHOOK_SECRET === 'string' && env.ELEVENLABS_WEBHOOK_SECRET
+          ? { 'x-elevenlabs-webhook-secret': env.ELEVENLABS_WEBHOOK_SECRET }
+          : {}),
       },
       body: JSON.stringify(body),
     });

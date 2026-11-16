@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import worker from './index.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 import { mapBotRow, mapWalletRow, mapLedgerRow } from './supabase-rest.mjs';
+import { sha256Hex } from './desk-grant.mjs';
 
 function fakeEnv(extra = {}) {
   return {
@@ -572,8 +573,16 @@ test('bot delete is dispatched when Supabase is unconfigured', async () => {
 });
 
 test('a platform send posts to the recipient handle and lists it on both wallets', async () => {
+  const grant = 'ab'.repeat(32);
+  const grantHash = await sha256Hex(grant);
   const fetcher = async (url, init = {}) => {
     const href = String(url);
+    if (href.includes('desk_locks')) {
+      return Response.json([{
+        grant_hash: grantHash,
+        grant_until: new Date(Date.now() + 60_000).toISOString(),
+      }]);
+    }
     if (href.includes('/rpc/policy_reserve_budget')) {
       return Response.json({ state: 'reserved' });
     }
@@ -613,7 +622,7 @@ test('a platform send posts to the recipient handle and lists it on both wallets
   });
   const posted = await worker.fetch(new Request('https://runtime/api/transfers', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-owner-id': 'alice' },
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'alice', 'x-desk-grant': grant },
     body: JSON.stringify({
       handle: '@bob',
       amount: '5000000',

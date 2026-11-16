@@ -31,10 +31,24 @@ import {
   transferRequest,
 } from './platform-transfer.mjs';
 import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
+import {
+  deskSpendAllowed,
+  newDeskGrant,
+  parseDeskVerifier,
+  passwordMatches,
+  sha256Hex,
+} from './desk-grant.mjs';
 import { spendLedgerCrossCheck, streamConfirmedPayments } from '@ubc2026/quicknode-streams';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
+}
+
+async function deskDenied(request, env, ownerId, fetcher) {
+  const desk = await deskSpendAllowed(env, request, ownerId, fetcher);
+  if (desk.ok) return null;
+  const status = desk.error === 'desk_lock_unavailable' ? 503 : 403;
+  return json({ error: desk.error }, status);
 }
 
 function ownerHeader(request) {
@@ -602,6 +616,8 @@ export async function handleApiData(request, env, matched) {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const denied = await deskDenied(request, env, ownerId, fetcher);
+    if (denied) return denied;
     const client = privyClient(env);
     if (!client) return json({ error: 'signer_not_configured' }, 503);
     const walletId = matched.params?.walletId;
@@ -1223,6 +1239,8 @@ export async function handleApiData(request, env, matched) {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const denied = await deskDenied(request, env, ownerId, fetcher);
+    if (denied) return denied;
     const body = await request.json().catch(() => ({}));
     const requestBody = transferRequest(body);
     if (!requestBody) return json({ error: 'invalid_transfer' }, 400);
@@ -1276,6 +1294,134 @@ export async function handleApiData(request, env, matched) {
     } catch (err) {
       return json({ error: transferErrorCode(err) }, 409);
     }
+  }
+
+  if (routeId === 'bots.freeze') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const body = await request.json().catch(() => ({}));
+    const freeze = body?.frozen !== false;
+    const listed = await supabaseGet(
+      env,
+      `bots?owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+      fetcher,
+    );
+    if (listed.status !== 200 || !Array.isArray(listed.rows)) {
+      return json({ error: 'freeze_failed' }, 502);
+    }
+    const rpc = createSupabaseRpc(env, fetcher);
+    const fn = freeze ? 'policy_freeze_bot' : 'policy_unfreeze_bot';
+    const items = [];
+    try {
+      for (const row of listed.rows) {
+        if (!row?.id) continue;
+        items.push(await rpc(fn, {
+          payload: { ownerId, botId: row.id, now: Date.now() },
+        }));
+      }
+    } catch {
+      return json({ error: 'freeze_failed' }, 502);
+    }
+    if (items.some(item => item?.state === 'blocked')) {
+      return json({ error: 'freeze_failed', frozen: freeze, items }, 409);
+    }
+    return json({ ok: true, source: 'supabase', frozen: freeze, count: items.length, items });
+  }
+
+  if (routeId === 'desk.status') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', locked: false });
+    const existing = await supabaseGet(
+      env,
+      `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}&select=owner_id`,
+      fetcher,
+    );
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) {
+      return json({ error: 'desk_lock_unavailable' }, 503);
+    }
+    return json({ ok: true, source: 'supabase', locked: Boolean(existing.rows[0]) });
+  }
+
+  if (routeId === 'desk.lock') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const body = await request.json().catch(() => null);
+    const verifier = parseDeskVerifier(body);
+    if (!verifier) return json({ error: 'invalid_verifier' }, 400);
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const existing = await supabaseGet(
+      env,
+      `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}&select=owner_id`,
+      fetcher,
+    );
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) {
+      return json({ error: 'desk_lock_unavailable' }, 503);
+    }
+    if (existing.rows[0]) return json({ error: 'desk_lock_exists' }, 409);
+    const userWrite = await supabaseWrite(env, {
+      path: 'users?on_conflict=id',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: { id: ownerId, privy_user_id: ownerId },
+      fetcher,
+    });
+    if (userWrite?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
+    const written = await supabaseWrite(env, {
+      path: 'desk_locks',
+      method: 'POST',
+      prefer: 'return=minimal',
+      body: {
+        owner_id: ownerId,
+        salt: verifier.salt,
+        hash: verifier.hash,
+        iterations: verifier.iterations,
+      },
+      fetcher,
+    });
+    if (written?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
+    return json({ ok: true });
+  }
+
+  if (routeId === 'desk.unlock') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const body = await request.json().catch(() => null);
+    const password = body && typeof body.password === 'string' ? body.password : '';
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const existing = await supabaseGet(
+      env,
+      `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}&select=salt,hash,iterations`,
+      fetcher,
+    );
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) {
+      return json({ error: 'desk_lock_unavailable' }, 503);
+    }
+    const row = existing.rows[0];
+    if (!row) return json({ error: 'desk_lock_missing' }, 404);
+    const matches = await passwordMatches(password, {
+      salt: row.salt,
+      hash: row.hash,
+      iterations: row.iterations,
+    });
+    if (!matches) return json({ error: 'desk_locked' }, 401);
+    const grant = newDeskGrant();
+    const grantHash = await sha256Hex(grant);
+    const untilMs = Date.now() + (30 * 60 * 1000);
+    const saved = await supabaseWrite(env, {
+      path: `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}`,
+      method: 'PATCH',
+      prefer: 'return=minimal',
+      body: { grant_hash: grantHash, grant_until: new Date(untilMs).toISOString() },
+      fetcher,
+    });
+    if (saved?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
+    return json({ ok: true, grant, until: untilMs });
   }
 
   return null;
