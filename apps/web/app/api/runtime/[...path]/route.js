@@ -1,5 +1,6 @@
 import { readRootEnv } from '../../../../lib/root-env.mjs';
 import { localProfileResponse, useLocalProfileDirectory } from '../../../../lib/profile-directory.mjs';
+import { fetchAgentRuntime } from '../../../../lib/runtime-fetch.mjs';
 import { runtimeProxyTarget } from '../../../../lib/runtime-proxy.mjs';
 
 export const runtime = 'nodejs';
@@ -72,7 +73,7 @@ async function proxy(request, context) {
     } catch { /* ignore bad referer */ }
   }
 
-  const init = { method: request.method, headers, redirect: 'error', cache: 'no-store' };
+  const init = { method: request.method, headers, redirect: 'manual', cache: 'no-store' };
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     const buf = await request.arrayBuffer();
     if (buf.byteLength > 1_000_000) return noStore({ error: 'body_too_large' }, 413);
@@ -80,7 +81,10 @@ async function proxy(request, context) {
   }
 
   try {
-    const upstream = await fetch(target.url, init);
+    const upstream = await fetchAgentRuntime(target.url, init);
+    if (upstream.status >= 300 && upstream.status < 400) {
+      return noStore({ error: 'runtime_unreachable' }, 502);
+    }
     const body = await upstream.arrayBuffer();
     const out = new Headers({ 'Cache-Control': 'no-store' });
     const type = upstream.headers.get('content-type');

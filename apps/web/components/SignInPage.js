@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Antigravity from './Antigravity';
+import Topography from './Topography';
 import SpecularButton from './SpecularButton';
 import { hasSeenLogin } from '../lib/seen-login.mjs';
 import './SignInPage.css';
 
-export default function SignInPage({ disabled = false, onLogin }) {
+export default function SignInPage({ disabled = false, onLogin, onDeveloperPreview = null }) {
   const [returning, setReturning] = useState(false);
 
   useEffect(() => {
@@ -19,12 +19,22 @@ export default function SignInPage({ disabled = false, onLogin }) {
   return (
     <div className="sign-in">
       <div className="sign-in-field" aria-hidden="true">
-        <Antigravity />
+        <Topography
+          color="#ff8fa3"
+          elevation={1.6}
+          scale={0.9}
+          tilt={15}
+          fog={0.5}
+          clickEffect="peak"
+          lineCount={30}
+          brightness={1.55}
+          mouseStrength={0.2}
+        />
       </div>
       <main className="sign-in-stage">
         <div className="sign-in-copy">
-          <h1>Make your first agent.</h1>
-          <p className="sign-in-note">Email, Google, GitHub, Discord, or a Solana wallet. Methods you link on the account all sign into that one account.</p>
+          <h1 className="sign-in-mark">Maelstrom</h1>
+          <p className="sign-in-slogan">Your agent. Your call.</p>
           <div className="sign-in-actions">
             <SpecularButton
               size="lg"
@@ -46,6 +56,11 @@ export default function SignInPage({ disabled = false, onLogin }) {
               {secondary}
             </button>
           </div>
+          {onDeveloperPreview ? (
+            <button type="button" className="sign-in-dev" onClick={onDeveloperPreview}>
+              Developer preview
+            </button>
+          ) : null}
         </div>
       </main>
     </div>

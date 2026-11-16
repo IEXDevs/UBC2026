@@ -35,7 +35,7 @@ export default function OverviewPanel({ bots, ownerId = null }) {
     };
   }, [ownerId]);
 
-  const overview = buildOverview({ bots, ownerId: ownerId ?? 'demo_owner', remoteMetric });
+  const overview = buildOverview({ bots, ownerId: ownerId || '', remoteMetric });
 
   return (
     <div className="overview-page">

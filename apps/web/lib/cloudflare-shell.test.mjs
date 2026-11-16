@@ -16,6 +16,10 @@ test('OpenNext wrangler config targets Cloudflare', () => {
   assert.ok(wrangler.compatibility_flags.includes('nodejs_compat'));
   assert.equal(wrangler.services[0].binding, 'WORKER_SELF_REFERENCE');
   assert.equal(wrangler.services[0].service, wrangler.name);
+  assert.equal(wrangler.services[1].binding, 'AGENT_RUNTIME');
+  assert.equal(wrangler.services[1].service, 'maelstrom-agent-runtime');
+  assert.equal(wrangler.env.dev.services[1].binding, 'AGENT_RUNTIME');
+  assert.equal(wrangler.env.dev.services[1].service, 'maelstrom-agent-runtime');
   assert.equal(wrangler.vars, undefined);
 
   const openNext = readFileSync(join(root, 'open-next.config.ts'), 'utf8');

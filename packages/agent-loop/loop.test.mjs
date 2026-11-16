@@ -143,8 +143,13 @@ test('approval requirement follows the bot mode and still holds over-budget', ()
   assert.equal(approvalRequirement(
     { approvalMode: 'fully-automatic' },
     { state: 'ready-to-reserve', debit: '1000' },
-    { ownerPermission: 'full' },
+    { ownerPermission: 'full', confirmed: true },
   ), false);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'fully-automatic' },
+    { state: 'ready-to-reserve', debit: '1000' },
+    { ownerPermission: 'full' },
+  ), true);
   assert.equal(approvalRequirement(
     { approvalMode: 'fully-automatic' },
     { state: 'over-budget', debit: '1000' },
@@ -171,6 +176,7 @@ test('full permissions manage funds and a mainnet quote never signs', async () =
     proposal,
     trustScore: '800',
     ownerPermission: 'full',
+    confirmed: true,
     mainFn: async () => { seen.push('verify-consensus'); return facts; },
     verifyFn: async () => facts,
     now: Date.now(),
@@ -189,6 +195,7 @@ test('full permissions manage funds and a mainnet quote never signs', async () =
     proposal,
     trustScore: '800',
     ownerPermission: 'full',
+    confirmed: true,
     quote: { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false },
     mainFn: async () => facts,
     verifyFn: async () => facts,

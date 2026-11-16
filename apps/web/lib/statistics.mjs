@@ -62,7 +62,7 @@ export function voiceMinutes(ms) {
   return Math.round((ms / 60000) * 10) / 10;
 }
 
-export function statisticsView({ bots = [], ownerId = 'demo_owner', remoteMetric = null, voiceMs = 0 } = {}) {
+export function statisticsView({ bots = [], ownerId = '', remoteMetric = null, voiceMs = 0 } = {}) {
   const list = Array.isArray(bots) ? bots : [];
   const overview = buildOverview({ bots: list, ownerId, remoteMetric });
   const ownerRows = [
