@@ -55,7 +55,7 @@ import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBot
 import { buildPermissionedSpendRequest, parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { mergeObservedWallets, walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
-import { SETUP_CARD_MS, accountSetupStep, clipAddress, readRecoveryAck, writeRecoveryAck } from '../lib/wallet-desk.mjs';
+import { SETUP_CARD_MS, accountSetupStep, clipAddress, readQuoteOut, readRecoveryAck, swapSendSettlement, writeRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
@@ -823,21 +823,48 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         return { ok: false, message: 'The send did not post.' };
       }
     }
-    if (target?.kind !== 'handle' || pending?.asset !== 'USDC') {
-      return { ok: false, message: 'Platform sends are USDC to a @handle.' };
+    if (target?.kind !== 'handle') {
+      return { ok: false, message: 'Platform sends go to a @handle.' };
     }
+    let settleAmount = pending.asset === 'USDC' ? pending.amount : null;
+    let pricedFrom = null;
+    if (pending.asset !== 'USDC') {
+      const quote = pending.quote;
+      if (!quote?.url || quote.broadcast !== false) {
+        return { ok: false, message: 'That quote cannot authorize a send.' };
+      }
+      let quoted = null;
+      try {
+        const response = await fetch(quote.url);
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok) quoted = readQuoteOut(payload);
+      } catch {
+        return { ok: false, message: 'The quote did not load. Nothing was sent.' };
+      }
+      const settlement = swapSendSettlement({
+        inputSymbol: pending.asset,
+        quoteOut: quoted,
+        quote,
+      });
+      if (settlement.error || settlement.authorizesTransaction !== false || settlement.broadcast !== false) {
+        return { ok: false, message: 'That quote cannot authorize a send.' };
+      }
+      settleAmount = settlement.amount;
+      pricedFrom = settlement.inputSymbol;
+    }
+    if (!settleAmount) return { ok: false, message: 'Platform sends are USDC to a @handle.' };
     const transfersUrl = shellRuntimeUrl('/api/transfers');
     if (!transfersUrl) return { ok: false, message: 'Platform sends need the agent runtime.' };
     try {
       if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
       const token = await getAccessToken?.();
-      const idempotencyKey = `wallet_${target.handle}_${pending.amount}_${Date.now()}`.replace(/[^a-zA-Z0-9:_-]/g, '_').slice(0, 128);
+      const idempotencyKey = `wallet_${target.handle}_${settleAmount}_${Date.now()}`.replace(/[^a-zA-Z0-9:_-]/g, '_').slice(0, 128);
       const response = await fetch(transfersUrl, {
         method: 'POST',
         headers: moneyHeaders(token),
         body: JSON.stringify({
           handle: target.handle,
-          amount: pending.amount,
+          amount: settleAmount,
           idempotencyKey,
         }),
       });
@@ -856,7 +883,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       const amountLabel = `${formatBaseUnits(body.transfer.amount)} USDC`;
       return {
         ok: true,
-        message: `Sent ${amountLabel} to @${body.transfer.handle}.`,
+        message: pricedFrom
+          ? `Priced ${pricedFrom} and sent ${amountLabel} to @${body.transfer.handle}. The quote was not broadcast.`
+          : `Sent ${amountLabel} to @${body.transfer.handle}.`,
         receipt: {
           id: body.transfer.id,
           at: body.transfer.createdAt || new Date().toISOString(),
@@ -864,6 +893,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           lines: [
             { label: 'To', value: `@${body.transfer.handle}` },
             { label: 'Amount', value: amountLabel },
+            ...(pricedFrom ? [{ label: 'Priced from', value: `${pricedFrom} · quote not broadcast` }] : []),
             { label: 'Network', value: 'Platform ledger · devnet execution, mainnet pricing' },
           ],
           cluster: 'devnet',

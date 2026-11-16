@@ -425,6 +425,31 @@ export function phraseMatches(typed, words) {
   return expected.every((word, index) => word === given[index]);
 }
 
+/**
+ * A non-USDC send is priced by the Jupiter quote, then settled as USDC.
+ * The quote stays paper: it cannot broadcast and it cannot authorize a transaction.
+ */
+export function swapSendSettlement({ inputSymbol, quoteOut, quote } = {}) {
+  if (!quote || quote.broadcast !== false) return { error: 'quote_not_authorization' };
+  if (quote.pricing !== 'mainnet' || quote.cluster !== 'devnet') return { error: 'invalid_quote' };
+  if (quote.label !== 'devnet execution, mainnet pricing') return { error: 'invalid_quote' };
+  if (typeof inputSymbol !== 'string' || inputSymbol === 'USDC' || inputSymbol === quote.output?.symbol) {
+    return { error: 'invalid_quote' };
+  }
+  if (quote.output?.symbol !== 'USDC') return { error: 'usdc_settlement_only' };
+  if (typeof quoteOut !== 'string' || !/^[1-9][0-9]{0,39}$/.test(quoteOut)) return { error: 'invalid_amount' };
+  return {
+    asset: 'USDC',
+    amount: quoteOut,
+    inputSymbol,
+    broadcast: false,
+    executionCluster: 'devnet',
+    pricingCluster: 'mainnet',
+    authorizesTransaction: false,
+    label: 'devnet execution, mainnet pricing',
+  };
+}
+
 export function swapDraft(rows, { from, to, amountText } = {}) {
   const input = (rows || []).find(row => row.symbol === from) || null;
   const output = (rows || []).find(row => row.symbol === to) || null;
