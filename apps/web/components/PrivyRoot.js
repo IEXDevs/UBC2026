@@ -1,21 +1,37 @@
 'use client';
 
+import { createContext, useContext } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
 import { privyProviderProps } from '../lib/privy-config.mjs';
 import { ToastProvider } from './bits/SwipeToast';
 
-const props = privyProviderProps({
-  appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
-  clientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
-});
+const PrivyPublicContext = createContext({ configured: false, appId: '', clientId: '' });
+
+export function usePrivyPublic() {
+  return useContext(PrivyPublicContext);
+}
 
 /**
  * Stock PrivyProvider. Session persistence is Privy's localStorage —
  * no Storage monkeypatches, backups, or restore loops.
+ * App id and client id come from the server layout so the client bundle
+ * and the prerender agree. A direct process.env read is empty in the browser.
  */
-export default function PrivyRoot({ children }) {
-  if (!props) return <ToastProvider>{children}</ToastProvider>;
+export default function PrivyRoot({ appId = '', clientId = '', children }) {
+  const props = privyProviderProps({ appId, clientId });
+  const value = {
+    configured: props !== null,
+    appId: props?.appId || '',
+    clientId: props?.clientId || '',
+  };
+  if (!props) {
+    return (
+      <PrivyPublicContext.Provider value={value}>
+        <ToastProvider>{children}</ToastProvider>
+      </PrivyPublicContext.Provider>
+    );
+  }
 
   // Omit clientId unless set — a wrong App Client id makes login show
   // "Something went wrong" (often invalid_origin against that client's allowlist).
@@ -31,10 +47,12 @@ export default function PrivyRoot({ children }) {
   if (props.clientId) providerProps.clientId = props.clientId;
 
   return (
-    <ToastProvider>
-      <PrivyProvider {...providerProps}>
-        {children}
-      </PrivyProvider>
-    </ToastProvider>
+    <PrivyPublicContext.Provider value={value}>
+      <ToastProvider>
+        <PrivyProvider {...providerProps}>
+          {children}
+        </PrivyProvider>
+      </ToastProvider>
+    </PrivyPublicContext.Provider>
   );
 }

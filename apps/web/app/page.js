@@ -39,7 +39,7 @@ import {
   writeLooks,
   writeRoster,
 } from '../lib/roster.mjs';
-import { ownerIdFromPrivyUser, privyAccountLabel, privyProviderProps, sessionReadyForWallets } from '../lib/privy-config.mjs';
+import { ownerIdFromPrivyUser, privyAccountLabel, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '../lib/profile.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import {
@@ -62,6 +62,7 @@ import { useToast } from '../components/bits/SwipeToast';
 import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
+import { usePrivyPublic } from '../components/PrivyRoot';
 import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
 import { clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
@@ -71,13 +72,10 @@ function readAccessToken(getAccessToken) {
 }
 
 const CONNECTORS = shellConnectors();
-const privyConfigured = privyProviderProps({
-  appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID,
-  clientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID,
-}) !== null;
 
 export default function HomePage() {
-  if (!privyConfigured) {
+  const { configured } = usePrivyPublic();
+  if (!configured) {
     return (
       <Shell
         ownerId={null}
