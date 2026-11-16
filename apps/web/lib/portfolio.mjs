@@ -114,6 +114,16 @@ function pegFor(mint, cluster) {
   return PEGS[mint] ?? null;
 }
 
+/** Stablecoin pegs fill gaps when a live DexScreener price is missing. */
+export function withKnownPegs(cluster, prices = {}) {
+  const next = { ...prices };
+  for (const mint of Object.keys(PEGS)) {
+    const peg = pegFor(mint, cluster);
+    if (peg && (typeof next[mint] !== 'string' || !PRICE.test(next[mint]))) next[mint] = peg;
+  }
+  return next;
+}
+
 function addToken(bucket, token) {
   const existing = bucket.get(token.mint);
   if (!existing) {

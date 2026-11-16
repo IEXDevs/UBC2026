@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hasStoredPrivySession, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
+import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
 
 function storage(entries) {
   const keys = Object.keys(entries);
@@ -21,6 +21,15 @@ test('the login page waits until Privy has finished and found no session', () =>
   assert.equal(showSignInGate({ privyConfigured: true, ready: true, authenticated: true }), false);
   assert.equal(showSessionHold({ privyConfigured: true, ready: false }), true);
   assert.equal(showSessionHold({ privyConfigured: true, ready: true }), false);
+});
+
+test('developer preview needs DEV_PREVIEW=1 and stays off in production', () => {
+  assert.equal(developerPreviewAllowed({ nodeEnv: 'development', devPreview: '1' }), true);
+  assert.equal(developerPreviewAllowed({ nodeEnv: 'development', devPreview: '' }), false);
+  assert.equal(developerPreviewAllowed({ nodeEnv: 'development', devPreview: '0' }), false);
+  assert.equal(developerPreviewAllowed({ nodeEnv: 'test', devPreview: '1' }), true);
+  assert.equal(developerPreviewAllowed({ nodeEnv: 'production', devPreview: '1' }), false);
+  assert.equal(developerPreviewAllowed({ nodeEnv: 'production', devPreview: '' }), false);
 });
 
 test('without Privy the shell stays available', () => {

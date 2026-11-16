@@ -2,6 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "maelstrom-agent-runtime",
   "main": "src/index.mjs",
+  "workers_dev": true,
+  "preview_urls": false,
   "compatibility_date": "2026-11-13",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
@@ -20,6 +22,12 @@
     "CLUSTER": "devnet",
     "PRODUCT": "Maelstrom"
   },
+  "routes": [
+    {
+      "pattern": "runtime.maelstrom.iexdevs.com",
+      "custom_domain": true
+    }
+  ],
   // Optional Streams dedupe cache when Supabase stream_events is unavailable.
   // Create the namespace once: wrangler kv namespace create STREAM_DEDUPE
   // "kv_namespaces": [{ "binding": "STREAM_DEDUPE", "id": "<namespace-id>" }]

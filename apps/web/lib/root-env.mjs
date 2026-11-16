@@ -65,7 +65,16 @@ function rootEnv() {
   return cached;
 }
 
-export function readRootEnv(name, env = rootEnv()) {
+function runtimeEnv() {
+  const merged = { ...rootEnv() };
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value !== 'string' || !value.trim() || !/^[A-Z0-9_]+$/.test(key)) continue;
+    merged[key] = value;
+  }
+  return merged;
+}
+
+export function readRootEnv(name, env = runtimeEnv()) {
   const value = env?.[name];
   return typeof value === 'string' ? value.trim() : '';
 }

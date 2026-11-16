@@ -33,7 +33,7 @@ export function metricsUrl(runtimeBase) {
   return `${root}/api/metrics`;
 }
 
-export function emptyMetric(ownerId = 'demo_owner') {
+export function emptyMetric(ownerId = '') {
   return {
     id: 'metric_rollup',
     ownerId,
@@ -123,9 +123,9 @@ export function formatPnlMicroUsdc(pnlMicroUsdc) {
 
 /**
  * Build the Overview view model from local bots + optional remote rollup.
- * Demo metrics are derived from bot experience previews so the pane is never blank.
+ * Without a runtime rollup, counts come from the bots already on screen.
  */
-export function buildOverview({ bots = [], ownerId = 'demo_owner', remoteMetric = null } = {}) {
+export function buildOverview({ bots = [], ownerId = '', remoteMetric = null } = {}) {
   const list = Array.isArray(bots) ? bots : [];
   const byStatus = { watching: 0, idle: 0, paused: 0, enabled: 0, draft: 0, other: 0 };
   for (const bot of list) {

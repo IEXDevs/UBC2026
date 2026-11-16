@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 import { accountWriteBodies } from '@ubc2026/wallets';
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { readRootEnv } from '../../../lib/root-env.mjs';
+import { fetchAgentRuntime } from '../../../lib/runtime-fetch.mjs';
 import { missingWalletSecrets, resolvePrivyAppId } from '../../../lib/wallet-provision.mjs';
 
 function requestOrigin(request) {
@@ -148,7 +149,7 @@ export async function POST(request) {
       try {
         const base = new URL(runtime.trim());
         if (base.protocol === 'https:' || base.protocol === 'http:') {
-          await fetch(new URL('/api/wallets/persist', base), {
+          await fetchAgentRuntime(new URL('/api/wallets/persist', base), {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${accessToken}`,

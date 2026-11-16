@@ -41,6 +41,17 @@ function clientLabel(client) {
  * Include every Solana linked wallet (embedded Privy + connected external).
  * createOnLogin often has an address before a server wallet id exists.
  */
+/** Changes when the user links or unlinks a wallet. The positions book refetches on this. */
+export function linkedWalletKey(user) {
+  const accounts = Array.isArray(user?.linkedAccounts)
+    ? user.linkedAccounts
+    : (Array.isArray(user?.linked_accounts) ? user.linked_accounts : []);
+  return accounts
+    .map(account => (typeof account?.address === 'string' ? account.address.trim() : ''))
+    .filter(Boolean)
+    .join('|');
+}
+
 export function walletsFromPrivyUser(user, ownerId) {
   if (!user || typeof ownerId !== 'string' || !ownerId.trim()) return [];
   const owner = ownerId.trim();

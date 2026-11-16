@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyLooks, randomShape, sanitizeLook, SHAPES } from './bot-look.mjs';
 
-test('unknown shape and color fall back to the bot default', () => {
-  const look = sanitizeLook('bot_shop', { shape: 'squircle', color: 'red', name: '  ' });
-  assert.equal(look.shape, 'triangle');
-  assert.equal(look.color, '#3dbea5');
+test('unknown shape and color fall back to the shared default', () => {
+  const look = sanitizeLook('bot_live', { shape: 'squircle', color: 'red', name: '  ' });
+  assert.equal(look.shape, 'circle');
+  assert.equal(look.color, '#7c5cff');
   assert.equal(look.name, undefined);
 });
 
@@ -26,7 +26,7 @@ test('an agent image is a small data url and new marks stay primary shapes', () 
   assert.equal(sanitizeLook('bot_shop', { image: 'https://example.com/a.png' }).image, undefined);
   assert.equal(sanitizeLook('bot_shop', { image: '' }).image, '');
   assert.deepEqual(SHAPES, ['circle', 'square', 'triangle']);
-  assert.equal(sanitizeLook('bot_shop', { shape: 'diamond' }).shape, 'triangle');
+  assert.equal(sanitizeLook('bot_shop', { shape: 'diamond' }).shape, 'circle');
   assert.ok(SHAPES.includes(randomShape(0)));
   assert.ok(SHAPES.includes(randomShape(0.5)));
   assert.ok(SHAPES.includes(randomShape(0.99)));

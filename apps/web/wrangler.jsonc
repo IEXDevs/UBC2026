@@ -15,6 +15,10 @@
     {
       "binding": "WORKER_SELF_REFERENCE",
       "service": "maelstrom-web"
+    },
+    {
+      "binding": "AGENT_RUNTIME",
+      "service": "maelstrom-agent-runtime"
     }
   ],
   "observability": {
@@ -25,7 +29,29 @@
       "pattern": "maelstrom.iexdevs.com",
       "custom_domain": true
     }
-  ]
+  ],
+  "env": {
+    "dev": {
+      "name": "maelstrom-web-dev",
+      "workers_dev": false,
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "maelstrom-web-dev"
+        },
+        {
+          "binding": "AGENT_RUNTIME",
+          "service": "maelstrom-agent-runtime"
+        }
+      ],
+      "routes": [
+        {
+          "pattern": "dev.maelstrom.iexdevs.com",
+          "custom_domain": true
+        }
+      ]
+    }
+  }
   // Public Next build names live in .env.example: NEXT_PUBLIC_PRIVY_APP_ID,
   // NEXT_PUBLIC_PRIVY_CLIENT_ID, NEXT_PUBLIC_AGENT_RUNTIME_URL.
   // Do not put PRIVY_APP_SECRET or any other secret value in this file.

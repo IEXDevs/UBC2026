@@ -2,14 +2,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DESK_LOCK_IDLE_MS,
+  clearDeskSession,
   createDeskLock,
   deskLockStorageKey,
+  deskSessionUntil,
+  hotkeyTypingTarget,
   idleLockDue,
   parseDeskLock,
+  parseDeskSession,
   passwordProblem,
   readDeskLock,
+  readDeskSession,
   unlockDesk,
+  walletHotkey,
   writeDeskLock,
+  writeDeskSession,
 } from './desk-lock.mjs';
 
 function memoryStorage() {
@@ -17,6 +24,7 @@ function memoryStorage() {
   return {
     getItem(key) { return values.has(key) ? values.get(key) : null; },
     setItem(key, value) { values.set(key, String(value)); },
+    removeItem(key) { values.delete(key); },
   };
 }
 
@@ -48,9 +56,43 @@ test('desk lock verifier round-trips per owner and ignores a tampered hash', asy
   assert.equal(parseDeskLock('not-json'), null);
 });
 
+test('shift L locks and shift U opens the unlock prompt, except while typing', () => {
+  assert.equal(walletHotkey({ shiftKey: true, code: 'KeyL' }), 'lock');
+  assert.equal(walletHotkey({ shiftKey: true, code: 'KeyU' }), 'unlock');
+  assert.equal(walletHotkey({ shiftKey: true, code: 'KeyL', repeat: true }), '');
+  assert.equal(walletHotkey({ shiftKey: false, code: 'KeyL' }), '');
+  assert.equal(walletHotkey({ shiftKey: true, ctrlKey: true, code: 'KeyL' }), '');
+  assert.equal(walletHotkey({ shiftKey: true, code: 'KeyK' }), '');
+  assert.equal(hotkeyTypingTarget({ tagName: 'input' }), true);
+  assert.equal(hotkeyTypingTarget({ tagName: 'TEXTAREA' }), true);
+  assert.equal(hotkeyTypingTarget({ tagName: 'DIV', isContentEditable: true }), true);
+  assert.equal(hotkeyTypingTarget({ tagName: 'BUTTON' }), false);
+  assert.equal(hotkeyTypingTarget(null), false);
+});
+
 test('idle lock trips after thirty minutes and stays open before that', () => {
   const start = 1_000_000;
   assert.equal(idleLockDue(start, start + DESK_LOCK_IDLE_MS - 1), false);
   assert.equal(idleLockDue(start, start + DESK_LOCK_IDLE_MS), true);
   assert.equal(idleLockDue(Number.NaN, start), false);
+});
+
+test('a wallet unlock lasts thirty minutes across a reload and then locks', () => {
+  const storage = memoryStorage();
+  const start = 1_700_000_000_000;
+  const until = deskSessionUntil(start);
+  assert.equal(until, start + DESK_LOCK_IDLE_MS);
+  assert.equal(writeDeskSession(storage, 'did:privy:abc', until), true);
+  assert.deepEqual(readDeskSession(storage, 'did:privy:abc', start + DESK_LOCK_IDLE_MS - 1), { v: 1, until });
+  assert.equal(readDeskSession(storage, 'did:privy:abc', until), null);
+  assert.equal(readDeskSession(storage, 'did:privy:other', start), null);
+  assert.equal(parseDeskSession('not-json', start), null);
+  assert.equal(clearDeskSession(storage, 'did:privy:abc'), true);
+  assert.equal(readDeskSession(storage, 'did:privy:abc', start), null);
+  const broken = {
+    getItem() { return null; },
+    setItem() { throw new Error('blocked'); },
+  };
+  assert.equal(writeDeskSession(broken, 'did:privy:abc', until), false);
+  assert.equal(writeDeskLock(broken, 'did:privy:abc', { v: 1, iterations: 120000, salt: 'aa', hash: 'bb' }), false);
 });

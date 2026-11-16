@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { usePrivy } from '@privy-io/react-auth';
 import { ExternalLink } from 'lucide-react';
 import { filterBotHistory } from '../lib/bot-history.mjs';
 import {
@@ -9,7 +10,9 @@ import {
   describeWallets,
   SOLSCAN_DEVNET,
 } from '../lib/money-views.mjs';
+import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { buildEarningsSeries, mergeConnectedPositions } from '../lib/earnings-chart.mjs';
+import { linkedWalletKey } from '../lib/wallet-provision.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
 import AddressCopy from './AddressCopy';
 import GlideSelect from './GlideSelect';
@@ -188,6 +191,8 @@ function Wallets({ state }) {
 }
 
 function Positions({ state, ownerId, getAccessToken }) {
+  const { user } = usePrivy();
+  const walletsKey = linkedWalletKey(user);
   const [portfolio, setPortfolio] = useState(null);
   useEffect(() => {
     if (typeof getAccessToken !== 'function') return undefined;
@@ -206,12 +211,17 @@ function Positions({ state, ownerId, getAccessToken }) {
         const body = await response.json().catch(() => null);
         if (stopped || !response.ok || !body || typeof body !== 'object') return;
         setPortfolio(body);
+        const enriched = await enrichPortfolio(body, {
+          userId: user?.id || ownerId,
+          storage: window.localStorage,
+        });
+        if (!stopped) setPortfolio(enriched.portfolio);
       } catch {
         // Paper lots stay on the book when the balance read fails.
       }
     })();
     return () => { stopped = true; };
-  }, [getAccessToken, ownerId]);
+  }, [getAccessToken, ownerId, user?.id, walletsKey]);
 
   const merged = useMemo(() => mergeConnectedPositions({
     positions: state.positions,

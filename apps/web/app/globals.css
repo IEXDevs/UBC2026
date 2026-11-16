@@ -1133,12 +1133,14 @@ button:focus-visible, input:focus-visible {
 .address-copy.is-empty { box-shadow: none; background: transparent; padding-left: 0; }
 .backdrop.desk-lock {
   z-index: 80;
-  backdrop-filter: blur(18px);
-  pointer-events: none;
 }
 .backdrop.desk-lock .sheet { pointer-events: auto; }
-.desk-unlock {
+.desk-unlock,
+.secret-mask {
   -webkit-text-security: disc;
+}
+.secret-mask.is-clear {
+  -webkit-text-security: none;
 }
 .shell.is-locked .composer {
   position: relative;
@@ -4620,17 +4622,17 @@ legend {
   z-index: 80;
   display: grid;
   gap: 8px;
+  justify-items: end;
+  width: min(356px, calc(100vw - 32px));
+  pointer-events: none;
 }
-.swipe-toast {
-  margin: 0;
-  max-width: 320px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: #f4f4f5;
-  color: #111;
-  font-size: 14px;
-  cursor: grab;
-  touch-action: none;
+.toast-stack .swipe-toast { pointer-events: auto; }
+.token-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: #1c1c1c;
 }
 
 .voice-pill {

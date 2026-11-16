@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
 import SecretDraft from './SecretDraft';
 import {
-  DESK_LOCK_IDLE_MS,
   createDeskLock,
   passwordProblem,
   readDeskLock,
@@ -12,9 +12,12 @@ import {
 } from '../lib/desk-lock.mjs';
 import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
 
-const idleMinutes = Math.round(DESK_LOCK_IDLE_MS / 60000);
+function controlValue(form, name) {
+  const node = form?.elements?.namedItem?.(name);
+  return node && typeof node.value === 'string' ? node.value : '';
+}
 
-export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
+export default function DeskLock({ ownerId, onUnlock, onClose }) {
   const [record, setRecord] = useState(undefined);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -36,20 +39,31 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
     setCopied(false);
   }, [ownerId]);
 
+  useEffect(() => {
+    function onKey(event) {
+      if (event.key === 'Escape') onClose?.();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const setting = record == null;
-  const who = accountLabel && accountLabel !== 'You' ? accountLabel : '';
 
   async function submit(event) {
     event.preventDefault();
     if (pending || record === undefined) return;
+    const typed = controlValue(event.currentTarget, setting ? 'desk-password' : 'maelstrom-desk-unlock');
+    const typedConfirm = controlValue(event.currentTarget, 'desk-password-confirm');
+    const nextPassword = typed || password;
+    const nextConfirm = typedConfirm || confirm;
     setNote('');
     if (setting) {
-      const problem = passwordProblem(password);
+      const problem = passwordProblem(nextPassword);
       if (problem) {
         setNote(problem);
         return;
       }
-      if (password !== confirm) {
+      if (nextPassword !== nextConfirm) {
         setNote('Those passwords do not match.');
         return;
       }
@@ -61,11 +75,16 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
     setPending(true);
     try {
       if (setting) {
-        const created = await createDeskLock(password);
-        writeDeskLock(window.localStorage, ownerId, created);
+        const created = await createDeskLock(nextPassword);
+        const saved = writeDeskLock(window.localStorage, ownerId, created);
+        if (!saved) {
+          setNote('The password could not be saved on this browser.');
+          setPending(false);
+          return;
+        }
         setRecord(created);
       } else {
-        const ok = await unlockDesk(password, record);
+        const ok = await unlockDesk(nextPassword, record);
         if (!ok) {
           setNote('Wrong password.');
           setPending(false);
@@ -74,6 +93,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
       }
       setPassword('');
       setConfirm('');
+      setPending(false);
       onUnlock?.();
     } catch {
       setNote('The password could not be saved on this browser.');
@@ -82,15 +102,20 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
   }
 
   return (
-    <div className="backdrop is-center desk-lock">
-      <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-labelledby="desk-lock-title">
-        <h2 id="desk-lock-title">{setting ? 'Set a password' : 'Unlock Maelstrom'}</h2>
-        <p className="quiet">
-          {who ? `Signed in as ${who}. ` : 'You stay signed in. '}
-          {setting
-            ? `Choose a password for wallets and sends. Chat stays open. A reload asks for it again, and so does ${idleMinutes} minutes of idle time.`
-            : `Enter it to use wallets and sends. You can keep talking. A reload asks again, and so does ${idleMinutes} minutes of idle time.`}
-        </p>
+    <div className="backdrop is-center desk-lock" onMouseDown={() => onClose?.()}>
+      <section
+        className="sheet wallet-gate"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="desk-lock-title"
+        onMouseDown={event => event.stopPropagation()}
+      >
+        <div className="sheet-head">
+          <h2 id="desk-lock-title">{setting ? 'Set a password' : 'Enter Password'}</h2>
+          <button type="button" className="icon-btn" aria-label="Close" onClick={() => onClose?.()}>
+            <X size={18} strokeWidth={1.75} />
+          </button>
+        </div>
         <form className="field" autoComplete="off" onSubmit={submit}>
           {setting ? (
             <SecretDraft
@@ -110,26 +135,24 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock }) {
               onCopied={setCopied}
             />
           ) : (
-            <label>
-              Password
-              <input
-                className="desk-unlock"
-                type="text"
-                name="maelstrom-desk-unlock"
-                autoFocus
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                inputMode="text"
-                data-1p-ignore="true"
-                data-lpignore="true"
-                data-form-type="other"
-                value={password}
-                disabled={record === undefined || pending}
-                onChange={event => setPassword(event.target.value)}
-              />
-            </label>
+            <input
+              className="desk-unlock"
+              type="text"
+              name="maelstrom-desk-unlock"
+              aria-label="Password"
+              autoFocus
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              inputMode="text"
+              data-1p-ignore="true"
+              data-lpignore="true"
+              data-form-type="other"
+              value={password}
+              disabled={record === undefined || pending}
+              onChange={event => setPassword(event.target.value)}
+            />
           )}
           {setting ? (
             <label>

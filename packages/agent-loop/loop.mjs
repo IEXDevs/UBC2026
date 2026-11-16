@@ -28,14 +28,13 @@ function needsHumanApproval(bot, policyDecision) {
 const OWNER_PERMISSIONS = new Set(['ask', 'review', 'full']);
 
 /** Whether this policy result still needs a person. Over-budget always does.
- * Full permissions means the owner let the agent manage funds, so a ready
- * proposal does not wait. Ask and review wait unless the owner already confirmed. */
+ * Every permission, including full, waits until the owner has confirmed.
+ * That confirm is the slide. Ask and review use the same check. */
 export function approvalRequirement(bot, policyDecision, options = {}) {
   if (!policyDecision || typeof policyDecision.state !== 'string') fail('Policy decision is required');
   if (policyDecision.state === 'blocked') return false;
   if (policyDecision.state === 'over-budget') return true;
-  if (options?.ownerPermission === 'full') return false;
-  if (options?.ownerPermission === 'ask' || options?.ownerPermission === 'review') {
+  if (options?.ownerPermission === 'full' || options?.ownerPermission === 'ask' || options?.ownerPermission === 'review') {
     return options?.confirmed !== true;
   }
   if (options?.ownerPermission != null && !OWNER_PERMISSIONS.has(options.ownerPermission)) {

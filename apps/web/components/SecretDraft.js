@@ -44,9 +44,13 @@ export default function SecretDraft({
         <button type="button" className="ghost" onClick={fill} disabled={disabled}>{action}</button>
         <div className="secret-box">
           <input
-            type={generated ? 'text' : 'password'}
+            className={generated ? 'secret-mask is-clear' : 'secret-mask'}
+            type="text"
             name={name}
             autoComplete={autoComplete}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={value}
             disabled={disabled}
             onChange={(event) => {

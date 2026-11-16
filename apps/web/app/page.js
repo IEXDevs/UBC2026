@@ -25,7 +25,7 @@ import AgentEdit from '../components/AgentEdit';
 import ComputerSheet from '../components/ComputerSheet';
 import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
-import { managesFunds, netChangeSummary, readStoredPermission } from '../lib/spend-permission.mjs';
+import { netChangeSummary, readStoredPermission } from '../lib/spend-permission.mjs';
 import { compactLines, contextUsage } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
 import {
@@ -61,8 +61,8 @@ import { useToast } from '../components/bits/SwipeToast';
 import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
-import { hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
-import { idleLockDue } from '../lib/desk-lock.mjs';
+import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
+import { clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 
 function readAccessToken(getAccessToken) {
@@ -129,6 +129,8 @@ function SessionHold() {
 function AuthedShell() {
   const { ready, authenticated, user, login, logout, getAccessToken: privyGetAccessToken } = usePrivy();
   const signedIn = ready && authenticated;
+  const devAllowed = developerPreviewAllowed();
+  const [devPreview, setDevPreview] = useState(false);
   const [liveWallets, setLiveWallets] = useState(null);
   const [walletNote, setWalletNote] = useState('');
   const accountsKey = linkedAccountsKey(user);
@@ -138,6 +140,27 @@ function AuthedShell() {
   const onLogout = useCallback(async () => {
     await logout?.();
   }, [logout]);
+
+  useEffect(() => {
+    if (!devAllowed) return undefined;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('dev') === '1') setDevPreview(true);
+    return undefined;
+  }, [devAllowed]);
+
+  function enterDevPreview() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('dev', '1');
+    window.history.replaceState(null, '', url);
+    setDevPreview(true);
+  }
+
+  function leaveDevPreview() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('dev');
+    window.history.replaceState(null, '', url);
+    setDevPreview(false);
+  }
 
   useEffect(() => {
     if (!signedIn) {
@@ -208,12 +231,30 @@ function AuthedShell() {
     return () => { stopped = true; };
   }, [signedIn, user, user?.id, user?.hasAcceptedTerms, accountsKey, getAccessToken]);
 
+  if (devPreview && devAllowed) {
+    return (
+      <Shell
+        devPreview
+        ownerId=""
+        user={null}
+        accountLabel="Developer"
+        signedIn
+        loginDisabled={false}
+        onLogin={login}
+        onLogout={leaveDevPreview}
+        liveWallets={[]}
+        walletNote="Developer preview. Sample balances. Live prices come from DexScreener."
+        getAccessToken={async () => null}
+      />
+    );
+  }
+
   if (showSessionHold({ privyConfigured: true, ready })) {
     return <SessionHold />;
   }
 
   if (showSignInGate({ privyConfigured: true, ready, authenticated })) {
-    return <SignInPage onLogin={login} />;
+    return <SignInPage onLogin={login} onDeveloperPreview={devAllowed ? enterDevPreview : null} />;
   }
 
   return (
@@ -257,7 +298,7 @@ function transferFailure(body, handle) {
   return 'The send did not post.';
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', getAccessToken = null }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', getAccessToken = null }) {
   const toast = useToast();
   const [looks, setLooks] = useState({});
   const [roster, setRoster] = useState({ order: [], extra: [] });
@@ -271,9 +312,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const [cornerEdit, setCornerEdit] = useState(null);
   const [pendingSend, setPendingSend] = useState(null);
   const [unlocked, setUnlocked] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
   const unlockedRef = useRef(false);
+  const unlockUntilRef = useRef(0);
+  const lockIntentRef = useRef(null);
   const deskLockOnRef = useRef(false);
-  const activityRef = useRef(0);
   deskLockOnRef.current = signedIn && Boolean(ownerId);
   const [pane, setPane] = useState('Main');
   const [slide, setSlide] = useState('right');
@@ -626,7 +669,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
   const glance = walletGlance(wallets, positions, transfers);
-  const setupStep = accountSetupStep({
+  const setupStep = devPreview ? null : accountSetupStep({
     signedIn,
     profileReady,
     handle: profile?.handle || '',
@@ -635,12 +678,46 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     recoveryConfirmed: recoveryAck === true,
   });
   const grantDesk = useCallback(() => {
-    activityRef.current = Date.now();
+    const until = deskSessionUntil(Date.now());
+    unlockUntilRef.current = until;
+    try { writeDeskSession(localStorage, ownerId, until); } catch { /* this tab still unlocks */ }
     unlockedRef.current = true;
     setUnlocked(true);
+    setLockOpen(false);
+    const intent = lockIntentRef.current;
+    lockIntentRef.current = null;
+    if (intent?.type === 'wallet') setWalletsOpen(true);
+    if (intent?.type === 'spend' && intent.pending) setPendingSend(intent.pending);
+  }, [ownerId]);
+  const dismissLock = useCallback(() => {
+    const intent = lockIntentRef.current;
+    lockIntentRef.current = null;
+    setLockOpen(false);
+    if (intent?.type === 'spend' && intent.pending) {
+      appendTalk(intent.pending.botId, {
+        id: `${intent.pending.lineId}-send`,
+        role: 'assistant',
+        text: 'The send stayed unsent.',
+      });
+    }
+  }, [appendTalk]);
+  const openWallet = useCallback(() => {
+    setCreateOpen(false);
+    setProfileOpen(false);
+    setPluginsOpen(false);
+    setStatsOpen(false);
+    if (deskLockOnRef.current && !unlockedRef.current) {
+      lockIntentRef.current = { type: 'wallet' };
+      setWalletsOpen(false);
+      setLockOpen(true);
+      return;
+    }
+    setWalletsOpen(true);
   }, []);
   const onWalletSend = useCallback(async (pending) => {
     if (deskLockOnRef.current && !unlockedRef.current) {
+      lockIntentRef.current = { type: 'wallet' };
+      setLockOpen(true);
       return { ok: false, message: 'Enter your password to use the wallet.' };
     }
     const target = pending?.target;
@@ -761,30 +838,68 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
     setSlideConfirm(null);
     if (resolve) resolve(accepted === true);
   }, []);
-  useEffect(() => {
+  const lockWallet = useCallback(() => {
+    unlockUntilRef.current = 0;
+    try { clearDeskSession(localStorage, ownerId); } catch { /* the in-memory lock still applies */ }
     unlockedRef.current = false;
     setUnlocked(false);
+    setLockOpen(false);
+    lockIntentRef.current = null;
+    setWalletsOpen(false);
+    setPendingSend(null);
+    finishSlideConfirm(false);
+  }, [ownerId, finishSlideConfirm]);
+  useEffect(() => {
+    if (!signedIn || !ownerId) return undefined;
+    function onKey(event) {
+      const action = walletHotkey(event);
+      if (!action || hotkeyTypingTarget(event.target)) return;
+      event.preventDefault();
+      if (action === 'lock') {
+        lockWallet();
+        toast?.('Wallet locked');
+        return;
+      }
+      setLockOpen(true);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [signedIn, ownerId, lockWallet, toast]);
+  useEffect(() => {
+    let open = false;
+    unlockUntilRef.current = 0;
+    if (ownerId) {
+      try {
+        const session = readDeskSession(localStorage, ownerId, Date.now());
+        open = Boolean(session);
+        if (session) unlockUntilRef.current = session.until;
+      } catch { open = false; }
+    }
+    unlockedRef.current = open;
+    setUnlocked(open);
+    setLockOpen(false);
+    lockIntentRef.current = null;
     setPendingSend(null);
   }, [ownerId]);
   useEffect(() => {
-    if (!deskLockOnRef.current || !unlocked) return undefined;
-    const mark = () => { activityRef.current = Date.now(); };
-    mark();
-    window.addEventListener('pointerdown', mark, true);
-    window.addEventListener('keydown', mark, true);
-    const tick = window.setInterval(() => {
-      if (!idleLockDue(activityRef.current, Date.now())) return;
-      unlockedRef.current = false;
-      setUnlocked(false);
-      setPendingSend(null);
-      finishSlideConfirm(false);
-    }, 5000);
-    return () => {
-      window.removeEventListener('pointerdown', mark, true);
-      window.removeEventListener('keydown', mark, true);
-      window.clearInterval(tick);
+    if (!unlocked || !ownerId) return undefined;
+    const tick = () => {
+      if (Date.now() < unlockUntilRef.current) return;
+      let session = null;
+      try { session = readDeskSession(localStorage, ownerId, Date.now()); } catch { session = null; }
+      if (session) {
+        unlockUntilRef.current = session.until;
+        return;
+      }
+      lockWallet();
     };
-  }, [unlocked, ownerId, signedIn, finishSlideConfirm]);
+    const id = window.setInterval(tick, 1000);
+    window.addEventListener('focus', tick);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', tick);
+    };
+  }, [unlocked, ownerId, lockWallet]);
   const clientTools = useMemo(() => createVoiceClientTools({
     bots,
     wallets,
@@ -797,8 +912,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       setComputerOpen(true);
     },
     confirm: askSlideConfirm,
-    locked: signedIn && Boolean(ownerId) && !unlocked,
-  }), [bots, wallets, activeBot, pane, askSlideConfirm, signedIn, ownerId, unlocked]);
+  }), [bots, wallets, activeBot, pane, askSlideConfirm]);
 
   function choosePane(next, direction) {
     if (next === pane) return;
@@ -939,10 +1053,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
       return;
     }
     if (id === 'wallet') {
-      setProfileOpen(false);
-      setPluginsOpen(false);
-      setStatsOpen(false);
-      setWalletsOpen(true);
+      openWallet();
+      return;
+    }
+    if (id === 'lock-wallet') {
+      lockWallet();
       return;
     }
     if (id === 'plugins') {
@@ -993,7 +1108,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   async function settleSpend(pending, confirmed) {
     const reply = (text) => appendTalk(pending.botId, { id: `${pending.lineId}-send`, role: 'assistant', text });
     if (deskLockOnRef.current && !unlockedRef.current) {
-      reply('Enter your password before a wallet action.');
+      lockIntentRef.current = { type: 'spend', pending };
+      setLockOpen(true);
       return;
     }
     const permission = pending.permission || readStoredPermission(typeof localStorage === 'undefined' ? null : localStorage);
@@ -1127,12 +1243,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
   }
 
   const sideColumn = railCollapsed ? 88 : sideWidth;
-  const locked = signedIn && Boolean(ownerId) && !unlocked;
-
   return (
     <>
     <div
-      className={`shell${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}${locked ? ' is-locked' : ''}`}
+      className={`shell${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}`}
       style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
       <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
@@ -1190,6 +1304,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
             collapsed={railCollapsed}
             signedIn={signedIn}
             loginDisabled={loginDisabled}
+            walletUnlocked={unlocked}
             onLogin={onLogin}
             onPick={onAccount}
           />
@@ -1248,6 +1363,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                 ownerId={ownerId}
                 accountLabel={accountLabel}
                 wallets={wallets}
+                walletUnlocked={unlocked}
+                onWalletLocked={() => setLockOpen(true)}
                 onBotsChange={(next) => setBotRecords(next)}
               />
             ) : null}
@@ -1280,8 +1397,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
                 permission,
                 summary: netChangeSummary({ amount: command.amount, asset: 'USDC', handle: command.handle }),
               };
-              if (managesFunds(permission)) {
-                void settleSpend(pending, false);
+              if (deskLockOnRef.current && !unlockedRef.current) {
+                lockIntentRef.current = { type: 'spend', pending };
+                setLockOpen(true);
                 return;
               }
               setPendingSend(pending);
@@ -1310,7 +1428,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
           balanceLabel={glance.balanceLabel}
           ownerId={ownerId}
           onResize={event => dragPane(event, 'right')}
-          onWallet={() => { setCreateOpen(false); setProfileOpen(false); setPluginsOpen(false); setStatsOpen(false); setWalletsOpen(true); }}
+          onWallet={openWallet}
           onComputer={() => onAccount('computer')}
           onEdit={(event) => setCornerEdit({ x: event.clientX, y: event.clientY })}
         />
@@ -1356,6 +1474,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         bot={bot}
         onParty={setParty}
         signedIn={signedIn}
+        devPreview={devPreview}
         ownerId={ownerId || ''}
         handle={profile?.handle || ''}
         onSend={onWalletSend}
@@ -1426,7 +1545,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
               onCommit={() => {
                 const pending = pendingSend;
                 setPendingSend(null);
-                if (deskLockOnRef.current && !unlockedRef.current) return;
+                if (deskLockOnRef.current && !unlockedRef.current) {
+                  lockIntentRef.current = { type: 'spend', pending };
+                  setLockOpen(true);
+                  return;
+                }
                 void settleSpend(pending, true);
               }}
             />
@@ -1452,11 +1575,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, loginDisabled, on
         onSave={saveProfile}
       />
     </div>
-    {locked ? (
+    {lockOpen ? (
       <DeskLock
         ownerId={ownerId}
-        accountLabel={accountLabel}
         onUnlock={grantDesk}
+        onClose={dismissLock}
       />
     ) : null}
     </>
