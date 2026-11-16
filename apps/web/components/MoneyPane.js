@@ -32,10 +32,10 @@ const VALUES = [
   { id: '10000000', label: '≥ 10 USDC' },
 ];
 
-export default function MoneyPane({ pane, state, onParty, ownerId, getAccessToken }) {
+export default function MoneyPane({ pane, state, onParty, ownerId, getAccessToken, onWallet }) {
   if (pane === 'history') return <History state={state} onParty={onParty} />;
   if (pane === 'wallets') return <Wallets state={state} />;
-  return <Positions state={state} ownerId={ownerId} getAccessToken={getAccessToken} />;
+  return <Positions state={state} ownerId={ownerId} getAccessToken={getAccessToken} onWallet={onWallet} />;
 }
 
 function historyRows(state) {
@@ -190,7 +190,7 @@ function Wallets({ state }) {
   );
 }
 
-function Positions({ state, ownerId, getAccessToken }) {
+function Positions({ state, ownerId, getAccessToken, onWallet }) {
   const { user } = usePrivy();
   const walletsKey = linkedWalletKey(user);
   const [portfolio, setPortfolio] = useState(null);
@@ -240,6 +240,7 @@ function Positions({ state, ownerId, getAccessToken }) {
       bots={state.bots}
       wallets={merged.wallets}
       earnings={earnings}
+      onWallet={onWallet}
     />
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Plus, Search } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Plus, Search, Wallet } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
@@ -356,6 +356,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [createOpen, setCreateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [walletsOpen, setWalletsOpen] = useState(false);
+  const [walletFocus, setWalletFocus] = useState('');
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [talks, setTalks] = useState({});
   const talksRef = useRef(talks);
@@ -740,11 +741,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       });
     }
   }, [appendTalk]);
-  const openWallet = useCallback(() => {
+  const openWallet = useCallback((walletId) => {
     setCreateOpen(false);
     setProfileOpen(false);
     setPluginsOpen(false);
     setStatsOpen(false);
+    setWalletFocus(typeof walletId === 'string' ? walletId : '');
     if (deskLockOnRef.current && !unlockedRef.current) {
       lockIntentRef.current = { type: 'wallet' };
       setWalletsOpen(false);
@@ -1356,7 +1358,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <header className="topbar">
           <span className="topbar-side" />
           <PaneDock panes={SHELL_PANES} pane={pane} onChange={choosePane} />
-          <span />
+          <button type="button" className="wallet-chip" onClick={() => openWallet()}>
+            <Wallet size={16} strokeWidth={1.75} />
+            <span>{glance.balanceLabel || 'Wallet'}</span>
+          </button>
         </header>
         )}
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' ? ' is-chat' : ''}`}>
@@ -1400,6 +1405,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                 onParty={setParty}
                 ownerId={ownerId}
                 getAccessToken={getAccessToken}
+                onWallet={openWallet}
               />
             ) : null}
             {!noAgents && pane === 'Logs' ? (
@@ -1528,6 +1534,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <RecoveryCeremony
           wallets={liveWallets || []}
           handle={profile?.handle || ''}
+          ownerId={ownerId || ''}
           onDone={() => {
             try { writeRecoveryAck(localStorage, ownerId); } catch { /* the phrase stays in the download only */ }
             setRecoveryAck(true);
@@ -1546,6 +1553,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         devPreview={devPreview}
         ownerId={ownerId || ''}
         handle={profile?.handle || ''}
+        focusId={walletFocus}
         onSend={onWalletSend}
         onReceipt={pushReceipt}
       />
@@ -1642,6 +1650,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         onLogin={onLogin}
         onLogout={onLogout}
         onSave={saveProfile}
+        onWallet={() => { setProfileOpen(false); openWallet(); }}
       />
     </div>
     {lockOpen ? (

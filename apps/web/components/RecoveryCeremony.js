@@ -1,52 +1,63 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import AddressCopy from './AddressCopy';
-import SlideCommit from './bits/SlideCommit';
-import SecretDraft from './SecretDraft';
-import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
+import Spotlight from './bits/Spotlight';
 import {
   createRecoveryPhrase,
   normalizePassphrase,
-  phraseComplete,
+  phraseMatches,
   recoveryCard,
-  shuffledPhrase,
-  verifyRecoveryPhrase,
+  recoveryResume,
+  recoveryStorageKey,
+  writeRecoveryStep,
 } from '../lib/wallet-desk.mjs';
 
-export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) {
+const GONE = 'Maelstrom does not store this seed or password. If you leave before the download, it is gone.';
+
+export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = '', onDone }) {
   const [words, setWords] = useState(null);
-  const [passphrase, setPassphrase] = useState('');
-  const [again, setAgain] = useState('');
-  const [retype, setRetype] = useState('');
-  const [revealed, setRevealed] = useState(false);
-  const [downloaded, setDownloaded] = useState(false);
-  const [picked, setPicked] = useState([]);
+  const [password, setPassword] = useState('');
+  const [repeat, setRepeat] = useState('');
+  const [typed, setTyped] = useState('');
   const [note, setNote] = useState('');
-  const [step, setStep] = useState('pass');
-  const [generated, setGenerated] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const joined = words ? words.join(' ') : '';
-  const bank = useMemo(() => (joined ? shuffledPhrase(joined) : []), [joined]);
-  const phraseReady = words ? phraseComplete(picked, words.length) : false;
-  const passReady = normalizePassphrase(retype) === passphrase && passphrase.length > 0;
+  const [step, setStep] = useState(null);
 
   useEffect(() => {
+    let raw = '';
+    try {
+      const key = recoveryStorageKey(ownerId);
+      raw = key ? localStorage.getItem(key) || '' : '';
+    } catch {
+      raw = '';
+    }
+    const resume = recoveryResume(raw);
+    setStep(resume.step === 'done' ? 'tell' : resume.step);
+    setNote(resume.lost
+      ? 'The seed from the last visit was not stored. If you did not download it, it is gone. This visit starts a new one.'
+      : '');
+  }, [ownerId]);
+
+  useEffect(() => {
+    if (!step || step === 'done') return;
+    try { writeRecoveryStep(localStorage, ownerId, step); } catch { /* the step stays on this screen */ }
+  }, [ownerId, step]);
+
+  useEffect(() => {
+    if (step !== 'save') return undefined;
     let stop = false;
+    setWords(null);
     createRecoveryPhrase()
       .then(phrase => { if (!stop) setWords(phrase); })
       .catch(() => { if (!stop) setNote('This browser could not create a recovery phrase. Reload and try again.'); });
     return () => { stop = true; };
-  }, []);
+  }, [step]);
 
   function download() {
-    if (!words || !revealed) {
-      setNote('Show the phrase, then download it.');
-      return;
-    }
+    if (!words || !password) return;
     const text = recoveryCard({
       words,
-      passphrase,
+      passphrase: password,
       wallets,
       handle,
       at: new Date().toISOString(),
@@ -58,152 +69,113 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
     link.download = 'maelstrom-recovery.txt';
     link.click();
     URL.revokeObjectURL(url);
-    setDownloaded(true);
-    setNote('Downloaded. Keep that file offline.');
+    setTyped('');
+    setNote(GONE);
+    setStep('confirm');
   }
 
-  function pick(index) {
-    if (picked.includes(index)) return;
-    if (index !== picked.length) {
-      setNote('That is not the next word.');
-      return;
-    }
-    const next = [...picked, index];
-    setPicked(next);
-    setNote(phraseComplete(next, words.length) ? 'Phrase confirmed.' : '');
-  }
+  if (!step) return null;
 
   return (
     <div className="backdrop is-center">
       <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
-        <h2 id="recovery-title">Save your recovery phrase</h2>
-        <p className="quiet">
-          This 12-word phrase and passphrase are created in your browser. Download them before the wallet opens.
-          Maelstrom does not keep a copy. Privy still signs these wallets.
-        </p>
-        <ul className="recovery-wallets">
-          {wallets.map(wallet => (
-            <li key={wallet.id || wallet.address}>
-              <span>{wallet.label || 'Wallet'}</span>
-              <AddressCopy address={wallet.address} />
-            </li>
-          ))}
-        </ul>
+        <h2 id="recovery-title">Save your seed phrase</h2>
+        <p className="quiet">{GONE}</p>
+        {step === 'tell' ? (
+          <>
+            <p className="quiet">
+              Your new wallet gets a 12-word seed phrase created in this browser. Write it down.
+              Privy still signs, and the download is the only copy.
+              {handle ? ` @${handle} is the name people pay.` : ''}
+            </p>
+            <ul className="recovery-wallets">
+              {wallets.map(wallet => (
+                <li key={wallet.id || wallet.address}>
+                  <Spotlight className="recovery-wallet">
+                    <span>{wallet.label || 'Wallet'}</span>
+                    <AddressCopy address={wallet.address} compact />
+                  </Spotlight>
+                </li>
+              ))}
+            </ul>
+            <button type="button" className="solid" onClick={() => { setNote(''); setStep('pass'); }}>
+              Continue
+            </button>
+          </>
+        ) : null}
         {step === 'pass' ? (
           <form
             className="field"
             onSubmit={(event) => {
               event.preventDefault();
-              const left = normalizePassphrase(passphrase);
-              if (!left || left !== again) {
-                setNote('Use the same passphrase, 8 to 64 characters.');
+              const left = normalizePassphrase(password);
+              if (!left || left !== repeat) {
+                setNote('Use the same password, 8 to 64 characters.');
                 return;
               }
-              if (!secretAcceptAllowed({ generated, copied })) {
-                setNote('Copy the generated passphrase before you continue.');
-                return;
-              }
-              setPassphrase(left);
+              setPassword(left);
               setNote('');
               setStep('save');
             }}
           >
-            <SecretDraft
-              kind="passphrase"
-              label="Passphrase"
-              name="recovery-passphrase"
-              value={passphrase}
-              generated={generated}
-              copied={copied}
-              disabled={!words}
-              onValue={setPassphrase}
-              onFill={(next) => {
-                setPassphrase(next);
-                setAgain(next);
-              }}
-              onGenerated={setGenerated}
-              onCopied={setCopied}
-            />
             <label>
-              Confirm passphrase
-              <input type="password" value={again} autoComplete="new-password" onChange={event => setAgain(event.target.value)} />
+              Password
+              <input type="password" name="wallet-password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} />
             </label>
-            <button type="submit" className="solid" disabled={!words || !secretAcceptAllowed({ generated, copied })}>Continue</button>
+            <label>
+              Repeat password
+              <input type="password" name="wallet-password-repeat" autoComplete="new-password" value={repeat} onChange={event => setRepeat(event.target.value)} />
+            </label>
+            <button type="submit" className="solid">Continue</button>
           </form>
         ) : null}
         {step === 'save' ? (
           <>
-            <ol className={`phrase-grid${revealed ? '' : ' is-hidden'}`} aria-hidden={revealed ? undefined : true}>
+            <p className="quiet">This is the seed. The download button is the only way forward.</p>
+            <ol className="phrase-grid">
               {(words || []).map((word, index) => (
                 <li key={`${word}-${index}`}>
-                  <span>{index + 1}</span>
-                  <b>{word}</b>
+                  <Spotlight className="phrase-cell">
+                    <span>{index + 1}</span>
+                    <b>{word}</b>
+                  </Spotlight>
                 </li>
               ))}
             </ol>
-            <div className="sheet-actions">
-              <button type="button" className="ghost" onClick={() => { setRevealed(true); setDownloaded(false); setNote('Download the phrase before you continue.'); }}>Show phrase</button>
-              <button type="button" className="ghost" onClick={download} disabled={!revealed}>Download</button>
-              <button
-                type="button"
-                className="solid"
-                disabled={!revealed || !downloaded}
-                onClick={() => { setPicked([]); setRetype(''); setNote(''); setStep('confirm'); }}
-              >
-                I saved it
-              </button>
-            </div>
+            <button type="button" className="solid" disabled={!words} onClick={download}>Download seed</button>
           </>
         ) : null}
-        {step === 'confirm' && words ? (
-          <>
-            <p className="quiet">Tap the words in order, then type the passphrase again.</p>
-            <div className="phrase-built" aria-live="polite">
-              {picked.map((index, position) => (
-                <span key={`${index}-${position}`}>{words[index]}</span>
-              ))}
-            </div>
-            <div className="phrase-pick">
-              {bank.map(item => (
-                <button
-                  key={item.index}
-                  type="button"
-                  className={picked.includes(item.index) ? 'is-used' : ''}
-                  disabled={picked.includes(item.index)}
-                  onClick={() => pick(item.index)}
-                >
-                  {item.word}
-                </button>
-              ))}
-            </div>
-            <button type="button" className="ghost" onClick={() => setPicked(current => current.slice(0, -1))}>Undo</button>
-            <label className="field">
-              Passphrase
-              <input type="password" value={retype} autoComplete="new-password" onChange={event => setRetype(event.target.value)} />
-            </label>
-          </>
-        ) : null}
-        {note ? <p className="quiet" role="status">{note}</p> : null}
-        <SlideCommit
-          label="Slide to finish"
-          doneLabel="Saved"
-          disabled={step !== 'confirm' || !phraseReady || !passReady}
-          onCommit={() => {
-            verifyRecoveryPhrase(words).then(valid => {
-              if (!valid || !passReady) {
-                setNote('The phrase did not check out. Download a new copy and try again.');
+        {step === 'confirm' ? (
+          <form
+            className="field"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!phraseMatches(typed, words)) {
+                setNote('Those words do not match the seed. Check the file and type them again.');
                 return;
               }
               setWords(null);
-              setPassphrase('');
-              setAgain('');
-              setRetype('');
+              setPassword('');
+              setRepeat('');
+              setTyped('');
               onDone?.();
-            }).catch(() => {
-              setNote('The phrase did not check out.');
-            });
-          }}
-        />
+            }}
+          >
+            <label>
+              Type the 12 words
+              <textarea
+                value={typed}
+                rows={3}
+                spellCheck={false}
+                autoCapitalize="none"
+                autoComplete="off"
+                onChange={event => { setTyped(event.target.value); setNote(''); }}
+              />
+            </label>
+            <button type="submit" className="solid">Confirm seed</button>
+          </form>
+        ) : null}
+        {note ? <p className="quiet" role="status">{note}</p> : null}
       </section>
     </div>
   );

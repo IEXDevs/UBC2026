@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { usePrivy } from '@privy-io/react-auth';
+import { useImportSeedPhrase, usePrivy } from '@privy-io/react-auth';
+import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
 import { X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
@@ -9,6 +10,7 @@ import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
 import TokenScreen from './TokenScreen';
 import SlideCommit from './bits/SlideCommit';
+import Spotlight from './bits/Spotlight';
 import TxnLog from './TxnLog';
 import TxnPreview from './TxnPreview';
 import { usePresence } from './usePresence';
@@ -22,9 +24,11 @@ import {
   displayToUnits,
   emptyTokenPrefs,
   normalizeTokenPrefs,
+  parseImportKey,
   parseSendTarget,
   readQuoteOut,
-  swapQuoteUrl,
+  swapDraft,
+  verifyRecoveryPhrase,
   tokenStorageKey,
   tradeableTokens,
 } from '../lib/wallet-desk.mjs';
@@ -56,6 +60,7 @@ export default function WalletsSheet({
   sns = '',
   onSend,
   onReceipt,
+  focusId = '',
 }) {
   const { mounted, leaving } = usePresence(open);
   const [pane, setPane] = useState('assets');
@@ -74,6 +79,10 @@ export default function WalletsSheet({
   useEffect(() => {
     if (open) setPane('assets');
   }, [open]);
+
+  useEffect(() => {
+    if (open && focusId) setWalletId(focusId);
+  }, [open, focusId]);
 
   useEffect(() => {
     const key = tokenStorageKey(ownerId);
@@ -138,22 +147,8 @@ export default function WalletsSheet({
               <X size={18} strokeWidth={1.75} />
             </button>
           </div>
-          {rows.length > 1 ? (
-            <div className="wallet-switch" role="tablist" aria-label="Wallets">
-              {rows.map(row => (
-                <button
-                  key={row.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active?.id === row.id}
-                  className={active?.id === row.id ? 'is-on' : ''}
-                  onClick={() => setWalletId(row.id)}
-                >
-                  {row.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <WalletSwitcher rows={rows} activeId={active?.id || ''} onSelect={setWalletId} />
+          {signedIn ? <WalletAdd /> : null}
           {pane === 'assets' ? (
             <>
               {note ? <p className="quiet">{note}</p> : null}
@@ -321,6 +316,107 @@ function ConnectedPortfolio({ open, preview = false }) {
       }}
       onRemove={remove}
     />
+  );
+}
+
+function WalletAdd() {
+  const { createWallet } = useCreateWallet();
+  const { importWallet } = useImportWallet();
+  const { importSeedPhrase } = useImportSeedPhrase();
+  const [mode, setMode] = useState('');
+  const [seed, setSeed] = useState('');
+  const [privkey, setPrivkey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+
+  function finish(message) {
+    setSeed('');
+    setPrivkey('');
+    setBusy(false);
+    setNote(message);
+  }
+
+  return (
+    <div className="wallet-add">
+      <div className="wallet-switch" role="group" aria-label="Add a wallet">
+        <button type="button" disabled={busy} onClick={() => {
+          setBusy(true);
+          setNote('');
+          createWallet()
+            .then(() => finish('New wallet created. Maelstrom does not store its key.'))
+            .catch(() => finish('That wallet was not created. Import a seed or a private key, or connect another wallet.'));
+        }}>Generate</button>
+        <button type="button" disabled={busy} aria-pressed={mode === 'seed'} onClick={() => { setMode('seed'); setPrivkey(''); setNote(''); }}>Import seed</button>
+        <button type="button" disabled={busy} aria-pressed={mode === 'key'} onClick={() => { setMode('key'); setSeed(''); setNote(''); }}>Import key</button>
+      </div>
+      <p className="quiet">The phrase and the private key are not stored here. If you do not keep your own copy, it is gone.</p>
+      {mode === 'seed' ? (
+        <form className="field" onSubmit={(event) => {
+          event.preventDefault();
+          const words = seed.trim().toLowerCase().split(/\s+/);
+          setBusy(true);
+          verifyRecoveryPhrase(words).then(valid => {
+            if (!valid) {
+              setBusy(false);
+              setNote('Type a 12-word seed phrase.');
+              return null;
+            }
+            return importSeedPhrase({ mnemonic: words.join(' '), chainType: 'solana' })
+              .then(() => finish('Seed imported. The field is cleared. Maelstrom does not keep the phrase.'));
+          }).catch(() => finish('That seed was not imported.'));
+        }}>
+          <label>
+            Seed phrase
+            <textarea value={seed} rows={3} spellCheck={false} autoCapitalize="none" autoComplete="off" onChange={event => setSeed(event.target.value)} />
+          </label>
+          <button type="submit" className="solid" disabled={busy}>Import seed</button>
+        </form>
+      ) : null}
+      {mode === 'key' ? (
+        <form className="field" onSubmit={(event) => {
+          event.preventDefault();
+          const key = parseImportKey(privkey);
+          if (!key) {
+            setNote('Paste a base58 private key.');
+            return;
+          }
+          setBusy(true);
+          importWallet({ privateKey: key })
+            .then(() => finish('Key imported. The field is cleared. Maelstrom does not keep the key.'))
+            .catch(() => finish('That key was not imported.'))
+            .finally(() => setPrivkey(''));
+        }}>
+          <label>
+            Private key
+            <input type="password" value={privkey} autoComplete="off" spellCheck={false} onChange={event => setPrivkey(event.target.value)} />
+          </label>
+          <button type="submit" className="solid" disabled={busy}>Import key</button>
+        </form>
+      ) : null}
+      {note ? <p className="quiet" role="status">{note}</p> : null}
+    </div>
+  );
+}
+
+function WalletSwitcher({ rows, activeId, onSelect }) {
+  if (!rows.length) return <p className="quiet">No wallet yet.</p>;
+  return (
+    <div className="wallet-switcher" role="tablist" aria-label="Wallets">
+      {rows.map(row => (
+        <Spotlight key={row.id} className={`wallet-switcher-row${activeId === row.id ? ' is-on' : ''}`}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeId === row.id}
+            className="wallet-switcher-pick"
+            onClick={() => onSelect(row.id)}
+          >
+            {row.label}
+          </button>
+          <AddressCopy address={row.address} compact />
+        </Spotlight>
+      ))}
+    </div>
   );
 }
 
@@ -498,40 +594,25 @@ function SwapPane({ tokens, onReceipt }) {
   const [amount, setAmount] = useState('');
   const [status, setStatus] = useState('');
   const [quote, setQuote] = useState('');
-  const [resetKey, setResetKey] = useState(0);
-  const [folded, setFolded] = useState(false);
-  const input = tokens.find(token => token.symbol === from) || null;
-  const output = tokens.find(token => token.symbol === to) || null;
-  const units = input ? displayToUnits(amount, input.decimals) : null;
-  const ready = Boolean(units && input && output && input.symbol !== output.symbol);
-  const receive = quote && output ? quote.replace(new RegExp(` ${output.symbol}$`), '') : '';
-  const preview = ready ? swapPreview({
-    pay: amount.trim(),
-    receive,
-    from: input.symbol,
-    to: output.symbol,
-  }) : null;
+  const draft = swapDraft(tokens, { from, to, amountText: amount });
+  const output = draft.output || null;
 
   async function loadQuote() {
     setQuote('');
-    const built = swapQuoteUrl('jupiter', tokens, {
-      inputSymbol: input?.symbol,
-      outputSymbol: output?.symbol,
-      amount: units,
-    });
-    if (!built.url) {
-      setStatus(built.error === 'not_tradeable'
+    if (!draft.url) {
+      setStatus(draft.error === 'not_tradeable'
         ? 'That token is restricted.'
-        : 'Choose two different tradeable tokens and an amount.');
+        : draft.error === 'invalid_amount'
+          ? 'Enter an amount.'
+          : 'Choose two different tradeable tokens.');
       return;
     }
-    const url = built.url;
     setStatus('Quoting…');
     try {
-      const response = await fetch(url);
+      const response = await fetch(draft.url);
       const body = await response.json().catch(() => ({}));
       const out = readQuoteOut(body);
-      if (!response.ok || !out) {
+      if (!response.ok || !out || !output) {
         setStatus('No quote. Nothing was signed.');
         return;
       }
@@ -539,13 +620,12 @@ function SwapPane({ tokens, onReceipt }) {
       const next = swapPreview({
         pay: amount.trim(),
         receive: shown,
-        from: input.symbol,
+        from: draft.input.symbol,
         to: output.symbol,
       });
       setQuote(`${shown} ${output.symbol}`);
-      setFolded(true);
       onReceipt?.({
-        id: `quote_${input.symbol}_${output.symbol}_${units}_${shown}`,
+        id: `quote_${draft.input.symbol}_${output.symbol}_${draft.amount}_${shown}`,
         at: new Date().toISOString(),
         title: next.title,
         lines: next.lines,
@@ -558,39 +638,34 @@ function SwapPane({ tokens, onReceipt }) {
   }
 
   return (
-    <div className="wallet-form field">
-      <p className="quiet">Jupiter aggregates the Solana routes. A slide confirms the quote. Nothing is signed before that.</p>
-      <div className="wallet-switch" role="group" aria-label="From token">
-        {tokens.map(token => (
-          <button key={token.symbol} type="button" className={from === token.symbol ? 'is-on' : ''} aria-pressed={from === token.symbol} onClick={() => { setFrom(token.symbol); setFolded(false); }}>
-            {token.symbol}
-          </button>
-        ))}
-      </div>
-      <div className="wallet-switch" role="group" aria-label="To token">
-        {tokens.map(token => (
-          <button key={`to-${token.symbol}`} type="button" className={to === token.symbol ? 'is-on' : ''} aria-pressed={to === token.symbol} onClick={() => { setTo(token.symbol); setFolded(false); }}>
-            {token.symbol}
-          </button>
-        ))}
-      </div>
+    <form
+      className="wallet-form field swap-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        loadQuote();
+      }}
+    >
+      <p className="quiet">A quote only. Nothing is signed from this screen.</p>
+      <label>
+        From
+        <select value={from} onChange={event => { setFrom(event.target.value); setQuote(''); }}>
+          {tokens.map(token => <option key={token.symbol} value={token.symbol}>{token.symbol}</option>)}
+        </select>
+      </label>
+      <label>
+        To
+        <select value={to} onChange={event => { setTo(event.target.value); setQuote(''); }}>
+          {tokens.map(token => <option key={`to-${token.symbol}`} value={token.symbol}>{token.symbol}</option>)}
+        </select>
+      </label>
       <label>
         Amount
-        <input value={amount} inputMode="decimal" placeholder="0.00" onChange={event => { setAmount(event.target.value); setQuote(''); setFolded(false); }} />
+        <input value={amount} inputMode="decimal" placeholder="0.00" onChange={event => { setAmount(event.target.value); setQuote(''); }} />
       </label>
-      <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
-      <SlideCommit
-        label="Slide to swap"
-        doneLabel="Quoting"
-        disabled={!ready}
-        resetKey={`${resetKey}:${from}:${to}:${amount}`}
-        onCommit={() => {
-          loadQuote().finally(() => setResetKey(value => value + 1));
-        }}
-      />
+      <button type="submit" className="solid" disabled={!draft.url}>Get quote</button>
       {quote ? <p className="wallet-figure wallet-figure-sm">{quote}</p> : null}
       {status ? <p className="quiet" role="status">{status}</p> : null}
-    </div>
+    </form>
   );
 }
 

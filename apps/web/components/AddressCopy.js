@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { shortAddress } from '../lib/money-views.mjs';
 
-export default function AddressCopy({ address, prefix = '', className = '' }) {
+export default function AddressCopy({ address, prefix = '', className = '', compact = false }) {
   const [note, setNote] = useState('');
   const clipped = shortAddress(address);
   const shown = prefix ? `${prefix}(${clipped})` : clipped;
@@ -22,9 +22,9 @@ export default function AddressCopy({ address, prefix = '', className = '' }) {
   if (!address) return <span className={`address-copy is-empty ${className}`.trim()}>No address</span>;
 
   return (
-    <button type="button" className={`address-copy ${className}`.trim()} onClick={copy} aria-label={`Copy ${address}`}>
+    <button type="button" className={`address-copy${compact ? ' is-compact' : ''} ${className}`.trim()} onClick={copy} aria-label={`Copy ${address}`}>
       <span>{shown}</span>
-      <small>{note || 'Copy'}</small>
+      {compact ? (note ? <small>{note}</small> : null) : <small>{note || 'Copy'}</small>}
     </button>
   );
 }

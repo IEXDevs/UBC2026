@@ -1035,7 +1035,8 @@ button.add-agent:not(:disabled):hover {
   background: transparent;
 }
 
-.stage.is-book .dock-slot { pointer-events: auto; }
+.stage.is-book .dock-slot,
+.topbar .wallet-chip { pointer-events: auto; }
 
 .wallet-chip {
   justify-self: end;
@@ -1089,6 +1090,7 @@ button.add-agent:not(:disabled):hover {
   grid-template-columns: 168px minmax(0, 1fr);
   padding: 0;
   overflow: hidden;
+  border-radius: 12px;
 }
 .wallet-nav {
   display: flex;
@@ -1105,7 +1107,7 @@ button.add-agent:not(:disabled):hover {
 }
 .wallet-nav button {
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: #d4d4d4;
   text-align: left;
@@ -1255,15 +1257,20 @@ button.add-agent:not(:disabled):hover {
 }
 .wallet-switch button {
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: transparent;
   color: #d4d4d4;
   box-shadow: inset 0 0 0 1px #2a2a2a;
-  padding: 6px 12px;
+  padding: 8px 12px;
   font: inherit;
   font-size: 13px;
+  cursor: pointer;
 }
-.wallet-switch button.is-on { background: #f5f5f5; color: #141414; box-shadow: none; }
+@media (hover: hover) and (pointer: fine) {
+  .wallet-switch button:hover { background: #2a2a2a; }
+}
+.wallet-switch button.is-on,
+.wallet-switch button[aria-pressed='true'] { background: #f5f5f5; color: #141414; box-shadow: none; }
 .token-rows {
   list-style: none;
   margin: 18px 0 0;
@@ -1303,7 +1310,7 @@ button.add-agent:not(:disabled):hover {
   gap: 8px;
   width: fit-content;
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: #1c1c1c;
   box-shadow: inset 0 0 0 1px #2a2a2a;
   padding: 6px 10px 6px 12px;
@@ -1312,6 +1319,44 @@ button.add-agent:not(:disabled):hover {
 }
 .address-copy small { color: #a3a3a3; font-size: 12px; }
 .address-copy.is-empty { box-shadow: none; background: transparent; padding-left: 0; }
+.address-copy.is-compact { padding: 4px 8px; background: transparent; }
+@media (hover: hover) and (pointer: fine) {
+  .address-copy:hover { background: #2a2a2a; }
+}
+.wallet-add { display: grid; gap: 8px; margin: 0 0 14px; }
+.wallet-switcher { display: grid; gap: 6px; margin: 0 0 12px; }
+.wallet-switcher-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+}
+.wallet-switcher-row.is-on { background: #1c1c1c; }
+@media (hover: hover) and (pointer: fine) {
+  .wallet-switcher-row:hover { background: #1c1c1c; }
+}
+.wallet-switcher-pick {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+.swap-form select {
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--stroke);
+  background: #111;
+  color: var(--text);
+  font: inherit;
+}
 .backdrop.desk-lock {
   z-index: 80;
 }
@@ -1334,6 +1379,19 @@ button.add-agent:not(:disabled):hover {
   display: grid;
   gap: 14px;
   padding: 22px;
+  border-radius: 12px;
+}
+.wallet-gate .solid,
+.wallets-sheet .solid,
+.wallet-gate .ghost,
+.wallets-sheet .ghost {
+  border-radius: 8px;
+}
+.wallet-gate .field input,
+.wallet-gate .field textarea,
+.wallets-sheet .field input,
+.wallets-sheet .field textarea {
+  border-radius: 8px;
 }
 .sheet.wallet-gate h2 {
   margin: 0;
@@ -1419,7 +1477,7 @@ button.add-agent:not(:disabled):hover {
   overflow: hidden;
   width: 100%;
   padding: 36px 24px;
-  border-radius: 22px;
+  border-radius: 12px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 28%),
     #1a1a1a;
@@ -1535,20 +1593,22 @@ button.add-agent:not(:disabled):hover {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
-.phrase-grid li {
+.phrase-grid li { list-style: none; }
+.phrase-cell {
   display: flex;
   gap: 8px;
   align-items: baseline;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #101010;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
 }
 .phrase-grid span { color: #a3a3a3; font-size: 12px; font-variant-numeric: tabular-nums; }
 .phrase-grid.is-hidden b { filter: blur(7px); user-select: none; }
 .phrase-pick, .phrase-built { display: flex; flex-wrap: wrap; gap: 8px; }
 .phrase-pick button, .phrase-built span {
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: #1c1c1c;
   box-shadow: inset 0 0 0 1px #2a2a2a;
   padding: 8px 12px;
@@ -1562,7 +1622,16 @@ button.add-agent:not(:disabled):hover {
   display: grid;
   gap: 8px;
 }
-.recovery-wallets li { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.recovery-wallet {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #141414;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+}
 @media (max-width: 720px) {
   .sheet.wallets-sheet {
     grid-template-columns: 1fr;
