@@ -2,7 +2,7 @@
  * Profile directory writes for the claim screen when the agent runtime URL is unset.
  * The service role stays on the server. Callers never receive it.
  */
-import { httpsAvatarUrl, normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
+import { directoryFailureCode, httpsAvatarUrl, normalizeDisplayName, normalizeHandle, postgrestEq } from '@ubc2026/contracts';
 
 const OWNER = /^[a-zA-Z0-9:_-]{1,128}$/;
 
@@ -42,20 +42,11 @@ async function rest(fetcher, origin, key, path, options = {}) {
   });
 }
 
-/** Postgres SQLSTATE or PostgREST code. Anything else stays off the response. */
-function safeDbCode(parsed) {
-  const code = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof parsed.code === 'string'
-    ? parsed.code
-    : '';
-  if (/^[0-9A-Z]{5}$/.test(code) || /^PGRST[0-9]{3}$/.test(code)) return code;
-  return '';
-}
-
 async function failureCode(response) {
   try {
-    return safeDbCode(await response.json());
+    return directoryFailureCode(response.status, await response.json());
   } catch {
-    return '';
+    return directoryFailureCode(response.status, null);
   }
 }
 
@@ -118,12 +109,12 @@ export async function localProfileResponse(request, { env = {}, fetcher = fetch 
         fetcher,
         origin,
         key,
-        `profiles?owner_id=eq.${encodeURIComponent(ownerId)}&select=handle,display_name,avatar_url`,
+        `profiles?${postgrestEq('owner_id', ownerId)}&select=handle,display_name,avatar_url`,
       );
     } catch {
       return json({ error: 'profile_read_failed' }, 502);
     }
-    if (!response.ok) return json({ error: 'profile_read_failed' }, 502);
+    if (!response.ok) return json({ error: (await failureCode(response)) || 'profile_read_failed' }, 502);
     const rows = await response.json().catch(() => []);
     const row = Array.isArray(rows) ? rows[0] : null;
     return json({
@@ -169,12 +160,12 @@ export async function localProfileResponse(request, { env = {}, fetcher = fetch 
       fetcher,
       origin,
       key,
-      `profiles?owner_id=eq.${encodeURIComponent(ownerId)}&select=handle,display_name,avatar_url`,
+      `profiles?${postgrestEq('owner_id', ownerId)}&select=handle,display_name,avatar_url`,
     );
-    if (!read.ok) return json({ error: 'profile_save_failed' }, 502);
+    if (!read.ok) return json({ error: (await failureCode(read)) || 'profile_save_failed' }, 502);
     const rows = await read.json().catch(() => []);
     const row = Array.isArray(rows) ? rows[0] : null;
-    if (!row?.handle) return json({ error: 'profile_save_failed' }, 502);
+    if (row?.handle !== handle) return json({ error: 'profile_save_failed' }, 502);
   } catch {
     return json({ error: 'profile_save_failed' }, 502);
   }

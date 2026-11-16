@@ -8,12 +8,19 @@ const ENV = {
   SUPABASE_SERVICE_ROLE_KEY: KEY,
 };
 
-function claim(body = { displayName: 'jimothy67', handle: 'Alex01' }) {
+function claim(body = { displayName: 'jimothy67', handle: 'Alex01' }, ownerId = 'did:privy:user_1') {
   return new Request('https://app.local/api/profiles/me', {
     method: 'PUT',
-    headers: { 'content-type': 'application/json', 'x-owner-id': 'did:privy:user_1' },
+    headers: { 'content-type': 'application/json', 'x-owner-id': ownerId },
     body: JSON.stringify(body),
   });
+}
+
+function ownerFrom(href) {
+  const raw = new URL(String(href)).searchParams.get('owner_id') || '';
+  const value = raw.replace(/^eq\./, '');
+  if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1).replaceAll('""', '"');
+  return value;
 }
 
 test('a handle claim writes the directory and keeps the service role out of the response', async () => {
@@ -94,8 +101,7 @@ test('a claim insert is still there on a fresh read by owner id', async () => {
         profiles.set(body.owner_id, body);
         return new Response(JSON.stringify([body]), { status: 201 });
       }
-      const owner = new URL(href).searchParams.get('owner_id')?.replace(/^eq\./, '');
-      const row = profiles.get(decodeURIComponent(owner || ''));
+      const row = profiles.get(ownerFrom(href));
       return Response.json(row ? [row] : []);
     },
   });
@@ -105,8 +111,7 @@ test('a claim insert is still there on a fresh read by owner id', async () => {
   }), {
     env: ENV,
     fetcher: async (url) => {
-      const owner = new URL(String(url)).searchParams.get('owner_id')?.replace(/^eq\./, '');
-      const row = profiles.get(decodeURIComponent(owner || ''));
+      const row = profiles.get(ownerFrom(url));
       return Response.json(row ? [row] : []);
     },
   });
@@ -128,6 +133,47 @@ test('a failed user insert returns the database code and does not claim success'
   });
   assert.equal(response.status, 502);
   assert.equal((await response.json()).error, '23503');
+});
+
+test('a Privy DID is quoted so the confirm read can see the claimed handle', async () => {
+  const profiles = new Map();
+  const response = await localProfileResponse(claim({
+    displayName: 'ada@example.com',
+    handle: 'alex',
+  }), {
+    env: ENV,
+    fetcher: async (url, init) => {
+      const href = String(url);
+      const method = init.method || 'GET';
+      if (href.includes('/users')) return new Response('', { status: 201 });
+      if (method === 'POST' && href.includes('/profiles')) {
+        const body = JSON.parse(init.body);
+        profiles.set(body.owner_id, body);
+        return Response.json([body], { status: 201 });
+      }
+      const filter = new URL(href).searchParams.get('owner_id') || '';
+      if (!filter.startsWith('eq."')) return Response.json({ code: 'PGRST100' }, { status: 400 });
+      const row = profiles.get(ownerFrom(href));
+      return Response.json(row ? [row] : []);
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.profile.handle, 'alex');
+  assert.equal(body.profile.displayName, 'ada@example.com');
+  assert.equal(profiles.get('did:privy:user_1').handle, 'alex');
+});
+
+test('a rejected directory call keeps the HTTP status and drops the provider body', async () => {
+  const response = await localProfileResponse(claim(), {
+    env: ENV,
+    fetcher: async () => Response.json({ message: 'Invalid API key', hint: 'service-role-secret' }, { status: 401 }),
+  });
+  assert.equal(response.status, 502);
+  const body = await response.json();
+  assert.equal(body.error, 'supabase_http_401');
+  assert.equal(JSON.stringify(body).includes('service-role-secret'), false);
+  assert.equal(JSON.stringify(body).includes('Invalid API key'), false);
 });
 
 test('a directory write is used when the service role is set', () => {
