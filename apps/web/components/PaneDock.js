@@ -244,6 +244,7 @@ export default function PaneDock({ panes, pane, onChange }) {
             gooeyness={0.5}
             wobble={0.5}
             hoverEffect
+            balanceActive={false}
             onChange={pick}
           />
         </div>
