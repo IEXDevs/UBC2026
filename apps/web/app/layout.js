@@ -3,6 +3,7 @@ import './globals.css';
 import CrashGuard from '../components/CrashGuard';
 import DeployReload from '../components/DeployReload';
 import PrivyRoot from '../components/PrivyRoot';
+import { publicPrivyIds } from '../lib/public-env.mjs';
 
 const chatFont = Figtree({
   subsets: ['latin'],
@@ -16,12 +17,13 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }) {
+  const privy = publicPrivyIds();
   return (
     <html lang="en">
       <body className={chatFont.variable}>
         <DeployReload />
         <CrashGuard>
-          <PrivyRoot>{children}</PrivyRoot>
+          <PrivyRoot appId={privy.appId} clientId={privy.clientId}>{children}</PrivyRoot>
         </CrashGuard>
       </body>
     </html>
