@@ -2,12 +2,36 @@
  * Sample balances for the local developer preview.
  * Dollar values are filled by a live DexScreener read in the browser.
  */
+import { draftBot } from './roster.mjs';
 
 const SOL = 'So11111111111111111111111111111111111111112';
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const BONK = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263';
 
 export const DEV_PREVIEW_OWNER = 'developer';
+
+/** One non-spendable wallet so the preview desk can open the sheet from the top bar and the positions book. */
+export function previewWallets() {
+  return [{
+    id: 'w_preview',
+    ownerId: DEV_PREVIEW_OWNER,
+    kind: 'main',
+    label: 'Preview',
+    address: '11111111111111111111111111111111',
+    frozen: false,
+    spendable: false,
+    readOnly: true,
+  }];
+}
+
+export function previewBot() {
+  return draftBot({
+    id: 'bot_preview',
+    name: 'Preview',
+    shape: 'circle',
+    color: '#7c5cff',
+  });
+}
 
 export function samplePortfolio() {
   return {

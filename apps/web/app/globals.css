@@ -1038,6 +1038,11 @@ button.add-agent:not(:disabled):hover {
 .stage.is-book .dock-slot,
 .topbar .wallet-chip { pointer-events: auto; }
 
+.topbar .wallet-chip {
+  position: relative;
+  z-index: 13;
+}
+
 .wallet-chip {
   justify-self: end;
   display: inline-flex;

@@ -65,6 +65,7 @@ import DeskLock from '../components/DeskLock';
 import { useHostedPreview } from '../components/HostedPreview';
 import { usePrivyPublic } from '../components/PrivyRoot';
 import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
+import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-preview.mjs';
 import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 
@@ -267,14 +268,14 @@ function AuthedShell() {
     return (
       <Shell
         devPreview
-        ownerId=""
+        ownerId={DEV_PREVIEW_OWNER}
         user={null}
         accountLabel="Developer"
         signedIn
         loginDisabled={false}
         onLogin={login}
         onLogout={leaveDevPreview}
-        liveWallets={[]}
+        liveWallets={previewWallets()}
         walletNote="Developer preview. Sample balances. Live prices come from DexScreener."
         getAccessToken={async () => null}
       />
@@ -350,7 +351,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const unlockUntilRef = useRef(0);
   const lockIntentRef = useRef(null);
   const deskLockOnRef = useRef(false);
-  deskLockOnRef.current = signedIn && Boolean(ownerId);
+    deskLockOnRef.current = signedIn && Boolean(ownerId) && !devPreview;
   const [pane, setPane] = useState('Main');
   const [slide, setSlide] = useState('right');
   const [createOpen, setCreateOpen] = useState(false);
@@ -695,9 +696,19 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     for (const bot of remoteBots) if (!order.includes(bot.id)) order.push(bot.id);
     return order.map((id) => ({ ...byId.get(id), ...(overlay.get(id) || {}) }));
   }, [botRecords, localRoster, remoteBots]);
-  const styled = useMemo(() => applyLooks(seedBots, looks), [seedBots, looks]);
+  const styled = useMemo(() => {
+    const looked = applyLooks(seedBots, looks);
+    if (!devPreview || looked.length > 0) return looked;
+    const sample = previewBot();
+    return sample ? [sample] : looked;
+  }, [seedBots, looks, devPreview]);
   const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
   const bots = assigned.bots;
+  useEffect(() => {
+    if (!devPreview || bots.length === 0) return;
+    if (bots.some(item => item.id === activeBot)) return;
+    setActiveBot(bots[0].id);
+  }, [devPreview, activeBot, bots]);
   const wallets = pickWalletList(assigned.wallets, remoteLists.wallets);
   const payments = remoteLists.payments || [];
   const paymentCrossCheck = remoteLists.paymentCrossCheck || [];
