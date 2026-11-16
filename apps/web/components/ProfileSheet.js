@@ -82,7 +82,7 @@ export default function ProfileSheet({
                 const nextName = normalizeDisplayName(displayName);
                 const nextHandle = normalizeHandle(handle);
                 if (!nextName || !nextHandle) {
-                  setNote('Use a display name and a handle like alex. Letters, numbers, and underscores.');
+                  setNote('Use a display name and a handle. Letters, numbers, and underscores.');
                   return;
                 }
                 Promise.resolve(onSave?.({
@@ -107,7 +107,7 @@ export default function ProfileSheet({
                   maxLength={32}
                   spellCheck={false}
                   autoCapitalize="none"
-                  placeholder="alex"
+                  placeholder="@handle"
                   onChange={event => setHandle(event.target.value.replace(/^@/, ''))}
                 />
               </label>

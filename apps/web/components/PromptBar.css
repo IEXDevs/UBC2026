@@ -242,7 +242,7 @@
   line-height: 22px;
   resize: none;
   outline: none;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
 }
 
 .prompt-bar__input::placeholder {

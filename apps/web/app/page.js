@@ -1334,7 +1334,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' ? ' is-chat' : ''}`}>
           <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}`} aria-label={pane}>
             {noAgents ? (
-                <div className="empty-hold">
+                <div className={`empty-hold${createOpen ? ' is-away' : ''}`}>
                   <p className="empty-hold__title">Create your first agent</p>
                   <div className="empty-hold__control">
                   <HoldButton
@@ -1480,7 +1480,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         </div>
       ) : null}
       {setupStep === 'handle' ? (
-        <ClaimHandle accountLabel={profile?.displayName || accountLabel} onSave={saveProfile} />
+        <ClaimHandle accountLabel={profile?.displayName || accountLabel} ownerId={ownerId} onSave={saveProfile} />
       ) : null}
       {setupStep === 'recovery' ? (
         <RecoveryCeremony

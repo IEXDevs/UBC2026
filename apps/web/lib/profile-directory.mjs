@@ -56,6 +56,35 @@ export function useLocalProfileDirectory(env = {}) {
     && env.SUPABASE_SERVICE_ROLE_KEY.trim());
 }
 
+/** True when another owner already stored this handle. The caller's own row is free. */
+export async function localHandleLookup(request, { env = {}, fetcher = fetch } = {}) {
+  const ownerId = (request.headers.get('x-owner-id') || '').trim();
+  if (!OWNER.test(ownerId)) return json({ error: 'owner_required' }, 401);
+  const origin = supabaseOrigin(env.SUPABASE_URL);
+  const key = typeof env.SUPABASE_SERVICE_ROLE_KEY === 'string' ? env.SUPABASE_SERVICE_ROLE_KEY.trim() : '';
+  if (!origin || !key) return json({ ok: false, error: 'directory_unconfigured', source: 'unconfigured' }, 503);
+  const handle = normalizeHandle(new URL(request.url).searchParams.get('q') || '');
+  if (!handle) return json({ error: 'invalid_recipient' }, 400);
+  let response;
+  try {
+    response = await rest(
+      fetcher,
+      origin,
+      key,
+      `profiles?handle=eq.${encodeURIComponent(handle)}&select=owner_id,handle&limit=1`,
+    );
+  } catch {
+    return json({ error: 'profile_read_failed' }, 502);
+  }
+  if (!response.ok) return json({ error: 'profile_read_failed' }, 502);
+  const rows = await response.json().catch(() => []);
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row || row.owner_id === ownerId) {
+    return json({ ok: true, recipient: { kind: 'handle', handle, missing: true } });
+  }
+  return json({ ok: true, recipient: { kind: 'handle', handle: row.handle, missing: false } });
+}
+
 export async function localProfileResponse(request, { env = {}, fetcher = fetch } = {}) {
   const ownerId = (request.headers.get('x-owner-id') || '').trim();
   if (!OWNER.test(ownerId)) return json({ error: 'owner_required' }, 401);

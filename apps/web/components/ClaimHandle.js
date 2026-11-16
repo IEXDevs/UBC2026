@@ -2,19 +2,21 @@
 
 import { useState } from 'react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
-import { claimSaveNote } from '../lib/profile.mjs';
+import { claimSaveNote, handleAlreadyClaimed } from '../lib/profile.mjs';
+import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 
-export default function ClaimHandle({ accountLabel = '', onSave }) {
+export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave }) {
   const [displayName, setDisplayName] = useState(accountLabel || '');
   const [handle, setHandle] = useState('');
   const [note, setNote] = useState('');
   const [pending, setPending] = useState(false);
+  const typed = normalizeHandle(handle);
 
   return (
     <div className="backdrop is-center">
       <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-labelledby="claim-title">
         <h2 id="claim-title">Claim your @handle</h2>
-        <p className="quiet">Every account needs a handle before the wallet opens. People pay @{handle || 'you'} on Maelstrom. A .sol name is separate and is not this claim.</p>
+        <p className="quiet">{typed ? `Claim your handle to get paid, @${typed}.` : 'Claim your handle to get paid.'}</p>
         <form
           className="field"
           onSubmit={(event) => {
@@ -22,14 +24,32 @@ export default function ClaimHandle({ accountLabel = '', onSave }) {
             const nextName = normalizeDisplayName(displayName);
             const nextHandle = normalizeHandle(handle);
             if (!nextName || !nextHandle) {
-              setNote('Use a display name and a handle like alex. Letters, numbers, and underscores.');
+              setNote('Use a display name and a handle. Letters, numbers, and underscores.');
               return;
             }
             setPending(true);
-            Promise.resolve(onSave?.({
-              displayName: nextName,
-              handle: nextHandle,
-            })).then((saved) => {
+            const lookup = ownerId
+              ? shellRuntimeUrl(`/api/profiles/lookup?q=${encodeURIComponent(`@${nextHandle}`)}`)
+              : null;
+            Promise.resolve(lookup ? fetch(lookup, {
+              headers: { 'x-owner-id': ownerId },
+              cache: 'no-store',
+            }) : null).then(async (response) => {
+              if (response) {
+                const found = await response.json().catch(() => ({}));
+                const unchecked = response.status === 503 && found.error === 'runtime_unconfigured';
+                if (!unchecked && (!response.ok || handleAlreadyClaimed(found))) {
+                  setNote(handleAlreadyClaimed(found) ? 'That handle is already taken.' : 'Could not check that handle.');
+                  setPending(false);
+                  return null;
+                }
+              }
+              return onSave?.({
+                displayName: nextName,
+                handle: nextHandle,
+              });
+            }).then((saved) => {
+              if (saved == null) return;
               if (saved?.error || saved?.ok === false) {
                 setNote(claimSaveNote(saved));
                 setPending(false);
@@ -53,7 +73,7 @@ export default function ClaimHandle({ accountLabel = '', onSave }) {
               maxLength={32}
               spellCheck={false}
               autoCapitalize="none"
-              placeholder="alex"
+              placeholder="@handle"
               onChange={event => setHandle(event.target.value.replace(/^@/, ''))}
             />
           </label>

@@ -4,7 +4,7 @@ export const SHAPES = Object.freeze(['circle', 'square', 'triangle']);
 
 export const SHAPE_PATHS = Object.freeze({
   circle: 'M32 6a26 26 0 1 0 .1 0',
-  square: 'M14 14h36v36H14z',
+  square: 'M19 14h26a5 5 0 0 1 5 5v26a5 5 0 0 1-5 5H19a5 5 0 0 1-5-5V19a5 5 0 0 1 5-5z',
   triangle: 'M32 8 58 54H6z',
 });
 

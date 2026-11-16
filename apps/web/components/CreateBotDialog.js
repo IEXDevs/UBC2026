@@ -8,16 +8,16 @@ import { AgentPhoto } from './AgentEdit';
 import { usePresence } from './usePresence';
 
 const SPLASH = [
-  { kind: 'circle', color: '#7c5cff', size: 280, x: -18, y: 8, rot: -10 },
-  { kind: 'square', color: '#e85a9b', size: 190, x: 118, y: -18, rot: 18 },
-  { kind: 'triangle', color: '#f0a202', size: 210, x: 124, y: 46, rot: 14 },
-  { kind: 'circle', color: '#3dbea5', size: 180, x: -22, y: 78, rot: 0 },
-  { kind: 'square', color: '#3b7ddd', size: 150, x: 112, y: 86, rot: -20 },
-  { kind: 'triangle', color: '#e24b4b', size: 170, x: 18, y: -22, rot: 24 },
-  { kind: 'circle', color: '#f0732b', size: 140, x: 46, y: 122, rot: 0 },
-  { kind: 'square', color: '#5aaa4a', size: 160, x: -16, y: 118, rot: 16 },
-  { kind: 'triangle', color: '#8b5a3c', size: 130, x: 78, y: 126, rot: -12 },
-  { kind: 'circle', color: '#f5f5f5', size: 96, x: 128, y: 12, rot: 0 },
+  { kind: 'circle', color: '#7c5cff', size: 196, side: 'left', y: '16%', gap: 28, rot: -8 },
+  { kind: 'triangle', color: '#e24b4b', size: 148, side: 'left', y: '36%', gap: 78, rot: 16 },
+  { kind: 'circle', color: '#3dbea5', size: 164, side: 'left', y: '56%', gap: 22, rot: 0 },
+  { kind: 'square', color: '#5aaa4a', size: 136, side: 'left', y: '76%', gap: 70, rot: 12 },
+  { kind: 'circle', color: '#f0732b', size: 112, side: 'left', y: '90%', gap: 36, rot: 0 },
+  { kind: 'square', color: '#e85a9b', size: 168, side: 'right', y: '14%', gap: 34, rot: 14 },
+  { kind: 'circle', color: '#f5f5f5', size: 92, side: 'right', y: '34%', gap: 86, rot: 0 },
+  { kind: 'triangle', color: '#f0a202', size: 180, side: 'right', y: '52%', gap: 20, rot: 10 },
+  { kind: 'square', color: '#3b7ddd', size: 132, side: 'right', y: '72%', gap: 64, rot: -14 },
+  { kind: 'triangle', color: '#8b5a3c', size: 120, side: 'right', y: '88%', gap: 30, rot: -8 },
 ];
 
 const CONFETTI_COLORS = ['#7c5cff', '#e85a9b', '#f0a202', '#3dbea5', '#3b7ddd', '#e24b4b', '#f0732b', '#5aaa4a', '#f5f5f5'];
@@ -75,6 +75,23 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
 
   return (
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
+      {celebrate ? (
+        <div className="create-splash" aria-hidden="true">
+          {SPLASH.map(piece => (
+            <span
+              key={`${piece.side}-${piece.kind}-${piece.y}`}
+              className={`create-shape is-${piece.kind} is-${piece.side}`}
+              style={{
+                '--y': piece.y,
+                '--size': `${piece.size}px`,
+                '--gap': `${piece.gap}px`,
+                '--rot': `${piece.rot}deg`,
+                background: piece.color,
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
       <form
         className={`sheet${celebrate ? ' is-create' : ''}`}
         role="dialog"
@@ -85,21 +102,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
       >
         {celebrate ? (
           <>
-            <div className="create-splash" aria-hidden="true">
-              {SPLASH.map(piece => (
-                <span
-                  key={`${piece.kind}-${piece.x}`}
-                  className={`create-shape is-${piece.kind}`}
-                  style={{
-                    '--x': `${piece.x}%`,
-                    '--y': `${piece.y}%`,
-                    '--size': `${piece.size}px`,
-                    '--rot': `${piece.rot}deg`,
-                    background: piece.color,
-                  }}
-                />
-              ))}
-            </div>
             <div className="create-scrim" aria-hidden="true" />
             <div className="create-confetti" aria-hidden="true">
               {CONFETTI.map(piece => (

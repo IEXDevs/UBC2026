@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Pencil } from 'lucide-react';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { PencilEdit01Icon } from '@hugeicons/core-free-icons';
 import { BOT_COLORS } from '../lib/bot-look.mjs';
 import BotMark from './BotMark';
 import HoldButton from './HoldButton';
@@ -22,7 +23,7 @@ export function AgentPhoto({ shape, color, image, size, onImage, label = 'Change
     <div className="agent-photo" style={{ width: size, height: size }}>
       <BotMark shape={shape} color={color} image={image} size={size} />
       <button type="button" className="agent-pencil" aria-label={label} onClick={() => inputRef.current?.click()}>
-        <Pencil size={size > 80 ? 16 : 13} strokeWidth={1.75} />
+        <HugeiconsIcon icon={PencilEdit01Icon} size={size > 80 ? 15 : 13} color="#ffffff" strokeWidth={2.25} />
       </button>
       <input
         ref={inputRef}

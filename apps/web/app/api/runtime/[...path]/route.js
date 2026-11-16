@@ -1,5 +1,5 @@
 import { readRootEnv } from '../../../../lib/root-env.mjs';
-import { localProfileResponse, useLocalProfileDirectory } from '../../../../lib/profile-directory.mjs';
+import { localHandleLookup, localProfileResponse, useLocalProfileDirectory } from '../../../../lib/profile-directory.mjs';
 import { fetchAgentRuntime } from '../../../../lib/runtime-fetch.mjs';
 import { runtimeProxyTarget } from '../../../../lib/runtime-proxy.mjs';
 
@@ -42,6 +42,9 @@ async function proxy(request, context) {
   // origin must not skip that write.
   if (pathname === '/api/profiles/me' && useLocalProfileDirectory(directoryEnv)) {
     return localProfileResponse(request, { env: directoryEnv });
+  }
+  if (pathname === '/api/profiles/lookup' && request.method === 'GET' && useLocalProfileDirectory(directoryEnv)) {
+    return localHandleLookup(request, { env: directoryEnv });
   }
   const target = runtimeProxyTarget(await runtimeOrigin(), pathname, new URL(request.url).search);
   if (target.error === 'runtime_unconfigured' && pathname === '/api/profiles/me') {
