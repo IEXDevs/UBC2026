@@ -1,15 +1,14 @@
 # Devpost form answers — Maelstrom
 
-Copy source for the UBC 2026 Devpost form. Written from `IEXDevs/UBC2026` on `main` (through pull request 22) and the project plan. This file is not a submitted entry. It does not claim a prize, a deploy, or a metric.
+Copy source for the UBC 2026 Devpost form. Written from `dev` at `171dc21`. This file is not a submitted entry. It does not claim a prize or a metric.
 
-Open on the plan, and not described below as finished:
+Still open, and not described below as finished:
 
-- Hosted deploy, and applying the Supabase migrations to a hosted project
-- Shopping checkout, SNS sends, and bots selling signals (library scaffolds only)
-- Payments feed, wallet page, and positions pane
-- In-app ElevenLabs conversation (`@elevenlabs/react` is not installed; live events are not pushed into a call)
-- Posting Grok Bot drafts to X (the package refuses to send)
-- 2–3 minute demo video and the live pitch
+- A signed-in click check of the wallet sheet on the hosted page
+- One recorded live devnet USDC send and one recorded Streams wake
+- Posting Grok Bot drafts to X. There is no X credential in the repo or the Worker secret list, and `packages/grok-bot` still returns `delivery: "offline"`
+- On-chain PDA caps and Cloudflare Queues. This repo does not deploy its own Solana program, and the Worker config does not bind a queue. Adding either would be a second path, so they stay out
+- The 2–3 minute demo video and the live pitch. The script is below. Do not submit the form from this file
 
 ## Form fields
 
@@ -66,6 +65,19 @@ The verifier is the only automatic reviewer, and the owner sees the settled resu
 
 ## What would you build next?
 
-Finish the pieces the plan still leaves open: a hosted Worker and a hosted database, a real x402 sandbox purchase, SNS sends, bot-sold signal endpoints, and the payments, wallet, and positions panes. Mount the ElevenLabs conversation in the app so read-back stays in the call. Post the Grok Bot drafts after an X credential exists. Record the demo once those paths are the ones on screen.
+Post the Grok Bot drafts after an X credential exists outside the build. Record the demo on the hosted desk once a signed-in send and a Streams wake are on camera. Leave PDA caps and Queues out unless they use the same spend path.
 
 No award amounts are results. The track, chain award, and bounties above are what we are entering.
+
+## Demo script (about 2–3 minutes)
+
+Do not invent a recording. Say these facts only.
+
+1. Open https://dev.maelstrom.iexdevs.com. Sign in with Privy. The desk is Solana devnet execution with mainnet prices.
+2. Finish the handle, then the password and the seed download. Say that Maelstrom does not store the seed or the password. If the download is gone, it is gone.
+3. Create one agent with an ask-every-time permission and a USDC cap. Show the top-right balance opening the wallet sheet, then the same sheet from Profile and from a positions wallet card.
+4. Copy the address from the first-five, last-five line. Price a non-USDC send and point at the label "devnet execution, mainnet pricing". Say the quote is not broadcast. The slide sends the quoted USDC on the platform ledger.
+5. Unlock the desk and send devnet USDC to a handle. The same desk grant is what the Worker requires before a spend.
+6. Freeze all agents and show that a frozen bot cannot spend. Unfreeze clears the freeze and leaves a paused bot paused.
+7. If a devnet deposit arrives, show the Streams wake on that bot. The hourly cron is only the fallback.
+8. Close on the order: trust gate, verifier, wallet freeze, bot policy, approval mode, then sign. Signing stays in the wallet package. A mainnet quote never authorizes a transaction.
