@@ -8,8 +8,10 @@ import {
   passwordProblem,
   readDeskLock,
   unlockDesk,
+  writeDeskGrant,
   writeDeskLock,
 } from '../lib/desk-lock.mjs';
+import { openDeskGrant, readDeskLockState, registerDeskVerifier } from '../lib/desk-grant-client.mjs';
 import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
 
 function controlValue(form, name) {
@@ -17,7 +19,7 @@ function controlValue(form, name) {
   return node && typeof node.value === 'string' ? node.value : '';
 }
 
-export default function DeskLock({ ownerId, onUnlock, onClose }) {
+export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken }) {
   const [record, setRecord] = useState(undefined);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -25,8 +27,10 @@ export default function DeskLock({ ownerId, onUnlock, onClose }) {
   const [pending, setPending] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [serverLocked, setServerLocked] = useState(false);
 
   useEffect(() => {
+    let stopped = false;
     try {
       setRecord(readDeskLock(window.localStorage, ownerId));
     } catch {
@@ -37,7 +41,14 @@ export default function DeskLock({ ownerId, onUnlock, onClose }) {
     setNote('');
     setGenerated(false);
     setCopied(false);
-  }, [ownerId]);
+    setServerLocked(false);
+    (async () => {
+      const token = typeof getAccessToken === 'function' ? await getAccessToken() : '';
+      const state = await readDeskLockState(fetch, { ownerId, token }).catch(() => ({ locked: false }));
+      if (!stopped && state.locked) setServerLocked(true);
+    })();
+    return () => { stopped = true; };
+  }, [ownerId, getAccessToken]);
 
   useEffect(() => {
     function onKey(event) {
@@ -47,7 +58,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const setting = record == null;
+  const setting = record == null && !serverLocked;
 
   async function submit(event) {
     event.preventDefault();
@@ -74,22 +85,39 @@ export default function DeskLock({ ownerId, onUnlock, onClose }) {
     }
     setPending(true);
     try {
+      const token = typeof getAccessToken === 'function' ? await getAccessToken() : '';
       if (setting) {
         const created = await createDeskLock(nextPassword);
-        const saved = writeDeskLock(window.localStorage, ownerId, created);
-        if (!saved) {
-          setNote('The password could not be saved on this browser.');
+        const registered = await registerDeskVerifier(fetch, {
+          ownerId,
+          token,
+          verifier: created,
+        });
+        if (registered.exists) {
+          setServerLocked(true);
+          setNote('This account already has a desk password. Enter that password.');
+          setPending(false);
+          return;
+        }
+        if (!registered.ok || !writeDeskLock(window.localStorage, ownerId, created)) {
+          setNote('The password could not be saved for spends.');
           setPending(false);
           return;
         }
         setRecord(created);
-      } else {
+      } else if (record) {
         const ok = await unlockDesk(nextPassword, record);
         if (!ok) {
           setNote('Wrong password.');
           setPending(false);
           return;
         }
+      }
+      const opened = await openDeskGrant(fetch, { ownerId, token, password: nextPassword });
+      if (!opened.ok || !writeDeskGrant(window.sessionStorage, ownerId, opened.grant, opened.until)) {
+        setNote('The password was not accepted for spends.');
+        setPending(false);
+        return;
       }
       setPassword('');
       setConfirm('');

@@ -83,8 +83,42 @@ export default function SecurityPanel({
       } else {
         setMessage('Grab-back needs runtime URL and sign-in.');
       }
-    } else if (action.id === 'freeze-all-bots') {
-      setMessage('Bots frozen in this session. Persist freeze via bot policy when API is live.');
+    } else if (action.id === 'freeze-all-bots' || action.id === 'unfreeze-all-bots') {
+      const freeze = action.id === 'freeze-all-bots';
+      if (!ownerId) {
+        setMessage('Sign in before freezing bots.');
+        setPending(null);
+        return;
+      }
+      const url = shellRuntimeUrl('/api/bots/freeze');
+      if (!url) {
+        setMessage('Freeze needs the agent runtime.');
+        setPending(null);
+        return;
+      }
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-owner-id': ownerId,
+          },
+          body: JSON.stringify({ frozen: freeze }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setMessage(freeze ? 'The freeze did not save.' : 'The unfreeze did not save.');
+          setPending(null);
+          return;
+        }
+        setMessage(freeze
+          ? `Froze ${data.count ?? 0} bot(s). New spends stay blocked until you unfreeze them.`
+          : `Unfroze ${data.count ?? 0} bot(s). A paused bot stays paused until you resume it.`);
+      } catch {
+        setMessage(freeze ? 'The freeze did not save.' : 'The unfreeze did not save.');
+        setPending(null);
+        return;
+      }
     }
 
     if (typeof onBotsChange === 'function') {

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DESK_LOCK_IDLE_MS,
+  clearDeskGrant,
   clearDeskSession,
   createDeskLock,
   deskLockStorageKey,
@@ -11,10 +12,12 @@ import {
   parseDeskLock,
   parseDeskSession,
   passwordProblem,
+  readDeskGrant,
   readDeskLock,
   readDeskSession,
   unlockDesk,
   walletHotkey,
+  writeDeskGrant,
   writeDeskLock,
   writeDeskSession,
 } from './desk-lock.mjs';
@@ -94,5 +97,11 @@ test('a wallet unlock lasts thirty minutes across a reload and then locks', () =
     setItem() { throw new Error('blocked'); },
   };
   assert.equal(writeDeskSession(broken, 'did:privy:abc', until), false);
+  const grant = 'ab'.repeat(32);
+  assert.equal(writeDeskGrant(storage, 'did:privy:abc', grant, until), true);
+  assert.equal(readDeskGrant(storage, 'did:privy:abc', start).grant, grant);
+  assert.equal(readDeskGrant(storage, 'did:privy:abc', until), null);
+  assert.equal(clearDeskGrant(storage, 'did:privy:abc'), true);
+  assert.equal(readDeskGrant(storage, 'did:privy:abc', start), null);
   assert.equal(writeDeskLock(broken, 'did:privy:abc', { v: 1, iterations: 120000, salt: 'aa', hash: 'bb' }), false);
 });

@@ -7,7 +7,7 @@ import { BIP39_ENGLISH } from './bip39-english.mjs';
 import { supabaseConfig, supabaseWrite } from './supabase-rest.mjs';
 
 const BIP39 = new Set(BIP39_ENGLISH);
-const SECRET_KEY = /^(privatekey|privkey|secretkey|seed|seedphrase|mnemonic|mnemonicphrase|authorizationkey|password|apikey|accesstoken|refreshtoken|servicerole|servicerolekey|authorization|cookie|viewerurl|liveview|liveviewurl)$/;
+const SECRET_KEY = /^(privatekey|privkey|secretkey|seed|seedphrase|mnemonic|mnemonicphrase|authorizationkey|password|apikey|accesstoken|refreshtoken|servicerole|servicerolekey|authorization|cookie|viewerurl|liveview|liveviewurl|grant|granthash|salt|hash)$/;
 const PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 const WALLET_AUTH = /wallet-auth:[A-Za-z0-9+/=_-]+/gi;
 const LIVE_VIEW = /https:\/\/live\.browser\.run\S*/gi;

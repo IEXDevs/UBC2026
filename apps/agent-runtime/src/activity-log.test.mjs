@@ -19,6 +19,7 @@ test('activity redaction keeps ordinary fields and drops key material', () => {
     address: PUBKEY,
     amount: '10',
     digest: 'ab'.repeat(32),
+    grant: 'cd'.repeat(32),
     privateKey: 'do-not-store',
     seedPhrase: SEED,
     apiKey: 'service-secret',
@@ -34,6 +35,7 @@ test('activity redaction keeps ordinary fields and drops key material', () => {
   assert.equal(logged.address, PUBKEY);
   assert.equal(logged.amount, '10');
   assert.equal(logged.digest, 'ab'.repeat(32));
+  assert.equal(logged.grant, '[redacted]');
   assert.equal(logged.privateKey, '[redacted]');
   assert.equal(logged.seedPhrase, '[redacted]');
   assert.equal(logged.apiKey, '[redacted]');

@@ -10,6 +10,7 @@ import { transferDevnetUsdc } from '@ubc2026/transfers';
 import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
 import { loadOwnerLoopContext, supabaseConfig } from './supabase-rest.mjs';
 import { alertFromSpend, publishBotAlert } from './bot-alerts.mjs';
+import { deskSpendAllowed } from './desk-grant.mjs';
 
 function json(body, status = 200) {
   return Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
@@ -27,6 +28,11 @@ export async function handleSpend(request, env = {}) {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
   const ownerId = ownerIdFrom(request);
   if (!ownerId) return json({ error: 'owner_required', signed: false }, 401);
+  const desk = await deskSpendAllowed(env, request, ownerId, env.fetch ?? fetch, Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now());
+  if (!desk.ok) {
+    const status = desk.error === 'desk_lock_unavailable' ? 503 : 403;
+    return json({ error: desk.error, signed: false }, status);
+  }
   const raw = await request.json().catch(() => null);
   const parsed = parsePermissionedSpendBody(raw);
   if (!parsed) return json({ error: 'invalid_spend', signed: false }, 400);

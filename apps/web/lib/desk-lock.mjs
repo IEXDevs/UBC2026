@@ -179,6 +179,61 @@ export function writeDeskSession(storage, ownerId, until) {
   }
 }
 
+export function deskGrantStorageKey(ownerId) {
+  const lockKey = deskLockStorageKey(ownerId);
+  if (!lockKey) return '';
+  return lockKey.replace('maelstrom.desk-lock.', 'maelstrom.desk-grant.');
+}
+
+export function parseDeskGrant(value, now) {
+  let record = value;
+  if (typeof value === 'string') {
+    try {
+      record = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!record || typeof record !== 'object' || record.v !== 1) return null;
+  if (typeof record.grant !== 'string' || !/^[0-9a-f]{64}$/.test(record.grant)) return null;
+  if (!Number.isFinite(record.until) || !Number.isFinite(now) || now >= record.until) return null;
+  return { v: 1, grant: record.grant, until: record.until };
+}
+
+export function readDeskGrant(storage, ownerId, now) {
+  const key = deskGrantStorageKey(ownerId);
+  if (!key || !storage || typeof storage.getItem !== 'function') return null;
+  try {
+    return parseDeskGrant(storage.getItem(key), now);
+  } catch {
+    return null;
+  }
+}
+
+export function writeDeskGrant(storage, ownerId, grant, until) {
+  const key = deskGrantStorageKey(ownerId);
+  if (!key || typeof grant !== 'string' || !/^[0-9a-f]{64}$/.test(grant)) return false;
+  if (!Number.isFinite(until) || until <= 0 || !storage || typeof storage.setItem !== 'function') return false;
+  const body = JSON.stringify({ v: 1, grant, until });
+  try {
+    storage.setItem(key, body);
+    return storage.getItem?.(key) === body;
+  } catch {
+    return false;
+  }
+}
+
+export function clearDeskGrant(storage, ownerId) {
+  const key = deskGrantStorageKey(ownerId);
+  if (!key || !storage || typeof storage.removeItem !== 'function') return false;
+  try {
+    storage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function clearDeskSession(storage, ownerId) {
   const key = deskOpenStorageKey(ownerId);
   if (!key || !storage || typeof storage.removeItem !== 'function') return false;

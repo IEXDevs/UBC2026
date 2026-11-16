@@ -65,7 +65,7 @@ import DeskLock from '../components/DeskLock';
 import { useHostedPreview } from '../components/HostedPreview';
 import { usePrivyPublic } from '../components/PrivyRoot';
 import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
-import { clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
+import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 
 function readAccessToken(getAccessToken) {
@@ -755,6 +755,17 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     }
     setWalletsOpen(true);
   }, []);
+  function moneyHeaders(token) {
+    const grant = typeof sessionStorage === 'undefined'
+      ? null
+      : readDeskGrant(sessionStorage, ownerId, Date.now());
+    return {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      'x-owner-id': ownerId,
+      ...(grant ? { 'x-desk-grant': grant.grant } : {}),
+    };
+  }
   const onWalletSend = useCallback(async (pending) => {
     if (deskLockOnRef.current && !unlockedRef.current) {
       lockIntentRef.current = { type: 'wallet' };
@@ -823,11 +834,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       const idempotencyKey = `wallet_${target.handle}_${pending.amount}_${Date.now()}`.replace(/[^a-zA-Z0-9:_-]/g, '_').slice(0, 128);
       const response = await fetch(transfersUrl, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-          'x-owner-id': ownerId,
-        },
+        headers: moneyHeaders(token),
         body: JSON.stringify({
           handle: target.handle,
           amount: pending.amount,
@@ -882,6 +889,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const lockWallet = useCallback(() => {
     unlockUntilRef.current = 0;
     try { clearDeskSession(localStorage, ownerId); } catch { /* the in-memory lock still applies */ }
+    try { clearDeskGrant(sessionStorage, ownerId); } catch { /* the in-memory lock still applies */ }
     unlockedRef.current = false;
     setUnlocked(false);
     setLockOpen(false);
@@ -1181,11 +1189,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       const token = await getAccessToken?.();
       const response = await fetch(spendUrl, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-          'x-owner-id': ownerId,
-        },
+        headers: moneyHeaders(token),
         body: JSON.stringify(requestBody.body),
       });
       const body = await response.json().catch(() => ({}));
@@ -1240,11 +1244,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     const token = await getAccessToken?.();
     const response = await fetch(transfersUrl, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        'x-owner-id': ownerId,
-      },
+      headers: moneyHeaders(token),
       body: JSON.stringify({
         ...pending.command,
         botId: pending.botId,
@@ -1656,6 +1656,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     {lockOpen ? (
       <DeskLock
         ownerId={ownerId}
+        getAccessToken={getAccessToken}
         onUnlock={grantDesk}
         onClose={dismissLock}
       />
