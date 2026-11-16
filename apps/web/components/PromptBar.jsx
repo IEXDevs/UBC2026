@@ -132,6 +132,7 @@ export default function PromptBar({
   permission = '',
   onPermissionChange,
   onModelChange,
+  onAddProvider,
   chips = null,
   extraReady = false,
   label = 'Prompt',
@@ -165,12 +166,23 @@ export default function PromptBar({
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [modelKey, setModelKey] = useState(defaultModel);
+  useEffect(() => {
+    if (!defaultModel) return;
+    if (models.some(item => item.key === defaultModel)) setModelKey(defaultModel);
+  }, [defaultModel, models]);
   const [plusOpen, setPlusOpen] = useState(false);
   const [effortOpen, setEffortOpen] = useState(false);
   const [effortIndex, setEffortIndex] = useState(() => {
     const i = efforts.indexOf(defaultEffort);
     return i >= 0 ? i : Math.max(0, Math.floor((efforts.length - 1) / 2));
   });
+  const effortKey = efforts.join('\u0000');
+  useEffect(() => {
+    const i = efforts.indexOf(defaultEffort);
+    const next = i >= 0 ? i : Math.max(0, efforts.length - 1);
+    setEffortIndex(next);
+    latest.current.onEffortChange?.(efforts[next] ?? '');
+  }, [effortKey, defaultEffort]);
   const [dismissed, setDismissed] = useState(false);
   const [active, setActive] = useState(0);
   const [listening, setListening] = useState(false);
@@ -627,6 +639,7 @@ export default function PromptBar({
                 align="left"
                 ariaLabel="Choose model"
                 textColor={color}
+                menuAction={onAddProvider ? { label: 'Add Provider', onSelect: onAddProvider } : null}
               />
             </span>
           ) : null}
@@ -653,9 +666,8 @@ export default function PromptBar({
             <span ref={permitRef} className="permit" onMouseDown={(event) => event.preventDefault()} onClick={(event) => event.stopPropagation()}>
               <button
                 type="button"
-                className="permit-chip"
-                style={{ '--permit': permit.color }}
-                aria-label="Permissions"
+                className={`permit-chip${permit.id === 'full' ? ' is-full' : ''}`}
+                aria-label={`Permissions, ${permit.label}`}
                 aria-expanded={permitOpen}
                 onClick={() => setPermitOpen(value => !value)}
               >
@@ -668,8 +680,8 @@ export default function PromptBar({
                       key={item.id}
                       type="button"
                       role="option"
+                      className={item.id === 'full' ? 'is-full' : ''}
                       aria-selected={item.id === permit.id}
-                      style={{ '--permit': item.color }}
                       onClick={() => {
                         onPermissionChange?.(item.id);
                         setPermitOpen(false);

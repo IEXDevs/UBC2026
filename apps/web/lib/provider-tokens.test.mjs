@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { maskToken, parseProviderDraft, publicProvider, readProviderViews, removeProvider, saveProvider } from './provider-tokens.mjs';
+
+const web = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function memory() {
   const saved = new Map();
@@ -24,4 +29,14 @@ test('a saved provider keeps the token out of the catalog view', () => {
   removeProvider(storage, saved.provider.id);
   assert.equal(readProviderViews(storage).length, 0);
   assert.equal(publicProvider(null), null);
+});
+
+test('Add Provider opens from the model menu and profile settings', () => {
+  const prompt = readFileSync(join(web, 'components/PromptBar.jsx'), 'utf8');
+  const profile = readFileSync(join(web, 'components/ProfileSheet.js'), 'utf8');
+  const dialog = readFileSync(join(web, 'components/ProviderAdd.js'), 'utf8');
+  assert.match(prompt, /label: 'Add Provider'/);
+  assert.match(profile, />Add Provider</);
+  assert.match(dialog, /saveProvider/);
+  assert.match(dialog, /aria-labelledby="provider-add-title"/);
 });

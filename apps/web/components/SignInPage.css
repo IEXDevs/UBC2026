@@ -69,29 +69,11 @@
   gap: 6px 20px;
 }
 
-.sign-in-alt {
-  border: 0;
-  border-radius: 20px;
-  background: transparent;
-  color: #ddd4f2;
-  font: inherit;
-  font-size: 1.0625rem;
-  font-weight: 500;
-  padding: 18px 28px;
-}
-
-.sign-in button.specular-button:not(:disabled):hover {
+.sign-in button.specular-button:not(:disabled):hover,
+.sign-in button.specular-button:not(:disabled):focus-visible {
   background-color: #ffffff;
-}
-
-.sign-in button.sign-in-alt:not(:disabled):hover {
-  background-color: rgba(244, 241, 251, 0.16);
-  color: #f4f1fb;
-}
-
-.sign-in-alt:focus-visible {
-  outline: 1px solid #f4f1fb;
-  outline-offset: 4px;
+  color: #120f17;
+  transform: translateY(-2px);
 }
 
 .sign-in-dev {
@@ -129,6 +111,11 @@
 @media (prefers-reduced-motion: reduce) {
   .sign-in-copy {
     animation: none;
+  }
+
+  .sign-in button.specular-button:not(:disabled):hover,
+  .sign-in button.specular-button:not(:disabled):focus-visible {
+    transform: none;
   }
 }
 

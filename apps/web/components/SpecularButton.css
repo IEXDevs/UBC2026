@@ -29,6 +29,11 @@
   transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+button.specular-button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--sb-tint) calc((var(--sb-tint-opacity) + 0.14) * 100%), transparent);
+  color: var(--sb-text-color);
+}
+
 .specular-button:active {
   transform: scale(0.97);
 }

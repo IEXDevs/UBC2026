@@ -77,7 +77,10 @@ export async function POST(request, context) {
       botType: typeof body.type === 'string' ? body.type : 'trading',
       history: Array.isArray(body.history) ? body.history : [],
       message,
-      model: readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined,
+      model: (typeof body.model === 'string' && /^[A-Za-z0-9_.:/-]{1,80}$/.test(body.model.trim()))
+        ? body.model.trim()
+        : (readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined),
+      reasoningEffort: typeof body.effort === 'string' ? body.effort : '',
       tools: openAiAgentTools(),
       toolsInstruction: chatToolsInstruction(),
       permission: permissionInstruction(body.permission),

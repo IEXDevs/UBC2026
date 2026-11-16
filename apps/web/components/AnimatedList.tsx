@@ -222,7 +222,7 @@ const AnimatedList = ({
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const springEase = CSS.supports?.('transition-timing-function', 'linear(0, 1)')
       ? SPRING
-      : 'cubic-bezier(0.34, 1.4, 0.64, 1)';
+      : 'cubic-bezier(0.34, 1, 0.64, 1)';
     const transition = `transform 620ms ${springEase}, opacity 300ms cubic-bezier(0.22, 1, 0.36, 1), filter 200ms ease`;
     const motion = { y: 0, h: 0, vy: 0, vh: 0, ty: 0, th: 0, ready: false };
     const fades = { top: '', bottom: '' };

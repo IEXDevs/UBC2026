@@ -141,7 +141,7 @@ const readableOn = (color: string) => {
 const ease = () =>
   typeof CSS !== 'undefined' && CSS.supports?.('transition-timing-function', 'linear(0, 1)')
     ? SPRING
-    : 'cubic-bezier(0.34, 1.4, 0.64, 1)';
+    : 'cubic-bezier(0.34, 1, 0.64, 1)';
 
 function Check() {
   const ref = useRef<HTMLSpanElement>(null);

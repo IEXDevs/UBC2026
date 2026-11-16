@@ -125,7 +125,7 @@ const TAIL_HALF = 9;
 const MENU_RADIUS = 10;
 const MENU_GAP = 8;
 const MARGIN = 8;
-const POP = 'cubic-bezier(0.2, 1.25, 0.4, 1)';
+const POP = 'cubic-bezier(0.2, 1, 0.4, 1)';
 
 const THEMES: Record<'dark' | 'light', Tokens> = {
   dark: {

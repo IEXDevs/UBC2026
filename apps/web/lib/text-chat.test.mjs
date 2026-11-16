@@ -66,7 +66,18 @@ test('completeTextChat hits Meta and never puts the key in the body', async () =
   assert.equal(result.model, META_SPARK_MODEL);
   assert.match(seen.url, /api\.meta\.ai/);
   assert.equal(seen.body.model, META_SPARK_MODEL);
-  assert.equal(seen.body.reasoning_effort, 'minimal');
+  assert.equal(seen.body.reasoning_effort, 'high');
+  let low;
+  await completeTextChat({
+    metaModelApiKey: META_KEY,
+    message: 'status?',
+    reasoningEffort: 'Low',
+    fetcher: async (_url, options) => {
+      low = JSON.parse(options.body);
+      return Response.json({ choices: [{ message: { content: 'watching' } }] });
+    },
+  });
+  assert.equal(low.reasoning_effort, 'low');
   assert.equal(JSON.stringify(seen.body).includes(META_KEY), false);
 });
 

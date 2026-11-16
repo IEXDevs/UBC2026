@@ -14,6 +14,7 @@ import { orbSpeed, voiceOrbLook } from '../lib/voice-orb.mjs';
 import WakeSlider from './WakeSlider';
 import GlideSelect from './GlideSelect';
 import PromptBar from './PromptBar';
+import ProviderAdd from './ProviderAdd';
 import { clampFloat, FLOAT_SIZE, FLOAT_STORAGE_KEY } from '../lib/voice-float.mjs';
 import { createMicGate } from '../lib/mic-gate.mjs';
 import {
@@ -34,16 +35,22 @@ import {
   voiceOverrides,
 } from '../lib/voice-settings.mjs';
 import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/spend-permission.mjs';
+import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
 
 const LEAVE_MS = 760;
 const PROMPT_SOURCES = [
   { key: 'files', name: 'Photos & files', description: 'Upload from this device', icon: Attachment01Icon, attach: true },
 ];
-const PROMPT_MODELS = [
-  { key: 'muse-spark', name: 'Muse Spark', tag: 'Chat' },
-];
-const PROMPT_EFFORTS = ['Low', 'Medium', 'High', 'Extra', 'Max'];
+function promptModels(rows) {
+  const source = Array.isArray(rows) && rows.length > 0 ? rows : fallbackThinkingCatalog();
+  return source.map(model => ({
+    key: model.id,
+    name: model.name,
+    tag: 'Chat',
+    levels: Array.isArray(model.levels) ? model.levels : [],
+  }));
+}
 const SUGGESTIONS = [
   'What should this agent watch?',
   'Summarize the latest activity',
@@ -78,6 +85,9 @@ export default function Composer({
   const [dragging, setDragging] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_VOICE_SETTINGS);
   const [permission, setPermission] = useState('ask');
+  const [models, setModels] = useState(() => promptModels());
+  const [chatModel, setChatModel] = useState(() => promptModels()[0]?.key || '');
+  const [providerOpen, setProviderOpen] = useState(false);
   const [callName, setCallName] = useState('');
   const [callBotId, setCallBotId] = useState(null);
   const [speaker, setSpeaker] = useState('idle');
@@ -95,7 +105,9 @@ export default function Composer({
   const dockRef = useRef(null);
   const settingsRef = useRef(settings);
   const permissionRef = useRef(permission);
-  const modelRef = useRef(PROMPT_MODELS[0]?.key || '');
+  const modelRef = useRef(models[0]?.key || '');
+  const effortRef = useRef(models[0]?.levels?.find(level => level.default)?.label || '');
+  const modelsRef = useRef(models);
   const botIdRef = useRef(botId);
   const botNameRef = useRef(botName);
   const botGoalRef = useRef(botGoal);
@@ -121,6 +133,7 @@ export default function Composer({
   clientToolsRef.current = clientTools;
   settingsRef.current = settings;
   permissionRef.current = permission;
+  modelsRef.current = models;
   botIdRef.current = botId;
   botNameRef.current = botName;
   botGoalRef.current = botGoal;
@@ -171,6 +184,21 @@ export default function Composer({
     }
     setSettingsReady(true);
     setPermission(parsePermission(localStorage.getItem(SPEND_PERMISSION_KEY)));
+  }, []);
+
+  useEffect(() => {
+    let stop = false;
+    fetch('/api/models', { cache: 'no-store' })
+      .then(response => (response.ok ? response.json() : null))
+      .then(data => {
+        if (stop || !Array.isArray(data?.models) || data.models.length === 0) return;
+        const next = promptModels(data.models);
+        setModels(next);
+        setChatModel(current => (next.some(item => item.key === current) ? current : next[0].key));
+        if (!next.some(item => item.key === modelRef.current)) modelRef.current = next[0].key;
+      })
+      .catch(() => {});
+    return () => { stop = true; };
   }, []);
 
   useEffect(() => {
@@ -320,6 +348,14 @@ export default function Composer({
     });
   }
 
+  function currentEffortId() {
+    const model = modelsRef.current.find(item => item.key === modelRef.current) ?? modelsRef.current[0];
+    const label = typeof effortRef.current === 'string' ? effortRef.current : '';
+    return model?.levels?.find(level => level.label === label)?.id
+      || model?.levels?.find(level => level.default)?.id
+      || '';
+  }
+
   async function sendMessage(text) {
     const spokenText = typeof text === 'string' ? text.trim() : draft.trim();
     const attached = files.map(file => file.name).join(', ');
@@ -351,6 +387,8 @@ export default function Composer({
         goal: botGoal,
         type: botType,
         permission,
+        model: modelRef.current,
+        effort: currentEffortId(),
         shellBots,
         shellWallets,
         shellBalanceLabel,
@@ -392,6 +430,8 @@ export default function Composer({
         goal: botGoal,
         type: botType,
         permission,
+        model: modelRef.current,
+        effort: currentEffortId(),
         shellBots,
         shellWallets,
         shellBalanceLabel,
@@ -711,6 +751,7 @@ export default function Composer({
       {stageNode}
       {floatNode}
       {settingsNode}
+      <ProviderAdd open={providerOpen} onClose={() => setProviderOpen(false)} />
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mentionCopy ? (
         <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} /></p>
@@ -728,9 +769,10 @@ export default function Composer({
           placeholder={`Message ${botName}`}
           label={`Message ${botName}`}
           sources={PROMPT_SOURCES}
-          models={PROMPT_MODELS}
-          efforts={PROMPT_EFFORTS}
-          defaultEffort="Medium"
+          models={models}
+          defaultModel={chatModel}
+          efforts={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.map(level => level.label) ?? []}
+          defaultEffort={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.find(level => level.default)?.label ?? ''}
           busy={thinking}
           background="transparent"
           color="#f5f5f5"
@@ -745,10 +787,15 @@ export default function Composer({
           onSend={(text) => sendMessage(text)}
           onDictate={live ? undefined : runDictation}
           permission={permission}
+          onEffortChange={(label) => { effortRef.current = label; }}
+          onAddProvider={() => setProviderOpen(true)}
           onModelChange={(key) => {
-            const item = PROMPT_MODELS.find(model => model.key === key);
+            const item = models.find(model => model.key === key);
             if (!item || item.key === modelRef.current) return;
             modelRef.current = item.key;
+            setChatModel(item.key);
+            const next = item.levels?.find(level => level.default)?.label || item.levels?.[0]?.label || '';
+            effortRef.current = next;
             pushLine('note', `Model set to ${item.name}`);
           }}
           onPermissionChange={(next) => {

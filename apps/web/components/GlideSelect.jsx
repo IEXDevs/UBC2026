@@ -49,6 +49,7 @@ export default function GlideSelect({
   disabled = false,
   ariaLabel = 'Select',
   className = '',
+  menuAction = null,
 }) {
   const items = options.map(norm);
   const [inner, setInner] = useState(defaultValue ?? '');
@@ -318,6 +319,21 @@ export default function GlideSelect({
               </div>
             ))}
           </div>
+          {menuAction ? (
+            <button
+              type="button"
+              className="glide-select__action"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                close('instant');
+                menuAction.onSelect?.();
+              }}
+            >
+              <span className="glide-select__action-shade" aria-hidden="true" />
+              <span className="glide-select__name">{menuAction.label}</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

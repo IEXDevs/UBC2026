@@ -4,13 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { PencilEdit01Icon } from '@hugeicons/core-free-icons';
-import { BOT_COLORS } from '../lib/bot-look.mjs';
+import { colorLabel, colorsForPicker } from '../lib/bot-look.mjs';
 import BotMark from './BotMark';
 import HoldButton from './HoldButton';
 
 function placePanel(x, y) {
   const width = 280;
-  const height = 360;
+  const height = 520;
   return {
     x: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
     y: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
@@ -72,6 +72,7 @@ export default function AgentEdit({ bot, x, y, onClose, onSave, onDelete }) {
   const [name, setName] = useState(bot.name);
   const [color, setColor] = useState(bot.color);
   const [image, setImage] = useState(bot.image || '');
+  const [moreColors, setMoreColors] = useState(false);
 
   useEffect(() => {
     function onKey(event) {
@@ -108,18 +109,21 @@ export default function AgentEdit({ bot, x, y, onClose, onSave, onDelete }) {
         <input aria-label="Agent name" value={name} maxLength={64} onChange={event => setName(event.target.value)} />
       </div>
       <div className="swatches" role="listbox" aria-label="Agent color">
-        {BOT_COLORS.map(swatch => (
+        {colorsForPicker(color, moreColors).map(swatch => (
           <button
             key={swatch.id}
             type="button"
             className={swatch.value === color ? 'is-on' : ''}
             style={{ background: swatch.value }}
-            aria-label={swatch.id}
+            aria-label={colorLabel(swatch.value)}
             aria-pressed={swatch.value === color}
             onClick={() => setColor(swatch.value)}
           />
         ))}
       </div>
+      {moreColors ? null : (
+        <button type="button" className="ghost" onClick={() => setMoreColors(true)}>More colors</button>
+      )}
       {image ? <button type="button" className="ghost" onClick={() => setImage('')}>Remove photo</button> : null}
       <div className="agent-edit-actions">
         <button type="submit" className="solid" disabled={!name.trim()}>Save</button>

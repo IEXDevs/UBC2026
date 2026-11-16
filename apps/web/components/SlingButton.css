@@ -42,7 +42,6 @@
   stroke: var(--sl-band);
   stroke-width: var(--sl-stroke);
   stroke-linecap: round;
-  transition: stroke-width 160ms var(--sl-ease-out);
 }
 
 .sling-button[data-armed] .sling-button__band {
@@ -58,7 +57,6 @@
   stroke: var(--sl-accent);
   stroke-width: var(--sl-stroke);
   stroke-linecap: butt;
-  transition: stroke-width 160ms var(--sl-ease-out);
 }
 
 .sling-button[data-armed] .sling-button__arc {

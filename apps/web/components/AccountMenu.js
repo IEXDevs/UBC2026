@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ChartColumn, Lock, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
-import { hasSeenLogin, markSeenLogin } from '../lib/seen-login.mjs';
+import { markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
 import SpecularButton from './SpecularButton';
 
@@ -18,13 +18,10 @@ const ITEMS = [
 
 export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, onLogin, onPick }) {
   const [open, setOpen] = useState(false);
-  const [returning, setReturning] = useState(false);
   const rootRef = useRef(null);
 
   useEffect(() => {
-    const storage = window.localStorage;
-    if (signedIn) markSeenLogin(storage);
-    setReturning(hasSeenLogin(storage));
+    if (signedIn) markSeenLogin(window.localStorage);
   }, [signedIn]);
 
   useEffect(() => {
@@ -47,11 +44,8 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
     return (
       <div className="sign-up-slot">
         <SpecularButton size="sm" radius={999} disabled={loginDisabled} onClick={onLogin}>
-          {returning ? 'Log In' : 'Sign Up'}
+          Continue
         </SpecularButton>
-        <button type="button" className="auth-alt" disabled={loginDisabled} onClick={onLogin}>
-          {returning ? 'Sign Up' : 'Log In'}
-        </button>
       </div>
     );
   }

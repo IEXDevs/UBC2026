@@ -322,6 +322,8 @@ export async function sendBotChat({
   goal,
   type,
   permission,
+  model,
+  effort,
   shellBots = null,
   shellWallets = null,
   shellBalanceLabel = null,
@@ -357,6 +359,8 @@ export async function sendBotChat({
         ...(typeof goal === 'string' && goal.trim() ? { goal: goal.trim().slice(0, 2000) } : {}),
         ...(typeof type === 'string' && type.trim() ? { type: type.trim().slice(0, 40) } : {}),
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
+        ...(typeof model === 'string' && model.trim() ? { model: model.trim().slice(0, 80) } : {}),
+        ...(typeof effort === 'string' && effort.trim() ? { effort: effort.trim().slice(0, 16) } : {}),
         ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),
         ...(Array.isArray(shellWallets) ? { shellWallets: shellWallets.slice(0, 40) } : {}),
         ...(typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()

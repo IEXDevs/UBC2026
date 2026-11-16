@@ -151,6 +151,53 @@
   touch-action: none;
 }
 
+.glide-select__action {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--gs-row);
+  margin-top: 5px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--gs-inner-radius);
+  background: transparent;
+  color: var(--gs-text);
+  font: inherit;
+  font-size: var(--gs-font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.glide-select__action::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  right: 2px;
+  left: 2px;
+  height: 1px;
+  background: color-mix(in srgb, var(--gs-text) 16%, transparent);
+}
+
+.glide-select__action-shade {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--gs-highlight);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.glide-select__action:hover .glide-select__action-shade,
+.glide-select__action:focus-visible .glide-select__action-shade {
+  opacity: 1;
+}
+
+.glide-select__action .glide-select__name {
+  position: relative;
+  z-index: 1;
+}
+
 .glide-select__pill {
   position: absolute;
   top: 0;

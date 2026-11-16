@@ -1,6 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyLooks, randomShape, sanitizeLook, SHAPES } from './bot-look.mjs';
+import { applyLooks, BOT_COLORS, colorLabel, colorsForPicker, randomShape, sanitizeLook, SHAPES } from './bot-look.mjs';
+
+test('color names come from the palette', () => {
+  assert.equal(colorLabel('#7c5cff'), 'Purple');
+  assert.equal(colorLabel('#7C5CFF'), 'Purple');
+  assert.equal(colorLabel('#000000'), 'Custom');
+});
+
+test('the picker starts with six colors and can show the rest', () => {
+  const short = colorsForPicker('#7c5cff', false);
+  assert.equal(short.length, 6);
+  assert.equal(colorsForPicker('#7c5cff', true).length, BOT_COLORS.length);
+  const withOrange = colorsForPicker('#f0732b', false);
+  assert.equal(withOrange.some(item => item.id === 'orange'), true);
+});
 
 test('unknown shape and color fall back to the shared default', () => {
   const look = sanitizeLook('bot_live', { shape: 'squircle', color: 'red', name: '  ' });

@@ -8,6 +8,22 @@ export const SHAPE_PATHS = Object.freeze({
   triangle: 'M32 8 58 54H6z',
 });
 
+export const PRIMARY_COLOR_IDS = Object.freeze(['paper', 'red', 'gold', 'teal', 'blue', 'purple']);
+
+export function colorLabel(value) {
+  const found = BOT_COLORS.find(item => item.value.toLowerCase() === String(value || '').toLowerCase());
+  if (!found) return 'Custom';
+  return found.id.charAt(0).toUpperCase() + found.id.slice(1);
+}
+
+export function colorsForPicker(selected, showAll) {
+  if (showAll) return BOT_COLORS;
+  const primary = BOT_COLORS.filter(item => PRIMARY_COLOR_IDS.includes(item.id));
+  const extra = BOT_COLORS.find(item => item.value.toLowerCase() === String(selected || '').toLowerCase());
+  if (extra && !primary.some(item => item.id === extra.id)) return [...primary, extra];
+  return primary;
+}
+
 export const BOT_COLORS = Object.freeze([
   { id: 'paper', value: '#f5f5f5' },
   { id: 'brown', value: '#8b5a3c' },

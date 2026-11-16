@@ -1290,7 +1290,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
       <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
-        {noAgents ? null : (
         <div
           className="pane-resize"
           role="separator"
@@ -1298,8 +1297,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           aria-label="Resize agents"
           onPointerDown={event => dragPane(event, 'left')}
         />
-        )}
-        {noAgents ? null : <div className="side-tools">
+        <div className="side-tools">
           <button
             type="button"
             className="icon-btn rail-toggle"
@@ -1323,8 +1321,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setPluginsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
-        </div>}
-        {noAgents ? null : <BotRail
+        </div>
+        <BotRail
           bots={visible}
           activeId={bot?.id}
           canDrag={!query.trim()}
@@ -1334,8 +1332,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           onDelete={onDelete}
           onEdit={onEditLook}
           onCreate={() => setCreateOpen(true)}
-        />}
-        {noAgents ? null : <footer className="you">
+        />
+        <footer className="you">
           <AccountMenu
             accountLabel={profileRailLabel({
               handle: profile?.handle,
@@ -1350,7 +1348,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             onLogin={onLogin}
             onPick={onAccount}
           />
-        </footer>}
+        </footer>
       </aside>
 
       <section className={`stage${pane === 'Positions' ? ' is-book' : ''}`}>
@@ -1476,7 +1474,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               });
             }}
           />
-        ) : pane === 'Positions' ? null : <div className="composer-gap" />}
+        ) : pane === 'Positions' ? null : (
+          <div className="composer-wait" role="status">
+            <p>Create an agent before sending.</p>
+          </div>
+        )}
       </section>
       {pane === 'Main' && bot ? (
         <AgentDetail

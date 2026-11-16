@@ -1,21 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Topography from './Topography';
 import SpecularButton from './SpecularButton';
-import { hasSeenLogin } from '../lib/seen-login.mjs';
 import './SignInPage.css';
 
 export default function SignInPage({ disabled = false, onLogin, onDeveloperPreview = null }) {
-  const [returning, setReturning] = useState(false);
-
-  useEffect(() => {
-    setReturning(hasSeenLogin(window.localStorage));
-  }, []);
-
-  const primary = returning ? 'Log in' : 'Sign up';
-  const secondary = returning ? 'Sign up' : 'Log in';
-
   return (
     <div className="sign-in">
       <div className="sign-in-field" aria-hidden="true">
@@ -46,16 +35,8 @@ export default function SignInPage({ disabled = false, onLogin, onDeveloperPrevi
               disabled={disabled || !onLogin}
               onClick={onLogin}
             >
-              {primary}
+              Continue
             </SpecularButton>
-            <button
-              type="button"
-              className="sign-in-alt"
-              disabled={disabled || !onLogin}
-              onClick={onLogin}
-            >
-              {secondary}
-            </button>
           </div>
           {onDeveloperPreview ? (
             <button type="button" className="sign-in-dev" onClick={onDeveloperPreview}>

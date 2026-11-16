@@ -5,6 +5,7 @@
  */
 import { OPENROUTER_FREE_MODEL, selectFreeOpenRouterModel } from '@ubc2026/contracts';
 import { thinkStep, toolStep } from './chat-activity.mjs';
+import { reasoningEffortFor } from './thinking-levels.mjs';
 
 export { OPENROUTER_FREE_MODEL };
 
@@ -171,6 +172,7 @@ async function postCompletion({
   tools,
   secrets,
   fetcher,
+  reasoningEffort = '',
 }) {
   const payload = {
     model: modelId,
@@ -180,9 +182,9 @@ async function postCompletion({
     payload.tools = tools;
     payload.tool_choice = 'auto';
   }
-  if (resolved.provider === 'meta') {
-    payload.reasoning_effort = 'minimal';
-  } else {
+  if (reasoningEffort) {
+    payload.reasoning_effort = reasoningEffort;
+  } else if (resolved.provider !== 'meta') {
     payload.temperature = 0.5;
   }
   let response;
@@ -282,6 +284,7 @@ export async function completeTextChat({
   tools = null,
   toolsInstruction = '',
   permission = '',
+  reasoningEffort = '',
   invokeTool = null,
   maxToolRounds = 4,
 } = {}) {
@@ -334,6 +337,7 @@ export async function completeTextChat({
   let toolRounds = 0;
   let usage = { prompt: 0, completion: 0, total: 0 };
   const activity = [];
+  const effort = reasoningEffortFor(modelId, reasoningEffort);
   while (true) {
     const completion = await postCompletion({
       resolved,
@@ -342,6 +346,7 @@ export async function completeTextChat({
       tools: toolList,
       secrets,
       fetcher,
+      reasoningEffort: effort,
     });
     const calls = Array.isArray(completion.message?.tool_calls)
       ? completion.message.tool_calls.filter(call => call?.function?.name)

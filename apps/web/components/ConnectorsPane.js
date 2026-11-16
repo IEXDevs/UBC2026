@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppWindow, BadgeDollarSign, Check, ChevronRight, Fingerprint, Search } from 'lucide-react';
 import { PLUGIN_CHIPS, pluginCatalog, readSharedLinks, withSharedLinks, writeSharedLinks } from '../lib/connectors.mjs';
-import { readProviderViews, removeProvider, saveProvider } from '../lib/provider-tokens.mjs';
+import { readProviderViews, removeProvider } from '../lib/provider-tokens.mjs';
+import ProviderAdd from './ProviderAdd';
 import Spotlight from './bits/Spotlight';
 import './bits/Spotlight.css';
 
@@ -51,8 +52,6 @@ export default function ConnectorsPane({ connectors = [] }) {
   const [extra, setExtra] = useState([]);
   const [providers, setProviders] = useState([]);
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({ name: '', token: '', baseUrl: '' });
-  const [note, setNote] = useState('');
 
   useEffect(() => {
     setExtra(readSharedLinks());
@@ -78,7 +77,6 @@ export default function ConnectorsPane({ connectors = [] }) {
 
   function toggle(item) {
     if (item.builtin) return;
-    setNote('');
     if (item.custom) {
       removeProvider(localStorage, item.id);
       remember(extra.filter(id => id !== item.id));
@@ -90,19 +88,6 @@ export default function ConnectorsPane({ connectors = [] }) {
       return;
     }
     remember(extra.includes(item.id) ? extra : [...extra, item.id]);
-  }
-
-  function addProvider(event) {
-    event.preventDefault();
-    const result = saveProvider(localStorage, draft);
-    if (!result.ok) {
-      setNote(result.reason === 'url' ? 'Use an https provider URL.' : result.reason === 'name' ? 'Use a short provider name.' : 'Use a token of at least 8 characters.');
-      return;
-    }
-    setDraft({ name: '', token: '', baseUrl: '' });
-    setAdding(false);
-    setNote('');
-    setProviders(readProviderViews(localStorage));
   }
 
   return (
@@ -196,19 +181,15 @@ export default function ConnectorsPane({ connectors = [] }) {
         </section>
       ))}
       <div className="provider-add">
-        <button type="button" className="app-view-all" onClick={() => { setAdding(value => !value); setNote(''); }}>
-          {adding ? 'Cancel custom provider' : 'Add a custom provider'}
+        <button type="button" className="app-view-all" onClick={() => setAdding(true)}>
+          Add Provider
         </button>
-        {adding ? (
-          <form className="provider-form" onSubmit={addProvider}>
-            <input aria-label="Provider name" placeholder="Provider name" value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} />
-            <input aria-label="API token" type="password" autoComplete="off" placeholder="API token" value={draft.token} onChange={event => setDraft(current => ({ ...current, token: event.target.value }))} />
-            <input aria-label="Provider URL" placeholder="https://api.example.com" value={draft.baseUrl} onChange={event => setDraft(current => ({ ...current, baseUrl: event.target.value }))} />
-            <button type="submit">Save token</button>
-          </form>
-        ) : null}
-        {note ? <p className="preview-note" role="status">{note}</p> : null}
       </div>
+      <ProviderAdd
+        open={adding}
+        onClose={() => setAdding(false)}
+        onSaved={() => setProviders(readProviderViews(localStorage))}
+      />
       </div>
     </section>
   );
