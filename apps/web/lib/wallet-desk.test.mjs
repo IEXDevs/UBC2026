@@ -14,6 +14,7 @@ import {
   phraseComplete,
   phraseMatches,
   swapDraft,
+  swapSendSettlement,
   phraseFromEntropy,
   quoteUrl,
   readQuoteOut,
@@ -169,6 +170,15 @@ test('swap quotes skip restricted tokens and signup claims a handle before recov
   assert.match(draft.url, /^https:\/\/lite-api\.jup\.ag\/swap\/v1\/quote\?/);
   assert.equal(swapDraft(deskTokens({}), { from: 'USDC', to: 'USDC', amountText: '1' }).error, 'invalid_quote');
   assert.equal(swapDraft(deskTokens({}), { from: 'USDC', to: 'SOL', amountText: '0' }).error, 'invalid_amount');
+  const priced = swapDraft(deskTokens({}), { from: 'SOL', to: 'USDC', amountText: '1' });
+  const settled = swapSendSettlement({ inputSymbol: 'SOL', quoteOut: '1000000', quote: priced });
+  assert.equal(settled.asset, 'USDC');
+  assert.equal(settled.amount, '1000000');
+  assert.equal(settled.broadcast, false);
+  assert.equal(settled.authorizesTransaction, false);
+  assert.equal(settled.label, 'devnet execution, mainnet pricing');
+  assert.equal(swapSendSettlement({ inputSymbol: 'SOL', quoteOut: '1000000', quote: { ...priced, broadcast: true } }).error, 'quote_not_authorization');
+  assert.equal(swapSendSettlement({ inputSymbol: 'USDC', quoteOut: '1000000', quote: priced }).error, 'invalid_quote');
   const base = {
     signedIn: true,
     profileReady: true,

@@ -452,9 +452,15 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
       .catch(() => { if (!stop) setSnsFailed(true); });
     return () => { stop = true; };
   }, [target?.kind, target?.domain]);
+  const pricedSwap = asset && asset.symbol !== 'USDC'
+    ? swapDraft(tokens, { from: asset.symbol, to: 'USDC', amountText: amount })
+    : null;
   const ready = Boolean(
-    active && !frozen && !observing && target && target.kind !== 'address' && units && asset?.symbol === 'USDC'
-    && (target.kind !== 'sns' || snsAddress),
+    active && !frozen && !observing && target && target.kind !== 'address' && units && asset
+    && (
+      (asset.symbol === 'USDC' && (target.kind !== 'sns' || snsAddress))
+      || (asset.symbol !== 'USDC' && target.kind === 'handle' && pricedSwap?.broadcast === false && pricedSwap.url)
+    )
   );
   const destination = target?.kind === 'handle'
     ? `@${target.handle}`
@@ -512,7 +518,7 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
         ))}
       </div>
       {asset && asset.symbol !== 'USDC' ? (
-        <p className="quiet">Platform sends are USDC. Other assets wait for the swap executor.</p>
+        <p className="quiet">This prices {asset.symbol} in USDC. The quote is mainnet pricing and is not broadcast. The slide sends that USDC on the platform ledger.</p>
       ) : null}
       <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
       <SlideCommit
@@ -521,7 +527,13 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
         disabled={!ready}
         resetKey={`${resetKey}:${to}:${amount}:${asset?.symbol || ''}`}
         onCommit={() => {
-          const pending = { target, amount: units, asset: asset.symbol };
+          const pending = {
+            target,
+            amount: units,
+            asset: asset.symbol,
+            amountText: amount.trim(),
+            quote: pricedSwap && pricedSwap.url ? pricedSwap : null,
+          };
           Promise.resolve(onSend?.(pending)).then(result => {
             setStatus(result?.message || result?.error || 'The send did not post.');
             if (result?.ok) {
