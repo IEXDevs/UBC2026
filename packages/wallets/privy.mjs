@@ -211,14 +211,27 @@ function readPrivyUserPayload(payload) {
   return payload;
 }
 
+function base64UrlToUtf8(value) {
+  const normalized = String(value).replace(/-/g, '+').replace(/_/g, '/');
+  const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+  const b64 = `${normalized}${pad}`;
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(b64, 'base64').toString('utf8');
+  }
+  if (typeof atob === 'function') {
+    const binary = atob(b64);
+    let out = '';
+    for (let i = 0; i < binary.length; i += 1) out += String.fromCharCode(binary.charCodeAt(i));
+    return out;
+  }
+  throw new Error('no_base64');
+}
+
 function jwtSub(accessToken) {
   try {
     const part = String(accessToken).split('.')[1];
     if (!part) return '';
-    const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
-    const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
-    const json = Buffer.from(`${normalized}${pad}`, 'base64').toString('utf8');
-    const payload = JSON.parse(json);
+    const payload = JSON.parse(base64UrlToUtf8(part));
     return typeof payload?.sub === 'string' ? payload.sub.trim() : '';
   } catch {
     return '';
@@ -480,7 +493,18 @@ export function createPrivyWalletClient({
 
   async function loadUser(privyUserId) {
     if (typeof privyUserId !== 'string' || !ownerIdPattern.test(privyUserId)) fail('Privy user id is required', 'invalid_owner');
-    return privy('GET', `/v1/users/${encodeURIComponent(privyUserId)}`);
+    // App-secret Basic auth only — do not attach PRIVY_AUTHORIZATION_KEY.
+    // Wallet-auth signatures are for wallet RPC/create; a bad key here 403s
+    // GET /v1/users/:id on Workers while localhost /users/me (Bearer+Origin) still works.
+    const url = `${privyApi}/v1/users/${encodeURIComponent(privyUserId)}`;
+    return fetchJson(url, {
+      method: 'GET',
+      headers: {
+        Authorization: basicAuth(id, secret),
+        'privy-app-id': id,
+        'Content-Type': 'application/json',
+      },
+    }, 'privy_failed');
   }
 
   function createdRecord(payload, ownerId, privyUserId, kind, label) {
@@ -681,12 +705,16 @@ export function createPrivyWalletClient({
       const headerOwner = typeof ownerId === 'string' && ownerIdPattern.test(ownerId.trim())
         ? ownerId.trim()
         : '';
-      if (fromJwt) {
-        if (headerOwner && headerOwner !== fromJwt) {
-          fail('Owner id does not match access token', 'owner_mismatch');
+      // Prefer JWT `sub` (source of truth). A stale x-owner-id must not block provision.
+      const serverUserId = fromJwt || headerOwner;
+      if (serverUserId) {
+        try {
+          const user = await loadUser(serverUserId);
+          return syncWallets(user, serverUserId, token);
+        } catch (error) {
+          // Fall through to /users/me when Origin is available (local Node).
+          if (!sanitizeOrigin(origin) || !(error instanceof WalletError)) throw error;
         }
-        const user = await loadUser(fromJwt);
-        return syncWallets(user, headerOwner || fromJwt, token);
       }
       const session = await this.readSession({ accessToken: token, ownerId, origin });
       return syncWallets(session.user, session.ownerId, session.accessToken);
