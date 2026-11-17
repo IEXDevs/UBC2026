@@ -88,13 +88,31 @@ function requestOrigin(request, env = {}) {
   return sanitizeOrigin(env.WEB_ORIGIN || env.PRIVY_ALLOWED_ORIGIN || '');
 }
 
-async function resolveOwner(request, env) {
+function privySecretsPresent(env) {
+  return typeof env?.PRIVY_APP_ID === 'string' && env.PRIVY_APP_ID.trim() !== ''
+    && typeof env?.PRIVY_APP_SECRET === 'string' && env.PRIVY_APP_SECRET.trim() !== '';
+}
+
+/**
+ * Resolve the caller’s owner id from a verified Privy access token when secrets exist.
+ * A bare `x-owner-id` is only accepted in offline/unconfigured environments (no Privy secrets).
+ * When both header and JWT are present, the verified JWT identity wins; a conflicting header is rejected.
+ */
+export async function resolveOwner(request, env) {
   const header = ownerHeader(request);
   const token = bearerToken(request);
-  if (!token) return { ownerId: header, user: null, token: '' };
+  const needsLogin = privySecretsPresent(env);
+
+  if (!token) {
+    if (needsLogin) return { ownerId: null, user: null, token: '', error: 'login_required' };
+    return { ownerId: header, user: null, token: '' };
+  }
 
   const client = privyClient(env);
-  if (!client?.acceptLogin) return { ownerId: header, user: null, token };
+  if (!client?.acceptLogin) {
+    if (needsLogin) return { ownerId: null, user: null, token, error: 'login_required' };
+    return { ownerId: header, user: null, token };
+  }
 
   try {
     const result = await client.acceptLogin({
@@ -102,13 +120,17 @@ async function resolveOwner(request, env) {
       ownerId: header || undefined,
       origin: requestOrigin(request, env),
     });
-    const ownerId = header || result?.main?.ownerId || result?.userId || null;
-    return { ownerId, user: result, token };
+    const verified = result?.main?.ownerId || result?.userId || null;
+    if (header && verified && header !== verified) {
+      return { ownerId: null, user: null, token, error: 'owner_mismatch' };
+    }
+    return { ownerId: verified || header || null, user: result, token };
   } catch (error) {
     if (error instanceof WalletError) {
-      return { ownerId: header, user: null, token, error: error.code || 'privy_failed' };
+      // Do not fall back to a client-supplied header after a failed Privy verify.
+      return { ownerId: null, user: null, token, error: error.code || 'privy_failed' };
     }
-    return { ownerId: header, user: null, token, error: 'privy_failed' };
+    return { ownerId: null, user: null, token, error: 'privy_failed' };
   }
 }
 
@@ -1084,6 +1106,54 @@ export async function handleApiData(request, env, matched) {
       source: 'supabase',
       items,
       crossCheck,
+    });
+  }
+
+  if (routeId === 'positions.list') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [], checks: [] });
+    const url = new URL(request.url);
+    const botId = url.searchParams.get('botId');
+    let path = `paper_positions?owner_id=eq.${encodeURIComponent(ownerId)}&status=eq.open&select=*&order=updated_at.desc&limit=100`;
+    let checksPath = `position_checks?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,bot_id,at,reason,status,flag,unrealized_loss_micro_usd,max_loss,created_at&order=at.desc&limit=50`;
+    if (typeof botId === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
+      // Still filter by owner_id — never trust botId alone (cross-user IDOR).
+      path = `paper_positions?owner_id=eq.${encodeURIComponent(ownerId)}&bot_id=eq.${encodeURIComponent(botId)}&status=eq.open&select=*&order=updated_at.desc&limit=100`;
+      checksPath = `position_checks?owner_id=eq.${encodeURIComponent(ownerId)}&bot_id=eq.${encodeURIComponent(botId)}&select=id,bot_id,at,reason,status,flag,unrealized_loss_micro_usd,max_loss,created_at&order=at.desc&limit=50`;
+    }
+    const [positions, checks] = await Promise.all([
+      supabaseGet(env, path, fetcher),
+      supabaseGet(env, checksPath, fetcher),
+    ]);
+    return json({
+      ok: true,
+      source: 'supabase',
+      items: (positions.rows || []).map((row) => ({
+        id: row.id,
+        ownerId: row.owner_id,
+        botId: row.bot_id,
+        mint: row.mint,
+        symbol: row.symbol,
+        quantity: amountText(row.quantity),
+        entryMicroUsdc: amountText(row.entry_micro_usdc),
+        realizedMicroUsdc: amountText(row.realized_micro_usdc),
+        status: row.status,
+        mode: row.mode,
+        cluster: row.cluster,
+        updatedAt: row.updated_at,
+      })).filter((row) => row.ownerId === ownerId),
+      checks: (checks.rows || []).map((row) => ({
+        id: row.id,
+        botId: row.bot_id,
+        at: row.at,
+        reason: row.reason,
+        status: row.status,
+        flag: row.flag,
+        unrealizedLossMicroUsd: amountText(row.unrealized_loss_micro_usd),
+        maxLoss: amountText(row.max_loss),
+      })),
     });
   }
 

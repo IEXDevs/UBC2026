@@ -12,6 +12,9 @@ import { alertFromGate, alertFromPauseReason, rememberBotAlert } from './bot-ale
 import { enrichEnv } from './runtime-env.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
+/** Set only by the Worker cron path that calls the DO stub directly — never from the public edge. */
+export const INTERNAL_POSITION_HEADER = 'x-maelstrom-internal';
+export const INTERNAL_POSITION_VALUE = 'position-check';
 
 function noStore(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -28,6 +31,19 @@ function ownerFrom(request) {
   const ownerId = request.headers.get(OWNER_HEADER);
   if (typeof ownerId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(ownerId)) return null;
   return ownerId;
+}
+
+function isInternalPositionCheck(request) {
+  return request.headers.get(INTERNAL_POSITION_HEADER) === INTERNAL_POSITION_VALUE;
+}
+
+function publicMeta(meta) {
+  if (!meta || typeof meta !== 'object') return null;
+  return {
+    botId: typeof meta.botId === 'string' ? meta.botId : null,
+    cluster: typeof meta.cluster === 'string' ? meta.cluster : null,
+    updatedAt: Number.isSafeInteger(meta.updatedAt) ? meta.updatedAt : null,
+  };
 }
 
 /**
@@ -129,19 +145,70 @@ export class BotStateMachine {
     const now = Date.now();
 
     if (request.method === 'GET' && url.pathname === '/status') {
-      const run = await this.get('run');
       const meta = await this.get('meta');
+      const ownerId = ownerFrom(request);
+      const metaOwner = typeof meta?.ownerId === 'string' ? meta.ownerId : null;
+      // Unauthenticated callers must not see paper positions, run goals, or check history.
+      if (!ownerId) {
+        return Response.json({
+          ok: true,
+          meta: publicMeta(meta),
+          run: null,
+          positionCheck: null,
+          auth: 'required',
+        }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (metaOwner && metaOwner !== ownerId) {
+        return Response.json({ error: 'owner_forbidden' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+      }
+      const run = await this.get('run');
       const positionCheck = await this.get('lastPositionCheck');
-      return Response.json({ ok: true, meta, run, positionCheck });
+      return Response.json({
+        ok: true,
+        meta,
+        run,
+        positionCheck,
+      }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     if (request.method === 'POST' && url.pathname === '/position-check') {
       const body = await request.json().catch(() => ({}));
       const botId = String(body.botId ?? '');
       if (!botId) return Response.json({ error: 'botId_required' }, { status: 400 });
+      const meta = await this.get('meta');
+      const metaOwner = typeof meta?.ownerId === 'string' ? meta.ownerId : null;
+      const headerOwner = ownerFrom(request);
+      const internal = isInternalPositionCheck(request);
+      // Public callers must prove owner. Cron uses the internal header set only on stub.fetch.
+      if (!internal) {
+        if (!headerOwner) {
+          return Response.json({ error: 'owner_required' }, { status: 401 });
+        }
+        if (metaOwner && metaOwner !== headerOwner) {
+          return Response.json({ error: 'owner_forbidden' }, { status: 403 });
+        }
+        if (typeof body.ownerId === 'string' && body.ownerId.length > 0 && body.ownerId !== headerOwner) {
+          return Response.json({ error: 'owner_mismatch' }, { status: 403 });
+        }
+      }
+      const ownerId = internal
+        ? (typeof body.ownerId === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(body.ownerId) ? body.ownerId : metaOwner)
+        : headerOwner;
+      if (ownerId && (!metaOwner || metaOwner !== ownerId)) {
+        await this.put('meta', {
+          ...(meta && typeof meta === 'object' ? meta : {}),
+          botId: meta?.botId || botId,
+          ownerId,
+          cluster: meta?.cluster || env.CLUSTER || 'devnet',
+          updatedAt: now,
+        });
+      }
       const stored = await this.get('positions');
       const fromBody = Array.isArray(body.positions) ? body.positions : [];
-      const positions = fromBody.length > 0 ? fromBody : (Array.isArray(stored) ? stored : []);
+      // Only the Worker cron (internal) or the verified owner may replace the book from the body.
+      const positions = (internal || headerOwner)
+        ? (fromBody.length > 0 ? fromBody : (Array.isArray(stored) ? stored : []))
+        : (Array.isArray(stored) ? stored : []);
       const checkedAt = Number.isSafeInteger(body.now) ? body.now : now;
       const check = assessPositions({
         bot: {
@@ -155,19 +222,22 @@ export class BotStateMachine {
         now: checkedAt,
       });
       await this.put('lastPositionCheck', check);
+      if (Array.isArray(fromBody) && fromBody.length > 0 && (internal || headerOwner)) {
+        await this.put('positions', fromBody.slice(0, 30));
+      }
       const history = await this.get('positionCheckHistory');
       const prior = Array.isArray(history) ? history : [];
       await this.put('positionCheckHistory', [...prior, check].slice(-48));
-      if (check.flag === 'max-loss' && typeof body.ownerId === 'string' && body.ownerId.length > 0) {
+      if (check.flag === 'max-loss' && ownerId) {
         await rememberBotAlert(env, this, {
           alert: 'max-loss',
           botId,
-          ownerId: body.ownerId,
+          ownerId,
           at: checkedAt,
           scope: checkedAt,
         });
       }
-      return Response.json({ ok: true, check });
+      return Response.json({ ok: true, check }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     if (request.method === 'POST' && url.pathname === '/alert') {
@@ -194,6 +264,15 @@ export class BotStateMachine {
       const botId = String(body.botId ?? '');
       const goal = String(body.goal ?? '');
       if (!botId) return Response.json({ error: 'botId_required' }, { status: 400 });
+      const headerOwner = ownerFrom(request);
+      const bodyOwner = typeof body.ownerId === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(body.ownerId)
+        ? body.ownerId
+        : null;
+      // Prefer verified header; ignore a body ownerId that conflicts with the header (IDOR attempt).
+      if (headerOwner && bodyOwner && headerOwner !== bodyOwner) {
+        return Response.json({ error: 'owner_mismatch' }, { status: 403 });
+      }
+      const ownerId = headerOwner || bodyOwner;
       let run = await this.get('run');
       if (!run || body.forceNew) {
         run = createEmptyRun({ runId: `run_${now}`, botId, goal, now });
@@ -202,7 +281,12 @@ export class BotStateMachine {
       }
       run = advanceRun(run, 'research', body.reason ?? 'wake', now);
       await this.put('run', run);
-      await this.put('meta', { botId, cluster: env.CLUSTER ?? 'devnet', updatedAt: now });
+      await this.put('meta', {
+        botId,
+        ownerId: ownerId || null,
+        cluster: env.CLUSTER ?? 'devnet',
+        updatedAt: now,
+      });
       return Response.json({ ok: true, run });
     }
 

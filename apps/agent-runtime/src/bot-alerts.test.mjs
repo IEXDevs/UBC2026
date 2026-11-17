@@ -108,7 +108,11 @@ test('a max-loss check and a verify mismatch land on that bot timeline only', as
   const other = new BotStateMachine();
   const checked = await desk.handle(new Request('https://bot/position-check', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-maelstrom-internal': 'position-check',
+      'x-owner-id': 'user_1',
+    },
     body: JSON.stringify({
       botId: 'bot_desk',
       ownerId: 'user_1',

@@ -1,7 +1,8 @@
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
 import { handleSpend } from './spend-route.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
-import { BotDurableObject } from './bot-do.mjs';
+import { BotDurableObject, INTERNAL_POSITION_HEADER, INTERNAL_POSITION_VALUE } from './bot-do.mjs';
+import { persistPositionCheck } from './position-persist.mjs';
 import {
   processQuickNodeWebhook,
   processStreamWalletSync,
@@ -19,11 +20,35 @@ import {
 import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
-import { handleApiData } from './api-data.mjs';
+import { handleApiData, resolveOwner } from './api-data.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
 import { rememberBotAlert } from './bot-alerts.mjs';
-import { supabaseConfig } from './supabase-rest.mjs';
+import { supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 import { corsPreflightResponse, withCors } from './cors.mjs';
+
+const OWNER_HEADER = 'x-owner-id';
+
+/**
+ * Status / positions: identity from resolveOwner (Privy bearer when secrets exist),
+ * then prove that owner owns the bot when Supabase is configured.
+ */
+async function assertBotOwner(request, env, botId) {
+  const { ownerId, error } = await resolveOwner(request, env);
+  if (error && !ownerId) {
+    const status = error === 'owner_mismatch' ? 403 : 401;
+    return { ok: false, status, error, ownerId: null };
+  }
+  if (!ownerId) return { ok: false, status: 401, error: 'owner_required', ownerId: null };
+  if (!supabaseConfig(env)) return { ok: true, ownerId };
+  const result = await supabaseGet(
+    env,
+    `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+    env.fetch ?? fetch,
+  );
+  if (!result.configured) return { ok: true, ownerId };
+  if (!result.rows?.length) return { ok: false, status: 404, error: 'bot_not_found', ownerId };
+  return { ok: true, ownerId };
+}
 
 export { BotDurableObject };
 
@@ -115,6 +140,10 @@ async function dispatch(request, env, rawEnv = env) {
     if (matched?.route.action && matched.params.botId) {
       const stub = botStub(env, matched.params.botId);
       const botId = matched.params.botId;
+      if (matched.route.action === 'status' || matched.route.id === 'bots.status' || matched.route.id === 'bots.status.root') {
+        const gate = await assertBotOwner(request, env, botId);
+        if (!gate.ok) return json({ error: gate.error }, gate.status);
+      }
       const prefix = `/bots/${encodeURIComponent(botId)}`;
       const rest = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : '';
       const target = rest.startsWith('/browser/')
@@ -149,6 +178,7 @@ async function dispatch(request, env, rawEnv = env) {
       'profiles.lookup',
       'transfers.list',
       'transfers.create',
+      'positions.list',
     ].includes(matched.route.id)) {
       const response = await handleApiData(request, env, matched);
       if (response) return response;
@@ -158,6 +188,10 @@ async function dispatch(request, env, rawEnv = env) {
     if (botMatch) {
       const botId = decodeURIComponent(botMatch[1]);
       const action = botMatch[2] ?? 'status';
+      if (action === 'status') {
+        const gate = await assertBotOwner(request, env, botId);
+        if (!gate.ok) return json({ error: gate.error }, gate.status);
+      }
       const stub = botStub(env, botId);
       const target = new URL(`https://bot/${action}`);
       return stub.fetch(new Request(target, request));
@@ -244,10 +278,17 @@ const worker = {
 
 function logCron(env, ctx, detail) {
   if (!supabaseConfig(env) || typeof ctx?.waitUntil !== 'function') return;
+  // Security: never log full position books, quotes, or balances — ids + flags only.
+  const safe = {
+    cron: typeof detail?.cron === 'string' ? detail.cron.slice(0, 64) : null,
+    botCount: Array.isArray(detail?.bots) ? detail.bots.length : 0,
+    bots: Array.isArray(detail?.bots) ? detail.bots.slice(0, 50).map(id => String(id).slice(0, 128)) : [],
+    streamDropped: detail?.streamDropped === true,
+  };
   ctx.waitUntil(persistActivity(env, {
     source: 'cron',
-    action: `cron ${detail.cron ?? 'scheduled'}`,
-    detail,
+    action: `cron ${safe.cron ?? 'scheduled'}`,
+    detail: safe,
   }).catch(() => {}));
 }
 
@@ -326,11 +367,23 @@ function deliverCheck(env, bot, details) {
   payload.balance = recorded.balance;
   const response = botStub(env, bot.id).fetch(new Request('https://bot/position-check', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      [INTERNAL_POSITION_HEADER]: INTERNAL_POSITION_VALUE,
+      ...(payload.ownerId ? { [OWNER_HEADER]: payload.ownerId } : {}),
+    },
     body: JSON.stringify(payload),
   })).then(response => response, () => Response.json({ ok: false, check: recorded }));
-  if (recorded.flag === 'max-loss' && payload.ownerId) {
-    return response.then(async (delivered) => {
+  return response.then(async (delivered) => {
+    if (payload.ownerId) {
+      await persistPositionCheck(env, {
+        ownerId: payload.ownerId,
+        botId: bot.id,
+        check: recorded,
+        positions: payload.positions,
+      }).catch(() => {});
+    }
+    if (recorded.flag === 'max-loss' && payload.ownerId) {
       await rememberBotAlert(env, null, {
         alert: 'max-loss',
         botId: bot.id,
@@ -338,8 +391,7 @@ function deliverCheck(env, bot, details) {
         at: payload.now,
         scope: payload.now,
       });
-      return delivered;
-    });
-  }
-  return response;
+    }
+    return delivered;
+  });
 }

@@ -1,0 +1,70 @@
+/**
+ * Rigor audit — position-persist service-role writes
+ * Achieves: verified ownerId is stamped on every row; unconfigured env is a no-op;
+ *   invalid ids refuse; detail payloads redact Authorization-like keys via redactForLog.
+ * Fails when: client-supplied owner is accepted without id shape checks, or secret
+ *   headers land in detail unredacted.
+ * Oracle: persistPositionCheck stamps owner_id from argument, not from position rows.
+ * Side effects: mocked supabaseWrite capture only.
+ * Gaps: does not hit live PostgREST; RLS exercised in supabase/paper-positions.test.mjs.
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { persistPositionCheck } from './position-persist.mjs';
+
+const MINT = 'So11111111111111111111111111111111111111112';
+
+test('persistPositionCheck refuses bad ids and skips when Supabase is unset', async () => {
+  const skipped = await persistPositionCheck({}, {
+    ownerId: 'alice',
+    botId: 'bot_1',
+    check: { at: 1, flag: 'clear', status: 'checked', unrealizedLossMicroUsd: '0' },
+  });
+  assert.equal(skipped.wrote, false);
+  assert.equal(skipped.reason, 'unconfigured');
+
+  const bad = await persistPositionCheck({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+  }, { ownerId: '../evil', botId: 'bot_1', check: {} });
+  assert.equal(bad.wrote, false);
+  assert.equal(bad.reason, 'invalid_ids');
+});
+
+test('persistPositionCheck stamps verified owner_id and redacts secret keys in detail', async () => {
+  const writes = [];
+  const env = {
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-secret',
+    fetch: async (url, init) => {
+      writes.push({ url: String(url), body: JSON.parse(init.body) });
+      return new Response('[]', { status: 201, headers: { 'content-type': 'application/json' } });
+    },
+  };
+  const result = await persistPositionCheck(env, {
+    ownerId: 'alice',
+    botId: 'bot_1',
+    check: {
+      at: 99,
+      reason: 'cron-hourly',
+      status: 'checked',
+      flag: 'within-cap',
+      unrealizedLossMicroUsd: '0',
+      positions: [{ mint: MINT, amount: '1', decimals: 9 }],
+      authorization: 'Bearer should-not-land',
+    },
+    positions: [{ mint: MINT, amount: '1000', decimals: 9, entryMicroUsd: '10' }],
+  });
+  assert.equal(result.wrote, true);
+  assert.ok(writes.length >= 2);
+  const checkWrite = writes.find(row => row.url.includes('position_checks'));
+  assert.equal(checkWrite.body.owner_id, 'alice');
+  assert.equal(checkWrite.body.bot_id, 'bot_1');
+  assert.equal(JSON.stringify(checkWrite.body).includes('service-role-secret'), false);
+  assert.equal(JSON.stringify(checkWrite.body.detail).includes('should-not-land'), false);
+  const posWrite = writes.find(row => row.url.includes('paper_positions'));
+  assert.equal(posWrite.body.owner_id, 'alice');
+  assert.equal(posWrite.body.bot_id, 'bot_1');
+  assert.equal(posWrite.body.mode, 'paper');
+  assert.equal(posWrite.body.broadcast, undefined);
+});

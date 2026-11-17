@@ -360,3 +360,43 @@ test('assetByMint resolves paper universe mints and returns null for unknowns', 
   assert.equal(assetByMint(''), null);
   assert.equal(assetByMint(null), null);
 });
+
+/**
+ * Rigor audit — cross-owner paper book refusal
+ * Achieves: close/mark refuse when position.ownerId != bot.ownerId (IDOR).
+ * Fails when: attacker bot object can close or mark another owner's lot.
+ * Oracle: bot_mismatch / owner_mismatch guards in closePaperPosition / markPaperBook.
+ * Side effects: none beyond in-memory book.
+ * Gaps: persistence/RLS covered in supabase/paper-positions.test.mjs.
+ */
+test('a bot cannot close or mark another owner\'s paper lot by swapping ownerId', async () => {
+  const book = createPaperBook();
+  const opened = openPaperPosition({
+    book,
+    bot: trader,
+    mint: SOL,
+    quantity: '1000000000',
+    quote: quote(SOL, '100'),
+    now: NOW,
+    idempotencyKey: 'owned',
+  });
+  assert.throws(() => closePaperPosition({
+    book,
+    bot: { ...trader, ownerId: 'attacker' },
+    positionId: opened.position.id,
+    quantity: '1',
+    quote: quote(SOL, '100', { fetchedAt: new Date(NOW + MIN_HOLD_MS).toISOString() }),
+    now: NOW + MIN_HOLD_MS,
+    idempotencyKey: 'steal-owner',
+  }), error => error.code === 'bot_mismatch');
+
+  await assert.rejects(
+    markPaperBook({
+      bot: { ...watcher, ownerId: 'attacker' },
+      positions: [opened.position],
+      lookup: async () => quote(SOL, '90'),
+      now: NOW,
+    }),
+    error => error.code === 'owner_mismatch',
+  );
+});

@@ -64,7 +64,9 @@ test('BotStateMachine control plane works without Cloudflare DO runtime', async 
 
   const empty = await machine.handle(new Request('https://bot/status'));
   assert.equal(empty.status, 200);
-  assert.equal((await empty.json()).run, null);
+  const emptyBody = await empty.json();
+  assert.equal(emptyBody.run, null);
+  assert.equal(emptyBody.positionCheck, null);
 
   const wakeBad = await machine.handle(new Request('https://bot/wake', {
     method: 'POST',
@@ -75,8 +77,8 @@ test('BotStateMachine control plane works without Cloudflare DO runtime', async 
 
   const wake = await machine.handle(new Request('https://bot/wake', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ botId: 'bot_1', goal: 'watch' }),
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ botId: 'bot_1', goal: 'watch', ownerId: 'user_1' }),
   }), { CLUSTER: 'devnet' });
   assert.equal(wake.status, 200);
 
@@ -97,8 +99,8 @@ test('BotStateMachine control plane works without Cloudflare DO runtime', async 
 
   const blockedWake = await machine.handle(new Request('https://bot/wake', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ botId: 'bot_1' }),
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ botId: 'bot_1', ownerId: 'user_1' }),
   }));
   assert.equal(blockedWake.status, 409);
 
@@ -107,9 +109,14 @@ test('BotStateMachine control plane works without Cloudflare DO runtime', async 
 
   const check = await machine.handle(new Request('https://bot/position-check', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-owner-id': 'user_1',
+      'x-maelstrom-internal': 'position-check',
+    },
     body: JSON.stringify({
       botId: 'bot_1',
+      ownerId: 'user_1',
       reason: 'unit',
       now: 1_700_000_000_000,
       positions: [],
@@ -122,7 +129,12 @@ test('BotStateMachine control plane works without Cloudflare DO runtime', async 
   assert.equal(checkBody.ok, true);
   assert.equal(checkBody.check.botId, 'bot_1');
 
-  const status = await machine.handle(new Request('https://bot/status'));
+  const deniedStatus = await machine.handle(new Request('https://bot/status'));
+  assert.equal((await deniedStatus.json()).positionCheck, null);
+
+  const status = await machine.handle(new Request('https://bot/status', {
+    headers: { 'x-owner-id': 'user_1' },
+  }));
   const body = await status.json();
   assert.equal(body.run.botId, 'bot_1');
   assert.equal(body.run.paused, false);

@@ -22,6 +22,7 @@ const ALLOWED = Object.freeze([
   /^\/api\/logs$/,
   /^\/api\/decisions$/,
   /^\/api\/payments$/,
+  /^\/api\/positions$/,
   /^\/api\/metrics$/,
   /^\/api\/profiles\/me$/,
   /^\/api\/profiles\/lookup$/,
