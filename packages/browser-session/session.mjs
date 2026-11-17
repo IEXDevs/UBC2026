@@ -71,7 +71,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_open',
-    description: 'Open a Cloudflare browser session owned by this bot. Pass url (https) to load a page — without url the Live View stays on about:blank. If this bot is already at its session limit, reuses the newest open session and navigates when url is set. Does not expose CDP or privileged URLs.',
+    description: 'Open a Cloudflare browser session owned by this agent. Pass url (https) to load a page — without url the Live View stays on about:blank. If this agent is already at its session limit, reuses the newest open session and navigates when url is set. Do not open x.com, twitter.com, or reddit.com; those sites block this browser. Does not expose CDP or privileged URLs.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -83,7 +83,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_navigate',
-    description: 'Open a new tab to an https URL in an existing bot-owned browser session. Prefer this over browser_open when a session is already open and the owner asks to look something up or change pages.',
+    description: 'Open a new tab to an https URL in an existing agent-owned browser session. Prefer this over browser_open when a session is already open and the owner asks to look something up or change pages. Do not open x.com, twitter.com, or reddit.com.',
     parameters: {
       type: 'object',
       additionalProperties: false,

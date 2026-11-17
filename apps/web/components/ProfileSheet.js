@@ -137,7 +137,7 @@ export default function ProfileSheet({
               <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>
               <p className="quiet">{wallets?.length ? glance.label : 'Sign-in provisions the main Privy wallet'}</p>
               <AddressCopy address={glance.address} />
-              <p className="quiet">Balance is from live positions when bots open them. devnet execution, mainnet pricing.</p>
+              <p className="quiet">Balance is from live positions when agents open them. devnet execution, mainnet pricing.</p>
               <ul className="profile-wallets">
                 {(wallets || []).map(wallet => (
                   <li key={wallet.id}>

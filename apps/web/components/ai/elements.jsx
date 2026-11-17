@@ -1,9 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { Orb } from '@yogesharc/thinking-orbs';
-import { chatOrbLook } from '../../lib/voice-orb.mjs';
-import { Trace, TraceDescription, TraceLine, TraceTitle } from '../ui/trace';
+import { CircleCheck, FileText, LoaderCircle, Search, Terminal } from 'lucide-react';
+import { CodeBlock, CodeBlockContent } from '../ui/code-block';
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from '../ui/trace';
 import './elements.css';
 
 function traceStatus(status) {
@@ -13,45 +22,87 @@ function traceStatus(status) {
   return undefined;
 }
 
+function ReasoningRow({ text = '', streaming = false }) {
+  const [open, setOpen] = useState();
+  const body = String(text || '').trim();
+  const line = (
+    <TraceLine status={streaming ? 'running' : undefined}>
+      <TraceIcon>
+        {streaming ? <LoaderCircle className="animate-spin" /> : <CircleCheck />}
+      </TraceIcon>
+      <TraceTitle>{streaming ? 'Thinking' : 'Thought'}</TraceTitle>
+    </TraceLine>
+  );
+  if (!body) return line;
+  return (
+    <TraceCollapsible open={open ?? streaming} onOpenChange={setOpen}>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="whitespace-pre-wrap">{body}</TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
+}
+
 export function Reasoning({ text = '', streaming = false }) {
-  const [open, setOpen] = useState(Boolean(streaming));
-  const look = chatOrbLook('think');
+  const body = String(text || '').trim();
+  if (!streaming && !body) return null;
   return (
     <Trace>
-      <button type="button" className="w-fit border-0 bg-transparent p-0 text-left" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-        <TraceLine status={streaming ? 'running' : undefined}>
-          {streaming ? <Orb state={look.state} variant={look.variant} size={16} label={look.label} /> : null}
-          <TraceTitle>{streaming ? 'Thinking' : 'Thought'}</TraceTitle>
-        </TraceLine>
-      </button>
-      {open && text ? <p className="m-0 max-w-full pl-1 text-sm leading-relaxed text-muted-foreground">{text}</p> : null}
+      <ReasoningRow text={body} streaming={streaming} />
     </Trace>
+  );
+}
+
+function Output({ text, failed = false }) {
+  if (!text) return null;
+  return (
+    <CodeBlock size="sm" variant={failed ? 'destructive' : 'default'}>
+      <CodeBlockContent wrap className="max-h-64">{text}</CodeBlockContent>
+    </CodeBlock>
   );
 }
 
 export function ToolCall({ name, input, status }) {
+  const failed = status === 'error';
+  const running = status === 'running';
+  const line = (
+    <TraceLine status={traceStatus(status)}>
+      <TraceIcon>
+        <Terminal />
+      </TraceIcon>
+      <TraceTitle>{running ? `Running ${name}` : failed ? `Failed ${name}` : name}</TraceTitle>
+    </TraceLine>
+  );
+  if (!input) return line;
   return (
-    <Trace>
-      <TraceLine status={traceStatus(status)}>
-        <TraceTitle>{name}</TraceTitle>
-        {input ? <TraceDescription>{input}</TraceDescription> : null}
-      </TraceLine>
-    </Trace>
+    <TraceCollapsible defaultOpen={failed || running}>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <Output text={input} failed={failed} />
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 }
 
 export function TerminalBlock({ command, status }) {
+  const failed = status === 'error';
+  const running = status === 'running';
+  const title = running ? `Running ${command}` : failed ? `${command} failed` : `Ran ${command}`;
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-background">
-      <div className="px-3 pt-2">
-        <Trace>
+    <Trace>
+      <TraceCollapsible defaultOpen={running || failed}>
+        <TraceCollapsibleTrigger>
           <TraceLine status={traceStatus(status)}>
-            <TraceTitle>Terminal</TraceTitle>
+            <TraceIcon>
+              <Terminal />
+            </TraceIcon>
+            <TraceTitle>{title}</TraceTitle>
           </TraceLine>
-        </Trace>
-      </div>
-      <pre className="m-0 overflow-x-auto px-3 py-2 text-xs text-foreground">{command}</pre>
-    </div>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>
+          <Output text={command} failed={failed} />
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
   );
 }
 
@@ -60,24 +111,30 @@ export function ChainOfThought({ sections = [], onSelect }) {
   return (
     <Trace>
       {sections.map((section) => (
-        <div key={section.value} className="flex flex-col gap-1">
-          <TraceLine>
-            <TraceTitle>{section.label}</TraceTitle>
-            <TraceDescription>{section.children?.length ?? 0}</TraceDescription>
-          </TraceLine>
-          {(section.children || []).map((child) => (
-            <button
-              key={child.value}
-              type="button"
-              className="w-fit border-0 bg-transparent p-0 pl-4 text-left"
-              onClick={() => onSelect?.(child.value)}
-            >
-              <TraceLine status="pending">
-                <TraceTitle>{child.label}</TraceTitle>
-              </TraceLine>
-            </button>
-          ))}
-        </div>
+        <TraceCollapsible key={section.value} defaultOpen>
+          <TraceCollapsibleTrigger>
+            <TraceLine>
+              <TraceTitle>{section.label}</TraceTitle>
+              <TraceDescription>{section.children?.length ?? 0}</TraceDescription>
+            </TraceLine>
+          </TraceCollapsibleTrigger>
+          <TraceCollapsibleContent>
+            <Trace>
+              {(section.children || []).map((child) => (
+                <button
+                  key={child.value}
+                  type="button"
+                  className="w-fit border-0 bg-transparent p-0 text-left"
+                  onClick={() => onSelect?.(child.value)}
+                >
+                  <TraceLine status="pending">
+                    <TraceTitle>{child.label}</TraceTitle>
+                  </TraceLine>
+                </button>
+              ))}
+            </Trace>
+          </TraceCollapsibleContent>
+        </TraceCollapsible>
       ))}
     </Trace>
   );
@@ -119,52 +176,95 @@ function SiteChip({ site }) {
   );
 }
 
+function SearchRow({ label, sites = [], icon = null }) {
+  const line = (
+    <TraceLine>
+      <TraceIcon>
+        {icon || <Search />}
+      </TraceIcon>
+      <TraceTitle>{label}</TraceTitle>
+      {sites.length > 0 ? <TraceDescription>{sites.length}</TraceDescription> : null}
+    </TraceLine>
+  );
+  if (sites.length === 0) return line;
+  return (
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <div className="agent-sites">
+          {sites.map((site) => <SiteChip key={site.url} site={site} />)}
+        </div>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
+}
+
 export function AgentTrace({ steps = [] }) {
   if (!steps.length) return null;
   return (
-    <div className="agent-trace">
+    <Trace className="agent-trace">
       {steps.map((step, index) => {
         const key = `${step.kind}-${index}`;
-        if (step.kind === 'think') return <Reasoning key={key} text={step.text} />;
+        if (step.kind === 'think') return <ReasoningRow key={key} text={step.text} />;
         if (step.kind === 'search') {
           return (
-            <div key={key} className="agent-search">
-              <p className="agent-search-label">{step.query ? `Searched ${step.query}` : 'Searched the web'}</p>
-              {step.sites.length > 0 ? (
-                <div className="agent-sites">
-                  {step.sites.map((site) => <SiteChip key={site.url} site={site} />)}
-                </div>
-              ) : null}
-            </div>
+            <SearchRow
+              key={key}
+              label={step.query ? `Searched ${step.query}` : 'Searched the web'}
+              sites={step.sites}
+            />
           );
         }
         if (step.kind === 'page') {
           return (
-            <div key={key} className="agent-search">
-              <p className="agent-search-label">{step.label}</p>
-              <div className="agent-sites">
-                <SiteChip site={step} />
-              </div>
-            </div>
+            <SearchRow
+              key={key}
+              label={step.label}
+              icon={<FileText />}
+              sites={[{ title: step.title || step.host, url: step.url, host: step.host }]}
+            />
           );
         }
-        return <ToolCall key={key} name={step.label} input={step.detail} status={step.status === 'error' ? 'error' : undefined} />;
+        return (
+          <ToolCall
+            key={key}
+            name={step.label}
+            input={step.detail}
+            status={step.status === 'error' ? 'error' : undefined}
+          />
+        );
       })}
-    </div>
+    </Trace>
   );
 }
 
 export function Sources({ urls = [] }) {
   if (urls.length === 0) return null;
   return (
-    <div className="flex flex-col gap-1 text-sm">
-      <span className="text-muted-foreground">Sources</span>
-      {urls.map((url) => (
-        <a key={url} href={url} target="_blank" rel="noreferrer" className="max-w-full truncate text-foreground underline-offset-2 hover:underline">
-          {url}
-        </a>
-      ))}
-    </div>
+    <Trace>
+      <TraceCollapsible>
+        <TraceCollapsibleTrigger>
+          <TraceLine>
+            <TraceIcon>
+              <FileText />
+            </TraceIcon>
+            <TraceTitle>Sources</TraceTitle>
+            <TraceDescription>{urls.length}</TraceDescription>
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent>
+          <Trace>
+            {urls.map((url) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer" className="max-w-full">
+                <TraceLine>
+                  <TraceTitle>{url}</TraceTitle>
+                </TraceLine>
+              </a>
+            ))}
+          </Trace>
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
   );
 }
 

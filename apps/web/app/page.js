@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Plus, Search, Wallet } from 'lucide-react';
+import { Plus, Search, Wallet } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
@@ -338,7 +338,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [roster, setRoster] = useState({ order: [], extra: [] });
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState('');
-  const [railCollapsed, setRailCollapsed] = useState(false);
   const [sideWidth, setSideWidth] = useState(300);
   const [detailWidth, setDetailWidth] = useState(280);
   const [paneDrag, setPaneDrag] = useState(false);
@@ -1169,19 +1168,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (event.button !== 0) return;
     event.preventDefault();
     const startX = event.clientX;
-    const startSide = railCollapsed ? 88 : sideWidth;
+    const startSide = sideWidth;
     const startDetail = detailWidth;
     setPaneDrag(true);
     function move(next) {
       const delta = next.clientX - startX;
       if (side === 'left') {
-        const width = startSide + delta;
-        if (width <= 168) {
-          setRailCollapsed(true);
-          return;
-        }
-        setRailCollapsed(false);
-        setSideWidth(Math.min(480, Math.max(200, width)));
+        setSideWidth(Math.min(480, Math.max(240, startSide + delta)));
         return;
       }
       setDetailWidth(Math.min(520, Math.max(220, startDetail - delta)));
@@ -1324,15 +1317,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     toast?.(`Sent ${amountLabel} to @${body.transfer.handle}`);
   }
 
-  const sideColumn = railCollapsed ? 88 : sideWidth;
   const noAgents = bots.length === 0;
   return (
     <>
     <div
-      className={`shell${noAgents ? ' is-empty' : ''}${pane === 'Positions' ? ' is-book' : ''}${railCollapsed ? ' is-collapsed' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}${setupStep === 'handle' || claimWelcome ? ' is-claim' : ''}`}
-      style={{ '--side-w': `${sideColumn}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
+      className={`shell${noAgents ? ' is-empty' : ''}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}${setupStep === 'handle' || claimWelcome ? ' is-claim' : ''}`}
+      style={{ '--side-w': `${sideWidth}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
     >
-      <aside className={`side${railCollapsed ? ' is-collapsed' : ''}`}>
+      <aside className="side">
         <div
           className="pane-resize"
           role="separator"
@@ -1341,17 +1333,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           onPointerDown={event => dragPane(event, 'left')}
         />
         <div className="side-tools">
-          <button
-            type="button"
-            className="icon-btn rail-toggle"
-            aria-pressed={railCollapsed}
-            aria-label={railCollapsed ? 'Expand sidebar' : 'Minimize sidebar'}
-            onClick={() => setRailCollapsed(current => !current)}
-          >
-            {railCollapsed
-              ? <PanelLeftOpen size={16} strokeWidth={1.75} />
-              : <PanelLeftClose size={16} strokeWidth={1.75} />}
-          </button>
           <label className="search">
             <Search size={16} strokeWidth={1.75} />
             <input
@@ -1369,7 +1350,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           bots={visible}
           activeId={bot?.id}
           canDrag={!query.trim()}
-          collapsed={railCollapsed}
           onSelect={openChat}
           onReorder={onReorder}
           onDelete={onDelete}
@@ -1384,7 +1364,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               fallback: accountLabel,
             })}
             avatarUrl={avatarUrl}
-            collapsed={railCollapsed}
             signedIn={signedIn}
             loginDisabled={loginDisabled}
             walletUnlocked={unlocked}

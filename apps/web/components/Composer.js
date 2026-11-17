@@ -374,8 +374,8 @@ export default function Composer({
     try {
       if (!ownerId || !botId) {
         pushLine('agent', ownerId
-          ? 'Pick a bot before chatting.'
-          : 'Sign in to chat with this bot.');
+          ? 'Pick an agent before chatting.'
+          : 'Sign in to chat with this agent.');
         return;
       }
       const result = await sendBotChat({
@@ -417,8 +417,8 @@ export default function Composer({
     try {
       if (!ownerId || !botId) {
         pushLine('agent', ownerId
-          ? 'Pick a bot before chatting.'
-          : 'Sign in to chat with this bot.');
+          ? 'Pick an agent before chatting.'
+          : 'Sign in to chat with this agent.');
         return;
       }
       const result = await sendBotChat({
@@ -970,8 +970,8 @@ function chatFailureNote(code) {
   if (code === 'openrouter_failed' || code === 'openrouter_unavailable') {
     return 'The model call failed. Try again in a moment.';
   }
-  if (code === 'not_found' || code === 'bot_not_found') return 'This bot was not found for your account.';
-  if (code === 'invalid_request') return 'Sign in to chat with this bot.';
+  if (code === 'not_found' || code === 'bot_not_found') return 'This agent was not found for your account.';
+  if (code === 'invalid_request') return 'Sign in to chat with this agent.';
   if (code === 'network') return 'Could not reach the chat API for a reply.';
   return 'I could not reply just now.';
 }

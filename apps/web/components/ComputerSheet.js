@@ -37,7 +37,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
     const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/status`);
     if (!ownerId || !url) {
       setSteps(loopStepsFromRun(null));
-      setLoopNote(ownerId ? 'This bot id cannot be loaded from the runtime.' : 'Sign in to load this bot’s loop.');
+      setLoopNote(ownerId ? 'This agent cannot be loaded from the runtime.' : 'Sign in to load this agent’s loop.');
       return undefined;
     }
     let stop = false;

@@ -93,7 +93,7 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.equal(text.includes(SECRET), false);
   assert.equal(text.includes(OPENROUTER), false);
   assert.equal(text.includes(ELEVEN), false);
-  assert.match(text, /Stopping all bots now/);
+  assert.match(text, /Stopping every agent now/);
 });
 
 test('get_price quotes DexScreener then Jupiter and does not authorize a transfer', async () => {

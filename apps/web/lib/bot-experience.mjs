@@ -192,7 +192,7 @@ export function whyExplanation(decision, events = []) {
   const empty = {
     title: 'Why did it do this?',
     showsChainOfThought: false,
-    lines: ['No decision record is stored for this bot yet.'],
+    lines: ['No decision record is stored for this agent yet.'],
     digests: null,
     memo: null,
     reasonSummary: null,

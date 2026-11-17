@@ -49,7 +49,7 @@ export default function SecurityPanel({
           results.push(0);
         }
       }
-      setMessage(`Pause requested for ${results.length} bot(s).`);
+      setMessage(`Pause requested for ${results.length} agent(s).`);
     } else if (action.id === 'request-grab-back') {
       if (ownerId) {
         try {
@@ -86,7 +86,7 @@ export default function SecurityPanel({
     } else if (action.id === 'freeze-all-bots' || action.id === 'unfreeze-all-bots') {
       const freeze = action.id === 'freeze-all-bots';
       if (!ownerId) {
-        setMessage('Sign in before freezing bots.');
+        setMessage('Sign in before freezing agents.');
         setPending(null);
         return;
       }
@@ -112,8 +112,8 @@ export default function SecurityPanel({
           return;
         }
         setMessage(freeze
-          ? `Froze ${data.count ?? 0} bot(s). New spends stay blocked until you unfreeze them.`
-          : `Unfroze ${data.count ?? 0} bot(s). A paused bot stays paused until you resume it.`);
+          ? `Froze ${data.count ?? 0} agent(s). New spends stay blocked until you unfreeze them.`
+          : `Unfroze ${data.count ?? 0} agent(s). A paused agent stays paused until you resume it.`);
       } catch {
         setMessage(freeze ? 'The freeze did not save.' : 'The unfreeze did not save.');
         setPending(null);
@@ -146,7 +146,7 @@ export default function SecurityPanel({
             <dd>{page.cluster}</dd>
           </div>
           <div>
-            <dt>Bots</dt>
+            <dt>Agents</dt>
             <dd>{page.summary.enabled} enabled · {page.summary.paused} paused · {page.summary.frozen} frozen</dd>
           </div>
         </dl>
@@ -188,8 +188,8 @@ export default function SecurityPanel({
         {message ? <p className="hint" role="status">{message}</p> : null}
       </section>
 
-      <section className="panel" aria-label="Bot freezes">
-        <h2>Bot freezes</h2>
+      <section className="panel" aria-label="Agent freezes">
+        <h2>Agent freezes</h2>
         <AnimatedList
           {...listLook({ maxHeight: 320 })}
           items={page.bots.map((bot) => ({

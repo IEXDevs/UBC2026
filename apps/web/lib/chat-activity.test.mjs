@@ -37,3 +37,16 @@ test('stored activity drops private urls and blank thoughts', () => {
   assert.deepEqual(steps[1].sites, []);
   assert.equal(steps[2].label, 'Checked a price');
 });
+
+test('repeated searches and a bare search query stay out of the log', () => {
+  const noisy = toolStep('web_search', { query: 'search' }, { results: [] });
+  assert.equal(noisy.query, '');
+  assert.equal(toolStep('browser_open', { url: 'https://x.com' }, { error: 'repeated_tool' }), null);
+  const blocked = toolStep('browser_navigate', { url: 'https://x.com' }, { error: 'site_blocked', host: 'x.com' });
+  assert.equal(blocked.label, 'Skipped a blocked site');
+  const steps = sanitizeActivity([
+    { kind: 'search', query: 'USDC', sites: [], status: 'done' },
+    { kind: 'search', query: 'USDC', sites: [], status: 'done' },
+  ]);
+  assert.equal(steps.length, 1);
+});

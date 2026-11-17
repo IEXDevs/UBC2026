@@ -147,7 +147,7 @@ export function buildOverview({ bots = [], ownerId = '', remoteMetric = null } =
 
   return {
     title: 'Overview',
-    subtitle: 'Owner rollup across every bot — decisions, gates, and spends.',
+    subtitle: 'Owner rollup across every agent — decisions, gates, and spends.',
     ownerId,
     botCount: list.length,
     byStatus,

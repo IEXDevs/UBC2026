@@ -57,7 +57,7 @@ export default function LogsPanel({
       title: event.kind || bot.name,
       lines: [
         event.summary ? { label: 'Event', value: event.summary } : null,
-        bot.name ? { label: 'Bot', value: bot.name } : null,
+        bot.name ? { label: 'Agent', value: bot.name } : null,
       ].filter(Boolean),
       solscanUrl: null,
     })))

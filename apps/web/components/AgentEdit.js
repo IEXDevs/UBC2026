@@ -17,11 +17,11 @@ function placePanel(x, y) {
   };
 }
 
-export function AgentPhoto({ shape, color, image, size, onImage, label = 'Change photo' }) {
+export function AgentPhoto({ shape, color, image, size, name = '', onImage, label = 'Change photo' }) {
   const inputRef = useRef(null);
   return (
     <div className="agent-photo" style={{ width: size, height: size }}>
-      <BotMark shape={shape} color={color} image={image} size={size} />
+      <BotMark shape={shape} color={color} image={image} name={name} size={size} />
       <button type="button" className="agent-pencil" aria-label={label} onClick={() => inputRef.current?.click()}>
         <HugeiconsIcon icon={PencilEdit01Icon} size={size > 80 ? 15 : 13} color="#ffffff" strokeWidth={2.25} />
       </button>
@@ -73,13 +73,27 @@ export default function AgentEdit({ bot, x, y, onClose, onSave, onDelete }) {
   const [color, setColor] = useState(bot.color);
   const [image, setImage] = useState(bot.image || '');
   const [moreColors, setMoreColors] = useState(false);
+  const [phase, setPhase] = useState('in');
+  const closing = useRef(false);
+
+  function requestClose() {
+    if (closing.current) return;
+    closing.current = true;
+    setPhase('out');
+    window.setTimeout(onClose, 200);
+  }
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setPhase('open'));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     function onKey(event) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') requestClose();
     }
     function onPointer(event) {
-      if (!event.target.closest?.('.agent-edit')) onClose();
+      if (!event.target.closest?.('.agent-edit')) requestClose();
     }
     document.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', onPointer);
@@ -95,7 +109,7 @@ export default function AgentEdit({ bot, x, y, onClose, onSave, onDelete }) {
 
   return createPortal(
     <form
-      className="agent-edit"
+      className={`agent-edit is-${phase}`}
       style={{ left: spot.x, top: spot.y }}
       onSubmit={(event) => {
         event.preventDefault();
@@ -105,7 +119,7 @@ export default function AgentEdit({ bot, x, y, onClose, onSave, onDelete }) {
       onMouseDown={event => event.stopPropagation()}
     >
       <div className="agent-edit-head">
-        <AgentPhoto shape={bot.shape} color={color} image={image} size={48} onImage={setImage} />
+        <AgentPhoto shape={bot.shape} color={color} image={image} name={name} size={48} onImage={setImage} />
         <input aria-label="Agent name" value={name} maxLength={64} onChange={event => setName(event.target.value)} />
       </div>
       <div className="swatches" role="listbox" aria-label="Agent color">

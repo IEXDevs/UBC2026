@@ -12,14 +12,14 @@ export function browserStatusNote({
   if (!ownerId) return 'Sign in to open an owner-bound Cloudflare browser session.';
   if (!sessionUrl) {
     return runtimeBase === 'shell'
-      ? 'This bot cannot open a browser session on the agent runtime.'
+      ? 'This agent cannot open a browser session on the agent runtime.'
       : 'Set NEXT_PUBLIC_AGENT_RUNTIME_URL to the Worker origin so Live View can open browser sessions.';
   }
   if (sessionRecordId) {
-    return 'A browser session is open for this bot (chat and this panel share it). Use Show live view — do not open another until you Release.';
+    return 'A browser session is open for this agent (chat and this panel share it). Use Show live view — do not open another until you Release.';
   }
   if (openCount > 0) {
-    return 'An open browser session was found for this bot. Use Show live view, or Release if you want a fresh one.';
+    return 'An open browser session was found for this agent. Use Show live view, or Release if you want a fresh one.';
   }
   return 'No browser session yet.';
 }
@@ -34,7 +34,7 @@ export function browserErrorNote(code) {
     return 'Firecrawl is not configured on the Worker (FIRECRAWL_API_KEY).';
   }
   if (key === 'concurrency_limit') {
-    return 'This bot already has the maximum open browser sessions (often one from chat). Use Show live view on the existing session, or Release first.';
+    return 'This agent already has the maximum open browser sessions (often one from chat). Use Show live view on the existing session, or Release first.';
   }
   if (key === 'owner_required' || key === 'forbidden') {
     return 'This browser session is not available for your account.';

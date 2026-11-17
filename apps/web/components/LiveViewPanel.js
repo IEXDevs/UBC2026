@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { browserErrorNote, browserStatusNote } from '../lib/browser-status.mjs';
 import { browserSessionUrl, liveViewFrame, pickOpenSession } from '../lib/live-view.mjs';
 import LatticeLoader from './bits/LatticeLoader';
+import HoldButton from './HoldButton';
 
 const runtimeBase = 'shell';
 
@@ -221,7 +222,6 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false, scr
       </div>
       {frame?.src ? (
         <div className="live-dock">
-          <span className="live-control-note">{driving ? 'You can interact' : 'Agent has control'}</span>
           <button
             className="cta"
             type="button"
@@ -230,9 +230,21 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false, scr
           >
             {driving ? 'Return control' : 'Take control'}
           </button>
-          <button className="ghost" type="button" disabled={!ready || busy} onClick={() => run('release')}>
-            Release
-          </button>
+          <HoldButton
+            className="live-stop"
+            doneLabel="Stopped"
+            backgroundColor="#3a1414"
+            fillColor="#e24b4b"
+            textColor="#fecaca"
+            fillTextColor="#ffffff"
+            size="md"
+            radius={999}
+            holdTime={800}
+            disabled={!ready}
+            onHold={() => run('release')}
+          >
+            Force stop
+          </HoldButton>
         </div>
       ) : null}
     </div>

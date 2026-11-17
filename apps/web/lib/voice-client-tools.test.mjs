@@ -33,7 +33,7 @@ test('voice client tools open bots and confirm without spending', async () => {
   assert.equal(confirm.accepted, true);
 
   const read = await tools.read_back({ topic: 'overview' });
-  assert.match(read.text, /3 bots/);
+  assert.match(read.text, /3 agents/);
   assert.ok(events.some((e) => e.kind === 'client.open_bot'));
 
   const missing = await runVoiceClientTool(tools, 'nope', {});

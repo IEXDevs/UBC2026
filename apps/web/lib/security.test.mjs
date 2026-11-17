@@ -17,8 +17,8 @@ test('security page lists kill-switch actions without secrets', () => {
   });
   assert.equal(page.signedIn, true);
   assert.equal(page.actions.length, 4);
-  assert.equal(securityActionLabel('unfreeze-all-bots'), 'Unfreeze every bot');
-  assert.equal(securityActionLabel('pause-all'), 'Pause every bot');
+  assert.equal(securityActionLabel('unfreeze-all-bots'), 'Unfreeze every agent');
+  assert.equal(securityActionLabel('pause-all'), 'Pause every agent');
   assert.ok(page.notes.every((n) => !/sk-|eyJ|secret/i.test(n)));
   assert.equal(pauseAllUrl('https://runtime.example/', 'bot_1'), 'https://runtime.example/bots/bot_1/pause');
   assert.equal(pauseAllUrl('javascript:x', 'bot_1'), null);

@@ -32,5 +32,6 @@ test('the live browser opens from the sidebar computer screen', () => {
   assert.match(panel, /framed \? 'Watch' : 'Start Browser'/);
   assert.match(panel, /Take control/);
   assert.match(panel, /Return control/);
-  assert.match(panel, /You can interact/);
+  assert.match(panel, /Force stop/);
+  assert.doesNotMatch(panel, /You can interact/);
 });

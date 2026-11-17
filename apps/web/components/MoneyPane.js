@@ -86,13 +86,13 @@ function History({ state, onParty }) {
       ))}
       <div className="history-filters">
         <label>
-          Bot
+          Agent
           <GlideSelect
-            ariaLabel="Bot"
+            ariaLabel="Agent"
             size="sm"
             menuWidth={180}
             value={botId}
-            options={[{ value: '', label: 'All bots' }, ...bots.map(item => ({ value: item.id, label: item.name }))]}
+            options={[{ value: '', label: 'All agents' }, ...bots.map(item => ({ value: item.id, label: item.name }))]}
             onChange={setBotId}
           />
         </label>

@@ -72,7 +72,7 @@ export default function FileLibrary({ bot, files = [], ownerId = null, onCompute
   return (
     <div className="file-library">
       <header onContextMenu={(event) => { event.preventDefault(); onEdit?.(event); }}>
-        <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={72} />
+        <BotMark shape={bot.shape} color={bot.color} image={bot.image} name={bot.name} size={72} />
         <strong>{bot.name}</strong>
       </header>
       <section className="side-computer">

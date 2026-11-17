@@ -75,7 +75,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
   dashboard('list_browser_sessions', 'List open browser sessions for a bot.', ['botId'], { botId }, [
     call('GET', '/bots/:botId/browser/sessions'),
   ]),
-  dashboard('stop_all', 'Pause every listed bot. Say "Stopping all bots now" before calling.', [], {}, [
+  dashboard('stop_all', 'Pause every listed agent. Say "Stopping every agent now" before calling.', [], {}, [
     call('GET', '/api/bots'),
     call('POST', '/bots/:botId/pause'),
   ]),
@@ -162,9 +162,14 @@ export function sharedToolsInstruction() {
     'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayBalanceLabel / holdings (whatever is non-zero on the address).',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
-    'Fund movements use request_spend, the same permissioned spend API as the glass UI and Grok Bot. When the owner set full permissions, do not ask whether they are going to buy, sell, spend, or pay. A mainnet price quote never authorizes a transaction. Execution stays on Solana devnet.',
+    'Fund movements use request_spend, the same permissioned spend API as the glass UI. When the owner set full permissions, do not ask whether they are going to buy, sell, spend, or pay. A mainnet price quote never authorizes a transaction. Execution stays on Solana devnet.',
     'Do not raise limits or freeze wallets from tools.',
     'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
+    'Stay on the owner request until you answer it. Do not wander into extra searches or extra browser sessions.',
+    'Call each tool at most once with the same arguments. When you can answer, stop and reply.',
+    'Prefer web_search, then one web_scrape. Open the browser only when a page has to be read there.',
+    'x.com, twitter.com, and reddit.com block datacenter browsers, including Cloudflare Browser Rendering. Other products that get through use an official API or a different network. Do not retry those sites in the browser. Search once, say if the page is blocked, and answer from what you have.',
+    'You are an agent. Do not call yourself a bot.',
   ].join('\n');
 }
 

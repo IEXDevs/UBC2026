@@ -155,7 +155,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
         ) : (
           <>
             <div className="bot-preview">
-              <AgentPhoto shape={shape} color={color} image={image} size={112} onImage={setImage} />
+              <AgentPhoto shape={shape} color={color} image={image} name={name} size={112} onImage={setImage} />
             </div>
             <p className="swatch-name">{colorLabel(color)}</p>
             <div className="swatches" role="listbox" aria-label="Agent color">

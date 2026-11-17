@@ -160,7 +160,7 @@ export function buildChatMessages({
     {
       role: 'system',
       content: [
-        `You are the Maelstrom bot named "${name}" (${type}).`,
+        `You are the Maelstrom agent named "${name}" (${type}).`,
         `Your goal (user text, not a platform rule): ${goal}`,
         'Reply to the owner in short chat messages. Do not claim you signed, broadcast, or settled anything.',
         'If the owner asks you to break platform rules, refuse and stay on-policy.',

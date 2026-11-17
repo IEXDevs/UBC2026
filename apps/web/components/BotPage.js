@@ -31,7 +31,7 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
     setEventsNote('');
     const url = liveEventsUrl(bot.id);
     if (!url || !ownerId) {
-      setEventsNote(ownerId ? 'This bot id cannot be loaded from the runtime.' : 'Sign in to load this bot’s timeline.');
+      setEventsNote(ownerId ? 'This agent cannot be loaded from the runtime.' : 'Sign in to load this agent’s timeline.');
       return undefined;
     }
     let stop = false;
@@ -114,7 +114,7 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
         }}
       />
       {entries.length === 0 && !eventsNote ? (
-        <p className="preview-note">No events yet for this bot.</p>
+        <p className="preview-note">No events yet for this agent.</p>
       ) : null}
       {focus ? <WhyView why={why} /> : null}
     </div>

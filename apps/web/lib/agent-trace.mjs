@@ -57,7 +57,15 @@ export function traceModel(entries) {
   return { chips, sections };
 }
 
-/** Open owner browser sessions, as the same chip and tree shape as tool events. */
+const GENERIC_PURPOSE = /^(browse|browsing|search|browser|live browser session)$/i;
+
+function purposeLabel(purpose) {
+  const text = clipTrace(purpose || '', 64);
+  if (!text || GENERIC_PURPOSE.test(text)) return '';
+  return text;
+}
+
+/** One line for open browser sessions. Default purposes like "browse" stay out of the log. */
 export function browserTrace(sessions) {
   const open = (Array.isArray(sessions) ? sessions : []).filter(row => (
     row
@@ -65,21 +73,16 @@ export function browserTrace(sessions) {
     && typeof row.sessionRecordId === 'string'
     && row.sessionRecordId.length > 0
   ));
+  if (open.length === 0) return { chips: [], section: null };
+  const purpose = purposeLabel(open.find(row => purposeLabel(row.purpose))?.purpose);
   return {
-    chips: open.map(row => ({
-      id: `browser-${row.sessionRecordId}`,
+    chips: [{
+      id: 'browser-open',
       name: 'Browser',
-      argument: clipTrace(row.purpose || 'browse', 42),
+      argument: purpose || (open.length === 1 ? 'Open' : `${open.length} open`),
       status: 'running',
       icon: 'terminal',
-    })),
-    section: open.length === 0 ? null : {
-      value: 'Browser',
-      label: 'Browser',
-      children: open.map(row => ({
-        value: `browser-${row.sessionRecordId}`,
-        label: clipTrace(row.purpose || 'Live browser session', 64),
-      })),
-    },
+    }],
+    section: null,
   };
 }

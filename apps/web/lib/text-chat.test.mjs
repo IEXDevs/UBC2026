@@ -178,3 +178,79 @@ test('completeTextChat runs a tool round then answers', async () => {
   assert.equal(result.activity[1].kind, 'think');
   assert.match(result.activity[1].text, /published rate/);
 });
+
+test('a repeated tool and a blocked browser stop the spin and still answer', async () => {
+  const seen = [];
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'open x and search it again',
+    tools: [{
+      type: 'function',
+      function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: { query: { type: 'string' } } } },
+    }, {
+      type: 'function',
+      function: { name: 'browser_open', description: 'Open', parameters: { type: 'object', properties: { url: { type: 'string' } } } },
+    }],
+    invokeTool: async (name, args) => {
+      seen.push(name);
+      return name === 'web_search' ? { results: [{ title: 'Note', url: 'https://example.com' }] } : { ok: true };
+    },
+    fetcher: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      round += 1;
+      if (round === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [
+                { id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{"query":"rates"}' } },
+                { id: 'c2', type: 'function', function: { name: 'web_search', arguments: '{"query":"rates"}' } },
+                { id: 'c3', type: 'function', function: { name: 'browser_open', arguments: '{"url":"https://x.com/explore"}' } },
+              ],
+            },
+          }],
+        });
+      }
+      assert.equal(body.tools, undefined);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: 'Rates are on example.com. X blocks this browser.' } }],
+      });
+    },
+  });
+  assert.deepEqual(seen, ['web_search']);
+  assert.equal(result.text, 'Rates are on example.com. X blocks this browser.');
+  assert.equal(result.activity.some(step => step.label === 'Skipped a blocked site'), true);
+});
+
+test('an empty tool finish still returns an answer instead of stopping', async () => {
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'what is the rate',
+    tools: [{
+      type: 'function',
+      function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: {} } },
+    }],
+    invokeTool: async () => ({ results: [] }),
+    fetcher: async () => {
+      round += 1;
+      if (round === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: '<think>Check the published rate.</think>',
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{}' } }],
+            },
+          }],
+        });
+      }
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content: '' } }] });
+    },
+  });
+  assert.match(result.activity.find(step => step.kind === 'think')?.text || '', /published rate/);
+  assert.match(result.text, /stopped so this request would not keep spinning|Answer the owner/);
+});

@@ -22,12 +22,12 @@ export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
     try {
       const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/shopping/prepare`);
       if (!ownerId || !url) {
-        setError(ownerId ? 'This bot cannot prepare a purchase.' : 'Sign in to prepare a purchase');
+        setError(ownerId ? 'This agent cannot prepare a purchase.' : 'Sign in to prepare a purchase');
         return;
       }
       const walletId = bot.record?.walletId || bot.walletId || '';
       if (!walletId) {
-        setError('Assign a provisioned wallet to this bot before shopping.');
+        setError('Assign a provisioned wallet to this agent before shopping.');
         return;
       }
       const body = provider === 'laso'

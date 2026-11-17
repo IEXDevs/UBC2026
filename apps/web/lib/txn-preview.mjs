@@ -118,7 +118,7 @@ export function logRows({ receipts = [], payments = [], transfers = [], activity
       at: item.at || 0,
       title: [item.action, item.status].filter(Boolean).join(' · ') || 'Activity',
       lines: [
-        line('Bot', item.botId),
+        line('Agent', item.botId),
         line('Source', item.source),
         line('Signature', signature),
       ].filter(Boolean),

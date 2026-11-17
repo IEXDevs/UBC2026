@@ -12,9 +12,9 @@ export const SECURITY_ACTIONS = Object.freeze([
 
 export function securityActionLabel(action) {
   switch (action) {
-    case 'pause-all': return 'Pause every bot';
-    case 'freeze-all-bots': return 'Freeze every bot';
-    case 'unfreeze-all-bots': return 'Unfreeze every bot';
+    case 'pause-all': return 'Pause every agent';
+    case 'freeze-all-bots': return 'Freeze every agent';
+    case 'unfreeze-all-bots': return 'Unfreeze every agent';
     case 'request-grab-back': return 'Request grab-back';
     default: return action;
   }
@@ -60,12 +60,12 @@ export function buildSecurityPage({
       label: securityActionLabel(id),
       kind: id === 'request-grab-back' ? 'danger' : id === 'freeze-all-bots' ? 'warn' : 'default',
       confirm: id === 'pause-all'
-        ? 'Pause every running bot checkpoint? They can be resumed later.'
+        ? 'Pause every running agent? They can be resumed later.'
         : id === 'freeze-all-bots'
-          ? 'Freeze every bot so policy refuses new spends until you unfreeze them?'
+          ? 'Freeze every agent so policy refuses new spends until you unfreeze them?'
           : id === 'unfreeze-all-bots'
-            ? 'Clear the freeze on every bot? A paused bot stays paused until you resume it.'
-            : 'Request grab-back of bot funds to the owner main wallet? Signing stays server-side.',
+            ? 'Clear the freeze on every agent? A paused agent stays paused until you resume it.'
+            : 'Request grab-back of agent funds to the owner main wallet? Signing stays server-side.',
     })),
     notes: [
       'Privy holds wallet keys. The model and this UI never receive private keys.',

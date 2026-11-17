@@ -23,7 +23,7 @@ function statusMark(status) {
 function agentIcon(bot, size, onPhoto) {
   return (
     <span className="agent-mark" style={{ width: size, height: size }}>
-      <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={size} />
+      <BotMark shape={bot.shape} color={bot.color} image={bot.image} name={bot.name} size={size} />
       {statusMark(bot.status)}
       <button
         type="button"

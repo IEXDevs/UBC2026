@@ -75,10 +75,21 @@ export function toolStep(name, args, result) {
   const parsed = parseResult(result);
   const failed = typeof parsed?.error === 'string' && parsed.error.length > 0;
   const status = failed ? 'error' : 'done';
+  if (parsed?.error === 'repeated_tool') return null;
+  if (parsed?.error === 'site_blocked') {
+    return {
+      kind: 'tool',
+      name: tool,
+      label: 'Skipped a blocked site',
+      detail: clip(parsed.host, 80),
+      status: 'error',
+    };
+  }
   if (tool === 'web_search') {
+    const query = clip(args?.query, 160);
     return {
       kind: 'search',
-      query: clip(args?.query, 160),
+      query: /^(search|web search|browse|browser)$/i.test(query) ? '' : query,
       sites: failed ? [] : sitesFrom(parsed),
       status,
     };
@@ -149,5 +160,11 @@ export function sanitizeActivity(value) {
     }
     if (steps.length >= 12) break;
   }
-  return steps;
+  const unique = [];
+  for (const step of steps) {
+    const prev = unique.at(-1);
+    if (prev && JSON.stringify(prev) === JSON.stringify(step)) continue;
+    unique.push(step);
+  }
+  return unique;
 }

@@ -61,8 +61,8 @@ export default function OverviewPanel({ bots, ownerId = null }) {
         </dl>
       </section>
 
-      <section className="panel" aria-label="Bots">
-        <h2>{overview.botCount} bots</h2>
+      <section className="panel" aria-label="Agents">
+        <h2>{overview.botCount} agents</h2>
         <AnimatedList
           {...listLook({ maxHeight: 360 })}
           items={overview.bots.map((bot) => ({
