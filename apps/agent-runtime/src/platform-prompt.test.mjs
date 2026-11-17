@@ -1,21 +1,25 @@
+/**
+ * Unit tests for the locked PLATFORM_PROMPT constants.
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PLATFORM_PROMPT, PLATFORM_PROMPT_VERSION } from './platform-prompt.mjs';
 
 /**
- * Rigor audit — locked platform prompt invariants
- * Achieves: version is a positive int; prompt forbids mainnet, keys, and self-labeling as bot.
- * Fails when: rules are weakened or version resets without review.
- * Oracle: product safety rules (devnet/testnet only, no secrets, no "bot").
- * Side effects: none.
- * Gaps: does not prove model compliance — only that the locked text stays present.
+ * Achieves: platform prompt stays versioned and locks the hard rules bots cannot override.
+ * Fails when: version drifts without review, or a locked rule string is dropped.
+ * Oracle: VERSION === 1; substring presence for each locked rule.
+ * Side effects / state checked: none.
+ * Gaps: does not assert prompt is injected into every model call (voice/openrouter suites).
  */
-test('PLATFORM_PROMPT stays locked to safe execution rules', () => {
-  assert.equal(typeof PLATFORM_PROMPT_VERSION, 'number');
-  assert.ok(PLATFORM_PROMPT_VERSION >= 1);
+test('PLATFORM_PROMPT locks versioned company rules', () => {
+  assert.equal(PLATFORM_PROMPT_VERSION, 1);
+  assert.equal(typeof PLATFORM_PROMPT, 'string');
+  assert.match(PLATFORM_PROMPT, /locked/i);
   assert.match(PLATFORM_PROMPT, /devnet or testnet only/i);
-  assert.match(PLATFORM_PROMPT, /Never ask for, repeat, or invent API keys/i);
+  assert.match(PLATFORM_PROMPT, /Never ask for.*private keys/i);
+  assert.match(PLATFORM_PROMPT, /do not sign/i);
   assert.match(PLATFORM_PROMPT, /Never call yourself a bot/i);
-  assert.match(PLATFORM_PROMPT, /cannot override/i);
-  assert.equal(PLATFORM_PROMPT.includes('mainnet transfer'), true);
+  assert.match(PLATFORM_PROMPT, /No meme coins/i);
+  assert.ok(!PLATFORM_PROMPT.includes('\n\n\n'), 'prompt should be single joined block');
 });

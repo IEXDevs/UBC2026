@@ -49,7 +49,7 @@ function spendRequest(body, headers = {}) {
   });
 }
 
-/*
+/**
  * Achieves: full-permission spend signs on devnet through each spend step.
  * Fails when: sign skipped or mainnet used.
  * Oracle: devnet signature path; step completion.
@@ -95,7 +95,7 @@ test('full permissions sign on devnet after every spend step', async () => {
   assert.equal(calls.length, 1);
 });
 
-/*
+/**
  * Achieves: mainnet quote is refused before any signature.
  * Fails when: signer invoked for mainnet.
  * Oracle: blocked; signed.length===0.
@@ -131,7 +131,7 @@ test('a mainnet quote never authorizes a signature', async () => {
   assert.equal(body.steps.at(-1), 'approval-mode');
 });
 
-/*
+/**
  * Achieves: voice request_spend preserves session permission and hits shared spend route.
  * Fails when: permission dropped or wrong route.
  * Oracle: permission retained; shared route posted.
@@ -176,4 +176,39 @@ test('voice request_spend keeps the session permission and posts the shared rout
   assert.equal(seen.body.action, 'sell');
   assert.equal(seen.body.quote.pricingCluster, 'mainnet');
   assert.equal(seen.body.quote.authorizesTransaction, false);
+});
+
+/**
+ * Achieves: POST /api/spend without x-owner-id is 401; invalid body with owner is 400.
+ * Fails when: ownerless spend succeeds or invalid JSON is treated as a valid spend.
+ * Oracle: status + error codes; signed===false.
+ * Side effects / state checked: loadSpendContext must not run on ownerless call.
+ * Gaps: desk lock 403 path covered in desk-grant.test.mjs.
+ */
+test('spend route rejects missing owner and invalid bodies', async () => {
+  let loaded = 0;
+  const denied = await worker.fetch(new Request('https://runtime/api/spend', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      permission: 'full',
+      confirmed: true,
+      botId: 'bot_1',
+      action: 'pay',
+      amount: '1000',
+      destination: DESTINATION,
+    }),
+  }), spendEnv({
+    loadSpendContext: async () => {
+      loaded += 1;
+      return { bot, wallet, ledger };
+    },
+  }));
+  assert.equal(denied.status, 401);
+  assert.equal((await denied.json()).error, 'owner_required');
+  assert.equal(loaded, 0);
+
+  const invalid = await worker.fetch(spendRequest({ nope: true }), spendEnv());
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error, 'invalid_spend');
 });
