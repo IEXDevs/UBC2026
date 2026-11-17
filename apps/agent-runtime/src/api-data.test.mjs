@@ -804,7 +804,9 @@ test('a profile claim upserts the user and stays readable', async () => {
     fetch: async () => { throw new Error('down'); },
   }));
   assert.equal(failed.status, 502);
-  assert.equal((await failed.json()).error, 'profile_save_failed');
+  const failedBody = await failed.json();
+  assert.equal(failedBody.error, 'profile_directory_unreachable');
+  assert.equal(JSON.stringify(failedBody).includes('down'), false);
 
   const unread = await worker.fetch(new Request('https://runtime/api/profiles/me', {
     headers: { 'x-owner-id': 'user_1' },
@@ -861,6 +863,49 @@ test('a claim for @alex quotes the Privy owner id on the confirm read', async ()
   const body = await rejected.json();
   assert.equal(body.error, 'supabase_http_401');
   assert.equal(JSON.stringify(body).includes('service-role-secret'), false);
+
+  const missed = await worker.fetch(new Request('https://runtime/api/profiles/lookup?q=%40alex', {
+    headers: { 'x-owner-id': 'did:privy:ada' },
+  }), fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => { throw new Error('down secret-value'); },
+  }));
+  assert.equal(missed.status, 502);
+  const missedBody = await missed.json();
+  assert.equal(missedBody.error, 'profile_directory_unreachable');
+  assert.equal(missedBody.recipient, undefined);
+  assert.equal(JSON.stringify(missedBody).includes('secret-value'), false);
+
+  const emptyConfirm = await worker.fetch(new Request('https://runtime/api/profiles/me', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'did:privy:ada' },
+    body: JSON.stringify({ displayName: 'ada@example.com', handle: 'alex' }),
+  }), fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('/rest/v1/users')) return new Response('', { status: 201 });
+      if ((init.method || 'GET') === 'POST') return Response.json([{ handle: 'alex' }], { status: 201 });
+      return Response.json([]);
+    },
+  }));
+  assert.equal(emptyConfirm.status, 502);
+  assert.equal((await emptyConfirm.json()).error, 'profile_not_confirmed');
+
+  const coded = await worker.fetch(new Request('https://runtime/api/profiles/lookup?q=%40alex', {
+    headers: { 'x-owner-id': 'did:privy:ada' },
+  }), fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => Response.json({ code: 'PGRST205', message: 'hidden table', hint: 'secret-role' }, { status: 404 }),
+  }));
+  assert.equal(coded.status, 502);
+  const codedBody = await coded.json();
+  assert.equal(codedBody.error, 'PGRST205');
+  assert.equal(JSON.stringify(codedBody).includes('secret-role'), false);
+  assert.equal(JSON.stringify(codedBody).includes('hidden table'), false);
 });
 
 test('a server wallet export returns HPKE fields and not a plaintext key', async () => {

@@ -1186,7 +1186,8 @@ export async function handleApiData(request, env, matched) {
       fetcher,
     );
     if (stored.status !== 200 || stored.rows?.[0]?.handle !== handle) {
-      return json({ error: stored.code || 'profile_save_failed' }, 502);
+      const code = stored.code || (stored.status === 200 ? 'profile_not_confirmed' : 'profile_save_failed');
+      return json({ error: code }, 502);
     }
     return json({ ok: true, source: 'supabase', profile: { handle, displayName, avatarUrl } });
   }
@@ -1228,6 +1229,9 @@ export async function handleApiData(request, env, matched) {
       `profiles?handle=eq.${encodeURIComponent(parsed.handle)}&select=owner_id,handle,display_name,avatar_url`,
       fetcher,
     );
+    if (found.status !== 200) {
+      return json({ error: found.code || 'profile_read_failed' }, 502);
+    }
     const row = found.rows?.[0];
     if (!row) return json({ ok: true, source: 'supabase', recipient: { kind: 'handle', handle: parsed.handle, missing: true } });
     const wallet = await supabaseGet(
