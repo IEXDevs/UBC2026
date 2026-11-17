@@ -408,11 +408,13 @@ export function accountSetupStep({
   handle,
   walletsReady,
   walletCount,
+  acceptanceConfirmed,
   recoveryConfirmed,
 } = {}) {
   if (signedIn !== true) return null;
   if (profileReady !== true || walletsReady !== true) return 'loading';
   if (typeof handle !== 'string' || !handle.trim()) return 'handle';
+  if (acceptanceConfirmed !== true) return 'acceptance';
   if (!walletCount) return null;
   if (recoveryConfirmed !== true) return 'recovery';
   return null;

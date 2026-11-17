@@ -379,6 +379,11 @@ export function parsePermissionedSpendBody(body) {
   if (body.asset != null && body.asset !== 'USDC') return null;
   const quote = sanitizeSpendQuote(body.quote);
   if (body.quote != null && quote == null && body.quote !== null) return null;
+  let reviewCap = null;
+  if (body.reviewCap != null) {
+    try { reviewCap = amount(body.reviewCap); } catch { return null; }
+    if (reviewCap === '0') return null;
+  }
   return {
     permission: body.permission,
     botId: body.botId,
@@ -388,6 +393,7 @@ export function parsePermissionedSpendBody(body) {
     destination,
     handle,
     confirmed: body.confirmed === true,
+    reviewCap,
     quote,
     idempotencyKey: typeof body.idempotencyKey === 'string' && idOk(body.idempotencyKey) ? body.idempotencyKey : null,
   };

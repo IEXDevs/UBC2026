@@ -4,6 +4,7 @@ import { SECRET_NAMES } from '@ubc2026/contracts';
 import { TransferError } from '@ubc2026/transfers';
 import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mjs';
 import { decideFromCheckpoint } from './decide.mjs';
+import { verifierFacts } from './spend-verifier.mjs';
 import { LoopEngineError, runBotLoop } from './loop-engine.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
@@ -434,7 +435,11 @@ export class BotStateMachine {
           trustScore: body.trustScore ?? facts.trustScore,
           trustConfirmed: body.trustConfirmed === true,
           mainFn: async () => facts,
-          verifyFn: async () => body.verifyFacts ?? facts,
+          verifyFn: async () => verifierFacts({
+            facts,
+            proposal: body.proposal,
+            trustScore: body.trustScore ?? facts.trustScore,
+          }),
           now,
         });
         await this.put('run', result.run);

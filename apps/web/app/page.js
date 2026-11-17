@@ -26,7 +26,7 @@ import HoldButton from '../components/HoldButton';
 import ComputerSheet from '../components/ComputerSheet';
 import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
-import { netChangeSummary, readStoredPermission } from '../lib/spend-permission.mjs';
+import { netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
 import { compactLines, contextUsage } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
 import {
@@ -68,6 +68,7 @@ import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 import SignInPage from '../components/SignInPage';
+import SpendAcceptance from '../components/SpendAcceptance';
 import DeskLock from '../components/DeskLock';
 import { useHostedPreview } from '../components/HostedPreview';
 import { usePrivyPublic } from '../components/PrivyRoot';
@@ -375,6 +376,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [profile, setProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
   const [recoveryAck, setRecoveryAck] = useState(null);
+  const [acceptanceAck, setAcceptanceAck] = useState(null);
   const [hideWalletError, setHideWalletError] = useState(false);
   const [claimWelcome, setClaimWelcome] = useState(false);
   const [transfers, setTransfers] = useState([]);
@@ -484,8 +486,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   useEffect(() => {
     try {
       setRecoveryAck(ownerId ? readRecoveryAck(localStorage, ownerId) : false);
+      setAcceptanceAck(ownerId ? readAcceptanceAck(localStorage, ownerId) : false);
     } catch {
       setRecoveryAck(false);
+      setAcceptanceAck(false);
     }
   }, [ownerId]);
 
@@ -728,6 +732,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     handle: profile?.handle || '',
     walletsReady: liveWallets !== null,
     walletCount: Array.isArray(liveWallets) ? liveWallets.length : 0,
+    acceptanceConfirmed: acceptanceAck === true,
     recoveryConfirmed: recoveryAck === true,
   });
   useEffect(() => {
@@ -1213,6 +1218,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         asset: 'USDC',
         confirmed: confirmed === true,
         idempotencyKey: pending.command.idempotencyKey,
+        ...(permission === 'review'
+          ? { reviewCap: readReviewThreshold(typeof localStorage === 'undefined' ? null : localStorage) }
+          : {}),
       });
     } catch {
       reply('The send did not post.');
@@ -1543,6 +1551,18 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             <button type="button" className="solid" onClick={() => setHideWalletError(true)}>Continue</button>
           </section>
         </div>
+      ) : null}
+      {setupStep === 'acceptance' && !claimWelcome ? (
+        <SpendAcceptance
+          onContinue={({ permission, reviewCap }) => {
+            try {
+              writeAcceptance(localStorage, ownerId, { permission, reviewCap });
+              setAcceptanceAck(true);
+            } catch {
+              /* the sheet stays until the threshold is stored */
+            }
+          }}
+        />
       ) : null}
       {setupStep === 'recovery' && !claimWelcome ? (
         <RecoveryCeremony

@@ -450,3 +450,46 @@ test('non-devnet proposals stop before signing', async () => {
     assert.equal(result.steps.includes('sign'), false);
   }
 });
+
+/**
+ * Achieves: Review by AI signs at or under reviewCap without a slide, and waits above it.
+ * Fails when: Under-cap still asks, or over-cap signs.
+ * Oracle: debit 1010 vs reviewCap; confirmed stays false.
+ * Side effects: none.
+ * Gaps: The verifier still has to match before this step.
+ */
+test('review permission auto-continues only inside the owner threshold', async () => {
+  const under = await runPermissionedSpend({
+    bot,
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '800',
+    ownerPermission: 'review',
+    confirmed: false,
+    reviewCap: '1010',
+    mainFn: async () => facts,
+    verifyFn: async () => facts,
+    now: Date.now(),
+    signDevnet: async () => ({ cluster: 'devnet', signature: 'sig_review' }),
+  });
+  assert.equal(under.state, 'signed');
+  assert.equal(under.signature, 'sig_review');
+
+  const over = await runPermissionedSpend({
+    bot,
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '800',
+    ownerPermission: 'review',
+    confirmed: false,
+    reviewCap: '1009',
+    mainFn: async () => facts,
+    verifyFn: async () => facts,
+    now: Date.now(),
+    signDevnet: async () => ({ cluster: 'devnet', signature: 'sig_should_not' }),
+  });
+  assert.equal(over.state, 'approval-needed');
+  assert.equal(over.signed, false);
+});

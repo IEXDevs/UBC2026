@@ -27,13 +27,23 @@ function needsHumanApproval(bot, policyDecision) {
 
 const OWNER_PERMISSIONS = new Set(['ask', 'review', 'full']);
 
+const REVIEW_CAP = /^(?:[1-9][0-9]{0,39})$/;
+
 /** Whether this policy result still needs a person. Over-budget always does.
- * Every permission, including full, waits until the owner has confirmed.
- * That confirm is the slide. Ask and review use the same check. */
+ * Ask and full wait until the owner has confirmed. That confirm is the slide.
+ * Review by AI continues when the debit is within reviewCap. The verify step
+ * has already agreed before this function runs. Above the cap, review waits. */
 export function approvalRequirement(bot, policyDecision, options = {}) {
   if (!policyDecision || typeof policyDecision.state !== 'string') fail('Policy decision is required');
   if (policyDecision.state === 'blocked') return false;
   if (policyDecision.state === 'over-budget') return true;
+  if (options?.ownerPermission === 'review' && REVIEW_CAP.test(options.reviewCap ?? '')) {
+    const debit = policyDecision.debit;
+    if (typeof debit === 'string' && REVIEW_CAP.test(debit) && BigInt(debit) <= BigInt(options.reviewCap)) {
+      return false;
+    }
+    return options?.confirmed !== true;
+  }
   if (options?.ownerPermission === 'full' || options?.ownerPermission === 'ask' || options?.ownerPermission === 'review') {
     return options?.confirmed !== true;
   }
@@ -166,6 +176,7 @@ export async function runPermissionedSpend({
   now,
   ownerPermission,
   confirmed = false,
+  reviewCap = null,
   quote = null,
   signDevnet,
 } = {}) {
@@ -200,7 +211,7 @@ export async function runPermissionedSpend({
   }
 
   steps.push('approval-mode');
-  const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed });
+  const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed, reviewCap });
   if (approvalNeeded) {
     return { state: 'approval-needed', steps, signed: false, policy };
   }
