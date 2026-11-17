@@ -15,7 +15,8 @@ export function walletProvisionPaths() {
 
 /** True when a provision response has at least one usable wallet row. */
 export function walletProvisionSucceeded(responseOk, body = {}) {
-  return responseOk === true && Array.isArray(body.wallets) && body.wallets.length > 0;
+  if (responseOk !== true || !body || typeof body !== 'object') return false;
+  return Array.isArray(body.wallets) && body.wallets.length > 0;
 }
 
 // acceptLogin only needs Privy credentials. QuickNode is for later signing.

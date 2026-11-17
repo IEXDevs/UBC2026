@@ -28,6 +28,10 @@ import {
   OPENROUTER_FREE_MODEL,
   isFreeOpenRouterModel,
   selectFreeOpenRouterModel,
+  parsePermissionedSpendBody,
+  buildPermissionedSpendRequest,
+  PERMISSIONED_SPEND_PATH,
+  OWNER_SPEND_PERMISSIONS,
 } from './contracts.mjs';
 
 const wallet = {
@@ -55,12 +59,26 @@ const bot = {
   cap: { mode: 'limited', asset: 'USDC', maxOutflow: '50000000', maxPerTransaction: '5000000' },
 };
 
+/**
+ * Achieves: Only Privy wallets with base58 addresses validate; foreign providers and bad keys fail.
+ * Fails when: phantom/other providers pass, or garbage addresses validate.
+ * Oracle: ContractError on non-privy provider; independent base58 address fixture vs 'not-a-key'.
+ * Side effects: none.
+ * Gaps: Does not cover additional/bot wallet kinds beyond kind:'main' fixture.
+ */
 test('validates Privy wallets and rejects non-privy providers', () => {
   assert.equal(validateWallet(wallet).kind, 'main');
   assert.throws(() => validateWallet({ ...wallet, provider: 'phantom' }), ContractError);
   assert.throws(() => validateWallet({ ...wallet, address: 'not-a-key' }), ContractError);
 });
 
+/**
+ * Achieves: Bot approval modes are enum-closed; capped-automatic requires autoApproveCap.
+ * Fails when: Unknown mode validates, or capped-automatic without cap is accepted.
+ * Oracle: APPROVAL_MODES contract — 'sometimes' is not in the enum; capped needs string cap.
+ * Side effects: none.
+ * Gaps: Does not exhaust every bot field nullability.
+ */
 test('validates bot records including approval modes and caps', () => {
   assert.equal(validateBotRecord(bot).approvalMode, 'ask');
   assert.throws(() => validateBotRecord({ ...bot, approvalMode: 'sometimes' }), ContractError);
@@ -74,6 +92,13 @@ test('validates bot records including approval modes and caps', () => {
   );
 });
 
+/**
+ * Achieves: Position-management bots require maxLoss and reject trading-style outflow caps.
+ * Fails when: Position bot accepts maxOutflow/maxPerTransaction without maxLoss.
+ * Oracle: Bot-type → cap-shape matrix from contracts (position ⇒ maxLoss).
+ * Side effects: none.
+ * Gaps: Shopping-specific cap edges deferred to bot-policy.
+ */
 test('position bots require maxLoss instead of outflow caps', () => {
   const position = {
     ...bot,
@@ -85,6 +110,13 @@ test('position bots require maxLoss instead of outflow caps', () => {
   assert.throws(() => validateBotRecord({ ...position, cap: bot.cap }), ContractError);
 });
 
+/**
+ * Achieves: Ledger/decision/timeline shapes validate; unknown event kinds are rejected.
+ * Fails when: secret.leak kind validates, or pending decision loses status.
+ * Oracle: EVENT_KINDS allowlist — 'secret.leak' is intentionally absent.
+ * Side effects: none.
+ * Gaps: Does not hash-chain timeline prevHash continuity (runtime concern).
+ */
 test('spend ledger, decisions, and timeline events validate tightly', () => {
   assert.equal(validateSpendLedger({ botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' }).spent, '0');
   const digest = 'a'.repeat(64);
@@ -126,6 +158,13 @@ test('spend ledger, decisions, and timeline events validate tightly', () => {
   );
 });
 
+/**
+ * Achieves: x402 payments and metrics validate; non-x402 protocols are rejected.
+ * Fails when: protocol 'card' validates, or pnlMicroUsdc is dropped.
+ * Oracle: Payment protocol allowlist (x402 family only for this contract).
+ * Side effects: none.
+ * Gaps: Negative metric counters not exhaustively tested.
+ */
 test('payments and metrics validate, and reject bad shapes', () => {
   assert.equal(validatePayment({
     id: 'pay_1',
@@ -160,6 +199,13 @@ test('payments and metrics validate, and reject bad shapes', () => {
   }).pnlMicroUsdc, '-1000');
 });
 
+/**
+ * Achieves: Missing secrets surface by name; empty env values stay undefined; .env.example lists every name blank.
+ * Fails when: Reader invents secret values, or .env.example omits/fills a secret.
+ * Oracle: Independent filesystem read of ../../.env.example vs SECRET_NAMES/PUBLIC_CONFIG_NAMES.
+ * Side effects: reads .env.example only (no network, no writes).
+ * Gaps: Does not assert secret group completeness against Cloudflare bindings.
+ */
 test('config reader reports missing secret names and never invents values', () => {
   assert.throws(() => requireConfig({}, SECRET_GROUPS.serverSigning), ConfigError);
   const read = readConfig({ PRIVY_APP_ID: 'app', PRIVY_APP_SECRET: '' }, SECRET_GROUPS.privy);
@@ -174,6 +220,13 @@ test('config reader reports missing secret names and never invents values', () =
   assert.ok(assignments.every(line => /= $/.test(line) === false && line.endsWith('=')));
 });
 
+/**
+ * Achieves: Concrete HTTP paths match declared route ids; CRON strings never match via HTTP matcher.
+ * Fails when: Route id collisions, wrong param capture, or CRON matches as HTTP.
+ * Oracle: Hand-built path strings vs API_ROUTES ids; CRON method must return null from matchApiRoute.
+ * Side effects: none.
+ * Gaps: Exhaustive live-route coverage is the next test.
+ */
 test('API route contracts match concrete paths and keep cron off the HTTP matcher', () => {
   const ids = API_ROUTES.map(route => route.id);
   assert.equal(new Set(ids).size, ids.length);
@@ -203,6 +256,24 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.ok(API_ROUTES.some(route => route.id === 'cron.stream-fallback' && route.status === 'live' && route.path === '5,20,35,50 * * * *'));
 });
 
+/**
+ * Achieves: Every live non-CRON API_ROUTES entry matches a filled sample path; wallet verbs stay distinct.
+ * Fails when: A live route fails to self-match, or PUT /api/wallets silently matches another route.
+ * Oracle: Generate pathname from route.path + samples map; wrong method must be null.
+ * Side effects: none.
+ * Gaps: Auth/phase metadata not asserted here.
+ */
+/**
+ * Rigor audit — exhaustive live HTTP route matching
+ * Achieves: every live non-CRON API_ROUTES entry matches matchApiRoute for a
+ *   concrete sample path; wallet list/create/persist/export stay distinct by method.
+ * Fails when: a new live route param lacks a sample, matcher drifts, or PUT /api/wallets
+ *   silently matches another wallet route.
+ * Oracle: API_ROUTES table is the product contract; samples are independent fixtures.
+ * Side effects: none.
+ * Gaps closed: full live HTTP set (not just hand-picked routes). Remaining: does not
+ *   execute handlers — only routing.
+ */
 test('every live HTTP API route matches a concrete sample path (and wallet routes stay distinct)', () => {
   const samples = {
     walletId: 'fmfdj6yqly31huorjqzq38zc',
@@ -233,6 +304,13 @@ test('every live HTTP API route matches a concrete sample path (and wallet route
   assert.equal(matchApiRoute('PUT', '/api/wallets'), null);
 });
 
+/**
+ * Achieves: Only https avatars win; handles normalize; SNS vs handle parsing stays distinct; PostgREST eq encodes safely.
+ * Fails when: javascript: avatars win, richclub.sol normalizes as handle, or eq filter injects quotes.
+ * Oracle: Scheme allowlist (https only); parseRecipient kind matrix; postgrestEq encoding of ':'.
+ * Side effects: none.
+ * Gaps: Does not cover every Privy linked-account avatar field.
+ */
 test('profile pictures, handles, and SNS recipients stay separate', () => {
   const user = {
     twitter: { profilePictureUrl: 'https://images.example/alex.png' },
@@ -257,6 +335,13 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.equal(profileInitials('Alex Rivera'), 'AR');
 });
 
+/**
+ * Achieves: Free model selection accepts :free suffix or zero pricing; paid models fall back or null.
+ * Fails when: Paid gpt-4o is treated free, or zero-price vendor id is rejected.
+ * Oracle: OPENROUTER_FREE_MODEL constant + pricing zeros independent of catalog.mjs.
+ * Side effects: none.
+ * Gaps: Live OpenRouter API pricing not queried.
+ */
 test('OpenRouter accepts only :free ids or a zero price', () => {
   assert.equal(OPENROUTER_FREE_MODEL.endsWith(':free'), true);
   assert.equal(isFreeOpenRouterModel('meta-llama/llama-3.3-70b-instruct:free'), true);
@@ -274,9 +359,74 @@ test('OpenRouter accepts only :free ids or a zero price', () => {
   assert.equal(selectFreeOpenRouterModel('openai/gpt-4o', { fallback: 'openai/gpt-4o-mini' }), null);
 });
 
+/**
+ * Achieves: Exactly three builtin templates exist, all locked/non-deletable, covering the three bot types.
+ * Fails when: Count drifts, deletable flips true, or a type is missing.
+ * Oracle: BOT_TYPES / BUILTIN_TEMPLATES set equality via sorted type list.
+ * Side effects: none.
+ * Gaps: User template CRUD is owned by bot-creation tests.
+ */
 test('builtin templates are locked and non-deletable', () => {
   const templates = createBuiltinTemplates();
   assert.equal(templates.length, 3);
   assert.ok(templates.every(t => t.builtin && t.deletable === false));
   assert.deepEqual(templates.map(t => t.type).sort(), ['position-management', 'shopping', 'trading']);
 });
+
+/**
+ * Achieves: Permissioned spend bodies require a valid permission, bot, amount>0, and handle or destination.
+ * Fails when: Invalid permission/amount/asset/quote shapes parse as spend, or path drifts from /api/spend.
+ * Oracle: OWNER_SPEND_PERMISSIONS + FUND_ACTIONS allowlists; base58 destination fixture; PERMISSIONED_SPEND_PATH.
+ * Side effects: none.
+ * Gaps: Does not exercise voice/UI callers — only the shared body parser.
+ */
+test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes', () => {
+  const dest = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const ok = parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'spend',
+    amount: '1000',
+    destination: dest,
+    confirmed: true,
+  });
+  assert.equal(ok.permission, 'full');
+  assert.equal(ok.amount, '1000');
+  assert.equal(ok.destination, dest);
+  assert.equal(ok.confirmed, true);
+  assert.equal(ok.asset, 'USDC');
+
+  const viaHandle = parsePermissionedSpendBody({
+    permission: 'ask',
+    botId: 'bot_1',
+    amount: '5',
+    handle: '@Alex',
+  });
+  assert.equal(viaHandle.handle, 'alex');
+  assert.equal(viaHandle.destination, null);
+
+  assert.equal(parsePermissionedSpendBody(null), null);
+  assert.equal(parsePermissionedSpendBody({ permission: 'sudo', botId: 'bot_1', amount: '1', destination: dest }), null);
+  assert.equal(parsePermissionedSpendBody({ permission: 'full', botId: 'bot_1', amount: '0', destination: dest }), null);
+  assert.equal(parsePermissionedSpendBody({ permission: 'full', botId: 'bot_1', amount: '1' }), null);
+  assert.equal(parsePermissionedSpendBody({ permission: 'full', botId: 'bot_1', amount: '1', destination: dest, asset: 'SOL' }), null);
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'full', botId: 'bot_1', amount: '1', destination: dest, quote: { pricingCluster: 'bogus' },
+  }), null);
+  assert.deepEqual(OWNER_SPEND_PERMISSIONS, ['ask', 'review', 'full']);
+
+  const req = buildPermissionedSpendRequest({
+    permission: 'review',
+    botId: 'bot_1',
+    amount: '42',
+    destination: dest,
+  });
+  assert.equal(req.method, 'POST');
+  assert.equal(req.path, PERMISSIONED_SPEND_PATH);
+  assert.equal(req.path, '/api/spend');
+  assert.throws(
+    () => buildPermissionedSpendRequest({ permission: 'full', botId: 'bot_1', amount: '1' }),
+    ContractError,
+  );
+});
+

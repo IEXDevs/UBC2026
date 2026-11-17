@@ -12,12 +12,28 @@ import {
 const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const rpcUrl = 'https://example.invalid/quicknode-secret-path';
 
+/**
+ * Rigor audit — genesis constant
+ * Achieves: full 44-char Solana-devnet genesis (not CAIP-2 truncated form).
+ * Fails when: truncated hash used for getGenesisHash compares (false cluster accept).
+ * Oracle: published Solana-devnet genesis hash.
+ * Side effects: none.
+ * Gaps: none.
+ */
 test('DEVNET_GENESIS_HASH is the full getGenesisHash value (not the CAIP-2 truncation)', () => {
   assert.equal(DEVNET_GENESIS_HASH, 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG');
   assert.equal(DEVNET_GENESIS_HASH.length, 44);
   assert.notEqual(DEVNET_GENESIS_HASH, 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1');
 });
 
+/**
+ * Rigor audit — SPL parse aggregates
+ * Achieves: non-zero mints kept; zero balances skipped; USDC recognized.
+ * Fails when: zeros inflate the list or same mint not aggregated correctly.
+ * Oracle: RPC tokenAmount.amount semantics.
+ * Side effects: none.
+ * Gaps: none for zero-skip + USDC symbol.
+ */
 test('parseTokenAccountsByMint aggregates non-zero mints and skips zeros', () => {
   const other = 'So11111111111111111111111111111111111111112';
   const parsed = parseTokenAccountsByMint([
@@ -43,8 +59,15 @@ test('parseTokenAccountsByMint aggregates non-zero mints and skips zeros', () =>
   assert.equal(parsed.tokens[1].amount, '9');
 });
 
+/**
+ * Rigor audit — unknown mints are not allowlisted away
+ * Achieves: arbitrary non-zero mints appear as known:false holdings.
+ * Fails when: parser only returns a fixed USDC/SOL allowlist.
+ * Oracle: get_wallets must list every non-zero SPL the account holds.
+ * Side effects: none.
+ * Gaps: none for allowlist regression.
+ */
 test('parseTokenAccountsByMint returns every non-zero mint the wallet holds (not an allowlist)', () => {
-  // Arbitrary meme-style mints — must show up without being pre-registered.
   const sixtySeven = '67o1n1111111111111111111111111111111111111';
   const trump = 'Trump1111111111111111111111111111111111111';
   const parsed = parseTokenAccountsByMint([
@@ -66,6 +89,14 @@ test('parseTokenAccountsByMint returns every non-zero mint the wallet holds (not
   assert.ok(parsed.tokens.some((token) => token.mint === trump));
 });
 
+/**
+ * Rigor audit — devnet balance read + secret hygiene
+ * Achieves: SOL + USDC from mocked RPC; response JSON never contains RPC URL path.
+ * Fails when: wrong cluster accepted, USDC missed, or RPC URL leaks into client JSON.
+ * Oracle: getGenesisHash must match DEVNET_GENESIS_HASH; amounts from RPC result.
+ * Side effects: fetcher call methods asserted indirectly via returned balances.
+ * Gaps: none for happy path. Remaining: wrong-genesis refusal covered elsewhere in privy tests.
+ */
 test('readDevnetWalletBalances returns SOL and SPL tokens without leaking the RPC URL', async () => {
   const bal = await readDevnetWalletBalances({
     rpcUrl,
@@ -106,6 +137,15 @@ test('readDevnetWalletBalances returns SOL and SPL tokens without leaking the RP
   assert.equal(JSON.stringify(bal).includes('quicknode-secret-path'), false);
 });
 
+/**
+ * Rigor audit — multi-cluster holdings
+ * Achieves: per-cluster SOL reported; display label uses actual non-zero cluster;
+ *   RPC hostnames never leak into JSON.
+ * Fails when: clusters mixed up or empty cluster preferred in display.
+ * Oracle: independent genesis per URL; holdings derived from returned lamports.
+ * Side effects: none beyond fetcher.
+ * Gaps: none for dual-cluster SOL. Remaining: SPL across clusters not asserted here.
+ */
 test('readWalletBalancesAcrossClusters returns whatever each cluster actually holds', async () => {
   const bal = await readWalletBalancesAcrossClusters({
     address,
