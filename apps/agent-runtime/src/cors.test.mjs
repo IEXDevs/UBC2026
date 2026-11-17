@@ -24,6 +24,56 @@ test('localhost and configured CORS origins are allowed', () => {
   );
 });
 
+test('hosted maelstrom origins are allowed only when listed in CORS_ORIGINS', () => {
+  const env = {
+    CORS_ORIGINS: 'https://maelstrom.iexdevs.com,https://dev.maelstrom.iexdevs.com',
+  };
+  const list = corsOriginList(env);
+  assert.ok(list.includes('https://maelstrom.iexdevs.com'));
+  assert.ok(list.includes('https://dev.maelstrom.iexdevs.com'));
+  // Defaults remain — deploying must not lock out local Next.
+  assert.ok(list.includes('http://localhost:3000'));
+
+  assert.equal(
+    allowedCorsOrigin(new Request('https://runtime/api/events', {
+      headers: { Origin: 'https://dev.maelstrom.iexdevs.com' },
+    }), env),
+    'https://dev.maelstrom.iexdevs.com',
+  );
+  assert.equal(
+    allowedCorsOrigin(new Request('https://runtime/api/events', {
+      headers: { Origin: 'https://dev.maelstrom.iexdevs.com' },
+    }), {}),
+    null,
+  );
+  // Whitespace / empty tokens in the secret must not invent origins.
+  assert.equal(
+    corsOriginList({ CORS_ORIGINS: ' , https://ok.example , ' }).includes('https://ok.example'),
+    true,
+  );
+  assert.equal(corsOriginList({ CORS_ORIGINS: ' , ' }).length, 2);
+});
+
+test('CORS rejects Origin header injection and overlong values', async () => {
+  const env = { CORS_ORIGINS: 'https://ok.example' };
+  // Fetch Request rejects CR/LF in header values — probe cors.mjs with a duck-typed request.
+  const injected = {
+    headers: { get: () => 'https://ok.example\r\nX-Evil: 1' },
+  };
+  assert.equal(allowedCorsOrigin(injected, env), null);
+  assert.equal(
+    allowedCorsOrigin(new Request('https://runtime/api/events', {
+      headers: { Origin: `https://${'a'.repeat(300)}.example` },
+    }), env),
+    null,
+  );
+  const denied = corsPreflightResponse({
+    method: 'OPTIONS',
+    headers: { get: (name) => (String(name).toLowerCase() === 'origin' ? 'https://ok.example\nX-Evil: 1' : null) },
+  }, env);
+  assert.equal(denied.status, 403);
+});
+
 test('preflight and responses carry CORS headers for localhost', async () => {
   const preflight = new Request('https://runtime/api/events?botId=bot_1', {
     method: 'OPTIONS',

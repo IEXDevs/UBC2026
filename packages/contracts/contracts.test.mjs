@@ -203,6 +203,36 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.ok(API_ROUTES.some(route => route.id === 'cron.stream-fallback' && route.status === 'live' && route.path === '5,20,35,50 * * * *'));
 });
 
+test('every live HTTP API route matches a concrete sample path (and wallet routes stay distinct)', () => {
+  const samples = {
+    walletId: 'fmfdj6yqly31huorjqzq38zc',
+    botId: 'bot_1',
+    sessionRecordId: 'rec_1',
+    signalId: 'sig_1',
+    name: 'list_bots',
+  };
+  const httpLive = API_ROUTES.filter(route => route.status === 'live' && route.method !== 'CRON');
+  assert.ok(httpLive.length >= 20);
+  for (const route of httpLive) {
+    const pathname = route.path.replace(/:([A-Za-z]+)/g, (_, name) => {
+      assert.ok(samples[name], `missing sample for :${name} on ${route.id}`);
+      return samples[name];
+    });
+    const matched = matchApiRoute(route.method, pathname);
+    assert.ok(matched, `${route.method} ${pathname} should match ${route.id}`);
+    assert.equal(matched.route.id, route.id);
+  }
+  assert.equal(matchApiRoute('GET', '/api/wallets').route.id, 'wallets.list');
+  assert.equal(matchApiRoute('POST', '/api/wallets').route.id, 'wallets.create');
+  assert.equal(matchApiRoute('POST', '/api/wallets/persist').route.id, 'wallets.persist');
+  assert.equal(
+    matchApiRoute('POST', `/api/wallets/${samples.walletId}/export`).route.id,
+    'wallets.export',
+  );
+  // Wrong method must not silently match another wallet route.
+  assert.equal(matchApiRoute('PUT', '/api/wallets'), null);
+});
+
 test('profile pictures, handles, and SNS recipients stay separate', () => {
   const user = {
     twitter: { profilePictureUrl: 'https://images.example/alex.png' },

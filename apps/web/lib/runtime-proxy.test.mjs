@@ -41,3 +41,36 @@ test('runtime proxy target stays on the configured origin', () => {
   assert.equal(safeRuntimeSearch('token=secret'), null);
   assert.equal(runtimeProxyTarget('https://user:pass@runtime.example', '/api/bots').error, 'runtime_unconfigured');
 });
+
+test('runtime proxy allows wallets persist and create paths but shell must not use create', () => {
+  // Proxy allowlist is not the shell provision policy — both paths are routable.
+  assert.equal(isAllowedRuntimePath('/api/wallets'), true);
+  assert.equal(isAllowedRuntimePath('/api/wallets/persist'), true);
+  const create = runtimeProxyTarget('https://runtime.maelstrom.iexdevs.com', '/api/wallets');
+  const persist = runtimeProxyTarget('https://runtime.maelstrom.iexdevs.com', '/api/wallets/persist');
+  assert.equal(create.url, 'https://runtime.maelstrom.iexdevs.com/api/wallets');
+  assert.equal(persist.url, 'https://runtime.maelstrom.iexdevs.com/api/wallets/persist');
+  // Health is intentionally not proxied (would look like "runtime up" from the shell).
+  assert.equal(runtimeProxyTarget('https://runtime.maelstrom.iexdevs.com', '/health').error, 'not_found');
+});
+
+test('runtime proxy rejects path traversal, null bytes, and overlong query values', () => {
+  assert.equal(isAllowedRuntimePath('/api/bots/%2e%2e/wallets'), false);
+  assert.equal(isAllowedRuntimePath('/api/bots/\0freeze'), false);
+  assert.equal(isAllowedRuntimePath(''), false);
+  assert.equal(isAllowedRuntimePath('api/bots'), false);
+  assert.equal(safeRuntimeSearch(`botId=${'x'.repeat(300)}`), null);
+  assert.equal(safeRuntimeSearch('token=secret'), null);
+  assert.equal(safeRuntimeSearch('botId=bot_1&limit=10'), '?botId=bot_1&limit=10');
+  // Duplicate keys still only keep allowlisted names.
+  assert.equal(safeRuntimeSearch('botId=a&evil=1'), null);
+});
+
+test('runtime proxy allowlist covers shopping, commerce is not proxied from shell', () => {
+  assert.equal(isAllowedRuntimePath('/bots/bot_1/shopping/prepare'), true);
+  assert.equal(isAllowedRuntimePath('/bots/bot_1/shopping/settle'), true);
+  // Signal settle stays on the Worker directly (no owner proxy path).
+  assert.equal(isAllowedRuntimePath('/bots/bot_1/commerce/signals/sig_1'), false);
+  assert.equal(isAllowedRuntimePath('/voice/agent'), true);
+  assert.equal(isAllowedRuntimePath('/voice/tools/list_bots'), false);
+});

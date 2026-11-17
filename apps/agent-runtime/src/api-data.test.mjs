@@ -323,6 +323,140 @@ test('wallets.list prefers platform transfer net for displayUsdcLabel', async ()
   assert.equal(body.items[0].usdcBalance, '0');
 });
 
+test('wallets.persist rejects missing auth, owner, empty wallets, and unconfigured supabase', async () => {
+  const envConfigured = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => new Response(null, { status: 201 }),
+  });
+  const noAuth = await worker.fetch(new Request('https://runtime/api/wallets/persist', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ wallets: [{ id: 'w1' }] }),
+  }), envConfigured);
+  assert.equal(noAuth.status, 401);
+  assert.equal((await noAuth.json()).error, 'login_required');
+
+  const noOwner = await worker.fetch(new Request('https://runtime/api/wallets/persist', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer tok_1',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ wallets: [{ id: 'w1' }] }),
+  }), envConfigured);
+  assert.equal(noOwner.status, 401);
+  assert.equal((await noOwner.json()).error, 'owner_required');
+
+  const empty = await worker.fetch(new Request('https://runtime/api/wallets/persist', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer tok_1',
+      'x-owner-id': 'user_1',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ wallets: [] }),
+  }), envConfigured);
+  assert.equal(empty.status, 400);
+  assert.equal((await empty.json()).error, 'invalid_wallets');
+
+  const unconfigured = await worker.fetch(new Request('https://runtime/api/wallets/persist', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer tok_1',
+      'x-owner-id': 'user_1',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      wallets: [{
+        id: 'w1',
+        ownerId: 'user_1',
+        kind: 'main',
+        label: 'Main',
+        address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+        provider: 'privy',
+        frozen: false,
+      }],
+    }),
+  }), fakeEnv({}));
+  assert.equal(unconfigured.status, 503);
+  assert.equal((await unconfigured.json()).error, 'unconfigured');
+});
+
+test('wallets.persist ignores foreign-owner wallet rows (owner header wins)', async () => {
+  const writes = [];
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('/rest/v1/wallets') && init.method === 'POST') {
+        writes.push(JSON.parse(init.body));
+        return new Response(null, { status: 201 });
+      }
+      if (href.includes('/rest/v1/wallets?') && (!init.method || init.method === 'GET')) {
+        return Response.json([{
+          id: 'w1',
+          owner_id: 'user_1',
+          kind: 'main',
+          label: 'Main',
+          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          provider: 'privy',
+          frozen: false,
+        }]);
+      }
+      return new Response(null, { status: 201 });
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/wallets/persist', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer tok_1',
+      'x-owner-id': 'user_1',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      wallets: [{
+        id: 'w1',
+        ownerId: 'attacker',
+        kind: 'main',
+        label: 'Main',
+        address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+        provider: 'privy',
+        frozen: false,
+      }],
+    }),
+  }), env);
+  assert.equal(res.status, 200);
+  assert.ok(writes.length >= 1);
+  const row = Array.isArray(writes[0]) ? writes[0][0] : writes[0];
+  assert.equal(row.owner_id, 'user_1');
+});
+
+test('wallet create surfaces Origin guidance when Privy acceptLogin fails on the Worker', async () => {
+  const { WalletError } = await import('@ubc2026/wallets');
+  const env = fakeEnv({
+    transferClient: {
+      acceptLogin: async () => {
+        const error = new WalletError('Privy users/me failed (403: must_specify_origin)', 'privy_failed');
+        throw error;
+      },
+    },
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/wallets', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer tok_1',
+      'x-owner-id': 'user_1',
+    },
+  }), env);
+  assert.equal(res.status, 502);
+  const body = await res.json();
+  assert.equal(body.error, 'privy_failed');
+  // Independent of page.js: shell should provision on Next then persist, not retry create here.
+  assert.match(body.detail || '', /Origin|\/api\/wallets\/persist|Next/i);
+});
+
 test('wallet create forwards browser origin into Privy acceptLogin', async () => {
   const seen = [];
   const env = fakeEnv({

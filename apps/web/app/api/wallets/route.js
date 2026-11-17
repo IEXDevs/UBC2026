@@ -1,34 +1,16 @@
 export const runtime = 'nodejs';
 
 import { accountWriteBodies } from '@ubc2026/wallets';
-import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
+import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { fetchAgentRuntime } from '../../../lib/runtime-fetch.mjs';
 import { missingWalletSecrets, resolvePrivyAppId } from '../../../lib/wallet-provision.mjs';
-
-function requestOrigin(request) {
-  const fromOrigin = sanitizeOrigin(request.headers.get('origin'));
-  if (fromOrigin) return fromOrigin;
-  const referer = request.headers.get('referer');
-  if (typeof referer === 'string' && referer.trim()) {
-    try { return sanitizeOrigin(new URL(referer.trim()).origin); } catch { /* ignore */ }
-  }
-  return 'http://localhost:3000';
-}
-
-function publicWallet(wallet) {
-  return {
-    id: wallet.id,
-    ownerId: wallet.ownerId,
-    kind: wallet.kind,
-    label: wallet.label,
-    address: wallet.address,
-    frozen: wallet.frozen,
-    provider: wallet.provider,
-    spendable: wallet.spendable !== false && !String(wallet.id).startsWith('linked_'),
-    walletClientType: wallet.walletClientType || null,
-  };
-}
+import {
+  publicWallet,
+  requestOrigin,
+  walletErrorFields,
+  walletErrorStatus,
+} from '../../../lib/wallets-route.mjs';
 
 async function persistAccount(login, ownerId) {
   const url = readRootEnv('SUPABASE_URL');
@@ -80,17 +62,6 @@ function rootWalletEnv() {
     PRIVY_AUTHORIZATION_KEY: readRootEnv('PRIVY_AUTHORIZATION_KEY'),
     NEXT_PUBLIC_PRIVY_APP_ID: readRootEnv('NEXT_PUBLIC_PRIVY_APP_ID'),
   };
-}
-
-/** Prefer duck-typing — `instanceof` fails when the wallets package is duplicated. */
-function walletErrorFields(error) {
-  if (!error || typeof error !== 'object') return null;
-  if (error.name !== 'WalletError' && error.constructor?.name !== 'WalletError') return null;
-  const code = typeof error.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code) ? error.code : 'wallet_failed';
-  const detail = typeof error.message === 'string'
-    ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
-    : undefined;
-  return { code, detail };
 }
 
 /** Config presence only — no secret values. */
@@ -174,7 +145,7 @@ export async function POST(request) {
   } catch (error) {
     const fields = walletErrorFields(error);
     const code = fields?.code || 'wallet_failed';
-    const status = code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin' ? 503 : 502;
+    const status = walletErrorStatus(code);
     const detail = fields?.detail
       || (typeof error?.message === 'string' ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180) : undefined);
     const payload = detail ? { error: code, detail } : { error: code };

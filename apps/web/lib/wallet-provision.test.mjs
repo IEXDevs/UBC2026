@@ -6,9 +6,29 @@ import {
   resolvePrivyAppId,
   walletConfigNote,
   walletProvisionNote,
+  walletProvisionPaths,
+  walletProvisionSucceeded,
   linkedWalletKey,
   walletsFromPrivyUser,
 } from './wallet-provision.mjs';
+
+test('shell wallet provision never hits the runtime create path', () => {
+  const paths = walletProvisionPaths();
+  // Independent of page.js: hosted Workers strip Origin on outbound Privy calls.
+  assert.deepEqual([...paths], ['/api/wallets']);
+  assert.equal(paths.some(path => path.includes('/api/runtime/')), false);
+  assert.equal(paths.some(path => path.includes('persist')), false);
+  // Frozen contract — page.js must not reintroduce a runtime fallback list.
+  assert.throws(() => { paths.push('/api/runtime/api/wallets'); });
+});
+
+test('walletProvisionSucceeded requires ok response and a non-empty wallets array', () => {
+  assert.equal(walletProvisionSucceeded(true, { wallets: [{ id: 'w1' }] }), true);
+  assert.equal(walletProvisionSucceeded(true, { wallets: [] }), false);
+  assert.equal(walletProvisionSucceeded(true, {}), false);
+  assert.equal(walletProvisionSucceeded(false, { wallets: [{ id: 'w1' }] }), false);
+  assert.equal(walletProvisionSucceeded(200, { wallets: [{ id: 'w1' }] }), false);
+});
 
 test('missing wallet secrets allow public app id as PRIVY_APP_ID', () => {
   assert.deepEqual(
@@ -111,6 +131,23 @@ test('mergeObservedWallets keeps the agent wallet and appends linked wallets', (
   assert.equal(merged[1].address, phantom);
   assert.equal(merged[1].kind, 'additional');
   assert.equal(merged[1].spendable, false);
+});
+
+test('wallet provision notes explain Worker Origin failures without leaking secrets', () => {
+  assert.match(
+    walletProvisionNote({
+      error: 'privy_failed',
+      detail: 'Worker cannot set Origin for Privy; use POST /api/wallets on Next then /api/wallets/persist',
+    }),
+    /Origin|Domains|Sign in/i,
+  );
+  assert.equal(
+    walletProvisionNote({
+      error: 'privy_failed',
+      detail: 'Bearer sk_live_super_secret_value_that_must_not_leak',
+    }).includes('sk_live'),
+    false,
+  );
 });
 
 test('wallet provision notes stay actionable and secret-free', () => {
