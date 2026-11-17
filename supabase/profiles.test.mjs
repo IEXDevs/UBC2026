@@ -7,6 +7,13 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 const foundations = readFileSync(new URL('./migrations/20261114000000_foundations.sql', import.meta.url), 'utf8');
 const profiles = readFileSync(new URL('./migrations/20261114200000_profiles.sql', import.meta.url), 'utf8');
 
+/**
+ * Achieves: Duplicate handles rejected on insert and update; authenticated can read handles; cannot update others; can update own display_name.
+ * Fails when: Duplicate handles insert/update, or RLS allows stealing another handle.
+ * Oracle: profiles unique(handle) + RLS update policy.
+ * Side effects: PGlite.
+ * Gaps: none meaningful
+ */
 test('a handle is unique and only its owner can change it', async () => {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(foundations);
@@ -28,7 +35,10 @@ test('a handle is unique and only its owner can change it', async () => {
   const stolen = await db.query(`update profiles set handle = 'stolen' where owner_id = 'bob'`);
   assert.equal(stolen.affectedRows ?? stolen.rowCount ?? 0, 0);
   await db.query(`update profiles set display_name = 'Alex R' where owner_id = 'alice'`);
+  await assert.rejects(() => db.query(`update profiles set handle = 'bob' where owner_id = 'alice'`));
+  await db.query(`update profiles set handle = 'alexr' where owner_id = 'alice'`);
   await db.exec('reset role');
-  const renamed = await db.query(`select display_name from profiles where owner_id = 'alice'`);
+  const renamed = await db.query(`select handle, display_name from profiles where owner_id = 'alice'`);
   assert.equal(renamed.rows[0].display_name, 'Alex R');
+  assert.equal(renamed.rows[0].handle, 'alexr');
 });

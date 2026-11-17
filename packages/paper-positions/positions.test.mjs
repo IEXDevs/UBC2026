@@ -61,6 +61,13 @@ const proposal = {
 };
 const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 
+/**
+ * Achieves: Trading bots open paper SOL positions from mainnet quotes on the execution cluster with broadcast=false; idempotent keys replay.
+ * Fails when: Positions mark live/mainnet broadcast, wrong entry cost, or duplicate keys create a second lot.
+ * Oracle: Paper trading rules: mainnet pricing / execution-cluster paper fills / PRICE_LABEL.
+ * Side effects: Mutates an in-memory paper book.
+ * Gaps: Does not cover concurrent idempotency under shared durable storage.
+ */
 test('trading bot opens a paper SOL lot from a mainnet quote and does not broadcast', () => {
   const book = createPaperBook();
   const opened = openPaperPosition({
@@ -97,6 +104,13 @@ test('trading bot opens a paper SOL lot from a mainnet quote and does not broadc
   assert.equal(book.fills.length, 1);
 });
 
+/**
+ * Achieves: Position/shopping/disabled bots, meme mints, mainnet/live swap flags, invalid/stale quotes are refused with stable codes.
+ * Fails when: Any refused path opens a position, or assertNoLiveTrade accepts mainnet.
+ * Oracle: PaperError codes from the paper-positions gate matrix.
+ * Side effects: Mutates an in-memory paper book (expects empty).
+ * Gaps: Does not cover every PAPER_UNIVERSE mint positively.
+ */
 test('position bots, shopping bots, meme mints, and live trades are refused', () => {
   const book = createPaperBook();
   const attempt = overrides => openPaperPosition({
@@ -122,6 +136,13 @@ test('position bots, shopping bots, meme mints, and live trades are refused', ()
   assert.throws(() => assertNoLiveTrade({ network: 'mainnet' }), PaperError);
 });
 
+/**
+ * Achieves: Closes before MIN_HOLD_MS throw; partial/full closes realize micro-USDC PnL without broadcast; other bots cannot close; close keys replay.
+ * Fails when: Early sells succeed, PnL math drifts, broadcast=true, cross-bot close is allowed, or close idempotency doubles fills.
+ * Oracle: MIN_HOLD_MS + paper PnL arithmetic from quote prices.
+ * Side effects: Mutates an in-memory paper book.
+ * Gaps: Does not cover loss-side closes across multiple mints in one assertion.
+ */
 test('a sell after the hold realizes paper PnL and a same-hour sell does not', () => {
   const book = createPaperBook();
   const opened = openPaperPosition({
@@ -164,6 +185,17 @@ test('a sell after the hold realizes paper PnL and a same-hour sell does not', (
   assert.equal(partial.position.quantity, '250000000');
   assert.equal(partial.position.entryMicroUsdc, '37500000');
   assert.equal(partial.position.status, 'open');
+  const replayedClose = closePaperPosition({
+    book,
+    bot: trader,
+    positionId: opened.position.id,
+    quantity: '250000000',
+    quote: quote(SOL, '160', { fetchedAt: new Date(NOW + MIN_HOLD_MS).toISOString() }),
+    now: NOW + MIN_HOLD_MS,
+    idempotencyKey: 'sell-half',
+  });
+  assert.equal(replayedClose.replayed, true);
+  assert.equal(partial.position.quantity, '250000000');
 
   const rest = closePaperPosition({
     book,
@@ -189,6 +221,13 @@ test('a sell after the hold realizes paper PnL and a same-hour sell does not', (
   }), error => error.code === 'bot_mismatch');
 });
 
+/**
+ * Achieves: markPaperBook prices each open mint once, marks max-loss stop, and positionLossDecision blocks further proposals.
+ * Fails when: Fallback runs unnecessarily, max loss is ignored, or a stop still returns approval-needed.
+ * Oracle: Position-management maxLoss policy + mainnet price adapter contract.
+ * Side effects: Calls injected price provider (no network).
+ * Gaps: Does not persist stop decisions to the policy ledger.
+ */
 test('mark to market uses the price adapter once per mint and stops a position bot at max loss', async () => {
   const book = createPaperBook();
   openPaperPosition({
@@ -265,6 +304,13 @@ test('mark to market uses the price adapter once per mint and stops a position b
   assert.equal(calls.length, 4);
 });
 
+/**
+ * Achieves: Marking another bot’s lots throws bot_mismatch; disabled position bots stop with zero trades/PnL.
+ * Fails when: Cross-bot marks succeed, or disabled bots still place trades.
+ * Oracle: Bot ownership + enabled gate for markPaperBook.
+ * Side effects: none
+ * Gaps: Does not cover frozen bots separately from disabled.
+ */
 test('a trading bot mark ignores other bots and a disabled position bot stops without a trade', async () => {
   const book = createPaperBook();
   const opened = openPaperPosition({

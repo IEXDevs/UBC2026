@@ -9,11 +9,25 @@ const activity = readFileSync(new URL('./migrations/20261114180000_activity_logs
 const grants = readFileSync(new URL('./migrations/20261114190000_service_role_grants.sql', import.meta.url), 'utf8');
 const SEED = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
+/**
+ * Achieves: service_role grants migration includes ALL on tables and EXECUTE on functions.
+ * Fails when: Grants omitted or narrowed so Worker writes fail.
+ * Oracle: 20261114190000_service_role_grants.sql text contract.
+ * Side effects: Reads migration file.
+ * Gaps: Does not execute grants against a live Supabase project.
+ */
 test('service role can use the tables the Worker writes', () => {
   assert.match(grants, /grant all privileges on all tables in schema public to service_role/);
   assert.match(grants, /grant execute on all functions in schema public to service_role/);
 });
 
+/**
+ * Achieves: Insert trigger redacts seed/privateKey/long blobs; RLS shows only owner rows; authenticated cannot insert; anon denied.
+ * Fails when: Secrets persist, cross-owner reads succeed, or clients can insert forged logs.
+ * Oracle: activity_logs redaction + RLS policies.
+ * Side effects: PGlite with pgcrypto; applies migrations.
+ * Gaps: Does not cover service_role write path end-to-end.
+ */
 test('activity logs redact secrets and hide other owners', async () => {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(foundations);

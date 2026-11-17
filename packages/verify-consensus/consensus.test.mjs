@@ -12,13 +12,30 @@ const base = {
   reasonSummary: 'Stable blue-chip allocation within hourly horizon',
 };
 
+/**
+ * Achieves: normalizeFacts accepts execution clusters and integer base-unit strings; mainnet, decimals, and incomplete facts throw.
+ * Fails when: mainnet-beta facts normalize, decimal prices are accepted, or empty reasonSummary passes.
+ * Oracle: Hackathon execution cluster policy + amount domain.
+ * Side effects: none
+ * Gaps: none meaningful
+ */
 test('facts require testnet/devnet and integer string amounts', () => {
   assert.equal(normalizeFacts(base).asset, 'SOL');
+  assert.equal(normalizeFacts({ ...base, cluster: 'testnet' }).cluster, 'testnet');
   assert.throws(() => normalizeFacts({ ...base, cluster: 'mainnet-beta' }));
   assert.throws(() => normalizeFacts({ ...base, price: '1.5' }));
   assert.throws(() => normalizeFacts({ ...base, trustScore: '1001' }));
+  assert.throws(() => normalizeFacts({ ...base, reasonSummary: '' }));
+  assert.throws(() => normalizeFacts({ ...base, mint: '' }));
 });
 
+/**
+ * Achieves: factsDigest is stable under reasonSummary trim and changes when amount changes.
+ * Fails when: Whitespace changes digest, or amount changes do not.
+ * Oracle: SHA-256 of normalizeFacts JSON.
+ * Side effects: none
+ * Gaps: none meaningful
+ */
 test('digest binds the canonical fact set', () => {
   const a = factsDigest(base);
   const b = factsDigest({ ...base, reasonSummary: '  Stable blue-chip allocation within hourly horizon  ' });
@@ -26,6 +43,13 @@ test('digest binds the canonical fact set', () => {
   assert.notEqual(a, factsDigest({ ...base, amount: '1000001' }));
 });
 
+/**
+ * Achieves: Matching main/verify on attempt 1 yields consensus with digest and compact memo.
+ * Fails when: Match still retries, or memo lacks consensus outcome.
+ * Oracle: reachConsensus silent-match path + memoFromDecision.
+ * Side effects: none
+ * Gaps: Does not cover verifyFn throwing.
+ */
 test('silent consensus on first independent match', async () => {
   const result = await reachConsensus({
     mainFn: async () => base,
@@ -38,6 +62,13 @@ test('silent consensus on first independent match', async () => {
   assert.match(memoFromDecision(result.decisionRecord), /"o":"c"/);
 });
 
+/**
+ * Achieves: Mismatches retry until main corrects; attempt history records amount mismatches.
+ * Fails when: Gives up early, or accepts wrong amount without retry.
+ * Oracle: MAX_ATTEMPTS retry loop with independent verifyFn.
+ * Side effects: none
+ * Gaps: Does not cover verify changing across attempts.
+ */
 test('backend re-checks until main agent corrects itself', async () => {
   let mainAmount = '999';
   const result = await reachConsensus({
@@ -53,6 +84,13 @@ test('backend re-checks until main agent corrects itself', async () => {
   assert.equal(result.facts.amount, '1000000');
 });
 
+/**
+ * Achieves: Memo fields bind digest/recordDigest; tampered facts/digest throw; different reasoning changes record hash.
+ * Fails when: Tampered records still memoize, or reasoning changes leave r unchanged.
+ * Oracle: hashDecisionRecord canonical payload.
+ * Side effects: none
+ * Gaps: none meaningful
+ */
 test('memo hash is recomputed from the decision record', async () => {
   const result = await reachConsensus({
     mainFn: async () => base,
@@ -80,6 +118,13 @@ test('memo hash is recomputed from the decision record', async () => {
   }));
 });
 
+/**
+ * Achieves: Five price mismatches → manual-review, null digest, memoFromDecision throws.
+ * Fails when: Exhaustion still returns consensus or a memo.
+ * Oracle: MAX_ATTEMPTS=5 manual-review outcome.
+ * Side effects: none
+ * Gaps: none meaningful
+ */
 test('five exhausted mismatches surface manual review without a memo', async () => {
   const result = await reachConsensus({
     mainFn: async () => base,
@@ -92,6 +137,13 @@ test('five exhausted mismatches surface manual review without a memo', async () 
   assert.ok(result.decisionRecord.mismatches.every(entry => entry.field === 'price'));
 });
 
+/**
+ * Achieves: compareFacts lists all mismatching canonical fields.
+ * Fails when: Only the first mismatch is reported.
+ * Oracle: Field-wise compare of normalizeFacts outputs.
+ * Side effects: none
+ * Gaps: none meaningful
+ */
 test('compareFacts reports every disagreeing field', () => {
   const comparison = compareFacts(base, { ...base, asset: 'USDC', trustScore: '10' });
   assert.equal(comparison.match, false);
