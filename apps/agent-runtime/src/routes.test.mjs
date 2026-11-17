@@ -83,7 +83,10 @@ test('owner browser routes are forwarded with the bot id kept on the object path
   const body = await live.json();
   assert.equal(body.forwarded, '/id/bot_1/browser/sessions/rec_1/live-view');
 
-  const open = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions', { method: 'GET' }), env);
+  const open = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions', {
+    method: 'GET',
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
   const opened = await open.json();
   assert.equal(opened.forwarded, '/id/bot_1/browser/sessions');
 });
@@ -115,9 +118,16 @@ test('the loop route reaches the Durable Object', async () => {
  */
 test('bot routes still reach the Durable Object', async () => {
   const env = fakeEnv();
-  const wake = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {
+  const denied = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {
     method: 'POST',
     body: JSON.stringify({ goal: 'watch' }),
+  }), env);
+  assert.equal(denied.status, 401);
+
+  const wake = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ goal: 'watch', botId: 'bot_1' }),
   }), env);
   const body = await wake.json();
   assert.equal(body.forwarded, '/wake');

@@ -28,9 +28,27 @@ import { corsPreflightResponse, withCors } from './cors.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
 
+/** Bot control + status actions that mutate or expose DO run / position state. */
+const OWNER_BOT_ACTIONS = new Set([
+  'status',
+  'wake',
+  'pause',
+  'resume',
+  'advance',
+  'decide',
+  'loop',
+]);
+
+function isOwnerBotAction(action) {
+  if (!action) return false;
+  if (OWNER_BOT_ACTIONS.has(action)) return true;
+  // Browser leaves share the DO and must not skip the edge owner gate.
+  return String(action).startsWith('browser/');
+}
+
 /**
- * Status / positions: identity from resolveOwner (Privy bearer when secrets exist),
- * then prove that owner owns the bot when Supabase is configured.
+ * Status / positions / control plane: identity from resolveOwner (Privy bearer when
+ * secrets exist), then prove that owner owns the bot when Supabase is configured.
  */
 async function assertBotOwner(request, env, botId) {
   const { ownerId, error } = await resolveOwner(request, env);
@@ -48,6 +66,27 @@ async function assertBotOwner(request, env, botId) {
   if (!result.configured) return { ok: true, ownerId };
   if (!result.rows?.length) return { ok: false, status: 404, error: 'bot_not_found', ownerId };
   return { ok: true, ownerId };
+}
+
+/**
+ * Forward to a DO stub with a verified owner header. Always strip the internal
+ * position-check header so clients cannot smuggle cron privileges.
+ */
+function forwardToBot(stub, target, request, ownerId = null) {
+  const headers = new Headers(request.headers);
+  headers.delete(INTERNAL_POSITION_HEADER);
+  if (ownerId) headers.set(OWNER_HEADER, ownerId);
+  const init = {
+    method: request.method,
+    headers,
+    redirect: request.redirect,
+  };
+  if (request.method !== 'GET' && request.method !== 'HEAD' && request.body) {
+    init.body = request.body;
+    // Node/undici requires duplex when re-wrapping a streaming body.
+    init.duplex = 'half';
+  }
+  return stub.fetch(new Request(target, init));
 }
 
 export { BotDurableObject };
@@ -140,16 +179,18 @@ async function dispatch(request, env, rawEnv = env) {
     if (matched?.route.action && matched.params.botId) {
       const stub = botStub(env, matched.params.botId);
       const botId = matched.params.botId;
-      if (matched.route.action === 'status' || matched.route.id === 'bots.status' || matched.route.id === 'bots.status.root') {
+      let ownerId = null;
+      if (isOwnerBotAction(matched.route.action)) {
         const gate = await assertBotOwner(request, env, botId);
         if (!gate.ok) return json({ error: gate.error }, gate.status);
+        ownerId = gate.ownerId;
       }
       const prefix = `/bots/${encodeURIComponent(botId)}`;
       const rest = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : '';
       const target = rest.startsWith('/browser/')
         ? new URL(`https://bot/id/${encodeURIComponent(botId)}${rest}`)
         : new URL(`https://bot/${matched.route.action}`);
-      return stub.fetch(new Request(target, request));
+      return forwardToBot(stub, target, request, ownerId);
     }
 
     // Live data / wallet routes (Supabase + Privy when secrets exist).
@@ -188,13 +229,15 @@ async function dispatch(request, env, rawEnv = env) {
     if (botMatch) {
       const botId = decodeURIComponent(botMatch[1]);
       const action = botMatch[2] ?? 'status';
-      if (action === 'status') {
+      let ownerId = null;
+      if (isOwnerBotAction(action)) {
         const gate = await assertBotOwner(request, env, botId);
         if (!gate.ok) return json({ error: gate.error }, gate.status);
+        ownerId = gate.ownerId;
       }
       const stub = botStub(env, botId);
       const target = new URL(`https://bot/${action}`);
-      return stub.fetch(new Request(target, request));
+      return forwardToBot(stub, target, request, ownerId);
     }
 
     return json({ error: 'not_found' }, 404);

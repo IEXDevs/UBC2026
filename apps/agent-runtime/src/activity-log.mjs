@@ -165,10 +165,17 @@ export async function persistActivity(env, row, fetcher = env?.fetch ?? fetch) {
   }
 }
 
+function isSensitiveBotPath(path) {
+  if (typeof path !== 'string') return false;
+  if (path.includes('/api/positions')) return true;
+  return /\/bots\/[^/]+(?:\/(?:status|wake|pause|resume|advance|decide|loop))?$/.test(path)
+    || /\/bots\/[^/]+\/(?:status|wake|pause|resume|advance|decide|loop)$/.test(path);
+}
+
 function slimLoggedResponse(path, body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
-  // Status / position endpoints: keep flags, drop full paper books from durable logs.
-  if (typeof path === 'string' && (/\/status$/.test(path) || path.includes('/api/positions'))) {
+  // Status / control / position endpoints: keep flags, drop full run + paper books.
+  if (isSensitiveBotPath(path)) {
     const check = body.positionCheck && typeof body.positionCheck === 'object'
       ? {
         flag: body.positionCheck.flag ?? null,
@@ -182,6 +189,9 @@ function slimLoggedResponse(path, body) {
       auth: body.auth ?? null,
       itemCount: Array.isArray(body.items) ? body.items.length : undefined,
       positionCheck: check,
+      // Never persist checkpoint / gate payloads in activity_logs.
+      run: body.run ? { present: true } : undefined,
+      gate: body.gate ? { decision: body.gate?.decision ?? null } : undefined,
     };
   }
   return body;

@@ -76,15 +76,18 @@ create index if not exists position_checks_bot_idx on position_checks(bot_id, at
 alter table paper_positions enable row level security;
 alter table paper_fills enable row level security;
 alter table position_checks enable row level security;
+alter table paper_positions force row level security;
+alter table paper_fills force row level security;
+alter table position_checks force row level security;
 
--- No grants to anon. Authenticated gets table privileges; RLS still filters rows.
+-- No grants to anon. Authenticated is read-only; Worker writes via service_role.
 revoke all on table paper_positions from anon, public;
 revoke all on table paper_fills from anon, public;
 revoke all on table position_checks from anon, public;
 
-grant select, insert, update, delete on table paper_positions to authenticated;
-grant select, insert, update, delete on table paper_fills to authenticated;
-grant select, insert, update, delete on table position_checks to authenticated;
+grant select on table paper_positions to authenticated;
+grant select on table paper_fills to authenticated;
+grant select on table position_checks to authenticated;
 
 -- Owner-only. Bot ownership must match the row owner (cannot reassign to another user).
 create policy paper_positions_owner on paper_positions
