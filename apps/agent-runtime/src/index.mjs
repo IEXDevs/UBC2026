@@ -20,7 +20,7 @@ import {
 import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
-import { handleApiData } from './api-data.mjs';
+import { handleApiData, resolveOwner } from './api-data.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
 import { rememberBotAlert } from './bot-alerts.mjs';
 import { supabaseConfig, supabaseGet } from './supabase-rest.mjs';
@@ -28,28 +28,26 @@ import { corsPreflightResponse, withCors } from './cors.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
 
-function ownerHeaderValue(request) {
-  const value = request.headers.get(OWNER_HEADER);
-  if (typeof value !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(value)) return null;
-  return value;
-}
-
 /**
- * When Supabase is configured, status must prove the caller owns the bot.
- * Without Supabase (local/offline), the DO still strips positionCheck unless the
- * header matches stored meta.ownerId.
+ * Status / positions: identity from resolveOwner (Privy bearer when secrets exist),
+ * then prove that owner owns the bot when Supabase is configured.
  */
-async function assertBotOwner(env, botId, ownerId, fetcher) {
-  if (!ownerId) return { ok: false, status: 401, error: 'owner_required' };
-  if (!supabaseConfig(env)) return { ok: true };
+async function assertBotOwner(request, env, botId) {
+  const { ownerId, error } = await resolveOwner(request, env);
+  if (error && !ownerId) {
+    const status = error === 'owner_mismatch' ? 403 : 401;
+    return { ok: false, status, error, ownerId: null };
+  }
+  if (!ownerId) return { ok: false, status: 401, error: 'owner_required', ownerId: null };
+  if (!supabaseConfig(env)) return { ok: true, ownerId };
   const result = await supabaseGet(
     env,
     `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
-    fetcher,
+    env.fetch ?? fetch,
   );
-  if (!result.configured) return { ok: true };
-  if (!result.rows?.length) return { ok: false, status: 404, error: 'bot_not_found' };
-  return { ok: true };
+  if (!result.configured) return { ok: true, ownerId };
+  if (!result.rows?.length) return { ok: false, status: 404, error: 'bot_not_found', ownerId };
+  return { ok: true, ownerId };
 }
 
 export { BotDurableObject };
@@ -143,8 +141,7 @@ async function dispatch(request, env, rawEnv = env) {
       const stub = botStub(env, matched.params.botId);
       const botId = matched.params.botId;
       if (matched.route.action === 'status' || matched.route.id === 'bots.status' || matched.route.id === 'bots.status.root') {
-        const ownerId = ownerHeaderValue(request);
-        const gate = await assertBotOwner(env, botId, ownerId, env.fetch ?? fetch);
+        const gate = await assertBotOwner(request, env, botId);
         if (!gate.ok) return json({ error: gate.error }, gate.status);
       }
       const prefix = `/bots/${encodeURIComponent(botId)}`;
@@ -192,8 +189,7 @@ async function dispatch(request, env, rawEnv = env) {
       const botId = decodeURIComponent(botMatch[1]);
       const action = botMatch[2] ?? 'status';
       if (action === 'status') {
-        const ownerId = ownerHeaderValue(request);
-        const gate = await assertBotOwner(env, botId, ownerId, env.fetch ?? fetch);
+        const gate = await assertBotOwner(request, env, botId);
         if (!gate.ok) return json({ error: gate.error }, gate.status);
       }
       const stub = botStub(env, botId);

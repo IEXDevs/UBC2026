@@ -122,3 +122,27 @@ test('GET /api/positions scopes by verified owner even when botId is attacker-co
   assert.equal(body.items.every(row => row.ownerId === 'alice'), true);
   assert.equal(body.items.some(row => row.ownerId === 'bob'), false);
 });
+
+/**
+ * Rigor audit — spoofed x-owner-id rejected when Privy secrets exist
+ * Achieves: with PRIVY_APP_ID/SECRET set, status/positions require a bearer; a
+ *   bare victim owner header alone cannot read positionCheck.
+ * Fails when: header-only IDOR still works once Privy is configured.
+ * Oracle: resolveOwner returns login_required without Bearer when secrets present.
+ * Side effects: none (no Privy network — client construction fails closed to login_required).
+ * Gaps: does not mint a real Privy JWT; success path covered by wallets Privy tests.
+ */
+test('status rejects spoofed x-owner-id when Privy secrets are configured', async () => {
+  const env = envWithBots(
+    [{ id: 'bot_alice', owner_id: 'alice' }],
+    {
+      PRIVY_APP_ID: 'app_test',
+      PRIVY_APP_SECRET: 'secret_test',
+    },
+  );
+  const spoof = await worker.fetch(new Request('https://runtime/bots/bot_alice/status', {
+    headers: { 'x-owner-id': 'alice' },
+  }), env);
+  assert.equal(spoof.status, 401);
+  assert.equal((await spoof.json()).error, 'login_required');
+});

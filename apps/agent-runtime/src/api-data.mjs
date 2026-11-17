@@ -88,13 +88,31 @@ function requestOrigin(request, env = {}) {
   return sanitizeOrigin(env.WEB_ORIGIN || env.PRIVY_ALLOWED_ORIGIN || '');
 }
 
-async function resolveOwner(request, env) {
+function privySecretsPresent(env) {
+  return typeof env?.PRIVY_APP_ID === 'string' && env.PRIVY_APP_ID.trim() !== ''
+    && typeof env?.PRIVY_APP_SECRET === 'string' && env.PRIVY_APP_SECRET.trim() !== '';
+}
+
+/**
+ * Resolve the caller’s owner id from a verified Privy access token when secrets exist.
+ * A bare `x-owner-id` is only accepted in offline/unconfigured environments (no Privy secrets).
+ * When both header and JWT are present, the verified JWT identity wins; a conflicting header is rejected.
+ */
+export async function resolveOwner(request, env) {
   const header = ownerHeader(request);
   const token = bearerToken(request);
-  if (!token) return { ownerId: header, user: null, token: '' };
+  const needsLogin = privySecretsPresent(env);
+
+  if (!token) {
+    if (needsLogin) return { ownerId: null, user: null, token: '', error: 'login_required' };
+    return { ownerId: header, user: null, token: '' };
+  }
 
   const client = privyClient(env);
-  if (!client?.acceptLogin) return { ownerId: header, user: null, token };
+  if (!client?.acceptLogin) {
+    if (needsLogin) return { ownerId: null, user: null, token, error: 'login_required' };
+    return { ownerId: header, user: null, token };
+  }
 
   try {
     const result = await client.acceptLogin({
@@ -102,13 +120,17 @@ async function resolveOwner(request, env) {
       ownerId: header || undefined,
       origin: requestOrigin(request, env),
     });
-    const ownerId = header || result?.main?.ownerId || result?.userId || null;
-    return { ownerId, user: result, token };
+    const verified = result?.main?.ownerId || result?.userId || null;
+    if (header && verified && header !== verified) {
+      return { ownerId: null, user: null, token, error: 'owner_mismatch' };
+    }
+    return { ownerId: verified || header || null, user: result, token };
   } catch (error) {
     if (error instanceof WalletError) {
-      return { ownerId: header, user: null, token, error: error.code || 'privy_failed' };
+      // Do not fall back to a client-supplied header after a failed Privy verify.
+      return { ownerId: null, user: null, token, error: error.code || 'privy_failed' };
     }
-    return { ownerId: header, user: null, token, error: 'privy_failed' };
+    return { ownerId: null, user: null, token, error: 'privy_failed' };
   }
 }
 
