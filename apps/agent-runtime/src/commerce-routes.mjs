@@ -34,7 +34,11 @@ function err(error) {
   ) {
     return json({ error: error.code || error.message }, 400);
   }
-  throw error;
+  // Fail closed — never let catalog/network/X402 surprises become an unhandled 500.
+  const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,64}$/i.test(error.code)
+    ? error.code
+    : 'internal';
+  return json({ error: code }, 502);
 }
 
 async function readBody(request) {
