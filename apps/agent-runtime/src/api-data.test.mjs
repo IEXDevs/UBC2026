@@ -819,7 +819,7 @@ test('a profile claim upserts the user and stays readable', async () => {
   assert.equal((await unread.json()).error, '42501');
 });
 
-test('a claim for @alex quotes the Privy owner id on the confirm read', async () => {
+test('a claim for @alex confirms the Privy owner without quoting the eq value', async () => {
   const profiles = new Map();
   const env = fakeEnv({
     SUPABASE_URL: 'https://example.supabase.co',
@@ -835,8 +835,9 @@ test('a claim for @alex quotes the Privy owner id on the confirm read', async ()
         return Response.json([body], { status: 201 });
       }
       const filter = new URL(href).searchParams.get('owner_id') || '';
-      if (!filter.startsWith('eq."')) return Response.json({ code: 'PGRST100' }, { status: 400 });
-      const owner = filter.slice(4, -1);
+      // Real PostgREST eq keeps quotes as part of the value, so a quoted DID matches nothing.
+      if (filter.includes('"')) return Response.json([]);
+      const owner = filter.startsWith('eq.') ? filter.slice(3) : '';
       const row = profiles.get(owner);
       return Response.json(row ? [{ handle: row.handle, display_name: row.display_name, avatar_url: null }] : []);
     },

@@ -135,7 +135,7 @@ test('a failed user insert returns the database code and does not claim success'
   assert.equal((await response.json()).error, '23503');
 });
 
-test('a Privy DID is quoted so the confirm read can see the claimed handle', async () => {
+test('a Privy DID confirm read matches the owner without quoting the eq value', async () => {
   const profiles = new Map();
   const response = await localProfileResponse(claim({
     displayName: 'ada@example.com',
@@ -152,7 +152,8 @@ test('a Privy DID is quoted so the confirm read can see the claimed handle', asy
         return Response.json([body], { status: 201 });
       }
       const filter = new URL(href).searchParams.get('owner_id') || '';
-      if (!filter.startsWith('eq."')) return Response.json({ code: 'PGRST100' }, { status: 400 });
+      // Real PostgREST eq keeps quotes as part of the value, so a quoted DID matches nothing.
+      if (filter.includes('"')) return Response.json([]);
       const row = profiles.get(ownerFrom(href));
       return Response.json(row ? [row] : []);
     },

@@ -214,8 +214,9 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.equal(privyAvatarUrl({ wallet: { address: 'So11111111111111111111111111111111111111112' } }), null);
   assert.equal(normalizeHandle('@Alex'), 'alex');
   assert.equal(normalizeHandle('richclub.sol'), null);
-  assert.equal(postgrestEq('owner_id', 'did:privy:user_1'), 'owner_id=eq.%22did%3Aprivy%3Auser_1%22');
-  assert.equal(postgrestEq('handle', 'alex'), 'handle=eq.%22alex%22');
+  assert.equal(postgrestEq('owner_id', 'did:privy:user_1'), 'owner_id=eq.did%3Aprivy%3Auser_1');
+  assert.equal(postgrestEq('handle', 'alex'), 'handle=eq.alex');
+  assert.equal(postgrestEq('owner_id', 'did:privy:user_1').includes('%22'), false);
   assert.equal(postgrestEq('bad column', 'alex'), '');
   assert.equal(directoryFailureCode(409, { code: '23505', message: 'duplicate key' }), '23505');
   assert.equal(directoryFailureCode(401, { message: 'Invalid API key', hint: 'service-role-secret' }), 'supabase_http_401');
