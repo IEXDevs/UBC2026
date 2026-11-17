@@ -1,9 +1,10 @@
 'use client';
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useEffect } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
 import { privyProviderProps } from '../lib/privy-config.mjs';
+import { installSiwsLoginDiagnostic } from '../lib/siws-login-diagnostic.mjs';
 import { ToastProvider } from './bits/SwipeToast';
 
 const PrivyPublicContext = createContext({ configured: false, appId: '', clientId: '' });
@@ -25,6 +26,11 @@ export default function PrivyRoot({ appId = '', clientId = '', children }) {
     appId: props?.appId || '',
     clientId: props?.clientId || '',
   };
+  // Privy keeps SIWS failures inside its modal. Record status and a safe code only.
+  useEffect(() => {
+    if (!value.appId) return undefined;
+    installSiwsLoginDiagnostic();
+  }, [value.appId]);
   if (!props) {
     return (
       <PrivyPublicContext.Provider value={value}>
