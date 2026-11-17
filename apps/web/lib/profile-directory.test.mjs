@@ -176,6 +176,36 @@ test('a rejected directory call keeps the HTTP status and drops the provider bod
   assert.equal(JSON.stringify(body).includes('Invalid API key'), false);
 });
 
+test('a thrown directory fetch and an empty confirm stay closed and drop the provider body', async () => {
+  const thrown = await localProfileResponse(claim({ displayName: 'ada@example.com', handle: 'alex' }), {
+    env: ENV,
+    fetcher: async () => { throw new Error('down secret-value'); },
+  });
+  assert.equal(thrown.status, 502);
+  const thrownBody = await thrown.json();
+  assert.equal(thrownBody.error, 'profile_directory_unreachable');
+  assert.equal(JSON.stringify(thrownBody).includes('secret-value'), false);
+  const lookup = await localHandleLookup(new Request('https://app.local/api/profiles/lookup?q=%40alex', {
+    headers: { 'x-owner-id': 'did:privy:user_1' },
+  }), {
+    env: ENV,
+    fetcher: async () => { throw new Error('down secret-value'); },
+  });
+  assert.equal(lookup.status, 502);
+  assert.equal((await lookup.json()).error, 'profile_read_failed');
+  const empty = await localProfileResponse(claim({ displayName: 'ada@example.com', handle: 'alex' }), {
+    env: ENV,
+    fetcher: async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('/users')) return new Response('', { status: 201 });
+      if ((init.method || 'GET') === 'POST') return Response.json([{ handle: 'alex' }], { status: 201 });
+      return Response.json([]);
+    },
+  });
+  assert.equal(empty.status, 502);
+  assert.equal((await empty.json()).error, 'profile_not_confirmed');
+});
+
 test('a directory write is used when the service role is set', () => {
   assert.equal(useLocalProfileDirectory(ENV), true);
   assert.equal(useLocalProfileDirectory({ SUPABASE_URL: ENV.SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: '' }), false);

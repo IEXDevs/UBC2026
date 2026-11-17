@@ -165,9 +165,9 @@ export async function localProfileResponse(request, { env = {}, fetcher = fetch 
     if (!read.ok) return json({ error: (await failureCode(read)) || 'profile_save_failed' }, 502);
     const rows = await read.json().catch(() => []);
     const row = Array.isArray(rows) ? rows[0] : null;
-    if (row?.handle !== handle) return json({ error: 'profile_save_failed' }, 502);
+    if (row?.handle !== handle) return json({ error: 'profile_not_confirmed' }, 502);
   } catch {
-    return json({ error: 'profile_save_failed' }, 502);
+    return json({ error: 'profile_directory_unreachable' }, 502);
   }
   return json({
     ok: true,
