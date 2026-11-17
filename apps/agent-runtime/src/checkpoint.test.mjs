@@ -52,8 +52,12 @@ test('BotStateMachine wakes, advances, and blocks while paused', async () => {
   assert.equal(blocked.status, 409);
   const resumed = await machine.handle(new Request('https://bot/resume', { method: 'POST' }));
   assert.equal(resumed.status, 200);
-  const status = await machine.handle(new Request('https://bot/status'));
+  const status = await machine.handle(new Request('https://bot/status', {
+    headers: { 'x-owner-id': 'user_1' },
+  }));
   const body = await status.json();
+  // Unauthenticated status strips run; wake without owner leaves meta.ownerId null,
+  // so any owner header is accepted when meta has no owner yet.
   assert.equal(body.run.botId, 'bot_1');
   assert.equal(body.run.paused, false);
 });

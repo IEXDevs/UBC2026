@@ -292,9 +292,14 @@ test('a position check does not move a paused run', async () => {
   }));
   const checked = await machine.handle(new Request('https://bot/position-check', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-maelstrom-internal': 'position-check',
+      'x-owner-id': 'alice',
+    },
     body: JSON.stringify({
       botId: 'bot_1',
+      ownerId: 'alice',
       now,
       reason: 'stream-drop-recheck',
       maxLoss: '10',
@@ -306,7 +311,9 @@ test('a position check does not move a paused run', async () => {
   assert.equal(body.check.flag, 'stream-fallback');
   assert.equal(body.check.balance.amount, '7');
   assert.equal(JSON.stringify(body).includes(secretUrl), false);
-  const status = await machine.handle(new Request('https://bot/status'));
+  const status = await machine.handle(new Request('https://bot/status', {
+    headers: { 'x-owner-id': 'alice' },
+  }));
   const saved = await status.json();
   assert.equal(saved.run.paused, true);
   assert.equal(saved.run.step, 'research');

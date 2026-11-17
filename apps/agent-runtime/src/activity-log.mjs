@@ -165,6 +165,28 @@ export async function persistActivity(env, row, fetcher = env?.fetch ?? fetch) {
   }
 }
 
+function slimLoggedResponse(path, body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  // Status / position endpoints: keep flags, drop full paper books from durable logs.
+  if (typeof path === 'string' && (/\/status$/.test(path) || path.includes('/api/positions'))) {
+    const check = body.positionCheck && typeof body.positionCheck === 'object'
+      ? {
+        flag: body.positionCheck.flag ?? null,
+        status: body.positionCheck.status ?? null,
+        positionCount: Array.isArray(body.positionCheck.positions) ? body.positionCheck.positions.length : 0,
+      }
+      : null;
+    return {
+      ok: body.ok === true,
+      error: typeof body.error === 'string' ? body.error.slice(0, 64) : null,
+      auth: body.auth ?? null,
+      itemCount: Array.isArray(body.items) ? body.items.length : undefined,
+      positionCheck: check,
+    };
+  }
+  return body;
+}
+
 export async function persistHttpActivity(env, { captured, response, started } = {}) {
   if (!supabaseConfig(env)) return { configured: false };
   let responseBody = null;
@@ -188,7 +210,7 @@ export async function persistHttpActivity(env, { captured, response, started } =
       ms: Math.max(0, Date.now() - (Number.isFinite(started) ? started : Date.now())),
       contentType: captured?.contentType ?? null,
       request: captured?.body ?? null,
-      response: responseBody,
+      response: slimLoggedResponse(captured?.path, responseBody),
     },
   }, env?.fetch ?? fetch);
 }

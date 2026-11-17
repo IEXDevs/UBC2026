@@ -372,7 +372,9 @@ test('execute retries with the same idempotency key after a crash', async () => 
   };
   const first = await postLoop(machine, env, payload());
   assert.equal(first.status, 500);
-  const saved = await machine.handle(new Request('https://bot/status'));
+  const saved = await machine.handle(new Request('https://bot/status', {
+    headers: { 'x-owner-id': 'user_1' },
+  }));
   const mid = await saved.json();
   assert.equal(mid.run.checkpoints.execute.status, 'started');
   assert.equal(mid.run.checkpoints.memo, undefined);
