@@ -419,6 +419,18 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
   assert.equal(req.method, 'POST');
   assert.equal(req.path, PERMISSIONED_SPEND_PATH);
   assert.equal(req.path, '/api/spend');
+  assert.equal(req.body.reviewCap, null);
+  const capped = parsePermissionedSpendBody({
+    permission: 'review',
+    botId: 'bot_1',
+    amount: '42',
+    destination: dest,
+    reviewCap: '25000000',
+  });
+  assert.equal(capped.reviewCap, '25000000');
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'review', botId: 'bot_1', amount: '42', destination: dest, reviewCap: '0',
+  }), null);
   assert.throws(
     () => buildPermissionedSpendRequest({ permission: 'full', botId: 'bot_1', amount: '1' }),
     ContractError,

@@ -1409,6 +1409,34 @@ button.add-agent:not(:disabled):hover {
   font-weight: 700;
 }
 
+.acceptance-tiers {
+  display: grid;
+  gap: 8px;
+}
+.acceptance-tiers label {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.acceptance-tiers label.is-on {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.acceptance-tiers input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.acceptance-tiers span {
+  font-weight: 650;
+}
+.acceptance-tiers small {
+  color: #c8c8c8;
+  line-height: 1.35;
+}
+
 .sheet.wallet-gate.claim-form {
   align-content: start;
   max-height: none;

@@ -2,10 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   netChangeSummary,
+  dollarsToBaseUnits,
   managesFunds,
   parsePermission,
   permissionInstruction,
+  readAcceptanceAck,
   transactionNeedsPerson,
+  writeAcceptance,
 } from './spend-permission.mjs';
 
 /**
@@ -25,6 +28,7 @@ test('full permissions manages funds and the other modes still wait', () => {
   assert.match(permissionInstruction('full'), /manage funds/);
   assert.match(permissionInstruction('full'), /Do not ask whether they are going to buy, sell, spend, or pay/);
   assert.match(permissionInstruction('review'), /review by AI/);
+  assert.match(permissionInstruction('review'), /review threshold/);
   assert.match(permissionInstruction('ask'), /ask every time/);
   assert.match(permissionInstruction('ask'), /mainnet price quote never authorizes/);
 });
@@ -36,6 +40,22 @@ test('full permissions manages funds and the other modes still wait', () => {
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
+test('onboarding stores the review maximum in base units', () => {
+  assert.equal(dollarsToBaseUnits('25'), '25000000');
+  assert.equal(dollarsToBaseUnits('0.5'), '500000');
+  assert.equal(dollarsToBaseUnits('0'), null);
+  const storage = new Map();
+  const memory = {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  };
+  writeAcceptance(memory, 'user_1', { permission: 'ask', reviewCap: '25000000' });
+  assert.equal(readAcceptanceAck(memory, 'user_1'), true);
+  assert.equal(memory.getItem('maelstrom.spendPermission'), 'ask');
+  assert.equal(memory.getItem('maelstrom.reviewThreshold'), '25000000');
+  assert.throws(() => writeAcceptance(memory, 'user_1', { permission: 'review', reviewCap: '0' }));
+});
+
 test('a send summary shows the outflow and the net', () => {
   const summary = netChangeSummary({ amount: '5000000', asset: 'USDC', handle: 'bob' });
   assert.equal(summary.title, 'Send to @bob');

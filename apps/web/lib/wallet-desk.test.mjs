@@ -252,9 +252,11 @@ test('swap quotes skip restricted tokens and signup claims a handle before recov
   };
   assert.equal(accountSetupStep({ ...base, handle: '' }), 'handle');
   assert.equal(accountSetupStep({ ...base, handle: 'alex', walletsReady: false }), 'loading');
-  assert.equal(accountSetupStep({ ...base, handle: 'alex', walletCount: 0 }), null);
-  assert.equal(accountSetupStep({ ...base, handle: 'alex' }), 'recovery');
-  assert.equal(accountSetupStep({ ...base, handle: 'alex', recoveryConfirmed: true }), null);
+  assert.equal(accountSetupStep({ ...base, handle: 'alex', walletCount: 0 }), 'acceptance');
+  assert.equal(accountSetupStep({ ...base, handle: 'alex', walletCount: 0, acceptanceConfirmed: true }), null);
+  assert.equal(accountSetupStep({ ...base, handle: 'alex' }), 'acceptance');
+  assert.equal(accountSetupStep({ ...base, handle: 'alex', acceptanceConfirmed: true }), 'recovery');
+  assert.equal(accountSetupStep({ ...base, handle: 'alex', acceptanceConfirmed: true, recoveryConfirmed: true }), null);
   assert.equal(SETUP_CARD_MS, 4000);
   assert.equal(setupCardVisible('loading'), null);
   assert.equal(setupCardVisible('handle'), 'handle');

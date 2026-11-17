@@ -351,10 +351,8 @@ async function performVerify(run, ctx) {
       if (priced) {
         const again = await quotedPrice(facts, ctx);
         if (!again || again.error) throw new LoopEngineError(again?.error || 'price_unavailable', 422);
-        const base = ctx.input.verifyFacts ? ctx.input.verifyFacts : facts;
-        return { ...base, price: again.price };
+        return { ...facts, price: again.price };
       }
-      if (ctx.input.verifyFacts) return ctx.input.verifyFacts;
       if (ctx.deps.trustLookup) return verifyFromProviders(facts, ctx);
       const completion = await ctx.models.complete({
         role: 'verify',

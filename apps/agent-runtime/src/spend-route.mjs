@@ -11,6 +11,7 @@ import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
 import { loadOwnerLoopContext, supabaseConfig } from './supabase-rest.mjs';
 import { alertFromSpend, publishBotAlert } from './bot-alerts.mjs';
 import { deskSpendAllowed } from './desk-grant.mjs';
+import { verifierFacts } from './spend-verifier.mjs';
 
 function json(body, status = 200) {
   return Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
@@ -98,10 +99,17 @@ export async function handleSpend(request, env = {}) {
       proposal,
       trustScore,
       mainFn: async () => facts,
-      verifyFn: async () => env.spendVerifyFacts || facts,
+      verifyFn: async () => verifierFacts({
+        facts,
+        proposal,
+        parsed,
+        trustScore,
+        mint: DEVNET_USDC_MINT,
+      }),
       now,
       ownerPermission: parsed.permission,
       confirmed: parsed.confirmed,
+      reviewCap: parsed.reviewCap,
       quote: parsed.quote,
       signDevnet,
     });
