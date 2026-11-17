@@ -9,6 +9,13 @@ function fill(bytes) {
   bytes.fill(7);
 }
 
+/*
+ * Achieves: verifies generated password/passphrase satisfy create rules and accept gate requires copy when generated.
+ * Fails when: length/charset break, passwordProblem rejects, accept allows uncopied generated secrets, or typed path blocked.
+ * Oracle: 20-char no-ambiguous charset; 4-word passphrase; secretAcceptAllowed({generated,copied,acknowledged}).
+ * Side effects / state checked: deterministic fill(7) RNG; no console/logging of secrets asserted via absence of throw only.
+ * Gaps: does not assert secrets are never logged in UI components (source check is next test).
+ */
 test('generated password and passphrase fit the create rules without being logged', () => {
   const password = generatePassword(fill);
   const passphrase = generatePassphrase(fill);
@@ -23,6 +30,13 @@ test('generated password and passphrase fit the create rules without being logge
   assert.equal(secretAcceptAllowed({ generated: false }), true);
 });
 
+/*
+ * Achieves: verifies SecretDraft places generator then field then Copy; DeskLock/Recovery omit wrong generator/ack UX.
+ * Fails when: Copy moves before field, 'I copied it' checkbox returns, DeskLock grows passphrase generate, Recovery adds generate password.
+ * Oracle: source order action < name < aria-label="Copy" < warning; Recovery Password/Repeat/Download seed/12 words.
+ * Side effects / state checked: component source text.
+ * Gaps: source snapshot only — no click/copy interaction.
+ */
 test('each create screen keeps one generator beside the field and a copy icon inside it', () => {
   const draft = readFileSync(new URL('../components/SecretDraft.js', import.meta.url), 'utf8');
   const generate = draft.indexOf('{action}');
