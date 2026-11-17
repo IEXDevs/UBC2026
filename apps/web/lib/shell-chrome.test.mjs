@@ -39,3 +39,16 @@ test('the home shell does not render the demo fixture', () => {
   assert.equal(page.includes('bot_meteora'), false);
   assert.equal(page.includes('Sandbox shopper'), false);
 });
+
+test('claim handle stays outside the shell that fades on first login', () => {
+  const root = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(root, '../app/page.js'), 'utf8');
+  const css = readFileSync(join(root, '../app/globals.css'), 'utf8');
+  assert.match(
+    page,
+    /<ProfileSheet[\s\S]*?\/>\s*<\/div>\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?\{setupStep === 'handle' \|\| claimWelcome \? \([\s\S]*?<ClaimHandle[\s\S]*?<DeskLock/,
+  );
+  assert.match(page, /setupStep === 'handle' \|\| claimWelcome \? ' is-claim'/);
+  assert.match(css, /\.shell\.is-claim\s*\{[^}]*opacity:\s*0/);
+  assert.match(css, /\.shell\.is-claim\s*\{[^}]*pointer-events:\s*none/);
+});

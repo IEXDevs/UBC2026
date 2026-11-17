@@ -1559,18 +1559,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           </section>
         </div>
       ) : null}
-      {setupStep === 'handle' || claimWelcome ? (
-        <ClaimHandle
-          accountLabel={profile?.displayName || accountLabel}
-          ownerId={ownerId}
-          onSave={async (next) => {
-            const saved = await saveProfile(next);
-            if (saved?.ok) setClaimWelcome(true);
-            return saved;
-          }}
-          onContinue={() => setClaimWelcome(false)}
-        />
-      ) : null}
       {setupStep === 'recovery' && !claimWelcome ? (
         <RecoveryCeremony
           wallets={liveWallets || []}
@@ -1695,6 +1683,19 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         onWallet={() => { setProfileOpen(false); openWallet(); }}
       />
     </div>
+    {/* Claim stays outside the shell. .shell.is-claim sets opacity 0. */}
+    {setupStep === 'handle' || claimWelcome ? (
+      <ClaimHandle
+        accountLabel={profile?.displayName || accountLabel}
+        ownerId={ownerId}
+        onSave={async (next) => {
+          const saved = await saveProfile(next);
+          if (saved?.ok) setClaimWelcome(true);
+          return saved;
+        }}
+        onContinue={() => setClaimWelcome(false)}
+      />
+    ) : null}
     {lockOpen ? (
       <DeskLock
         ownerId={ownerId}
