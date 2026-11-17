@@ -7,6 +7,13 @@ import {
   serializeToolResult,
 } from './chat-tools.mjs';
 
+/**
+ * Achieves: verifies openAiAgentTools maps shared research and dashboard schemas.
+ * Fails when: openAiAgentTools maps shared research and dashboard schemas breaks (e.g. expected /same tools on text and voice/, /get_price/, /devnet execution, mainnet pricing/).
+ * Oracle: assert.match(chatToolsInstruction(), /same tools on text and voice/); assert.match(chatToolsInstruction(), /get_price/); assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/); assert.ok(tools.some(tool => tool.function.name === 'get_price'); assert.ok(tools.some(tool => tool.function.name === 'web_search'); assert.ok(tools.some(tool => tool.function.name === 'browser_open')
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('openAiAgentTools maps shared research and dashboard schemas', () => {
   const tools = openAiAgentTools();
   assert.ok(tools.some(tool => tool.function.name === 'get_price'));
@@ -19,6 +26,13 @@ test('openAiAgentTools maps shared research and dashboard schemas', () => {
   assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/);
 });
 
+/**
+ * Achieves: verifies get_price returns a paper quote and does not sign.
+ * Fails when: get_price returns a paper quote and does not sign breaks (e.g. expected true, 'jupiter-price-v3', 'dexscreener'); failure/null paths flip.
+ * Oracle: assert.equal(result.ok, true); assert.equal(result.quote.quoteSource, 'jupiter-price-v3'); assert.equal(result.quote.fallbackFrom, 'dexscreener'); assert.equal(result.quote.label, 'devnet execution, mainnet pricing'); assert.equal(result.quote.authorizesTransaction, false); assert.equal(result.quote.executionCluster, 'devnet')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('get_price returns a paper quote and does not sign', async () => {
   const calls = [];
   const mint = 'So11111111111111111111111111111111111111112';
@@ -43,6 +57,13 @@ test('get_price returns a paper quote and does not sign', async () => {
   assert.equal(calls.some(call => call.key === 'jupiter-test-key'), true);
 });
 
+/**
+ * Achieves: verifies serializeToolResult strips viewerUrl.
+ * Fails when: serializeToolResult strips viewerUrl breaks (e.g. expected false, false, /bs_1/).
+ * Oracle: assert.equal(text.includes('viewerUrl'), false); assert.equal(text.includes('secret'), false); assert.match(text, /bs_1/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('serializeToolResult strips viewerUrl', () => {
   const text = serializeToolResult({
     sessionRecordId: 'bs_1',
@@ -54,6 +75,13 @@ test('serializeToolResult strips viewerUrl', () => {
   assert.match(text, /bs_1/);
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker opens browser via Worker when runtime is set.
+ * Fails when: createChatToolInvoker opens browser via Worker when runtime is set breaks (e.g. expected 'bs_abc', 'https://www.google.com/', 'POST').
+ * Oracle: assert.equal(opened.sessionRecordId, 'bs_abc'); assert.equal(opened.url, 'https://www.google.com/'); assert.equal(calls[0].method, 'POST'); assert.equal(calls[0].owner, 'did:privy:owner1'); assert.equal(calls[0].body.url, 'https://www.google.com/'); assert.match(calls[0].url, /\/bots\/bot_1\/browser\/sessions$/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('createChatToolInvoker opens browser via Worker when runtime is set', async () => {
   const calls = [];
   const invoke = createChatToolInvoker({
@@ -88,6 +116,13 @@ test('createChatToolInvoker opens browser via Worker when runtime is set', async
   assert.equal(calls[0].body.url, 'https://www.google.com/');
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker navigates via Worker.
+ * Fails when: createChatToolInvoker navigates via Worker breaks (e.g. expected /\/sessions\/bs_1\/navigate$/, { url: 'https://example.com/' }, 'https://example.com/').
+ * Oracle: assert.equal(navigated.url, 'https://example.com/'); assert.deepEqual(JSON.parse(options.body), { url: 'https://example.com/' }); assert.match(String(url), /\/sessions\/bs_1\/navigate$/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('createChatToolInvoker navigates via Worker', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
@@ -106,6 +141,13 @@ test('createChatToolInvoker navigates via Worker', async () => {
   assert.equal(navigated.url, 'https://example.com/');
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker reuses session after Worker concurrency_limit.
+ * Fails when: createChatToolInvoker reuses session after Worker concurrency_limit breaks (e.g. expected 'POST', 'GET', /\/sessions\/bs_old\/navigate$/).
+ * Oracle: assert.equal(options.method, 'POST'); assert.equal(options.method, 'GET'); assert.equal(opened.reused, true); assert.equal(opened.url, 'https://example.com/fun'); assert.equal(opened.sessionRecordId, 'bs_old'); assert.match(String(url), /\/sessions\/bs_old\/navigate$/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('createChatToolInvoker reuses session after Worker concurrency_limit', async () => {
   let step = 0;
   const invoke = createChatToolInvoker({
@@ -134,6 +176,13 @@ test('createChatToolInvoker reuses session after Worker concurrency_limit', asyn
   assert.equal(opened.sessionRecordId, 'bs_old');
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker redacts live-view viewer URLs from Worker.
+ * Fails when: createChatToolInvoker redacts live-view viewer URLs from Worker breaks (e.g. expected 'bs_1', undefined, /Live View/).
+ * Oracle: assert.equal(view.sessionRecordId, 'bs_1'); assert.equal(view.viewerUrl, undefined); assert.match(view.note, /Live View/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('createChatToolInvoker redacts live-view viewer URLs from Worker', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
@@ -153,6 +202,13 @@ test('createChatToolInvoker redacts live-view viewer URLs from Worker', async ()
   assert.match(view.note, /Live View/);
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker returns search_not_configured without Firecrawl.
+ * Fails when: createChatToolInvoker returns search_not_configured without Firecrawl breaks (e.g. expected 'search_not_configured').
+ * Oracle: assert.equal(result.error, 'search_not_configured')
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('createChatToolInvoker returns search_not_configured without Firecrawl', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
@@ -164,6 +220,13 @@ test('createChatToolInvoker returns search_not_configured without Firecrawl', as
   assert.equal(result.error, 'search_not_configured');
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker lists bots via Worker dashboard tools.
+ * Fails when: createChatToolInvoker lists bots via Worker dashboard tools breaks (e.g. expected 'bot_1', /\/api\/bots$/, 'GET').
+ * Oracle: assert.equal(listed.items[0].id, 'bot_1'); assert.equal(calls[0].method, 'GET'); assert.equal(calls[0].owner, 'did:privy:owner1'); assert.match(calls[0].url, /\/api\/bots$/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('createChatToolInvoker lists bots via Worker dashboard tools', async () => {
   const calls = [];
   const invoke = createChatToolInvoker({
@@ -182,6 +245,13 @@ test('createChatToolInvoker lists bots via Worker dashboard tools', async () => 
   assert.equal(calls[0].owner, 'did:privy:owner1');
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker falls back to shell bots and wallets when Worker is empty.
+ * Fails when: createChatToolInvoker falls back to shell bots and wallets when Worker is empty breaks (e.g. expected 'shell', 'bot_local', 'shell').
+ * Oracle: assert.equal(bots.source, 'shell'); assert.equal(bots.items[0].id, 'bot_local'); assert.equal(wallets.source, 'shell'); assert.equal(wallets.items[0].id, 'w_main'); assert.match(wallets.balances.displayBalanceLabel, /12\.5 USDC/); assert.match(wallets.clusterNote, /devnet/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('createChatToolInvoker falls back to shell bots and wallets when Worker is empty', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
@@ -210,6 +280,13 @@ test('createChatToolInvoker falls back to shell bots and wallets when Worker is 
   assert.match(wallets.clusterNote, /devnet/);
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker enriches shell wallet addresses via QuickNode.
+ * Fails when: createChatToolInvoker enriches shell wallet addresses via QuickNode breaks (e.g. expected '2500000000', 'USDC', /2\.5 SOL/).
+ * Oracle: assert.equal(wallets.items[0].solLamports, '2500000000'); assert.equal(wallets.items[0].tokens[0].symbol, 'USDC'); assert.match(wallets.balances.displayBalanceLabel, /2\.5 SOL/); assert.match(wallets.balances.displayBalanceLabel, /0\.75 USDC/); assert.ok(wallets.items[0].holdings.some((row)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('createChatToolInvoker enriches shell wallet addresses via QuickNode', async () => {
   const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
   const { TESTNET_GENESIS_HASH } = await import('@ubc2026/wallets/balances');
@@ -273,6 +350,13 @@ test('createChatToolInvoker enriches shell wallet addresses via QuickNode', asyn
   assert.ok(wallets.items[0].holdings.some((row) => row.cluster === 'devnet'));
 });
 
+/**
+ * Achieves: verifies createChatToolInvoker pauses a bot via Worker.
+ * Fails when: createChatToolInvoker pauses a bot via Worker breaks (e.g. expected /\/bots\/bot_2\/pause$/, 'POST', 'paused').
+ * Oracle: assert.equal(options.method, 'POST'); assert.equal(paused.status, 'paused'); assert.match(String(url), /\/bots\/bot_2\/pause$/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('createChatToolInvoker pauses a bot via Worker', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
@@ -288,6 +372,13 @@ test('createChatToolInvoker pauses a bot via Worker', async () => {
   assert.equal(paused.status, 'paused');
 });
 
+/**
+ * Achieves: verifies what happened while away reads events and does not spend.
+ * Fails when: what happened while away reads events and does not spend breaks (e.g. expected 1, 'GET', 'did:privy:owner1'); failure/null paths flip.
+ * Oracle: assert.equal(seen.length, 1); assert.equal(seen[0].method, 'GET'); assert.equal(seen[0].owner, 'did:privy:owner1'); assert.equal(seen[0].url.includes('bot_active'), false); assert.equal(briefing.spends, false); assert.equal(briefing.signs, false)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('what happened while away reads events and does not spend', async () => {
   const seen = [];
   const invoke = createChatToolInvoker({

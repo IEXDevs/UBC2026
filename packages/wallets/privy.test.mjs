@@ -1,3 +1,7 @@
+/**
+ * Existing Privy client suite. Each test below carries a rigor audit comment.
+ * Oracles: Privy HTTP shapes, Solana-devnet genesis, and wallet assignment rules.
+ */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
@@ -8,6 +12,7 @@ import {
   DEVNET_GENESIS_HASH,
   WalletError,
   canonicalizeJson,
+  privyAuthorizationSignature,
   createPrivyWalletClient,
   createPrivyWalletClientFromEnv,
   loginMethodsFromUser,
@@ -94,6 +99,14 @@ function assertNoSecrets(value) {
   assert.equal(text.includes(authorizationKey.slice('wallet-auth:'.length)), false);
 }
 
+/**
+ * Rigor audit — missing server-signing names throw before any request
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('missing server-signing names throw before any request', () => {
   const { fetcher, calls } = mockFetch([]);
   assert.throws(
@@ -112,6 +125,14 @@ test('missing server-signing names throw before any request', () => {
   );
 });
 
+/**
+ * Rigor audit — readLoginUser returns linked wallets and does not create one
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('readLoginUser returns linked wallets and does not create one', async () => {
   const phantom = 'So11111111111111111111111111111111111111112';
   const { fetcher, calls } = mockFetch([
@@ -143,6 +164,14 @@ test('readLoginUser returns linked wallets and does not create one', async () =>
   assert.equal(calls.some(call => String(call.url).includes('/v1/wallets')), false);
 });
 
+/**
+ * Rigor audit — login recovers owner id from JWT sub without users/me (Worker-safe)
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('login recovers owner id from JWT sub without users/me (Worker-safe)', async () => {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
@@ -166,6 +195,14 @@ test('login recovers owner id from JWT sub without users/me (Worker-safe)', asyn
   assert.equal(calls[2].body.owner.user_id, privyUserId);
 });
 
+/**
+ * Rigor audit — login prefers JWT sub over a stale x-owner-id header
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('login prefers JWT sub over a stale x-owner-id header', async () => {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
@@ -182,6 +219,14 @@ test('login prefers JWT sub over a stale x-owner-id header', async () => {
   assert.equal(String(calls[0].url).includes(encodeURIComponent(privyUserId)), true);
 });
 
+/**
+ * Rigor audit — Worker-safe login loads the user with app secret and no authorization signature
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('Worker-safe login loads the user with app secret and no authorization signature', async () => {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
@@ -195,6 +240,14 @@ test('Worker-safe login loads the user with app secret and no authorization sign
   assert.equal(userCall.init.headers['privy-authorization-signature'], undefined);
 });
 
+/**
+ * Rigor audit — login keeps linked wallets and sign-in methods on the same owner
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('login keeps linked wallets and sign-in methods on the same owner', async () => {
   const phantom = 'So11111111111111111111111111111111111111112';
   const { fetcher } = mockFetch([
@@ -237,6 +290,14 @@ test('login keeps linked wallets and sign-in methods on the same owner', async (
   assert.equal(loginMethodsFromUser({ linked_accounts: [] }).length, 0);
 });
 
+/**
+ * Rigor audit — login creates the main Solana wallet when Privy has none
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('login creates the main Solana wallet when Privy has none', async () => {
   const { fetcher, calls } = mockFetch([
     { match: url => url.includes('/v1/users/'), body: userWith([]) },
@@ -293,6 +354,14 @@ test('login creates the main Solana wallet when Privy has none', async () => {
   assert.equal(calls.length, 3);
 });
 
+/**
+ * Rigor audit — login recovers when createOnLogin linked a Solana wallet with null server id
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('login recovers when createOnLogin linked a Solana wallet with null server id', async () => {
   const { fetcher, calls } = mockFetch([
     {
@@ -325,6 +394,14 @@ test('login recovers when createOnLogin linked a Solana wallet with null server 
   assert.equal(calls.some(call => call.body?.display_name === 'Main'), false);
 });
 
+/**
+ * Rigor audit — login retries list after create fails when a server wallet already exists
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('login retries list after create fails when a server wallet already exists', async () => {
   const calls = [];
   let listCount = 0;
@@ -355,6 +432,14 @@ test('login retries list after create fails when a server wallet already exists'
   assert.equal(calls.some(call => call.body?.display_name === 'Main'), true);
 });
 
+/**
+ * Rigor audit — login keeps an existing main wallet and maps later embedded wallets as additional
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('login keeps an existing main wallet and maps later embedded wallets as additional', async () => {
   const { fetcher, calls } = mockFetch([
     {
@@ -382,6 +467,14 @@ test('login keeps an existing main wallet and maps later embedded wallets as add
   assert.equal(calls[0].init.headers['privy-authorization-signature'], undefined);
 });
 
+/**
+ * Rigor audit — additional wallets require a main wallet and a label
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('additional wallets require a main wallet and a label', async () => {
   const empty = mockFetch([
     { match: url => url.includes('/v1/users/'), body: userWith([]) },
@@ -418,6 +511,14 @@ test('additional wallets require a main wallet and a label', async () => {
   assert.equal(ready.calls[1].init.headers.Authorization.startsWith('Basic '), true);
 });
 
+/**
+ * Rigor audit — server signing broadcasts only after devnet genesis matches
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('server signing broadcasts only after devnet genesis matches', async () => {
   const wallet = {
     ...createMainWallet({ ownerId: 'user_1', address, id: walletId }),
@@ -455,6 +556,14 @@ test('server signing broadcasts only after devnet genesis matches', async () => 
   assert.equal(calls[2].url, rpcUrl);
 });
 
+/**
+ * Rigor audit — a non-devnet QuickNode genesis hash never sends the transaction
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('a non-devnet QuickNode genesis hash never sends the transaction', async () => {
   const wallet = {
     ...createMainWallet({ ownerId: 'user_1', address, id: walletId }),
@@ -478,6 +587,14 @@ test('a non-devnet QuickNode genesis hash never sends the transaction', async ()
   assert.equal(calls.some(call => call.body?.method === 'sendTransaction'), false);
 });
 
+/**
+ * Rigor audit — freeze and provider failures do not reveal secrets or broadcast
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('freeze and provider failures do not reveal secrets or broadcast', async () => {
   const openWallet = {
     ...createMainWallet({ ownerId: 'user_1', address, id: walletId }),
@@ -542,6 +659,14 @@ test('freeze and provider failures do not reveal secrets or broadcast', async ()
   );
 });
 
+/**
+ * Rigor audit — devnet reads and owner sweeps stay off the public client surface and off mainnet
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('devnet reads and owner sweeps stay off the public client surface and off mainnet', async () => {
   const live = client();
   assert.equal(live.rpc, undefined);
@@ -636,6 +761,14 @@ test('devnet reads and owner sweeps stay off the public client surface and off m
   assert.equal(sweep.calls.at(-1).body.method, 'sendTransaction');
 });
 
+/**
+ * Rigor audit — an owner export returns HPKE ciphertext and refuses a plaintext key
+ * Achieves: behavior named in the test title (see assertions).
+ * Fails when: assertions below would not hold for a plausible defective impl.
+ * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Side effects: mocked fetch call list inspected where present.
+ * Gaps: see assertion strength in body; strengthen if a defect could still pass.
+ */
 test('an owner export returns HPKE ciphertext and refuses a plaintext key', async () => {
   const wallet = {
     ...createMainWallet({ ownerId: 'user_1', address, id: walletId }),
@@ -672,4 +805,54 @@ test('an owner export returns HPKE ciphertext and refuses a plaintext key', asyn
   assert.equal(exported.encapsulatedKey, encapsulated);
   assert.equal(exported.privateKey, undefined);
   assert.equal(JSON.stringify(exported).includes('do-not-return'), false);
+});
+
+/**
+ * Achieves: privyAuthorizationSignature produces a verifiable P-256 signature over the canonical payload.
+ * Fails when: Wrong payload verifies, or junk/empty authorization keys succeed.
+ * Oracle: node:crypto verify against independently generated public key + canonicalizeJson payload.
+ * Side effects: none (local keypair fixture).
+ * Gaps: does not call live Privy HTTP.
+ */
+test('privyAuthorizationSignature signs the canonical payload and rejects bad keys', () => {
+  const url = 'https://api.privy.io/v1/wallets';
+  const body = { chain_type: 'solana', owner: { user_id: privyUserId } };
+  const signature = privyAuthorizationSignature({
+    appId,
+    authorizationKey,
+    method: 'POST',
+    url,
+    body,
+    idempotencyKey: 'idem_1',
+    expiresAt: 1_700_000_000,
+  });
+  const payload = canonicalizeJson({
+    version: 1,
+    method: 'POST',
+    url,
+    body,
+    headers: {
+      'privy-app-id': appId,
+      'privy-idempotency-key': 'idem_1',
+      'privy-request-expiry': '1700000000',
+    },
+  });
+  assert.equal(verify('sha256', Buffer.from(payload), publicKey, Buffer.from(signature, 'base64')), true);
+  const withoutPrefix = privyAuthorizationSignature({
+    appId,
+    authorizationKey: authorizationKey.slice('wallet-auth:'.length),
+    method: 'POST',
+    url,
+    body,
+  });
+  assert.equal(typeof withoutPrefix, 'string');
+  assert.notEqual(withoutPrefix, '');
+  assert.throws(
+    () => privyAuthorizationSignature({ appId, authorizationKey: 'not-a-key', method: 'POST', url, body }),
+    WalletError,
+  );
+  assert.throws(
+    () => privyAuthorizationSignature({ appId, authorizationKey: '', method: 'POST', url, body }),
+    WalletError,
+  );
 });

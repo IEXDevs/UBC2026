@@ -254,7 +254,12 @@ function base64UrlToUtf8(value) {
   throw new Error('no_base64');
 }
 
-function jwtSub(accessToken) {
+/**
+ * Read the Privy user id from an access-token JWT `sub` without verifying the
+ * signature. Empty when the token is opaque / malformed — callers must then
+ * use `/users/me` (needs Origin) or an explicit owner id.
+ */
+export function readPrivyAccessTokenSub(accessToken) {
   try {
     const part = String(accessToken).split('.')[1];
     if (!part) return '';
@@ -263,6 +268,10 @@ function jwtSub(accessToken) {
   } catch {
     return '';
   }
+}
+
+function jwtSub(accessToken) {
+  return readPrivyAccessTokenSub(accessToken);
 }
 
 function resolvePrivyUserId(user, accessToken, ownerId) {

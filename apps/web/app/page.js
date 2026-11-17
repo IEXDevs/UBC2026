@@ -54,7 +54,14 @@ import {
 import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
 import { buildPermissionedSpendRequest, parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
-import { mergeObservedWallets, walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
+import {
+  mergeObservedWallets,
+  walletConfigNote,
+  walletProvisionNote,
+  walletProvisionPaths,
+  walletProvisionSucceeded,
+  walletsFromPrivyUser,
+} from '../lib/wallet-provision.mjs';
 import { SETUP_CARD_MS, accountSetupStep, clipAddress, readQuoteOut, readRecoveryAck, swapSendSettlement, writeRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
@@ -208,14 +215,13 @@ function AuthedShell() {
           return;
         }
 
-        // Provision only via Next `/api/wallets`. The agent-runtime Worker
-        // cannot set Origin for Privy users/me, so POST /api/runtime/api/wallets
-        // always 502s and used to overwrite a useful Next error in the console.
+        // Provision only via Next `/api/wallets` (see walletProvisionPaths).
         // Next already mirrors rows to Supabase with /api/wallets/persist.
         let body = {};
         let ok = false;
+        const provisionPath = walletProvisionPaths()[0];
         try {
-          const response = await fetch('/api/wallets', {
+          const response = await fetch(provisionPath, {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${token}`,
@@ -225,9 +231,9 @@ function AuthedShell() {
           });
           body = await response.json().catch(() => ({}));
           if (stopped) return;
-          ok = response.ok && Array.isArray(body.wallets) && body.wallets.length > 0;
+          ok = walletProvisionSucceeded(response.ok, body);
           if (!ok) {
-            console.error('[wallets] provision failed', '/api/wallets', response.status, {
+            console.error('[wallets] provision failed', provisionPath, response.status, {
               error: body.error,
               detail: body.detail,
               missing: body.missing,
@@ -235,7 +241,7 @@ function AuthedShell() {
           }
         } catch (error) {
           if (stopped) return;
-          console.error('[wallets] provision failed', '/api/wallets', {
+          console.error('[wallets] provision failed', provisionPath, {
             error: error?.name || 'fetch_failed',
             detail: typeof error?.message === 'string' ? error.message.slice(0, 180) : undefined,
           });

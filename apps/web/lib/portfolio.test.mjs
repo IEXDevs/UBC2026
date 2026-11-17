@@ -22,6 +22,13 @@ const DEVNET = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 const PHANTOM = 'So11111111111111111111111111111111111111112';
 const AGENT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
+/**
+ * Achieves: verifies portfolio reads refuse a broadcast method.
+ * Fails when: portfolio reads refuse a broadcast method breaks (e.g. expected 'getBalance', 'getTokenAccountsByOwner').
+ * Oracle: assert.equal(assertPortfolioReadMethod('getBalance'), 'getBalance'); assert.equal(assertPortfolioReadMethod('getTokenAccountsByOwner'), 'getTokenAccountsByOwner'); assert.throws( () => assertPortfolioReadMethod('sendTransaction'), error => error instanceof PortfolioError &&
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('portfolio reads refuse a broadcast method', () => {
   assert.equal(assertPortfolioReadMethod('getBalance'), 'getBalance');
   assert.equal(assertPortfolioReadMethod('getTokenAccountsByOwner'), 'getTokenAccountsByOwner');
@@ -31,6 +38,13 @@ test('portfolio reads refuse a broadcast method', () => {
   );
 });
 
+/**
+ * Achieves: verifies usd micro multiplies base units by a decimal price.
+ * Fails when: usd micro multiplies base units by a decimal price breaks (e.g. expected 9, '150.25', 6, '1', '$150.25').
+ * Oracle: assert.equal(usdMicro('1000000000', 9, '150.25'); assert.equal(usdMicro('2500000', 6, '1'); assert.equal(formatUsdMicro('150250000'), '$150.25'); assert.equal(formatUsdMicro('2500000'), '$2.50'); assert.equal(formatShare(2550), '25.5%'); assert.equal(formatShare(10000), '100%')
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('usd micro multiplies base units by a decimal price', () => {
   assert.equal(usdMicro('1000000000', 9, '150.25'), '150250000');
   assert.equal(usdMicro('2500000', 6, '1'), '2500000');
@@ -40,6 +54,13 @@ test('usd micro multiplies base units by a decimal price', () => {
   assert.equal(formatShare(10000), '100%');
 });
 
+/**
+ * Achieves: verifies portfolio slices sum to the whole and skip dust nfts.
+ * Fails when: portfolio slices sum to the whole and skip dust nfts breaks (e.g. expected false, PRICE_LABEL, '250000000').
+ * Oracle: assert.equal(book.authorizesTransaction, false); assert.equal(book.priceLabel, PRICE_LABEL); assert.equal(book.totalUsdMicro, '250000000'); assert.equal(book.slices.reduce((sum, slice); assert.equal(book.slices[0].symbol, 'SOL'); assert.equal(book.slices[0].shareBps, 8000)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('portfolio slices sum to the whole and skip dust nfts', () => {
   const book = buildPortfolio({
     cluster: 'mainnet',
@@ -78,6 +99,13 @@ test('portfolio slices sum to the whole and skip dust nfts', () => {
   assert.match(book.note, /devnet execution, mainnet pricing/);
 });
 
+/**
+ * Achieves: verifies quicknode read prices balances and never sends a transaction.
+ * Fails when: quicknode read prices balances and never sends a transaction breaks (e.g. expected RPC, false, 'devnet').
+ * Oracle: assert.equal(url, RPC); assert.equal(body.some(row => row.method === 'sendTransaction'), false); assert.equal(book.cluster, 'devnet'); assert.equal(book.totalUsdMicro, '102000000'); assert.equal(book.wallets[0].holdings.some(row => row.symbol === 'USDC' && row.usdMicro === '2000000'), true); assert.equal(book.fetchedAt, '2026-11-15T00:00:00.000Z')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('quicknode read prices balances and never sends a transaction', async () => {
   const calls = [];
   const fetcher = async (url, init) => {
@@ -136,6 +164,13 @@ test('quicknode read prices balances and never sends a transaction', async () =>
   assert.match(book.note, /QUICKNODE_MAINNET_RPC_URL/);
 });
 
+/**
+ * Achieves: verifies a non-solana genesis and a leaked url are refused.
+ * Fails when: a non-solana genesis and a leaked url are refused breaks (e.g. expected ['QUICKNODE_MAINNET_RPC_URL', 'QUICKNODE_DEVNET_RPC_URL'], RPC).
+ * Oracle: assert.equal(choosePortfolioRpc({ QUICKNODE_MAINNET_RPC_URL: ` ${RPC} ` }).rpcUrl, RPC); assert.deepEqual(choosePortfolioRpc({}).missing, ['QUICKNODE_MAINNET_RPC_URL', 'QUICKNODE_DEVNET_RPC_URL']); assert.rejects( () => loadPortfolio({ rpcUrl: RPC, fetcher, wallets: [{ address: PHANTOM, label: 'Phantom' }],; assert.rejects( () => loadPortfolio({ rpcUrl: 'http://example.invalid/quicknode-secret-path', fetcher: async (
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a non-solana genesis and a leaked url are refused', async () => {
   const fetcher = async () => new Response(JSON.stringify([
     { jsonrpc: '2.0', id: 0, result: MAINNET.replace('5', 'x') },
@@ -162,6 +197,13 @@ test('a non-solana genesis and a leaked url are refused', async () => {
   );
 });
 
+/**
+ * Achieves: verifies portfolio errors name the missing config and drop urls.
+ * Fails when: portfolio errors name the missing config and drop urls breaks (e.g. expected /QUICKNODE_MAINNET_RPC_URL/, detail: 'https://example.invalid/quicknode-secret-path' }).
+ * Oracle: assert.equal( portfolioErrorNote({ error: 'rpc_failed', detail: 'https://example.invalid/quicknode-secret-path; assert.match(portfolioErrorNote({ error: 'missing_config' }), /QUICKNODE_MAINNET_RPC_URL/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('portfolio errors name the missing config and drop urls', () => {
   assert.match(portfolioErrorNote({ error: 'missing_config' }), /QUICKNODE_MAINNET_RPC_URL/);
   assert.equal(
@@ -170,6 +212,13 @@ test('portfolio errors name the missing config and drop urls', () => {
   );
 });
 
+/**
+ * Achieves: verifies no linked wallets skip the rpc.
+ * Fails when: no linked wallets skip the rpc breaks (e.g. expected false, '0', /Connect a Solana wallet/).
+ * Oracle: assert.equal(called, false); assert.equal(book.totalUsdMicro, '0'); assert.match(book.note, /Connect a Solana wallet/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('no linked wallets skip the rpc', async () => {
   let called = false;
   const book = await loadPortfolio({

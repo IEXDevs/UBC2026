@@ -64,6 +64,13 @@ function portfolio() {
   };
 }
 
+/**
+ * Achieves: verifies earnings chart is paper PnL and does not authorize a transaction.
+ * Fails when: earnings chart is paper PnL and does not authorize a transaction breaks (e.g. expected false, false, true).
+ * Oracle: assert.equal(series.broadcast, false); assert.equal(series.authorizesTransaction, false); assert.equal(series.paperPnl, true); assert.equal(series.label, PAPER_PNL_LABEL); assert.equal(series.totalMicro, '-250000'); assert.equal(line.up, false)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('earnings chart is paper PnL and does not authorize a transaction', () => {
   const series = buildEarningsSeries({
     positions: [paper, { id: 'balance', source: 'connected-balance', readOnly: true, pnlMicroUsdc: '9000000' }],
@@ -86,6 +93,13 @@ test('earnings chart is paper PnL and does not authorize a transaction', () => {
   assert.equal(line.up, false);
 });
 
+/**
+ * Achieves: verifies connected wallets add read-only mainnet balances and keep paper lots.
+ * Fails when: connected wallets add read-only mainnet balances and keep paper lots breaks (e.g. expected false, false, PAPER_PNL_LABEL).
+ * Oracle: assert.equal(merged.broadcast, false); assert.equal(merged.authorizesTransaction, false); assert.equal(merged.label, PAPER_PNL_LABEL); assert.equal(merged.positions[0].id, 'pos_sol'); assert.equal(merged.positions.length, 3); assert.equal(phantom.market, 'mainnet price')
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('connected wallets add read-only mainnet balances and keep paper lots', () => {
   const merged = mergeConnectedPositions({
     positions: [paper],
@@ -128,6 +142,13 @@ test('connected wallets add read-only mainnet balances and keep paper lots', () 
   assert.equal(book.cards.find(card => card.holder === 'Phantom' || card.botName === 'Phantom').market, 'mainnet price');
 });
 
+/**
+ * Achieves: verifies a quote that authorizes a transaction does not add balances.
+ * Fails when: a quote that authorizes a transaction does not add balances breaks (e.g. expected 1, 'pos_sol', false).
+ * Oracle: assert.equal(merged.positions.length, 1); assert.equal(merged.positions[0].id, 'pos_sol'); assert.equal(merged.authorizesTransaction, false); assert.equal(merged.broadcast, false)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('a quote that authorizes a transaction does not add balances', () => {
   const merged = mergeConnectedPositions({
     positions: [paper],

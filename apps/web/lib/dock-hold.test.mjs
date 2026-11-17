@@ -3,12 +3,26 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { DOCK_EXPAND_MS, DOCK_SWITCH_MS, dockCollapseDelay, dockHoldDelay, dockShouldStayOpen, pillAnchor } from './dock-hold.mjs';
 
+/**
+ * Achieves: verifies dock expand CSS variable matches DOCK_EXPAND_MS and old opacity delay is gone.
+ * Fails when: --dock-expand drifts from the constant, or the 220ms/80ms opacity rule returns.
+ * Oracle: globals.css must declare --dock-expand: ${DOCK_EXPAND_MS}ms; no opacity 220ms ease 80ms.
+ * Side effects / state checked: stylesheet text.
+ * Gaps: source snapshot only for CSS; runtime animation not timed.
+ */
 test('dock expand duration matches the navbar stylesheet', () => {
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, new RegExp(`--dock-expand:\\s*${DOCK_EXPAND_MS}ms`));
   assert.doesNotMatch(css, /opacity 220ms ease 80ms/);
 });
 
+/**
+ * Achieves: verifies collapse is deferred until expand animation completes.
+ * Fails when: mid-expand collapse delay is 0, or post-expand hover-out still forces stay-open forever.
+ * Oracle: remaining expand time = DOCK_EXPAND_MS - elapsed; stay-open while hovering or expand incomplete.
+ * Side effects / state checked: N/A.
+ * Gaps: none for timing helpers.
+ */
 test('dock stays open until the expand animation has finished', () => {
   const openedAt = 1_000;
   assert.equal(dockCollapseDelay(openedAt + 40, openedAt), DOCK_EXPAND_MS - 40);
@@ -20,6 +34,13 @@ test('dock stays open until the expand animation has finished', () => {
   assert.equal(dockShouldStayOpen(false, DOCK_EXPAND_MS), false);
 });
 
+/**
+ * Achieves: verifies pane-switch hold keeps the dock extended for DOCK_SWITCH_MS.
+ * Fails when: DOCK_SWITCH_MS drifts from 2000, or switch hold is ignored when expand already finished.
+ * Oracle: remaining switch ms wins over collapse when switchUntil is in the future.
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('dock stays extended until a pane switch animation finishes', () => {
   const now = 5_000;
   assert.equal(DOCK_SWITCH_MS, 2000);
@@ -30,6 +51,13 @@ test('dock stays extended until a pane switch animation finishes', () => {
   assert.equal(dockHoldDelay(now, 0, 0), DOCK_EXPAND_MS);
 });
 
+/**
+ * Achieves: verifies pill anchor is the main stage center accounting for rail width.
+ * Fails when: rail width is ignored or small viewports compute off-center anchors incorrectly.
+ * Oracle: independent center math — (viewport - rail)/2 adjusted by known fixture expectations.
+ * Side effects / state checked: N/A.
+ * Gaps: none for anchor math.
+ */
 test('every pane uses the main stage center as the pill anchor', () => {
   assert.equal(pillAnchor(1400, 300, 280), 710);
   assert.equal(pillAnchor(1400, 88, 280), 604);

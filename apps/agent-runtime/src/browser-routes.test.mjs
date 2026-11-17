@@ -33,6 +33,13 @@ function machineWithBrowsers() {
   return { machine: new BotStateMachine(), closed, tabs, env: { browsers: provider } };
 }
 
+/**
+ * Achieves: browser create/list are owner-scoped and omit provider session ids from responses.
+ * Fails when: other owners see sessions, or provider id leaks in JSON.
+ * Oracle: owner-bound status/items; no provider id substring.
+ * Side effects / state checked: browser provider mock.
+ * Gaps: cross-owner isolation if not fully asserted — check test body
+ */
 test('browser sessions are owner-bound and hide the provider id', async () => {
   const { machine, env, closed, tabs } = machineWithBrowsers();
   const opened = await machine.handle(new Request('https://bot/id/bot_1/browser/sessions', {
@@ -102,6 +109,13 @@ test('browser sessions are owner-bound and hide the provider id', async () => {
   assert.deepEqual((await listed.json()).sessions, []);
 });
 
+/**
+ * Achieves: session page history persists beyond first page in durable store.
+ * Fails when: second page lost or overwritten incorrectly.
+ * Oracle: stored pages include later navigation.
+ * Side effects / state checked: durable store state.
+ * Gaps: none
+ */
 test('durable store pages session records past the first page', async () => {
   const rows = new Map();
   for (let i = 0; i < 101; i += 1) rows.set(`browser:user_1:bot_1:rec_${String(i).padStart(3, '0')}`, { n: i });

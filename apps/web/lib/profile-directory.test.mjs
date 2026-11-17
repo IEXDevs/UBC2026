@@ -23,6 +23,13 @@ function ownerFrom(href) {
   return value;
 }
 
+/**
+ * Achieves: verifies a handle claim writes the directory and keeps the service role out of the response.
+ * Fails when: a handle claim writes the directory and keeps the service role out of the response breaks (e.g. expected 200, 'supabase', 'alex01'); failure/null paths flip.
+ * Oracle: assert.equal(response.status, 200); assert.equal(body.source, 'supabase'); assert.equal(body.profile.handle, 'alex01'); assert.equal(body.profile.displayName, 'jimothy67'); assert.equal(calls[0].url, 'https://directory.example/rest/v1/users?on_conflict=id'); assert.equal(calls[0].body.privy_user_id, 'did:privy:user_1')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a handle claim writes the directory and keeps the service role out of the response', async () => {
   const calls = [];
   const response = await localProfileResponse(claim(), {
@@ -46,6 +53,13 @@ test('a handle claim writes the directory and keeps the service role out of the 
   assert.equal(calls.every(call => call.auth === `Bearer ${KEY}`), true);
 });
 
+/**
+ * Achieves: verifies a handle lookup refuses a name another owner already stored.
+ * Fails when: a handle lookup refuses a name another owner already stored breaks (e.g. expected 200, false, true).
+ * Oracle: assert.equal(response.status, 200); assert.equal((await response.json()).recipient.missing, false); assert.equal((await open.json()).recipient.missing, true); assert.equal(ownBody.recipient.missing, false); assert.equal(ownBody.recipient.self, true); assert.equal(ownBody.recipient.handle, 'royce')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a handle lookup refuses a name another owner already stored', async () => {
   const response = await localHandleLookup(new Request('https://app.local/api/profiles/lookup?q=%40Alex', {
     headers: { 'x-owner-id': 'did:privy:user_2' },
@@ -74,6 +88,13 @@ test('a handle lookup refuses a name another owner already stored', async () => 
   assert.equal(ownBody.recipient.handle, 'royce');
 });
 
+/**
+ * Achieves: verifies a taken handle stays a conflict and does not look like a saved claim.
+ * Fails when: a taken handle stays a conflict and does not look like a saved claim breaks (e.g. expected 409, { error: 'handle_taken' }).
+ * Oracle: assert.equal(response.status, 409); assert.deepEqual(await response.json(), { error: 'handle_taken' })
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a taken handle stays a conflict and does not look like a saved claim', async () => {
   const response = await localProfileResponse(claim(), {
     env: ENV,
@@ -83,6 +104,13 @@ test('a taken handle stays a conflict and does not look like a saved claim', asy
   assert.deepEqual(await response.json(), { error: 'handle_taken' });
 });
 
+/**
+ * Achieves: verifies a claim insert is still there on a fresh read by owner id.
+ * Fails when: a claim insert is still there on a fresh read by owner id breaks (e.g. expected 200, 'alex01', 'jimothy67').
+ * Oracle: assert.equal(response.status, 200); assert.equal(body.profile.handle, 'alex01'); assert.equal(body.profile.displayName, 'jimothy67'); assert.equal(users.has('did:privy:user_1'), true)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a claim insert is still there on a fresh read by owner id', async () => {
   const users = new Map();
   const profiles = new Map();
@@ -121,6 +149,13 @@ test('a claim insert is still there on a fresh read by owner id', async () => {
   assert.equal(users.has('did:privy:user_1'), true);
 });
 
+/**
+ * Achieves: verifies a failed user insert returns the database code and does not claim success.
+ * Fails when: a failed user insert returns the database code and does not claim success breaks (e.g. expected 502, '23503').
+ * Oracle: assert.equal(response.status, 502); assert.equal((await response.json()).error, '23503')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a failed user insert returns the database code and does not claim success', async () => {
   const response = await localProfileResponse(claim(), {
     env: ENV,
@@ -135,6 +170,13 @@ test('a failed user insert returns the database code and does not claim success'
   assert.equal((await response.json()).error, '23503');
 });
 
+/**
+ * Achieves: verifies a Privy DID confirm read matches the owner without quoting the eq value.
+ * Fails when: a Privy DID confirm read matches the owner without quoting the eq value breaks (e.g. expected 200, 'alex', 'ada@example.com').
+ * Oracle: assert.equal(response.status, 200); assert.equal(body.profile.handle, 'alex'); assert.equal(body.profile.displayName, 'ada@example.com'); assert.equal(profiles.get('did:privy:user_1').handle, 'alex')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a Privy DID confirm read matches the owner without quoting the eq value', async () => {
   const profiles = new Map();
   const response = await localProfileResponse(claim({
@@ -165,6 +207,13 @@ test('a Privy DID confirm read matches the owner without quoting the eq value', 
   assert.equal(profiles.get('did:privy:user_1').handle, 'alex');
 });
 
+/**
+ * Achieves: verifies a rejected directory call keeps the HTTP status and drops the provider body.
+ * Fails when: a rejected directory call keeps the HTTP status and drops the provider body breaks (e.g. expected 502, 'supabase_http_401', false).
+ * Oracle: assert.equal(response.status, 502); assert.equal(body.error, 'supabase_http_401'); assert.equal(JSON.stringify(body).includes('service-role-secret'), false); assert.equal(JSON.stringify(body).includes('Invalid API key'), false)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a rejected directory call keeps the HTTP status and drops the provider body', async () => {
   const response = await localProfileResponse(claim(), {
     env: ENV,
@@ -177,6 +226,13 @@ test('a rejected directory call keeps the HTTP status and drops the provider bod
   assert.equal(JSON.stringify(body).includes('Invalid API key'), false);
 });
 
+/**
+ * Achieves: verifies a thrown directory fetch and an empty confirm stay closed and drop the provider body.
+ * Fails when: a thrown directory fetch and an empty confirm stay closed and drop the provider body breaks (e.g. expected 502, 'profile_directory_unreachable', false).
+ * Oracle: assert.equal(thrown.status, 502); assert.equal(thrownBody.error, 'profile_directory_unreachable'); assert.equal(JSON.stringify(thrownBody).includes('secret-value'), false); assert.equal(lookup.status, 502); assert.equal((await lookup.json()).error, 'profile_read_failed'); assert.equal(empty.status, 502)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a thrown directory fetch and an empty confirm stay closed and drop the provider body', async () => {
   const thrown = await localProfileResponse(claim({ displayName: 'ada@example.com', handle: 'alex' }), {
     env: ENV,
@@ -207,11 +263,25 @@ test('a thrown directory fetch and an empty confirm stay closed and drop the pro
   assert.equal((await empty.json()).error, 'profile_not_confirmed');
 });
 
+/**
+ * Achieves: verifies a directory write is used when the service role is set.
+ * Fails when: a directory write is used when the service role is set breaks (e.g. expected true, SUPABASE_SERVICE_ROLE_KEY: '' }, useLocalProfileDirectory(ENV) !== true); failure/null paths flip.
+ * Oracle: assert.equal(useLocalProfileDirectory(ENV), true); assert.equal(useLocalProfileDirectory({ SUPABASE_URL: ENV.SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: '' })
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('a directory write is used when the service role is set', () => {
   assert.equal(useLocalProfileDirectory(ENV), true);
   assert.equal(useLocalProfileDirectory({ SUPABASE_URL: ENV.SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: '' }), false);
 });
 
+/**
+ * Achieves: verifies a missing directory config does not pretend the claim was saved.
+ * Fails when: a missing directory config does not pretend the claim was saved breaks (e.g. expected 503, 'directory_unconfigured', false).
+ * Oracle: assert.equal(response.status, 503); assert.equal((await response.json()).error, 'directory_unconfigured'); assert.equal(called, false)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a missing directory config does not pretend the claim was saved', async () => {
   let called = false;
   const response = await localProfileResponse(claim(), {

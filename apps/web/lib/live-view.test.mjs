@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { browserSessionUrl, liveViewFrame, pickOpenSession } from './live-view.mjs';
 
+/**
+ * Achieves: verifies browser session URLs stay on runtime origin, encode path segments, and reject empty/javascript.
+ * Fails when: agent base not preserved, encoding skipped, shell proxy path drifts, or javascript: accepted.
+ * Oracle: /bots/{id}/browser/sessions[+/{rec}/live-view]; shell → /api/runtime/...; ''/javascript → null.
+ * Side effects / state checked: N/A.
+ * Gaps: does not hit live runtime HTTP.
+ */
 test('browser session URLs stay on the runtime origin', () => {
   assert.equal(
     browserSessionUrl('https://runtime.example/agent/', 'bot_1'),
@@ -23,6 +30,13 @@ test('browser session URLs stay on the runtime origin', () => {
   );
 });
 
+/**
+ * Achieves: verifies iframe embed only for verified https live.browser.run /ui/view URLs with no-referrer.
+ * Fails when: unverified embeds, evil host/http/other path get src, or referrerPolicy lost.
+ * Oracle: embedVerified+live.browser.run/ui/view → embed true; evil/http → src null; wrong path → embed false.
+ * Side effects / state checked: N/A.
+ * Gaps: JWT contents not validated — host/path gate only.
+ */
 test('only a verified live.browser.run URL is framed', () => {
   const framed = liveViewFrame({
     embedVerified: true,
@@ -45,6 +59,13 @@ test('only a verified live.browser.run URL is framed', () => {
   assert.equal(liveViewFrame({ embedVerified: true, viewerUrl: 'https://live.browser.run/other?jwt=secret' }).embed, false);
 });
 
+/**
+ * Achieves: verifies pickOpenSession returns newest open session by updatedAt and ignores closed.
+ * Fails when: empty → non-null, closed preferred, or older open wins.
+ * Oracle: sessions updatedAt 5 'new' preferred over 'old'; closed ignored.
+ * Side effects / state checked: N/A.
+ * Gaps: ties on updatedAt not asserted.
+ */
 test('pickOpenSession prefers the newest open record', () => {
   assert.equal(pickOpenSession({ sessions: [] }), null);
   const picked = pickOpenSession({

@@ -8,7 +8,7 @@
     "./privy": "./privy.mjs",
     "./balances": "./balances.mjs"
   },
-  "scripts": { "test": "node --test wallets.test.mjs privy.test.mjs balances.test.mjs" },
+  "scripts": { "test": "node --test wallets.test.mjs privy.test.mjs privy.worker-login.test.mjs balances.test.mjs" },
   "dependencies": { "@ubc2026/contracts": "0.1.0" },
   "engines": { "node": ">=20" }
 }

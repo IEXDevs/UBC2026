@@ -27,6 +27,13 @@ async function challengeFor(handle, path) {
   return body;
 }
 
+/**
+ * Achieves: health/challenge/unpaid paths stay on devnet and never hit live network; mainnet cluster refused.
+ * Fails when: live fetch called, mainnet accepted, or challenge not 402/devnet.
+ * Oracle: health 200/devnet; 402 challenge NETWORKS.devnet; mainnet health 403; fetch throws if called.
+ * Side effects / state checked: global fetch replaced with thrower.
+ * Gaps: none
+ */
 test('health, catalog challenge, and unpaid body stay on devnet without a network call', async () => {
   const original = globalThis.fetch;
   globalThis.fetch = () => { throw new Error('live network'); };
@@ -57,6 +64,13 @@ test('health, catalog challenge, and unpaid body stay on devnet without a networ
   }
 });
 
+/**
+ * Achieves: confirmed payment-signature releases price/trust payloads on devnet.
+ * Fails when: 200 without confirm, or wrong cluster/asset in paid.
+ * Oracle: priceUsd 150.25; trust score 120; confirms===2; paid.network/asset assertions.
+ * Side effects / state checked: confirmPayment mock count.
+ * Gaps: none
+ */
 test('a confirmed devnet payment releases the price and trust score', async () => {
   let confirms = 0;
   const handle = handler({
@@ -96,6 +110,13 @@ test('a confirmed devnet payment releases the price and trust score', async () =
   assert.equal(confirms, 2);
 });
 
+/**
+ * Achieves: terms mismatch and unbound/failed confirmer keep 402 and do not release quotes.
+ * Fails when: mismatch still confirms or unbound returns 200.
+ * Oracle: payment_terms_mismatch; settlement_unconfirmed; unknown_transaction; confirms 0 on mismatch.
+ * Side effects / state checked: confirmPayment counter.
+ * Gaps: none
+ */
 test('mismatched terms and an unbound confirmer do not release a quote', async () => {
   let confirms = 0;
   const handle = handler({
@@ -124,6 +145,13 @@ test('mismatched terms and an unbound confirmer do not release a quote', async (
   assert.equal((await failed.json()).error, 'unknown_transaction');
 });
 
+/**
+ * Achieves: worker.mjs source text excludes mainnet USDC mint and mainnet CAIP id.
+ * Fails when: mainnet identifiers appear in source.
+ * Oracle: readFileSync excludes known mainnet strings.
+ * Side effects / state checked: N/A.
+ * Gaps: none — static source scan only
+ */
 test('worker source does not name a mainnet USDC mint or mainnet CAIP network', () => {
   const source = readFileSync(new URL('./worker.mjs', import.meta.url), 'utf8');
   assert.equal(source.includes('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'), false);

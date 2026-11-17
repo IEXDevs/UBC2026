@@ -10,6 +10,13 @@ import {
 
 const mint = 'So11111111111111111111111111111111111111112';
 
+/**
+ * Achieves: Cache get/set is per-mint and expires exactly at ttl boundary.
+ * Fails when: Cross-mint bleed, or expired entries remain readable.
+ * Oracle: DEFAULT_TRUST_CACHE_TTL_MS + durable record expiry.
+ * Side effects: In-memory storage + fake clock.
+ * Gaps: Does not cover concurrent set races.
+ */
 test('durable cache keeps one record per mint until ttl', async () => {
   const clock = { t: 1_000 };
   const cache = createDurableTokenCache({
@@ -26,6 +33,13 @@ test('durable cache keeps one record per mint until ttl', async () => {
   assert.equal(DEFAULT_TRUST_CACHE_TTL_MS, 60 * 60 * 1000);
 });
 
+/**
+ * Achieves: Persisted value drops decision/cache fields and sets expiresAt=now+ttl.
+ * Fails when: Gate decisions are stored as source of truth for later threshold changes.
+ * Oracle: Cache must store score facts only so threshold can be re-evaluated.
+ * Side effects: In-memory storage.
+ * Gaps: none meaningful
+ */
 test('cache stores the trust record without the gate decision', async () => {
   const storage = createMemoryTrustStorage();
   const cache = createDurableTokenCache({ storage, now: () => 50, ttlMs: 10 });
@@ -42,6 +56,13 @@ test('cache stores the trust record without the gate decision', async () => {
   assert.equal(stored.expiresAt, 60);
 });
 
+/**
+ * Achieves: Mint-mismatched stored records are deleted; ttlMs=0 construction throws.
+ * Fails when: Corrupt entries are returned as hits, or zero ttl is allowed.
+ * Oracle: TrustError on bad cache config + corrupt drop policy.
+ * Side effects: In-memory storage.
+ * Gaps: Does not cover partially JSON-corrupt Cloudflare values.
+ */
 test('corrupt and expired entries are dropped', async () => {
   const storage = createMemoryTrustStorage();
   await storage.put(`trust:${mint}`, { mint, expiresAt: 10, value: { mint: 'other' } });
@@ -51,6 +72,13 @@ test('corrupt and expired entries are dropped', async () => {
   assert.throws(() => createDurableTokenCache({ ttlMs: 0 }), TrustError);
 });
 
+/**
+ * Achieves: adaptCloudflareKv put uses expirationTtl and get returns parsed trust records.
+ * Fails when: TTL option omitted or JSON round-trip loses score.
+ * Oracle: Cloudflare KV get/put JSON API.
+ * Side effects: Fake KV map.
+ * Gaps: Does not cover KV size/limit errors.
+ */
 test('Cloudflare KV adapter round-trips JSON and sets expiration', async () => {
   const saved = new Map();
   let putOptions;

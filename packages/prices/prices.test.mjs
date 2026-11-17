@@ -12,6 +12,13 @@ import {
 
 const mint = 'So11111111111111111111111111111111111111112';
 
+/**
+ * Achieves: DexScreener lookup returns the highest-liquidity USD pair with mainnet pricing / devnet execution labels.
+ * Fails when: Lower-liquidity pair wins, wrong mint URL, or cluster labels flip.
+ * Oracle: DexScreener tokens/v1/solana response shape + PRICE_LABEL.
+ * Side effects: Injected fetcher only.
+ * Gaps: Transport/empty/wrong-mint negatives covered in the following test.
+ */
 test('DexScreener provider picks the highest-liquidity USD pair', async () => {
   const lookup = createDexScreenerPriceProvider({
     fetcher: async url => {
@@ -40,14 +47,44 @@ test('DexScreener provider picks the highest-liquidity USD pair', async () => {
   assert.equal(quote.executionCluster, 'devnet');
 });
 
+/**
+ * Achieves: Bad mints, empty lists, rate limits, wrong-baseToken pairs, and bad JSON fail with stable PriceError codes.
+ * Fails when: Invalid mints succeed, empty/wrong pairs return a fabricated price, or 429 is not rate-limited.
+ * Oracle: PriceError code/status contract + DexScreener mint filter.
+ * Side effects: Injected fetcher.
+ * Gaps: none meaningful
+ */
 test('invalid mints and empty pair lists fail cleanly', async () => {
   await assert.rejects(createDexScreenerPriceProvider({})('bad'), PriceError);
   await assert.rejects(
     createDexScreenerPriceProvider({ fetcher: async () => Response.json([]) })(mint),
     (error) => error.code === 'price_not_found' && error.status === 404,
   );
+  await assert.rejects(
+    createDexScreenerPriceProvider({ fetcher: async () => new Response('slow', { status: 429 }) })(mint),
+    (error) => error.code === 'provider_rate_limited' && error.status === 429,
+  );
+  await assert.rejects(
+    createDexScreenerPriceProvider({
+      fetcher: async () => Response.json([
+        { baseToken: { address: 'other' }, priceUsd: '9', pairAddress: 'x', liquidity: { usd: 99 } },
+      ]),
+    })(mint),
+    (error) => error.code === 'price_not_found',
+  );
+  await assert.rejects(
+    createDexScreenerPriceProvider({ fetcher: async () => new Response('{', { status: 200 }) })(mint),
+    (error) => error.code === 'invalid_provider_response',
+  );
 });
 
+/**
+ * Achieves: Finite non-negative numbers format as plain decimals; scientific inputs expand; negatives/strings throw.
+ * Fails when: Scientific form survives, negatives are accepted, or string sci-notation is accepted.
+ * Oracle: Jupiter numeric → decimal string contract used by paper PnL.
+ * Side effects: none
+ * Gaps: Does not cover extreme exponents beyond safe integer range.
+ */
 test('formatUsdPrice keeps plain decimals and expands scientific form', () => {
   assert.equal(formatUsdPrice(147.48), '147.48');
   assert.equal(formatUsdPrice(0), '0');
@@ -57,6 +94,13 @@ test('formatUsdPrice keeps plain decimals and expands scientific form', () => {
   assert.throws(() => formatUsdPrice('1e-7'), PriceError);
 });
 
+/**
+ * Achieves: Jupiter /price/v3 returns usdPrice with API key header and cluster labels.
+ * Fails when: Wrong URL/header, missing fields accepted as OK, or labels flip.
+ * Oracle: Jupiter Price API v3 response fields.
+ * Side effects: Injected fetcher only.
+ * Gaps: Does not cover multi-mint batch responses.
+ */
 test('Jupiter price provider reads usdPrice for the mint', async () => {
   const lookup = createJupiterPriceProvider({
     apiKey: 'jup-key',
@@ -85,6 +129,13 @@ test('Jupiter price provider reads usdPrice for the mint', async () => {
   assert.equal(quote.executionCluster, 'devnet');
 });
 
+/**
+ * Achieves: Missing prices → 404; 429 → provider_rate_limited without body leak; bad mint → invalid_mint.
+ * Fails when: Empty payloads succeed, rate-limit bodies leak, or bad mints fall through.
+ * Oracle: PriceError sanitization contract.
+ * Side effects: none
+ * Gaps: Does not cover network throw → provider_unavailable for Jupiter.
+ */
 test('Jupiter omits unreliable prices and hides transport failures', async () => {
   await assert.rejects(
     createJupiterPriceProvider({ fetcher: async () => Response.json({}) })(mint),
@@ -97,6 +148,13 @@ test('Jupiter omits unreliable prices and hides transport failures', async () =>
   await assert.rejects(createJupiterPriceProvider({})('bad'), (error) => error.code === 'invalid_mint');
 });
 
+/**
+ * Achieves: Primary DexScreener hit skips Jupiter; empty DexScreener falls back with fallbackFrom set and sci prices expanded.
+ * Fails when: Jupiter runs on a primary hit, fallbackFrom missing, or sci price left unexpanded.
+ * Oracle: createMainnetPriceProvider fallback ordering.
+ * Side effects: Injected fetcher only.
+ * Gaps: Does not cover primary transport failure fallback.
+ */
 test('mainnet prices use DexScreener and fall back to Jupiter', async () => {
   let jupiterCalls = 0;
   const lookup = createMainnetPriceProvider({
@@ -131,6 +189,13 @@ test('mainnet prices use DexScreener and fall back to Jupiter', async () => {
   assert.equal(quote.label, 'devnet execution, mainnet pricing');
 });
 
+/**
+ * Achieves: invalid_mint from primary never calls fallback; rate-limited primary surfaces fallback’s price_not_found.
+ * Fails when: Fallback runs after invalid_mint, or primary 429 is returned instead of fallback error.
+ * Oracle: FALLBACK_CODES set in prices.mjs.
+ * Side effects: none
+ * Gaps: Does not cover provider_unavailable primary path.
+ */
 test('price fallback skips invalid mints and surfaces the Jupiter error', async () => {
   let fallbackCalls = 0;
   const lookup = createMainnetPriceProvider({
@@ -147,6 +212,13 @@ test('price fallback skips invalid mints and surfaces the Jupiter error', async 
   await assert.rejects(limited(mint), (error) => error.code === 'price_not_found' && error.status === 404);
 });
 
+/**
+ * Achieves: readAgentPriceQuote returns paperPnl=true, authorizesTransaction=false, base units, and no signature/apiKey fields.
+ * Fails when: Quote authorizes a tx, includes secrets, or wrong cluster labels.
+ * Oracle: Agent tool contract for price quotes (paper-only).
+ * Side effects: Injected fetcher only.
+ * Gaps: Does not cover usdPriceBaseUnits rounding edges beyond 1.50.
+ */
 test('agent price quote is paper PnL and does not authorize a transaction', async () => {
   assert.equal(usdPriceBaseUnits('1.50'), '1500000');
   const quote = await readAgentPriceQuote(mint, {

@@ -49,6 +49,13 @@ function memoryStorage(initial = {}) {
   };
 }
 
+/**
+ * Achieves: verifies only the Privy terms POST is treated as the accept-terms request.
+ * Fails when: only the Privy terms POST is treated as the accept-terms request breaks (e.g. expected 'POST', 'POST', 'GET'); failure/null paths flip.
+ * Oracle: assert.equal(isAcceptTermsRequest('https://auth.privy.io/api/v1/users/me/accept_terms', 'POST'); assert.equal(isAcceptTermsRequest('/api/v1/users/me/accept_terms', 'POST'); assert.equal(isAcceptTermsRequest('https://auth.privy.io/api/v1/users/me/accept_terms', 'GET'); assert.equal(isAcceptTermsRequest('https://auth.privy.io/api/v1/sessions', 'POST'); assert.equal(isAcceptTermsRequest('https://example.com/api/v1/users/me/accept_terms', 'POST'); assert.equal(isPrivyAccessToken(TOKEN), true)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('only the Privy terms POST is treated as the accept-terms request', () => {
   assert.equal(isAcceptTermsRequest('https://auth.privy.io/api/v1/users/me/accept_terms', 'POST'), true);
   assert.equal(isAcceptTermsRequest('/api/v1/users/me/accept_terms', 'POST'), true);
@@ -65,6 +72,13 @@ test('only the Privy terms POST is treated as the accept-terms request', () => {
   assert.equal(isPrivyTokenStorageKey('privy:refresh_token'), false);
 });
 
+/**
+ * Achieves: verifies terms Accept keeps a bearer after the SDK clears storage.
+ * Fails when: terms Accept keeps a bearer after the SDK clears storage breaks (e.g. expected null, TOKEN, `Bearer ${TOKEN}`).
+ * Oracle: assert.equal(storage.getItem('privy:pat'), null); assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN); assert.equal(seen[0].authorization, `Bearer ${TOKEN}`); assert.equal(session.getItem(MAELSTROM_TOKEN_KEY), TOKEN); assert.equal(seen[1].authorization, null)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('terms Accept keeps a bearer after the SDK clears storage', async () => {
   const storage = memoryStorage();
   const session = memoryStorage();
@@ -99,6 +113,13 @@ test('terms Accept keeps a bearer after the SDK clears storage', async () => {
   assert.equal(seen[1].authorization, null);
 });
 
+/**
+ * Achieves: verifies removeItem clears live keys but Accept still uses the Maelstrom backup.
+ * Fails when: removeItem clears live keys but Accept still uses the Maelstrom backup breaks (e.g. expected TOKEN, null, TOKEN).
+ * Oracle: assert.equal(readPrivyAccessToken(storage), TOKEN); assert.equal(storage.getItem('privy:clapp:pat'), null); assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN); assert.equal(seen[0], `Bearer ${TOKEN}`)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('removeItem clears live keys but Accept still uses the Maelstrom backup', async () => {
   const storage = memoryStorage({ 'privy:clapp:pat': JSON.stringify(TOKEN) });
   const seen = [];
@@ -125,6 +146,13 @@ test('removeItem clears live keys but Accept still uses the Maelstrom backup', a
   assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
+/**
+ * Achieves: verifies explicit logout clears Maelstrom backups via withPrivyLogout.
+ * Fails when: explicit logout clears Maelstrom backups via withPrivyLogout breaks (e.g. expected TOKEN, null, null).
+ * Oracle: assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN); assert.equal(storage.getItem('privy:pat'), null); assert.equal(storage.getItem('privy:refresh_token'), null); assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), null); assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), null)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('explicit logout clears Maelstrom backups via withPrivyLogout', async () => {
   const storage = memoryStorage({
     'privy:pat': JSON.stringify(TOKEN),
@@ -149,6 +177,13 @@ test('explicit logout clears Maelstrom backups via withPrivyLogout', async () =>
   assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), null);
 });
 
+/**
+ * Achieves: verifies clear leaves Privy in charge; in-memory Accept cache still works.
+ * Fails when: clear leaves Privy in charge; in-memory Accept cache still works breaks (e.g. expected null, null, `Bearer ${TOKEN}`).
+ * Oracle: assert.equal(storage.getItem('other'), null); assert.equal(storage.getItem('privy:pat'), null); assert.equal(seen[0], `Bearer ${TOKEN}`)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('clear leaves Privy in charge; in-memory Accept cache still works', async () => {
   const storage = memoryStorage();
   const session = memoryStorage();
@@ -176,6 +211,13 @@ test('clear leaves Privy in charge; in-memory Accept cache still works', async (
   assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
+/**
+ * Achieves: verifies OAuth can rotate session keys without our removeItem hooks.
+ * Fails when: OAuth can rotate session keys without our removeItem hooks breaks (e.g. expected null, null, nextPat).
+ * Oracle: assert.equal(storage.getItem('privy:pat'), null); assert.equal(storage.getItem('privy:token'), null); assert.equal(readPrivyAccessToken(storage), nextPat); assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), nextPat)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('OAuth can rotate session keys without our removeItem hooks', () => {
   const storage = memoryStorage({
     'privy:pat': JSON.stringify(TOKEN),
@@ -200,6 +242,13 @@ test('OAuth can rotate session keys without our removeItem hooks', () => {
   assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), nextPat);
 });
 
+/**
+ * Achieves: verifies install does not rewrite missing privy keys from stale backups.
+ * Fails when: install does not rewrite missing privy keys from stale backups breaks (e.g. expected null, null, null).
+ * Oracle: assert.equal(storage.getItem('privy:pat'), null); assert.equal(storage.getItem('privy:token'), null); assert.equal(storage.getItem('privy:refresh_token'), null)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('install does not rewrite missing privy keys from stale backups', () => {
   const storage = memoryStorage({
     [MAELSTROM_TOKEN_KEY]: TOKEN,
@@ -219,6 +268,13 @@ test('install does not rewrite missing privy keys from stale backups', () => {
   clearAcceptTermsBackups(target);
 });
 
+/**
+ * Achieves: verifies restorePrivySession rehydrates missing Privy keys from backups.
+ * Fails when: restorePrivySession rehydrates missing Privy keys from backups breaks (e.g. expected auth, TOKEN, 'refresh-1').
+ * Oracle: assert.equal(restorePrivySession(storage, auth); assert.equal(JSON.parse(storage.getItem('privy:pat')), TOKEN); assert.equal(JSON.parse(storage.getItem('privy:refresh_token')), 'refresh-1')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('restorePrivySession rehydrates missing Privy keys from backups', () => {
   const storage = memoryStorage({
     [MAELSTROM_TOKEN_KEY]: TOKEN,
@@ -232,6 +288,13 @@ test('restorePrivySession rehydrates missing Privy keys from backups', () => {
   assert.equal(JSON.parse(storage.getItem('privy:refresh_token')), 'refresh-1');
 });
 
+/**
+ * Achieves: verifies auth.privy.io JSON responses refill the token cache.
+ * Fails when: auth.privy.io JSON responses refill the token cache breaks (e.g. expected `Bearer ${TOKEN}`).
+ * Oracle: assert.equal(seen[0], `Bearer ${TOKEN}`)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('auth.privy.io JSON responses refill the token cache', async () => {
   const storage = memoryStorage();
   const seen = [];
@@ -269,6 +332,13 @@ test('auth.privy.io JSON responses refill the token cache', async () => {
   assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
+/**
+ * Achieves: verifies empty Bearer headers are replaced on accept_terms.
+ * Fails when: empty Bearer headers are replaced on accept_terms breaks (e.g. expected true, `Bearer ${TOKEN}`, authorizationNeedsToken(new Headers({ au !== true).
+ * Oracle: assert.equal(authorizationNeedsToken(new Headers({ authorization: 'Bearer ' })), true); assert.equal(seen[0], `Bearer ${TOKEN}`)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('empty Bearer headers are replaced on accept_terms', async () => {
   const storage = memoryStorage({ 'privy:pat': JSON.stringify(TOKEN) });
   const seen = [];
@@ -290,6 +360,13 @@ test('empty Bearer headers are replaced on accept_terms', async () => {
   assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
+/**
+ * Achieves: verifies a customer bearer on accept_terms is replaced with the session token.
+ * Fails when: a customer bearer on accept_terms is replaced with the session token breaks (e.g. expected TOKEN, `Bearer ${TOKEN}`).
+ * Oracle: assert.equal(readPrivyAccessToken(storage), TOKEN); assert.equal(seen[0], `Bearer ${TOKEN}`)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('a customer bearer on accept_terms is replaced with the session token', async () => {
   const storage = memoryStorage({
     'privy:pat': JSON.stringify(TOKEN),
@@ -314,6 +391,13 @@ test('a customer bearer on accept_terms is replaced with the session token', asy
   assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
+/**
+ * Achieves: verifies the session bearer is left in place when it is already set.
+ * Fails when: the session bearer is left in place when it is already set breaks (e.g. expected `Bearer ${TOKEN}`).
+ * Oracle: assert.equal(seen[0], `Bearer ${TOKEN}`)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('the session bearer is left in place when it is already set', async () => {
   const storage = memoryStorage({ 'privy:pat': JSON.stringify(TOKEN) });
   const seen = [];
@@ -334,6 +418,13 @@ test('the session bearer is left in place when it is already set', async () => {
   assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
+/**
+ * Achieves: verifies the customer access token is not sent as the accept_terms bearer.
+ * Fails when: the customer access token is not sent as the accept_terms bearer breaks (e.g. expected '', null, seen[0] !== null).
+ * Oracle: assert.equal(readPrivyAccessToken(storage), ''); assert.equal(seen[0], null)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('the customer access token is not sent as the accept_terms bearer', async () => {
   const storage = memoryStorage({ 'privy:token': JSON.stringify(TOKEN) });
   const seen = [];
@@ -356,6 +447,13 @@ test('the customer access token is not sent as the accept_terms bearer', async (
   assert.equal(seen[0], null);
 });
 
+/**
+ * Achieves: verifies a wiped session is minted from the refresh token before accept_terms.
+ * Fails when: a wiped session is minted from the refresh token before accept_terms breaks (e.g. expected 'refresh-1', `Bearer ${TOKEN}`, 'refresh-2').
+ * Oracle: assert.equal(await request.json().then((body) => body.refresh_token), 'refresh-1'); assert.equal(seen[0], `Bearer ${TOKEN}`); assert.equal(resolvePrivyRefreshToken(target), 'refresh-2'); assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), 'refresh-2')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('a wiped session is minted from the refresh token before accept_terms', async () => {
   const storage = memoryStorage({
     'privy:refresh_token': JSON.stringify('refresh-1'),
@@ -393,6 +491,13 @@ test('a wiped session is minted from the refresh token before accept_terms', asy
   assert.equal(storage.getItem(MAELSTROM_REFRESH_KEY), 'refresh-2');
 });
 
+/**
+ * Achieves: verifies rememberTokensFromPayload keeps session and customer tokens separate.
+ * Fails when: rememberTokensFromPayload keeps session and customer tokens separate breaks (e.g. expected TOKEN, 'customer.access.jwt', TOKEN).
+ * Oracle: assert.equal(auth.current(null), TOKEN); assert.equal(auth.customerToken(null), 'customer.access.jwt'); assert.equal(auth.current(null), TOKEN); assert.equal(auth.customerToken(null), 'other.customer.jwt')
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('rememberTokensFromPayload keeps session and customer tokens separate', () => {
   const auth = createAcceptTermsAuth();
   rememberTokensFromPayload(auth, {
@@ -405,6 +510,13 @@ test('rememberTokensFromPayload keeps session and customer tokens separate', () 
   assert.equal(auth.customerToken(null), 'other.customer.jwt');
 });
 
+/**
+ * Achieves: verifies a wipe leaves privy keys gone so refresh can use Privy storage as-is.
+ * Fails when: a wipe leaves privy keys gone so refresh can use Privy storage as-is breaks (e.g. expected null, null, null).
+ * Oracle: assert.equal(storage.getItem('privy:pat'), null); assert.equal(storage.getItem('privy:token'), null); assert.equal(storage.getItem('privy:refresh_token'), null); assert.equal(storage.getItem(MAELSTROM_TOKEN_KEY), TOKEN); assert.equal(storage.getItem(MAELSTROM_CUSTOMER_KEY), customer)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('a wipe leaves privy keys gone so refresh can use Privy storage as-is', () => {
   const storage = memoryStorage();
   const target = {
@@ -429,6 +541,13 @@ test('a wipe leaves privy keys gone so refresh can use Privy storage as-is', () 
   assert.equal(storage.getItem(MAELSTROM_CUSTOMER_KEY), customer);
 });
 
+/**
+ * Achieves: verifies postAcceptTerms sends bearer and app id.
+ * Fails when: postAcceptTerms sends bearer and app id breaks (e.g. expected true, 'https://auth.privy.io/api/v1/users/me/accept_terms', `Bearer ${TOKEN}`).
+ * Oracle: assert.equal(result.ok, true); assert.equal(seen[0].url, 'https://auth.privy.io/api/v1/users/me/accept_terms'); assert.equal(seen[0].headers.authorization, `Bearer ${TOKEN}`); assert.equal(seen[0].headers['privy-app-id'], 'app_123'); assert.equal(seen[0].headers['privy-client-id'], 'client_9'); assert.equal(seen[0].headers['privy-client'], 'react-auth:3.51.4')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('postAcceptTerms sends bearer and app id', async () => {
   const seen = [];
   const result = await postAcceptTerms({
@@ -448,6 +567,13 @@ test('postAcceptTerms sends bearer and app id', async () => {
   assert.equal(seen[0].headers['privy-client'], 'react-auth:3.51.4');
 });
 
+/**
+ * Achieves: verifies postAcceptTerms mints a session bearer from the refresh token.
+ * Fails when: postAcceptTerms mints a session bearer from the refresh token breaks (e.g. expected true, SESSIONS_URL, undefined).
+ * Oracle: assert.equal(result.ok, true); assert.equal(seen[0].url, SESSIONS_URL); assert.equal(seen[0].authorization, undefined); assert.equal(JSON.parse(seen[0].body).refresh_token, 'refresh-1'); assert.equal(seen[1].authorization, `Bearer ${TOKEN}`)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('postAcceptTerms mints a session bearer from the refresh token', async () => {
   const seen = [];
   const result = await postAcceptTerms({
@@ -469,6 +595,13 @@ test('postAcceptTerms mints a session bearer from the refresh token', async () =
   assert.equal(seen[1].authorization, `Bearer ${TOKEN}`);
 });
 
+/**
+ * Achieves: verifies postAcceptTerms fails closed without a token.
+ * Fails when: postAcceptTerms fails closed without a token breaks (e.g. expected false, 'token_missing', result.ok !== false).
+ * Oracle: assert.equal(result.ok, false); assert.equal(result.error, 'token_missing')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('postAcceptTerms fails closed without a token', async () => {
   const result = await postAcceptTerms({
     token: '',
@@ -481,6 +614,13 @@ test('postAcceptTerms fails closed without a token', async () => {
   assert.equal(result.error, 'token_missing');
 });
 
+/**
+ * Achieves: verifies fetch captured before install still gets the session bearer.
+ * Fails when: fetch captured before install still gets the session bearer breaks (e.g. expected `Bearer ${TOKEN}`).
+ * Oracle: assert.equal(seen[0], `Bearer ${TOKEN}`)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('fetch captured before install still gets the session bearer', async () => {
   const seen = [];
   const native = async (input, init) => {
@@ -510,6 +650,13 @@ test('fetch captured before install still gets the session bearer', async () => 
   assert.equal(seen[0], `Bearer ${TOKEN}`);
 });
 
+/**
+ * Achieves: verifies an expired session token does not call accept_terms and login can continue.
+ * Fails when: an expired session token does not call accept_terms and login can continue breaks (e.g. expected false, false, 401).
+ * Oracle: assert.equal(called, false); assert.equal(result.ok, false); assert.equal(result.status, 401); assert.equal(acceptFailureShouldContinue(result), true); assert.equal(acceptFailureShouldContinue({ ok: false, status: 401, error: 'Missing auth token.' }); assert.equal(acceptFailureShouldContinue({ ok: false, status: 500, error: 'accept_failed' })
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('an expired session token does not call accept_terms and login can continue', async () => {
   const expired = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ exp: 1 })).toString('base64url')}.sig`;
   let called = false;
@@ -530,6 +677,13 @@ test('an expired session token does not call accept_terms and login can continue
   assert.equal(acceptFailureShouldContinue({ ok: true, status: 200, error: '' }), false);
 });
 
+/**
+ * Achieves: verifies resolveAcceptTermsToken reads the installed cache.
+ * Fails when: resolveAcceptTermsToken reads the installed cache breaks (e.g. expected TOKEN).
+ * Oracle: assert.equal(resolveAcceptTermsToken(target), TOKEN)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('resolveAcceptTermsToken reads the installed cache', () => {
   const storage = memoryStorage({ 'privy:pat': JSON.stringify(TOKEN) });
   const target = {

@@ -4,6 +4,13 @@ import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mj
 import { BotStateMachine } from './bot-do.mjs';
 import { decideFromCheckpoint } from './decide.mjs';
 
+/**
+ * Achieves: checkpoint helper advances/pauses while retaining history entries.
+ * Fails when: history cleared on pause or advance skips states.
+ * Oracle: history length/order assertions in test.
+ * Side effects / state checked: in-memory checkpoint state.
+ * Gaps: none
+ */
 test('run checkpoints advance and pause without losing history', () => {
   let run = createEmptyRun({ runId: 'run_1', botId: 'bot_1', goal: 'yield', now: 1 });
   run = advanceRun(run, 'research', 'started', 2);
@@ -16,6 +23,13 @@ test('run checkpoints advance and pause without losing history', () => {
   assert.ok(run.events.length >= 3);
 });
 
+/**
+ * Achieves: machine wake/advance work; paused machine refuses advance.
+ * Fails when: paused advance succeeds or wake fails to set state.
+ * Oracle: state transitions + paused block in test.
+ * Side effects / state checked: machine internal state.
+ * Gaps: none
+ */
 test('BotStateMachine wakes, advances, and blocks while paused', async () => {
   const machine = new BotStateMachine();
   const wake = await machine.handle(new Request('https://bot/wake', {
@@ -90,6 +104,13 @@ const facts = {
   reasonSummary: 'Transfer under cap',
 };
 
+/**
+ * Achieves: ask-mode decide pauses awaiting approval instead of executing.
+ * Fails when: ask mode auto-executes.
+ * Oracle: paused/approval-needed outcome.
+ * Side effects / state checked: decide result state.
+ * Gaps: none
+ */
 test('decide path pauses for approval in ask mode', async () => {
   let run = createEmptyRun({ runId: 'run_1', botId: 'bot_1', goal: 'yield', now: 1 });
   run = advanceRun(run, 'research', 'wake', 2);
@@ -112,6 +133,13 @@ test('decide path pauses for approval in ask mode', async () => {
   assert.match(memo.r, /^[a-f0-9]{64}$/);
 });
 
+/**
+ * Achieves: DO /decide persists gate outcome on the machine.
+ * Fails when: gate outcome not stored or wrong.
+ * Oracle: stored gate fields match decide result.
+ * Side effects / state checked: machine storage.
+ * Gaps: none
+ */
 test('BotStateMachine /decide stores gate outcome', async () => {
   const machine = new BotStateMachine();
   await machine.handle(new Request('https://bot/wake', {

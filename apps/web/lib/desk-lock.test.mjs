@@ -31,6 +31,13 @@ function memoryStorage() {
   };
 }
 
+/**
+ * Achieves: verifies desk lock rejects a short password and accepts a matching one.
+ * Fails when: desk lock rejects a short password and accepts a matching one breaks (e.g. expected 'Use at least 8 characters.', record, record); failure/null paths flip.
+ * Oracle: assert.equal(passwordProblem('short'), 'Use at least 8 characters.'); assert.equal(await unlockDesk('correct horse', record); assert.equal(await unlockDesk('correct horses', record); assert.equal(await unlockDesk('', record); assert.equal(await unlockDesk('correct horse', other); assert.rejects(() => createDeskLock('short')
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('desk lock rejects a short password and accepts a matching one', async () => {
   assert.equal(passwordProblem('short'), 'Use at least 8 characters.');
   await assert.rejects(() => createDeskLock('short'), /at least 8/);
@@ -43,6 +50,13 @@ test('desk lock rejects a short password and accepts a matching one', async () =
   assert.equal(await unlockDesk('correct horse', other), true);
 });
 
+/**
+ * Achieves: verifies desk lock verifier round-trips per owner and ignores a tampered hash.
+ * Fails when: desk lock verifier round-trips per owner and ignores a tampered hash breaks (e.g. expected '', 'maelstrom.desk-lock.did:privy:abc', 'did:privy:abc', record); failure/null paths flip.
+ * Oracle: assert.equal(deskLockStorageKey(''), ''); assert.equal(deskLockStorageKey(' did:privy:abc '), 'maelstrom.desk-lock.did:privy:abc'); assert.equal(writeDeskLock(storage, 'did:privy:abc', record); assert.equal(await unlockDesk('panel-lock', readDeskLock(storage, 'did:privy:abc'); assert.equal(readDeskLock(storage, 'did:privy:other'); assert.equal(await unlockDesk('panel-lock', readDeskLock(storage, 'did:privy:abc')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('desk lock verifier round-trips per owner and ignores a tampered hash', async () => {
   assert.equal(deskLockStorageKey(''), '');
   assert.equal(deskLockStorageKey('  did:privy:abc  '), 'maelstrom.desk-lock.did:privy:abc');
@@ -59,6 +73,13 @@ test('desk lock verifier round-trips per owner and ignores a tampered hash', asy
   assert.equal(parseDeskLock('not-json'), null);
 });
 
+/**
+ * Achieves: verifies shift L locks and shift U opens the unlock prompt, except while typing.
+ * Fails when: shift L locks and shift U opens the unlock prompt, except while typing breaks (e.g. expected code: 'KeyL' }, code: 'KeyU' }, code: 'KeyL', repeat: true }); failure/null paths flip.
+ * Oracle: assert.equal(walletHotkey({ shiftKey: true, code: 'KeyL' }); assert.equal(walletHotkey({ shiftKey: true, code: 'KeyU' }); assert.equal(walletHotkey({ shiftKey: true, code: 'KeyL', repeat: true }); assert.equal(walletHotkey({ shiftKey: false, code: 'KeyL' }); assert.equal(walletHotkey({ shiftKey: true, ctrlKey: true, code: 'KeyL' }); assert.equal(walletHotkey({ shiftKey: true, code: 'KeyK' })
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('shift L locks and shift U opens the unlock prompt, except while typing', () => {
   assert.equal(walletHotkey({ shiftKey: true, code: 'KeyL' }), 'lock');
   assert.equal(walletHotkey({ shiftKey: true, code: 'KeyU' }), 'unlock');
@@ -73,6 +94,13 @@ test('shift L locks and shift U opens the unlock prompt, except while typing', (
   assert.equal(hotkeyTypingTarget(null), false);
 });
 
+/**
+ * Achieves: verifies idle lock trips after thirty minutes and stays open before that.
+ * Fails when: idle lock trips after thirty minutes and stays open before that breaks (e.g. expected start + DESK_LOCK_IDLE_MS - 1, start + DESK_LOCK_IDLE_MS, start); failure/null paths flip.
+ * Oracle: assert.equal(idleLockDue(start, start + DESK_LOCK_IDLE_MS - 1); assert.equal(idleLockDue(start, start + DESK_LOCK_IDLE_MS); assert.equal(idleLockDue(Number.NaN, start)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('idle lock trips after thirty minutes and stays open before that', () => {
   const start = 1_000_000;
   assert.equal(idleLockDue(start, start + DESK_LOCK_IDLE_MS - 1), false);
@@ -80,6 +108,13 @@ test('idle lock trips after thirty minutes and stays open before that', () => {
   assert.equal(idleLockDue(Number.NaN, start), false);
 });
 
+/**
+ * Achieves: verifies a wallet unlock lasts thirty minutes across a reload and then locks.
+ * Fails when: a wallet unlock lasts thirty minutes across a reload and then locks breaks (e.g. expected start + DESK_LOCK_IDLE_MS, 'did:privy:abc', until, 'did:privy:abc', start + DESK_LOCK_IDLE_MS - 1); failure/null paths flip.
+ * Oracle: assert.equal(until, start + DESK_LOCK_IDLE_MS); assert.equal(writeDeskSession(storage, 'did:privy:abc', until); assert.equal(readDeskSession(storage, 'did:privy:abc', until); assert.equal(readDeskSession(storage, 'did:privy:other', start); assert.equal(parseDeskSession('not-json', start); assert.equal(clearDeskSession(storage, 'did:privy:abc')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('a wallet unlock lasts thirty minutes across a reload and then locks', () => {
   const storage = memoryStorage();
   const start = 1_700_000_000_000;

@@ -14,6 +14,13 @@ import {
   toOpenAiTools,
 } from './catalog.mjs';
 
+/**
+ * Achieves: Shared catalog includes research + dashboard + price tools with get_price safety copy.
+ * Fails when: A required tool name is missing, lengths drift, or get_price claims it signs.
+ * Oracle: Explicit required-name allowlist + description substrings (DexScreener/Jupiter/no-sign).
+ * Side effects: none.
+ * Gaps: Handler wiring to runtime routes is covered in agent-runtime / web tests.
+ */
 test('shared catalog covers research and dashboard tools', () => {
   for (const name of [
     'web_search',
@@ -34,6 +41,11 @@ test('shared catalog covers research and dashboard tools', () => {
   assert.equal(RESEARCH_TOOLS.length, 6);
   assert.ok(DASHBOARD_TOOLS.length >= 10);
   assert.equal(SHARED_AGENT_TOOLS.length, RESEARCH_TOOLS.length + PRICE_TOOLS.length + DASHBOARD_TOOLS.length);
+  assert.equal(new Set(SHARED_TOOL_NAMES).size, SHARED_TOOL_NAMES.length);
+  assert.deepEqual(
+    SHARED_AGENT_TOOLS.map((tool) => tool.name).sort(),
+    [...SHARED_TOOL_NAMES].sort(),
+  );
   const price = PRICE_TOOLS.find((tool) => tool.name === 'get_price');
   assert.equal(price.handler, 'price');
   assert.deepEqual(price.voiceCalls, []);
@@ -43,6 +55,13 @@ test('shared catalog covers research and dashboard tools', () => {
   assert.match(price.description, /does not sign/);
 });
 
+/**
+ * Achieves: Away briefing is read-only, redacts secrets/URLs/JWTs, and ignores pre-since or invalid kinds.
+ * Fails when: spends/signs flip true, JWT/live URLs leak into spoken text, or secret.leak events appear.
+ * Oracle: Hand-built timeline rows with planted secrets; EVENT_KINDS allowlist rejects secret.leak.
+ * Side effects: none (pure function over fixture rows).
+ * Gaps: Does not hit live Supabase event store.
+ */
 test('spoken away briefing reads stored timeline rows and does not spend', () => {
   const rows = [
     {
@@ -92,6 +111,13 @@ test('spoken away briefing reads stored timeline rows and does not spend', () =>
   assert.equal(parseAwaySince('1763200000000'), 1763200000000);
 });
 
+/**
+ * Achieves: OpenAI tool mapping preserves every shared tool name as type=function.
+ * Fails when: Names diverge from SHARED_TOOL_NAMES or type is not function.
+ * Oracle: Sorted equality of mapped names vs SHARED_TOOL_NAMES constant.
+ * Side effects: none.
+ * Gaps: JSON Schema parameter validity not deep-checked.
+ */
 test('OpenAI tool mapping preserves names', () => {
   const mapped = toOpenAiTools();
   assert.equal(mapped.every((item) => item.type === 'function'), true);
@@ -99,8 +125,16 @@ test('OpenAI tool mapping preserves names', () => {
     mapped.map((item) => item.function.name).sort(),
     [...SHARED_TOOL_NAMES].sort(),
   );
+  assert.equal(mapped.every((item) => item.function.parameters && typeof item.function.parameters === 'object'), true);
 });
 
+/**
+ * Achieves: Voice research webhooks expose live_view/navigate/search; away tool is GET-only and non-spending.
+ * Fails when: navigate/live_view missing, away tool gains required params, or instruction omits get_price safety.
+ * Oracle: Explicit webhook name membership + away.voiceCalls path equality to GET /api/events.
+ * Side effects: none.
+ * Gaps: Alias → runtime dispatch covered in voice/runtime tests.
+ */
 test('voice research webhooks include live_view and navigate', () => {
   const names = VOICE_RESEARCH_WEBHOOKS.map((item) => item.name);
   assert.ok(names.includes('browser_live_view'));

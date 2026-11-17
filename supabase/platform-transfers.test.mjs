@@ -27,6 +27,13 @@ async function dbWithPeople() {
   return db;
 }
 
+/**
+ * Achieves: platform_post_transfer credits recipient once per idempotency key; parties can read; strangers cannot.
+ * Fails when: Double insert on replay, or RLS leaks to unrelated owners.
+ * Oracle: platform_transfers RPC + RLS.
+ * Side effects: PGlite with foundations/profiles/transfers migrations.
+ * Gaps: Does not move on-chain USDC (platform ledger only).
+ */
 test('a handle send credits the recipient wallet and replays once', async () => {
   const db = await dbWithPeople();
   const posted = await db.query(`
@@ -61,6 +68,13 @@ test('a handle send credits the recipient wallet and replays once', async () => 
   assert.equal(hidden.rows.length, 0);
 });
 
+/**
+ * Achieves: Missing handle, self transfer, and frozen source wallet raise stable errors.
+ * Fails when: Any refused path inserts a transfer row.
+ * Oracle: platform_post_transfer validation errors.
+ * Side effects: PGlite.
+ * Gaps: Does not cover frozen destination wallet.
+ */
 test('a platform send refuses a missing handle, a self send, and a frozen wallet', async () => {
   const db = await dbWithPeople();
   await assert.rejects(

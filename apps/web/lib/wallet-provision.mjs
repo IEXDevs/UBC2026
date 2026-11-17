@@ -3,6 +3,22 @@
  * Never include secret values — only env names and safe error codes.
  */
 
+/**
+ * Shell wallet provision URLs after Privy login.
+ * Only Next `/api/wallets` — never `/api/runtime/api/wallets` create.
+ * Cloudflare Workers strip outbound Origin, so runtime create 502s and used
+ * to overwrite useful Next errors. Persist still happens inside the Next route.
+ */
+export function walletProvisionPaths() {
+  return Object.freeze(['/api/wallets']);
+}
+
+/** True when a provision response has at least one usable wallet row. */
+export function walletProvisionSucceeded(responseOk, body = {}) {
+  if (responseOk !== true || !body || typeof body !== 'object') return false;
+  return Array.isArray(body.wallets) && body.wallets.length > 0;
+}
+
 // acceptLogin only needs Privy credentials. QuickNode is for later signing.
 const REQUIRED = Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET']);
 
@@ -187,13 +203,15 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
     if (/403/i.test(detail) && /PRIVY_AUTHORIZATION_KEY|authorization/i.test(detail)) {
       return 'Privy returned 403 without an authorization signature. Add PRIVY_AUTHORIZATION_KEY (wallet-auth private key from Privy → Authorization keys) to root .env.local, restart Next, and sign in again.';
     }
-    if (/must_specify_origin|invalid_origin/i.test(detail)) {
+    if (/must_specify_origin|invalid_origin|cannot set Origin/i.test(detail)) {
       return 'Privy rejected the Origin. Allowlist this site (and http://localhost:3000) under Privy → Domains, then sign in again.';
     }
     if (/403/i.test(detail)) {
       return 'Privy returned 403. If the app secret is full-access, set PRIVY_AUTHORIZATION_KEY from Privy → Authorization keys (or turn off required authorization signatures).';
     }
-    if (detail && detail.length <= 180 && !/[\r\n]/.test(detail)) {
+    // Never echo bearer tokens / API keys that may appear in upstream detail strings.
+    if (detail && detail.length <= 180 && !/[\r\n]/.test(detail)
+      && !/(sk_|Bearer\s|api[_-]?key|secret|password)/i.test(detail)) {
       return `Privy wallet create failed: ${detail}. Check PRIVY_APP_SECRET, Solana wallets in the dashboard, and optional PRIVY_AUTHORIZATION_KEY.`;
     }
     return 'Privy rejected wallet create. Confirm PRIVY_APP_SECRET matches this app, Solana embedded wallets are on, and retry.';

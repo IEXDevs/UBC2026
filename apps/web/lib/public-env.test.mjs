@@ -7,6 +7,13 @@ import { publicEnv, publicPrivyIds } from './public-env.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * Achieves: verifies public env values are trimmed and empty when blank/unset.
+ * Fails when: surrounding spaces remain, blank strings become truthy, or clientId leaks unset as undefined wrongly.
+ * Oracle: '  app_1  '→'app_1'; whitespace-only and missing → ''.
+ * Side effects / state checked: N/A.
+ * Gaps: none for helpers.
+ */
 test('public Privy ids are trimmed and stay empty when unset', () => {
   assert.equal(publicEnv('NEXT_PUBLIC_PRIVY_APP_ID', { NEXT_PUBLIC_PRIVY_APP_ID: '  app_1  ' }), 'app_1');
   assert.equal(publicEnv('NEXT_PUBLIC_PRIVY_APP_ID', { NEXT_PUBLIC_PRIVY_APP_ID: '   ' }), '');
@@ -17,6 +24,13 @@ test('public Privy ids are trimmed and stay empty when unset', () => {
   }), { appId: 'app_1', clientId: '' });
 });
 
+/**
+ * Achieves: verifies logged-out landing takes Privy ids from server layout, not client process.env.
+ * Fails when: layout stops calling publicPrivyIds, or page/PrivyRoot read NEXT_PUBLIC_* from process.env.
+ * Oracle: layout wires appId/clientId props; page uses usePrivyPublic + SignInPage; no client env reads.
+ * Side effects / state checked: source-text contract on layout/page/PrivyRoot.
+ * Gaps: source snapshot only — runtime React wiring not executed.
+ */
 test('the logged-out landing reads Privy ids from the server layout', () => {
   const layout = readFileSync(join(root, 'app/layout.js'), 'utf8');
   const page = readFileSync(join(root, 'app/page.js'), 'utf8');

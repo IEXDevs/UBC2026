@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ShoppingError,
   rankCatalogItems,
   buildShoppingProposal,
   prepareSandboxPurchase,
@@ -22,6 +23,13 @@ const bot = {
 const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 const recipient = 'So11111111111111111111111111111111111111112';
 
+/**
+ * Achieves: Price-only ranking picks the cheapest item with a lowest-price reason; empty catalogs throw.
+ * Fails when: Higher price wins when quality is absent, or empty input is ranked.
+ * Oracle: Sandbox catalog ranking when no quality scores exist.
+ * Side effects: none
+ * Gaps: none meaningful
+ */
 test('ranks catalog by lowest price', () => {
   const { best, reason, comparison } = rankCatalogItems([
     { id: 'a', name: 'A', price: '5000' },
@@ -30,8 +38,16 @@ test('ranks catalog by lowest price', () => {
   assert.equal(best.id, 'b');
   assert.match(reason, /lowest/);
   assert.equal(comparison, 'price');
+  assert.throws(() => rankCatalogItems([]), ShoppingError);
 });
 
+/**
+ * Achieves: Quality/price ranking prefers best ratio; quality>1000 throws; unscored items sort last.
+ * Fails when: Cheapest always wins when quality exists, or invalid quality is accepted.
+ * Oracle: Quality 0–1000 sandbox scoring rules.
+ * Side effects: none
+ * Gaps: preferCheapest=false ranking path untested.
+ */
 test('quality per price can outrank a cheaper item and still only proposes', () => {
   const { best, ranked, reason, comparison } = rankCatalogItems([
     { id: 'cheap', name: 'Thin sticker', price: '1000', quality: '100' },
@@ -46,6 +62,13 @@ test('quality per price can outrank a cheaper item and still only proposes', () 
   assert.throws(() => rankCatalogItems([{ id: 'bad', name: 'Bad', price: '1000', quality: '1001' }]), /0 to 1000/);
 });
 
+/**
+ * Achieves: buildShoppingProposal emits outflow=price and a 64-char digest.
+ * Fails when: Outflow mismatches item price or digest length drifts.
+ * Oracle: proposalDigest from bot-policy.
+ * Side effects: none
+ * Gaps: Does not evaluate policy against a ledger here.
+ */
 test('builds a policy-bound shopping proposal', () => {
   const { proposal, digest } = buildShoppingProposal({
     bot,
@@ -57,6 +80,13 @@ test('builds a policy-bound shopping proposal', () => {
   assert.equal(digest.length, 64);
 });
 
+/**
+ * Achieves: End-to-end prep picks cheapest, returns payment-required challenge, and next=await-owner-approval; disabled bots block.
+ * Fails when: Settles without approval, picks wrong SKU, skips 402, or disabled bots still ready-for-payment.
+ * Oracle: x402 sandbox buy-without-signature → 402 challenge + bot-policy enabled gate.
+ * Side effects: Injected storeClient.
+ * Gaps: none meaningful
+ */
 test('prepareSandboxPurchase lists, picks, evaluates policy, and surfaces 402', async () => {
   const storeClient = {
     listCatalog: async () => [
@@ -81,8 +111,25 @@ test('prepareSandboxPurchase lists, picks, evaluates policy, and surfaces 402', 
   assert.equal(result.challenge.state, 'payment-required');
   assert.equal(result.next, 'await-owner-approval');
   assert.equal(result.policy.state, 'approval-needed');
+
+  const blocked = await prepareSandboxPurchase({
+    bot: { ...bot, enabled: false },
+    ledger,
+    recipient,
+    storeClient,
+    now: Date.now(),
+  });
+  assert.equal(blocked.policy.state, 'blocked');
+  assert.equal(blocked.next, 'blocked');
 });
 
+/**
+ * Achieves: Quality ranking drives the proposed outflow; buy is called without signature; next is not settled.
+ * Fails when: Settles inline, or cheap low-quality item is proposed when quality exists.
+ * Oracle: prepareSandboxPurchase next-state machine.
+ * Side effects: Injected storeClient.
+ * Gaps: Does not reserve budget in bot-policy.
+ */
 test('prepareSandboxPurchase proposes the quality pick and does not settle', async () => {
   let bought = false;
   const storeClient = {
@@ -106,6 +153,13 @@ test('prepareSandboxPurchase proposes the quality pick and does not settle', asy
   assert.notEqual(result.next, 'settled');
 });
 
+/**
+ * Achieves: After signPayment, sandbox buy receives PAYMENT-SIGNATURE and returns settled order; mainnet accepted terms throw.
+ * Fails when: Signs mainnet terms, skips signature, or order id missing still succeeds.
+ * Oracle: x402 PAYMENT-SIGNATURE settlement on Solana devnet.
+ * Side effects: Injected storeClient + signPayment.
+ * Gaps: none meaningful
+ */
 test('settleSandboxPurchase signs and confirms an order', async () => {
   const challenge = buildPaymentRequired({
     resourceUrl: 'https://sandbox.test/store/buy',
@@ -137,8 +191,26 @@ test('settleSandboxPurchase signs and confirms an order', async () => {
   assert.equal(settled.next, 'settled');
   assert.equal(settled.payment.transaction, 'sig_shop_1');
   assert.equal(settled.order.orderId, 'ord_1');
+
+  await assert.rejects(
+    () => settleSandboxPurchase({
+      bot,
+      itemId: 'sku_lo',
+      accepted: { ...accepted, network: NETWORKS.mainnet },
+      storeClient,
+      signPayment: async () => 'sig',
+    }),
+    ShoppingError,
+  );
 });
 
+/**
+ * Achieves: Laso 402 on mainnet returns await-owner-mainnet-approval with proposal outflow from amount.
+ * Fails when: Auto-settles mainnet, or wrong payTo/outflow.
+ * Oracle: Laso mainnet owner-gate contract (not sandbox auto-pay).
+ * Side effects: Injected fetcher.
+ * Gaps: Does not perform a real Laso purchase.
+ */
 test('prepareLasoTinyCardPurchase surfaces a mainnet owner gate', async () => {
   const lasoBot = {
     ...bot,

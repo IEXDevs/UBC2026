@@ -11,10 +11,24 @@ function concat(parts) {
   return parts.reduce((sql, part) => (sql.endsWith('\n') ? sql + part : `${sql}\n${part}`));
 }
 
+/**
+ * Achieves: Committed schema.sql equals concatenation of the three phase-1 migrations.
+ * Fails when: schema.sql drifts from migrations.
+ * Oracle: Byte equality of concat(foundations, policy, templates).
+ * Side effects: Reads SQL files.
+ * Gaps: Later migrations are intentionally outside schema.sql.
+ */
 test('schema.sql is foundations, the policy ledger, and bot templates', () => {
   assert.equal(schema, concat([foundations, policy, templates]));
 });
 
+/**
+ * Achieves: schema.sql mentions required tables, cap columns, RLS, realtime, policy RPCs, and no embedded live secrets.
+ * Fails when: A required symbol disappears or a secret literal is committed.
+ * Oracle: Phase-1 schema checklist.
+ * Side effects: Reads schema.sql.
+ * Gaps: String presence only — not executable DDL validation.
+ */
 test('schema covers phase 1 tables, caps, RLS, and realtime', () => {
   for (const name of [
     'users',

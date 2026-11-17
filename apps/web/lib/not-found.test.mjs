@@ -12,6 +12,13 @@ const rootError = readFileSync(join(root, 'app/global-error.js'), 'utf8');
 const guard = readFileSync(join(root, 'components/CrashGuard.js'), 'utf8');
 const layout = readFileSync(join(root, 'app/layout.js'), 'utf8');
 
+/**
+ * Achieves: verifies missing routes and crash boundaries all render the shared 404 screen.
+ * Fails when: NotFoundScreen loses Return Home, themes drop below 5, or CrashGuard leaves layout.
+ * Oracle: 404 + href="/" on screen; not-found/error/global-error/CrashGuard all reference NotFoundScreen; layout wraps CrashGuard.
+ * Side effects / state checked: source text across app error surfaces.
+ * Gaps: source snapshot only — no rendered React tree.
+ */
 test('missing routes and crashes render the same 404 screen', () => {
   assert.match(screen, />\s*404\s*</);
   assert.match(screen, /Return Home/);

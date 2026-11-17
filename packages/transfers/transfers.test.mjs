@@ -129,6 +129,13 @@ function assertMoveThenMemo(base64, { payer, amount, memo }) {
   return tx;
 }
 
+/**
+ * Achieves: transferDevnetUsdc signs via Privy then broadcasts a create-ATA + transferChecked + memo tx for DEVNET_USDC only.
+ * Fails when: Mainnet mint appears, memo/order wrong, secrets leak, or sendTransaction skipped/duplicated wrongly.
+ * Oracle: SPL Token transferChecked + memo program layout + DEVNET_USDC_MINT.
+ * Side effects: Injected Privy/RPC mock fetch.
+ * Gaps: Does not cover ATA already-exists races.
+ */
 test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', async () => {
   const memo = 'decision:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const { client: signer, calls } = client(null, devnetRoutes());
@@ -158,6 +165,13 @@ test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', asy
   assert.equal(JSON.stringify(sign.body).includes(appSecret), false);
 });
 
+/**
+ * Achieves: build/transfer refuse mainnet cluster, frozen wallets, and mainnet genesis before sendTransaction.
+ * Fails when: Any of those paths still broadcasts.
+ * Oracle: DEVNET_GENESIS_HASH gate + WalletError/TransferError codes.
+ * Side effects: Injected mocks; asserts no sign/send side effects.
+ * Gaps: Does not cover testnet genesis explicitly.
+ */
 test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', async () => {
   const calls = [];
   const signer = {
@@ -217,6 +231,13 @@ test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', as
   assert.deepEqual(calls, []);
 });
 
+/**
+ * Achieves: External adapter signs locally; runtime broadcasts on verified devnet; adapter never sendTransaction; mainnet genesis blocks before sign.
+ * Fails when: Adapter broadcasts, Privy signs deposits, or mainnet still sends.
+ * Oracle: Deposit path ownership: adapter signs, QuickNode broadcasts.
+ * Side effects: Injected adapter + RPC mocks.
+ * Gaps: Does not cover adapter disconnect mid-sign.
+ */
 test('wallet adapter deposit signs locally and broadcasts only on devnet', async () => {
   let signed = 0;
   let adapterSent = 0;
@@ -275,6 +296,13 @@ test('wallet adapter deposit signs locally and broadcasts only on devnet', async
   assert.equal(blocked.calls.some(call => call.body?.method === 'sendTransaction'), false);
 });
 
+/**
+ * Achieves: Withdraw/move/grab-back are Privy-signed USDC moves with expected memos; frozen sleeves can still be grabbed.
+ * Fails when: Wrong destinations/memos, adapter signs withdraws, or frozen wallets are skipped for grab-back.
+ * Oracle: Owner wallet ops memos: withdraw / wallet.move / funds.grabbed.
+ * Side effects: Injected Privy/RPC mocks.
+ * Gaps: Does not cover zero-balance no-op grab across all sleeves in isolation.
+ */
 test('withdraw, wallet moves, and grab-back return USDC to the main wallet', async () => {
   let adapterSigned = 0;
   const adapter = {
@@ -334,6 +362,13 @@ test('withdraw, wallet moves, and grab-back return USDC to the main wallet', asy
   assert.equal(calls.filter(call => call.body?.method === 'sendTransaction').length, 3);
 });
 
+/**
+ * Achieves: Missing balances are read via getTokenAccountsByOwner for DEVNET_USDC; partial grab failures retain completed moves.
+ * Fails when: Mainnet mint queried, or earlier successes discarded on later failure.
+ * Oracle: TransferError.completed partial-failure contract.
+ * Side effects: Injected RPC mocks.
+ * Gaps: Does not retry/resume remaining sleeves after failure.
+ */
 test('grab-back can read devnet balances and keeps earlier sweeps when a later one fails', async () => {
   const routes = devnetRoutes();
   routes.push({

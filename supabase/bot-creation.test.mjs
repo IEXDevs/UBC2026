@@ -49,6 +49,13 @@ function draft(overrides = {}) {
   };
 }
 
+/**
+ * Achieves: Builtin templates are locked; drafts force enabled=false; frozen/foreign wallets refused; enable_bot is idempotent; JWT owner enforced.
+ * Fails when: Builtins deletable, enabled=true drafts, or cross-owner create succeeds.
+ * Oracle: schema.sql bot template + create_bot_draft/enable_bot RPCs.
+ * Side effects: PGlite with full schema.sql.
+ * Gaps: Does not cover concurrent enable races.
+ */
 test('postgres keeps three locked templates and creates disabled bots', async () => {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(schema);

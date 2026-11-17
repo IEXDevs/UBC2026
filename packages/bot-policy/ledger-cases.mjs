@@ -66,6 +66,13 @@ function reserveInput(idempotencyKey, proposalOverrides = {}, extra = {}) {
 }
 
 export const ledgerCases = [
+  /**
+   * Achieves: Ask mode preview/reserve both stay approval-needed with zero reserved and no events.
+   * Fails when: Reserve writes reserved>0 or events without an approval.
+   * Oracle: snapshot.reserved === '0', reservations/events empty.
+   * Side effects: none on deny (memory ledger unchanged).
+   * Gaps: Preview vs reserve response field parity beyond state.
+   */
   {
     name: 'ask mode previews and does not reserve without approval',
     async run(ledger, assert) {
@@ -81,6 +88,13 @@ export const ledgerCases = [
       assert.equal(snap.events.length, 0);
     },
   },
+  /**
+   * Achieves: Approved ask-mode reserve debit=42 once; reused approvalId is blocked; one budget.reserved event.
+   * Fails when: Double reserve on same approval, or events count ≠ 1.
+   * Oracle: proposalDigest-backed approval; debit outflow+fee; snapshot.reserved === '42'.
+   * Side effects: consumes approval, increments reserved, appends timeline event.
+   * Gaps: Approval row usedAt persistence shape.
+   */
   {
     name: 'ask mode reserves once and consumes the approval',
     async run(ledger, assert) {
@@ -100,6 +114,13 @@ export const ledgerCases = [
       assert.equal(snap.events.filter(event => event.kind === 'budget.reserved').length, 1);
     },
   },
+  /**
+   * Achieves: First auto reserve succeeds; second over same maxOutflow is over-budget with total-outflow.
+   * Fails when: Second also reserves, or reserved totals both debits.
+   * Oracle: Hand debit 58+2=60; second violations ['total-outflow'].
+   * Side effects: reserved='60' after first only.
+   * Gaps: per-transaction headroom when total still open.
+   */
   {
     name: 'fully automatic reserves inside the cap and blocks the next hold',
     async run(ledger, assert) {
@@ -113,6 +134,13 @@ export const ledgerCases = [
       assert.equal((await ledger.snapshot()).ledgers[0].reserved, '60');
     },
   },
+  /**
+   * Achieves: Existing spent+reserved plus new debit trips both per-tx and total caps without adding reserve.
+   * Fails when: Soft-accepts over-budget or mutates reserved away from prior '1'.
+   * Oracle: debit '51'; violations both caps; reserved stays '1'.
+   * Side effects: none on over-budget (no new hold).
+   * Gaps: none for this arithmetic case.
+   */
   {
     name: 'fees and existing holds count toward both caps',
     async run(ledger, assert) {
@@ -124,6 +152,13 @@ export const ledgerCases = [
       assert.equal((await ledger.snapshot()).ledgers[0].reserved, '1');
     },
   },
+  /**
+   * Achieves: Capped-automatic reserves at autoApproveCap and asks when the next debit would exceed it.
+   * Fails when: Above-cap auto-reserves, or at-cap asks.
+   * Oracle: autoApproveCap '42' matches first debit; second state approval-needed.
+   * Side effects: reserved='42' after first.
+   * Gaps: Fractional cap vs debit equality only at exact match.
+   */
   {
     name: 'capped automatic reserves up to its cap and asks above it',
     async run(ledger, assert) {
@@ -135,6 +170,13 @@ export const ledgerCases = [
       assert.equal((await ledger.snapshot()).ledgers[0].reserved, '42');
     },
   },
+  /**
+   * Achieves: Unlimited+ask still needs approval; unlimited+fully-automatic reserves.
+   * Fails when: Unlimited ask auto-reserves, or unlimited automatic asks.
+   * Oracle: Two fixture resets; states approval-needed vs reserved.
+   * Side effects: second fixture reserved='42'.
+   * Gaps: Unlimited + capped-automatic hybrid not covered.
+   */
   {
     name: 'unlimited ask still needs approval and unlimited automatic reserves',
     async run(ledger, assert) {
@@ -150,6 +192,13 @@ export const ledgerCases = [
       assert.equal((await ledger.snapshot()).ledgers[0].reserved, '42');
     },
   },
+  /**
+   * Achieves: Over-budget without override; approve-once allows one reserve past the cap.
+   * Fails when: Plain reserve succeeds over budget, or approve-once still blocked.
+   * Oracle: spent '80' vs maxOutflow '100'; approve-once → reserved.
+   * Side effects: reserved='42' after override.
+   * Gaps: Second approve-once reuse blocked is approval-consumption-owned (adjacent case).
+   */
   {
     name: 'approve-once can reserve past the outflow cap a single time',
     async run(ledger, assert) {
@@ -164,6 +213,13 @@ export const ledgerCases = [
       assert.equal((await ledger.snapshot()).ledgers[0].reserved, '42');
     },
   },
+  /**
+   * Achieves: Idempotent replay returns same digest without double reserve; mutated quote on same key throws.
+   * Fails when: reserved doubles on replay, or mismatched quote silently replaces.
+   * Oracle: replay.digest === first.digest; reserved stays '42'; idempotency-mismatch throw.
+   * Side effects: single reservation row.
+   * Gaps: Cross-process idempotency is Supabase-owned.
+   */
   {
     name: 'replay does not double-reserve and a reused key cannot change the quote',
     async run(ledger, assert) {
@@ -181,6 +237,13 @@ export const ledgerCases = [
       assert.equal((await ledger.snapshot()).ledgers[0].reserved, '42');
     },
   },
+  /**
+   * Achieves: pauseBot blocks reserves with bot-disabled; resume restores spending and emits events.
+   * Fails when: Pause still reserves, or resume leaves bot disabled.
+   * Oracle: reason bot-disabled; events include bot.paused and bot.enabled.
+   * Side effects: bot.enabled flag + timeline events.
+   * Gaps: pause idempotency (second pause) not asserted.
+   */
   {
     name: 'pause blocks spending until resume',
     async run(ledger, assert) {
@@ -199,6 +262,13 @@ export const ledgerCases = [
       assert.ok(snap.events.some(event => event.kind === 'bot.enabled'));
     },
   },
+  /**
+   * Achieves: freezeBot blocks with bot-frozen; resume while frozen fails; unfreeze leaves disabled until resume.
+   * Fails when: Resume unfreezes implicitly, or spend works while frozen.
+   * Oracle: reason codes bot-frozen then bot-disabled; final reserve succeeds after unfreeze+resume.
+   * Side effects: frozen/enabled flags.
+   * Gaps: freezeWallet interaction covered in adjacent case.
+   */
   {
     name: 'freeze holds a bot until unfreeze and a fresh resume',
     async run(ledger, assert) {
@@ -216,6 +286,13 @@ export const ledgerCases = [
       assert.equal(allowed.state, 'reserved');
     },
   },
+  /**
+   * Achieves: freezeWallet blocks only bots on that wallet; other wallet bots still reserve; unfreeze restores.
+   * Fails when: bot_2 on other wallet is blocked, or bot_1 stays blocked after unfreeze.
+   * Oracle: frozen.botIds === ['bot_1']; events wallet.frozen/unfrozen for bot_1 only.
+   * Side effects: wallet.frozen flag + per-bot events.
+   * Gaps: Multi-bot same wallet fan-out only checked for one assignee.
+   */
   {
     name: 'freezing a wallet blocks every assigned bot and leaves other wallets alone',
     async run(ledger, assert) {
@@ -251,6 +328,13 @@ export const ledgerCases = [
       assert.ok(snap.events.some(event => event.kind === 'wallet.unfrozen' && event.botId === 'bot_1'));
     },
   },
+  /**
+   * Achieves: stopAll pauses only the caller's bots, writes kill.stop-all per bot, leaves other owners alone.
+   * Fails when: user_2 bot is paused, or kill events ≠ 2 for user_1.
+   * Oracle: botIds ['bot_1','bot_2']; user_2 bot stays enabled and can reserve.
+   * Side effects: enabled=false for owner bots + kill events.
+   * Gaps: stopAll while already paused idempotency.
+   */
   {
     name: 'stop all pauses every bot the owner has and writes a kill event',
     async run(ledger, assert) {
@@ -306,6 +390,13 @@ export const ledgerCases = [
       assert.equal(theirs.state, 'reserved');
     },
   },
+  /**
+   * Achieves: At maxLoss reserve is blocked; one unit under maxLoss can still reserve.
+   * Fails when: At-loss still reserves, or under-loss is blocked.
+   * Oracle: realizedLoss '10' vs maxLoss '10' → max-loss-reached; '9' → reserved.
+   * Side effects: none on block; reserved on allow.
+   * Gaps: realizedLoss updates after fills are market-data-owned.
+   */
   {
     name: 'position manager stops at max loss',
     async run(ledger, assert) {
@@ -324,6 +415,13 @@ export const ledgerCases = [
       assert.equal(allowed.state, 'reserved');
     },
   },
+  /**
+   * Achieves: wrong-owner, quote-expired, asset mismatch soft-block; mainnet throws; reserved stays 0.
+   * Fails when: Any illegal path reserves, or mainnet soft-blocks instead of throw.
+   * Oracle: reason codes + /devnet or testnet/ throw; snapshot.reserved === '0'.
+   * Side effects: none on rejects.
+   * Gaps: testnet success path not reserved here (allowed by policy).
+   */
   {
     name: 'wrong owner, expired quote, asset mismatch, and mainnet are rejected',
     async run(ledger, assert) {

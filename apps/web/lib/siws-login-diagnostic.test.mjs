@@ -26,6 +26,13 @@ function jsonResponse(status, body, { ok = status < 400 } = {}) {
   };
 }
 
+/**
+ * Achieves: verifies only Privy SIWS posts are named.
+ * Fails when: only Privy SIWS posts are named breaks (e.g. expected { method: 'POST' }, { method: 'post' }, { method: 'POST' }).
+ * Oracle: assert.equal(siwsPostName(AUTH, { method: 'POST' }); assert.equal(siwsPostName(INIT, { method: 'post' }); assert.equal(siwsPostName(`${AUTH}?captcha=secret`, { method: 'POST' }); assert.equal(siwsPostName(AUTH, { method: 'GET' }); assert.equal(siwsPostName('https://auth.privy.io/api/v1/sessions', { method: 'POST' }); assert.equal(siwsPostName('https://example.com/api/v1/siws/authenticate', { method: 'POST' })
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('only Privy SIWS posts are named', () => {
   assert.equal(siwsPostName(AUTH, { method: 'POST' }), 'siws/authenticate');
   assert.equal(siwsPostName(INIT, { method: 'post' }), 'siws/init');
@@ -44,6 +51,13 @@ test('only Privy SIWS posts are named', () => {
   assert.equal(walletLoginFailureLine('siws/init', 'network', 'siws_failed'), '[wallet-login] siws/init network siws_failed');
 });
 
+/**
+ * Achieves: verifies a failed SIWS post logs status and a safe code, not the body.
+ * Fails when: a failed SIWS post logs status and a safe code, not the body breaks (e.g. expected response, body, ['[wallet-login] siws/authenticate 400 invalid_data']); failure/null paths flip.
+ * Oracle: assert.equal(result, response); assert.equal(logged.includes(ADDRESS), false); assert.equal(logged.includes('sig-secret'), false); assert.equal(logged.includes('super-secret'), false); assert.equal(logged.includes('header.payload'), false); assert.equal(logged.includes('Invalid SIWS'), false)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a failed SIWS post logs status and a safe code, not the body', async () => {
   const lines = [];
   const seen = [];
@@ -77,6 +91,13 @@ test('a failed SIWS post logs status and a safe code, not the body', async () =>
   assert.equal(logged.includes('Invalid SIWS'), false);
 });
 
+/**
+ * Achieves: verifies siws/init uses the error field when code is absent and safe.
+ * Fails when: siws/init uses the error field when code is absent and safe breaks (e.g. expected ['[wallet-login] siws/init 403 disallowed_login_method'], false, lines[0].includes(ADDRESS) !== false).
+ * Oracle: assert.equal(lines[0].includes(ADDRESS), false); assert.deepEqual(lines, ['[wallet-login] siws/init 403 disallowed_login_method'])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('siws/init uses the error field when code is absent and safe', async () => {
   const lines = [];
   const target = {
@@ -88,6 +109,13 @@ test('siws/init uses the error field when code is absent and safe', async () => 
   assert.equal(lines[0].includes(ADDRESS), false);
 });
 
+/**
+ * Achieves: verifies a successful SIWS response is not read.
+ * Fails when: a successful SIWS response is not read breaks (e.g. expected true, [], result.ok !== true).
+ * Oracle: assert.equal(result.ok, true); assert.deepEqual(lines, [])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a successful SIWS response is not read', async () => {
   const lines = [];
   const target = {
@@ -108,6 +136,13 @@ test('a successful SIWS response is not read', async () => {
   assert.deepEqual(lines, []);
 });
 
+/**
+ * Achieves: verifies other fetches and network failures stay quiet about secrets.
+ * Fails when: other fetches and network failures stay quiet about secrets breaks (e.g. expected 401, ['[wallet-login] siws/authenticate network siws_failed'], false).
+ * Oracle: assert.equal(other.status, 401); assert.equal(lines[0].includes('header.payload'), false); assert.equal(lines[0].includes('sig-secret'), false); assert.equal(calls.length, 2); assert.deepEqual(lines, ['[wallet-login] siws/authenticate network siws_failed'])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('other fetches and network failures stay quiet about secrets', async () => {
   const lines = [];
   const calls = [];
@@ -130,6 +165,13 @@ test('other fetches and network failures stay quiet about secrets', async () => 
   assert.equal(calls.length, 2);
 });
 
+/**
+ * Achieves: verifies PrivyRoot installs the diagnostic and does not touch storage.
+ * Fails when: PrivyRoot installs the diagnostic and does not touch storage breaks (e.g. expected /installSiwsLoginDiagnostic/, false, source.includes('localStorage.setItem') !== false).
+ * Oracle: assert.equal(source.includes('localStorage.setItem'), false); assert.match(source, /installSiwsLoginDiagnostic/)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: source snapshot only — runtime UI/HTTP not executed.
+ */
 test('PrivyRoot installs the diagnostic and does not touch storage', () => {
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../components/PrivyRoot.js'), 'utf8');
   assert.match(source, /installSiwsLoginDiagnostic/);

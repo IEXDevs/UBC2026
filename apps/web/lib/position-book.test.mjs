@@ -4,6 +4,13 @@ import { getDemoShellState } from './demo-state.mjs';
 import { walletGlance } from './money-views.mjs';
 import { bookFrame, layoutPositionBook, stepBubbleFollow } from './position-book.mjs';
 
+/**
+ * Achieves: verifies position book layout clusters venues, wires account/spoke links, and cash glance excludes borrow.
+ * Fails when: demo card labels/summary drift, Kamino not clustered vs Drift, walletGlance includes borrow, or nodes leave frame.
+ * Oracle: demo shell → 5 venues / 7 positions / pnl 6.02 USDC; glance balanceLabel '25 USDC'; venues logos under /venues/.
+ * Side effects / state checked: layout derived from getDemoShellState(); no mutation of demo state asserted.
+ * Gaps: depends on demo fixture numbers — fixture churn fails this test intentionally.
+ */
 test('the position book clusters venues and keeps borrow out of the cash glance', () => {
   const state = getDemoShellState();
   const book = layoutPositionBook(state.positions, state.bots, state.wallets);
@@ -40,6 +47,13 @@ test('the position book clusters venues and keeps borrow out of the cash glance'
   }
 });
 
+/**
+ * Achieves: verifies bubble follow trails nearer nodes first, settles offsets, and leaves pinned/unlinked nodes alone.
+ * Fails when: neighbor moves ≤ farther, pin/null-lag nodes move, or settle never reaches remain < 1.
+ * Oracle: after one 16ms step neighbor in (4,30); after 140 steps b≈-20 c≈80; a/z unchanged.
+ * Side effects / state checked: nodes array mutated in place by stepBubbleFollow.
+ * Gaps: physics tolerances only — not pixel-perfect to UI spring constants beyond lag fields.
+ */
 test('linked nodes trail a drag and farther ones follow behind', () => {
   const nodes = [
     { id: 'a', x: -120, y: 0, pin: true, lag: 0, ox: 0, oy: 0 },

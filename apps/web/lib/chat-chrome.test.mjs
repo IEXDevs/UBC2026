@@ -12,6 +12,13 @@ const page = readFileSync(join(root, 'app/page.js'), 'utf8');
 const composer = readFileSync(join(root, 'components/Composer.js'), 'utf8');
 const promptBar = readFileSync(join(root, 'components/PromptBar.jsx'), 'utf8');
 
+/**
+ * Achieves: verifies the edit button stays hidden until the message is hovered or focused.
+ * Fails when: the edit button stays hidden until the message is hovered or focused no longer holds.
+ * Oracle: assert.match(block, /button\.chat-edit \{\s*[^}]*opacity: 0;/); assert.match(block, /button\.chat-edit:disabled \{\s*opacity: 0;/); assert.match(block, /\[data-slot='message'\]:hover button\.chat-edit/); assert.match(block, /\[data-slot='message'\]:focus button\.chat-edit/); assert.match(block, /\[data-slot='message'\]:focus-within button\.chat-edit/); assert.match(block, /button\.chat-edit:focus/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('the edit button stays hidden until the message is hovered or focused', () => {
   const start = css.indexOf('button.chat-edit {');
   const block = css.slice(start, css.indexOf('.chat-revise {', start));
@@ -28,6 +35,13 @@ test('the edit button stays hidden until the message is hovered or focused', () 
   assert.match(bubbles, /tabIndex=\{onEdit && !editing \? 0 : undefined\}/);
 });
 
+/**
+ * Achieves: verifies chat message lists reuse the agent rail scrollbar.
+ * Fails when: chat message lists reuse the agent rail scrollbar no longer holds.
+ * Oracle: assert.match(rail, /scrollbar-width: thin;/); assert.match(rail, /scrollbar-color: var\(--al-thumb\); assert.match(rail, /::-webkit-scrollbar \{\s*width: 6px;/); assert.match(rail, /::-webkit-scrollbar-track \{\s*background: transparent;/); assert.match(rail, /::-webkit-scrollbar-thumb \{\s*border-radius: 3px;\s*background: var\(--al-thumb\); assert.match(chat, /\.voice-script \{/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('chat message lists reuse the agent rail scrollbar', () => {
   assert.match(rail, /scrollbar-width: thin;/);
   assert.match(rail, /scrollbar-color: var\(--al-thumb\) transparent;/);
@@ -46,6 +60,13 @@ test('chat message lists reuse the agent rail scrollbar', () => {
   assert.doesNotMatch(css, /\.voice-script,\s*\.voice-script \.chat-log/);
 });
 
+/**
+ * Achieves: verifies the chat top bar does not cover messages or the scrollbar.
+ * Fails when: the chat top bar does not cover messages or the scrollbar no longer holds.
+ * Oracle: assert.match(topbar, /position: absolute;/); assert.match(topbar, /background: transparent;/); assert.match(topbar, /pointer-events: none;/); assert.match(css, /\.stage:not\(\.is-book\); assert.match(chat, /background: transparent;/); assert.match(bubble, /background: transparent;/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('the chat top bar does not cover messages or the scrollbar', () => {
   const topbar = css.slice(css.indexOf('.stage:not(.is-book) .topbar {'), css.indexOf('.stage:not(.is-book) .topbar .dock-slot'));
   assert.match(topbar, /position: absolute;/);
@@ -60,6 +81,13 @@ test('the chat top bar does not cover messages or the scrollbar', () => {
   assert.doesNotMatch(bubble, /background:\s*#000/);
 });
 
+/**
+ * Achieves: verifies a chat message stays on its own side of the midline.
+ * Fails when: a chat message stays on its own side of the midline no longer holds.
+ * Oracle: assert.match(block, /\.agent-thread \[data-slot='message-content'\] \{\s*width: auto;\s*max-width: 50%;/); assert.match(block, /\[data-align='end'\] \[data-slot='message-content'\] \{\s*margin-left: auto;/); assert.match(block, /\.agent-thread \[data-slot='bubble'\] \{\s*max-width: 100%;/); assert.match(promptBar, /aria-label=\{listening \? 'Stop dictation' : 'Dictate'\}/); assert.match(composer, /onDictate=\{live \? undefined : runDictation\}/); assert.match(composer, /startBrowserDictation/)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('a chat message stays on its own side of the midline', () => {
   const block = css.slice(
     css.indexOf(".agent-thread [data-slot='message-content']"),
@@ -71,6 +99,13 @@ test('a chat message stays on its own side of the midline', () => {
   assert.doesNotMatch(block, /max-width: min\(72%/);
 });
 
+/**
+ * Achieves: verifies the prompt bar exposes both dictation and live voice mode.
+ * Fails when: the prompt bar exposes both dictation and live voice mode breaks (e.g. expected /aria-label=\{listening \? 'Stop dictation' : 'Dictate'\}/, /onDictate=\{live \? undefined : runDictation\}/, /startBrowserDictation/); failure/null paths flip.
+ * Oracle: assert.equal(privyRoot.includes('installPrivySessionMirror'), false); assert.equal(privyRoot.includes('restorePrivySessionIfMissing'), false); assert.equal(privyRoot.includes('localStorage.setItem'), false); assert.equal(privySession.includes('maelstrom:privy'), false); assert.equal(privySession.includes('removeItem'), false); assert.match(promptBar, /aria-label=\{listening \? 'Stop dictation' : 'Dictate'\}/)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: source snapshot only — runtime UI/HTTP not executed.
+ */
 test('the prompt bar exposes both dictation and live voice mode', () => {
   assert.match(promptBar, /aria-label=\{listening \? 'Stop dictation' : 'Dictate'\}/);
   assert.match(composer, /onDictate=\{live \? undefined : runDictation\}/);

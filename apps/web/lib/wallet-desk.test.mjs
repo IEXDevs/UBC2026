@@ -36,6 +36,13 @@ import {
 const ADDRESS = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const PHRASE = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima'];
 
+/**
+ * Achieves: verifies token prefs keep USDC visible and tradeable.
+ * Fails when: token prefs keep USDC visible and tradeable breaks (e.g. expected ['SOL'], ['SOL'], 1).
+ * Oracle: assert.equal(prefs.extra.length, 1); assert.equal(prefs.extra[0].symbol, 'BONK'); assert.equal(prefs.sns, 'richclub.sol'); assert.deepEqual(prefs.hidden, ['SOL']); assert.deepEqual(prefs.restricted, ['SOL'])
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('token prefs keep USDC visible and tradeable', () => {
   const prefs = normalizeTokenPrefs({
     hidden: ['USDC', 'SOL', 'nope'],
@@ -54,6 +61,13 @@ test('token prefs keep USDC visible and tradeable', () => {
   assert.equal(prefs.sns, 'richclub.sol');
 });
 
+/**
+ * Achieves: verifies desk tokens use the platform USDC book and hide nothing by default.
+ * Fails when: desk tokens use the platform USDC book and hide nothing by default breaks (e.g. expected 'USDC', '4 USDC', false).
+ * Oracle: assert.equal(rows[0].symbol, 'USDC'); assert.equal(rows[0].amountLabel, '4 USDC'); assert.equal(rows[0].hidden, false); assert.equal(rows[0].tradeable, true); assert.equal(rows[1].amountLabel, '1 SOL'); assert.equal(rows[1].hidden, true)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('desk tokens use the platform USDC book and hide nothing by default', () => {
   const rows = deskTokens({
     transfers: [
@@ -71,6 +85,13 @@ test('desk tokens use the platform USDC book and hide nothing by default', () =>
   assert.equal(rows[1].hidden, true);
 });
 
+/**
+ * Achieves: verifies send targets accept a handle, an SNS name, or an address.
+ * Fails when: send targets accept a handle, an SNS name, or an address breaks (e.g. expected { kind: 'handle', handle: 'alex' }, { kind: 'sns', domain: 'richclub.sol' }, { kind: 'address', address: ADDRESS }); failure/null paths flip.
+ * Oracle: assert.equal(parseSendTarget('hello there'), null); assert.deepEqual(parseSendTarget('@Alex'), { kind: 'handle', handle: 'alex' }); assert.deepEqual(parseSendTarget('richclub.sol'), { kind: 'sns', domain: 'richclub.sol' }); assert.deepEqual(parseSendTarget(ADDRESS), { kind: 'address', address: ADDRESS })
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('send targets accept a handle, an SNS name, or an address', () => {
   assert.deepEqual(parseSendTarget('@Alex'), { kind: 'handle', handle: 'alex' });
   assert.deepEqual(parseSendTarget('richclub.sol'), { kind: 'sns', domain: 'richclub.sol' });
@@ -78,6 +99,13 @@ test('send targets accept a handle, an SNS name, or an address', () => {
   assert.equal(parseSendTarget('hello there'), null);
 });
 
+/**
+ * Achieves: verifies display amounts become base units.
+ * Fails when: display amounts become base units breaks (e.g. expected 6, 9, 6); failure/null paths flip.
+ * Oracle: assert.equal(displayToUnits('1.5', 6); assert.equal(displayToUnits('0.000000001', 9); assert.equal(displayToUnits('0', 6); assert.equal(displayToUnits('1.1234567', 6)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('display amounts become base units', () => {
   assert.equal(displayToUnits('1.5', 6), '1500000');
   assert.equal(displayToUnits('0.000000001', 9), '1');
@@ -85,6 +113,13 @@ test('display amounts become base units', () => {
   assert.equal(displayToUnits('1.1234567', 6), null);
 });
 
+/**
+ * Achieves: verifies a price series becomes one line and a filled area.
+ * Fails when: a price series becomes one line and a filled area breaks (e.g. expected true, /^M/, /Z$/); failure/null paths flip.
+ * Oracle: assert.equal(line.up, true); assert.equal(chartLine([1]), null); assert.match(line.d, /^M/); assert.match(line.area, /Z$/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('a price series becomes one line and a filled area', () => {
   const line = chartLine([2, 1, 3], 100, 40);
   assert.equal(line.up, true);
@@ -93,6 +128,13 @@ test('a price series becomes one line and a filled area', () => {
   assert.equal(chartLine([1]), null);
 });
 
+/**
+ * Achieves: verifies quotes stay on the public Jupiter or DFlow read endpoints.
+ * Fails when: quotes stay on the public Jupiter or DFlow read endpoints breaks (e.g. expected /^https:\/\/lite-api\.jup\.ag\/swap\/v1\/quote\?/, /^https:\/\/quote-api\.dflow\.net\/quote\?/, { inputMint: USDC_MINT, outputMint: USDC_MINT, amount: '1' }); failure/null paths flip.
+ * Oracle: assert.equal(quoteUrl('jupiter', { inputMint: USDC_MINT, outputMint: USDC_MINT, amount: '1' }); assert.equal(readQuoteOut({ outAmount: '42' }), '42'); assert.equal(readQuoteOut({ outAmount: '1.2' }), null); assert.match(jupiter, /^https:\/\/lite-api\.jup\.ag\/swap\/v1\/quote\?/); assert.match(dflow, /^https:\/\/quote-api\.dflow\.net\/quote\?/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('quotes stay on the public Jupiter or DFlow read endpoints', () => {
   const jupiter = quoteUrl('jupiter', { inputMint: USDC_MINT, outputMint: SOL_MINT, amount: '1000000' });
   const dflow = quoteUrl('dflow', { inputMint: USDC_MINT, outputMint: SOL_MINT, amount: '1000000' });
@@ -103,6 +145,13 @@ test('quotes stay on the public Jupiter or DFlow read endpoints', () => {
   assert.equal(readQuoteOut({ outAmount: '1.2' }), null);
 });
 
+/**
+ * Achieves: verifies recovery phrases are confirmed in order and never stored in the ack.
+ * Fails when: recovery phrases are confirmed in order and never stored in the ack breaks (e.g. expected PHRASE, 'alpha'], 12); failure/null paths flip.
+ * Oracle: assert.equal(recoveryWords(['alpha', 'alpha']); assert.equal(shuffled.length, 12); assert.equal(phraseMatches(PHRASE.join(' '), PHRASE); assert.equal(phraseMatches('alpha bravo', PHRASE); assert.equal(phraseComplete([0, 1, 2], 3); assert.equal(phraseComplete([0, 2, 1], 3)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('recovery phrases are confirmed in order and never stored in the ack', () => {
   assert.deepEqual(recoveryWords(PHRASE.join(' ')), PHRASE);
   assert.equal(recoveryWords(['alpha', 'alpha']), null);
@@ -135,6 +184,13 @@ test('recovery phrases are confirmed in order and never stored in the ack', () =
   assert.match(recoveryCard({ words: PHRASE, passphrase: 'correct horse' }), /Password:\ncorrect horse/);
 });
 
+/**
+ * Achieves: verifies a recovery phrase is a real 12-word BIP39 mnemonic and the ack stores no words.
+ * Fails when: a recovery phrase is a real 12-word BIP39 mnemonic and the ack stores no words breaks (e.g. expected [...Array(11, true, 12); failure/null paths flip.
+ * Oracle: assert.equal(await verifyRecoveryPhrase(known), true); assert.equal(recoveryWords(known).length, 12); assert.equal(await verifyRecoveryPhrase(phrase), true); assert.equal([...storage.values()][0].includes('abandon'), false); assert.equal(readRecoveryAck(memory, 'did:privy:abc'); assert.deepEqual(known, [...Array(11)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('a recovery phrase is a real 12-word BIP39 mnemonic and the ack stores no words', async () => {
   const known = await phraseFromEntropy(new Uint8Array(16));
   assert.deepEqual(known, [...Array(11).fill('abandon'), 'about']);
@@ -152,6 +208,13 @@ test('a recovery phrase is a real 12-word BIP39 mnemonic and the ack stores no w
   assert.equal(readRecoveryAck(memory, 'did:privy:abc'), true);
 });
 
+/**
+ * Achieves: verifies swap quotes skip restricted tokens and signup claims a handle before recovery.
+ * Fails when: swap quotes skip restricted tokens and signup claims a handle before recovery breaks (e.g. expected rows, { inputSymbol: 'USDC', outputSymbol: 'SOL', amount: '1, false, /^https:\/\/quote-api\.dflow\.net\/quote\?/).
+ * Oracle: assert.equal(swapQuoteUrl('jupiter', rows, { inputSymbol: 'USDC', outputSymbol: 'SOL', amount: '1000000', }); assert.equal(open.broadcast, false); assert.equal(draft.broadcast, false); assert.equal(swapDraft(deskTokens({}), { from: 'USDC', to: 'USDC', amountText: '1' }); assert.equal(swapDraft(deskTokens({}), { from: 'USDC', to: 'SOL', amountText: '0' }); assert.equal(settled.asset, 'USDC')
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('swap quotes skip restricted tokens and signup claims a handle before recovery', () => {
   const rows = deskTokens({ prefs: { restricted: ['SOL'] } });
   assert.equal(swapQuoteUrl('jupiter', rows, {
