@@ -307,13 +307,13 @@ export function normalizeHandle(value) {
 }
 
 /**
- * PostgREST `eq` filter. A Privy DID contains colons, which PostgREST treats
- * as reserved unless the value is quoted.
+ * PostgREST `eq` filter. Quotes are part of the value for `eq`, not delimiters,
+ * so `eq."did:privy:…"` matches nothing. Percent-encode the raw value so a
+ * colon in a Privy DID stays inside it.
  */
 export function postgrestEq(column, value) {
   if (typeof column !== 'string' || !/^[a-z_][a-z0-9_]*$/i.test(column)) return '';
-  const text = String(value ?? '').replaceAll('"', '""');
-  return `${column}=eq.${encodeURIComponent(`"${text}"`)}`;
+  return `${column}=eq.${encodeURIComponent(String(value ?? ''))}`;
 }
 
 /** SQLSTATE / PGRST code, else the HTTP status. Never the provider message. */
