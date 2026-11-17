@@ -478,9 +478,9 @@ export function recoveryCard({ words, wallets = [], handle = '', passphrase = ''
     lines.push('Seed phrase:', phrase.join(' '), '');
     const pass = normalizePassphrase(passphrase);
     if (pass) lines.push('Password:', pass, '');
-    lines.push('Maelstrom does not store this seed or password.', 'If this file is gone, the phrase is gone.', 'Privy still signs. This file is the backup on your device.', '');
+    lines.push('This file is the only copy. Maelstrom does not keep the seed or the password.', '');
   } else {
-    lines.push('Signing keys stay in Privy. This card lists addresses. It is not a seed phrase.', '');
+    lines.push('Addresses only. Not a seed phrase.', '');
   }
   for (const wallet of wallets) {
     if (typeof wallet?.address !== 'string' || !wallet.address.trim()) continue;

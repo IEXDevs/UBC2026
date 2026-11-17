@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AddressCopy from './AddressCopy';
 import Spotlight from './bits/Spotlight';
 import {
@@ -13,13 +13,71 @@ import {
   writeRecoveryStep,
 } from '../lib/wallet-desk.mjs';
 
-const GONE = 'Maelstrom does not store this seed or password. If you leave before the download, it is gone.';
+const EMPTY_SLOTS = () => Array.from({ length: 12 }, () => '');
+
+function PhraseEntry({ slots, onChange }) {
+  const refs = useRef([]);
+
+  function focus(index) {
+    refs.current[index]?.focus();
+  }
+
+  function writeFrom(index, raw) {
+    const parts = raw.toLowerCase().split(/\s+/).filter(Boolean).map(part => part.replace(/[^a-z]/g, ''));
+    if (parts.length === 0) {
+      const next = slots.slice();
+      next[index] = '';
+      onChange(next);
+      return;
+    }
+    const next = slots.slice();
+    parts.forEach((part, offset) => {
+      if (index + offset < 12) next[index + offset] = part;
+    });
+    onChange(next);
+    if (/\s/.test(raw)) focus(Math.min(11, index + parts.length));
+  }
+
+  return (
+    <ol className="phrase-grid">
+      {slots.map((word, index) => (
+        <li key={index}>
+          <Spotlight className="phrase-cell">
+            <span>{index + 1}</span>
+            <input
+              ref={node => { refs.current[index] = node; }}
+              aria-label={`Word ${index + 1}`}
+              value={word}
+              spellCheck={false}
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              autoFocus={index === 0}
+              onChange={event => writeFrom(index, event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === ' ') {
+                  event.preventDefault();
+                  focus(Math.min(11, index + 1));
+                  return;
+                }
+                if (event.key === 'Backspace' && !word && index > 0) {
+                  event.preventDefault();
+                  focus(index - 1);
+                }
+              }}
+            />
+          </Spotlight>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = '', onDone }) {
   const [words, setWords] = useState(null);
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
-  const [typed, setTyped] = useState('');
+  const [slots, setSlots] = useState(EMPTY_SLOTS);
   const [note, setNote] = useState('');
   const [step, setStep] = useState(null);
 
@@ -33,9 +91,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
     }
     const resume = recoveryResume(raw);
     setStep(resume.step === 'done' ? 'tell' : resume.step);
-    setNote(resume.lost
-      ? 'The seed from the last visit was not stored. If you did not download it, it is gone. This visit starts a new one.'
-      : '');
+    setNote(resume.lost ? 'The last seed was not saved. This is a new one.' : '');
   }, [ownerId]);
 
   useEffect(() => {
@@ -49,7 +105,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
     setWords(null);
     createRecoveryPhrase()
       .then(phrase => { if (!stop) setWords(phrase); })
-      .catch(() => { if (!stop) setNote('This browser could not create a recovery phrase. Reload and try again.'); });
+      .catch(() => { if (!stop) setNote('Could not create a seed. Reload and try again.'); });
     return () => { stop = true; };
   }, [step]);
 
@@ -69,8 +125,8 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
     link.download = 'maelstrom-recovery.txt';
     link.click();
     URL.revokeObjectURL(url);
-    setTyped('');
-    setNote(GONE);
+    setSlots(EMPTY_SLOTS());
+    setNote('Downloaded. We do not keep this seed or password.');
     setStep('confirm');
   }
 
@@ -79,13 +135,11 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   return (
     <div className="backdrop is-center">
       <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
-        <h2 id="recovery-title">Save your seed phrase</h2>
-        <p className="quiet">{GONE}</p>
+        <h2 id="recovery-title">Save your seed</h2>
         {step === 'tell' ? (
           <>
             <p className="quiet">
-              Your new wallet gets a 12-word seed phrase created in this browser. Write it down.
-              Privy still signs, and the download is the only copy.
+              A 12-word seed is created in this browser. Download it. We do not keep a copy.
               {handle ? ` @${handle} is the name people pay.` : ''}
             </p>
             <ul className="recovery-wallets">
@@ -131,7 +185,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         ) : null}
         {step === 'save' ? (
           <>
-            <p className="quiet">This is the seed. The download button is the only way forward.</p>
+            <p className="quiet">Download the seed to continue. We do not keep a copy.</p>
             <ol className="phrase-grid">
               {(words || []).map((word, index) => (
                 <li key={`${word}-${index}`}>
@@ -150,28 +204,19 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
             className="field"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!phraseMatches(typed, words)) {
-                setNote('Those words do not match the seed. Check the file and type them again.');
+              if (!phraseMatches(slots.join(' '), words)) {
+                setNote('Those words do not match. Check the file and try again.');
                 return;
               }
               setWords(null);
               setPassword('');
               setRepeat('');
-              setTyped('');
+              setSlots(EMPTY_SLOTS());
               onDone?.();
             }}
           >
-            <label>
-              Type the 12 words
-              <textarea
-                value={typed}
-                rows={3}
-                spellCheck={false}
-                autoCapitalize="none"
-                autoComplete="off"
-                onChange={event => { setTyped(event.target.value); setNote(''); }}
-              />
-            </label>
+            <p className="quiet">Type the 12 words</p>
+            <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); setNote(''); }} />
             <button type="submit" className="solid">Confirm seed</button>
           </form>
         ) : null}
