@@ -7,6 +7,13 @@ import { redactForLog, redactLogText } from './activity-log.mjs';
 const SEED = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const PUBKEY = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
+/*
+ * Achieves: redactForLog/redactLogText keep safe fields and scrub seeds, keys, grants, bearer, long hex.
+ * Fails when: SEED appears in output, ordinary note redacted, or bearer not scrubbed.
+ * Oracle: goal keeps fund/please without abandon; grant/privateKey/seedPhrase/apiKey/viewerUrl/secretKey/mnemonic '[redacted]'; text redactions.
+ * Side effects / state checked: N/A.
+ * Gaps: none for listed patterns
+ */
 test('activity redaction keeps ordinary fields and drops key material', () => {
   assert.equal(BIP39_ENGLISH.length, 2048);
   assert.equal(BIP39_ENGLISH[0], 'abandon');
@@ -50,6 +57,13 @@ test('activity redaction keeps ordinary fields and drops key material', () => {
   assert.equal(redactLogText(`hex ${'ab'.repeat(64)} end`).includes('ab'.repeat(40)), false);
 });
 
+/*
+ * Achieves: wake activity_logs POST stores redacted body without seed/privateKey/bearer.
+ * Fails when: SEED/privateKey/bearer appear in posted body, or activity_logs not written.
+ * Oracle: 200; one POST to activity_logs; body excludes secrets and includes [redacted]/owner/bot.
+ * Side effects / state checked: Supabase activity_logs write captured.
+ * Gaps: none
+ */
 test('configured requests are stored without seed phrases or private keys', async () => {
   const seen = [];
   const fetcher = async (url, init = {}) => {

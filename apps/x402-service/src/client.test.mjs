@@ -95,6 +95,13 @@ async function buyer({ bot = botRecord(), ledgerWallet, confirm, payMerchant = p
   };
 }
 
+/*
+ * Achieves: automatic bot pays exact USDC on devnet, receives quote, and replays with same attemptId without re-signing.
+ * Fails when: mainnet used, wrong amount/mint, or replay signs again.
+ * Oracle: paid state; transfer amount 10000; signed.length 1 then replay keeps 1; reserved 15000 after trust.
+ * Side effects / state checked: ledger reserved; signed txs; global fetch thrower.
+ * Gaps: none for happy/replay
+ */
 test('a fully automatic bot pays devnet USDC and receives the quote', async () => {
   const original = globalThis.fetch;
   globalThis.fetch = () => { throw new Error('live network'); };
@@ -139,6 +146,13 @@ test('a fully automatic bot pays devnet USDC and receives the quote', async () =
   }
 });
 
+/*
+ * Achieves: over-budget/frozen/ask-without-approval block before sign; approve-once then pays.
+ * Fails when: sign occurs while blocked, or approve path fails to pay.
+ * Oracle: over-budget/blocked/approval-needed then paid with signed.length 1.
+ * Side effects / state checked: ledger reserved 0 while blocked; signer count.
+ * Gaps: none
+ */
 test('policy blocks spending before the bot wallet signs', async () => {
   const tight = botRecord({
     cap: { maxOutflow: '1000', maxPerTransaction: '1000' },
@@ -197,6 +211,13 @@ test('policy blocks spending before the bot wallet signs', async () => {
   assert.equal(paid.body.executionCluster, 'devnet');
 });
 
+/*
+ * Achieves: mainnet challenge and merchant mismatch block without sign; failed settlement keeps reserved and marks failed.
+ * Fails when: mainnet still signs, or failed settlement clears reserve incorrectly.
+ * Oracle: wrong-cluster/merchant-mismatch signed 0; settlement-failed signed 1 reserved 10000.
+ * Side effects / state checked: ledger + signer.
+ * Gaps: none
+ */
 test('mainnet challenges and a rejected settlement never skip bot-policy', async () => {
   const hostile = await buyer({
     fetcher: async (url) => Response.json({
@@ -234,6 +255,13 @@ test('mainnet challenges and a rejected settlement never skip bot-policy', async
   assert.equal((await denied.ledger.snapshot()).ledgers[0].reserved, '10000');
 });
 
+/*
+ * Achieves: client.mjs source excludes mainnet USDC mint and mainnet CAIP id.
+ * Fails when: mainnet identifiers appear in source.
+ * Oracle: readFileSync excludes known mainnet strings.
+ * Side effects / state checked: N/A.
+ * Gaps: none — static source scan only
+ */
 test('client source does not name a mainnet USDC mint or mainnet CAIP network', () => {
   const source = readFileSync(new URL('./client.mjs', import.meta.url), 'utf8');
   assert.equal(source.includes('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'), false);

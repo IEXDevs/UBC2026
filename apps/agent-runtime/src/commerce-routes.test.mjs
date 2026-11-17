@@ -23,6 +23,13 @@ const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 const payTo = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const feePayer = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
+/*
+ * Achieves: shopping prepare then settle completes through worker commerce routes.
+ * Fails when: prepare/settle status wrong or payload missing.
+ * Oracle: status/body assertions in test.
+ * Side effects / state checked: commerce handler mocks.
+ * Gaps: payment failure path partial
+ */
 test('shopping prepare + settle through worker routes', async () => {
   assert.equal(matchCommerceRoute('POST', '/bots/bot_shop/shopping/prepare').kind, 'shopping-prepare');
   const env = {
@@ -85,6 +92,13 @@ test('shopping prepare + settle through worker routes', async () => {
   assert.equal(settled.next, 'settled');
 });
 
+/*
+ * Achieves: signal sell challenges with 402 then settle releases payload after payment.
+ * Fails when: 402 skipped or settle returns empty without pay.
+ * Oracle: 402 then settled payload fields.
+ * Side effects / state checked: payment/settle mocks.
+ * Gaps: none
+ */
 test('signal sell returns 402 and settle releases payload', async () => {
   const offers = new Map();
   const env = {
@@ -117,6 +131,13 @@ test('signal sell returns 402 and settle releases payload', async () => {
   assert.equal(body.payload.tip, 'rotate LP');
 });
 
+/*
+ * Achieves: grab-back dry-run returns planned sweeps for additional wallets without executing.
+ * Fails when: live transfers occur or plan empty incorrectly.
+ * Oracle: plan includes additional wallets; no broadcast.
+ * Side effects / state checked: dry-run flag.
+ * Gaps: none
+ */
 test('grab-back dry-run plans additional wallet sweeps', async () => {
   const res = await dispatchCommerceRoute(new Request('https://runtime/security/grab-back', {
     method: 'POST',
@@ -139,6 +160,13 @@ test('grab-back dry-run plans additional wallet sweeps', async () => {
   assert.equal(body.moves.length, 1);
 });
 
+/*
+ * Achieves: SNS send builds unsigned transfer intent via demo resolver.
+ * Fails when: intent signed early or address unresolved.
+ * Oracle: unsigned intent fields / resolved address.
+ * Side effects / state checked: demo SNS map.
+ * Gaps: none
+ */
 test('sns send builds unsigned intent from demo resolver', async () => {
   const dest = 'So11111111111111111111111111111111111111112';
   const res = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_1/sns/send', {

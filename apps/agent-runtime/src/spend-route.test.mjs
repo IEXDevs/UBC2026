@@ -49,6 +49,13 @@ function spendRequest(body, headers = {}) {
   });
 }
 
+/*
+ * Achieves: full-permission spend signs on devnet through each spend step.
+ * Fails when: sign skipped or mainnet used.
+ * Oracle: devnet signature path; step completion.
+ * Side effects / state checked: signer mocks.
+ * Gaps: none
+ */
 test('full permissions sign on devnet after every spend step', async () => {
   const calls = [];
   const response = await worker.fetch(spendRequest({
@@ -88,6 +95,13 @@ test('full permissions sign on devnet after every spend step', async () => {
   assert.equal(calls.length, 1);
 });
 
+/*
+ * Achieves: mainnet quote is refused before any signature.
+ * Fails when: signer invoked for mainnet.
+ * Oracle: blocked; signed.length===0.
+ * Side effects / state checked: signer mock.
+ * Gaps: none
+ */
 test('a mainnet quote never authorizes a signature', async () => {
   let signed = false;
   const response = await worker.fetch(spendRequest({
@@ -117,6 +131,13 @@ test('a mainnet quote never authorizes a signature', async () => {
   assert.equal(body.steps.at(-1), 'approval-mode');
 });
 
+/*
+ * Achieves: voice request_spend preserves session permission and hits shared spend route.
+ * Fails when: permission dropped or wrong route.
+ * Oracle: permission retained; shared route posted.
+ * Side effects / state checked: route/session mocks.
+ * Gaps: none
+ */
 test('voice request_spend keeps the session permission and posts the shared route', async () => {
   let seen = null;
   const response = await handleVoiceRequest(new Request('https://runtime.example/voice/tools/request_spend', {

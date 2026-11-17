@@ -17,6 +17,13 @@ function fakeEnv(extra = {}) {
   };
 }
 
+/*
+ * Achieves: catalog includes live data routes; ownerless data GETs are 401.
+ * Fails when: routes missing or ownerless allowed.
+ * Oracle: catalog membership + 401.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('route catalog lists live data routes and ownerless data calls require auth', async () => {
   const env = fakeEnv();
   const catalog = await worker.fetch(new Request('https://runtime/api/routes'), env);
@@ -32,6 +39,13 @@ test('route catalog lists live data routes and ownerless data calls require auth
   assert.equal(sign.status, 401);
 });
 
+/*
+ * Achieves: localhost Origin receives ACAO on OPTIONS and /api/events.
+ * Fails when: ACAO missing for localhost.
+ * Oracle: ACAO header === localhost origin.
+ * Side effects / state checked: N/A.
+ * Gaps: denied Origin withCors covered in cors.test.mjs
+ */
 test('localhost Origin gets CORS on preflight and /api/events', async () => {
   const env = fakeEnv();
   const preflight = await worker.fetch(new Request('https://runtime/api/events?botId=bot_meteora', {
@@ -52,6 +66,13 @@ test('localhost Origin gets CORS on preflight and /api/events', async () => {
   assert.equal(events.headers.get('Access-Control-Allow-Origin'), 'http://localhost:3000');
 });
 
+/*
+ * Achieves: browser routes forward to DO with bot id on object path.
+ * Fails when: bot id dropped from path.
+ * Oracle: forwarded pathname includes bot id.
+ * Side effects / state checked: BOT stub fetch.
+ * Gaps: none
+ */
 test('owner browser routes are forwarded with the bot id kept on the object path', async () => {
   const env = fakeEnv();
   const live = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions/rec_1/live-view', {
@@ -67,6 +88,13 @@ test('owner browser routes are forwarded with the bot id kept on the object path
   assert.equal(opened.forwarded, '/id/bot_1/browser/sessions');
 });
 
+/*
+ * Achieves: loop route is forwarded to the bot Durable Object.
+ * Fails when: loop not forwarded.
+ * Oracle: forwarded path assertion.
+ * Side effects / state checked: BOT stub.
+ * Gaps: none
+ */
 test('the loop route reaches the Durable Object', async () => {
   const env = fakeEnv();
   const loop = await worker.fetch(new Request('https://runtime/bots/bot_1/loop', {
@@ -78,6 +106,13 @@ test('the loop route reaches the Durable Object', async () => {
   assert.equal(body.forwarded, '/loop');
 });
 
+/*
+ * Achieves: bot control routes forward to DO.
+ * Fails when: routing miss/404.
+ * Oracle: forwarded pathname.
+ * Side effects / state checked: BOT stub.
+ * Gaps: none
+ */
 test('bot routes still reach the Durable Object', async () => {
   const env = fakeEnv();
   const wake = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {
@@ -102,6 +137,13 @@ async function posted(promise) {
   return { path: body.forwarded, payload: JSON.parse(body.body) };
 }
 
+/*
+ * Achieves: hourly cron records position check; empty fleet is a no-op.
+ * Fails when: empty fleet still mutates or check not recorded.
+ * Oracle: recorded check / no-op assertions.
+ * Side effects / state checked: schedule mocks.
+ * Gaps: none
+ */
 test('hourly cron records a position check and does nothing with an empty fleet', async () => {
   const empty = cronCtx();
   await worker.scheduled({}, fakeEnv(), empty.ctx);
@@ -119,6 +161,13 @@ test('hourly cron records a position check and does nothing with an empty fleet'
   assert.equal(check.payload.balance, null);
 });
 
+/*
+ * Achieves: fresh stream skips RPC; stale stream performs devnet balance read.
+ * Fails when: fresh still RPCs or stale skips.
+ * Oracle: RPC call counts per freshness.
+ * Side effects / state checked: stream age + RPC mocks.
+ * Gaps: none
+ */
 test('a fresh stream skips the RPC re-check, and a stale stream reads devnet balances', async () => {
   const calls = [];
   const fresh = cronCtx();
@@ -158,6 +207,13 @@ test('a fresh stream skips the RPC re-check, and a stale stream reads devnet bal
   assert.deepEqual(reasons.sort(), ['stream-drop-recheck', 'stream-drop-recheck']);
 });
 
+/*
+ * Achieves: shopping bots excluded from hourly position checks; unknown cron is no-op.
+ * Fails when: shopping included or unknown cron mutates state.
+ * Oracle: skip/no-op assertions.
+ * Side effects / state checked: cron handler mocks.
+ * Gaps: none
+ */
 test('shopping bots are not hourly position checks, and an unknown cron does no work', async () => {
   const shop = cronCtx();
   await worker.scheduled({ cron: '0 * * * *', scheduledTime: now }, fakeEnv({

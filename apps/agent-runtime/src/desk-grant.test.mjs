@@ -9,6 +9,13 @@ const SUPABASE = {
   SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
 };
 
+/*
+ * Achieves: passwordMatches accepts only matching verifier; raw password field rejected.
+ * Fails when: wrong password accepted or password field treated as verifier.
+ * Oracle: true only for match; reject path in test.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('a password matches only its verifier and a password field is rejected', async () => {
   const verifier = await createDeskLock('correct horse');
   assert.equal(await passwordMatches('correct horse', verifier), true);
@@ -16,6 +23,13 @@ test('a password matches only its verifier and a password field is rejected', as
   assert.equal(await passwordMatches('correct horse', { ...verifier, password: 'correct horse' }), false);
 });
 
+/*
+ * Achieves: freeze-all invokes policy freeze for every owned bot.
+ * Fails when: some bots skipped or wrong owner scope.
+ * Oracle: policy call count/ids match owned bots.
+ * Side effects / state checked: policy RPC mocks.
+ * Gaps: none
+ */
 test('freeze all bots calls policy for each owned bot', async () => {
   const frozen = [];
   const env = {
@@ -45,6 +59,13 @@ test('freeze all bots calls policy for each owned bot', async () => {
   assert.equal(JSON.stringify(body).includes('service-role'), false);
 });
 
+/*
+ * Achieves: unlock stores hashed grant; spend without grant fails.
+ * Fails when: plaintext grant stored, or bare owner spends successfully.
+ * Oracle: stored hash === sha256(grant); spend denied without grant.
+ * Side effects / state checked: desk_locks write + spend attempt.
+ * Gaps: none
+ */
 test('desk unlock stores a grant hash and spend rejects a bare owner', async () => {
   const verifier = await createDeskLock('correct horse');
   let row = null;

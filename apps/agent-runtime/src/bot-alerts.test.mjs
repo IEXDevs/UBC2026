@@ -12,6 +12,13 @@ import {
 const at = 1_700_000_000_000;
 const mint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
+/*
+ * Achieves: alert builders emit EVENT_KINDS events scoped to the given botId only.
+ * Fails when: unknown kind or wrong botId in payload.
+ * Oracle: kinds ⊆ EVENT_KINDS; botId matches input.
+ * Side effects / state checked: N/A.
+ * Gaps: none for builder shape
+ */
 test('each bot alert stays inside EVENT_KINDS and names only that bot', () => {
   const cases = [
     ['max-loss', 'bot.paused'],
@@ -41,6 +48,13 @@ test('each bot alert stays inside EVENT_KINDS and names only that bot', () => {
   ), null);
 });
 
+/*
+ * Achieves: timeline write posts one row when configured and no-ops without service key.
+ * Fails when: writes without key, or multiple rows for one alert.
+ * Oracle: configured: one write; unconfigured: zero writes.
+ * Side effects / state checked: fetch call count/body.
+ * Gaps: none
+ */
 test('timeline writes one row for that bot and stays quiet without a service key', async () => {
   const input = {
     alert: 'verify-mismatch',
@@ -82,6 +96,13 @@ test('timeline writes one row for that bot and stays quiet without a service key
   assert.equal(seen[0].body.kind, 'bot.paused');
 });
 
+/*
+ * Achieves: max-loss and verify-mismatch alerts write only to the subject bot timeline.
+ * Fails when: alerts fan out to other bots or wrong kinds.
+ * Oracle: timeline rows for subject bot only with expected kinds.
+ * Side effects / state checked: timeline writes captured.
+ * Gaps: none
+ */
 test('a max-loss check and a verify mismatch land on that bot timeline only', async () => {
   const desk = new BotStateMachine();
   const other = new BotStateMachine();
@@ -197,6 +218,13 @@ test('a max-loss check and a verify mismatch land on that bot timeline only', as
   assert.equal(verifyItems[0].botId, 'bot_1');
 });
 
+/*
+ * Achieves: over-cap spend produces unapproved_spend alert for that bot.
+ * Fails when: wrong kind or other botId.
+ * Oracle: alert kind/botId assertions in file.
+ * Side effects / state checked: timeline write.
+ * Gaps: none
+ */
 test('an over-cap spend attempt is an unapproved alert on that bot', async () => {
   const machines = new Map();
   const env = {

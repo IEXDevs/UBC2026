@@ -17,6 +17,13 @@ import {
 import { eventsUrl } from '../../web/lib/bot-experience.mjs';
 import { browserSessionUrl } from '../../web/lib/live-view.mjs';
 
+/*
+ * Achieves: permission note mirrors owner chip modes and ignores unknown modes.
+ * Fails when: unknown mode accepted or note mismatches chip.
+ * Oracle: note text per known mode; unknown ignored.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('voice permission note follows the owner chip and ignores unknown modes', () => {
   assert.match(ownerPermissionNote('ask'), /ask every time/);
   assert.match(ownerPermissionNote('review'), /review by AI/);
@@ -62,6 +69,13 @@ function toolRequest(name, { headers = {}, body = {} } = {}) {
   });
 }
 
+/*
+ * Achieves: ElevenLabs agent spec points at Muse Spark custom LLM without secrets.
+ * Fails when: secret values in spec or wrong LLM.
+ * Oracle: model/LLM fields; no secret substrings.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('the agent spec uses Muse Spark as the custom LLM and includes no secret values', async () => {
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/agent`), env({
     META_MODEL_API_KEY: 'LLM_test_secret_value_here',
@@ -96,6 +110,13 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.match(text, /Stopping every agent now/);
 });
 
+/*
+ * Achieves: get_price uses DexScreener then Jupiter and never authorizes transfer.
+ * Fails when: transfer authorized or quote sources skipped.
+ * Oracle: quote path; no sign/transfer.
+ * Side effects / state checked: price fetch mocks.
+ * Gaps: none
+ */
 test('get_price quotes DexScreener then Jupiter and does not authorize a transfer', async () => {
   const mint = 'So11111111111111111111111111111111111111112';
   const seen = [];
@@ -123,6 +144,13 @@ test('get_price quotes DexScreener then Jupiter and does not authorize a transfe
   assert.equal(seen.length, 2);
 });
 
+/*
+ * Achieves: voice webhook tools hit the same worker routes as UI panels.
+ * Fails when: divergent routes/paths.
+ * Oracle: requested paths match UI routes.
+ * Side effects / state checked: fetch path log.
+ * Gaps: none
+ */
 test('webhook tools call the same routes as the bot page and Live View panel', async () => {
   const seen = [];
   const fetchApi = async request => {
@@ -170,6 +198,13 @@ test('webhook tools call the same routes as the bot page and Live View panel', a
   assert.equal(expectedRelease.pathname.includes('live-view'), false);
 });
 
+/*
+ * Achieves: away summary speaks timeline events without spending.
+ * Fails when: spend invoked or events ignored.
+ * Oracle: spoken events; spend count 0.
+ * Side effects / state checked: timeline + spend mocks.
+ * Gaps: none
+ */
 test('what happened while away speaks stored timeline events and does not spend', async () => {
   const seen = [];
   const fetchApi = async request => {
@@ -224,6 +259,13 @@ test('what happened while away speaks stored timeline events and does not spend'
   assert.equal(seen.length, 1);
 });
 
+/*
+ * Achieves: pause/loop/stop_all tools call worker routes.
+ * Fails when: local-only no-ops without route posts.
+ * Oracle: route paths posted.
+ * Side effects / state checked: fetch log.
+ * Gaps: none
+ */
 test('pause, loop, and stop_all go through the worker routes', async () => {
   const paused = await worker.fetch(toolRequest('pause_bot', {
     body: { tool_name: 'pause_bot', parameters: { botId: 'bot_1' } },
@@ -267,6 +309,13 @@ test('pause, loop, and stop_all go through the worker routes', async () => {
   assert.equal(JSON.stringify(stopBody).includes('live.browser.run'), false);
 });
 
+/*
+ * Achieves: bound session owner is used when x-owner-id absent.
+ * Fails when: tools fail for missing header despite bind.
+ * Oracle: tool success with session owner.
+ * Side effects / state checked: session bind state.
+ * Gaps: none
+ */
 test('voice session-owner bind lets tools resolve owner without x-owner-id header', async () => {
   const seen = [];
   const fetchApi = async (request) => {
@@ -293,6 +342,13 @@ test('voice session-owner bind lets tools resolve owner without x-owner-id heade
   assert.equal(body.result.calls[0].body.items[0].id, 'bot_1');
 });
 
+/*
+ * Achieves: tools reject missing webhook secret, missing owner, or unknown tool names.
+ * Fails when: any of those succeed.
+ * Oracle: failure statuses/errors for each case.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('tool calls fail closed without a webhook secret, owner, or known tool', async () => {
   let called = false;
   const fetchApi = async () => {
@@ -331,6 +387,13 @@ test('tool calls fail closed without a webhook secret, owner, or known tool', as
   assert.equal(VOICE_TOOLS.some(item => item.name === 'web_search'), true);
 });
 
+/*
+ * Achieves: voice decide uses text-chat prompt and strips ElevenLabs policy text.
+ * Fails when: ElevenLabs policy retained or wrong prompt.
+ * Oracle: prompt contents assertions.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', () => {
   const text = buildTextChatMessages({
     botName: 'Nova',
@@ -370,6 +433,13 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
   assert.equal(voice.at(-1).role, 'tool');
 });
 
+/*
+ * Achieves: custom LLM streams via OpenRouter when keyed; without key does not call out.
+ * Fails when: network without key, or stream wrong.
+ * Oracle: stream chunks with key; no fetch without key.
+ * Side effects / state checked: OpenRouter mock / fetch guard.
+ * Gaps: none
+ */
 test('the custom LLM streams Grok through OpenRouter and does not call out without a key', async () => {
   const calls = [];
   const fetcher = async (url, init) => {
@@ -445,6 +515,13 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.equal(calls.length, 1);
 });
 
+/*
+ * Achieves: provision no-ops without ElevenLabs API key.
+ * Fails when: network called without key.
+ * Oracle: no fetch; benign result.
+ * Side effects / state checked: fetch guard.
+ * Gaps: none
+ */
 test('provisioning the ElevenLabs agent does nothing without a key', async () => {
   let called = false;
   const skipped = await provisionVoiceAgent({
