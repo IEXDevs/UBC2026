@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSearch, createScrape, createBrowserProvider } from './providers.mjs';
+import { createSearch, createScrape, createBrowserProvider, assertPublicHttpUrl, ProviderError } from './providers.mjs';
 
 const reply = value => async () => Response.json(value);
 
@@ -253,4 +253,27 @@ test('viewer rejects unexpected hosts and missing config', async () => {
   });
   await assert.rejects(provider.readonlyView('abc'), { code: 'invalid_provider_response' });
   await assert.rejects(createBrowserProvider({}).createSession(), { code: 'browser_not_configured' });
+});
+
+/**
+ * Achieves: assertPublicHttpUrl accepts http(s) without credentials; rejects javascript/data/userinfo.
+ * Fails when: Credentialed URLs or non-http schemes pass.
+ * Oracle: URL protocol/username/password gates; ProviderError code invalid_navigate.
+ * Side effects: none.
+ * Gaps: does not resolve DNS or follow redirects.
+ */
+test('assertPublicHttpUrl accepts public http(s) and rejects unsafe schemes', () => {
+  assert.equal(assertPublicHttpUrl('https://example.com/path').href, 'https://example.com/path');
+  assert.equal(assertPublicHttpUrl(' http://example.com ').protocol, 'http:');
+  assert.throws(() => assertPublicHttpUrl(''), ProviderError);
+  assert.throws(() => assertPublicHttpUrl('javascript:alert(1)'), (err) => {
+    assert.equal(err instanceof ProviderError, true);
+    assert.equal(err.code, 'invalid_navigate');
+    assert.equal(err.status, 400);
+    return true;
+  });
+  assert.throws(() => assertPublicHttpUrl('data:text/html,hi'), ProviderError);
+  assert.throws(() => assertPublicHttpUrl('https://user:pass@example.com/'), ProviderError);
+  assert.throws(() => assertPublicHttpUrl('not a url'), ProviderError);
+  assert.throws(() => assertPublicHttpUrl('a'.repeat(2001)), ProviderError);
 });

@@ -12,6 +12,7 @@ import {
   DEVNET_GENESIS_HASH,
   WalletError,
   canonicalizeJson,
+  privyAuthorizationSignature,
   createPrivyWalletClient,
   createPrivyWalletClientFromEnv,
   loginMethodsFromUser,
@@ -804,4 +805,54 @@ test('an owner export returns HPKE ciphertext and refuses a plaintext key', asyn
   assert.equal(exported.encapsulatedKey, encapsulated);
   assert.equal(exported.privateKey, undefined);
   assert.equal(JSON.stringify(exported).includes('do-not-return'), false);
+});
+
+/**
+ * Achieves: privyAuthorizationSignature produces a verifiable P-256 signature over the canonical payload.
+ * Fails when: Wrong payload verifies, or junk/empty authorization keys succeed.
+ * Oracle: node:crypto verify against independently generated public key + canonicalizeJson payload.
+ * Side effects: none (local keypair fixture).
+ * Gaps: does not call live Privy HTTP.
+ */
+test('privyAuthorizationSignature signs the canonical payload and rejects bad keys', () => {
+  const url = 'https://api.privy.io/v1/wallets';
+  const body = { chain_type: 'solana', owner: { user_id: privyUserId } };
+  const signature = privyAuthorizationSignature({
+    appId,
+    authorizationKey,
+    method: 'POST',
+    url,
+    body,
+    idempotencyKey: 'idem_1',
+    expiresAt: 1_700_000_000,
+  });
+  const payload = canonicalizeJson({
+    version: 1,
+    method: 'POST',
+    url,
+    body,
+    headers: {
+      'privy-app-id': appId,
+      'privy-idempotency-key': 'idem_1',
+      'privy-request-expiry': '1700000000',
+    },
+  });
+  assert.equal(verify('sha256', Buffer.from(payload), publicKey, Buffer.from(signature, 'base64')), true);
+  const withoutPrefix = privyAuthorizationSignature({
+    appId,
+    authorizationKey: authorizationKey.slice('wallet-auth:'.length),
+    method: 'POST',
+    url,
+    body,
+  });
+  assert.equal(typeof withoutPrefix, 'string');
+  assert.notEqual(withoutPrefix, '');
+  assert.throws(
+    () => privyAuthorizationSignature({ appId, authorizationKey: 'not-a-key', method: 'POST', url, body }),
+    WalletError,
+  );
+  assert.throws(
+    () => privyAuthorizationSignature({ appId, authorizationKey: '', method: 'POST', url, body }),
+    WalletError,
+  );
 });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateBot, evaluateProposal, validateApproval, proposalDigest, raiseLimits } from './policy.mjs';
+import { validateBot, evaluateProposal, validateApproval, proposalDigest, raiseLimits, PolicyError } from './policy.mjs';
 
 const bot = {
   id: 'b',
@@ -172,4 +172,18 @@ test('proposalDigest is deterministic and binds critical fields', () => {
   assert.notEqual(proposalDigest(p), proposalDigest({ ...p, recipient: 'attacker' }));
   assert.notEqual(proposalDigest(p), proposalDigest({ ...p, outflow: '41' }));
   assert.match(proposalDigest(p), /^[a-f0-9]{64}$/);
+});
+
+/**
+ * Achieves: PolicyError is thrown for incomplete bots and malformed raiseLimits caps.
+ * Fails when: Soft-fail returns instead of throw, or wrong error class.
+ * Oracle: instanceof PolicyError on validateBot/raiseLimits failure paths.
+ * Side effects: none.
+ * Gaps: assessSpend PolicyError paths live in ledger.test.mjs.
+ */
+test('PolicyError is thrown for incomplete bots and invalid raiseLimits', () => {
+  assert.throws(() => validateBot({ ...bot, type: undefined }), PolicyError);
+  assert.throws(() => validateBot({ ...bot, cap: { mode: 'limited', asset: 'USDC', maxOutflow: 100 } }), PolicyError);
+  assert.throws(() => raiseLimits(bot, { mode: 'limited', asset: 'USDC', maxOutflow: '1.5' }), PolicyError);
+  assert.throws(() => raiseLimits(bot, null), PolicyError);
 });

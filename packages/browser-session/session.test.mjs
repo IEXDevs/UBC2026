@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createMemoryStore, createBrowserSessionService, agentTools, describeLiveViewEmbed, SessionError } from './session.mjs';
+import {
+  createMemoryStore,
+  createBrowserSessionService,
+  createDefaultBrowserSessionService,
+  agentTools,
+  describeLiveViewEmbed,
+  SessionError,
+  ProviderError,
+} from './session.mjs';
 
 function service(overrides = {}) {
   const store = createMemoryStore();
@@ -278,4 +286,33 @@ test('navigate without openTab fails closed', async () => {
     svc.navigateSession({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1', url: 'https://example.com/' }),
     (error) => error.code === 'browser_not_configured',
   );
+});
+
+/**
+ * Achieves: createDefaultBrowserSessionService wires env keys into providers and refuses unconfigured open.
+ * Fails when: Missing Firecrawl/CF tokens still open a browser session, or store ignored.
+ * Oracle: Injected fetcher never called for search; openSession throws ProviderError without CF creds.
+ * Side effects: memory store only.
+ * Gaps: does not call live Firecrawl/Cloudflare APIs.
+ */
+test('createDefaultBrowserSessionService wires env and fails closed without credentials', async () => {
+  const store = createMemoryStore();
+  const calls = [];
+  const svc = createDefaultBrowserSessionService({
+    FIRECRAWL_API_KEY: 'fc-test',
+    CLOUDFLARE_ACCOUNT_ID: '',
+    CLOUDFLARE_API_TOKEN: '',
+    MAX_BROWSER_SESSIONS_PER_BOT: '2',
+    fetcher: async (...args) => {
+      calls.push(args);
+      throw new Error('live network');
+    },
+  }, store);
+  assert.equal(typeof svc.search, 'function');
+  assert.equal(typeof svc.openSession, 'function');
+  await assert.rejects(
+    svc.openSession({ ownerId: 'u1', botId: 'b1' }),
+    (error) => error instanceof ProviderError && error.code === 'browser_not_configured',
+  );
+  assert.equal(calls.length, 0);
 });

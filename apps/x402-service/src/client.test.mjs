@@ -8,7 +8,7 @@ import { DEVNET_USDC_MINT, NETWORKS } from '@ubc2026/x402';
 import { assignBotWallet, createMainWallet } from '@ubc2026/wallets';
 import { DEVNET_USDC_DECIMALS, MEMO_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID } from '@ubc2026/transfers';
 import { SOL_MINT, createPriceTrustHandler } from './worker.mjs';
-import { createX402BotClient } from './client.mjs';
+import { buildX402Proposal, createX402BotClient } from './client.mjs';
 
 const payTo = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const feePayer = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
@@ -266,4 +266,61 @@ test('client source does not name a mainnet USDC mint or mainnet CAIP network', 
   const source = readFileSync(new URL('./client.mjs', import.meta.url), 'utf8');
   assert.equal(source.includes('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'), false);
   assert.equal(source.includes('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'), false);
+});
+
+/*
+ * Achieves: buildX402Proposal maps accepted terms into a bot-policy proposal with capped timeout.
+ * Fails when: cluster leaves devnet, wrong expectedReceiveAsset, or timeout uncapped above 600s.
+ * Oracle: Independent accepted fixture → expiresAt = now + min(timeout, 600); asset USDC.
+ * Side effects / state checked: none (pure).
+ * Gaps: reserveBudget integration covered in pay path tests above.
+ */
+test('buildX402Proposal maps accepted x402 terms into a policy proposal', () => {
+  const bot = botRecord();
+  const accepted = {
+    scheme: 'exact',
+    network: NETWORKS.devnet,
+    amount: '10000',
+    asset: DEVNET_USDC_MINT,
+    payTo,
+    maxTimeoutSeconds: 120,
+  };
+  const price = buildX402Proposal({
+    bot,
+    accepted,
+    kind: 'price',
+    mint: SOL_MINT,
+    now: 1000,
+    attemptId: 'x402_attempt_1',
+  });
+  assert.equal(price.id, 'x402_attempt_1');
+  assert.equal(price.botId, bot.id);
+  assert.equal(price.cluster, 'devnet');
+  assert.equal(price.asset, 'USDC');
+  assert.equal(price.recipient, payTo);
+  assert.equal(price.quoteId, `price:${SOL_MINT}`);
+  assert.equal(price.outflow, '10000');
+  assert.equal(price.expectedReceiveAsset, 'price-quote');
+  assert.equal(price.expiresAt, 1120);
+
+  const trust = buildX402Proposal({
+    bot,
+    accepted: { ...accepted, maxTimeoutSeconds: 9999 },
+    kind: 'trust',
+    mint: SOL_MINT,
+    now: 500,
+    attemptId: 'x402_attempt_2',
+  });
+  assert.equal(trust.expectedReceiveAsset, 'trust-score');
+  assert.equal(trust.expiresAt, 1100);
+
+  const fallback = buildX402Proposal({
+    bot,
+    accepted: { ...accepted, maxTimeoutSeconds: 0 },
+    kind: 'price',
+    mint: SOL_MINT,
+    now: 10,
+    attemptId: 'x402_attempt_3',
+  });
+  assert.equal(fallback.expiresAt, 70);
 });

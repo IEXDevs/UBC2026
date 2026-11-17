@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createMemoryLedger, createSupabaseLedger, PolicyError } from './ledger.mjs';
+import { createMemoryLedger, createSupabaseLedger, assessSpend, PolicyError } from './ledger.mjs';
+import { proposalDigest } from './policy.mjs';
 import { ledgerCases, proposal, shoppingFixture } from './ledger-cases.mjs';
 
 /**
@@ -62,4 +63,57 @@ test('supabase ledger client forwards payloads to policy RPCs', async () => {
   assert.equal(stopped.state, 'paused');
   assert.equal(reserved.state, 'paused');
   assert.throws(() => createSupabaseLedger(null), PolicyError);
+});
+
+/**
+ * Achieves: assessSpend previews ask/auto modes without reserving; blocks missing/frozen rows.
+ * Fails when: ready-to-reserve without approval in ask, or missing bot returns ready.
+ * Oracle: Independent fixture rows + proposalDigest; no ledger mutation (pure).
+ * Side effects: none.
+ * Gaps: capped-automatic over-cap path uses autoApproveCap string amount.
+ */
+test('assessSpend previews without reserving and blocks freeze/missing rows', () => {
+  const fixture = shoppingFixture();
+  const bot = fixture.bots[0];
+  const wallet = fixture.wallets[0];
+  const ledger = fixture.ledgers[0];
+  const p = proposal();
+  const ask = assessSpend({ bot, wallet, ledger, proposal: p, now: 1000, ownerId: 'user_1' });
+  assert.equal(ask.state, 'approval-needed');
+  assert.equal(ask.digest, proposalDigest(p));
+
+  const autoBot = { ...bot, approvalMode: 'fully-automatic' };
+  const auto = assessSpend({ bot: autoBot, wallet, ledger, proposal: p, now: 1000 });
+  assert.equal(auto.state, 'ready-to-reserve');
+  assert.equal(auto.debit, '42');
+
+  assert.equal(assessSpend({ bot: null, wallet, ledger, proposal: p, now: 1000 }).reason, 'bot-missing');
+  assert.equal(assessSpend({ bot, wallet: null, ledger, proposal: p, now: 1000 }).reason, 'wallet-missing');
+  assert.equal(assessSpend({ bot, wallet, ledger: null, proposal: p, now: 1000 }).reason, 'ledger-missing');
+  assert.equal(
+    assessSpend({ bot, wallet: { ...wallet, frozen: true }, ledger, proposal: p, now: 1000 }).reason,
+    'wallet-frozen',
+  );
+  assert.equal(
+    assessSpend({ bot: { ...bot, frozen: true }, wallet, ledger, proposal: p, now: 1000 }).reason,
+    'bot-frozen',
+  );
+  assert.equal(
+    assessSpend({ bot, wallet, ledger, proposal: p, now: 1000, ownerId: 'other' }).reason,
+    'wrong-owner',
+  );
+  assert.throws(() => assessSpend({ bot, wallet, ledger, proposal: p, now: -1 }), PolicyError);
+  assert.throws(
+    () => assessSpend({ bot: { ...bot, approvalMode: 'mystery' }, wallet, ledger, proposal: p, now: 1000 }),
+    PolicyError,
+  );
+
+  const capped = assessSpend({
+    bot: { ...bot, approvalMode: 'capped-automatic', autoApproveCap: '10' },
+    wallet,
+    ledger,
+    proposal: p,
+    now: 1000,
+  });
+  assert.equal(capped.state, 'approval-needed');
 });

@@ -12,7 +12,10 @@ import {
   PUBLIC_DEVNET_RPC,
   SOL_FAUCET_URL,
   USDC_FAUCET_URL,
+  assertSecretNamesCovered,
+  assertSolanaAddress,
   buildAccountsAndFundsPlan,
+  decodeBase58,
   formatAccountsAndFunds,
   isSolanaAddress,
   runAccountsAndFunds,
@@ -128,4 +131,37 @@ test('cli prints json with no secrets in the environment', () => {
   assert.match(refused.stderr, /public address/);
   const rendered = runAccountsAndFunds(['--address', ADDRESS]);
   assert.equal(rendered.plan.storesValues, false);
+});
+
+/**
+ * Achieves: decodeBase58 returns 32-byte pubkeys; assertSolanaAddress throws AccountsFundsError on junk.
+ * Fails when: Non-base58 or wrong-length values decode as 32 bytes, or assert soft-fails.
+ * Oracle: ADDRESS fixture length 32; independent junk samples.
+ * Side effects: none.
+ * Gaps: does not verify ed25519 point-on-curve.
+ */
+test('decodeBase58 and assertSolanaAddress enforce 32-byte base58 pubkeys', () => {
+  const decoded = decodeBase58(ADDRESS);
+  assert.equal(decoded instanceof Uint8Array, true);
+  assert.equal(decoded.length, 32);
+  assert.equal(decodeBase58('not-an-address'), null);
+  assert.equal(decodeBase58(''), null);
+  assert.equal(decodeBase58('0'.repeat(32)), null);
+  assert.equal(decodeBase58(`${ADDRESS}1`), null);
+  assert.equal(assertSolanaAddress(ADDRESS), ADDRESS);
+  assert.throws(() => assertSolanaAddress('nope'), AccountsFundsError);
+  assert.throws(() => assertSolanaAddress(''), AccountsFundsError);
+});
+
+/**
+ * Achieves: assertSecretNamesCovered passes when ACCOUNT_VENDORS list every SECRET_NAMES entry.
+ * Fails when: A contracts SECRET_NAMES entry is missing from vendor name lists.
+ * Oracle: SECRET_NAMES ⊆ ACCOUNT_VENDORS.flatMap(names).
+ * Side effects: none.
+ * Gaps: does not prove dashboard steps stay current with vendor UIs.
+ */
+test('assertSecretNamesCovered requires every SECRET_NAMES entry in ACCOUNT_VENDORS', () => {
+  assert.doesNotThrow(() => assertSecretNamesCovered());
+  const listed = new Set(ACCOUNT_VENDORS.flatMap(vendor => vendor.names));
+  for (const name of SECRET_NAMES) assert.ok(listed.has(name), name);
 });

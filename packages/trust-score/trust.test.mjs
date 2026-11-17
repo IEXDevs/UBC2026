@@ -283,3 +283,26 @@ test('trust cache failures do not leak storage details', async () => {
     (error) => error.code === 'cache_unavailable',
   );
 });
+
+/**
+ * Achieves: ProviderError/TrustError exports carry code/status; invalid mint becomes ProviderError.
+ * Fails when: Wrong class thrown, or status defaults incorrectly.
+ * Oracle: errors.mjs constructors + createTrustScoreProvider invalid_mint path.
+ * Side effects: none (no network).
+ * Gaps: adaptCloudflareKv / durable cache covered in cache.test.mjs.
+ */
+test('ProviderError and TrustError are exported with code/status semantics', async () => {
+  const { ProviderError, TrustError, createTrustScoreProvider } = await import('./trust.mjs');
+  const providerErr = new ProviderError('provider_failed', 502);
+  assert.equal(providerErr instanceof Error, true);
+  assert.equal(providerErr.code, 'provider_failed');
+  assert.equal(providerErr.status, 502);
+  assert.equal(new ProviderError('x').status, 502);
+  assert.equal(new TrustError('bad').name, 'Error');
+  const lookup = createTrustScoreProvider({ endpoint: 'https://trust.test', apiKey: 'k', fetcher: async () => assert.fail('no call') });
+  await assert.rejects(lookup('!!!'), (error) => error instanceof ProviderError && error.code === 'invalid_mint' && error.status === 400);
+  await assert.rejects(
+    createTrustScoreProvider({ endpoint: '', apiKey: '' })(mint),
+    (error) => error instanceof ProviderError && error.code === 'trust_not_configured' && error.status === 503,
+  );
+});

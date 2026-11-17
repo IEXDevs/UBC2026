@@ -20,7 +20,10 @@ import {
   API_ROUTES,
   matchApiRoute,
   privyAvatarUrl,
+  httpsAvatarUrl,
+  normalizeDisplayName,
   normalizeHandle,
+  CLUSTERS,
   postgrestEq,
   directoryFailureCode,
   parseRecipient,
@@ -420,5 +423,29 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
     () => buildPermissionedSpendRequest({ permission: 'full', botId: 'bot_1', amount: '1' }),
     ContractError,
   );
+});
+
+/**
+ * Achieves: httpsAvatarUrl / normalizeDisplayName / CLUSTERS enforce https-only, trim rules, and hackathon clusters.
+ * Fails when: http avatars accepted, newline names pass, or mainnet appears in CLUSTERS.
+ * Oracle: https-only URL gate; display-name length/whitespace rules; frozen ['devnet','testnet'].
+ * Side effects: none.
+ * Gaps: privyAvatarUrl composition already covered above.
+ */
+test('httpsAvatarUrl, normalizeDisplayName, and CLUSTERS enforce hackathon profile rules', () => {
+  assert.deepEqual(CLUSTERS, ['devnet', 'testnet']);
+  assert.equal(CLUSTERS.includes('mainnet-beta'), false);
+  assert.equal(httpsAvatarUrl('https://cdn.example/a.png'), 'https://cdn.example/a.png');
+  assert.equal(httpsAvatarUrl('http://cdn.example/a.png'), null);
+  assert.equal(httpsAvatarUrl('https://user:pass@cdn.example/a.png'), null);
+  assert.equal(httpsAvatarUrl('javascript:alert(1)'), null);
+  assert.equal(httpsAvatarUrl('a'.repeat(501)), null);
+  assert.equal(httpsAvatarUrl(null), null);
+  assert.equal(normalizeDisplayName('  Alex   Rivera  '), 'Alex Rivera');
+  assert.equal(normalizeDisplayName(''), null);
+  // Whitespace (including newlines) is collapsed before the newline reject check.
+  assert.equal(normalizeDisplayName('line\nbreak'), 'line break');
+  assert.equal(normalizeDisplayName('a'.repeat(65)), null);
+  assert.equal(normalizeDisplayName(42), null);
 });
 

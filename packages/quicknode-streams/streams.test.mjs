@@ -9,12 +9,14 @@ import {
   planBackfill,
   handleQuickNodeWebhook,
   createMemoryDedupeStore,
+  createKvDedupeStore,
   createMemoryWalletKv,
   createQuickNodeKvClient,
   createSupabaseStreamStore,
   syncWalletsToKv,
   runStreamBackfill,
   streamsReadmeSection,
+  streamAsset,
   streamConfirmedPayments,
   walletLedgerCrossCheck,
   spendLedgerCrossCheck,
@@ -323,4 +325,51 @@ test('spend ledger cross-check freezes only unapproved outflows', () => {
   assert.equal(alerts[0].walletId, 'w1');
   assert.equal(alerts[0].excess, '10');
   assert.deepEqual(spendLedgerCrossCheck({ events: [], wallets: [{ id: 'w1', address: wallet, botIds: ['bot_1'] }], ledgers: [] }), []);
+});
+
+/**
+ * Achieves: streamAsset maps USDC mint/symbol to USDC; drops empty/overlong; passes other tokens through.
+ * Fails when: Circle mint stays raw, or blank/oversize tokens return truthy.
+ * Oracle: DEVNET_USDC_MINT + 'USDC' → 'USDC'; null/''/>64 → null.
+ * Side effects: none.
+ * Gaps: mainnet USDC mint is intentionally not remapped here.
+ */
+test('streamAsset maps Circle USDC and rejects empty or overlong tokens', () => {
+  assert.equal(streamAsset('USDC'), 'USDC');
+  assert.equal(streamAsset(DEVNET_USDC_MINT), 'USDC');
+  assert.equal(streamAsset(' SOL '), 'SOL');
+  assert.equal(streamAsset(null), null);
+  assert.equal(streamAsset(''), null);
+  assert.equal(streamAsset('   '), null);
+  assert.equal(streamAsset('x'.repeat(65)), null);
+});
+
+/**
+ * Achieves: createKvDedupeStore prefixes signatures, sets TTL, and rejects missing KV.
+ * Fails when: Wrong key prefix, TTL omitted, or null ns succeeds.
+ * Oracle: Spy KV get/put args; StreamsError on null ns.
+ * Side effects: none beyond spy.
+ * Gaps: does not call live Cloudflare KV.
+ */
+test('createKvDedupeStore prefixes signatures with TTL and rejects missing KV', async () => {
+  const calls = [];
+  const ns = {
+    async get(key) {
+      calls.push(['get', key]);
+      return key.endsWith('seen') ? '{"at":1}' : null;
+    },
+    async put(key, value, opts) {
+      calls.push(['put', key, value, opts]);
+    },
+  };
+  const store = createKvDedupeStore(ns, { ttlSeconds: 99, prefix: 'sig:' });
+  assert.equal(await store.has('seen'), true);
+  assert.equal(await store.has('fresh'), false);
+  await store.put('fresh', { at: 2 });
+  assert.deepEqual(calls[0], ['get', 'sig:seen']);
+  assert.deepEqual(calls[1], ['get', 'sig:fresh']);
+  assert.equal(calls[2][0], 'put');
+  assert.equal(calls[2][1], 'sig:fresh');
+  assert.equal(calls[2][3].expirationTtl, 99);
+  assert.throws(() => createKvDedupeStore(null), StreamsError);
 });

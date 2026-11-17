@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  NETWORKS, DEVNET_USDC_MINT, buildPaymentRequired, parsePaymentSignature, buildPaymentSignature, buildPaymentResponse, paymentFeedEntry,
+  NETWORKS, DEVNET_USDC_MINT, X402Error,
+  buildPaymentRequired, parsePaymentSignature, buildPaymentSignature, buildPaymentResponse, paymentFeedEntry,
   createSandboxStoreClient,
 } from './x402.mjs';
 
@@ -146,4 +147,34 @@ test('sandbox store client lists catalog and surfaces 402 buy challenges', async
   const ordered = await client.buy({ itemId: 'sku_1', paymentSignature: 'sig_header' });
   assert.equal(ordered.state, 'ordered');
   assert.equal(ordered.orderId, 'ord_paid');
+});
+
+/**
+ * Achieves: X402Error is thrown for malformed challenges, signatures, and relative resource URLs.
+ * Fails when: Soft returns instead of throw, or wrong error class.
+ * Oracle: instanceof X402Error on builder/parser failure paths.
+ * Side effects: none.
+ * Gaps: Worker payment settlement errors are apps/x402-service-owned.
+ */
+test('X402Error is thrown for malformed payment artifacts', () => {
+  assert.throws(
+    () => buildPaymentRequired({
+      resourceUrl: '/relative',
+      description: 'x',
+      amount: '1',
+      payTo,
+      feePayer,
+    }),
+    X402Error,
+  );
+  assert.throws(() => parsePaymentSignature(''), X402Error);
+  assert.throws(() => parsePaymentSignature('%%%'), X402Error);
+  assert.throws(
+    () => buildPaymentSignature({
+      accepted: { scheme: 'exact', network: NETWORKS.mainnet, amount: '1', asset: DEVNET_USDC_MINT, payTo },
+      signature: 'sig',
+    }),
+    X402Error,
+  );
+  assert.throws(() => buildPaymentResponse({ success: true, transaction: '', network: NETWORKS.devnet }), X402Error);
 });

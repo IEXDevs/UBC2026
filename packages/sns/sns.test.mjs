@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSnsResolver, buildSnsTransferIntent, prepareSnsSend, resolveSnsOwner, SnsError } from './sns.mjs';
+import {
+  createSnsResolver,
+  buildSnsTransferIntent,
+  prepareSnsSend,
+  resolveSnsOwner,
+  normalizeSnsName,
+  SnsError,
+} from './sns.mjs';
 
 const dest = 'So11111111111111111111111111111111111111112';
 const from = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
@@ -117,4 +124,22 @@ test('prepareSnsSend resolves and optionally executes on devnet', async () => {
     }),
     SnsError,
   );
+});
+
+/**
+ * Achieves: normalizeSnsName lowercases valid .sol names and rejects junk / empty / non-.sol.
+ * Fails when: Uppercase kept, or spaces/javascript: names accepted.
+ * Oracle: /^[a-z0-9][a-z0-9-]{0,62}\.sol$/i domain rule.
+ * Side effects: none.
+ * Gaps: does not prove on-chain ownership of the name.
+ */
+test('normalizeSnsName lowercases valid domains and rejects invalid names', () => {
+  assert.equal(normalizeSnsName('Alex.sol'), 'alex.sol');
+  assert.equal(normalizeSnsName('richclub.sol'), 'richclub.sol');
+  assert.throws(() => normalizeSnsName(''), SnsError);
+  assert.throws(() => normalizeSnsName('alex'), SnsError);
+  assert.throws(() => normalizeSnsName('.sol'), SnsError);
+  assert.throws(() => normalizeSnsName('alex.eth'), SnsError);
+  assert.throws(() => normalizeSnsName(' alex.sol '), SnsError);
+  assert.throws(() => normalizeSnsName('@alex.sol'), SnsError);
 });

@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeFacts, compareFacts, factsDigest, reachConsensus, hashDecisionRecord, memoFromDecision } from './consensus.mjs';
+import {
+  normalizeFacts,
+  compareFacts,
+  factsDigest,
+  reachConsensus,
+  hashDecisionRecord,
+  memoFromDecision,
+  buildDecisionRecord,
+  ConsensusError,
+} from './consensus.mjs';
 
 const base = {
   asset: 'SOL',
@@ -148,4 +157,31 @@ test('compareFacts reports every disagreeing field', () => {
   const comparison = compareFacts(base, { ...base, asset: 'USDC', trustScore: '10' });
   assert.equal(comparison.match, false);
   assert.deepEqual(comparison.mismatches, ['asset', 'trustScore']);
+});
+
+/**
+ * Achieves: buildDecisionRecord binds facts + attempt mismatches and hashes the canonical payload.
+ * Fails when: Empty attempts succeed, invalid outcome accepted, or digest mismatches hashDecisionRecord.
+ * Oracle: Independent SHA-256 via hashDecisionRecord on the same payload.
+ * Side effects: none.
+ * Gaps: reachConsensus already exercises consensus/manual-review outcomes end-to-end.
+ */
+test('buildDecisionRecord hashes attempt history and rejects incomplete inputs', () => {
+  const attempts = [
+    { attempt: 1, mismatches: ['price'], match: false },
+    { attempt: 2, mismatches: [], match: true },
+  ];
+  const record = buildDecisionRecord({ facts: base, attempts, outcome: 'consensus' });
+  assert.equal(record.version, 1);
+  assert.equal(record.outcome, 'consensus');
+  assert.equal(record.attemptCount, 2);
+  assert.deepEqual(record.mismatches, [{ attempt: 1, field: 'price' }]);
+  assert.equal(record.finalDigest, factsDigest(base));
+  const { recordDigest } = hashDecisionRecord(record);
+  assert.equal(record.recordDigest, recordDigest);
+
+  assert.throws(() => buildDecisionRecord({ facts: base, attempts: [], outcome: 'consensus' }), ConsensusError);
+  assert.throws(() => buildDecisionRecord({ facts: base, attempts, outcome: 'approve' }), ConsensusError);
+  assert.throws(() => buildDecisionRecord({ facts: { ...base, cluster: 'mainnet-beta' }, attempts, outcome: 'consensus' }), ConsensusError);
+  assert.throws(() => normalizeFacts({ ...base, amount: '-1' }), ConsensusError);
 });

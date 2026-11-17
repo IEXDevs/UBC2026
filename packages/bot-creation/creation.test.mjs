@@ -12,6 +12,7 @@ import {
   missingCreationSteps,
   removeUserTemplate,
   templateDefaults,
+  validateUserTemplate,
   walletPickerOptions,
 } from './creation.mjs';
 
@@ -198,4 +199,61 @@ test('draft assigns a selectable wallet and stays disabled until enable', () => 
   assert.equal(draft.enabled, false);
   assert.throws(() => enableBot({ ...draft, frozen: true }), /Bot is frozen/);
   assert.throws(() => createBotDraft(draftInput({ type: 'unknown-type' })), CreationError);
+});
+
+/**
+ * Achieves: validateUserTemplate normalizes user templates and rejects locked/builtin/invalid shapes.
+ * Fails when: builtin templates validate, empty name/goal pass, or capped-automatic without cap passes.
+ * Oracle: CreationError on locked/invalid; returned shape builtin=false deletable=true.
+ * Side effects: none.
+ * Gaps: persistence of templates is store-owned.
+ */
+test('validateUserTemplate accepts user templates and rejects locked or invalid ones', () => {
+  const valid = validateUserTemplate({
+    id: 'tpl_mine',
+    ownerId,
+    name: 'My shopper',
+    goal: 'Compare prices carefully',
+    type: 'shopping',
+    defaultApprovalMode: 'ask',
+    defaultCap: limited,
+  });
+  assert.equal(valid.builtin, false);
+  assert.equal(valid.deletable, true);
+  assert.equal(valid.defaultApprovalMode, 'ask');
+  assert.deepEqual(valid.defaultCap, limited);
+
+  const capped = validateUserTemplate({
+    id: 'tpl_cap',
+    ownerId,
+    name: 'Capped',
+    goal: 'Auto under a cap',
+    type: 'trading',
+    defaultApprovalMode: 'capped-automatic',
+    autoApproveCap: '1000',
+    defaultCap: limited,
+  });
+  assert.equal(capped.autoApproveCap, '1000');
+
+  assert.throws(() => validateUserTemplate({ ...valid, builtin: true }), CreationError);
+  assert.throws(() => validateUserTemplate({ ...valid, deletable: false }), CreationError);
+  assert.throws(() => validateUserTemplate({ ...valid, id: 'builtin:trading' }), CreationError);
+  assert.throws(() => validateUserTemplate({ ...valid, name: '' }), CreationError);
+  assert.throws(() => validateUserTemplate({ ...valid, type: 'unknown' }), CreationError);
+  assert.throws(
+    () => validateUserTemplate({
+      ...valid,
+      defaultApprovalMode: 'capped-automatic',
+      autoApproveCap: undefined,
+    }),
+    CreationError,
+  );
+  assert.throws(
+    () => validateUserTemplate({
+      ...valid,
+      defaultApprovalMode: 'ask',
+      autoApproveCap: '5',
+    }),
+    CreationError,
+  );
 });

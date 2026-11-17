@@ -6,6 +6,7 @@ import {
   PRICE_LABEL,
   MIN_HOLD_MS,
   PaperError,
+  assetByMint,
   assertNoLiveTrade,
   closePaperPosition,
   createPaperBook,
@@ -342,4 +343,20 @@ test('a trading bot mark ignores other bots and a disabled position bot stops wi
   assert.equal(stopped.action, 'stop');
   assert.equal(stopped.pnlMicroUsdc, '0');
   assert.equal(stopped.tradesPlaced, 0);
+});
+
+/**
+ * Achieves: assetByMint returns PAPER_UNIVERSE rows for known mints and null for unknowns.
+ * Fails when: Unknown mint returns a stub asset, or SOL/USDC symbols swapped.
+ * Oracle: PAPER_UNIVERSE mint → symbol map.
+ * Side effects: none.
+ * Gaps: does not cover mint case folding (mints are case-sensitive base58).
+ */
+test('assetByMint resolves paper universe mints and returns null for unknowns', () => {
+  assert.equal(assetByMint(SOL).symbol, 'SOL');
+  assert.equal(assetByMint(USDC).symbol, 'USDC');
+  assert.equal(assetByMint(PAPER_UNIVERSE[2].mint).symbol, 'USDT');
+  assert.equal(assetByMint(BONK), null);
+  assert.equal(assetByMint(''), null);
+  assert.equal(assetByMint(null), null);
 });
