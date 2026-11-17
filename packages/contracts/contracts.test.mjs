@@ -257,13 +257,6 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
 });
 
 /**
- * Achieves: Every live non-CRON API_ROUTES entry matches a filled sample path; wallet verbs stay distinct.
- * Fails when: A live route fails to self-match, or PUT /api/wallets silently matches another route.
- * Oracle: Generate pathname from route.path + samples map; wrong method must be null.
- * Side effects: none.
- * Gaps: Auth/phase metadata not asserted here.
- */
-/**
  * Rigor audit — exhaustive live HTTP route matching
  * Achieves: every live non-CRON API_ROUTES entry matches matchApiRoute for a
  *   concrete sample path; wallet list/create/persist/export stay distinct by method.
@@ -271,8 +264,7 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
  *   silently matches another wallet route.
  * Oracle: API_ROUTES table is the product contract; samples are independent fixtures.
  * Side effects: none.
- * Gaps closed: full live HTTP set (not just hand-picked routes). Remaining: does not
- *   execute handlers — only routing.
+ * Gaps: Auth/phase metadata not asserted here; does not execute handlers — only routing.
  */
 test('every live HTTP API route matches a concrete sample path (and wallet routes stay distinct)', () => {
   const samples = {
