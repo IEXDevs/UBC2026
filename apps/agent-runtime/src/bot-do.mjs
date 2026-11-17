@@ -140,6 +140,25 @@ export class BotStateMachine {
       .map(([, value]) => structuredClone(value));
   }
 
+  /**
+   * When meta.ownerId is bound, require a matching x-owner-id.
+   * Unbound DOs (stream wake before ownership stamp) still allow the call —
+   * the Worker edge assertBotOwner covers public exposure.
+   */
+  async requireBoundOwner(request) {
+    const meta = await this.get('meta');
+    const metaOwner = typeof meta?.ownerId === 'string' ? meta.ownerId : null;
+    if (!metaOwner) return null;
+    const ownerId = ownerFrom(request);
+    if (!ownerId) {
+      return Response.json({ error: 'owner_required' }, { status: 401 });
+    }
+    if (ownerId !== metaOwner) {
+      return Response.json({ error: 'owner_forbidden' }, { status: 403 });
+    }
+    return null;
+  }
+
   async handle(request, env = {}) {
     const url = new URL(request.url);
     const now = Date.now();
@@ -272,12 +291,20 @@ export class BotStateMachine {
       if (headerOwner && bodyOwner && headerOwner !== bodyOwner) {
         return Response.json({ error: 'owner_mismatch' }, { status: 403 });
       }
-      const ownerId = headerOwner || bodyOwner;
+      const priorMeta = await this.get('meta');
+      const priorOwner = typeof priorMeta?.ownerId === 'string' ? priorMeta.ownerId : null;
+      let ownerId = headerOwner || bodyOwner || null;
+      if (priorOwner && ownerId && priorOwner !== ownerId) {
+        return Response.json({ error: 'owner_forbidden' }, { status: 403 });
+      }
+      // Stream wakes may omit owner — never wipe a bound ownerId with null.
+      if (priorOwner && !ownerId) ownerId = priorOwner;
       let run = await this.get('run');
       if (!run || body.forceNew) {
         run = createEmptyRun({ runId: `run_${now}`, botId, goal, now });
       } else if (run.paused) {
-        return Response.json({ error: 'run_paused', run }, { status: 409 });
+        // Do not leak the full checkpoint to an unauthorized caller.
+        return Response.json({ error: 'run_paused' }, { status: 409 });
       }
       run = advanceRun(run, 'research', body.reason ?? 'wake', now);
       await this.put('run', run);
@@ -292,6 +319,8 @@ export class BotStateMachine {
 
     if (request.method === 'POST' && url.pathname === '/pause') {
       const body = await request.json().catch(() => ({}));
+      const ownerGate = await this.requireBoundOwner(request);
+      if (ownerGate) return ownerGate;
       let run = await this.get('run');
       if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
       run = pauseRun(run, body.reason ?? 'owner-pause', now);
@@ -300,6 +329,8 @@ export class BotStateMachine {
     }
 
     if (request.method === 'POST' && url.pathname === '/resume') {
+      const ownerGate = await this.requireBoundOwner(request);
+      if (ownerGate) return ownerGate;
       let run = await this.get('run');
       if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
       run = resumeRun(run, now);
@@ -309,6 +340,8 @@ export class BotStateMachine {
 
     if (request.method === 'POST' && url.pathname === '/advance') {
       const body = await request.json().catch(() => ({}));
+      const ownerGate = await this.requireBoundOwner(request);
+      if (ownerGate) return ownerGate;
       let run = await this.get('run');
       if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
       try {
@@ -323,6 +356,8 @@ export class BotStateMachine {
     if (request.method === 'POST' && url.pathname === '/loop') {
       const ownerId = ownerFrom(request);
       if (!ownerId) return Response.json({ error: 'owner_required' }, { status: 401 });
+      const ownerGate = await this.requireBoundOwner(request);
+      if (ownerGate) return ownerGate;
       const body = await request.json().catch(() => null);
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
         return Response.json({ error: 'invalid_json' }, { status: 400 });
@@ -369,6 +404,8 @@ export class BotStateMachine {
         }
         return Response.json({ ok: true, ...result });
       } catch (error) {
+        // Owner already passed requireBoundOwner — returning the saved run lets the
+        // shell resume; unauthenticated callers never reach this branch.
         const saved = await this.get('run');
         if (error instanceof OpenRouterError) return Response.json({ error: error.code, run: saved }, { status: error.status });
         if (error instanceof TransferError) return Response.json({ error: error.code, run: saved }, { status: 409 });
@@ -379,6 +416,8 @@ export class BotStateMachine {
 
     if (request.method === 'POST' && url.pathname === '/decide') {
       const body = await request.json().catch(() => ({}));
+      const ownerGate = await this.requireBoundOwner(request);
+      if (ownerGate) return ownerGate;
       let run = await this.get('run');
       if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
       if (!body.bot || !body.wallet || !body.ledger || !body.proposal || !body.facts) {

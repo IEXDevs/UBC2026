@@ -76,7 +76,16 @@ test('configured requests are stored without seed phrases or private keys', asyn
   const env = {
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    fetch: fetcher,
+    fetch: async (url, init) => {
+      const target = String(url);
+      if (target.includes('/rest/v1/bots?')) {
+        return new Response(JSON.stringify([{ id: 'bot_1' }]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return fetcher(url, init);
+    },
     BOT: {
       idFromName: name => name,
       get: () => ({ fetch: async () => Response.json({ ok: true, goal: 'kept' }) }),

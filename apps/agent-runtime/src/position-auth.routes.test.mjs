@@ -146,3 +146,99 @@ test('status rejects spoofed x-owner-id when Privy secrets are configured', asyn
   assert.equal(spoof.status, 401);
   assert.equal((await spoof.json()).error, 'login_required');
 });
+
+test('/api/positions rejects spoofed x-owner-id when Privy secrets are configured', async () => {
+  const env = envWithBots(
+    [{ id: 'bot_alice', owner_id: 'alice' }],
+    {
+      PRIVY_APP_ID: 'app_test',
+      PRIVY_APP_SECRET: 'secret_test',
+      positions: [
+        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'devnet', updated_at: 1 },
+      ],
+    },
+  );
+  const spoof = await worker.fetch(new Request('https://runtime/api/positions', {
+    headers: { 'x-owner-id': 'alice' },
+  }), env);
+  assert.equal(spoof.status, 401);
+  assert.equal((await spoof.json()).error, 'login_required');
+});
+
+test('alice and bob each list only their own positions when authorized', async () => {
+  const env = envWithBots(
+    [{ id: 'bot_alice', owner_id: 'alice' }, { id: 'bot_bob', owner_id: 'bob' }],
+    {
+      positions: [
+        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'devnet', updated_at: 1 },
+        { id: 'pos:b', owner_id: 'bob', bot_id: 'bot_bob', mint: 'So11111111111111111111111111111111111111112', quantity: '9', entry_micro_usdc: '9', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'devnet', updated_at: 1 },
+      ],
+    },
+  );
+  const alice = await worker.fetch(new Request('https://runtime/api/positions', {
+    headers: { 'x-owner-id': 'alice' },
+  }), env);
+  assert.equal(alice.status, 200);
+  const aliceBody = await alice.json();
+  assert.deepEqual(aliceBody.items.map(row => row.id), ['pos:a']);
+
+  const bob = await worker.fetch(new Request('https://runtime/api/positions', {
+    headers: { 'x-owner-id': 'bob' },
+  }), env);
+  assert.equal(bob.status, 200);
+  const bobBody = await bob.json();
+  assert.deepEqual(bobBody.items.map(row => row.id), ['pos:b']);
+});
+
+test('wake/pause/loop require owner and strip smuggled internal position headers', async () => {
+  const seen = [];
+  const env = envWithBots(
+    [{ id: 'bot_alice', owner_id: 'alice' }, { id: 'bot_bob', owner_id: 'bob' }],
+    {
+      BOT: {
+        idFromName: (name) => name,
+        get: (id) => ({
+          fetch: async (request) => {
+            seen.push({
+              id,
+              path: new URL(request.url).pathname,
+              owner: request.headers.get('x-owner-id'),
+              internal: request.headers.get('x-maelstrom-internal'),
+            });
+            return Response.json({ ok: true, forwarded: new URL(request.url).pathname });
+          },
+        }),
+      },
+    },
+  );
+
+  const anonPause = await worker.fetch(new Request('https://runtime/bots/bot_alice/pause', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  }), env);
+  assert.equal(anonPause.status, 401);
+
+  const crossWake = await worker.fetch(new Request('https://runtime/bots/bot_bob/wake', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'alice' },
+    body: JSON.stringify({ botId: 'bot_bob', goal: 'steal' }),
+  }), env);
+  assert.equal(crossWake.status, 404);
+  assert.equal((await crossWake.json()).run, undefined);
+
+  const ok = await worker.fetch(new Request('https://runtime/bots/bot_alice/pause', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-owner-id': 'alice',
+      'x-maelstrom-internal': 'position-check',
+    },
+    body: '{}',
+  }), env);
+  assert.equal(ok.status, 200);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].path, '/pause');
+  assert.equal(seen[0].owner, 'alice');
+  assert.equal(seen[0].internal, null);
+});

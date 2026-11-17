@@ -84,14 +84,14 @@ test('BotStateMachine control plane works without Cloudflare DO runtime', async 
 
   const advanced = await machine.handle(new Request('https://bot/advance', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
     body: JSON.stringify({ step: 'research', summary: 'look' }),
   }));
   assert.equal(advanced.status, 200);
 
   const paused = await machine.handle(new Request('https://bot/pause', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
     body: JSON.stringify({ reason: 'owner' }),
   }));
   assert.equal(paused.status, 200);
@@ -103,8 +103,12 @@ test('BotStateMachine control plane works without Cloudflare DO runtime', async 
     body: JSON.stringify({ botId: 'bot_1', ownerId: 'user_1' }),
   }));
   assert.equal(blockedWake.status, 409);
+  assert.equal((await blockedWake.json()).run, undefined);
 
-  const resumed = await machine.handle(new Request('https://bot/resume', { method: 'POST' }));
+  const resumed = await machine.handle(new Request('https://bot/resume', {
+    method: 'POST',
+    headers: { 'x-owner-id': 'user_1' },
+  }));
   assert.equal(resumed.status, 200);
 
   const check = await machine.handle(new Request('https://bot/position-check', {

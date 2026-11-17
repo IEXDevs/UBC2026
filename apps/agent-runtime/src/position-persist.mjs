@@ -2,10 +2,10 @@
  * Persist paper position checks through the Supabase service role.
  * Caller must pass a verified ownerId (from the bot row / cron plan), never a
  * client-supplied claim alone. Service role bypasses RLS — every write filters
- * and stamps owner_id from that verified value.
+ * and stamps owner_id from that verified value, and re-checks bots.owner_id.
  */
 import { redactForLog } from './activity-log.mjs';
-import { supabaseConfig, supabaseWrite } from './supabase-rest.mjs';
+import { supabaseConfig, supabaseGet, supabaseWrite } from './supabase-rest.mjs';
 
 const OWNER = /^[a-zA-Z0-9:_-]{1,128}$/;
 const BOT = /^[a-zA-Z0-9:_-]{1,128}$/;
@@ -41,6 +41,15 @@ function slimCheckDetail(check) {
 export async function persistPositionCheck(env, { ownerId, botId, check, positions } = {}) {
   if (!OWNER.test(ownerId) || !BOT.test(botId)) return { wrote: false, reason: 'invalid_ids' };
   if (!supabaseConfig(env)) return { wrote: false, reason: 'unconfigured' };
+  const fetcher = env.fetch ?? fetch;
+  const owned = await supabaseGet(
+    env,
+    `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+    fetcher,
+  );
+  if (owned.configured && !owned.rows?.length) {
+    return { wrote: false, reason: 'owner_mismatch' };
+  }
   const at = Number.isSafeInteger(check?.at) ? check.at : Date.now();
   const detail = slimCheckDetail(check);
   const checkRow = {
@@ -57,7 +66,6 @@ export async function persistPositionCheck(env, { ownerId, botId, check, positio
     max_loss: typeof check?.maxLoss === 'string' && AMOUNT.test(check.maxLoss) ? check.maxLoss : null,
     detail,
   };
-  const fetcher = env.fetch ?? fetch;
   await supabaseWrite(env, {
     path: 'position_checks',
     method: 'POST',

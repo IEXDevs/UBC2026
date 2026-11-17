@@ -124,7 +124,12 @@ export async function resolveOwner(request, env) {
     if (header && verified && header !== verified) {
       return { ownerId: null, user: null, token, error: 'owner_mismatch' };
     }
-    return { ownerId: verified || header || null, user: result, token };
+    // When Privy secrets are configured, never fall back to a client header after
+    // a "successful" login that did not yield a verified owner id.
+    if (needsLogin && !verified) {
+      return { ownerId: null, user: result, token, error: 'login_required' };
+    }
+    return { ownerId: verified || (!needsLogin ? header : null) || null, user: result, token };
   } catch (error) {
     if (error instanceof WalletError) {
       // Do not fall back to a client-supplied header after a failed Privy verify.
