@@ -37,7 +37,7 @@ function pair(mint, extra = {}) {
   };
 }
 
-/*
+/**
  * Achieves: verifies profiles keep token details and drop the spot price.
  * Fails when: profiles keep token details and drop the spot price breaks (e.g. expected 'BONK', undefined, undefined); failure/null paths flip.
  * Oracle: assert.equal(profile.symbol, 'BONK'); assert.equal(profile.priceUsd, undefined); assert.equal(profile.priceNative, undefined); assert.equal(profile.imageUrl, undefined); assert.equal(profile.url, 'https://dexscreener.com/solana/pair'); assert.equal(JSON.stringify(profile).includes('9.87'), false)
@@ -65,7 +65,7 @@ test('profiles keep token details and drop the spot price', () => {
   assert.equal(JSON.stringify(profile).includes('9.87'), false);
 });
 
-/*
+/**
  * Achieves: verifies the highest-liquidity solana pair wins for each mint.
  * Fails when: the highest-liquidity solana pair wins for each mint breaks (e.g. expected '9.87', 50, false).
  * Oracle: assert.equal(indexed.get(BONK).priceUsd, '9.87'); assert.equal(indexed.get(BONK).liquiditySort, 50); assert.equal(indexed.has(SOL), false)
@@ -83,7 +83,7 @@ test('the highest-liquidity solana pair wins for each mint', () => {
   assert.equal(indexed.has(SOL), false);
 });
 
-/*
+/**
  * Achieves: verifies a browser read caches details and leaves the price out of storage.
  * Fails when: duplicate mints refetch, priceUsd is persisted, or rateLimited flips true on success.
  * Oracle: one fetch to DEX_TOKEN_ORIGIN/BONK; book price 9.87 / symbol BONK; saved JSON omits priceUsd and 9.87.
@@ -113,7 +113,7 @@ test('a browser read caches details and leaves the price out of storage', async 
   assert.match(saved, /BONK/);
 });
 
-/*
+/**
  * Achieves: verifies a rate limit keeps the saved profile and does not reuse a price.
  * Fails when: a rate limit keeps the saved profile and does not reuse a price breaks (e.g. expected true, true, 'BONK'); failure/null paths flip.
  * Oracle: assert.equal(book.rateLimited, true); assert.equal(book.tokens[0].fromCache, true); assert.equal(book.tokens[0].symbol, 'BONK'); assert.equal(book.tokens[0].priceUsd, null); assert.equal(storage.getItem(dexCacheKey('user-1')).includes('9.87'), false); assert.equal(view.price, null)
@@ -143,7 +143,7 @@ test('a rate limit keeps the saved profile and does not reuse a price', async ()
   assert.match(view.note, /devnet execution, mainnet pricing/);
 });
 
-/*
+/**
  * Achieves: verifies a live price draws the published window and batches thirty mints.
  * Fails when: a live price draws the published window and batches thirty mints breaks (e.g. expected 2, '1H', 1); failure/null paths flip.
  * Oracle: assert.equal(view.price, 2); assert.equal(view.changeLabel, '1H'); assert.equal(view.points[0].price, 1); assert.equal(view.points[1].price, 2); assert.equal(view.quoteSource, 'dexscreener'); assert.equal(dexTokenView({ mint: BONK, range: 'nope' })
@@ -167,7 +167,7 @@ test('a live price draws the published window and batches thirty mints', () => {
   assert.match(dexTokenUrl(many), new RegExp(`${SOL},${USDC},${BONK}$`));
 });
 
-/*
+/**
  * Achieves: verifies more than thirty mints use a second browser request.
  * Fails when: more than thirty mints use a second browser request breaks (e.g. expected 2, ', ').
  * Oracle: assert.equal(calls.length, 2); assert.equal(calls[0].split(','); assert.equal(calls[1].split(',')
@@ -190,7 +190,7 @@ test('more than thirty mints use a second browser request', async () => {
   assert.equal(calls[1].split(',').length, 1);
 });
 
-/*
+/**
  * Achieves: verifies portfolio dollars use the live dex price, then a peg, and the saved symbol.
  * Fails when: portfolio dollars use the live dex price, then a peg, and the saved symbol breaks (e.g. expected 'BONK', '2000000000', '2000000').
  * Oracle: assert.equal(bonk.symbol, 'BONK'); assert.equal(bonk.usdMicro, '2000000000'); assert.equal(usdc.usdMicro, '2000000'); assert.equal(enriched.rateLimited, true); assert.equal(enriched.portfolio.wallets[0].holdings.find(row => row.mint === BONK).usdMicro, '0'); assert.equal(rateLimitCopy('https://api.dexscreener.com/tokens/v1/solana/x').title, 'DexScreener rate limit')

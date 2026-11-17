@@ -11,7 +11,7 @@ import { createMemoryWalletKv } from '@ubc2026/quicknode-streams';
 const secret = 'qn_secret';
 const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
-/*
+/**
  * Achieves: webhook rejects bad HMAC and wakes bot on valid signature.
  * Fails when: bad HMAC accepted or valid does not wake.
  * Oracle: auth failure vs wake success.
@@ -56,7 +56,7 @@ test('runtime webhook verifies HMAC and wakes the bot stub', async () => {
   assert.equal(wakes[0].body.reason, 'quicknode-stream');
 });
 
-/*
+/**
  * Achieves: valid webhook resolves wallet→bots, persists event, wakes, and runs loop.
  * Fails when: steps skipped or wrong bot resolved.
  * Oracle: persist/wake/loop call sequence.
@@ -118,7 +118,7 @@ test('runtime webhook resolves wallet bots, persists, wakes, and runs loop', asy
   assert.equal(json.wakes[0].loopStatus, 200);
 });
 
-/*
+/**
  * Achieves: wallet sync/backfill owner routes respond as wired.
  * Fails when: 404/wrong owner scope.
  * Oracle: status/body assertions in test.
@@ -157,7 +157,7 @@ test('wallet sync and backfill owner routes', async () => {
   assert.equal(wakes[0].body.reason, 'quicknode-backfill');
 });
 
-/*
+/**
  * Achieves: stream x402 outflow exceeding ledger freezes the wallet.
  * Fails when: over-ledger outflow does not freeze.
  * Oracle: frozen flag/write observed.
@@ -218,7 +218,7 @@ test('an x402 outflow above the spend ledger freezes the wallet', async () => {
   assert.equal(typeof freezes[0].now, 'number');
 });
 
-/*
+/**
  * Achieves: outflow within ledger coverage does not freeze.
  * Fails when: false freeze on covered spend.
  * Oracle: wallet remains unfrozen.

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sanitizeActivity, thinkStep, toolStep } from './chat-activity.mjs';
 
-/*
+/**
  * Achieves: verifies web search keeps public sites and drops javascript / live.browser.run secrets.
  * Fails when: Circle URL dropped, javascript kept, or live.browser.run token URL appears in sites.
  * Oracle: sites = [{ title:Circle, url:circle.com/... }]; kind search; query preserved.
@@ -22,7 +22,7 @@ test('a web search keeps the query and public sites', () => {
   assert.deepEqual(step.sites, [{ title: 'Circle', url: 'https://www.circle.com/usdc', host: 'circle.com' }]);
 });
 
-/*
+/**
  * Achieves: verifies scrape becomes a page step and failed tools surface error status with detail.
  * Fails when: page kind/host wrong, or tool_failed JSON is treated as success.
  * Oracle: web_scrape → kind page host example.com; get_price error string → status error detail EPjF.
@@ -40,7 +40,7 @@ test('a scraped page becomes one site and a failed tool stays empty', () => {
   assert.equal(failed.detail, 'EPjF');
 });
 
-/*
+/**
  * Achieves: verifies sanitizeActivity drops private URLs and blank thoughts.
  * Fails when: blank think kept, live.browser.run site survives, or tool label lost.
  * Oracle: thinkStep('   ')→null; search sites cleared; tool label preserved.
@@ -59,7 +59,7 @@ test('stored activity drops private urls and blank thoughts', () => {
   assert.equal(steps[2].label, 'Checked a price');
 });
 
-/*
+/**
  * Achieves: verifies noisy/repeated searches and blocked browser tools stay out of the useful log.
  * Fails when: bare query 'search' kept, repeated_tool returns a step, or duplicate searches not collapsed.
  * Oracle: query 'search'→''; repeated_tool→null; site_blocked labeled; duplicate USDC searches → length 1.

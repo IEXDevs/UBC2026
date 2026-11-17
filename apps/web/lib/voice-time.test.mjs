@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from './voice-time.mjs';
 
-/*
+/**
  * Achieves: verifies voice duration parsing, blip filtering, accumulation, and storage keys.
  * Fails when: invalid/negative ms become non-zero, blips (<250ms) accumulate, or keys drift.
  * Oracle: blip threshold is 250ms; invalid reads are 0; keys are `maelstrom.voiceTime[.id]`.

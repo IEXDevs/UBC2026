@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { DOCK_EXPAND_MS, DOCK_SWITCH_MS, dockCollapseDelay, dockHoldDelay, dockShouldStayOpen, pillAnchor } from './dock-hold.mjs';
 
-/*
+/**
  * Achieves: verifies dock expand CSS variable matches DOCK_EXPAND_MS and old opacity delay is gone.
  * Fails when: --dock-expand drifts from the constant, or the 220ms/80ms opacity rule returns.
  * Oracle: globals.css must declare --dock-expand: ${DOCK_EXPAND_MS}ms; no opacity 220ms ease 80ms.
@@ -16,7 +16,7 @@ test('dock expand duration matches the navbar stylesheet', () => {
   assert.doesNotMatch(css, /opacity 220ms ease 80ms/);
 });
 
-/*
+/**
  * Achieves: verifies collapse is deferred until expand animation completes.
  * Fails when: mid-expand collapse delay is 0, or post-expand hover-out still forces stay-open forever.
  * Oracle: remaining expand time = DOCK_EXPAND_MS - elapsed; stay-open while hovering or expand incomplete.
@@ -34,7 +34,7 @@ test('dock stays open until the expand animation has finished', () => {
   assert.equal(dockShouldStayOpen(false, DOCK_EXPAND_MS), false);
 });
 
-/*
+/**
  * Achieves: verifies pane-switch hold keeps the dock extended for DOCK_SWITCH_MS.
  * Fails when: DOCK_SWITCH_MS drifts from 2000, or switch hold is ignored when expand already finished.
  * Oracle: remaining switch ms wins over collapse when switchUntil is in the future.
@@ -51,7 +51,7 @@ test('dock stays extended until a pane switch animation finishes', () => {
   assert.equal(dockHoldDelay(now, 0, 0), DOCK_EXPAND_MS);
 });
 
-/*
+/**
  * Achieves: verifies pill anchor is the main stage center accounting for rail width.
  * Fails when: rail width is ignored or small viewports compute off-center anchors incorrectly.
  * Oracle: independent center math — (viewport - rail)/2 adjusted by known fixture expectations.

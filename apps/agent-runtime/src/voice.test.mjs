@@ -17,7 +17,7 @@ import {
 import { eventsUrl } from '../../web/lib/bot-experience.mjs';
 import { browserSessionUrl } from '../../web/lib/live-view.mjs';
 
-/*
+/**
  * Achieves: permission note mirrors owner chip modes and ignores unknown modes.
  * Fails when: unknown mode accepted or note mismatches chip.
  * Oracle: note text per known mode; unknown ignored.
@@ -69,7 +69,7 @@ function toolRequest(name, { headers = {}, body = {} } = {}) {
   });
 }
 
-/*
+/**
  * Achieves: ElevenLabs agent spec points at Muse Spark custom LLM without secrets.
  * Fails when: secret values in spec or wrong LLM.
  * Oracle: model/LLM fields; no secret substrings.
@@ -110,7 +110,7 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.match(text, /Stopping every agent now/);
 });
 
-/*
+/**
  * Achieves: get_price uses DexScreener then Jupiter and never authorizes transfer.
  * Fails when: transfer authorized or quote sources skipped.
  * Oracle: quote path; no sign/transfer.
@@ -144,7 +144,7 @@ test('get_price quotes DexScreener then Jupiter and does not authorize a transfe
   assert.equal(seen.length, 2);
 });
 
-/*
+/**
  * Achieves: voice webhook tools hit the same worker routes as UI panels.
  * Fails when: divergent routes/paths.
  * Oracle: requested paths match UI routes.
@@ -198,7 +198,7 @@ test('webhook tools call the same routes as the bot page and Live View panel', a
   assert.equal(expectedRelease.pathname.includes('live-view'), false);
 });
 
-/*
+/**
  * Achieves: away summary speaks timeline events without spending.
  * Fails when: spend invoked or events ignored.
  * Oracle: spoken events; spend count 0.
@@ -259,7 +259,7 @@ test('what happened while away speaks stored timeline events and does not spend'
   assert.equal(seen.length, 1);
 });
 
-/*
+/**
  * Achieves: pause/loop/stop_all tools call worker routes.
  * Fails when: local-only no-ops without route posts.
  * Oracle: route paths posted.
@@ -309,7 +309,7 @@ test('pause, loop, and stop_all go through the worker routes', async () => {
   assert.equal(JSON.stringify(stopBody).includes('live.browser.run'), false);
 });
 
-/*
+/**
  * Achieves: bound session owner is used when x-owner-id absent.
  * Fails when: tools fail for missing header despite bind.
  * Oracle: tool success with session owner.
@@ -342,7 +342,7 @@ test('voice session-owner bind lets tools resolve owner without x-owner-id heade
   assert.equal(body.result.calls[0].body.items[0].id, 'bot_1');
 });
 
-/*
+/**
  * Achieves: tools reject missing webhook secret, missing owner, or unknown tool names.
  * Fails when: any of those succeed.
  * Oracle: failure statuses/errors for each case.
@@ -387,7 +387,7 @@ test('tool calls fail closed without a webhook secret, owner, or known tool', as
   assert.equal(VOICE_TOOLS.some(item => item.name === 'web_search'), true);
 });
 
-/*
+/**
  * Achieves: voice decide uses text-chat prompt and strips ElevenLabs policy text.
  * Fails when: ElevenLabs policy retained or wrong prompt.
  * Oracle: prompt contents assertions.
@@ -433,7 +433,7 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
   assert.equal(voice.at(-1).role, 'tool');
 });
 
-/*
+/**
  * Achieves: custom LLM streams via OpenRouter when keyed; without key does not call out.
  * Fails when: network without key, or stream wrong.
  * Oracle: stream chunks with key; no fetch without key.
@@ -515,7 +515,7 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.equal(calls.length, 1);
 });
 
-/*
+/**
  * Achieves: provision no-ops without ElevenLabs API key.
  * Fails when: network called without key.
  * Oracle: no fetch; benign result.

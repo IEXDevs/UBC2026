@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { applyRootPublicEnv, findEnvRoot, parseEnvFile, readRootEnv } from './root-env.mjs';
 
-/*
+/**
  * Achieves: verifies root env reads trim values, find workspace root, and parse .env syntax.
  * Fails when: blanks become non-empty, nested apps/web does not find monorepo root, or quotes/comments mishandled.
  * Oracle: trimmed key; empty string stays ''; findEnvRoot(nested)=root; parse keeps SKIP and quoted key.
@@ -21,7 +21,7 @@ test('root env reads a named value and ignores blanks', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maelstrom-env-'));
   const nested = path.join(root, 'apps', 'web');
   fs.mkdirSync(nested, { recursive: true });
-  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ workspaces: ['apps/*'] }));
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ workspaces: ['apps/**'] }));
   fs.writeFileSync(path.join(root, '.env.local'), 'ELEVENLABS_API_KEY=\n');
   fs.writeFileSync(path.join(nested, 'package.json'), JSON.stringify({ name: 'web' }));
   assert.equal(findEnvRoot(nested), root);
@@ -49,7 +49,7 @@ test('worker process env overrides the local file', () => {
   }
 });
 
-/*
+/**
  * Achieves: verifies only unset NEXT_PUBLIC_ keys are copied; secrets and blanks are skipped.
  * Fails when: already-set public URL is overwritten, PRIVY_APP_SECRET leaks, or blank client id is set.
  * Oracle: returns ['NEXT_PUBLIC_PRIVY_APP_ID']; runtime URL unchanged; secret undefined on target.

@@ -7,7 +7,7 @@ import { PLUGIN_CHIPS, groupConnectors, pluginCatalog, withSharedLinks } from '.
 const composio = composioConnectors();
 const covered = new Set(PLUGIN_CHIPS.flatMap(chip => chip.categories ?? []));
 
-/*
+/**
  * Achieves: verifies connectors are owner-shared (no botId), builtins linked, and groupConnectors search splits linked/available.
  * Fails when: bot-scoped connectors appear, github link does not apply, or git search misses gitlab/github split.
  * Oracle: withSharedLinks(['github']); idle available = popular composio minus github; query 'git' → gitlab available, github linked.
@@ -33,7 +33,7 @@ test('connectors stay one shared set and group like a catalog', () => {
   assert.deepEqual(found.linked.map(item => item.id), ['github']);
 });
 
-/*
+/**
  * Achieves: verifies pluginCatalog section order, recommended expand, chip/query filters, and custom provider lead section.
  * Fails when: Recommended ≠ first 8, expand shows all, Chain/Research/Identity/Payments order drifts, or custom providers lose lead.
  * Oracle: titles Recommended → Chain/Research/Identity/Payments; chip code; query sol→solana; connectedOnly all linked.
@@ -69,7 +69,7 @@ test('plugin catalog leads with Composio apps, then built-in sections', () => {
   assert.equal(withCustom[1].title, 'Recommended for you');
 });
 
-/*
+/**
  * Achieves: verifies every Composio app has logo URL, category chip coverage, unique ids, and firecrawl uses logos CDN.
  * Fails when: catalog < 24, logo path drifts, category missing from PLUGIN_CHIPS, or duplicate ids.
  * Oracle: logo https://logos.composio.dev/api/{id}; composio true builtin false; unique ids.

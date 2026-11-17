@@ -85,7 +85,7 @@ function buildRequest(route) {
   return { pathname, request: new Request(`https://runtime${pathname}`, init) };
 }
 
-/*
+/**
  * Rigor audit — exhaustive live HTTP route dispatch
  * Achieves: every live non-CRON API_ROUTES id is hit via worker.fetch with a concrete
  *   sample path; auth class predicts status; live paths are not generic 404s; no
@@ -146,7 +146,7 @@ test('every live HTTP API route is dispatched with auth-appropriate status', asy
   }
 });
 
-/*
+/**
  * Achieves: both live CRON schedule strings are reachable via worker.scheduled and
  *   empty-fleet is a quiet no-op (no waitUntil work).
  * Fails when: scheduled export missing, or empty fleet still enqueues DO work.
@@ -171,7 +171,7 @@ test('live CRON schedules smoke via scheduled() with empty fleet', async () => {
   }
 });
 
-/*
+/**
  * Achieves: spot-check that owner/privy routes reject without credentials, and
  *   auth:none health/routes succeed — anchors the matrix auth classes.
  * Fails when: health requires auth or /api/me succeeds without owner.

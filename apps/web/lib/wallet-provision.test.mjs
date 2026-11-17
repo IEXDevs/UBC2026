@@ -36,7 +36,7 @@ test('shell wallet provision never hits the runtime create path', () => {
  *   status code numbers accepted as ok.
  * Oracle: shell must show at least one wallet row after provision.
  * Side effects: none (pure).
- * Gaps closed: null/undefined body, wallets: null, ok: 'true' string.
+ * Gaps: none — closed: null/undefined body, wallets: null, ok: 'true' string.
  */
 test('walletProvisionSucceeded requires ok response and a non-empty wallets array', () => {
   assert.equal(walletProvisionSucceeded(true, { wallets: [{ id: 'w1' }] }), true);
@@ -199,7 +199,7 @@ test('mergeObservedWallets keeps the agent wallet and appends linked wallets', (
  *   get a generic unhelpful note.
  * Oracle: UX must never display API keys; Origin failures point at Privy Domains.
  * Side effects: none.
- * Gaps closed: explicit assertion that note matches /Domains/i for Worker text.
+ * Gaps: none — closed: explicit assertion that note matches /Domains/i for Worker text.
  */
 test('wallet provision notes explain Worker Origin failures without leaking secrets', () => {
   const originNote = walletProvisionNote({

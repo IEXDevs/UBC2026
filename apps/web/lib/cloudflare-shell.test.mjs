@@ -7,7 +7,7 @@ import { parseJsonc } from './jsonc.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/*
+/**
  * Achieves: verifies OpenNext Cloudflare wrangler/assets/services and deploy script contracts.
  * Fails when: worker name/main/assets drift, AGENT_RUNTIME service unbound, or deploy scripts lose opennextjs-cloudflare.
  * Oracle: wrangler.name maelstrom-web; main .open-next/worker.js; services include AGENT_RUNTIME→maelstrom-agent-runtime; no vars secrets in wrangler.

@@ -95,7 +95,7 @@ async function buyer({ bot = botRecord(), ledgerWallet, confirm, payMerchant = p
   };
 }
 
-/*
+/**
  * Achieves: automatic bot pays exact USDC on devnet, receives quote, and replays with same attemptId without re-signing.
  * Fails when: mainnet used, wrong amount/mint, or replay signs again.
  * Oracle: paid state; transfer amount 10000; signed.length 1 then replay keeps 1; reserved 15000 after trust.
@@ -146,7 +146,7 @@ test('a fully automatic bot pays devnet USDC and receives the quote', async () =
   }
 });
 
-/*
+/**
  * Achieves: over-budget/frozen/ask-without-approval block before sign; approve-once then pays.
  * Fails when: sign occurs while blocked, or approve path fails to pay.
  * Oracle: over-budget/blocked/approval-needed then paid with signed.length 1.
@@ -211,7 +211,7 @@ test('policy blocks spending before the bot wallet signs', async () => {
   assert.equal(paid.body.executionCluster, 'devnet');
 });
 
-/*
+/**
  * Achieves: mainnet challenge and merchant mismatch block without sign; failed settlement keeps reserved and marks failed.
  * Fails when: mainnet still signs, or failed settlement clears reserve incorrectly.
  * Oracle: wrong-cluster/merchant-mismatch signed 0; settlement-failed signed 1 reserved 10000.
@@ -255,7 +255,7 @@ test('mainnet challenges and a rejected settlement never skip bot-policy', async
   assert.equal((await denied.ledger.snapshot()).ledgers[0].reserved, '10000');
 });
 
-/*
+/**
  * Achieves: client.mjs source excludes mainnet USDC mint and mainnet CAIP id.
  * Fails when: mainnet identifiers appear in source.
  * Oracle: readFileSync excludes known mainnet strings.
@@ -268,7 +268,7 @@ test('client source does not name a mainnet USDC mint or mainnet CAIP network', 
   assert.equal(source.includes('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'), false);
 });
 
-/*
+/**
  * Achieves: buildX402Proposal maps accepted terms into a bot-policy proposal with capped timeout.
  * Fails when: cluster leaves devnet, wrong expectedReceiveAsset, or timeout uncapped above 600s.
  * Oracle: Independent accepted fixture → expiresAt = now + min(timeout, 600); asset USDC.

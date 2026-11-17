@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getDemoShellState, panePlaceholder } from './demo-state.mjs';
 
-/*
+/**
  * Achieves: verifies demo shell product chrome, three bots, builtin connectors, and pane copy.
  * Fails when: product/ownerId/panes drift, bot/template counts change, or Overview/Security copy flips.
  * Oracle: Maelstrom + null owner; panes Main/Positions/History; five named builtins; templates undeletable.

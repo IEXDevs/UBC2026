@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { hasSeenLogin, markSeenLogin, SEEN_LOGIN_KEY } from './seen-login.mjs';
 
-/*
+/**
  * Achieves: verifies first visit is unsigned, markSeenLogin stores '1', and storage throws fail closed.
  * Fails when: unset storage reads true, mark does not write SEEN_LOGIN_KEY, or throws become true.
  * Oracle: SEEN_LOGIN_KEY value must be exactly '1'; any getItem throw → false (treat as first visit).
@@ -22,7 +22,7 @@ test('a first visit is sign up, and a stored visit is log in', () => {
   assert.equal(hasSeenLogin({ getItem() { throw new Error('blocked'); } }), false);
 });
 
-/*
+/**
  * Achieves: verifies markSeenLogin swallows setItem failures (private mode) without throwing.
  * Fails when: setItem throw propagates out of markSeenLogin.
  * Oracle: private-mode storage may reject writes; callers must not crash on first login.

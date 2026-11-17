@@ -16,7 +16,7 @@ import {
   walletGlance,
 } from './money-views.mjs';
 
-/*
+/**
  * Achieves: verifies money panes are history, wallets, and positions.
  * Fails when: money panes are history, wallets, and positions breaks (e.g. expected 'history', 'wallets', 'positions'); failure/null paths flip.
  * Oracle: assert.equal(moneyPane('History'), 'history'); assert.equal(moneyPane('Wallets'), 'wallets'); assert.equal(moneyPane('Positions'), 'positions'); assert.equal(moneyPane('Main'), null); assert.equal(moneyPane('Plugins'), null)
@@ -31,7 +31,7 @@ test('money panes are history, wallets, and positions', () => {
   assert.equal(moneyPane('Plugins'), null);
 });
 
-/*
+/**
  * Achieves: verifies base unit strings render with six decimals.
  * Fails when: base unit strings render with six decimals breaks (e.g. expected '0.01', '25', '-1.5').
  * Oracle: assert.equal(formatBaseUnits('10000'), '0.01'); assert.equal(formatBaseUnits('25000000'), '25'); assert.equal(formatBaseUnits('-1500000'), '-1.5')
@@ -44,7 +44,7 @@ test('base unit strings render with six decimals', () => {
   assert.equal(formatBaseUnits('-1500000'), '-1.5');
 });
 
-/*
+/**
  * Achieves: verifies demo money rows match the contract shapes.
  * Fails when: demo money rows match the contract shapes breaks (e.g. expected 'paid', '0.01 USDC', null).
  * Oracle: assert.equal(payments[0].direction, 'paid'); assert.equal(payments[0].amountLabel, '0.01 USDC'); assert.equal(payments[0].badge, null); assert.equal(wallets[0].kind, 'main'); assert.equal(wallets[1].frozen, true); assert.equal(positions[0].amountLabel, '25 USDC')
@@ -92,7 +92,7 @@ test('demo money rows match the contract shapes', () => {
   ]).balanceLabel, '5 USDC');
 });
 
-/*
+/**
  * Achieves: verifies wallet addresses show the first five and last five characters.
  * Fails when: wallet addresses show the first five and last five characters breaks (e.g. expected '4zMMC...DncDU', 'short').
  * Oracle: assert.equal(shortAddress(address), '4zMMC...DncDU'); assert.equal(shortAddress('short'), 'short')
@@ -105,7 +105,7 @@ test('wallet addresses show the first five and last five characters', () => {
   assert.equal(shortAddress('short'), 'short');
 });
 
-/*
+/**
  * Achieves: verifies solscan links cover devnet, testnet, and mainnet signatures.
  * Fails when: solscan links cover devnet, testnet, and mainnet signatures breaks (e.g. expected 'devnet', 'devnet', 'mainnet'); failure/null paths flip.
  * Oracle: assert.equal(solscanTxUrl(signature, 'devnet'); assert.equal(solanaExplorerTxUrl(signature, 'devnet'); assert.equal(solscanTxUrl(signature, 'mainnet'); assert.equal(solscanTxUrl(null, 'devnet'); assert.equal(solscanTxUrl(signature, 'mainnet-beta'); assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta')
@@ -122,7 +122,7 @@ test('solscan links cover devnet, testnet, and mainnet signatures', () => {
   assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta'), null);
 });
 
-/*
+/**
  * Achieves: verifies stream-confirmed payments show the badge and unapproved spend is an alert.
  * Fails when: stream-confirmed payments show the badge and unapproved spend is an alert breaks (e.g. expected 'confirmed', 'out', `https://solscan.io/tx/${signature}?cluster=devnet`).
  * Oracle: assert.equal(row.badge, 'confirmed'); assert.equal(row.flow, 'out'); assert.equal(row.solscanUrl, `https://solscan.io/tx/${signature}?cluster=devnet`); assert.deepEqual(alerts, [{ walletId: 'w1', asset: 'USDC', excessLabel: '1.5' }]); assert.deepEqual(describeSpendAlerts([]), [])

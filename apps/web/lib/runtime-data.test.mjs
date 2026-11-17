@@ -13,7 +13,7 @@ import {
   upsertOwnerBot,
 } from './runtime-data.mjs';
 
-/*
+/**
  * Achieves: verifies runtime base rejects junk and keeps origin.
  * Fails when: runtime base rejects junk and keeps origin breaks (e.g. expected '', '', 'https://maelstrom-agent-runtime.example.workers.dev').
  * Oracle: assert.equal(runtimeBaseUrl(''), ''); assert.equal(runtimeBaseUrl('not a url'), ''); assert.equal(runtimeBaseUrl('https://maelstrom-agent-runtime.example.workers.dev/'), 'https://maelstrom-agent-
@@ -26,7 +26,7 @@ test('runtime base rejects junk and keeps origin', () => {
   assert.equal(runtimeBaseUrl('https://maelstrom-agent-runtime.example.workers.dev/'), 'https://maelstrom-agent-runtime.example.workers.dev');
 });
 
-/*
+/**
  * Achieves: verifies shell bot mapping never invents preview experience.
  * Fails when: shell bot mapping never invents preview experience breaks (e.g. expected 'Renamed', 'hex', 'watching'); failure/null paths flip.
  * Oracle: assert.equal(bot.name, 'Renamed'); assert.equal(bot.shape, 'hex'); assert.equal(bot.status, 'watching'); assert.equal(bot.experience, undefined); assert.equal(shellBotFromRemote(null), null)
@@ -51,7 +51,7 @@ test('shell bot mapping never invents preview experience', () => {
   assert.equal(shellBotFromRemote(null), null);
 });
 
-/*
+/**
  * Achieves: verifies empty money state has no fake rows.
  * Fails when: structured result drifts from expected shape.
  * Oracle: assert.deepEqual(emptyMoneyState(), { bots: [], wallets: [], payments: [], positions: [], paymentCrossCheck: [
@@ -68,7 +68,7 @@ test('empty money state has no fake rows', () => {
   });
 });
 
-/*
+/**
  * Achieves: verifies delete bot URL stays on the runtime origin.
  * Fails when: delete bot URL stays on the runtime origin breaks (e.g. expected 'bot_1', '../evil', 'bot_1'); failure/null paths flip.
  * Oracle: assert.equal( deleteBotUrl('https://runtime.example/agent/', 'bot_1'); assert.equal(deleteBotUrl('https://runtime.example', '../evil'); assert.equal(deleteBotUrl('', 'bot_1')
@@ -84,7 +84,7 @@ test('delete bot URL stays on the runtime origin', () => {
   assert.equal(deleteBotUrl('', 'bot_1'), null);
 });
 
-/*
+/**
  * Achieves: verifies shell runtime URLs stay on the same-origin proxy.
  * Fails when: shell runtime URLs stay on the same-origin proxy breaks (e.g. expected '/api/runtime/api/bots', '/api/runtime/api/payments', '/api/runtime/api/wallets'); failure/null paths flip.
  * Oracle: assert.equal(shellRuntimeUrl('/api/bots'), '/api/runtime/api/bots'); assert.equal(shellRuntimeUrl('/api/payments'), '/api/runtime/api/payments'); assert.equal(shellRuntimeUrl('/api/wallets'), '/api/runtime/api/wallets'); assert.equal(shellRuntimeUrl('/api/profiles/me'), '/api/runtime/api/profiles/me'); assert.equal(shellRuntimeUrl('/api/transfers'), '/api/runtime/api/transfers'); assert.equal(shellRuntimeUrl('/api/metrics'), '/api/runtime/api/metrics')
@@ -110,7 +110,7 @@ function jsonResponse(body, ok = true) {
   return { ok, json: async () => body };
 }
 
-/*
+/**
  * Achieves: verifies owner lists load bots, wallets, payments, and paper positions from the proxy.
  * Fails when: owner lists load bots, wallets, payments, and paper positions from the proxy breaks (e.g. expected 'supabase', 1, 1).
  * Oracle: assert.equal(lists.source, 'supabase'); assert.equal(lists.bots.length, 1); assert.equal(lists.wallets.length, 1); assert.equal(lists.payments.length, 1); assert.equal(lists.paymentCrossCheck.length, 1); assert.equal(lists.paymentCrossCheck[0].walletId, 'w1')
@@ -176,7 +176,7 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
   assert.deepEqual(unsigned.bots, []);
 });
 
-/*
+/**
  * Achieves: verifies bot chat URL uses the same-origin Next route.
  * Fails when: bot chat URL uses the same-origin Next route breaks (e.g. expected 'bot_1', 'bot_1', '../evil'); failure/null paths flip.
  * Oracle: assert.equal(botChatUrl('https://runtime.example/agent/', 'bot_1'); assert.equal(botChatUrl('', 'bot_1'); assert.equal(botChatUrl('https://runtime.example', '../evil')
@@ -189,7 +189,7 @@ test('bot chat URL uses the same-origin Next route', () => {
   assert.equal(botChatUrl('https://runtime.example', '../evil'), null);
 });
 
-/*
+/**
  * Achieves: verifies firstAssignableWalletId skips frozen wallets.
  * Fails when: firstAssignableWalletId skips frozen wallets breaks (e.g. expected '', frozen: true }, { id: 'w_ok' }]).
  * Oracle: assert.equal(firstAssignableWalletId([]), ''); assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }])
@@ -201,7 +201,7 @@ test('firstAssignableWalletId skips frozen wallets', () => {
   assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }]), 'w_ok');
 });
 
-/*
+/**
  * Achieves: verifies upsertOwnerBot posts the shell bot to the runtime proxy.
  * Fails when: upsertOwnerBot posts the shell bot to the runtime proxy breaks (e.g. expected true, '/api/runtime/api/bots', 'POST').
  * Oracle: assert.equal(result.ok, true); assert.equal(calls[0].url, '/api/runtime/api/bots'); assert.equal(calls[0].method, 'POST'); assert.equal(calls[0].owner, 'did:privy:abc'); assert.equal(calls[0].body.walletId, 'w_main'); assert.equal(calls[0].body.id, 'bot_local')

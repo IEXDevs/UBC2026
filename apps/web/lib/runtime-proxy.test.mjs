@@ -85,7 +85,7 @@ test('runtime proxy allows wallets persist and create paths but shell must not u
  * Fails when: `..` encodings or evil query keys pass through to the Worker.
  * Oracle: isAllowedRuntimePath + QUERY_KEYS set.
  * Side effects: none.
- * Gaps closed: boundaries for query length and duplicate evil keys.
+ * Gaps: none — closed: boundaries for query length and duplicate evil keys.
  */
 test('runtime proxy rejects path traversal, null bytes, and overlong query values', () => {
   assert.equal(isAllowedRuntimePath('/api/bots/%2e%2e/wallets'), false);

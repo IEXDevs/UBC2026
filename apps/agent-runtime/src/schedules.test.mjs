@@ -21,7 +21,7 @@ const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const now = 1_700_000_000_000;
 const secretUrl = 'https://example.invalid/quicknode-secret-path';
 
-/*
+/**
  * Achieves: hourly plan includes trading bots and excludes shopping.
  * Fails when: shopping included or trading skipped.
  * Oracle: plan membership.
@@ -45,7 +45,7 @@ test('the hourly plan checks trading bots and skips shopping', () => {
   assert.equal(plan.recheckBots.length, 0);
 });
 
-/*
+/**
  * Achieves: stale stream schedules exactly one RPC re-check per wallet.
  * Fails when: zero/many re-checks per wallet.
  * Oracle: one re-check entry per wallet.
@@ -73,7 +73,7 @@ test('a stream older than an hour schedules one RPC re-check per wallet', () => 
   assert.deepEqual(plan.walletRechecks[0].botIds, ['trade', 'shop']);
 });
 
-/*
+/**
  * Achieves: paper loss raises max-loss without retaining provider-only fields.
  * Fails when: max-loss not flagged or extras retained.
  * Oracle: flag present; extras absent.
@@ -104,7 +104,7 @@ test('paper loss flags max-loss without keeping provider extras', () => {
   assert.equal(held.flag, 'within-cap');
 });
 
-/*
+/**
  * Achieves: USDC read refuses non-devnet clusters and never echoes RPC URL.
  * Fails when: other cluster accepted or RPC URL in output.
  * Oracle: refusal + no URL leak.
@@ -215,7 +215,7 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
   assert.equal(missing.code, 'rpc_not_configured');
 });
 
-/*
+/**
  * Achieves: schedule Supabase reads return empty without service key.
  * Fails when: invented rows without key.
  * Oracle: empty result.
@@ -237,7 +237,7 @@ test('supabase schedule reads stay empty without a service key', async () => {
   assert.equal(health.source, 'unconfigured');
 });
 
-/*
+/**
  * Achieves: configured reads map bots and latest stream delivery fields.
  * Fails when: mapping wrong or stale delivery chosen.
  * Oracle: mapped bot/stream fields.
@@ -271,7 +271,7 @@ test('supabase schedule reads map bots and the latest stream delivery', async ()
   assert.equal(seen.every(call => !String(call.url).includes(key)), true);
 });
 
-/*
+/**
  * Achieves: position check leaves paused runs unmoved.
  * Fails when: paused run advances.
  * Oracle: run state unchanged.

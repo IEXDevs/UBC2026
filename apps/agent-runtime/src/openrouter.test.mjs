@@ -12,7 +12,7 @@ import {
 
 const API_KEY = 'test-openrouter-key-value';
 
-/*
+/**
  * Achieves: platform system prompt is first; caller system messages are stripped.
  * Fails when: caller system retained or platform not first.
  * Oracle: messages[0] platform; no caller system.
@@ -36,7 +36,7 @@ test('locked platform prompt is first and caller system messages are dropped', (
   assert.match(messages[1].content, /Bot goal/);
 });
 
-/*
+/**
  * Achieves: chat uses Muse Spark model id and keeps API key out of JSON body.
  * Fails when: wrong model or key appears in body.
  * Oracle: model id assertion; body excludes key.
@@ -70,7 +70,7 @@ test('model calls use Muse Spark and never put the key in the body', async () =>
   assert.match(seen[0].url, /api\.meta\.ai/);
 });
 
-/*
+/**
  * Achieves: decide and vision select their respective model ids.
  * Fails when: models swapped or identical incorrectly.
  * Oracle: model ids per call type.
@@ -99,7 +99,7 @@ test('decide uses the strong model and vision uses the image model', async () =>
   assert.deepEqual(models, ['custom/decide', MODEL_ROLES.vision]);
 });
 
-/*
+/**
  * Achieves: OpenRouter without key does not fetch.
  * Fails when: network called.
  * Oracle: fetch not invoked; error thrown/returned.
@@ -117,7 +117,7 @@ test('missing API key does not call the network', async () => {
   );
 });
 
-/*
+/**
  * Achieves: text chat maps agent history roles and keeps platform rules first.
  * Fails when: history roles wrong or platform not first.
  * Oracle: message order/roles.
@@ -146,7 +146,7 @@ test('text chat keeps platform rules first and maps agent history', () => {
   assert.match(messages.at(-1).content, /\[redacted\]/);
 });
 
-/*
+/**
  * Achieves: chat completion returns model reply text via Muse Spark.
  * Fails when: empty reply or wrong model.
  * Oracle: reply text + model id.
@@ -175,7 +175,7 @@ test('chat completion uses Muse Spark and returns a reply', async () => {
   assert.equal(seen[0].reasoning_effort, 'minimal');
 });
 
-/*
+/**
  * Achieves: catalog selection skips paid models for free/zero-price choice.
  * Fails when: paid model selected.
  * Oracle: chosen model free/zero.

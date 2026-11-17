@@ -6,7 +6,7 @@ function menuContaining(...nodes) {
   return { contains: (target) => nodes.includes(target) };
 }
 
-/*
+/**
  * Achieves: verifies an outside pointer closes an open permissions menu, while a
  * pointer on a contained option does not.
  * Fails when: open+outside returns false, or open+inside option returns true.
@@ -22,7 +22,7 @@ test('a pointer outside the expanded permissions menu closes it', () => {
   assert.equal(shouldClosePermitMenu(true, option, menu), false);
 });
 
-/*
+/**
  * Achieves: verifies Ask / Review / Full option nodes are treated as inside the menu.
  * Fails when: any of those option ids returns true (would close before selection).
  * Oracle: each option is in menuContaining(...); contains must keep the menu open.
@@ -37,7 +37,7 @@ test('choosing Ask every time, Review by AI, or Full permissions stays inside th
   }
 });
 
-/*
+/**
  * Achieves: verifies a closed menu never closes-on-pointer (no-op while collapsed).
  * Fails when: open=false returns true for any target/menu combination.
  * Oracle: first guard is `if (!open) return false`.
@@ -48,7 +48,7 @@ test('a closed permissions menu ignores outside pointers', () => {
   assert.equal(shouldClosePermitMenu(false, { id: 'page' }, null), false);
 });
 
-/*
+/**
  * Achieves: verifies a missing or non-DOM menu root still closes when the menu is open.
  * Fails when: null menuRoot or object without contains keeps the menu open.
  * Oracle: without a working contains(), the predicate must treat the pointer as outside.

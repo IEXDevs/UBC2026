@@ -107,7 +107,7 @@ test('sanitizeOrigin rejects CR/LF and credentials (CORS/Origin injection)', () 
  *   to `/users/me` without Origin (the hosted 502 regression).
  * Oracle: Privy docs — app-secret Basic for GET user; `/users/me` requires Origin.
  * Side effects: asserts exact first call URL/headers and zero `/users/me` calls.
- * Gaps closed: checks Authorization scheme + missing signature + missing Origin.
+ * Gaps: none — closed: checks Authorization scheme + missing signature + missing Origin.
  * Remaining: mock Privy; does not prove live Cloudflare Origin stripping.
  */
 test('JWT login without Origin never calls users/me (Worker regression)', async () => {
@@ -321,7 +321,7 @@ test('missing access token fails before any Privy network call', async () => {
  * Fails when: partial sanitization returns evil substrings (e.g. with @, CR, query).
  * Oracle: URL.origin equality for non-empty outputs.
  * Side effects: none.
- * Gaps closed: samples beyond the hand-picked injection cases.
+ * Gaps: none — closed: samples beyond the hand-picked injection cases.
  * Remaining: not a randomized generator; fixed sample set.
  */
 test('sanitizeOrigin property: only http(s) origins without credentials or control chars', () => {
@@ -367,7 +367,7 @@ test('sanitizeOrigin property: only http(s) origins without credentials or contr
  * Fails when: create errors are swallowed and an empty/invalid main is returned.
  * Oracle: provision must yield a usable main wallet or fail closed.
  * Side effects: create attempted; no successful result object.
- * Gaps closed: partial-failure path (checklist).
+ * Gaps: none — closed: partial-failure path (checklist).
  */
 test('wallet create failure after empty user rejects without a fake main wallet', async () => {
   const { fetcher, calls } = mockFetch([
@@ -400,7 +400,7 @@ test('wallet create failure after empty user rejects without a fake main wallet'
  * Fails when: concurrent calls corrupt ownerId/address or race into `/users/me`.
  * Oracle: idempotent sync of existing embedded wallet; same address both times.
  * Side effects: both calls hit `/v1/users/:id` only.
- * Gaps closed: concurrency / duplicate request (checklist) for the JWT sync path.
+ * Gaps: none — closed: concurrency / duplicate request (checklist) for the JWT sync path.
  * Remaining: does not simulate Privy create races (no empty linked_accounts here).
  */
 test('concurrent JWT acceptLogin calls stay Worker-safe and return the same main', async () => {

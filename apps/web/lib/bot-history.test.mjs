@@ -17,7 +17,7 @@ const transfers = [
   { id: 'send', botId: 'bot_meteora', handle: 'ada', amount: '1000000', direction: 'out' },
 ];
 
-/*
+/**
  * Achieves: verifies history rows attach bot names and normalize earned/paid to in/out.
  * Fails when: shop payments appear under meteora, directions stay earned/paid, or transfers dropped.
  * Oracle: meteora rows [in/in, out/out, send/out] with botName Meteora.
@@ -34,7 +34,7 @@ test('history rows keep the bot and the inflow or outflow', () => {
   ]);
 });
 
-/*
+/**
  * Achieves: verifies filters by bot, direction, and minimum units.
  * Fails when: minUnits keeps small outs, flow in returns outs, or shop badge is invented.
  * Oracle: meteora+out+min 2e6 → ['out']; flow in length 1; shop badge null.
@@ -50,7 +50,7 @@ test('filters keep one bot, one direction, and a minimum value', () => {
   assert.equal(filterBotHistory(rows, { botId: 'bot_shop' })[0].badge, null);
 });
 
-/*
+/**
  * Achieves: verifies stream-confirmed payments keep the confirmed badge and in direction.
  * Fails when: badge dropped or earned stays as paid/out.
  * Oracle: badge confirmed; direction in.

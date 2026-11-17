@@ -8,7 +8,7 @@ import {
 } from './voice-client-tools.mjs';
 import { getDemoShellState } from './demo-state.mjs';
 
-/*
+/**
  * Achieves: verifies voice client tools can open bots/confirm/read without spending, and respect desk lock.
  * Fails when: open_bot does not switch active id, unknown tools succeed, or locked desk still mutates active.
  * Oracle: Sandbox shopper → bot_shop + Main pane; unknown_tool; locked → desk_locked and active unchanged.

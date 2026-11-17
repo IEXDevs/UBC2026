@@ -8,7 +8,7 @@ import {
 } from './security.mjs';
 import { getDemoShellState } from './demo-state.mjs';
 
-/*
+/**
  * Achieves: verifies security page lists kill-switch actions and never echoes secrets in notes.
  * Fails when: action count drifts, labels wrong, notes contain sk-/JWT/secret, or javascript: pause URL accepted.
  * Oracle: 4 actions; pause URL is runtime/bots/:id/pause; javascript:x → null.
@@ -31,7 +31,7 @@ test('security page lists kill-switch actions without secrets', () => {
   assert.equal(pauseAllUrl('javascript:x', 'bot_1'), null);
 });
 
-/*
+/**
  * Achieves: verifies local pause/freeze mutate bot shell status without remote calls.
  * Fails when: pause-all leaves watching bots active, or freeze-all leaves frozen=false on live bots.
  * Oracle: every bot is draft|paused after pause-all; frozen===true or draft after freeze-all.

@@ -9,7 +9,7 @@ const thread = [
   { id: 'a2', role: 'assistant', text: 'reply two' },
 ];
 
-/*
+/**
  * Achieves: verifies editing a user turn keeps prior lines, trims text, and stamps an editToken.
  * Fails when: later turns remain, whitespace not trimmed, or editToken missing/wrong prefix.
  * Oracle: edit u2 → prior [u1,a1]; lines [u1,a1,u2]; text trimmed; editToken starts with 'u2:'.
@@ -26,7 +26,7 @@ test('reviseThread keeps earlier lines and drops later ones', () => {
   assert.ok(revised.lines[2].editToken.startsWith('u2:'));
 });
 
-/*
+/**
  * Achieves: verifies blank text, non-user lines, missing ids, and null threads are rejected.
  * Fails when: any invalid case returns a revised thread instead of null.
  * Oracle: whitespace-only, agent id, missing id, and null thread all → null.

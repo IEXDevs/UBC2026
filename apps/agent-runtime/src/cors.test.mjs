@@ -7,7 +7,7 @@ import {
   withCors,
 } from './cors.mjs';
 
-/*
+/**
  * Achieves: default localhost allowlist plus env-configured origins are accepted; unknown Origin is denied.
  * Fails when: defaults drop localhost/127.0.0.1, CORS_ORIGINS is ignored, or evil.example is allowed.
  * Oracle: hardcoded default pair; includes() for configured host; allowedCorsOrigin null for unlisted Origin.
@@ -31,7 +31,7 @@ test('localhost and configured CORS origins are allowed', () => {
   );
 });
 
-/*
+/**
  * Achieves: hosted maelstrom hosts work only when present in CORS_ORIGINS; whitespace/empty env tokens are ignored.
  * Fails when: listing is skipped (host allowed with empty env), defaults are dropped after env set, or blank tokens invent origins.
  * Oracle: allow when listed; deny same Origin with {}; length stays 2 for blank-only CORS_ORIGINS.
@@ -68,7 +68,7 @@ test('hosted maelstrom origins are allowed only when listed in CORS_ORIGINS', ()
   assert.equal(corsOriginList({ CORS_ORIGINS: ' , ' }).length, 2);
 });
 
-/*
+/**
  * Achieves: Origin values with CR/LF or extreme length never become an allowlisted ACAO echo.
  * Fails when: injected Origin is reflected, overlong Origin is accepted, or preflight returns 204 for injected Origin.
  * Oracle: allowedCorsOrigin null; preflight status 403 for CR/LF Origin (duck-typed request).
@@ -95,7 +95,7 @@ test('CORS rejects Origin header injection and overlong values', async () => {
   assert.equal(denied.status, 403);
 });
 
-/*
+/**
  * Achieves: CORS_ORIGINS values containing CR/LF never appear as allowlist entries (header-injection fragments stay out).
  * Fails when: list entries retain \\r/\\n, or a CR/LF-split remnant is treated as an allowed Origin match.
  * Oracle: every list entry fails /[\\r\\n]/; Origin matching the pre-split host still works; remnant "X-Evil: 1" is not an allowed Origin.
@@ -119,7 +119,7 @@ test('CORS list must not include CR/LF env tokens', () => {
   );
 });
 
-/*
+/**
  * Achieves: allowed Origin gets ACAO on preflight/response; denied Origin gets 403 preflight and withCors does not add ACAO.
  * Fails when: localhost preflight lacks ACAO/headers, evil Origin gets 204, or withCors stamps ACAO onto a denied Origin response.
  * Oracle: 204 + ACAO for localhost; 403 without ACAO for evil; withCors leaves Access-Control-Allow-Origin unset for denied Origin.

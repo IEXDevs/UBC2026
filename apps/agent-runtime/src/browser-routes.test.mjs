@@ -33,7 +33,7 @@ function machineWithBrowsers() {
   return { machine: new BotStateMachine(), closed, tabs, env: { browsers: provider } };
 }
 
-/*
+/**
  * Achieves: browser create/list are owner-scoped and omit provider session ids from responses.
  * Fails when: other owners see sessions, or provider id leaks in JSON.
  * Oracle: owner-bound status/items; no provider id substring.
@@ -109,7 +109,7 @@ test('browser sessions are owner-bound and hide the provider id', async () => {
   assert.deepEqual((await listed.json()).sessions, []);
 });
 
-/*
+/**
  * Achieves: session page history persists beyond first page in durable store.
  * Fails when: second page lost or overwritten incorrectly.
  * Oracle: stored pages include later navigation.

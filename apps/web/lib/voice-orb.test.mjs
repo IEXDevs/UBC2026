@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chatOrbLook, orbSpeed, voiceOrbLook } from './voice-orb.mjs';
 
-/*
+/**
  * Achieves: verifies chat/voice orb visual states and speed clamping for activity levels.
  * Fails when: activity→state maps drift, voice sides pick wrong variant, or speed exceeds 2.25.
  * Oracle: think→reasoning/Thinking; search→searching; browser→using; tool→working;

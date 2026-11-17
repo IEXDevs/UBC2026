@@ -17,7 +17,7 @@ function fakeEnv(extra = {}) {
   };
 }
 
-/*
+/**
  * Achieves: catalog includes live data routes; ownerless data GETs are 401.
  * Fails when: routes missing or ownerless allowed.
  * Oracle: catalog membership + 401.
@@ -39,7 +39,7 @@ test('route catalog lists live data routes and ownerless data calls require auth
   assert.equal(sign.status, 401);
 });
 
-/*
+/**
  * Achieves: localhost Origin receives ACAO on OPTIONS and /api/events.
  * Fails when: ACAO missing for localhost.
  * Oracle: ACAO header === localhost origin.
@@ -66,7 +66,7 @@ test('localhost Origin gets CORS on preflight and /api/events', async () => {
   assert.equal(events.headers.get('Access-Control-Allow-Origin'), 'http://localhost:3000');
 });
 
-/*
+/**
  * Achieves: browser routes forward to DO with bot id on object path.
  * Fails when: bot id dropped from path.
  * Oracle: forwarded pathname includes bot id.
@@ -88,7 +88,7 @@ test('owner browser routes are forwarded with the bot id kept on the object path
   assert.equal(opened.forwarded, '/id/bot_1/browser/sessions');
 });
 
-/*
+/**
  * Achieves: loop route is forwarded to the bot Durable Object.
  * Fails when: loop not forwarded.
  * Oracle: forwarded path assertion.
@@ -106,7 +106,7 @@ test('the loop route reaches the Durable Object', async () => {
   assert.equal(body.forwarded, '/loop');
 });
 
-/*
+/**
  * Achieves: bot control routes forward to DO.
  * Fails when: routing miss/404.
  * Oracle: forwarded pathname.
@@ -137,7 +137,7 @@ async function posted(promise) {
   return { path: body.forwarded, payload: JSON.parse(body.body) };
 }
 
-/*
+/**
  * Achieves: hourly cron records position check; empty fleet is a no-op.
  * Fails when: empty fleet still mutates or check not recorded.
  * Oracle: recorded check / no-op assertions.
@@ -161,7 +161,7 @@ test('hourly cron records a position check and does nothing with an empty fleet'
   assert.equal(check.payload.balance, null);
 });
 
-/*
+/**
  * Achieves: fresh stream skips RPC; stale stream performs devnet balance read.
  * Fails when: fresh still RPCs or stale skips.
  * Oracle: RPC call counts per freshness.
@@ -207,7 +207,7 @@ test('a fresh stream skips the RPC re-check, and a stale stream reads devnet bal
   assert.deepEqual(reasons.sort(), ['stream-drop-recheck', 'stream-drop-recheck']);
 });
 
-/*
+/**
  * Achieves: shopping bots excluded from hourly position checks; unknown cron is no-op.
  * Fails when: shopping included or unknown cron mutates state.
  * Oracle: skip/no-op assertions.

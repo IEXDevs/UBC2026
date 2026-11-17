@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseThinkingCatalog, reasoningEffortFor, thinkingLevelsForModel } from './thinking-levels.mjs';
 
-/*
+/**
  * Achieves: verifies contributor spark omits Max and maps unknown Max label to high effort.
  * Fails when: Max appears in spark labels, default is not High, or Max→high mapping breaks.
  * Oracle: labels Minimal…Extra (no Max); default id high; reasoningEffortFor(...,'Max')==='high'.
@@ -17,7 +17,7 @@ test('contributor spark has no Max and defaults to High', () => {
   assert.equal(reasoningEffortFor('muse-spark-1.3-contributor', 'Low'), 'low');
 });
 
-/*
+/**
  * Achieves: verifies wonder includes Max and catalog reasoning overrides reshape the level list.
  * Fails when: wonder default is not max, or catalog override ignores effort/default fields.
  * Oracle: wonder last id max + default max; catalog wonder → [low,high,max] default low.

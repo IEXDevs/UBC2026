@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mapTransferRow, platformProposal, transferErrorCode, transferRequest } from './platform-transfer.mjs';
 
-/*
+/**
  * Achieves: transferRequest normalizes handle/amount; zero amount rejected; proposal/map/error helpers behave.
  * Fails when: zero amount accepted, handle not lowercased, or direction wrong.
  * Oracle: null for amount 0; normalized deepEqual; proposal recipient @bob; map direction in; error code wallet_frozen.

@@ -28,7 +28,7 @@ function memoryStorage(initial = {}) {
   };
 }
 
-/*
+/**
  * Achieves: verifies a bot draft needs a name, a known shape, and a hex color.
  * Fails when: a bot draft needs a name, a known shape, and a hex color breaks (e.g. expected shape: 'circle', color: '#7c5cff' }, shape: 'squircle', color: '#7c5cff' }, 'string'); failure/null paths flip.
  * Oracle: assert.equal(draftBot({ name: ' ', shape: 'circle', color: '#7c5cff' }); assert.equal(draftBot({ name: 'Ada', shape: 'squircle', color: '#7c5cff' }); assert.equal(typeof loose.shape, 'string'); assert.equal(bot.name, 'Ada'); assert.equal(bot.shape, 'triangle'); assert.equal(bot.color, '#7c5cff')
@@ -47,7 +47,7 @@ test('a bot draft needs a name, a known shape, and a hex color', () => {
   assert.equal(bot.id, 'bot_ada');
 });
 
-/*
+/**
  * Achieves: verifies withoutId drops one agent and leaves the rest.
  * Fails when: structured result drifts from expected shape.
  * Oracle: assert.deepEqual(withoutId(['a', 'b', 'c'], 'b'); assert.deepEqual(withoutId(['a'], 'a'); assert.deepEqual(withoutId(['a'], 'z')
@@ -60,7 +60,7 @@ test('withoutId drops one agent and leaves the rest', () => {
   assert.deepEqual(withoutId(['a'], 'z'), ['a']);
 });
 
-/*
+/**
  * Achieves: verifies reorder moves one id and leaves the others in place.
  * Fails when: structured result drifts from expected shape.
  * Oracle: assert.deepEqual(reorderIds(['a', 'b', 'c'], 'a', 'c'); assert.deepEqual(reorderIds(['a', 'b', 'c'], 'c', 'a'); assert.deepEqual(reorderIds(['a', 'b'], 'a', 'a')
@@ -73,7 +73,7 @@ test('reorder moves one id and leaves the others in place', () => {
   assert.deepEqual(reorderIds(['a', 'b'], 'a', 'a'), ['a', 'b']);
 });
 
-/*
+/**
  * Achieves: verifies an empty saved order shows no bots, and a missing order keeps the seed.
  * Fails when: an empty saved order shows no bots, and a missing order keeps the seed breaks (e.g. expected { order: [], extra: [] }, null, ['bot_ada', 'bot_meteora']).
  * Oracle: assert.equal(mergeRoster(seed, null); assert.deepEqual(mergeRoster(seed, { order: [], extra: [] }); assert.deepEqual(merged.bots.map(bot => bot.id), ['bot_ada', 'bot_meteora'])
@@ -89,7 +89,7 @@ test('an empty saved order shows no bots, and a missing order keeps the seed', (
   assert.deepEqual(merged.bots.map(bot => bot.id), ['bot_ada', 'bot_meteora']);
 });
 
-/*
+/**
  * Achieves: verifies removeBotFromRoster drops order and extra entries.
  * Fails when: structured result drifts from expected shape.
  * Oracle: assert.deepEqual(next.order, ['bot_meteora']); assert.deepEqual(next.extra, [])
@@ -106,7 +106,7 @@ test('removeBotFromRoster drops order and extra entries', () => {
   assert.deepEqual(next.extra, []);
 });
 
-/*
+/**
  * Achieves: verifies roster and looks storage keys are scoped to the owner.
  * Fails when: roster and looks storage keys are scoped to the owner breaks (e.g. expected 'maelstrom.roster.did:privy:a', 'maelstrom.botLooks.did:privy:a', '').
  * Oracle: assert.equal(rosterStorageKey('did:privy:a'), 'maelstrom.roster.did:privy:a'); assert.equal(looksStorageKey('did:privy:a'), 'maelstrom.botLooks.did:privy:a'); assert.equal(rosterStorageKey(''), ''); assert.equal(looksStorageKey(null), '')
@@ -120,7 +120,7 @@ test('roster and looks storage keys are scoped to the owner', () => {
   assert.equal(looksStorageKey(null), '');
 });
 
-/*
+/**
  * Achieves: verifies each owner keeps a separate roster.
  * Fails when: each owner keeps a separate roster breaks (e.g. expected 'did:privy:one', 'did:privy:two', null).
  * Oracle: assert.equal(readRoster(storage, 'did:privy:one'); assert.deepEqual(readRoster(storage, 'did:privy:two'); assert.deepEqual(readRoster(storage, null)
@@ -137,7 +137,7 @@ test('each owner keeps a separate roster', () => {
   assert.deepEqual(readRoster(storage, null), { order: [], extra: [] });
 });
 
-/*
+/**
  * Achieves: verifies legacy global roster is claimed once by the first signed-in owner.
  * Fails when: legacy global roster is claimed once by the first signed-in owner breaks (e.g. expected true, 'bot_ada', null).
  * Oracle: assert.equal(first.adopted, true); assert.equal(first.roster.extra[0].id, 'bot_ada'); assert.equal(storage.getItem(LEGACY_ROSTER_KEY), null); assert.equal(readLooks(storage, 'did:privy:one'); assert.equal(second.adopted, false); assert.deepEqual(second.roster.extra, [])
@@ -161,7 +161,7 @@ test('legacy global roster is claimed once by the first signed-in owner', () => 
   assert.deepEqual(second.roster.extra, []);
 });
 
-/*
+/**
  * Achieves: verifies writeLooks round-trips per owner.
  * Fails when: writeLooks round-trips per owner breaks (e.g. expected 'did:privy:a', 'did:privy:b').
  * Oracle: assert.equal(readLooks(storage, 'did:privy:a'); assert.deepEqual(readLooks(storage, 'did:privy:b')

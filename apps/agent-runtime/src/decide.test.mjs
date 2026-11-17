@@ -57,7 +57,7 @@ function liveRun(now = 1) {
   return advanceRun(run, 'research', 'wake', now + 1);
 }
 
-/*
+/**
  * Achieves: missing/paused runs throw before the gate runs.
  * Fails when: gate is invoked without a live run, or pause is ignored.
  * Oracle: thrown message codes no_run / run_paused.
@@ -95,7 +95,7 @@ test('decideFromCheckpoint rejects missing and paused runs', async () => {
   );
 });
 
-/*
+/**
  * Achieves: low trust without confirmation pauses at trust-confirmation.
  * Fails when: verify runs or pause reason differs.
  * Oracle: gate.state + run.pauseReason; mainFn must not run.
@@ -120,7 +120,7 @@ test('decideFromCheckpoint pauses for trust-confirmation-required', async () => 
   assert.equal(result.run.pauseReason, 'trust-confirmation');
 });
 
-/*
+/**
  * Achieves: divergent main/verify facts pause at verify-mismatch.
  * Fails when: mismatch still advances to approval/execute.
  * Oracle: gate.state === verify-mismatch; run paused.
@@ -144,7 +144,7 @@ test('decideFromCheckpoint pauses on verify-mismatch', async () => {
   assert.equal(result.run.pauseReason, 'verify-mismatch');
 });
 
-/*
+/**
  * Achieves: frozen wallet blocks and pauses the run.
  * Fails when: blocked gate still reaches approval or execute.
  * Oracle: gate.state === blocked; run.paused.
@@ -168,7 +168,7 @@ test('decideFromCheckpoint pauses when gate is blocked', async () => {
   assert.ok(result.run.pauseReason);
 });
 
-/*
+/**
  * Achieves: ask-mode approval-needed advances to approval then pauses.
  * Fails when: ask mode auto-executes or skips approval step.
  * Oracle: gate.state + run.step === approval + paused.
@@ -193,7 +193,7 @@ test('decideFromCheckpoint pauses for approval-needed in ask mode', async () => 
   assert.equal(result.run.pauseReason, 'approval-needed');
 });
 
-/*
+/**
  * Achieves: fully-automatic mode reaches execute without pausing.
  * Fails when: automatic bots still pause for approval.
  * Oracle: gate.state === ready-to-execute; run.paused === false; step === execute.

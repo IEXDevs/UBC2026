@@ -18,7 +18,7 @@ import {
 } from './bot-experience.mjs';
 import { getDemoShellState } from './demo-state.mjs';
 
-/*
+/**
  * Achieves: verifies approval preview is the first bot-page section.
  * Fails when: approval preview is the first bot-page section breaks (e.g. expected [...BOT_PAGE_SECTIONS], 'approval-preview', 'approval-needed'); failure/null paths flip.
  * Oracle: assert.equal(page.sections[0].id, 'approval-preview'); assert.equal(page.sections[0].preview.state, 'approval-needed'); assert.equal(page.sections[0].preview.outflowLabel, '5 USDC'); assert.equal(page.sections[0].preview.recipient, 'alex.sol'); assert.equal(page.sections[0].preview.cluster, 'devnet'); assert.equal(page.sections[1].entries[0].kind, 'approval.requested')
@@ -40,7 +40,7 @@ test('approval preview is the first bot-page section', () => {
   assert.equal(page.sections[3].why.memo.includes(experience.decision.decisionDigest), true);
 });
 
-/*
+/**
  * Achieves: verifies over-budget preview offers approve once or raise limit.
  * Fails when: over-budget preview offers approve once or raise limit breaks (e.g. expected 'over-budget', ['approve-once', 'raise-limit'], false).
  * Oracle: assert.equal(preview.state, 'over-budget'); assert.equal(preview.actions.includes('approve'), false); assert.equal(raisedCap('trading', preview.currentCap, { maxOutflow: '80000000', maxPerTransaction: '15000000',; assert.deepEqual(preview.actions, ['approve-once', 'raise-limit']); assert.deepEqual(preview.violations, ['per-transaction']); assert.deepEqual(raisedCap('trading', preview.currentCap, { maxOutflow: '50000000', maxPerTransaction: '400000
@@ -63,7 +63,7 @@ test('over-budget preview offers approve once or raise limit', () => {
   }).ok, true);
 });
 
-/*
+/**
  * Achieves: verifies timeline is newest first and drops live-view secrets and hidden reasoning.
  * Fails when: timeline is newest first and drops live-view secrets and hidden reasoning breaks (e.g. expected 'evt_leak', false, false).
  * Oracle: assert.equal(entries[0].id, 'evt_leak'); assert.equal(entries[0].summary.includes('http'), false); assert.equal(entries[0].summary.includes('eyJ'), false); assert.equal(entries[0].summary.includes('viewerUrl'), false); assert.equal(entries.some(entry => entry.id === 'evt_other'), false); assert.equal(entries.find(entry => entry.id === 'evt_thought').summary.includes('chain-of-thought'), false)
@@ -108,7 +108,7 @@ test('timeline is newest first and drops live-view secrets and hidden reasoning'
   assert.deepEqual(entries.map(entry => entry.at), [...entries.map(entry => entry.at)].sort((a, b) => b - a));
 });
 
-/*
+/**
  * Achieves: verifies why view uses the decision record and hides a mismatched memo.
  * Fails when: why view uses the decision record and hides a mismatched memo breaks (e.g. expected false, false, null).
  * Oracle: assert.equal(why.showsChainOfThought, false); assert.equal(JSON.stringify(why).includes('do not show'), false); assert.equal(why.memo, null); assert.equal(why.related.some(entry => entry.kind === 'verify.mismatch'), true); assert.match(why.lines.join(' '), /does not match|unsigned|mismatch/)
@@ -129,7 +129,7 @@ test('why view uses the decision record and hides a mismatched memo', () => {
   assert.equal(why.related.some(entry => entry.kind === 'verify.mismatch'), true);
 });
 
-/*
+/**
  * Achieves: verifies incomplete preview cannot be approved.
  * Fails when: incomplete preview cannot be approved breaks (e.g. expected 'blocked', [], 'clear').
  * Oracle: assert.equal(blocked.state, 'blocked'); assert.equal(buildApprovalPreview(null).state, 'clear'); assert.equal(formatBaseUnits('1000000', 'USDC'); assert.deepEqual(blocked.actions, [])
@@ -144,7 +144,7 @@ test('incomplete preview cannot be approved', () => {
   assert.equal(formatBaseUnits('1000000', 'USDC'), '1 USDC');
 });
 
-/*
+/**
  * Achieves: verifies event polling stays on the runtime origin.
  * Fails when: event polling stays on the runtime origin breaks (e.g. expected 'bot_meteora', 'bot_meteora', 'bot_meteora'); failure/null paths flip.
  * Oracle: assert.equal( eventsUrl('https://runtime.example/agent/', 'bot_meteora'); assert.equal(eventsUrl('javascript:alert(1)', 'bot_meteora'); assert.equal(eventsUrl('', 'bot_meteora'); assert.equal(logsUrl('https://runtime.example/agent/'), 'https://runtime.example/agent/api/logs'); assert.equal(logsUrl('javascript:alert(1)'), null)
@@ -162,7 +162,7 @@ test('event polling stays on the runtime origin', () => {
   assert.equal(logsUrl('javascript:alert(1)'), null);
 });
 
-/*
+/**
  * Achieves: verifies live events accept an ISO timestamp from the Worker.
  * Fails when: live events accept an ISO timestamp from the Worker breaks (e.g. expected Date.parse('2026-11-15T01:00:00.000Z', 'bot_live').
  * Oracle: assert.equal(row.at, Date.parse('2026-11-15T01:00:00.000Z'); assert.equal(timelineEntries([row], 'bot_live')
@@ -182,7 +182,7 @@ test('live events accept an ISO timestamp from the Worker', () => {
   assert.equal(timelineEntries([row], 'bot_live').length, 1);
 });
 
-/*
+/**
  * Achieves: verifies demo shell bots carry a bot page and money panes stay empty placeholders.
  * Fails when: demo shell bots carry a bot page and money panes stay empty placeholders breaks (e.g. expected 'approval-preview', undefined, undefined); failure/null paths flip.
  * Oracle: assert.equal(page.sections[0].id, 'approval-preview'); assert.equal(bot.payments, undefined); assert.equal(bot.positions, undefined); assert.equal(bot.walletPage, undefined); assert.equal(page.includes('aria-label="Stats"'), false); assert.equal(page.includes('OverviewPanel'), false)

@@ -15,7 +15,7 @@ function memory() {
   };
 }
 
-/*
+/**
  * Achieves: verifies saved providers expose masked hints only and reject insecure short drafts.
  * Fails when: raw token appears in views/JSON, rejected drafts echo the short token, or remove leaves rows.
  * Oracle: hint === maskToken(token); 'token' not in public provider; http + short token → ok:false without echoing token.
@@ -38,7 +38,7 @@ test('a saved provider keeps the token out of the catalog view', () => {
   assert.equal(publicProvider(null), null);
 });
 
-/*
+/**
  * Achieves: verifies Add Provider entry points exist in model menu and profile settings.
  * Fails when: PromptBar/ProfileSheet lose Add Provider, or dialog drops saveProvider/a11y title.
  * Oracle: source contains label/button and dialog wiring.

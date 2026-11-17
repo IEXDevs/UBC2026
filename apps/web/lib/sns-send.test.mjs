@@ -19,7 +19,7 @@ const env = {
   QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
 };
 
-/*
+/**
  * Achieves: verifies SNS send plans use the provided resolved address, not a hard-coded domain map.
  * Fails when: different domains collapse to one address, or missing address becomes sns_not_found incorrectly skipped.
  * Oracle: richclub→ADDRESS; other.sol→OTHER; amount without address → sns_not_found.
@@ -34,7 +34,7 @@ test('a send uses the owner passed in from SNS, not a fixed domain', () => {
   assert.equal(planSnsSend({ domain: 'richclub.sol', amount: '1', wallet, env }).error, 'sns_not_found');
 });
 
-/*
+/**
  * Achieves: verifies missing QuickNode RPC is reported while still returning the resolved address.
  * Fails when: missing_config omits QUICKNODE_DEVNET_RPC_URL, or address is dropped on config failure.
  * Oracle: error missing_config; missing=['QUICKNODE_DEVNET_RPC_URL']; address preserved.

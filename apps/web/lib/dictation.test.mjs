@@ -20,7 +20,7 @@ function fakeClient() {
   return { CommitStrategy, RealtimeEvents, Scribe: { connect() {} } };
 }
 
-/*
+/**
  * Achieves: verifies dictation helpers expose stable error codes.
  * Fails when: dictation helpers expose stable error codes breaks (e.g. expected 'unsupported', 'voice_live', '', 'world ']).
  * Oracle: assert.equal(dictationUnsupportedError().code, 'unsupported'); assert.equal(dictationBusyError().code, 'voice_live'); assert.equal(joinTranscript([' hello ', '', 'world '])
@@ -33,7 +33,7 @@ test('dictation helpers expose stable error codes', () => {
   assert.equal(joinTranscript([' hello ', '', 'world ']), 'hello world');
 });
 
-/*
+/**
  * Achieves: verifies startBrowserDictation streams partials and cancel settles with committed text.
  * Fails when: startBrowserDictation streams partials and cancel settles with committed text breaks (e.g. expected 'function', 'sutkn_test', 'scribe_v2_realtime').
  * Oracle: assert.equal(typeof job.cancel, 'function'); assert.equal(connectOpts.token, 'sutkn_test'); assert.equal(connectOpts.modelId, 'scribe_v2_realtime'); assert.equal(connectOpts.commitStrategy, 'vad'); assert.equal(await job, 'hello world'); assert.deepEqual(partials, ['hel', 'hello', 'hello'])
@@ -89,7 +89,7 @@ test('startBrowserDictation streams partials and cancel settles with committed t
   assert.equal(await job, 'hello world');
 });
 
-/*
+/**
  * Achieves: verifies startBrowserDictation rejects when the scribe token route fails.
  * Fails when: startBrowserDictation rejects when the scribe token route fails no longer holds.
  * Oracle: assert.rejects( () => startBrowserDictation({ fetcher: async () => ({ ok: false, json: async () => ({ error: '

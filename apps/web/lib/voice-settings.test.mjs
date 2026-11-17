@@ -12,7 +12,7 @@ import {
   voiceSession,
 } from './voice-settings.mjs';
 
-/*
+/**
  * Achieves: verifies voice catalog bounds, clamping, parse fallbacks, session/overrides, and invalid language drop.
  * Fails when: speed/volume clamps drift, unknown voiceId sticks, language 'nope' kept, or overrides omit tts.
  * Oracle: SPEED 0.5–2; clampSpeed(0.73)=0.75; null parse→defaults; Adam session; es→agent.language; unknown voice→default.

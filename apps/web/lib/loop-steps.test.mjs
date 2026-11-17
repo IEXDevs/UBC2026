@@ -12,7 +12,7 @@ import {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/*
+/**
  * Achieves: verifies an empty run lists every loop step as pending beside the browser.
  * Fails when: an empty run lists every loop step as pending beside the browser breaks (e.g. expected LOOP_STEPS.map(step => step.id, steps.map((, 'Pending'); failure/null paths flip.
  * Oracle: assert.equal(loopStepStateLabel(steps[0]), 'Pending'); assert.equal(steps.some(step => step.detail.includes('http')), false); assert.deepEqual(steps.map(step => step.id), LOOP_STEPS.map(step => step.id); assert.deepEqual(steps.map(step => step.state), steps.map(()
@@ -27,7 +27,7 @@ test('an empty run lists every loop step as pending beside the browser', () => {
   assert.equal(steps.some(step => step.detail.includes('http')), false);
 });
 
-/*
+/**
  * Achieves: verifies checkpointed steps keep order and visual states.
  * Fails when: checkpointed steps keep order and visual states breaks (e.g. expected 'executed', 'Executed', 'Pool snapshot').
  * Oracle: assert.equal(byId.research.state, 'executed'); assert.equal(loopStepStateLabel(byId.research), 'Executed'); assert.equal(byId.research.detail, 'Pool snapshot'); assert.equal(byId.decide.state, 'executed'); assert.equal(byId['trust-gate'].state, 'executed'); assert.equal(byId.verify.state, 'verifying')
@@ -63,7 +63,7 @@ test('checkpointed steps keep order and visual states', () => {
   assert.equal(byId.monitor.state, 'pending');
 });
 
-/*
+/**
  * Achieves: verifies approval wait and a paused current step read as waiting.
  * Fails when: approval wait and a paused current step read as waiting breaks (e.g. expected 'waiting', 'Waiting for approval', 'approval-needed').
  * Oracle: assert.equal(approval.state, 'waiting'); assert.equal(loopStepStateLabel(approval), 'Waiting for approval'); assert.equal(approval.detail, 'approval-needed'); assert.equal(research.state, 'waiting'); assert.equal(loopStepStateLabel(research), 'Waiting')
@@ -90,7 +90,7 @@ test('approval wait and a paused current step read as waiting', () => {
   assert.equal(loopStepStateLabel(research), 'Waiting');
 });
 
-/*
+/**
  * Achieves: verifies the current research or decide step reads as thinking.
  * Fails when: the current research or decide step reads as thinking breaks (e.g. expected 'thinking', 'Thinking').
  * Oracle: assert.equal(decide.state, 'thinking'); assert.equal(loopStepStateLabel(decide), 'Thinking')
@@ -104,7 +104,7 @@ test('the current research or decide step reads as thinking', () => {
   assert.equal(loopStepStateLabel(decide), 'Thinking');
 });
 
-/*
+/**
  * Achieves: verifies loop details drop live view URLs and hidden reasoning.
  * Fails when: loop details drop live view URLs and hidden reasoning breaks (e.g. expected false, false, false).
  * Oracle: assert.equal(redactLoopDetail(leaked).includes('live.browser.run'), false); assert.equal(redactLoopDetail(leaked).includes('eyJ'), false); assert.equal(redactLoopDetail(leaked).includes('http'), false); assert.equal(research.detail.includes('http'), false); assert.equal(research.detail.includes('live.browser.run'), false); assert.equal(JSON.stringify(steps).includes('viewerUrl'), false)
@@ -126,7 +126,7 @@ test('loop details drop live view URLs and hidden reasoning', () => {
   assert.equal(JSON.stringify(steps).includes('viewerUrl'), false);
 });
 
-/*
+/**
  * Achieves: verifies the computer sheet places the loop list beside the live view.
  * Fails when: the computer sheet places the loop list beside the live view breaks (e.g. expected /LoopSteps/, /LiveViewPanel/, false).
  * Oracle: assert.equal(panel.includes('LoopSteps'), false); assert.equal(sheet.includes('viewerUrl'), false); assert.match(stage, /LoopSteps/); assert.match(stage, /LiveViewPanel/); assert.match(frame, /live\.browser\.run/); assert.match(frame, /\/ui\/view/)

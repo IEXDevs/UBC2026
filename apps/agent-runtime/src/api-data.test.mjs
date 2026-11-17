@@ -19,7 +19,7 @@ function fakeEnv(extra = {}) {
   };
 }
 
-/*
+/**
  * Achieves: enrichEnv returns the same object on re-entry and preserves injected transferClient/loadLoopContext.
  * Fails when: second enrichEnv allocates a new env, or injectables are overwritten/dropped.
  * Oracle: identity equality once===twice; reference equality for transferClient and loadLoopContext.
@@ -36,7 +36,7 @@ test('enrichEnv is idempotent and leaves injectables alone', () => {
   assert.equal(once.loadLoopContext, loadLoopContext);
 });
 
-/*
+/**
  * Achieves: metrics without x-owner-id is 401; with owner and no Supabase returns empty unconfigured items (not stubs).
  * Fails when: ownerless call succeeds, or unconfigured path invents stub data / non-empty items.
  * Oracle: 401 then 200 with source='unconfigured', items=[], stub undefined.
@@ -58,7 +58,7 @@ test('data routes require an owner and stay empty without Supabase', async () =>
   assert.equal(body.stub, undefined);
 });
 
-/*
+/**
  * Achieves: POST /api/wallets with bearer but no Privy/transferClient returns 503 signer_not_configured.
  * Fails when: missing signer returns 200/401 or a different error code.
  * Oracle: status 503 and error==='signer_not_configured'.
@@ -75,7 +75,7 @@ test('wallet create reports signer_not_configured without Privy secrets', async 
   assert.equal((await res.json()).error, 'signer_not_configured');
 });
 
-/*
+/**
  * Achieves: POST /api/wallets without Authorization returns login_required before touching Privy.
  * Fails when: missing bearer is treated as signer_not_configured, or acceptLogin is invoked.
  * Oracle: 401 + error login_required; transferClient.acceptLogin throws if called (must not).
@@ -98,7 +98,7 @@ test('wallet create requires bearer and returns login_required without it', asyn
   assert.equal((await res.json()).error, 'login_required');
 });
 
-/*
+/**
  * Achieves: persist upserts wallet rows via Supabase and never calls Privy acceptLogin.
  * Fails when: acceptLogin is invoked, wrote!=1, or no POST to /rest/v1/wallets.
  * Oracle: 200 ok/wrote=1/wallets[0].id; acceptCalls===0; wallet POST observed.
@@ -162,7 +162,7 @@ test('wallets.persist writes rows without calling Privy acceptLogin', async () =
   assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/wallets') && entry.method === 'POST'), true);
 });
 
-/*
+/**
  * Achieves: a second identical persist POST succeeds again using merge-duplicates Prefer.
  * Fails when: second POST 4xx/5xx, Prefer omits merge-duplicates, or only one write occurs when two are sent.
  * Oracle: both responses 200 with wrote=1; two wallet POSTs each Prefer includes merge-duplicates.
@@ -232,7 +232,7 @@ test('wallets.persist is idempotent on a duplicate second POST', async () => {
   assert.equal(walletPosts[1].body[0]?.id || walletPosts[1].body.id, 'w1');
 });
 
-/*
+/**
  * Achieves: non-JSON body yields invalid_wallets and does not write wallets.
  * Fails when: malformed body returns 200 or still POSTs wallet rows.
  * Oracle: 400 + invalid_wallets; wrote flag stays false.
@@ -265,7 +265,7 @@ test('wallets.persist rejects malformed JSON body', async () => {
   assert.equal(wrote, false);
 });
 
-/*
+/**
  * Achieves: list enriches wallet with USDC/SOL/token balances from configured RPC without leaking RPC URL.
  * Fails when: usdcBalance wrong, balanceStatus not ok, or response includes example.invalid.
  * Oracle: usdcBalance '1234500', label '1.2345 USDC', solLamports '0', balances.onchainUsdc match; no RPC host in JSON.
@@ -342,7 +342,7 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
   assert.equal(JSON.stringify(body).includes('example.invalid'), false);
 });
 
-/*
+/**
  * Achieves: list surfaces SOL lamports and each SPL token with a combined displayBalanceLabel.
  * Fails when: tokens truncated to USDC-only, SOL missing, or display label omits amounts.
  * Oracle: solLamports 1500000000; tokens length 2; displayBalanceLabel matches 1.5 SOL / 2.5 USDC / 7 So11.
@@ -436,7 +436,7 @@ test('wallets.list reports SOL and every SPL token in the wallet', async () => {
   assert.ok(body.items[0].holdings.length >= 2);
 });
 
-/*
+/**
  * Achieves: when platform transfers exist, displayUsdcLabel/displaySource prefer platform net over on-chain USDC.
  * Fails when: displaySource stays onchain despite transfers, or displayUsdcLabel uses on-chain 0 incorrectly as primary display.
  * Oracle: displaySource 'platform', displayUsdcLabel '5 USDC', item.usdcBalance still '0' on-chain.
@@ -498,7 +498,7 @@ test('wallets.list prefers platform transfer net for displayUsdcLabel', async ()
   assert.equal(body.items[0].usdcBalance, '0');
 });
 
-/*
+/**
  * Achieves: persist fails closed for no bearer, no owner, empty wallets[], and missing Supabase config.
  * Fails when: any of those paths return 200 or wrong error codes.
  * Oracle: 401 login_required; 401 owner_required; 400 invalid_wallets; 503 unconfigured.
@@ -565,7 +565,7 @@ test('wallets.persist rejects missing auth, owner, empty wallets, and unconfigur
   assert.equal((await unconfigured.json()).error, 'unconfigured');
 });
 
-/*
+/**
  * Achieves: posted wallet.ownerId is overwritten by x-owner-id before Supabase write.
  * Fails when: attacker ownerId is persisted as owner_id.
  * Oracle: written row.owner_id === 'user_1' despite body ownerId 'attacker'.
@@ -622,7 +622,7 @@ test('wallets.persist ignores foreign-owner wallet rows (owner header wins)', as
   assert.equal(row.owner_id, 'user_1');
 });
 
-/*
+/**
  * Achieves: Worker Privy failure returns privy_failed with guidance to use Next provision + persist.
  * Fails when: error lacks detail, or detail omits Origin/persist guidance.
  * Oracle: 502 + privy_failed; detail matches /Origin|persist|Next/i.
@@ -653,7 +653,7 @@ test('wallet create surfaces Origin guidance when Privy acceptLogin fails on the
   assert.match(body.detail || '', /Origin|\/api\/wallets\/persist|Next/i);
 });
 
-/*
+/**
  * Achieves: Origin and x-maelstrom-origin headers are forwarded into acceptLogin.origin.
  * Fails when: origin arg missing/wrong for either header path.
  * Oracle: seen[0].origin === 'http://localhost:3000' for both Origin and x-maelstrom-origin.
@@ -709,7 +709,7 @@ test('wallet create forwards browser origin into Privy acceptLogin', async () =>
   assert.equal(seen[0].origin, 'http://localhost:3000');
 });
 
-/*
+/**
  * Achieves: mapBotRow/mapWalletRow/mapLedgerRow map snake_case rows into public records including linked spendable=false.
  * Fails when: cap amounts wrong type, linked privyWalletId set, or ledger fields mismatched.
  * Oracle: bot.cap.maxOutflow '100'; linked.spendable false and privyWalletId undefined; ledger deepEqual.
@@ -765,7 +765,7 @@ test('supabase mappers turn rows into bot/wallet/ledger records', () => {
   });
 });
 
-/*
+/**
  * Achieves: logs route requires owner and returns empty unconfigured without Supabase.
  * Fails when: ownerless 200 or invented log rows.
  * Oracle: 401 then 200 source unconfigured items=[].
@@ -785,7 +785,7 @@ test('activity logs require an owner and stay empty without Supabase', async () 
   assert.deepEqual(body.items, []);
 });
 
-/*
+/**
  * Achieves: lookup resolves @handle via profiles+wallets and .sol via SNS demo map.
  * Fails when: handle/sns kinds wrong, address missing, or self flagged incorrectly.
  * Oracle: handle recipient kind/displayName/address; sns kind/domain/address.
@@ -827,7 +827,7 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   assert.equal(snsBody.recipient.address, address);
 });
 
-/*
+/**
  * Achieves: create requires walletId belonging to owner; successful create upserts bot + spend_ledgers.
  * Fails when: missing/foreign wallet accepted, or writes skip bots/ledgers.
  * Oracle: 400 without wallet; 404 wallet_not_found for foreign id; 200 ok with bot id/walletId; writes include bots and spend_ledgers.
@@ -904,7 +904,7 @@ test('bots.create upserts a shell bot when the wallet belongs to the owner', asy
   assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/spend_ledgers')), true);
 });
 
-/*
+/**
  * Achieves: chat without owner is 401; with owner but no OpenRouter is 503 openrouter_not_configured.
  * Fails when: ownerless chat succeeds or missing key returns another code.
  * Oracle: 401 then 503 with openrouter_not_configured.
@@ -928,7 +928,7 @@ test('bot text chat requires owner and OpenRouter', async () => {
   assert.equal((await missingKey.json()).error, 'openrouter_not_configured');
 });
 
-/*
+/**
  * Achieves: configured openRouter.chat reply is returned with ok/botId.
  * Fails when: reply text wrong or ok false.
  * Oracle: 200 ok, reply 'Nova heard: status?', botId bot_1.
@@ -961,7 +961,7 @@ test('bot text chat returns an OpenRouter reply for the owner', async () => {
   assert.equal(body.botId, 'bot_1');
 });
 
-/*
+/**
  * Achieves: DELETE bot without Supabase returns 503 unconfigured (route is wired).
  * Fails when: 404/405 or silent 200 without config.
  * Oracle: 503 + unconfigured.
@@ -977,7 +977,7 @@ test('bot delete is dispatched when Supabase is unconfigured', async () => {
   assert.equal((await res.json()).error, 'unconfigured');
 });
 
-/*
+/**
  * Achieves: desk-granted transfer posts platform_post_transfer and lists as out for sender / in for recipient.
  * Fails when: wrong handle/amount posted, or list direction wrong for bob.
  * Oracle: posted transfer direction out/handle bob; listed direction in/amount 5000000.
@@ -1055,7 +1055,7 @@ test('a platform send posts to the recipient handle and lists it on both wallets
   assert.equal(listedBody.items[0].amount, '5000000');
 });
 
-/*
+/**
  * Achieves: health reflects signing and supabase bound/set independently.
  * Fails when: empty SUPABASE_URL still reports supabase true, or secrets.set wrong.
  * Oracle: signing true; supabase false when URL empty; set/bound flags; then supabase true when configured.
@@ -1087,7 +1087,7 @@ test('health reports signing and supabase readiness flags', async () => {
   assert.equal(body.secrets.SUPABASE_URL.set, true);
 });
 
-/*
+/**
  * Achieves: payments without Supabase returns empty unconfigured and never calls fetch.
  * Fails when: fetch invoked or stub/items invented.
  * Oracle: source unconfigured, items/crossCheck [], stub undefined, called false.
@@ -1114,7 +1114,7 @@ test('payments feed stays empty without Supabase and does not pretend to read it
   assert.equal(called, false);
 });
 
-/*
+/**
  * Achieves: payments prefer stream_events x402-out (not payments table) and flag unapproved_spend vs ledger.
  * Fails when: payments table consulted, deposit events listed as paid, or crossCheck missing/wrong excess.
  * Oracle: one confirmed item amount 12; crossCheck unapproved_spend excess 10; no service-role in JSON; no /payments URL.
@@ -1198,7 +1198,7 @@ test('payments feed lists stream-confirmed x402 rows and cross-checks the ledger
   assert.equal(JSON.stringify(body).includes('service-role-test'), false);
 });
 
-/*
+/**
  * Achieves: PUT profiles/me upserts users+profiles; unreachable/unauthorized failures are sanitized 502s.
  * Fails when: upserts skip users, or error bodies leak exception text/secrets.
  * Oracle: 200 handle alex01; writes include on_conflict; 502 profile_directory_unreachable without 'down'; 502 42501.
@@ -1259,7 +1259,7 @@ test('a profile claim upserts the user and stays readable', async () => {
   assert.equal((await unread.json()).error, '42501');
 });
 
-/*
+/**
  * Achieves: Privy DID owner_id is stored/read without PostgREST-breaking quotes; failures sanitize secrets.
  * Fails when: eq filter quotes DID (empty read), or 401/404/empty-confirm leak secrets/messages.
  * Oracle: 200 handle alex; profiles.get DID; rejected/missed/emptyConfirm/coded error codes without secrets.
@@ -1356,7 +1356,7 @@ test('a claim for @alex confirms the Privy owner without quoting the eq value', 
   assert.equal(JSON.stringify(codedBody).includes('hidden table'), false);
 });
 
-/*
+/**
  * Achieves: export requires signer+desk grant; returns HPKE ciphertext fields and strips privateKey.
  * Fails when: plaintext privateKey returned, or export proceeds without signer.
  * Oracle: 503 signer_not_configured; then 200 ciphertext ct, privateKey undefined, no do-not-return in JSON.

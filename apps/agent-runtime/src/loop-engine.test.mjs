@@ -127,7 +127,7 @@ function stepOrder(run) {
   return seen;
 }
 
-/*
+/**
  * Achieves: when lookupPrice missing, loop fetches DexScreener rather than asking the model for a price.
  * Fails when: model asked for price or DexScreener not consulted.
  * Oracle: DexScreener fetch observed; model prompts exclude price invention duty as asserted.
@@ -189,7 +189,7 @@ test('a missing lookupPrice reads DexScreener instead of asking the model for a 
   assert.equal(JSON.stringify(quote).includes('signature'), false);
 });
 
-/*
+/**
  * Achieves: loop checkpoints each step using injected OpenRouter (no live key/network).
  * Fails when: steps skip checkpoints or live network called.
  * Oracle: checkpoint sequence; OpenRouter mock used.
@@ -258,7 +258,7 @@ test('the bot loop checkpoints every step and calls OpenRouter without a live ke
   assert.equal(transfer.calls.length, 1);
 });
 
-/*
+/**
  * Achieves: ask mode pauses for approval then executes a single time after approve.
  * Fails when: double execute or execute before approval.
  * Oracle: one execution after approval.
@@ -297,7 +297,7 @@ test('ask mode waits for the owner and then executes once', async () => {
   assert.equal(transfer.calls.length, 1);
 });
 
-/*
+/**
  * Achieves: low trust / frozen wallet abort before verify and before model calls.
  * Fails when: verify/model still invoked.
  * Oracle: no model calls; early stop reason.
@@ -327,7 +327,7 @@ test('low trust and a frozen wallet stop before verify and before any model call
   assert.equal(frozenModels.calls.length, 0);
 });
 
-/*
+/**
  * Achieves: missing OpenRouter key fails closed without network fetch.
  * Fails when: global fetch invoked.
  * Oracle: no network; expected error/stop.
@@ -348,7 +348,7 @@ test('a missing OpenRouter key does not call the network', async () => {
   assert.equal(body.run.checkpoints.research, undefined);
 });
 
-/*
+/**
  * Achieves: post-crash execute retry reuses the same idempotency key.
  * Fails when: new key minted on retry.
  * Oracle: idempotency keys equal across attempts.
@@ -386,7 +386,7 @@ test('execute retries with the same idempotency key after a crash', async () => 
   assert.equal(done.run.checkpoints.execute.idempotencyKey, mid.run.runId);
 });
 
-/*
+/**
  * Achieves: mainnet proposals and missing owners are refused before execute.
  * Fails when: execute still called.
  * Oracle: blocked outcomes; execute count 0.
@@ -418,7 +418,7 @@ test('mainnet proposals and missing owners do not execute', async () => {
   assert.equal(missing.status, 401);
 });
 
-/*
+/**
  * Achieves: fully-automatic over-budget still needs approve-once before spend.
  * Fails when: auto-executes over budget without approval.
  * Oracle: approval-needed then single execute after approve.

@@ -76,7 +76,7 @@ test('requestOrigin prefers sanitized Origin over Referer over localhost default
  * Fails when: linked wallets can sign/spend or extra secret fields appear.
  * Oracle: shell/runtime contract — observing wallets are non-spendable.
  * Side effects: none.
- * Gaps closed: spendable:false on main; frozen does not change spendable alone.
+ * Gaps: none — closed: spendable:false on main; frozen does not change spendable alone.
  */
 test('publicWallet marks linked_ ids non-spendable even if spendable was true', () => {
   const linked = publicWallet({

@@ -14,7 +14,7 @@ import {
 
 const ownerId = 'demo_owner';
 
-/*
+/**
  * Achieves: verifies creation uses wallet picker, template caps/approval, and rejects missing/frozen wallets.
  * Fails when: frozen sleeve selectable, draft enables without enableBot, or frozen wallet assigns.
  * Oracle: 2 selectable; locked templates undeletable; trading ask/limited/50 USDC; missing wallet throws; frozen throws.
@@ -47,7 +47,7 @@ test('creation flow uses the wallet picker, caps, and approval mode', () => {
   assert.throws(() => submitDraft({ ...form, walletId: options[2].wallet.id }, wallets), /Cannot assign a frozen wallet/);
 });
 
-/*
+/**
  * Achieves: verifies user templates save/delete while locked builtins cannot be deleted.
  * Fails when: saved template not deletable, remove leaves it, or builtin delete succeeds.
  * Oracle: saved.deletable true; visibleTemplates keeps builtins ordered; removeUserTemplate clears user; locked throws.

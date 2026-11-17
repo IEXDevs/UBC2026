@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createExportRecipient, sealForRecipient } from './wallet-hpke.mjs';
 
-/*
+/**
  * Achieves: verifies HPKE seal/open round-trip and that a different recipient cannot open.
  * Fails when: sealed plaintext mismatches, or a foreign recipient successfully decrypts.
  * Oracle: independent seal of known plaintext; reject open by a second createExportRecipient().

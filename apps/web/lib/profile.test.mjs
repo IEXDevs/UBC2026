@@ -11,7 +11,7 @@ import {
   recipientHint,
 } from './profile.mjs';
 
-/*
+/**
  * Achieves: verifies a message can name a handle or an SNS name.
  * Fails when: a message can name a handle or an SNS name breaks (e.g. expected '@Alex', '@richclub.sol', null).
  * Oracle: assert.equal(mentionIn('send it to @Alex'), '@Alex'); assert.equal(mentionIn('pay @richclub.sol today'), '@richclub.sol'); assert.equal(mentionIn('hello'), null); assert.equal(recipientHint({ kind: 'handle', handle: 'alex', displayName: 'Alex', address: '4zMMC9srt5Ri5X14GA; assert.equal(recipientHint({ kind: 'handle', handle: 'alex', missing: true }); assert.equal(recipientHint({ kind: 'handle', handle: 'royce', missing: false, self: true })
@@ -34,7 +34,7 @@ test('a message can name a handle or an SNS name', () => {
   assert.equal(profileRailLabel({ fallback: 'You' }), 'You');
 });
 
-/*
+/**
  * Achieves: verifies an empty Supabase directory does not erase a saved handle claim.
  * Fails when: an empty Supabase directory does not erase a saved handle claim breaks (e.g. expected 'keep', 'alex', 'Alex').
  * Oracle: assert.equal(empty.persist, 'keep'); assert.equal(empty.profile.handle, 'alex'); assert.equal(empty.profile.displayName, 'Alex'); assert.equal(missingName.persist, 'keep'); assert.equal(missingName.profile.handle, 'alex'); assert.equal(nothing.persist, 'clear')
@@ -61,7 +61,7 @@ test('an empty Supabase directory does not erase a saved handle claim', () => {
   assert.equal(profileAfterDirectoryRead(local, { source: 'local' }).persist, 'keep');
 });
 
-/*
+/**
  * Achieves: verifies a 200 without a stored handle is not a saved claim.
  * Fails when: a 200 without a stored handle is not a saved claim breaks (e.g. expected false, 'profile_save_failed', false).
  * Oracle: assert.equal(missing.ok, false); assert.equal(missing.error, 'profile_save_failed'); assert.equal(echoed.ok, false); assert.equal(echoed.error, 'profile_save_failed'); assert.equal(stored.ok, true); assert.equal(stored.profile.handle, 'alex')
@@ -94,7 +94,7 @@ test('a 200 without a stored handle is not a saved claim', () => {
   assert.equal(kept.profile.handle, 'alex');
 });
 
-/*
+/**
  * Achieves: verifies a failed claim names the status and error code.
  * Fails when: a failed claim names the status and error code breaks (e.g. expected handle: 'alex', missing: true } }, handle: 'alex', missing: false } }, handle: 'royce', missing: false, self: true } }).
  * Oracle: assert.equal(handleAlreadyClaimed({ recipient: { kind: 'handle', handle: 'alex', missing: true } }); assert.equal(handleAlreadyClaimed({ recipient: { kind: 'handle', handle: 'alex', missing: false } }); assert.equal(handleAlreadyClaimed({ recipient: { kind: 'handle', handle: 'royce', missing: false, self: true }; assert.equal(handleAlreadyClaimed({ recipient: { kind: 'sns', domain: 'alex.sol' } }); assert.equal(claimSaveNote({ error: 'handle_taken' }), 'That handle is already taken.'); assert.equal( claimSaveNote({ status: 502, code: 'profile_save_failed' })
@@ -119,7 +119,7 @@ test('a failed claim names the status and error code', () => {
   assert.equal(claimSaveNote(new Error('network')), 'The directory did not update (profile_save_failed). Try the claim again.');
 });
 
-/*
+/**
  * Achieves: verifies a handle can be claimed only after the directory says it is open.
  * Fails when: a handle can be claimed only after the directory says it is open breaks (e.g. expected { recipient: { kind: 'handle', handle: 'royce', missing: tru, { recipient: { kind: 'handle', handle: 'royce', missing: fal, { error: 'runtime_unconfigured' }).
  * Oracle: assert.equal(claimLookupVerdict(200, { recipient: { kind: 'handle', handle: 'royce', missing: true } }); assert.equal(claimLookupVerdict(200, { recipient: { kind: 'handle', handle: 'royce', missing: false } }); assert.equal(claimLookupVerdict(503, { error: 'runtime_unconfigured' }); assert.equal(claimLookupVerdict(502, { error: 'profile_read_failed' }); assert.equal(claimLookupVerdict(0, {})

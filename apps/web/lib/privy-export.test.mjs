@@ -9,7 +9,7 @@ import {
 const ADDRESS = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const OTHER = 'So11111111111111111111111111111111111111112';
 
-/*
+/**
  * Achieves: verifies only Privy Solana linked wallets are treated as embedded export targets.
  * Fails when: null/empty user returns a wallet, phantom Solana matches, or address not returned for Privy.
  * Oracle: walletClientType privy + chainType solana → { address }; phantom → null.
@@ -43,7 +43,7 @@ test('privyEmbeddedSolanaWallet finds privy solana linked accounts', () => {
   );
 });
 
-/*
+/**
  * Achieves: verifies export sheet only unlocks when selected address matches (or is empty for) the embedded wallet.
  * Fails when: mismatched OTHER returns ADDRESS, empty sheet does not fall back, or null user exports.
  * Oracle: match/empty → ADDRESS; OTHER/null user → null.
@@ -65,7 +65,7 @@ test('exportAddressForSheet only returns when sheet matches embedded', () => {
   assert.equal(exportAddressForSheet(null, ADDRESS), null);
 });
 
-/*
+/**
  * Achieves: verifies failure copy distinguishes server-side wallets, address mismatch, and auth errors.
  * Fails when: notes lose server-side / agent wallet / Sign in guidance.
  * Oracle: exportFailureNote patterns for hasEmbedded/addressMatch/auth error.

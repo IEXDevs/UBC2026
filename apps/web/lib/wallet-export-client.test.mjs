@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { requestWalletExport } from './wallet-export-client.mjs';
 
-/*
+/**
  * Achieves: verifies export POSTs HPKE recipient key and returns ciphertext without private key fields.
  * Fails when: URL/headers/body wrong, private_key leaks into result, or ciphertext dropped.
  * Oracle: shellRuntimeUrl export path; body is only { recipientPublicKey }; result omits private_key.
@@ -39,7 +39,7 @@ test('the export client returns ciphertext and drops extra fields', async () => 
   assert.equal(JSON.stringify(seen.body).includes('private'), false);
 });
 
-/*
+/**
  * Achieves: verifies missing inputs and non-HPKE / HTTP failures fail closed without calling a bad path.
  * Fails when: missing walletId still fetches, or HTTP 500 / wrong encryptionType returns ok:true.
  * Oracle: missing required fields → { ok:false, error:'runtime' }; bad body → export_failed or body.error.

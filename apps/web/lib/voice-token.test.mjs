@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { VoiceTokenError, requestScribeToken, requestVoiceToken } from './voice-token.mjs';
 
-/*
+/**
  * Achieves: verifies conversation token mint uses xi-api-key, returns only the token, and maps empty key / HTTP / network failures.
  * Fails when: empty apiKey ≠ voice_unconfigured, URL/agent_id drift, reject ≠ voice_rejected, or throw ≠ voice_unreachable.
  * Oracle: GET https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=…; VoiceTokenError codes.
@@ -47,7 +47,7 @@ test('a voice token request uses the server key and returns only the token', asy
   );
 });
 
-/*
+/**
  * Achieves: verifies scribe single-use token POST path, xi-api-key header, and unconfigured/reject/unreachable codes.
  * Fails when: method ≠ POST, URL drifts, empty key ≠ voice_unconfigured, HTTP fail ≠ voice_rejected, or throw ≠ voice_unreachable.
  * Oracle: POST https://api.elevenlabs.io/v1/single-use-token/realtime_scribe → token; VoiceTokenError codes match conversation path.

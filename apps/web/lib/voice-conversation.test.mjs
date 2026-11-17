@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createConversationLog, eventToConversationText } from './voice-conversation.mjs';
 
-/*
+/**
  * Achieves: verifies ring-buffer conversation log, subscriber fan-out, and event text formatting.
  * Fails when: max is exceeded without FIFO drop, subscribers miss kinds, or formatting loses summary.
  * Oracle: max=3 keeps the newest three; first push is dropped; eventToConversationText uses kind+summary.

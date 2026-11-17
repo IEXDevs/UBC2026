@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pickWalletList, withAssignedWallet } from './wallet-assign.mjs';
 
-/*
+/**
  * Achieves: verifies a live spendable main wallet is assigned to every bot.
  * Fails when: null wallets mutate bot ids, or main wallet is not applied to all bots.
  * Oracle: null → bots unchanged; main w_main_owner replaces every bot.walletId.
@@ -26,7 +26,7 @@ test('a live main wallet replaces the assignment on every bot', () => {
   assert.deepEqual(live.bots.map(bot => bot.walletId), ['w_main_owner', 'w_main_owner']);
 });
 
-/*
+/**
  * Achieves: verifies non-spendable connected wallets cannot become the agent spend wallet.
  * Fails when: spendable:false main overwrites bot walletId, or spendable additional is ignored.
  * Oracle: phantom spendable:false keeps wallet_shop; spendable additional becomes assigned id.
@@ -48,7 +48,7 @@ test('a connected wallet cannot become the agent spend wallet', () => {
   assert.equal(mixed.bots[0].walletId, 'w_main_owner');
 });
 
-/*
+/**
  * Achieves: verifies pickWalletList skips empty arrays so later non-empty sources win.
  * Fails when: empty first source blocks later wallets, or first non-empty is skipped.
  * Oracle: [], null, [{id:w1}] → [{id:w1}]; live beats remote; all empty → [].

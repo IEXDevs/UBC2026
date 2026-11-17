@@ -25,7 +25,7 @@ function checked(sourceOwner, destinationOwner, mint, amount, decimals, nested) 
   return step;
 }
 
-/*
+/**
  * Achieves: verifies nested inner transferChecked hops net to owner USDC out + SOL in only.
  * Fails when: intermediate hops appear as legs, deltas wrong, or leg count ≠ 2.
  * Oracle: owner→hopA USDC 5e6 out; hopC→owner SOL 2.1e7 in; legs.length === 2.
@@ -49,7 +49,7 @@ test('a four-step swap nets to the owner start and end only', () => {
   assert.equal(legs.length, 2);
 });
 
-/*
+/**
  * Achieves: verifies pre/post token balances win over pool hops that never touch the owner.
  * Fails when: hop-only USDC volume becomes a leg or owner deltas ignore pre/post balances.
  * Oracle: owner USDC 10e6→5e6 (−5e6); SOL post 2.1e7 in; hopA↔hopB↔hopC ignored.

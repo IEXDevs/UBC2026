@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { shoppingComparisonView } from './shopping-comparison.mjs';
 
-/*
+/**
  * Achieves: verifies quality-ranked shopping view marks the proposal row and keeps the ask/next/outflow.
  * Fails when: first row is not the proposal, quality dropped, or ask/next missing.
  * Oracle: title Price and quality; rows[0] proposal solid quality 800; ask matches Ask before buy.
@@ -30,7 +30,7 @@ test('shows the quality-ranked proposal and keeps the ask', () => {
   assert.equal(view.outflow, '4000');
 });
 
-/*
+/**
  * Achieves: verifies price-only catalogs still surface a proposal without inventing quality.
  * Fails when: title is not Lowest price, or quality becomes a fake number.
  * Oracle: quality null; role proposal.
@@ -48,7 +48,7 @@ test('a price-only catalog still lists the cheapest proposal', () => {
   assert.equal(view.rows[0].role, 'proposal');
 });
 
-/*
+/**
  * Achieves: verifies Laso challenges are not rendered as catalog comparisons.
  * Fails when: laso provider returns a comparison view object.
  * Oracle: shoppingComparisonView({ provider:'laso', ... }) === null.

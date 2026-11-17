@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { logRows, sendPreview, signatureOf, swapPreview } from './txn-preview.mjs';
 
-/*
+/**
  * Achieves: verifies send preview title and From/To/Amount/Network line labels.
  * Fails when: title omits amount, label order drifts, or destination value is wrong.
  * Oracle: sendPreview({ from, to, amountLabel }) → title 'Send …' and fixed line labels.
@@ -18,7 +18,7 @@ test('a send preview names the wallet, destination, and amount', () => {
   assert.equal(preview.lines[2].value, '1.5 USDC');
 });
 
-/*
+/**
  * Achieves: verifies log rows merge receipts/payments/activity with Solscan links and signature helpers.
  * Fails when: row order/ids drift, cluster query missing on solscan, or swap placeholder text changes.
  * Oracle: solscan.io/tx/{sig}[+?cluster=devnet]; signatureOf; swapPreview empty receive → 'Quoted when you slide'.

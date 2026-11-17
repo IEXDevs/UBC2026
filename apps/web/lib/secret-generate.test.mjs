@@ -9,7 +9,7 @@ function fill(bytes) {
   bytes.fill(7);
 }
 
-/*
+/**
  * Achieves: verifies generated password/passphrase satisfy create rules and accept gate requires copy when generated.
  * Fails when: length/charset break, passwordProblem rejects, accept allows uncopied generated secrets, or typed path blocked.
  * Oracle: 20-char no-ambiguous charset; 4-word passphrase; secretAcceptAllowed({generated,copied,acknowledged}).
@@ -30,7 +30,7 @@ test('generated password and passphrase fit the create rules without being logge
   assert.equal(secretAcceptAllowed({ generated: false }), true);
 });
 
-/*
+/**
  * Achieves: verifies SecretDraft places generator then field then Copy; DeskLock/Recovery omit wrong generator/ack UX.
  * Fails when: Copy moves before field, 'I copied it' checkbox returns, DeskLock grows passphrase generate, Recovery adds generate password.
  * Oracle: source order action < name < aria-label="Copy" < warning; Recovery Password/Repeat/Download seed/12 words.
