@@ -75,6 +75,9 @@ export default function Composer({
   usage = null,
   onAttach = null,
   onEditLine = null,
+  onPatchLine = null,
+  onConfirm = null,
+  onBindAccess = null,
   clientTools = null,
 }) {
   const [presence, setPresence] = useState('off');
@@ -209,6 +212,10 @@ export default function Composer({
   const editToken = editTokenIn(lines);
   const linesRef = useRef(lines);
   linesRef.current = lines;
+  const resolveRef = useRef(null);
+  useEffect(() => {
+    onBindAccess?.((line, accepted) => resolveRef.current?.(line, accepted));
+  }, [onBindAccess]);
   const seenEdit = useRef('');
   useEffect(() => {
     if (!editToken) return undefined;
@@ -393,11 +400,7 @@ export default function Composer({
         shellWallets,
         shellBalanceLabel,
       });
-      if (result.ok) {
-        pushLine('agent', result.reply, botId, result.tokens, result.activity);
-      } else {
-        pushLine('agent', chatFailureNote(result.error));
-      }
+      await settleChat(result, spoken, prior);
     } catch {
       pushLine('agent', chatFailureNote('network'));
     } finally {
@@ -436,7 +439,8 @@ export default function Composer({
         shellWallets,
         shellBalanceLabel,
       });
-      pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error), botId, result.ok ? result.tokens : 0, result.ok ? result.activity : []);
+      if (!result.ok) pushLine('agent', chatFailureNote(result.error));
+      else await settleChat(result, spoken, prior);
     } catch {
       pushLine('agent', chatFailureNote('network'));
     } finally {
@@ -446,14 +450,89 @@ export default function Composer({
     }
   }
 
-  function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = []) {
+  function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = [], access = null) {
     const spoken = typeof text === 'string' ? text.trim() : '';
     if (!spoken) return;
     const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
     if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
     if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
+    if (access && access.kind === 'inline' && typeof access.name === 'string') line.access = access;
     onLine?.(line, targetId);
   }
+
+  async function settleChat(result, spoken, prior, grants) {
+    if (!result?.ok) {
+      pushLine('agent', chatFailureNote(result?.error));
+      return;
+    }
+    if (result.hold?.kind === 'modal') {
+      if (result.reply) pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
+      const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label) : false;
+      if (!accepted) {
+        pushLine('note', 'That stayed unconfirmed.');
+        return;
+      }
+      await continueChat(spoken, prior, [result.hold]);
+      return;
+    }
+    if (result.hold?.kind === 'inline') {
+      pushLine('agent', result.reply || result.hold.label, botIdRef.current, result.tokens, result.activity, result.hold);
+      return;
+    }
+    pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
+  }
+
+  async function continueChat(spoken, prior, grants) {
+    setThinking(true);
+    onThinking?.(true);
+    sendingRef.current = true;
+    try {
+      const result = await sendBotChat({
+        ownerId,
+        botId: botIdRef.current,
+        message: spoken,
+        history: prior,
+        name: botName,
+        goal: botGoal,
+        type: botType,
+        permission: permissionRef.current,
+        grants,
+        model: modelRef.current,
+        effort: currentEffortId(),
+        shellBots,
+        shellWallets,
+        shellBalanceLabel,
+      });
+      await settleChat(result, spoken, prior, grants);
+    } catch {
+      pushLine('agent', chatFailureNote('network'));
+    } finally {
+      sendingRef.current = false;
+      setThinking(false);
+      onThinking?.(false);
+    }
+  }
+
+  resolveRef.current = async (line, accepted) => {
+    if (!line?.access || sendingRef.current) return;
+    onPatchLine?.(line.id, { access: null }, botIdRef.current);
+    if (accepted !== true) {
+      pushLine('note', 'Access stayed off.');
+      return;
+    }
+    const thread = linesRef.current;
+    const index = thread.findIndex(item => item.id === line.id);
+    const before = index >= 0 ? thread.slice(0, index) : thread;
+    let userIndex = -1;
+    for (let i = before.length - 1; i >= 0; i -= 1) {
+      if (before[i]?.role === 'user') {
+        userIndex = i;
+        break;
+      }
+    }
+    if (userIndex < 0) return;
+    await continueChat(before[userIndex].text, before.slice(0, userIndex), [line.access]);
+  };
 
   function sealMic(live = sessionRef.current) {
     micGate.current.enforce();

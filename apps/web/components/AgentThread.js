@@ -14,7 +14,7 @@ function liveEventsUrl(botId) {
   return shellRuntimeUrl(`/api/events?botId=${encodeURIComponent(botId)}`);
 }
 
-export default function AgentThread({ bot, ownerId = null, lines = [], thinking = false, onParty = null, onEdit = null }) {
+export default function AgentThread({ bot, ownerId = null, lines = [], thinking = false, onParty = null, onEdit = null, onAccess = null }) {
   const [remoteEvents, setRemoteEvents] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [focus, setFocus] = useState(null);
@@ -81,7 +81,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
 
   return (
     <div className="agent-thread">
-      <ChatBubbles lines={lines} thinking={thinking} onParty={onParty} onEdit={onEdit} />
+      <ChatBubbles lines={lines} thinking={thinking} onParty={onParty} onEdit={onEdit} onAccess={onAccess} />
       {chips.length > 0 ? (
         <div className="agent-chips">
           {chips.map(chip => (

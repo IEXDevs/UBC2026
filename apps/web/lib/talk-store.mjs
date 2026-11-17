@@ -26,7 +26,28 @@ function cleanLine(line) {
   if (line.compacted === true) next.compacted = true;
   const activity = sanitizeActivity(line.activity);
   if (activity.length > 0) next.activity = activity;
+  const access = cleanAccess(line.access);
+  if (access) next.access = access;
   return next;
+}
+
+function cleanAccess(value) {
+  if (!value || value.kind !== 'inline' || typeof value.name !== 'string' || !value.name.trim()) return null;
+  const label = typeof value.label === 'string' ? value.label.trim().slice(0, 200) : '';
+  if (!label) return null;
+  const args = {};
+  if (value.args && typeof value.args === 'object' && !Array.isArray(value.args)) {
+    for (const key of Object.keys(value.args).slice(0, 8)) {
+      if (typeof value.args[key] === 'string') args[key] = value.args[key].slice(0, 200);
+    }
+  }
+  return {
+    kind: 'inline',
+    name: value.name.trim().slice(0, 64),
+    args,
+    label,
+    prompt: typeof value.prompt === 'string' && value.prompt.trim() ? value.prompt.trim().slice(0, 240) : label,
+  };
 }
 
 export function normalizeTalks(value) {

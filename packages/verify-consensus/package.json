@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./consensus.mjs",
-  "scripts": { "test": "node --test consensus.test.mjs" },
+  "exports": {
+    ".": "./consensus.mjs",
+    "./turn": "./turn.mjs"
+  },
+  "scripts": { "test": "node --test consensus.test.mjs turn.test.mjs" },
   "engines": { "node": ">=20" }
 }

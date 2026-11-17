@@ -13,6 +13,18 @@ import {
 const META_KEY = 'LLM_1607358788850350_testsecretvalue';
 const OR_KEY = 'sk-or-v1-test-openrouter-key-value';
 
+function isTurnVerify(options) {
+  try {
+    return JSON.stringify(JSON.parse(options.body).messages || []).includes('Role: turn-verify');
+  } catch {
+    return false;
+  }
+}
+
+function turnAllowed() {
+  return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
+}
+
 /**
  * Achieves: verifies text chat messages keep platform rules and map agent history.
  * Fails when: text chat messages keep platform rules and map agent history breaks (e.g. expected 'developer', /Maelstrom/, /Nova/); failure/null paths flip.
@@ -77,6 +89,7 @@ test('completeTextChat hits Meta and never puts the key in the body', async () =
     botName: 'Nova',
     message: 'status?',
     fetcher: async (url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       seen = { url, body: JSON.parse(options.body) };
       return Response.json({ choices: [{ message: { content: 'watching' } }] });
     },
@@ -94,6 +107,7 @@ test('completeTextChat hits Meta and never puts the key in the body', async () =
     message: 'status?',
     reasoningEffort: 'Low',
     fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       low = JSON.parse(options.body);
       return Response.json({ choices: [{ message: { content: 'watching' } }] });
     },
@@ -113,10 +127,13 @@ test('completeTextChat keeps the provider token total', async () => {
   const result = await completeTextChat({
     metaModelApiKey: META_KEY,
     message: 'status?',
-    fetcher: async () => Response.json({
-      usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
-      choices: [{ message: { content: 'watching' } }],
-    }),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      return Response.json({
+        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
+        choices: [{ message: { content: 'watching' } }],
+      });
+    },
   });
   assert.deepEqual(result.usage, { prompt: 11, completion: 4, total: 15 });
 });
@@ -135,6 +152,7 @@ test('OpenRouter text chat skips a paid model id', async () => {
     model: 'openai/gpt-4o',
     message: 'status?',
     fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       seen = JSON.parse(options.body);
       return Response.json({ choices: [{ message: { content: 'free reply' } }] });
     },
@@ -188,6 +206,7 @@ test('completeTextChat runs a tool round then answers', async () => {
       return { results: [{ title: 'USDC', url: 'https://example.com' }] };
     },
     fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       const body = JSON.parse(options.body);
       round += 1;
       if (round === 1) {
@@ -253,6 +272,7 @@ test('a repeated tool and a blocked browser stop the spin and still answer', asy
       return name === 'web_search' ? { results: [{ title: 'Note', url: 'https://example.com' }] } : { ok: true };
     },
     fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       const body = JSON.parse(options.body);
       round += 1;
       if (round === 1) {
@@ -298,7 +318,8 @@ test('an empty tool finish still returns an answer instead of stopping', async (
       function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: {} } },
     }],
     invokeTool: async () => ({ results: [] }),
-    fetcher: async () => {
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       round += 1;
       if (round === 1) {
         return Response.json({
@@ -316,4 +337,118 @@ test('an empty tool finish still returns an answer instead of stopping', async (
   });
   assert.match(result.activity.find(step => step.kind === 'think')?.text || '', /published rate/);
   assert.match(result.text, /stopped so this request would not keep spinning|Answer the owner/);
+});
+
+test('the hidden verifier blocks a tool and a reply that it does not allow', async () => {
+  const seen = [];
+  let calls = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'search',
+    tools: [{
+      type: 'function',
+      function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: {} } },
+    }],
+    invokeTool: async (name) => {
+      seen.push(name);
+      return { results: [] };
+    },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      calls += 1;
+      if (calls === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{}' } }],
+            },
+          }],
+        });
+      }
+      return Response.json({ choices: [{ message: { content: 'should not ship' } }] });
+    },
+  });
+  assert.deepEqual(seen, []);
+  assert.equal(result.text, 'That step did not pass the check.');
+});
+
+test('ask mode holds a tool for an inline access request until it is granted', async () => {
+  const seen = [];
+  const tools = [{
+    type: 'function',
+    function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: { query: { type: 'string' } } } },
+  }];
+  const fetcher = async (_url, options) => {
+    if (isTurnVerify(options)) return turnAllowed();
+    const body = JSON.parse(options.body);
+    const calls = body.messages.some(item => item.role === 'tool');
+    if (!calls) {
+      return Response.json({
+        choices: [{
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{"query":"USDC"}' } }],
+          },
+        }],
+      });
+    }
+    return Response.json({ choices: [{ message: { content: 'USDC is flat.' } }] });
+  };
+  const held = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'search',
+    tools,
+    permissionMode: 'ask',
+    invokeTool: async (name) => { seen.push(name); return { results: [] }; },
+    fetcher,
+  });
+  assert.equal(held.hold.kind, 'inline');
+  assert.equal(held.hold.name, 'web_search');
+  assert.deepEqual(seen, []);
+  const next = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'search',
+    tools,
+    permissionMode: 'ask',
+    grants: [held.hold],
+    invokeTool: async (name) => { seen.push(name); return { results: [] }; },
+    fetcher,
+  });
+  assert.equal(next.hold, undefined);
+  assert.equal(next.text, 'USDC is flat.');
+  assert.deepEqual(seen, ['web_search']);
+});
+
+test('full permissions holds a fund tool for the confirm slide', async () => {
+  const seen = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send it',
+    permissionMode: 'full',
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object', properties: {} } },
+    }],
+    invokeTool: async (name) => { seen.push(name); return { ok: true }; },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      return Response.json({
+        choices: [{
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1","handle":"bob"}' } }],
+          },
+        }],
+      });
+    },
+  });
+  assert.equal(result.hold.kind, 'modal');
+  assert.match(result.hold.prompt, /Slide to confirm/);
+  assert.deepEqual(seen, []);
 });

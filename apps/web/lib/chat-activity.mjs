@@ -14,6 +14,8 @@ const LABELS = Object.freeze({
 });
 
 const PAGE_TOOLS = new Set(['web_scrape', 'browser_navigate', 'browser_open']);
+const SECRET_KEY = /key|token|secret|password|authorization|cookie|seed|phrase/i;
+const SECRET_VALUE = /eyJ[A-Za-z0-9_-]{8,}|live\.browser\.run/i;
 
 function clip(value, max) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -69,30 +71,64 @@ export function thinkStep(text) {
   return { kind: 'think', text: clean };
 }
 
+function commandLine(name, args) {
+  const parts = [name];
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return name;
+  for (const key of Object.keys(args).slice(0, 6)) {
+    if (SECRET_KEY.test(key)) continue;
+    const value = args[key];
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue;
+    const text = String(value).trim();
+    if (!text || SECRET_VALUE.test(text)) continue;
+    parts.push(`${key}=${text.slice(0, 120)}`);
+  }
+  return parts.join(' ').slice(0, 240);
+}
+
+function failureText(parsed) {
+  const error = clip(parsed?.error, 80).replace(SECRET_VALUE, '[hidden]');
+  const hint = clip(parsed?.hint, 180).replace(SECRET_VALUE, '[hidden]');
+  const extra = clip(typeof parsed?.detail === 'string' ? parsed.detail : '', 180).replace(SECRET_VALUE, '[hidden]');
+  return [error, hint && hint !== error ? hint : '', extra && extra !== error && extra !== hint ? extra : '']
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 400);
+}
+
+function withFailure(step, name, args, parsed, failed) {
+  if (!failed) return step;
+  return {
+    ...step,
+    status: 'error',
+    command: commandLine(name, args),
+    error: failureText(parsed),
+  };
+}
+
 export function toolStep(name, args, result) {
   const tool = clip(name, 64);
   if (!tool) return null;
   const parsed = parseResult(result);
-  const failed = typeof parsed?.error === 'string' && parsed.error.length > 0;
+  const failed = (typeof parsed?.error === 'string' && parsed.error.length > 0) || parsed?.ok === false;
   const status = failed ? 'error' : 'done';
   if (parsed?.error === 'repeated_tool') return null;
   if (parsed?.error === 'site_blocked') {
-    return {
+    return withFailure({
       kind: 'tool',
       name: tool,
       label: 'Skipped a blocked site',
       detail: clip(parsed.host, 80),
       status: 'error',
-    };
+    }, tool, args, parsed, true);
   }
   if (tool === 'web_search') {
     const query = clip(args?.query, 160);
-    return {
+    return withFailure({
       kind: 'search',
       query: /^(search|web search|browse|browser)$/i.test(query) ? '' : query,
       sites: failed ? [] : sitesFrom(parsed),
       status,
-    };
+    }, tool, args, parsed, failed);
   }
   if (PAGE_TOOLS.has(tool)) {
     const page = siteFrom({
@@ -104,12 +140,21 @@ export function toolStep(name, args, result) {
     }
   }
   const detail = tool === 'get_price' ? clip(args?.mint, 48) : '';
-  return {
+  return withFailure({
     kind: 'tool',
     name: tool,
-    label: LABELS[tool] || tool.replaceAll('_', ' '),
+    label: failed ? `${LABELS[tool] || tool.replaceAll('_', ' ')} failed` : (LABELS[tool] || tool.replaceAll('_', ' ')),
     detail,
     status,
+  }, tool, args, parsed, failed);
+}
+
+function failureFields(step) {
+  const command = clip(step.command, 240).replace(SECRET_VALUE, '[hidden]');
+  const error = clip(step.error, 400).replace(SECRET_VALUE, '[hidden]');
+  return {
+    ...(command ? { command } : {}),
+    ...(error ? { error } : {}),
   };
 }
 
@@ -130,11 +175,13 @@ export function sanitizeActivity(value) {
       if (text) steps.push({ kind: 'think', text });
     } else if (step.kind === 'search') {
       const sites = (Array.isArray(step.sites) ? step.sites : []).map(cleanSite).filter(Boolean).slice(0, 6);
+      const searchStatus = step.status === 'error' ? 'error' : 'done';
       steps.push({
         kind: 'search',
         query: clip(step.query, 160),
         sites,
-        status: step.status === 'error' ? 'error' : 'done',
+        status: searchStatus,
+        ...(searchStatus === 'error' ? failureFields(step) : {}),
       });
     } else if (step.kind === 'page') {
       const site = cleanSite(step);
@@ -150,12 +197,14 @@ export function sanitizeActivity(value) {
     } else if (step.kind === 'tool') {
       const label = clip(step.label, 80);
       if (!label) continue;
+      const toolStatus = step.status === 'error' ? 'error' : 'done';
       steps.push({
         kind: 'tool',
         name: clip(step.name, 64),
         label,
         detail: clip(step.detail, 80),
-        status: step.status === 'error' ? 'error' : 'done',
+        status: toolStatus,
+        ...(toolStatus === 'error' ? failureFields(step) : {}),
       });
     }
     if (steps.length >= 12) break;

@@ -443,9 +443,12 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
 test('the custom LLM streams Grok through OpenRouter and does not call out without a key', async () => {
   const calls = [];
   const fetcher = async (url, init) => {
-    calls.push({ url, init, body: JSON.parse(init.body) });
+    const body = JSON.parse(init.body);
+    calls.push({ url, init, body });
+    const blob = JSON.stringify(body.messages || []);
+    const content = blob.includes('Role: turn-verify') ? '{"allow":true}' : `hello ${OPENROUTER}`;
     return Response.json({
-      choices: [{ message: { content: `hello ${OPENROUTER}` } }],
+      choices: [{ message: { content } }],
     });
   };
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
@@ -465,7 +468,7 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.match(sse, /data: \[DONE\]/);
   assert.equal(sse.includes(OPENROUTER), false);
   assert.match(sse, /hello \[hidden\]/);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(calls[0].init.headers.Authorization, `Bearer ${OPENROUTER}`);
   assert.equal(calls[0].body.model.endsWith(':free'), true);

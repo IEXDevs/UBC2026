@@ -85,6 +85,96 @@ export function writeAcceptance(storage, ownerId, { permission, reviewCap } = {}
   return { permission: mode, reviewCap: cap };
 }
 
+const FUND_TOOLS = new Set(['request_spend', 'sns_send', 'prepare_shopping']);
+
+const ACCESS_COPY = Object.freeze({
+  web_search: 'Search the web',
+  web_scrape: 'Read a page',
+  browser_open: 'Open the browser',
+  browser_navigate: 'Open a page',
+  browser_live_view: 'Show the live view',
+  browser_release: 'Close the browser',
+  get_price: 'Look up a price',
+  get_wallets: 'Read wallet balances',
+  get_overview: 'Read the overview',
+  get_activity: 'Read activity',
+  get_payment_feed: 'Read payments',
+  list_bots: 'List agents',
+  get_bot_status: 'Read agent status',
+  list_browser_sessions: 'List browser sessions',
+  what_happened_while_away: 'Read what happened while you were away',
+  why_decision: 'Read a decision',
+  prepare_shopping: 'Prepare a purchase',
+  request_spend: 'Move funds',
+  sns_send: 'Send to a .sol name',
+  pause_bot: 'Pause an agent',
+  resume_bot: 'Resume an agent',
+  wake_bot: 'Wake an agent',
+  start_task: 'Start a task',
+  stop_all: 'Stop every agent',
+});
+
+function plainArgs(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return {};
+  const next = {};
+  for (const key of Object.keys(args).slice(0, 8)) {
+    const value = args[key];
+    if (typeof value === 'string') next[key] = value.slice(0, 200);
+    else if (value === true || value === false) next[key] = value;
+  }
+  return next;
+}
+
+function stable(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const next = {};
+  for (const key of Object.keys(value).sort()) next[key] = stable(value[key]);
+  return next;
+}
+
+function accessDetail(name, args) {
+  const query = typeof args?.query === 'string' ? args.query.trim() : '';
+  const url = typeof args?.url === 'string' ? args.url.trim() : '';
+  const amount = typeof args?.amount === 'string' ? args.amount.trim() : '';
+  const handle = typeof args?.handle === 'string' ? args.handle.replace(/^@/, '').trim() : '';
+  if (name === 'web_search' && query) return `Search the web for “${query.slice(0, 80)}”`;
+  if ((name === 'web_scrape' || name === 'browser_navigate' || name === 'browser_open') && url) {
+    return `Open ${url.slice(0, 120)}`;
+  }
+  if (name === 'request_spend' || name === 'sns_send') {
+    const who = handle ? ` to @${handle}` : '';
+    return amount ? `Move ${amount} USDC${who}` : `Move funds${who}`;
+  }
+  return ACCESS_COPY[name] || `Use ${name}`;
+}
+
+/** Ask shows an inline access request for tools. Fund moves use the confirm slide in ask and full. */
+export function toolAccessKind(mode, name) {
+  if (typeof name !== 'string' || !name.trim()) return null;
+  if (FUND_TOOLS.has(name) && (mode === 'ask' || mode === 'full')) return 'modal';
+  if (mode === 'ask') return 'inline';
+  return null;
+}
+
+export function toolAccessRequest(mode, name, args = {}) {
+  const kind = toolAccessKind(mode, name);
+  if (!kind) return null;
+  const label = accessDetail(name, plainArgs(args));
+  return {
+    kind,
+    name,
+    args: plainArgs(args),
+    label,
+    prompt: kind === 'modal' ? `${label}. Slide to confirm.` : label,
+  };
+}
+
+export function grantCovers(grants, name, args) {
+  if (!Array.isArray(grants)) return false;
+  const want = JSON.stringify(stable(plainArgs(args)));
+  return grants.some(grant => grant?.name === name && JSON.stringify(stable(plainArgs(grant.args))) === want);
+}
+
 export function permissionInstruction(id) {
   const mode = parsePermission(id);
   const shared = 'Fund movements go through the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.';

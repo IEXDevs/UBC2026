@@ -942,6 +942,7 @@ test('bot text chat returns an OpenRouter reply for the owner', async () => {
         model: 'muse-spark-1.3-contributor',
         text: `${botName} heard: ${message}`,
       }),
+      complete: async () => ({ text: '{"allow":true}' }),
     },
   });
   const res = await worker.fetch(new Request('https://runtime/api/bots/bot_1/chat', {

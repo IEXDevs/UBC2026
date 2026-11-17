@@ -6,7 +6,7 @@ import {
   serializeToolResult,
 } from '../../../../../lib/chat-tools.mjs';
 import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mjs';
-import { permissionInstruction } from '../../../../../lib/spend-permission.mjs';
+import { parsePermission, permissionInstruction, toolAccessKind } from '../../../../../lib/spend-permission.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -57,6 +57,10 @@ export async function POST(request, context) {
     return Response.json({ error: 'message_required' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
   }
 
+  const permissionMode = parsePermission(body.permission);
+  const grants = Array.isArray(body.grants)
+    ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
+    : [];
   const env = chatToolEnv();
   const invokeRaw = createChatToolInvoker({
     ownerId,
@@ -83,14 +87,24 @@ export async function POST(request, context) {
       reasoningEffort: typeof body.effort === 'string' ? body.effort : '',
       tools: openAiAgentTools(),
       toolsInstruction: chatToolsInstruction(),
-      permission: permissionInstruction(body.permission),
-      invokeTool: async (name, args) => serializeToolResult(await invokeRaw(name, args)),
+      permission: permissionInstruction(permissionMode),
+      permissionMode,
+      grants,
+      invokeTool: async (name, args) => {
+        const next = args && typeof args === 'object' ? { ...args } : {};
+        if (toolAccessKind(permissionMode, name) && (permissionMode === 'full' || name === 'request_spend' || name === 'sns_send' || name === 'prepare_shopping')) {
+          next.confirmed = true;
+          next.permission = permissionMode;
+        }
+        return serializeToolResult(await invokeRaw(name, next));
+      },
     });
     return Response.json(
       {
         ok: true,
         botId,
         reply: reply.text,
+        ...(reply.hold ? { hold: reply.hold } : {}),
         model: reply.model,
         provider: reply.provider,
         toolRounds: reply.toolRounds ?? 0,

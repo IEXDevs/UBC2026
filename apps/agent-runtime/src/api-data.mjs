@@ -24,6 +24,7 @@ import {
 } from './supabase-rest.mjs';
 import { readBotAlerts } from './bot-alerts.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
+import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import {
   mapTransferRow,
   platformProposal,
@@ -921,10 +922,16 @@ export async function handleApiData(request, env, matched) {
         history,
         message,
       });
+      const verdict = await openrouter.complete({
+        role: 'verify',
+        goal: botGoal,
+        task: turnVerifyTask('reply', reply.text),
+      });
+      const text = parseTurnVerdict(verdict.text).allow ? reply.text : BLOCKED_TURN;
       return json({
         ok: true,
         botId,
-        reply: reply.text,
+        reply: text,
         model: reply.model,
       });
     } catch (err) {
