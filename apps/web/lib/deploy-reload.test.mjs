@@ -22,12 +22,26 @@ function memorySession() {
   };
 }
 
+/*
+ * Achieves: verifies a build id prefers the git commit.
+ * Fails when: a build id prefers the git commit breaks (e.g. expected head: (, head: (, head: ().
+ * Oracle: assert.equal(resolveBuildId({ env: { NEXT_PUBLIC_BUILD_ID: 'from-env' }, head: (); assert.equal(resolveBuildId({ env: { NEXT_PUBLIC_BUILD_ID: 'from-env' }, head: (); assert.equal(resolveBuildId({ env: {}, head: ()
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('a build id prefers the git commit', () => {
   assert.equal(resolveBuildId({ env: { NEXT_PUBLIC_BUILD_ID: 'from-env' }, head: () => 'abc1234' }), 'abc1234');
   assert.equal(resolveBuildId({ env: { NEXT_PUBLIC_BUILD_ID: 'from-env' }, head: () => '' }), 'from-env');
   assert.equal(resolveBuildId({ env: {}, head: () => 'nope' }), 'dev');
 });
 
+/*
+ * Achieves: verifies a new deployment is reloaded once after caches are cleared.
+ * Fails when: a new deployment is reloaded once after caches are cleared breaks (e.g. expected '/api/build', 'no-store', { reload: true, id: 'bbbbbbb' }).
+ * Oracle: assert.equal(url, '/api/build'); assert.equal(init.cache, 'no-store'); assert.equal(replaced, `https://maelstrom.example/desk?tab=1&${BUILD_QUERY}=bbbbbbb#voice`); assert.equal(deleted.length, 1); assert.deepEqual(first, { reload: true, id: 'bbbbbbb' }); assert.deepEqual(deleted, ['pages'])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a new deployment is reloaded once after caches are cleared', async () => {
   const deleted = [];
   const unregistered = [];
@@ -63,6 +77,13 @@ test('a new deployment is reloaded once after caches are cleared', async () => {
   assert.equal(deleted.length, 1);
 });
 
+/*
+ * Achieves: verifies the same build and a failed check leave the page alone.
+ * Fails when: the same build and a failed check leave the page alone breaks (e.g. expected { reload: false }, 'aaaaaaa', 'bbbbbbb').
+ * Oracle: assert.equal(buildsDiffer('aaaaaaa', 'aaaaaaa'); assert.equal(buildsDiffer('', 'bbbbbbb'); assert.equal(reloadUrl('https://maelstrom.example/', 'bbbbbbb'); assert.equal(cleanBuildQuery(`https://maelstrom.example/?${BUILD_QUERY}=aaaaaaa`, 'aaaaaaa'); assert.equal(cleanBuildQuery('https://maelstrom.example/?x=1', 'aaaaaaa'); assert.deepEqual(same, { reload: false })
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('the same build and a failed check leave the page alone', async () => {
   const same = await checkDeploy({
     localId: 'aaaaaaa',
@@ -86,11 +107,25 @@ test('the same build and a failed check leave the page alone', async () => {
   assert.equal(cleanBuildQuery('https://maelstrom.example/?x=1', 'aaaaaaa'), null);
 });
 
+/*
+ * Achieves: verifies clearing caches ignores a browser with neither cache storage nor a worker.
+ * Fails when: intended checks for "clearing caches ignores a browser with neither cache storage nor a worker" no longer hold.
+ * Oracle: assertions in the test body define the expected outcomes independently of production control-flow mirroring.
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('clearing caches ignores a browser with neither cache storage nor a worker', async () => {
   await clearBrowserCaches();
   await clearBrowserCaches({ caches: {}, serviceWorker: {} });
 });
 
+/*
+ * Achieves: verifies the watcher checks immediately and when the tab is shown.
+ * Fails when: structured result drifts from expected shape.
+ * Oracle: assert.deepEqual(calls, ['/'])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('the watcher checks immediately and when the tab is shown', () => {
   const calls = [];
   let visible = () => {};
@@ -120,6 +155,13 @@ test('the watcher checks immediately and when the tab is shown', () => {
   stop();
 });
 
+/*
+ * Achieves: verifies the app publishes the build id and mounts the reload watcher.
+ * Fails when: resolveBuildId / NEXT_PUBLIC_BUILD_ID / DeployReload / no-store / _headers cache rules drift.
+ * Oracle: next.config resolves build id; layout mounts DeployReload; /api/build is no-store; _headers cover /api/build and /_next/static.
+ * Side effects / state checked: source-text / config snapshot.
+ * Gaps: source snapshot only — runtime UI/HTTP not executed.
+ */
 test('the app publishes the build id and mounts the reload watcher', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const config = readFileSync(join(root, 'next.config.mjs'), 'utf8');

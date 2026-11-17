@@ -8,6 +8,13 @@ import {
   transactionNeedsPerson,
 } from './spend-permission.mjs';
 
+/*
+ * Achieves: verifies permission modes: full manages funds; ask/review still need a person; instructions match mode.
+ * Fails when: unknown modes become full, full still needs a person, or ask instruction loses mainnet-quote warning.
+ * Oracle: parsePermission('nope')→'ask'; managesFunds only for full; transactionNeedsPerson false only for full.
+ * Side effects / state checked: N/A.
+ * Gaps: none for permission helpers.
+ */
 test('full permissions manages funds and the other modes still wait', () => {
   assert.equal(parsePermission('full'), 'full');
   assert.equal(parsePermission('nope'), 'ask');
@@ -22,6 +29,13 @@ test('full permissions manages funds and the other modes still wait', () => {
   assert.match(permissionInstruction('ask'), /mainnet price quote never authorizes/);
 });
 
+/*
+ * Achieves: verifies a send summary titles the handle and shows negative USDC net.
+ * Fails when: title drops @handle, sign is positive, or net unit missing.
+ * Oracle: amount 5e6 → signed −5; title Send to @bob; net −5 USDC.
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('a send summary shows the outflow and the net', () => {
   const summary = netChangeSummary({ amount: '5000000', asset: 'USDC', handle: 'bob' });
   assert.equal(summary.title, 'Send to @bob');
@@ -29,6 +43,13 @@ test('a send summary shows the outflow and the net', () => {
   assert.equal(summary.net, '−5 USDC');
 });
 
+/*
+ * Achieves: verifies swap legs keep each asset line while netting the USDC side.
+ * Fails when: SOL line missing, USDC sign wrong, or net includes SOL.
+ * Oracle: out 5 USDC + in SOL → lines −5 and SOL; net −5 USDC.
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('swap legs keep each asset and net the USDC side', () => {
   const summary = netChangeSummary({
     asset: 'USDC',

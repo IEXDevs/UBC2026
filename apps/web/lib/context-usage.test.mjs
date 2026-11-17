@@ -2,6 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compactLines, contextTone, contextUsage, estimateTokens, formatTokens } from './context-usage.mjs';
 
+/*
+ * Achieves: verifies an empty thread reports zero usage against the 128k window.
+ * Fails when: empty input invents tokens/messages or changes the limit.
+ * Oracle: all counters 0; limit 128000.
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('empty thread uses none of the window', () => {
   assert.deepEqual(contextUsage([]), {
     input: 0,
@@ -14,6 +21,13 @@ test('empty thread uses none of the window', () => {
   });
 });
 
+/*
+ * Achieves: verifies user lines count as messages/input and tone colors escalate with percent.
+ * Fails when: assistant lines count as messages, token estimate drifts, or tone thresholds mis-map.
+ * Oracle: 8 a's → 2 tokens; messages=2; input=3; output=1; used=4; tones grey→yellow→amber→red.
+ * Side effects / state checked: N/A.
+ * Gaps: none for estimators.
+ */
 test('user lines count as messages and input tokens', () => {
   const usage = contextUsage([
     { role: 'user', text: 'a'.repeat(8) },
@@ -33,6 +47,13 @@ test('user lines count as messages and input tokens', () => {
   assert.equal(contextTone(95), '#ef4444');
 });
 
+/*
+ * Achieves: verifies compaction marks older lines and keeps the recent tail under a tiny window.
+ * Fails when: recent id is dropped, compacted flag missing, or percent does not decrease after compact.
+ * Oracle: limit 80 → first line compacted; last id 'c'; percent(next) < percent(lines); huge limit keeps length 3.
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('a full window compacts earlier messages and keeps the recent tail', () => {
   const lines = [
     { id: 'a', role: 'user', text: 'x'.repeat(200) },

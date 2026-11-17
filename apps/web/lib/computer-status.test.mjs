@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computerStatus, countOpenBrowserSessions } from './computer-status.mjs';
 
+/*
+ * Achieves: verifies open browser sessions mark the computer Awake over idle/paused bot status.
+ * Fails when: openSessionCount>0 returns Asleep/Paused, or zero sessions with idle returns Awake.
+ * Oracle: sessions dominate; paused with 0 sessions → Paused; paused with sessions → Awake.
+ * Side effects / state checked: N/A.
+ * Gaps: none for status mapping.
+ */
 test('open browser sessions make the computer Awake even when the bot is idle', () => {
   assert.equal(computerStatus({ openSessionCount: 0, botStatus: 'idle' }), 'Asleep');
   assert.equal(computerStatus({ openSessionCount: 0, botStatus: 'watching' }), 'Asleep');
@@ -11,6 +18,13 @@ test('open browser sessions make the computer Awake even when the bot is idle', 
   assert.equal(computerStatus({ openSessionCount: 1, botStatus: 'paused' }), 'Awake');
 });
 
+/*
+ * Achieves: verifies only open rows with a sessionRecordId count (array or {sessions} shape).
+ * Fails when: closed/missing-id/null rows inflate the count, or bare arrays are ignored.
+ * Oracle: one valid open among junk → 1; bare array with open+missing-status → 2 (status optional when id present).
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('countOpenBrowserSessions ignores closed and malformed rows', () => {
   assert.equal(countOpenBrowserSessions(null), 0);
   assert.equal(countOpenBrowserSessions({ sessions: [] }), 0);

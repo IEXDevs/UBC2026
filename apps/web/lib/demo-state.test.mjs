@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getDemoShellState, panePlaceholder } from './demo-state.mjs';
 
+/*
+ * Achieves: verifies demo shell product chrome, three bots, builtin connectors, and pane copy.
+ * Fails when: product/ownerId/panes drift, bot/template counts change, or Overview/Security copy flips.
+ * Oracle: Maelstrom + null owner; panes Main/Positions/History; five named builtins; templates undeletable.
+ * Side effects / state checked: N/A (pure fixture).
+ * Gaps: none for fixture shape; live runtime bots are covered elsewhere.
+ */
 test('demo shell exposes locked panes and three builtin templates', () => {
   const state = getDemoShellState();
   assert.equal(state.product, 'Maelstrom');
@@ -20,4 +27,5 @@ test('demo shell exposes locked panes and three builtin templates', () => {
   for (const name of ['Payments', 'Positions', 'Wallets']) {
     assert.deepEqual(panePlaceholder(name), { title: name, body: 'Empty.' });
   }
+  assert.deepEqual(panePlaceholder('UnknownPane'), { title: 'UnknownPane', body: 'Empty.' });
 });

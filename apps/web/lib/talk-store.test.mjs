@@ -23,12 +23,26 @@ function memory(initial = {}) {
   };
 }
 
+/*
+ * Achieves: verifies talk storage key is owner-scoped.
+ * Fails when: talk storage key is owner-scoped breaks (e.g. expected 'maelstrom.talks.did:privy:abc', '', '').
+ * Oracle: assert.equal(talkStorageKey('did:privy:abc'), 'maelstrom.talks.did:privy:abc'); assert.equal(talkStorageKey(''), ''); assert.equal(talkStorageKey(null), '')
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('talk storage key is owner-scoped', () => {
   assert.equal(talkStorageKey('did:privy:abc'), 'maelstrom.talks.did:privy:abc');
   assert.equal(talkStorageKey(''), '');
   assert.equal(talkStorageKey(null), '');
 });
 
+/*
+ * Achieves: verifies normalizeTalks drops junk and caps lines.
+ * Fails when: normalizeTalks drops junk and caps lines breaks (e.g. expected ['1', '3'], 'note', 'circle.com').
+ * Oracle: assert.equal(kept.bot_1[0].role, 'note'); assert.equal(kept.bot_1[1].activity[0].sites[0].host, 'circle.com'); assert.equal(talks[''], undefined); assert.deepEqual(talks.bot_1.map(line => line.id), ['1', '3'])
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('normalizeTalks drops junk and caps lines', () => {
   const talks = normalizeTalks({
     bot_1: [
@@ -57,6 +71,13 @@ test('normalizeTalks drops junk and caps lines', () => {
   assert.equal(talks[''], undefined);
 });
 
+/*
+ * Achieves: verifies read and write round-trip chats per owner.
+ * Fails when: read and write round-trip chats per owner breaks (e.g. expected 'did:privy:1', talks, 'did:privy:1', 'did:privy:other').
+ * Oracle: assert.equal(writeTalks(storage, 'did:privy:1', talks); assert.deepEqual(readTalks(storage, 'did:privy:1'); assert.deepEqual(readTalks(storage, 'did:privy:other'); assert.deepEqual(readTalks(storage, 'did:privy:1')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('read and write round-trip chats per owner', () => {
   const storage = memory();
   const talks = {
@@ -67,4 +88,19 @@ test('read and write round-trip chats per owner', () => {
   assert.deepEqual(readTalks(storage, 'did:privy:other'), {});
   clearTalks(storage, 'did:privy:1');
   assert.deepEqual(readTalks(storage, 'did:privy:1'), {});
+});
+
+/*
+ * Achieves: verifies corrupt JSON and overlong owner ids fail closed to empty talks.
+ * Fails when: JSON.parse throw becomes a crash, or an overlong ownerId still writes a key.
+ * Oracle: corrupt raw → {}; ownerId length > 256 → talkStorageKey '' and writeTalks false.
+ * Side effects / state checked: storage may hold corrupt raw without throwing on read.
+ * Gaps: none.
+ */
+test('corrupt storage and overlong owner ids fail closed', () => {
+  const storage = memory({ 'maelstrom.talks.did:privy:1': '{not-json' });
+  assert.deepEqual(readTalks(storage, 'did:privy:1'), {});
+  const long = 'x'.repeat(300);
+  assert.equal(talkStorageKey(long), '');
+  assert.equal(writeTalks(storage, long, { bot_1: [{ id: '1', role: 'user', text: 'x' }] }), false);
 });

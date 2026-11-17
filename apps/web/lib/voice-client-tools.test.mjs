@@ -8,6 +8,13 @@ import {
 } from './voice-client-tools.mjs';
 import { getDemoShellState } from './demo-state.mjs';
 
+/*
+ * Achieves: verifies voice client tools can open bots/confirm/read without spending, and respect desk lock.
+ * Fails when: open_bot does not switch active id, unknown tools succeed, or locked desk still mutates active.
+ * Oracle: Sandbox shopper → bot_shop + Main pane; unknown_tool; locked → desk_locked and active unchanged.
+ * Side effects / state checked: active/pane setters and pushEvent kinds.
+ * Gaps: confirm_dialog does not assert spending is blocked beyond accepted:true — tools never call wallet APIs here.
+ */
 test('voice client tools open bots and confirm without spending', async () => {
   const state = getDemoShellState();
   let active = state.bots[0].id;

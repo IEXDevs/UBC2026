@@ -15,6 +15,13 @@ function memory() {
   };
 }
 
+/*
+ * Achieves: verifies saved providers expose masked hints only and reject insecure short drafts.
+ * Fails when: raw token appears in views/JSON, rejected drafts echo the short token, or remove leaves rows.
+ * Oracle: hint === maskToken(token); 'token' not in public provider; http + short token → ok:false without echoing token.
+ * Side effects / state checked: Map storage write/remove via saveProvider/removeProvider.
+ * Gaps: none for storage helpers; UI open path is source-checked below.
+ */
 test('a saved provider keeps the token out of the catalog view', () => {
   const storage = memory();
   const token = 'sk-live-example-token-91af';
@@ -31,6 +38,13 @@ test('a saved provider keeps the token out of the catalog view', () => {
   assert.equal(publicProvider(null), null);
 });
 
+/*
+ * Achieves: verifies Add Provider entry points exist in model menu and profile settings.
+ * Fails when: PromptBar/ProfileSheet lose Add Provider, or dialog drops saveProvider/a11y title.
+ * Oracle: source contains label/button and dialog wiring.
+ * Side effects / state checked: component source text.
+ * Gaps: source snapshot only — click/open not executed.
+ */
 test('Add Provider opens from the model menu and profile settings', () => {
   const prompt = readFileSync(join(web, 'components/PromptBar.jsx'), 'utf8');
   const profile = readFileSync(join(web, 'components/ProfileSheet.js'), 'utf8');

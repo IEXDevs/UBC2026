@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmsLevel, smoothLevel, speakingSide } from './voice-levels.mjs';
 
+/*
+ * Achieves: verifies level smoothing, RMS of silent/loud buffers, and speaking-side selection.
+ * Fails when: smoothLevel ignores targets, silence RMS is non-zero, or side thresholds mis-fire.
+ * Oracle: silence is all-128 PCM; louder user/agent levels win; both near-zero → idle.
+ * Side effects / state checked: N/A.
+ * Gaps: none for pure helpers; real AnalyserNode wiring is UI-only.
+ */
 test('voice levels follow the louder side', () => {
   assert.ok(smoothLevel(0, 1, 40) > 0.5);
   assert.ok(smoothLevel(1, 0, 40) > 0.7);

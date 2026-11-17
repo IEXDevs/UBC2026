@@ -10,6 +10,13 @@ function source(path) {
   return readFileSync(join(root, path), 'utf8');
 }
 
+/*
+ * Achieves: verifies the live browser enters from the sidebar computer screen, not the chat thread.
+ * Fails when: AgentThread embeds LiveViewPanel, FileLibrary loses side-computer/LiveViewPanel, or panel controls disappear.
+ * Oracle: LiveViewPanel lives in FileLibrary/ComputerSheet; panel keeps Start Browser / Take control / Force stop.
+ * Side effects / state checked: component source text.
+ * Gaps: source snapshot only — browser session HTTP not exercised.
+ */
 test('the live browser opens from the sidebar computer screen', () => {
   const thread = source('components/AgentThread.js');
   const library = source('components/FileLibrary.js');

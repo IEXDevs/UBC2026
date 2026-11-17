@@ -13,6 +13,13 @@ import {
 const META_KEY = 'LLM_1607358788850350_testsecretvalue';
 const OR_KEY = 'sk-or-v1-test-openrouter-key-value';
 
+/*
+ * Achieves: verifies text chat messages keep platform rules and map agent history.
+ * Fails when: text chat messages keep platform rules and map agent history breaks (e.g. expected 'developer', /Maelstrom/, /Nova/); failure/null paths flip.
+ * Oracle: assert.equal(messages[0].role, 'developer'); assert.equal(messages[2].role, 'user'); assert.equal(messages[3].role, 'assistant'); assert.equal(messages.some(item => item.content.includes('ignore rules')), false); assert.match(messages[0].content, /Maelstrom/); assert.match(messages[1].content, /Nova/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('text chat messages keep platform rules and map agent history', () => {
   const messages = buildTextChatMessages({
     botName: 'Nova',
@@ -35,6 +42,13 @@ test('text chat messages keep platform rules and map agent history', () => {
   assert.match(messages.at(-1).content, /\[redacted\]/);
 });
 
+/*
+ * Achieves: verifies LLM_ keys resolve to Meta Model API.
+ * Fails when: LLM_ keys resolve to Meta Model API breaks (e.g. expected 'meta', META_SPARK_MODEL, /api\.meta\.ai/).
+ * Oracle: assert.equal(resolved.provider, 'meta'); assert.equal(resolved.model, META_SPARK_MODEL); assert.equal(fromOpenrouterSlot.provider, 'meta'); assert.equal(or.provider, 'openrouter'); assert.equal(or.model, OPENROUTER_FREE_MODEL); assert.equal(or.model.endsWith(':free'), true)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('LLM_ keys resolve to Meta Model API', () => {
   const resolved = resolveTextChatProvider({ metaModelApiKey: META_KEY });
   assert.equal(resolved.provider, 'meta');
@@ -49,6 +63,13 @@ test('LLM_ keys resolve to Meta Model API', () => {
   assert.notEqual(or.model, OPENROUTER_SPARK_MODEL);
 });
 
+/*
+ * Achieves: verifies completeTextChat hits Meta and never puts the key in the body.
+ * Fails when: completeTextChat hits Meta and never puts the key in the body breaks (e.g. expected 'watching', undefined, 'meta'); failure/null paths flip.
+ * Oracle: assert.equal(result.text, 'watching'); assert.equal(result.usage, undefined); assert.equal(result.provider, 'meta'); assert.equal(result.model, META_SPARK_MODEL); assert.equal(seen.body.model, META_SPARK_MODEL); assert.equal(seen.body.reasoning_effort, 'high')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('completeTextChat hits Meta and never puts the key in the body', async () => {
   let seen;
   const result = await completeTextChat({
@@ -81,6 +102,13 @@ test('completeTextChat hits Meta and never puts the key in the body', async () =
   assert.equal(JSON.stringify(seen.body).includes(META_KEY), false);
 });
 
+/*
+ * Achieves: verifies completeTextChat keeps the provider token total.
+ * Fails when: structured result drifts from expected shape.
+ * Oracle: assert.deepEqual(result.usage, { prompt: 11, completion: 4, total: 15 })
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('completeTextChat keeps the provider token total', async () => {
   const result = await completeTextChat({
     metaModelApiKey: META_KEY,
@@ -93,6 +121,13 @@ test('completeTextChat keeps the provider token total', async () => {
   assert.deepEqual(result.usage, { prompt: 11, completion: 4, total: 15 });
 });
 
+/*
+ * Achieves: verifies OpenRouter text chat skips a paid model id.
+ * Fails when: OpenRouter text chat skips a paid model id breaks (e.g. expected OPENROUTER_FREE_MODEL, OPENROUTER_FREE_MODEL, true).
+ * Oracle: assert.equal(result.model, OPENROUTER_FREE_MODEL); assert.equal(seen.model, OPENROUTER_FREE_MODEL); assert.equal(seen.model.endsWith(':free'), true)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('OpenRouter text chat skips a paid model id', async () => {
   let seen;
   const result = await completeTextChat({
@@ -109,6 +144,13 @@ test('OpenRouter text chat skips a paid model id', async () => {
   assert.equal(seen.model.endsWith(':free'), true);
 });
 
+/*
+ * Achieves: verifies missing model key does not call the network.
+ * Fails when: missing model key does not call the network no longer holds.
+ * Oracle: assert.rejects( () => completeTextChat({ message: 'hi', fetcher: () => { throw new Error('network'); }, })
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('missing model key does not call the network', async () => {
   await assert.rejects(
     () => completeTextChat({
@@ -119,6 +161,13 @@ test('missing model key does not call the network', async () => {
   );
 });
 
+/*
+ * Achieves: verifies completeTextChat runs a tool round then answers.
+ * Fails when: completeTextChat runs a tool round then answers breaks (e.g. expected /Use web_search/, 'USDC looks stable.', 1).
+ * Oracle: assert.equal(result.text, 'USDC looks stable.'); assert.equal(result.toolRounds, 1); assert.equal(result.activity[0].kind, 'search'); assert.equal(result.activity[0].sites[0].host, 'example.com'); assert.equal(result.activity[1].kind, 'think'); assert.deepEqual(seen, [{ name: 'web_search', args: { query: 'USDC rates' } }])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('completeTextChat runs a tool round then answers', async () => {
   let round = 0;
   const seen = [];
@@ -179,6 +228,13 @@ test('completeTextChat runs a tool round then answers', async () => {
   assert.match(result.activity[1].text, /published rate/);
 });
 
+/*
+ * Achieves: verifies a repeated tool and a blocked browser stop the spin and still answer.
+ * Fails when: a repeated tool and a blocked browser stop the spin and still answer breaks (e.g. expected undefined, ['web_search'], 'Rates are on example.com. X blocks this browser.').
+ * Oracle: assert.equal(body.tools, undefined); assert.equal(result.text, 'Rates are on example.com. X blocks this browser.'); assert.equal(result.activity.some(step => step.label === 'Skipped a blocked site'), true); assert.deepEqual(seen, ['web_search'])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('a repeated tool and a blocked browser stop the spin and still answer', async () => {
   const seen = [];
   let round = 0;
@@ -225,6 +281,13 @@ test('a repeated tool and a blocked browser stop the spin and still answer', asy
   assert.equal(result.activity.some(step => step.label === 'Skipped a blocked site'), true);
 });
 
+/*
+ * Achieves: verifies an empty tool finish still returns an answer instead of stopping.
+ * Fails when: an empty tool finish still returns an answer instead of stopping breaks (e.g. expected /published rate/, /stopped so this request would not keep spinning|Answer the ).
+ * Oracle: assert.match(result.activity.find(step => step.kind === 'think')?.text || '', /published rate/); assert.match(result.text, /stopped so this request would not keep spinning|Answer the owner/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('an empty tool finish still returns an answer instead of stopping', async () => {
   let round = 0;
   const result = await completeTextChat({

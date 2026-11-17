@@ -14,6 +14,13 @@ import {
 
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
+/*
+ * Achieves: verifies chart range labels, Solscan token URLs, and compact USD formatting.
+ * Fails when: ranges reorder, invalid mint links, or $2.50M format drifts.
+ * Oracle: CHART_RANGES fixed list; USDC solscan URL; invalid mint → null; 2.5e6 → $2.50M.
+ * Side effects / state checked: N/A.
+ * Gaps: none for URL/format helpers.
+ */
 test('chart ranges and solscan links stay on the token page', () => {
   assert.deepEqual(CHART_RANGES, ['1H', '1D', '1W', '1M', 'YTD', '1Y', 'All']);
   assert.equal(solscanTokenUrl(USDC), `https://solscan.io/token/${USDC}`);
@@ -22,6 +29,13 @@ test('chart ranges and solscan links stay on the token page', () => {
   assert.equal(formatCompactUsd(2_500_000), '$2.50M');
 });
 
+/*
+ * Achieves: verifies candle range move, layout up flag, hover nearest point, and time formatting.
+ * Fails when: pct ≤ 0 on rising series, nearest ends pick wrong prices, or UTC label drifts.
+ * Oracle: points 1→1.02; nearest at 0/120; formatCandleTime fixed epoch → Nov 14 22:13 UTC.
+ * Side effects / state checked: N/A.
+ * Gaps: none for chart helpers; live price feeds not used.
+ */
 test('candles move and pick the hovered point', () => {
   const points = [{ t: 100, price: 1 }, { t: 200, price: 1.02 }];
   const move = rangeMove(points);
@@ -35,6 +49,13 @@ test('candles move and pick the hovered point', () => {
   assert.equal(formatCandleTime(1_700_000_000, '1D'), 'Nov 14 22:13 UTC');
 });
 
+/*
+ * Achieves: verifies holdings across wallets combine by mint for amount and usdMicro.
+ * Fails when: duplicate mints stay separate or sums are string-concatenated wrongly.
+ * Oracle: 10+5 → amount 15; usdMicro 150; single row.
+ * Side effects / state checked: N/A.
+ * Gaps: none for combineHoldings.
+ */
 test('holdings from several wallets add by mint', () => {
   const rows = combineHoldings({
     wallets: [
