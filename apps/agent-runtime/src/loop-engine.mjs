@@ -10,6 +10,7 @@ import { evaluateProposal, validateApproval } from '@ubc2026/bot-policy';
 import { evaluateTrust } from '@ubc2026/trust-score';
 import { transferDevnetUsdc } from '@ubc2026/transfers';
 import { memoFromDecision, normalizeFacts, reachConsensus } from '@ubc2026/verify-consensus';
+import { parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import { assertSpendAllowed } from '@ubc2026/wallets';
 import { advanceRun, pauseRun, resumeRun } from './checkpoint.mjs';
 
@@ -190,6 +191,15 @@ function resolvePause(run, ctx) {
   return run;
 }
 
+async function acceptTurn(ctx, kind, detail) {
+  const completion = await ctx.models.complete({
+    role: 'verify',
+    goal: ctx.bot?.goal || '',
+    task: turnVerifyTask(kind, detail),
+  });
+  return parseTurnVerdict(completion.text).allow;
+}
+
 async function performResearch(run, ctx) {
   let sources = Array.isArray(ctx.input.research?.sources) ? ctx.input.research.sources : [];
   let searchNote = null;
@@ -219,6 +229,9 @@ async function performResearch(run, ctx) {
     });
     summary = completion.text;
     model = completion.model;
+  }
+  if (!(await acceptTurn(ctx, 'research', summary))) {
+    return waitStep(run, 'research', 'verifier-blocked', { model }, ctx.now);
   }
   return finishStep(run, 'research', { summary: clip(summary), sources: slim, model, searchNote }, ctx.now);
 }
@@ -263,6 +276,9 @@ async function performDecide(run, ctx) {
   if (!facts) return waitStep(run, 'decide', 'decide-invalid', { model }, ctx.now);
   if (facts.amount !== built.proposal.outflow || facts.cluster !== built.proposal.cluster || facts.asset !== built.proposal.asset) {
     return waitStep(run, 'decide', 'amount-mismatch', { model }, ctx.now);
+  }
+  if (!(await acceptTurn(ctx, 'decide', summary))) {
+    return waitStep(run, 'decide', 'verifier-blocked', { model }, ctx.now);
   }
   return finishStep(run, 'decide', { summary: clip(summary, 500), proposal: built.proposal, facts, model }, ctx.now);
 }
@@ -552,6 +568,9 @@ async function performMonitor(run, ctx) {
     goal: goalFor(run, ctx.bot),
     task: 'Role: monitor\nThe devnet execution finished. Write a one-line watch note. Do not propose a new spend.',
   });
+  if (!(await acceptTurn(ctx, 'monitor', completion.text))) {
+    return waitStep(run, 'monitor', 'verifier-blocked', { model: completion.model }, ctx.now);
+  }
   return finishStep(run, 'monitor', { note: clip(completion.text, 500), model: completion.model }, ctx.now);
 }
 

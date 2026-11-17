@@ -925,6 +925,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     }
   }, [liveWallets, wallets, signedIn, user, getAccessToken, ownerId]);
   const confirmResolve = useRef(null);
+  const accessRef = useRef(null);
   const [slideConfirm, setSlideConfirm] = useState(null);
   const askSlideConfirm = useCallback((prompt) => new Promise((resolve) => {
     confirmResolve.current = resolve;
@@ -1430,6 +1431,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                   thinking={thinkingBot === bot.id}
                   onParty={setParty}
                   onEdit={onEditLine}
+                  onAccess={(line, accepted) => accessRef.current?.(line, accepted)}
                 />
             ) : null}
             {!noAgents && money ? (
@@ -1504,6 +1506,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             resolveMention={resolveMention}
             usage={contextUsage(talks[bot.id] ?? [])}
             onEditLine={onEditLine}
+            onPatchLine={(lineId, patch, forBot) => {
+              const id = forBot || bot.id;
+              setTalks(current => ({
+                ...current,
+                [id]: (current[id] ?? []).map(item => (item.id === lineId ? { ...item, ...patch } : item)),
+              }));
+            }}
+            onConfirm={askSlideConfirm}
+            onBindAccess={(handler) => { accessRef.current = handler; }}
             onAttach={items => {
               setLibrary(current => {
                 const prev = current[bot.id] ?? [];

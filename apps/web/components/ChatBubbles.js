@@ -13,7 +13,7 @@ function urlsIn(text) {
   return [...String(text || '').matchAll(/https?:\/\/[^\s)]+/g)].map((match) => match[0]);
 }
 
-export default function ChatBubbles({ lines, className = '', thinking = false, onParty, onEdit }) {
+export default function ChatBubbles({ lines, className = '', thinking = false, onParty, onEdit, onAccess }) {
   const tailRef = useRef(null);
   const rows = withHeads(lines);
   const [editingId, setEditingId] = useState(null);
@@ -108,6 +108,13 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
                 </BubbleContent>
               </Bubble>
               <Sources urls={urls} />
+              {line.access?.kind === 'inline' ? (
+                <div className="access-request" role="group" aria-label={line.access.label}>
+                  <p>{line.access.label}</p>
+                  <button type="button" onClick={() => onAccess?.(line, true)}>Allow</button>
+                  <button type="button" onClick={() => onAccess?.(line, false)}>Not now</button>
+                </div>
+              ) : null}
             </MessageContent>
           </Message>
         );

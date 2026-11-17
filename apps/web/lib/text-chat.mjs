@@ -4,7 +4,9 @@
  * OpenRouter calls use a free model only.
  */
 import { OPENROUTER_FREE_MODEL, selectFreeOpenRouterModel } from '@ubc2026/contracts';
+import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import { thinkStep, toolStep } from './chat-activity.mjs';
+import { grantCovers, toolAccessRequest } from './spend-permission.mjs';
 import { reasoningEffortFor } from './thinking-levels.mjs';
 
 export { OPENROUTER_FREE_MODEL };
@@ -323,6 +325,8 @@ export async function completeTextChat({
   tools = null,
   toolsInstruction = '',
   permission = '',
+  permissionMode = '',
+  grants = [],
   reasoningEffort = '',
   invokeTool = null,
   maxToolRounds = 4,
@@ -381,15 +385,34 @@ export async function completeTextChat({
   let nudged = false;
   const effort = reasoningEffortFor(modelId, reasoningEffort);
 
-  function finish(text) {
+  function finish(text, hold = null) {
     return {
       model: modelId,
       text,
       provider: resolved.provider,
       toolRounds,
+      ...(hold ? { hold } : {}),
       ...(activity.length > 0 ? { activity } : {}),
       ...(usage.total > 0 ? { usage } : {}),
     };
+  }
+
+  async function allowStep(kind, detail) {
+    const completion = await postCompletion({
+      resolved,
+      modelId,
+      messages: [{
+        role: resolved.provider === 'meta' ? 'developer' : 'system',
+        content: turnVerifyTask(kind, detail),
+      }],
+      tools: null,
+      secrets,
+      fetcher,
+      reasoningEffort: '',
+    });
+    const content = typeof completion.message?.content === 'string' ? completion.message.content : '';
+    usage = addUsage(usage, completion.usage);
+    return parseTurnVerdict(content).allow;
   }
 
   async function runCalls(calls) {
@@ -411,6 +434,10 @@ export async function completeTextChat({
           host: blocked,
           hint: 'This site blocks datacenter browsers. Do not retry. Answer from search.',
         };
+      } else if (toolAccessRequest(permissionMode, name, args) && !grantCovers(grants, name, args)) {
+        return toolAccessRequest(permissionMode, name, args);
+      } else if (!(await allowStep('tool', JSON.stringify({ name, args })))) {
+        result = { error: 'verifier_blocked', hint: BLOCKED_TURN };
       } else {
         seenTools.add(signature);
         try {
@@ -432,6 +459,7 @@ export async function completeTextChat({
     }
     toolRounds += 1;
     if (repeated) forceAnswer = true;
+    return null;
   }
 
   while (true) {
@@ -457,7 +485,8 @@ export async function completeTextChat({
     if (!wantsTools || toolRounds >= rounds) {
       if (wantsTools && calls.length > 0 && toolRounds < rounds) {
         messages.push(assistantToolMessage(completion.message));
-        await runCalls(calls);
+        const held = await runCalls(calls);
+        if (held) return finish(held.label, held);
         forceAnswer = true;
         continue;
       }
@@ -474,9 +503,11 @@ export async function completeTextChat({
         }
         text = 'I stopped so this request would not keep spinning. I do not have a finished answer from the last step.';
       }
+      if (!(await allowStep('reply', text))) text = BLOCKED_TURN;
       return finish(text);
     }
     messages.push(assistantToolMessage(completion.message));
-    await runCalls(calls);
+    const held = await runCalls(calls);
+    if (held) return finish(held.label, held);
   }
 }

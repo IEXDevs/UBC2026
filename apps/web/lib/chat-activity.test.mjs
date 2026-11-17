@@ -35,9 +35,18 @@ test('a scraped page becomes one site and a failed tool stays empty', () => {
   });
   assert.equal(page.kind, 'page');
   assert.equal(page.host, 'example.com');
-  const failed = toolStep('get_price', { mint: 'EPjF' }, '{"error":"tool_failed"}');
+  const failed = toolStep('get_price', { mint: 'EPjF' }, '{"error":"tool_failed","hint":"The price feed refused the mint."}');
   assert.equal(failed.status, 'error');
   assert.equal(failed.detail, 'EPjF');
+  assert.equal(failed.command, 'get_price mint=EPjF');
+  assert.match(failed.error, /tool_failed/);
+  assert.match(failed.error, /price feed refused/);
+  const search = toolStep('web_search', { query: 'USDC rates' }, { error: 'tool_failed' });
+  assert.equal(search.status, 'error');
+  assert.equal(search.command, 'web_search query=USDC rates');
+  const kept = sanitizeActivity([failed, search]);
+  assert.equal(kept[0].command, 'get_price mint=EPjF');
+  assert.match(kept[1].error, /tool_failed/);
 });
 
 /**

@@ -322,6 +322,7 @@ export async function sendBotChat({
   goal,
   type,
   permission,
+  grants = null,
   model,
   effort,
   shellBots = null,
@@ -359,6 +360,7 @@ export async function sendBotChat({
         ...(typeof goal === 'string' && goal.trim() ? { goal: goal.trim().slice(0, 2000) } : {}),
         ...(typeof type === 'string' && type.trim() ? { type: type.trim().slice(0, 40) } : {}),
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
+        ...(Array.isArray(grants) ? { grants: grants.slice(0, 4) } : {}),
         ...(typeof model === 'string' && model.trim() ? { model: model.trim().slice(0, 80) } : {}),
         ...(typeof effort === 'string' && effort.trim() ? { effort: effort.trim().slice(0, 16) } : {}),
         ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),
@@ -371,12 +373,16 @@ export async function sendBotChat({
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
+    const hold = body.hold && (body.hold.kind === 'inline' || body.hold.kind === 'modal')
+      && typeof body.hold.name === 'string'
+      ? body.hold
+      : null;
     const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
-    if (!reply) return { ok: false, error: 'empty_reply' };
+    if (!reply && !hold) return { ok: false, error: 'empty_reply' };
     const reported = Number(body.usage?.total);
     const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
     const activity = sanitizeActivity(body.activity);
-    return { ok: true, reply, model: body.model || null, tokens, activity };
+    return { ok: true, reply: reply || hold.label || '', model: body.model || null, tokens, activity, hold };
   } catch {
     return { ok: false, error: 'network' };
   }

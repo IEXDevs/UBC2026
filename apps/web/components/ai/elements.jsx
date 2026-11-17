@@ -199,12 +199,49 @@ function SearchRow({ label, sites = [], icon = null }) {
   );
 }
 
+function FailedCommand({ title, command, error }) {
+  const lines = [];
+  if (command) lines.push(`$ ${command}`);
+  if (error) lines.push(error);
+  const body = lines.join('\n');
+  const line = (
+    <TraceLine status="error">
+      <TraceIcon>
+        <Terminal />
+      </TraceIcon>
+      <TraceTitle>{title}</TraceTitle>
+    </TraceLine>
+  );
+  if (!body) return line;
+  return (
+    <TraceCollapsible defaultOpen>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <Output text={body} failed />
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
+}
+
 export function AgentTrace({ steps = [] }) {
   if (!steps.length) return null;
   return (
     <Trace className="agent-trace">
       {steps.map((step, index) => {
         const key = `${step.kind}-${index}`;
+        if (step.status === 'error') {
+          const title = step.kind === 'search'
+            ? (step.query ? `Searched ${step.query}` : 'Search failed')
+            : (step.label || 'Command failed');
+          return (
+            <FailedCommand
+              key={key}
+              title={title}
+              command={step.command}
+              error={step.error || step.detail}
+            />
+          );
+        }
         if (step.kind === 'think') return <ReasoningRow key={key} text={step.text} />;
         if (step.kind === 'search') {
           return (

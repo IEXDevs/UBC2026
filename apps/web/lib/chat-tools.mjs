@@ -510,6 +510,10 @@ export function createChatToolInvoker({
     for (const key of entry.body || []) {
       if (typeof args[key] === 'string' && args[key].trim()) body[key] = args[key].trim();
     }
+    if (args.confirmed === true) body.confirmed = true;
+    if (args.permission === 'ask' || args.permission === 'review' || args.permission === 'full') {
+      body.permission = args.permission;
+    }
     return workerJson(
       fetcher,
       url,

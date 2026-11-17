@@ -66,7 +66,8 @@ function scriptedOpenRouter() {
       typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
     )).join('\n');
     let content = 'research summary for yield';
-    if (text.includes('Role: decide')) {
+    if (text.includes('Role: turn-verify')) content = '{"allow":true}';
+    else if (text.includes('Role: decide')) {
       content = JSON.stringify({ summary: 'Devnet USDC transfer under cap', facts, proposal });
     } else if (text.includes('Role: verify')) content = JSON.stringify(facts);
     else if (text.includes('Role: monitor')) content = 'watching the devnet position';
@@ -167,12 +168,13 @@ test('a missing lookupPrice reads DexScreener instead of asking the model for a 
   assert.equal(seen.every(url => url.startsWith('https://api.dexscreener.com/')), true);
   const roles = models.calls.map(call => {
     const text = call.messages.map(message => message.content).join('\n');
+    if (text.includes('Role: turn-verify')) return 'turn-verify';
     if (text.includes('Role: decide')) return 'decide';
     if (text.includes('Role: verify')) return 'verify';
     if (text.includes('Role: monitor')) return 'monitor';
     return 'research';
   });
-  assert.deepEqual(roles, ['research', 'decide', 'monitor']);
+  assert.deepEqual(roles, ['research', 'turn-verify', 'decide', 'turn-verify', 'monitor', 'turn-verify']);
   const quote = body.run.checkpoints.verify.priceQuote;
   assert.equal(quote.label, 'devnet execution, mainnet pricing');
   assert.equal(quote.pricingCluster, 'mainnet');
@@ -235,13 +237,17 @@ test('the bot loop checkpoints every step and calls OpenRouter without a live ke
   assert.equal(searches[0].includes(API_KEY), false);
   const roles = models.calls.map(call => {
     const text = call.messages.map(message => message.content).join('\n');
+    if (text.includes('Role: turn-verify')) return 'turn-verify';
     if (text.includes('Role: decide')) return 'decide';
     if (text.includes('Role: verify')) return 'verify';
     if (text.includes('Role: monitor')) return 'monitor';
     return 'research';
   });
-  assert.deepEqual(roles, ['research', 'decide', 'verify', 'monitor']);
+  assert.deepEqual(roles, ['research', 'turn-verify', 'decide', 'turn-verify', 'verify', 'monitor', 'turn-verify']);
   assert.deepEqual(models.calls.map(call => call.model), [
+    'muse-spark-1.3-contributor',
+    'muse-spark-1.3-contributor',
+    'muse-spark-1.3-contributor',
     'muse-spark-1.3-contributor',
     'muse-spark-1.3-contributor',
     'muse-spark-1.3-contributor',
@@ -403,7 +409,9 @@ test('mainnet proposals and missing owners do not execute', async () => {
     const body = JSON.parse(options.body);
     calls.push(body);
     const text = JSON.stringify(body.messages);
-    const content = text.includes('Role: decide')
+    const content = text.includes('Role: turn-verify')
+      ? '{"allow":true}'
+      : text.includes('Role: decide')
       ? JSON.stringify({ summary: 'no', facts, proposal: { ...proposal, cluster: 'mainnet' } })
       : 'research summary';
     return Response.json({ choices: [{ message: { content } }] });

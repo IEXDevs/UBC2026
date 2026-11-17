@@ -22,7 +22,8 @@ import {
 import { buildTextChatMessages } from '../../web/lib/text-chat.mjs';
 import { permissionInstruction } from '../../web/lib/spend-permission.mjs';
 import { readAgentPriceQuote } from '@ubc2026/prices';
-import { META_SPARK_MODEL, resolveModelProvider } from './openrouter.mjs';
+import { META_SPARK_MODEL, createOpenRouterFromEnv, resolveModelProvider } from './openrouter.mjs';
+import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 
 export const DEFAULT_VOICE_MODEL = META_SPARK_MODEL;
 /** @deprecated Prefer DEFAULT_VOICE_MODEL — kept for older imports. */
@@ -652,6 +653,19 @@ async function handleTool(name, request, env, fetchApi) {
   const owner = await resolveToolOwner(request, body);
   if (!owner) return json({ error: 'owner_required' }, 400);
   if (parsed.conversationId) await rememberVoiceOwner(parsed.conversationId, owner);
+  const models = env.openRouter
+    || (resolveModelProvider(env).provider !== 'none' ? createOpenRouterFromEnv(env, env.fetch ?? fetch) : null);
+  if (models && typeof models.complete === 'function') {
+    try {
+      const verdict = await models.complete({
+        role: 'verify',
+        task: turnVerifyTask('tool', JSON.stringify({ name, parameters: parsed.parameters })),
+      });
+      if (!parseTurnVerdict(verdict.text).allow) return json({ error: 'verifier_blocked' }, 409);
+    } catch {
+      return json({ error: 'verifier_blocked' }, 409);
+    }
+  }
   let result;
   try {
     if (toolDef.handler === 'research') {
@@ -822,7 +836,18 @@ async function handleCustomLlm(request, env, fetcher) {
     });
   }
   const data = await response.json().catch(() => null);
-  const text = redactString(typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : '', secrets);
+  const drafted = redactString(typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : '', secrets);
+  let text = drafted;
+  try {
+    const models = createOpenRouterFromEnv(env, fetcher);
+    const verdict = await models.complete({
+      role: 'verify',
+      task: turnVerifyTask('reply', drafted),
+    });
+    if (!parseTurnVerdict(verdict.text).allow) text = BLOCKED_TURN;
+  } catch {
+    text = BLOCKED_TURN;
+  }
   const chunk = {
     id: 'chatcmpl-voice',
     object: 'chat.completion.chunk',

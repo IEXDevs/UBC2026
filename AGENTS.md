@@ -62,3 +62,21 @@ Rules for coding agents working in Maelstrom (`UBC2026`). Read this before editi
 Check merged PRs and the Notion page "UBC Conference AIgent idea" before starting. Chunks through Isaac's streams/shopping/commerce, Alex's loop/voice/schedules, Sid's web shell, and the agent-runtime data/signing wiring are on `main`. Hosted deploy, applying Supabase migrations remotely, live ElevenLabs agent provisioning, Grok Bot posting to X, and the demo video remain outside the code path.
 
 If a Notion search does not show "UBC Conference AIgent idea", ask for the board URL instead of guessing a chunk is free.
+
+## Learned User Preferences
+
+- Maelstrom's voice is casual and uses no emojis. Assets, amounts, and destinations stay exact.
+- The glass UI stays distinct from Grok Bot: the sidebar stays expanded, user-facing copy does not say "bot", and agent icons are distinct.
+- Spend permission defaults to ask every time and is enforced. Thinking controls follow the selected model's API options.
+- Do not store seed phrases or private keys. Onboarding requires a download and a re-entry, and warns that a lost phrase cannot be recovered.
+- Seed entry is a 12-word grid. Space moves to the next word.
+
+## Learned Workspace Facts
+
+- A Laso reloadable card belongs to the human principal. That person completes signup, KYC, the issuer one-time code, and issuer terms. The agent may hand over the claim URL and poll status. It must not open the claim URL or submit identity for the user.
+- For this hackathon, the principal is in Austin, Texas and is at least 18. Mainnet execution is planned and is not enabled.
+- Onboarding explains Ask, Review by AI, and Full permissions, and stores a Review by AI USDC maximum. A hidden server verifier must match amount, asset, cluster, and recipient before approval mode. At or under the cap the spend can continue. Above the cap the owner confirms. Ask and Full still require the confirm slide.
+- Privy Solana addresses are cluster-agnostic and are the user's mainnet address. Broadcasts require the Solana devnet genesis hash. Sends, receives, and cards are meant to use that same address on mainnet later. Laso card funding settles only on Solana mainnet or Base and cannot complete on devnet.
+- A reloadable-card load checks the merchant list and advises the owner before any transfer. The Solana payment uses the exact amount and the exact payTo from the quote. The second agent must approve before approval mode.
+- Signup requires an SNS domain claim. Wallet addresses show the first 5 and last 5 characters and copy on click.
+- Logs may include activity other than private keys and seed phrases. Row access stays limited to that owner.

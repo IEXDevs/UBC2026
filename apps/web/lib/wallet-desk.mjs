@@ -407,7 +407,6 @@ export function accountSetupStep({
   profileReady,
   handle,
   walletsReady,
-  walletCount,
   acceptanceConfirmed,
   recoveryConfirmed,
 } = {}) {
@@ -415,7 +414,7 @@ export function accountSetupStep({
   if (profileReady !== true || walletsReady !== true) return 'loading';
   if (typeof handle !== 'string' || !handle.trim()) return 'handle';
   if (acceptanceConfirmed !== true) return 'acceptance';
-  if (!walletCount) return null;
+  // A missing wallet is not a finished signup. Recovery still has to run.
   if (recoveryConfirmed !== true) return 'recovery';
   return null;
 }
