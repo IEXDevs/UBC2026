@@ -38,6 +38,7 @@ import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/sp
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
 import { startVoiceConversation } from '../lib/voice-session.mjs';
+import { classifyVoiceDisconnect, voiceErrorNote } from '../lib/voice-disconnect.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -163,6 +164,7 @@ export default function Composer({
   const modeRef = useRef('listening');
   const vadRef = useRef(0);
   const connectingRef = useRef(false);
+  const userEndedRef = useRef(false);
   const sendingRef = useRef(false);
   const placeRef = useRef(place);
   const leaveTimer = useRef(0);
@@ -630,10 +632,16 @@ export default function Composer({
       /* the track lock covers the hang-up */
     }
     gate.stop();
-    Promise.resolve(live?.endSession?.()).finally(() => gate.disarm(generation));
+    Promise.resolve(live?.endSession?.())
+      .catch(() => {})
+      .finally(() => {
+        gate.disarm(generation);
+        userEndedRef.current = false;
+      });
   }
 
-  function closeStage(keepNote = false) {
+  function closeStage(keepNote = false, { userEnded = false } = {}) {
+    if (userEnded) userEndedRef.current = true;
     if (presenceRef.current === 'off' || presenceRef.current === 'leave') return;
     setPhase('leave');
     setWarm(false);
@@ -721,15 +729,18 @@ export default function Composer({
         onVadScore: ({ vadScore }) => {
           if (sessionRef.current === live) vadRef.current = vadScore;
         },
-        onError: () => {
-          if (sessionRef.current === live) setNote('The voice session hit an error.');
+        onError: (message, context) => {
+          if (sessionRef.current !== live && live != null) return;
+          setNote(voiceErrorNote(message, context));
         },
-        onDisconnect: () => {
-          if (sessionRef.current !== live) return;
+        onDisconnect: (details) => {
+          if (sessionRef.current !== live && live != null) return;
+          const outcome = classifyVoiceDisconnect(details, { userEnded: userEndedRef.current });
           sessionRef.current = null;
           modeRef.current = 'listening';
           vadRef.current = 0;
-          closeStage();
+          if (outcome.note) setNote(outcome.note);
+          closeStage(Boolean(outcome.note));
         },
       };
       // Retry without TTS overrides when the portal agent rejects voiceId/speed.
@@ -836,7 +847,7 @@ export default function Composer({
             <button type="button" className="icon-btn" aria-label="Minimize voice" onClick={() => setMode('mini')}>
               <Minimize2 size={16} strokeWidth={1.75} />
             </button>
-            <button type="button" className="icon-btn is-stop" aria-label="Stop voice" onClick={() => closeStage()}>
+            <button type="button" className="icon-btn is-stop" aria-label="Stop voice" onClick={() => closeStage(false, { userEnded: true })}>
               <Square size={16} strokeWidth={1.75} />
             </button>
           </div>
@@ -868,7 +879,7 @@ export default function Composer({
           <button type="button" aria-label="Full view" onClick={() => setMode('full')}>
             <Maximize2 size={16} strokeWidth={1.75} />
           </button>
-          <button type="button" className="is-stop" aria-label="End" onClick={() => closeStage()}>
+          <button type="button" className="is-stop" aria-label="End" onClick={() => closeStage(false, { userEnded: true })}>
             <Square size={14} strokeWidth={1.75} />
           </button>
           <span className="voice-float-who" data-side={speaker}>{callName || botName}</span>
@@ -961,7 +972,7 @@ export default function Composer({
               aria-pressed={live}
               title={live ? 'Stop voice mode' : 'Talk live with the agent'}
               onMouseDown={event => event.preventDefault()}
-              onClick={() => { if (live) closeStage(); else startSession(); }}
+              onClick={() => { if (live) closeStage(false, { userEnded: true }); else startSession(); }}
             >
               <span className="voice-mode-bars" aria-hidden="true">
                 <i />
