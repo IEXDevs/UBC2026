@@ -55,6 +55,24 @@ test('text chat messages keep platform rules and map agent history', () => {
 });
 
 /**
+ * Achieves: verifies a file catalog reaches the agent as names and not preview bytes.
+ * Fails when: the prompt omits the file name or includes the data URL.
+ * Oracle: messages[1] includes shot.png and does not include base64.
+ * Side effects / state checked: N/A.
+ * Gaps: none for catalog text.
+ */
+test('text chat can recall attached file names', () => {
+  const messages = buildTextChatMessages({
+    botName: 'Nova',
+    message: 'What files do I have?',
+    provider: 'meta',
+    fileCatalog: [{ name: 'shot.png', type: 'image/png', botName: 'Nova', url: 'data:image/png;base64,aaaa' }],
+  });
+  assert.match(messages[1].content, /shot\.png/);
+  assert.equal(messages[1].content.includes('base64'), false);
+});
+
+/**
  * Achieves: verifies LLM_ keys resolve to Meta Model API.
  * Fails when: LLM_ keys resolve to Meta Model API breaks (e.g. expected 'meta', META_SPARK_MODEL, /api\.meta\.ai/).
  * Oracle: assert.equal(resolved.provider, 'meta'); assert.equal(resolved.model, META_SPARK_MODEL); assert.equal(fromOpenrouterSlot.provider, 'meta'); assert.equal(or.provider, 'openrouter'); assert.equal(or.model, OPENROUTER_FREE_MODEL); assert.equal(or.model.endsWith(':free'), true)

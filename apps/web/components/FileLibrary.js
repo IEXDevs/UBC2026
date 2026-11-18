@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { FileText, Film, Globe, Image as ImageIcon, Music } from 'lucide-react';
 import { fileKind, filterLibrary, libraryGroups } from '../lib/file-library.mjs';
 import BotMark from './BotMark';
+import FileStage from './FileStage';
 import LiveViewPanel from './LiveViewPanel';
 
 const FILTERS = [
@@ -104,13 +105,7 @@ export default function FileLibrary({ bot, files = [], ownerId = null, getAccess
       {!settingsOpen && rows.length === 0 ? <p className="library-empty">No files yet.</p> : null}
       {settingsOpen ? null : <FileGroup label="This week" files={fresh} onOpen={setPreview} />}
       {settingsOpen ? null : <FileGroup label="Older" files={older} onOpen={setPreview} />}
-      {preview ? (
-        <div className="library-preview" role="dialog" aria-label={preview.name}>
-          <button type="button" onClick={() => setPreview(null)}>Close</button>
-          {preview.url ? <img src={preview.url} alt="" /> : <strong>{preview.name}</strong>}
-          <small>{preview.type || 'file'} · {Math.max(1, Math.round((preview.size || 0) / 1024))} KB</small>
-        </div>
-      ) : null}
+      {preview ? <FileStage file={preview} onClose={() => setPreview(null)} /> : null}
     </div>
   );
 }

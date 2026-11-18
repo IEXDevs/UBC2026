@@ -7,6 +7,7 @@ import { OPENROUTER_FREE_MODEL, selectFreeOpenRouterModel } from '@ubc2026/contr
 import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import { thinkStep, toolStep } from './chat-activity.mjs';
 import { grantCovers, toolAccessRequest } from './spend-permission.mjs';
+import { catalogRecallText } from './file-catalog.mjs';
 import { reasoningEffortFor } from './thinking-levels.mjs';
 
 export { OPENROUTER_FREE_MODEL };
@@ -95,11 +96,13 @@ export function buildTextChatMessages({
   provider = 'meta',
   toolsInstruction = '',
   permission = '',
+  fileCatalog = [],
 } = {}) {
   const name = clip(redact(String(botName || 'Agent'), secrets), 80) || 'Agent';
   const goal = clip(redact(String(botGoal || 'Waiting for a goal.'), secrets), 2000);
   const type = clip(redact(String(botType || 'trading'), secrets), 40) || 'trading';
   const instructionRole = provider === 'meta' ? 'developer' : 'system';
+  const catalog = catalogRecallText(fileCatalog);
   const messages = [
     { role: instructionRole, content: PLATFORM },
     {
@@ -116,6 +119,7 @@ export function buildTextChatMessages({
         ...(typeof toolsInstruction === 'string' && toolsInstruction.trim()
           ? [toolsInstruction.trim()]
           : []),
+        ...(catalog ? [catalog] : []),
       ].join('\n'),
     },
   ];
@@ -325,6 +329,7 @@ export async function completeTextChat({
   tools = null,
   toolsInstruction = '',
   permission = '',
+  fileCatalog = [],
   permissionMode = '',
   grants = [],
   reasoningEffort = '',
@@ -373,6 +378,7 @@ export async function completeTextChat({
     provider: resolved.provider,
     toolsInstruction: toolList ? toolsInstruction : '',
     permission,
+    fileCatalog,
   });
   const rounds = Number.isSafeInteger(maxToolRounds) && maxToolRounds > 0
     ? Math.min(maxToolRounds, 8)

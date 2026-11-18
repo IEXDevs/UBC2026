@@ -101,6 +101,7 @@ export async function POST(request, context) {
       tools: openAiAgentTools(),
       toolsInstruction: chatToolsInstruction(),
       permission: permissionInstruction(permissionMode),
+      fileCatalog: Array.isArray(body.fileCatalog) ? body.fileCatalog.slice(0, 40) : [],
       permissionMode,
       grants,
       invokeTool: async (name, args) => {

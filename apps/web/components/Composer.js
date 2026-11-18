@@ -56,6 +56,34 @@ const SUGGESTIONS = [
   'Summarize the latest activity',
   'Show the open positions',
 ];
+const HOSTED_IMAGE_BYTES = 400_000;
+
+function previewUrl(file) {
+  const image = isImageFile(file);
+  const type = file?.type || '';
+  const playable = image || type.startsWith('video/') || type.startsWith('audio/');
+  if (!playable || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return Promise.resolve('');
+  if (image && file.size > 0 && file.size <= HOSTED_IMAGE_BYTES && typeof FileReader !== 'undefined') {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const value = typeof reader.result === 'string' ? reader.result : '';
+        resolve(value.startsWith('data:image/') ? value : '');
+      };
+      reader.onerror = () => resolve('');
+      try {
+        reader.readAsDataURL(file);
+      } catch {
+        resolve('');
+      }
+    });
+  }
+  try {
+    return Promise.resolve(URL.createObjectURL(file));
+  } catch {
+    return Promise.resolve('');
+  }
+}
 
 export default function Composer({
   botId = null,
@@ -66,6 +94,7 @@ export default function Composer({
   shellBots = null,
   shellWallets = null,
   shellBalanceLabel = null,
+  fileCatalog = null,
   getAccessToken = null,
   lines = [],
   onLine,
@@ -97,6 +126,8 @@ export default function Composer({
   const [speaker, setSpeaker] = useState('idle');
   const [draft, setDraft] = useState('');
   const [files, setFiles] = useState([]);
+  const catalogRef = useRef(fileCatalog);
+  catalogRef.current = fileCatalog;
   const fileRef = useRef(null);
   const [mention, setMention] = useState('');
   const [mentionCopy, setMentionCopy] = useState(null);
@@ -308,18 +339,23 @@ export default function Composer({
     return () => { stop = true; };
   }, [draft, resolveMention]);
 
-  function addFiles(list) {
+  async function addFiles(list) {
     const room = Math.max(0, 10 - files.length);
-    const next = [...list].slice(0, room).map(file => ({
-      id: `${file.name}-${file.size}-${file.lastModified}`,
-      name: file.name,
-      size: file.size,
-      type: file.type || 'file',
-      url: isImageFile({ name: file.name, type: file.type }) ? URL.createObjectURL(file) : '',
-    }));
+    const picked = [...list].slice(0, room);
+    const next = [];
+    for (const file of picked) {
+      next.push({
+        id: `${file.name}-${file.size}-${file.lastModified}`,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'file',
+        url: await previewUrl(file),
+        addedAt: Date.now(),
+      });
+    }
     if (next.length === 0) return;
     setFiles(current => [...current, ...next].slice(0, 10));
-    onAttach?.(next.map(file => ({ ...file, addedAt: Date.now() })));
+    onAttach?.(next);
   }
 
   function dropFile(id) {
@@ -402,6 +438,7 @@ export default function Composer({
         shellBots,
         shellWallets,
         shellBalanceLabel,
+        fileCatalog: catalogRef.current,
         accessToken,
       });
       await settleChat(result, spoken, prior);
@@ -444,6 +481,7 @@ export default function Composer({
         shellBots,
         shellWallets,
         shellBalanceLabel,
+        fileCatalog: catalogRef.current,
         accessToken,
       });
       if (!result.ok) pushLine('agent', chatFailureNote(result.error));
@@ -511,6 +549,7 @@ export default function Composer({
         shellBots,
         shellWallets,
         shellBalanceLabel,
+        fileCatalog: catalogRef.current,
         accessToken,
       });
       await settleChat(result, spoken, prior, grants);
