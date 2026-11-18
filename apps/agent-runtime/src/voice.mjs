@@ -368,6 +368,15 @@ function authorize(request, env) {
   return null;
 }
 
+/** Web sync may present the ElevenLabs API key when the webhook secret is not bound there. */
+function authorizeSync(request, env) {
+  const denied = authorize(request, env);
+  if (!denied) return null;
+  const apiKey = typeof env.ELEVENLABS_API_KEY === 'string' ? env.ELEVENLABS_API_KEY.trim() : '';
+  if (apiKey && secretMatches(apiKey, presentedSecret(request))) return null;
+  return denied;
+}
+
 function readOwnerCandidate(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -799,7 +808,7 @@ export async function handleVoiceRequest(request, env = {}, { fetchApi, fetcher 
   const url = new URL(request.url);
   if (url.pathname === '/voice/agent' && request.method === 'GET') return json(voiceAgentSpec(request, env));
   if (url.pathname === '/voice/agent/sync' && request.method === 'POST') {
-    const denied = authorize(request, env);
+    const denied = authorizeSync(request, env);
     if (denied) return denied;
     const result = await syncVoiceAgent({
       env,

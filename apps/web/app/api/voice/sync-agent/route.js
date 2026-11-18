@@ -3,13 +3,24 @@ import { fetchAgentRuntime } from '../../../../lib/runtime-fetch.mjs';
 
 /**
  * Push Worker custom-LLM URL + webhook secret into the ElevenLabs agent.
- * Uses server-side secrets only — never returns secret values.
+ * Auth to the runtime with the webhook secret when the web Worker has it, else
+ * the ElevenLabs API key (already required for /api/voice/token).
  */
 export async function POST() {
-  const runtime = readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL');
-  const secret = readRootEnv('ELEVENLABS_WEBHOOK_SECRET');
-  if (!runtime || !secret) {
-    return Response.json({ error: 'voice_sync_unconfigured' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+  // Public URL optional when AGENT_RUNTIME service binding is present.
+  const runtime = readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL')
+    || 'https://runtime.maelstrom.iexdevs.com';
+  const webhookSecret = readRootEnv('ELEVENLABS_WEBHOOK_SECRET');
+  const apiKey = readRootEnv('ELEVENLABS_API_KEY');
+  const authSecret = webhookSecret || apiKey;
+  if (!authSecret) {
+    return Response.json(
+      {
+        error: 'voice_sync_unconfigured',
+        missing: ['ELEVENLABS_WEBHOOK_SECRET|ELEVENLABS_API_KEY'],
+      },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
   let base;
   try {
@@ -22,7 +33,9 @@ export async function POST() {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-elevenlabs-webhook-secret': secret,
+        ...(webhookSecret
+          ? { 'x-elevenlabs-webhook-secret': webhookSecret }
+          : { authorization: `Bearer ${apiKey}` }),
       },
       body: '{}',
       cache: 'no-store',
