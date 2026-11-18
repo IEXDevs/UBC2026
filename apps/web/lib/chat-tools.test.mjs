@@ -449,6 +449,44 @@ test('createChatToolInvoker get_wallets sends Bearer and falls back on login_req
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
+/**
+ * Achieves: get_wallets rpc_failed stays unavailable — never "0 SOL" / empty positions.
+ * Fails when: failed RPC is summarized as an empty funded wallet.
+ * Oracle: balances.ok false; balanceStatus failed; label includes unavailable; no 0 SOL.
+ * Side effects: fetcher doubles only.
+ * Gaps: none.
+ */
+test('createChatToolInvoker get_wallets keeps rpc_failed distinct from empty success', async () => {
+  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_local',
+    runtimeBase: 'https://runtime.example',
+    env: {
+      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
+    },
+    shellWallets: [{ id: 'w_main', label: 'Main', address, kind: 'main' }],
+    fetcher: async (url) => {
+      const href = String(url);
+      if (href.includes('/api/wallets') || href.includes('/api/transfers')) {
+        return Response.json({ ok: true, source: 'supabase', items: [] });
+      }
+      if (href.includes('example.invalid')) {
+        return new Response('boom', { status: 500 });
+      }
+      return new Response('nope', { status: 404 });
+    },
+  });
+  const wallets = await invoke('get_wallets', {});
+  assert.equal(wallets.balances.ok, false);
+  assert.equal(wallets.balances.balanceStatus, 'failed');
+  assert.match(wallets.balances.displayBalanceLabel, /balance unavailable/);
+  assert.equal(wallets.balances.displayBalanceLabel.includes('0 SOL'), false);
+  assert.equal(wallets.balances.displaySolLabel, null);
+  assert.equal(wallets.items[0].balanceStatus, 'rpc_failed');
+});
+
 test('createChatToolInvoker falls back to shell bots and wallets when Worker is empty', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',

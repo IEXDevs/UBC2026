@@ -174,15 +174,23 @@ function spendableChainLabel(value) {
   return text;
 }
 
-export function walletGlance(wallets, positions, transfers = [], chainLabel = null) {
+export function walletGlance(wallets, positions, transfers = [], chainLabel = null, balanceRead = null) {
   const main = wallets.find(wallet => wallet.kind === 'main') ?? wallets[0] ?? null;
   const platform = Array.isArray(transfers) && transfers.length > 0;
   const chain = spendableChainLabel(chainLabel);
+  const failed = balanceRead && balanceRead.ok === false;
+  const stale = balanceRead?.stale === true && typeof balanceRead?.asOf === 'string';
+  const unavailable = failed
+    ? `balance unavailable (${balanceRead.code || 'rpc_failed'})${stale ? ` · stale ${balanceRead.asOf}` : ''}`
+    : null;
   return {
     label: main?.label ?? 'Wallet',
     address: main?.address ?? '',
     short: shortAddress(main?.address),
-    balanceLabel: chain || (platform ? `${formatBaseUnits(platformBalance(transfers))} USDC` : glanceBalance(positions)),
+    balanceLabel: unavailable
+      || chain
+      || (platform ? `${formatBaseUnits(platformBalance(transfers))} USDC` : glanceBalance(positions)),
+    balanceStatus: failed ? (balanceRead.code || 'rpc_failed') : (stale ? 'stale' : 'ok'),
     platform,
   };
 }

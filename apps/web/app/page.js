@@ -822,12 +822,43 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         const body = await response.json().catch(() => null);
         if (stop) return;
         if (response.ok && body?.ok === true && body.cluster === 'devnet' && body.address === walletAddress) {
-          setDevnetBalance(body);
+          setDevnetBalance({ ...body, asOf: new Date().toISOString(), stale: false });
+        } else if (body && typeof body === 'object') {
+          // Keep failed reads distinct from an empty funded wallet (0 SOL / 0 USDC).
+          setDevnetBalance({
+            ok: false,
+            code: typeof body.code === 'string' ? body.code : `http_${response.status}`,
+            cluster: 'devnet',
+            address: walletAddress,
+            solLamports: null,
+            usdcAmount: null,
+            tokens: [],
+            asOf: typeof body.asOf === 'string' ? body.asOf : null,
+            stale: body.stale === true,
+          });
         } else {
-          setDevnetBalance(null);
+          setDevnetBalance({
+            ok: false,
+            code: `http_${response.status}`,
+            cluster: 'devnet',
+            address: walletAddress,
+            solLamports: null,
+            usdcAmount: null,
+            tokens: [],
+          });
         }
       } catch {
-        if (!stop) setDevnetBalance(null);
+        if (!stop) {
+          setDevnetBalance({
+            ok: false,
+            code: 'rpc_failed',
+            cluster: 'devnet',
+            address: walletAddress,
+            solLamports: null,
+            usdcAmount: null,
+            tokens: [],
+          });
+        }
       }
     })();
     return () => { stop = true; };
@@ -844,7 +875,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
   const chainLabel = devnetSpendableLabel(devnetBalance);
-  const glance = walletGlance(wallets, positions, transfers, chainLabel);
+  const glance = walletGlance(wallets, positions, transfers, chainLabel, devnetBalance);
   const setupStep = devPreview ? null : accountSetupStep({
     signedIn,
     profileReady,

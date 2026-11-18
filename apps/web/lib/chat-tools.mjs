@@ -24,7 +24,12 @@ import {
 import { ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
 import { normalizePriceMint, readAgentPriceQuote } from '@ubc2026/prices';
 import { ownerAsksForOneTrade } from './owner-trade.mjs';
-import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
+import {
+  BALANCE_READ_FAILED,
+  classifyBalanceRead,
+  readWalletBalancesAcrossClusters,
+  unavailableBalanceLabel,
+} from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
 
@@ -270,22 +275,31 @@ function summarizeOnchain(items) {
     }
   }
   let sol = 0n;
+  let solKnown = false;
   for (const wallet of items) {
     if (typeof wallet?.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports)) {
       sol += BigInt(wallet.solLamports);
+      solKnown = true;
     }
   }
+  const classified = classifyBalanceRead({ items });
+  const failed = classified.status === BALANCE_READ_FAILED
+    || classified.status === 'partial'
+    || classified.ok === false;
   const displayBalanceLabel = holdings.map((row) => row.label).filter(Boolean).join(' · ')
-    || formatSolLabel(sol.toString());
+    || (failed ? unavailableBalanceLabel(classified.code || 'rpc_failed') : (solKnown ? formatSolLabel(sol.toString()) : null));
   return {
-    onchainSol: sol.toString(),
-    onchainSolLabel: formatSolLabel(sol.toString()),
+    onchainSol: solKnown ? sol.toString() : null,
+    onchainSolLabel: solKnown ? formatSolLabel(sol.toString()) : null,
     tokens,
     tokensLabel: tokens.map((token) => token.label).filter(Boolean).join(' · ') || null,
     holdings,
     displayBalanceLabel,
-    displaySolLabel: formatSolLabel(sol.toString()),
+    displaySolLabel: solKnown ? formatSolLabel(sol.toString()) : null,
     displaySource: 'onchain',
+    balanceStatus: classified.status,
+    balanceCode: classified.code,
+    balanceOk: classified.ok,
   };
 }
 
@@ -334,19 +348,28 @@ function withDisplayBalances(payload, {
     || items.find((wallet) => typeof wallet?.usdcBalanceLabel === 'string')?.usdcBalanceLabel
     || null;
   const onchain = summarizeOnchain(items);
+  const failed = onchain.balanceOk === false;
   const solLabelFinal = onchain.onchainSolLabel || solLabel;
   const onchainLabel = onchain.holdings?.length
     ? onchain.displayBalanceLabel
-    : (onchain.onchainSol !== '0' ? onchain.displayBalanceLabel : null);
-  const displayBalanceLabel = [
-    platform.transferCount > 0 ? platform.label : null,
-    onchainLabel,
-    shellHint,
-    solLabelFinal,
-    displayUsdcLabel,
-  ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ')
-    || onchain.displayBalanceLabel
-    || '0 SOL';
+    : (onchain.onchainSol != null && onchain.onchainSol !== '0' ? onchain.displayBalanceLabel : null);
+  const unavailable = unavailableBalanceLabel(onchain.balanceCode || 'rpc_failed');
+  const displayBalanceLabel = failed
+    ? ([
+      shellHint ? `${shellHint} (shell · onchain unavailable)` : null,
+      platform.transferCount > 0 ? platform.label : null,
+      onchain.holdings?.length ? onchain.displayBalanceLabel : unavailable,
+    ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ')
+      || unavailable)
+    : ([
+      platform.transferCount > 0 ? platform.label : null,
+      onchainLabel,
+      shellHint,
+      solLabelFinal,
+      displayUsdcLabel,
+    ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ')
+      || onchain.displayBalanceLabel
+      || '0 SOL');
   const balances = {
     ...(existing || {}),
     ...onchain,
@@ -355,11 +378,16 @@ function withDisplayBalances(payload, {
       platformUsdcLabel: platform.label,
       platformTransferCount: platform.transferCount,
     } : {}),
-    displayUsdcLabel: displayUsdcLabel || existing?.displayUsdcLabel || null,
-    displaySolLabel: solLabelFinal,
+    displayUsdcLabel: failed
+      ? (shellHint || (platform.transferCount > 0 ? platform.label : null))
+      : (displayUsdcLabel || existing?.displayUsdcLabel || null),
+    displaySolLabel: failed ? null : solLabelFinal,
     displayBalanceLabel,
+    balanceStatus: failed && shellHint ? 'partial' : onchain.balanceStatus,
+    balanceCode: onchain.balanceCode,
+    ok: onchain.balanceOk !== false,
     displaySource: platform.transferCount > 0
-      ? (onchain.tokens.length || onchain.onchainSol !== '0' ? 'mixed' : 'platform')
+      ? (onchain.tokens.length || (onchain.onchainSol != null && onchain.onchainSol !== '0') ? 'mixed' : 'platform')
       : 'onchain',
     clusterNote: CLUSTER_NOTE,
   };

@@ -147,10 +147,14 @@ export function usdcUnits({ positions = [], transfers = [] } = {}) {
 export function deskTokens({ positions = [], transfers = [], prefs, devnet = null } = {}) {
   const clean = normalizeTokenPrefs(prefs);
   const onchain = devnet?.ok === true && devnet?.cluster === 'devnet';
-  const book = onchain && UNITS.test(devnet.usdcAmount)
-    ? devnet.usdcAmount
-    : usdcUnits({ positions, transfers });
-  const solUnits = onchain && UNITS.test(devnet.solLamports) ? devnet.solLamports : null;
+  const failed = Boolean(devnet) && devnet.ok !== true;
+  const stale = Boolean(devnet?.stale === true && typeof devnet?.asOf === 'string');
+  const knownUsdc = UNITS.test(devnet?.usdcAmount) ? devnet.usdcAmount : null;
+  const knownSol = UNITS.test(devnet?.solLamports) ? devnet.solLamports : null;
+  const book = onchain && knownUsdc != null
+    ? knownUsdc
+    : (failed ? knownUsdc : usdcUnits({ positions, transfers }));
+  const solUnits = (onchain || failed) ? knownSol : null;
   const rows = [
     ...CORE_TOKENS.map(token => ({ ...token })),
     ...clean.extra.map(token => ({ ...token, core: false })),
@@ -176,15 +180,38 @@ export function deskTokens({ positions = [], transfers = [], prefs, devnet = nul
   }
   return rows.map(token => {
     let amount = token.amount;
+    let amountKnown = true;
     if (amount == null) {
-      if (token.symbol === 'USDC') amount = book;
-      else if (token.symbol === 'SOL' && solUnits != null) amount = solUnits;
-      else amount = positionUnits(positions, token.symbol);
+      if (token.symbol === 'USDC') {
+        amount = book;
+        amountKnown = book != null;
+      } else if (token.symbol === 'SOL') {
+        if (solUnits != null) {
+          amount = solUnits;
+          amountKnown = true;
+        } else if (failed) {
+          amount = null;
+          amountKnown = false;
+        } else {
+          amount = positionUnits(positions, token.symbol);
+        }
+      } else if (failed) {
+        amount = null;
+        amountKnown = false;
+      } else {
+        amount = positionUnits(positions, token.symbol);
+      }
     }
+    const unavailable = !amountKnown || amount == null;
+    const amountLabel = unavailable
+      ? `${token.symbol} unavailable${devnet?.code ? ` (${devnet.code})` : ''}${stale ? ` · stale ${devnet.asOf}` : ''}`
+      : `${formatBaseUnits(amount, token.decimals)} ${token.symbol}${stale ? ` · stale ${devnet.asOf}` : ''}`;
     return {
       ...token,
-      amount,
-      amountLabel: `${formatBaseUnits(amount, token.decimals)} ${token.symbol}`,
+      amount: unavailable ? null : amount,
+      amountLabel,
+      amountKnown: !unavailable,
+      balanceStatus: failed ? (devnet.code || 'rpc_failed') : (stale ? 'stale' : 'ok'),
       hidden: clean.hidden.includes(token.symbol),
       tradeable: !clean.restricted.includes(token.symbol),
     };
