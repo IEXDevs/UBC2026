@@ -57,6 +57,7 @@ function gateFields(detail) {
     ...(steps.length > 0 ? { steps } : {}),
     ...(typeof detail.signed === 'boolean' ? { signed: detail.signed } : {}),
     ...(typeof detail.reason === 'string' ? { reason: detail.reason } : {}),
+    ...(typeof detail.prompt === 'string' ? { prompt: detail.prompt } : {}),
     ...(typeof detail.cluster === 'string' ? { cluster: detail.cluster } : {}),
   };
 }

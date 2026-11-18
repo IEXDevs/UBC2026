@@ -8,7 +8,11 @@ const amount = value => {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(value)) fail('Amounts must be unsigned integer strings in base units');
   return value;
 };
-const score = value => {
+const score = (value, unavailable = false) => {
+  if (unavailable) {
+    if (value == null || value === '') return null;
+    fail('An unavailable trust score cannot be invented');
+  }
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,2}|1000)$/.test(value) || Number(value) > 1000) fail('Trust score must be an integer string from 0 to 1000');
   return value;
 };
@@ -18,15 +22,18 @@ export function normalizeFacts(facts) {
   if (!facts || !required(facts.asset) || !required(facts.mint) || !required(facts.cluster) || !required(facts.reasonSummary)) fail('Incomplete trade facts');
   if (!['devnet', 'testnet'].includes(facts.cluster)) fail('Hackathon execution must use devnet or testnet');
   if (typeof facts.reasonSummary !== 'string' || facts.reasonSummary.length > 2000) fail('Reasoning summary is required and must stay short');
-  return {
+  const unavailable = facts.trustUnavailable === true;
+  const normalized = {
     asset: facts.asset,
     mint: facts.mint,
     cluster: facts.cluster,
     price: amount(facts.price),
     amount: amount(facts.amount),
-    trustScore: score(facts.trustScore),
+    trustScore: score(facts.trustScore, unavailable),
     reasonSummary: facts.reasonSummary.trim(),
   };
+  if (unavailable) normalized.trustUnavailable = true;
+  return normalized;
 }
 
 function sha256Hex(value) {

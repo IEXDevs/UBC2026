@@ -36,6 +36,21 @@ test('facts require testnet/devnet and integer string amounts', () => {
   assert.throws(() => normalizeFacts({ ...base, trustScore: '1001' }));
   assert.throws(() => normalizeFacts({ ...base, reasonSummary: '' }));
   assert.throws(() => normalizeFacts({ ...base, mint: '' }));
+  assert.equal(Object.hasOwn(normalizeFacts(base), 'trustUnavailable'), false);
+  const missing = { ...base };
+  delete missing.trustScore;
+  assert.throws(() => normalizeFacts(missing));
+  const open = normalizeFacts({ ...missing, trustUnavailable: true });
+  assert.equal(open.trustScore, null);
+  assert.equal(open.trustUnavailable, true);
+  assert.throws(() => normalizeFacts({ ...base, trustUnavailable: true }));
+  assert.equal(compareFacts(
+    { ...missing, trustUnavailable: true },
+    { ...missing, trustUnavailable: true },
+  ).match, true);
+  const drifted = compareFacts({ ...missing, trustUnavailable: true }, base);
+  assert.equal(drifted.match, false);
+  assert.equal(drifted.mismatches.includes('trustScore'), true);
 });
 
 /**

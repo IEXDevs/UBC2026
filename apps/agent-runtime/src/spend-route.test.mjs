@@ -190,9 +190,9 @@ test('voice request_spend keeps the session permission and posts the shared rout
  * Gaps: desk lock 403 path covered in desk-grant.test.mjs.
  */
 /**
- * Achieves: full permission trades without a confirm slide, and a Jupiter miss or low score still blocks.
- * Fails when: unconfirmed full skips signing on a passing gate, or a failed/low trust lookup signs.
- * Oracle: Jupiter search score 800 signs; score 100 and a thrown lookup do not.
+ * Achieves: full permission trades without a confirm slide, and a Jupiter miss or low score still does not sign.
+ * Fails when: unconfirmed full skips signing on a passing gate, a low score signs, or a failed lookup signs.
+ * Oracle: Jupiter search score 800 signs; score 100 and a thrown lookup stay unsigned.
  * Side effects / state checked: signer call count.
  * Gaps: live Jupiter is not called.
  */
@@ -271,7 +271,14 @@ test('full permission signs after Jupiter trust and a failed lookup does not', a
   }), failedEnv);
   const failedBody = await failed.json();
   assert.equal(failedBody.signed, false);
-  assert.equal(failedBody.state, 'trust-unavailable');
+  assert.equal(failedBody.state, 'trust-confirmation-required');
+  assert.equal(failedBody.prompt, 'This has a low trust score, are you sure you want to buy?');
+  assert.equal(failedBody.steps.includes('verify-consensus'), true);
+  assert.equal(failedBody.steps.includes('wallet-freeze'), true);
+  assert.equal(failedBody.steps.includes('bot-policy'), true);
+  assert.equal(failedBody.steps.includes('approval-mode'), true);
+  assert.equal(failedBody.steps.includes('reserve'), false);
+  assert.equal(failedBody.steps.includes('sign'), false);
   assert.equal(signed, 1);
 });
 
@@ -548,6 +555,204 @@ test('a 1 USDC buy is not invalid_spend and an over-cap buy stops at the cap', a
   assert.equal(overBody.steps.includes('approval-mode'), true);
   assert.equal(overBody.steps.includes('reserve'), false);
   assert.equal(overBody.steps.includes('sign'), false);
+  assert.equal(signed, 0);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+});
+
+/**
+ * Achieves: a 1 USDC buy continues when Jupiter trust is missing by forcing confirmation.
+ * Fails when: the buy dies as trust-unavailable, a score is invented, or confirmation skips a gate.
+ * Oracle: 1000000 stays unsigned until confirmed, then reserves; low score, cap, max loss, freeze, and mainnet still stop.
+ * Side effects: in-memory ledger. Jupiter is a throwing or empty fetch, never a live call.
+ * Gaps: the swap itself is not broadcast on this no-destination buy.
+ */
+test('a within-cap USDC buy continues when Jupiter trust is unavailable by forcing confirmation', async () => {
+  const trading = {
+    ...bot,
+    id: 'bot_4y38iiud',
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '50000000', maxPerTransaction: '5000000' },
+  };
+  const book = { botId: 'bot_4y38iiud', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
+  const ledgerApi = createMemoryLedger();
+  await ledgerApi.reset({
+    users: [{ id: 'user_1', privyUserId: 'did:privy:user_1' }],
+    wallets: [wallet],
+    bots: [trading],
+    ledgers: [book],
+  });
+  let signed = 0;
+  let reserves = 0;
+  const counting = {
+    reserveBudget: async (input) => {
+      reserves += 1;
+      return ledgerApi.reserveBudget(input);
+    },
+  };
+  const client = {
+    async getDevnetBlockhash() {
+      return { cluster: 'devnet', blockhash: DESTINATION };
+    },
+    async signAndBroadcastDevnet() {
+      signed += 1;
+      return { cluster: 'devnet', signature: 'sig_should_not' };
+    },
+  };
+  let mode = 'down';
+  const envFor = (context) => spendEnv({
+    transferClient: client,
+    ledgerApi: counting,
+    loadSpendContext: async () => context,
+    fetch: async () => {
+      if (mode === 'down') throw new Error('jupiter down');
+      if (mode === 'empty') return Response.json([]);
+      if (mode === 'mismatch') {
+        return Response.json([{ id: 'not-the-mint', organicScore: 99, isVerified: true }]);
+      }
+      return Response.json([{
+        id: DEVNET_USDC_MINT,
+        organicScore: 10,
+        isVerified: false,
+      }]);
+    },
+  });
+  const baseEnv = () => {
+    const env = envFor({ bot: trading, wallet, ledger: book });
+    delete env.trustLookup;
+    return env;
+  };
+  const buy = {
+    permission: 'full',
+    botId: 'bot_4y38iiud',
+    action: 'buy',
+    amount: 1000000,
+    asset: 'USDC',
+    quoteCluster: 'devnet',
+  };
+
+  const held = await worker.fetch(spendRequest(buy), baseEnv());
+  const heldBody = await held.json();
+  assert.equal(held.status, 409);
+  assert.equal(heldBody.error, undefined);
+  assert.equal(heldBody.signed, false);
+  assert.equal(heldBody.state, 'trust-confirmation-required');
+  assert.equal(heldBody.prompt, 'This has a low trust score, are you sure you want to buy?');
+  assert.equal(heldBody.cluster, 'devnet');
+  assert.equal(heldBody.trustScore, undefined);
+  assert.equal(JSON.stringify(heldBody).includes('800'), false);
+  assert.equal(heldBody.steps.includes('trust-gate'), true);
+  assert.equal(heldBody.steps.includes('verify-consensus'), true);
+  assert.equal(heldBody.steps.includes('wallet-freeze'), true);
+  assert.equal(heldBody.steps.includes('bot-policy'), true);
+  assert.equal(heldBody.steps.includes('approval-mode'), true);
+  assert.equal(heldBody.steps.includes('reserve'), false);
+  assert.equal(heldBody.steps.includes('sign'), false);
+  assert.equal(reserves, 0);
+  assert.equal(signed, 0);
+
+  mode = 'empty';
+  const empty = await worker.fetch(spendRequest(buy), baseEnv());
+  assert.equal((await empty.json()).state, 'trust-confirmation-required');
+
+  mode = 'mismatch';
+  const mismatched = await worker.fetch(spendRequest(buy), baseEnv());
+  const mismatchedBody = await mismatched.json();
+  assert.equal(mismatchedBody.state, 'trust-confirmation-required');
+  assert.equal(mismatchedBody.signed, false);
+  assert.equal(JSON.stringify(mismatchedBody).includes('99'), false);
+  assert.equal(reserves, 0);
+
+  mode = 'low';
+  const low = await worker.fetch(spendRequest(buy), baseEnv());
+  const lowBody = await low.json();
+  assert.equal(lowBody.state, 'trust-confirmation-required');
+  assert.equal(lowBody.signed, false);
+  assert.deepEqual(lowBody.steps, ['trust-gate']);
+  assert.equal(reserves, 0);
+
+  mode = 'down';
+  const continued = await worker.fetch(spendRequest({
+    ...buy,
+    confirmed: true,
+    idempotencyKey: 'buy_1_usdc',
+  }), baseEnv());
+  const continuedBody = await continued.json();
+  assert.equal(continued.status, 200);
+  assert.equal(continuedBody.error, undefined);
+  assert.equal(continuedBody.signed, false);
+  assert.equal(continuedBody.state, 'reserved');
+  assert.equal(continuedBody.trustScore, undefined);
+  assert.equal(JSON.stringify(continuedBody).includes('800'), false);
+  assert.equal(continuedBody.steps.includes('verify-consensus'), true);
+  assert.equal(continuedBody.steps.includes('wallet-freeze'), true);
+  assert.equal(continuedBody.steps.includes('bot-policy'), true);
+  assert.equal(continuedBody.steps.includes('approval-mode'), true);
+  assert.equal(continuedBody.steps.includes('reserve'), true);
+  assert.equal(continuedBody.steps.includes('sign'), false);
+  assert.equal(reserves, 1);
+  assert.equal(signed, 0);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+
+  const over = await worker.fetch(spendRequest({
+    ...buy,
+    confirmed: true,
+    amount: '72860000',
+    idempotencyKey: 'over_cap',
+  }), baseEnv());
+  const overBody = await over.json();
+  assert.equal(overBody.state, 'approval-needed');
+  assert.equal(overBody.reason, 'per-transaction');
+  assert.equal(overBody.signed, false);
+  assert.equal(overBody.steps.includes('bot-policy'), true);
+  assert.equal(overBody.steps.includes('reserve'), false);
+  assert.equal(overBody.steps.includes('sign'), false);
+  assert.equal(reserves, 1);
+
+  const lossEnv = envFor({
+    bot: { ...trading, cap: { ...trading.cap, maxLoss: '10' } },
+    wallet,
+    ledger: { ...book, realizedLoss: '10' },
+  });
+  delete lossEnv.trustLookup;
+  const loss = await worker.fetch(spendRequest({
+    ...buy,
+    confirmed: true,
+    idempotencyKey: 'max_loss',
+  }), lossEnv);
+  const lossBody = await loss.json();
+  assert.equal(lossBody.state, 'blocked');
+  assert.equal(lossBody.reason, 'max-loss-reached');
+  assert.equal(lossBody.signed, false);
+  assert.equal(lossBody.steps.includes('reserve'), false);
+  assert.equal(lossBody.steps.includes('sign'), false);
+
+  const frozenEnv = envFor({ bot: trading, wallet: { ...wallet, frozen: true }, ledger: book });
+  delete frozenEnv.trustLookup;
+  const frozen = await worker.fetch(spendRequest({
+    ...buy,
+    confirmed: true,
+    idempotencyKey: 'frozen',
+  }), frozenEnv);
+  const frozenBody = await frozen.json();
+  assert.equal(frozenBody.state, 'blocked');
+  assert.equal(frozenBody.reason, 'spend-frozen');
+  assert.equal(frozenBody.signed, false);
+  assert.equal(frozenBody.steps.includes('verify-consensus'), true);
+  assert.equal(frozenBody.steps.includes('wallet-freeze'), true);
+  assert.equal(frozenBody.steps.includes('sign'), false);
+
+  const quoted = await worker.fetch(spendRequest({
+    ...buy,
+    confirmed: true,
+    quoteCluster: 'mainnet',
+    idempotencyKey: 'mainnet_quote',
+  }), baseEnv());
+  const quotedBody = await quoted.json();
+  assert.equal(quotedBody.state, 'quote-not-authorization');
+  assert.equal(quotedBody.signed, false);
+  assert.equal(quotedBody.steps.includes('sign'), false);
+  assert.equal(quotedBody.steps.includes('reserve'), false);
+  assert.equal(reserves, 1);
   assert.equal(signed, 0);
   assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
 });

@@ -717,6 +717,7 @@ test('request_spend carries a desk grant and a gate result is not an ask-mode ho
           state: 'approval-needed',
           steps: ['trust-gate', 'verify-consensus', 'approval-mode'],
           signed: false,
+          prompt: 'This has a low trust score, are you sure you want to buy?',
         }, { status: 409 });
       }
       return Response.json({ status: 'paused' });
@@ -731,6 +732,7 @@ test('request_spend carries a desk grant and a gate result is not an ask-mode ho
   assert.equal(spent.error, 'approval-needed');
   assert.equal(spent.state, 'approval-needed');
   assert.equal(spent.signed, false);
+  assert.equal(spent.prompt, 'This has a low trust score, are you sure you want to buy?');
   assert.equal(spent.steps[0], 'trust-gate');
   assert.match(calls[0].url, /\/api\/spend$/);
   assert.equal(calls[0].grant, grant);
