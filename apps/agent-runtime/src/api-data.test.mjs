@@ -623,18 +623,18 @@ test('wallets.persist ignores foreign-owner wallet rows (owner header wins)', as
 });
 
 /**
- * Achieves: Worker Privy failure returns privy_failed with guidance to use Next provision + persist.
- * Fails when: error lacks detail, or detail omits Origin/persist guidance.
- * Oracle: 502 + privy_failed; detail matches /Origin|persist|Next/i.
+ * Achieves: Worker Privy failure returns privy_failed with runtime secret guidance.
+ * Fails when: error lacks detail naming runtime Privy secrets.
+ * Oracle: 502 + privy_failed; detail matches /PRIVY_APP_SECRET|AUTHORIZATION/i.
  * Side effects / state checked: acceptLogin throws WalletError (no network).
  * Gaps: none for this failure mode
  */
-test('wallet create surfaces Origin guidance when Privy acceptLogin fails on the Worker', async () => {
+test('wallet create surfaces runtime Privy guidance when acceptLogin fails on the Worker', async () => {
   const { WalletError } = await import('@ubc2026/wallets');
   const env = fakeEnv({
     transferClient: {
       acceptLogin: async () => {
-        const error = new WalletError('Privy users/me failed (403: must_specify_origin)', 'privy_failed');
+        const error = new WalletError('Privy users failed (401)', 'privy_failed');
         throw error;
       },
     },
@@ -649,18 +649,17 @@ test('wallet create surfaces Origin guidance when Privy acceptLogin fails on the
   assert.equal(res.status, 502);
   const body = await res.json();
   assert.equal(body.error, 'privy_failed');
-  // Independent of page.js: shell should provision on Next then persist, not retry create here.
-  assert.match(body.detail || '', /Origin|\/api\/wallets\/persist|Next/i);
+  assert.match(body.detail || '', /PRIVY_APP_SECRET|AUTHORIZATION|agent-runtime/i);
 });
 
 /**
- * Achieves: Origin and x-maelstrom-origin headers are forwarded into acceptLogin.origin.
- * Fails when: origin arg missing/wrong for either header path.
- * Oracle: seen[0].origin === 'http://localhost:3000' for both Origin and x-maelstrom-origin.
+ * Achieves: wallet create does not pass Origin into acceptLogin on Workers.
+ * Fails when: origin is still forwarded (forbidden outbound header on workerd).
+ * Oracle: seen[0].origin is undefined for both Origin and x-maelstrom-origin headers.
  * Side effects / state checked: acceptLogin args captured; Supabase write stubbed.
- * Gaps: Referer / WEB_ORIGIN fallbacks not asserted
+ * Gaps: none for the no-Origin contract
  */
-test('wallet create forwards browser origin into Privy acceptLogin', async () => {
+test('wallet create does not forward Origin into Privy acceptLogin', async () => {
   const seen = [];
   const env = fakeEnv({
     transferClient: {
@@ -694,7 +693,7 @@ test('wallet create forwards browser origin into Privy acceptLogin', async () =>
     },
   }), env);
   assert.equal(res.status, 200);
-  assert.equal(seen[0].origin, 'http://localhost:3000');
+  assert.equal(seen[0].origin, undefined);
 
   seen.length = 0;
   const viaProxy = await worker.fetch(new Request('https://runtime/api/wallets', {
@@ -706,7 +705,7 @@ test('wallet create forwards browser origin into Privy acceptLogin', async () =>
     },
   }), env);
   assert.equal(viaProxy.status, 200);
-  assert.equal(seen[0].origin, 'http://localhost:3000');
+  assert.equal(seen[0].origin, undefined);
 });
 
 /**

@@ -5,9 +5,10 @@
 
 /**
  * Shell wallet provision URLs after Privy login.
- * Only Next `/api/wallets` — never `/api/runtime/api/wallets` create.
- * Cloudflare Workers strip outbound Origin, so runtime create 502s and used
- * to overwrite useful Next errors. Persist still happens inside the Next route.
+ * Browser always hits same-origin Next `/api/wallets`. On Cloudflare that route
+ * proxies create through the AGENT_RUNTIME service binding (workerd fetch to
+ * Privy); local Next still calls Privy directly. Never call
+ * `/api/runtime/api/wallets` from the browser.
  */
 export function walletProvisionPaths() {
   return Object.freeze(['/api/wallets']);
@@ -237,8 +238,14 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
   }
   if (code === 'privy_failed') {
     const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
+    if (/TypeError/i.test(detail)) {
+      return 'Privy fetch failed inside the Worker (TypeError). Redeploy web+runtime after the agent-runtime proxy fix, put PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime, then sign out/in and retry.';
+    }
     if (/forbidden_header|worker_origin/i.test(detail)) {
       return 'Hosted Cloudflare blocked a Privy Origin header. Sign out and sign in again, then retry wallet create.';
+    }
+    if (/AUTHORIZATION_KEY|agent-runtime/i.test(detail)) {
+      return 'Agent-runtime Privy create failed. Put the same PRIVY_APP_SECRET and PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime, redeploy runtime, then sign in again.';
     }
     if (/403/i.test(detail) && /insufficient_app_secret_permissions/i.test(detail)) {
       return 'PRIVY_APP_SECRET is read-only. In Privy → App settings → API keys, create a full-access secret, put it in root .env.local, restart Next, and sign in again.';
