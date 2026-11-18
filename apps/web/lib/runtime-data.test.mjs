@@ -8,6 +8,7 @@ import {
   firstAssignableWalletId,
   positionsFromStatus,
   runtimeBaseUrl,
+  sendBotChat,
   shellBotFromRemote,
   shellRuntimeUrl,
   upsertOwnerBot,
@@ -187,6 +188,39 @@ test('bot chat URL uses the same-origin Next route', () => {
   assert.equal(botChatUrl('https://runtime.example/agent/', 'bot_1'), '/api/bots/bot_1/chat');
   assert.equal(botChatUrl('', 'bot_1'), '/api/bots/bot_1/chat');
   assert.equal(botChatUrl('https://runtime.example', '../evil'), null);
+});
+
+/**
+ * Achieves: verifies sendBotChat forwards Privy Bearer to the chat route.
+ * Fails when: Authorization is omitted while accessToken is provided.
+ * Oracle: headers.authorization === Bearer tok; reply ok.
+ * Side effects / state checked: global fetch double.
+ * Gaps: none.
+ */
+test('sendBotChat forwards Bearer access token', async () => {
+  const prior = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    return Response.json({ reply: 'hello', usage: { total: 3 } });
+  };
+  try {
+    const result = await sendBotChat({
+      ownerId: 'did:privy:abc',
+      botId: 'bot_1',
+      message: 'show wallets',
+      accessToken: 'tok',
+      shellWallets: [{ id: 'w_main' }],
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.reply, 'hello');
+    assert.equal(calls[0].url, '/api/bots/bot_1/chat');
+    assert.equal(calls[0].headers.authorization, 'Bearer tok');
+    assert.equal(calls[0].headers['x-owner-id'], 'did:privy:abc');
+    assert.equal(calls[0].body.shellWallets[0].id, 'w_main');
+  } finally {
+    globalThis.fetch = prior;
+  }
 });
 
 /**

@@ -1482,6 +1482,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             shellBots={bots}
             shellWallets={wallets}
             shellBalanceLabel={glance.balanceLabel}
+            getAccessToken={getAccessToken}
             clientTools={clientTools}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {

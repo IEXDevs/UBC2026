@@ -51,13 +51,17 @@ function toolErrorPayload(error) {
   return { error: code };
 }
 
-async function workerJson(fetcher, url, ownerId, method, body) {
+async function workerJson(fetcher, url, ownerId, method, body, accessToken = '') {
+  const headers = {
+    'content-type': 'application/json',
+    'x-owner-id': ownerId,
+  };
+  if (typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000) {
+    headers.authorization = `Bearer ${accessToken.trim()}`;
+  }
   const response = await fetcher(url, {
     method,
-    headers: {
-      'content-type': 'application/json',
-      'x-owner-id': ownerId,
-    },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: 'no-store',
   });
@@ -346,6 +350,7 @@ export function createChatToolInvoker({
   shellBots = null,
   shellWallets = null,
   shellBalanceLabel = null,
+  accessToken = '',
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
@@ -355,9 +360,14 @@ export function createChatToolInvoker({
   const root = runtimeBaseUrl(runtimeBase);
   const localBots = shellBotItems(shellBots);
   const localWallets = shellWalletItems(shellWallets);
+  const token = typeof accessToken === 'string' ? accessToken.trim() : '';
   const balanceHint = typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
     ? shellBalanceLabel.trim().slice(0, 64)
     : null;
+
+  function callWorker(url, method, body) {
+    return workerJson(fetcher, url, ownerId, method, body, token);
+  }
 
   async function invokeBrowser(name, args = {}) {
     const openUrl = browserSessionUrl(root, botId);
@@ -370,7 +380,7 @@ export function createChatToolInvoker({
       };
       if (typeof args.url === 'string' && args.url.trim()) body.url = args.url.trim();
       try {
-        const opened = await workerJson(fetcher, openUrl, ownerId, 'POST', body);
+        const opened = await callWorker(openUrl, 'POST', body);
         return {
           sessionRecordId: opened.sessionRecordId,
           purpose: opened.purpose,
@@ -383,7 +393,7 @@ export function createChatToolInvoker({
       } catch (error) {
         // Older Workers still return concurrency_limit — reuse via list + navigate.
         if (error?.code !== 'concurrency_limit') throw error;
-        const listed = await workerJson(fetcher, openUrl, ownerId, 'GET');
+        const listed = await callWorker(openUrl, 'GET');
         const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
         const newest = [...sessions].sort((a, b) => {
           const aAt = Number(a?.updatedAt ?? a?.createdAt ?? 0);
@@ -396,7 +406,7 @@ export function createChatToolInvoker({
             sessionRecordId: newest.sessionRecordId,
             action: 'navigate',
           });
-          const navigated = await workerJson(fetcher, navUrl, ownerId, 'POST', { url: args.url.trim() });
+          const navigated = await callWorker(navUrl, 'POST', { url: args.url.trim() });
           return {
             sessionRecordId: navigated.sessionRecordId || newest.sessionRecordId,
             purpose: newest.purpose || body.purpose,
@@ -421,12 +431,12 @@ export function createChatToolInvoker({
     if (name === 'browser_navigate') {
       let sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
       if (!sessionRecordId) {
-        const listed = await workerJson(fetcher, openUrl, ownerId, 'GET');
+        const listed = await callWorker(openUrl, 'GET');
         const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
         sessionRecordId = sessions[0]?.sessionRecordId || '';
       }
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'navigate' });
-      const navigated = await workerJson(fetcher, url, ownerId, 'POST', {
+      const navigated = await callWorker(url, 'POST', {
         url: typeof args.url === 'string' ? args.url : '',
       });
       return {
@@ -438,7 +448,7 @@ export function createChatToolInvoker({
     if (name === 'browser_live_view') {
       const sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'live-view' });
-      const view = await workerJson(fetcher, url, ownerId, 'POST', {});
+      const view = await callWorker(url, 'POST', {});
       // Never return viewerUrl to the model.
       return {
         sessionRecordId: view.sessionRecordId || sessionRecordId,
@@ -455,7 +465,7 @@ export function createChatToolInvoker({
     if (name === 'browser_release') {
       const sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'release' });
-      const released = await workerJson(fetcher, url, ownerId, 'POST', {});
+      const released = await callWorker(url, 'POST', {});
       return {
         sessionRecordId: released.sessionRecordId || sessionRecordId,
         status: released.status || 'closed',
@@ -472,7 +482,7 @@ export function createChatToolInvoker({
     if (name === 'stop_all') {
       const listPath = ownerApiUrl('/api/bots', apiBase);
       if (!listPath) return { error: 'runtime_unconfigured' };
-      const listed = await workerJson(fetcher, listPath, ownerId, 'GET');
+      const listed = await callWorker(listPath, 'GET');
       const items = Array.isArray(listed.items) ? listed.items : [];
       const paused = [];
       for (const item of items) {
@@ -480,7 +490,7 @@ export function createChatToolInvoker({
         if (!id) continue;
         const pausePath = ownerApiUrl(`/bots/${encodeURIComponent(id)}/pause`, apiBase);
         if (!pausePath) continue;
-        const result = await workerJson(fetcher, pausePath, ownerId, 'POST', {});
+        const result = await callWorker(pausePath, 'POST', {});
         paused.push({ botId: id, status: result.status || 'paused' });
       }
       return { list: listed, paused };
@@ -514,13 +524,7 @@ export function createChatToolInvoker({
     if (args.permission === 'ask' || args.permission === 'review' || args.permission === 'full') {
       body.permission = args.permission;
     }
-    return workerJson(
-      fetcher,
-      url,
-      ownerId,
-      entry.method,
-      entry.method === 'GET' ? undefined : body,
-    );
+    return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body);
   }
 
   return async function invokeTool(name, args = {}) {
@@ -545,19 +549,38 @@ export function createChatToolInvoker({
         return await invokeBrowser(name, args);
       }
       if (name === 'list_bots') {
-        const remote = await invokeDashboard(name, args);
+        let remote;
+        try {
+          remote = await invokeDashboard(name, args);
+        } catch (error) {
+          if (error?.code === 'login_required' && localBots.length > 0) {
+            return { ok: true, source: 'shell', items: localBots };
+          }
+          throw error;
+        }
         const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
         if (remoteItems.length > 0) return remote;
         if (localBots.length > 0) return { ok: true, source: 'shell', items: localBots };
         return remote;
       }
       if (name === 'get_wallets') {
-        const remote = await invokeDashboard(name, args);
+        let remote = null;
+        try {
+          remote = await invokeDashboard(name, args);
+        } catch (error) {
+          // Runtime requires Bearer when Privy secrets are bound. Fall back to
+          // shell wallets the composer already posted so chat still answers.
+          if (error?.code === 'login_required' && localWallets.length > 0) {
+            remote = { ok: true, source: 'shell', items: [] };
+          } else {
+            throw error;
+          }
+        }
         const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
         let transfers = null;
         try {
           const transferPath = ownerApiUrl('/api/transfers', apiBase);
-          if (transferPath) transfers = await workerJson(fetcher, transferPath, ownerId, 'GET');
+          if (transferPath) transfers = await callWorker(transferPath, 'GET');
         } catch {
           transfers = null;
         }
