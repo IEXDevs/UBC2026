@@ -140,9 +140,9 @@ test('desk unlock stores a grant hash and spend rejects a bare owner', async () 
 });
 
 /**
- * Achieves: a later password replaces the account verifier, clears the old grant, and unlocks.
- * Fails when: the second password stays 409, the old password still unlocks, or the new one does not.
- * Oracle: replaced hash, null grant, unlock status.
+ * Achieves: a later password replaces the account verifier and that same password gets a grant.
+ * Fails when: the follow-up grant rejects the saved password, the old password still unlocks, or another account is stuck on this verifier.
+ * Oracle: grant after replace; iteration count read back as text; other owner is desk_lock_missing.
  * Side effects: in-memory desk row. The passwords stay in the request fixtures.
  * Gaps: live Supabase is not called.
  */
@@ -170,10 +170,16 @@ test('a later desk password replaces the stored verifier and can unlock', async 
         return new Response(null, { status: 204 });
       }
       if (href.includes('/rest/v1/desk_locks') && href.includes('select=owner_id')) {
+        if (href.includes('user_2')) return Response.json([]);
         return Response.json(row ? [{ owner_id: 'user_1' }] : []);
       }
       if (href.includes('/rest/v1/desk_locks') && href.includes('select=salt')) {
-        return Response.json(row ? [{ salt: row.salt, hash: row.hash, iterations: row.iterations }] : []);
+        if (href.includes('user_2')) return Response.json([]);
+        return Response.json(row ? [{
+          salt: row.salt,
+          hash: row.hash,
+          iterations: String(row.iterations),
+        }] : []);
       }
       if (href.includes('/rest/v1/desk_locks') && href.includes('grant_hash')) {
         return Response.json(row?.grant_hash ? [{ grant_hash: row.grant_hash, grant_until: row.grant_until }] : [{ grant_hash: null, grant_until: null }]);
@@ -223,4 +229,12 @@ test('a later desk password replaces the stored verifier and can unlock', async 
   const grantBody = await opened.json();
   assert.match(grantBody.grant, /^[0-9a-f]{64}$/);
   assert.notEqual(row.grant_hash, grantBody.grant);
+
+  const otherAccount = await worker.fetch(new Request('https://runtime/api/desk/unlock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_2' },
+    body: JSON.stringify({ password: 'later horse' }),
+  }), env);
+  assert.equal(otherAccount.status, 404);
+  assert.equal((await otherAccount.json()).error, 'desk_lock_missing');
 });

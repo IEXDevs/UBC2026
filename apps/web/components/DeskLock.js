@@ -106,14 +106,16 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           setPending(false);
           return;
         }
-        setRecord(created);
-        setReplacing(false);
         const opened = await openDeskGrant(fetch, { ownerId, token, password: nextPassword });
         if (!opened.ok || !writeDeskGrant(window.sessionStorage, ownerId, opened.grant, opened.until)) {
-          setNote('The password was not accepted for spends.');
+          setRecord(created);
+          setReplacing(true);
+          setNote('Password saved. Spends are not open yet.');
           setPending(false);
           return;
         }
+        setRecord(created);
+        setReplacing(false);
       } else {
         const accepted = await acceptEnteredPassword({
           fetchImpl: fetch,
