@@ -659,6 +659,40 @@ test('wallet create surfaces runtime Privy guidance when acceptLogin fails on th
  * Side effects / state checked: acceptLogin args captured; Supabase write stubbed.
  * Gaps: none for the no-Origin contract
  */
+/**
+ * Achieves: JWT access tokens resolve owner via sub without calling acceptLogin.
+ * Fails when: events poll still runs full wallet sync for every Bearer JWT.
+ * Oracle: readPrivyAccessTokenSub + resolveOwner JWT fast path.
+ * Side effects / state checked: acceptLogin must not run.
+ */
+test('events list uses JWT sub without calling acceptLogin', async () => {
+  let called = false;
+  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ sub: 'did:privy:user_1' })).toString('base64url');
+  const token = `${header}.${body}.sig`;
+  const env = fakeEnv({
+    PRIVY_APP_ID: 'app_test',
+    PRIVY_APP_SECRET: 'secret_test',
+    transferClient: {
+      acceptLogin: async () => {
+        called = true;
+        throw new Error('acceptLogin should not run for JWT sub');
+      },
+    },
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => Response.json([]),
+  });
+  const res = await worker.fetch(new Request('https://runtime/api/events?botId=bot_1', {
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-owner-id': 'did:privy:user_1',
+    },
+  }), env);
+  assert.equal(res.status, 200);
+  assert.equal(called, false);
+});
+
 test('wallet create does not forward Origin into Privy acceptLogin', async () => {
   const seen = [];
   const env = fakeEnv({

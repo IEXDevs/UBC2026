@@ -2,7 +2,7 @@
  * Live /api/* data routes backed by Supabase + Privy when secrets exist.
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
-import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
+import { createPrivyWalletClientFromEnv, readPrivyAccessTokenSub } from '@ubc2026/wallets/privy';
 import {
   ConfigError,
   httpsAvatarUrl,
@@ -83,9 +83,11 @@ function privySecretsPresent(env) {
 }
 
 /**
- * Resolve the caller’s owner id from a verified Privy access token when secrets exist.
- * A bare `x-owner-id` is only accepted in offline/unconfigured environments (no Privy secrets).
- * When both header and JWT are present, the verified JWT identity wins; a conflicting header is rejected.
+ * Resolve the caller’s owner id when Privy secrets exist.
+ * Prefer the access-token JWT `sub` (same trust as acceptLogin’s loadUser path) so
+ * events/browser polls do not run a full wallet sync on every request.
+ * A bare `x-owner-id` is only accepted when Privy secrets are unset.
+ * When both header and JWT are present, the JWT identity wins; a conflict is rejected.
  */
 export async function resolveOwner(request, env) {
   const header = ownerHeader(request);
@@ -95,6 +97,14 @@ export async function resolveOwner(request, env) {
   if (!token) {
     if (needsLogin) return { ownerId: null, user: null, token: '', error: 'login_required' };
     return { ownerId: header, user: null, token: '' };
+  }
+
+  const sub = readPrivyAccessTokenSub(token);
+  if (sub && /^[a-zA-Z0-9:_-]{1,128}$/.test(sub)) {
+    if (header && header !== sub) {
+      return { ownerId: null, user: null, token, error: 'owner_mismatch' };
+    }
+    return { ownerId: sub, user: null, token };
   }
 
   const client = privyClient(env);
@@ -109,7 +119,7 @@ export async function resolveOwner(request, env) {
       ownerId: header || undefined,
       // Workers cannot set outbound Origin; JWT sub / owner id drive loadUser.
     });
-    const verified = result?.main?.ownerId || result?.userId || null;
+    const verified = result?.main?.ownerId || result?.privyUserId || result?.userId || null;
     if (header && verified && header !== verified) {
       return { ownerId: null, user: null, token, error: 'owner_mismatch' };
     }

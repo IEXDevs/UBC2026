@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import AccountStats from './AccountStats';
 import { pickOwnerRollup } from '../lib/overview.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { profileStats, statisticsView } from '../lib/statistics.mjs';
 import BranchedMenu from './BranchedMenu';
@@ -34,7 +35,17 @@ function leafLabel(row) {
   );
 }
 
-export default function StatisticsSheet({ open, onClose, bots = [], ownerId = null, voiceMs = 0, talks = {}, payments = [], transfers = [] }) {
+export default function StatisticsSheet({
+  open,
+  onClose,
+  bots = [],
+  ownerId = null,
+  getAccessToken = null,
+  voiceMs = 0,
+  talks = {},
+  payments = [],
+  transfers = [],
+}) {
   const { mounted, leaving } = usePresence(open);
   const [remoteMetric, setRemoteMetric] = useState(null);
 
@@ -55,7 +66,7 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json();
@@ -72,7 +83,7 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
       stop = true;
       clearInterval(timer);
     };
-  }, [open, ownerId]);
+  }, [open, ownerId, getAccessToken]);
 
   if (!mounted) return null;
 

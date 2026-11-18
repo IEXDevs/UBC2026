@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { normalizeLiveEvent, timelineEntries } from '../lib/bot-experience.mjs';
 import { browserTrace, traceModel } from '../lib/agent-trace.mjs';
 import { browserSessionUrl } from '../lib/live-view.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { ChainOfThought, TerminalBlock, ToolCall } from './ai/elements';
 import ChatBubbles from './ChatBubbles';
@@ -14,7 +15,16 @@ function liveEventsUrl(botId) {
   return shellRuntimeUrl(`/api/events?botId=${encodeURIComponent(botId)}`);
 }
 
-export default function AgentThread({ bot, ownerId = null, lines = [], thinking = false, onParty = null, onEdit = null, onAccess = null }) {
+export default function AgentThread({
+  bot,
+  ownerId = null,
+  getAccessToken = null,
+  lines = [],
+  thinking = false,
+  onParty = null,
+  onEdit = null,
+  onAccess = null,
+}) {
   const [remoteEvents, setRemoteEvents] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [focus, setFocus] = useState(null);
@@ -28,7 +38,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json();
@@ -44,7 +54,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
       stop = true;
       clearInterval(timer);
     };
-  }, [bot.id, ownerId]);
+  }, [bot.id, ownerId, getAccessToken]);
 
   useEffect(() => {
     setSessions([]);
@@ -54,7 +64,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json();
@@ -70,7 +80,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
       stop = true;
       clearInterval(timer);
     };
-  }, [bot.id, ownerId]);
+  }, [bot.id, ownerId, getAccessToken]);
 
   const entries = remoteEvents ? timelineEntries(remoteEvents, bot.id) : [];
   const trace = traceModel(entries);
@@ -95,7 +105,7 @@ export default function AgentThread({ bot, ownerId = null, lines = [], thinking 
       ) : null}
       <ChainOfThought sections={sections} onSelect={setFocus} />
       {focused ? <p className="agent-focus">{focused.summary}</p> : null}
-      <ShoppingPanel bot={bot} ownerId={ownerId} />
+      <ShoppingPanel bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   applySecurityActionLocal,
   buildSecurityPage,
 } from '../lib/security.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import AnimatedList from './AnimatedList';
 import SlideCommit from './bits/SlideCommit';
@@ -13,6 +14,7 @@ import { listLook } from './listLook';
 export default function SecurityPanel({
   bots,
   ownerId = null,
+  getAccessToken = null,
   accountLabel = null,
   onBotsChange,
   wallets = null,
@@ -38,10 +40,9 @@ export default function SecurityPanel({
         try {
           const response = await fetch(url, {
             method: 'POST',
-            headers: {
+            headers: await ownerAuthHeaders(ownerId, getAccessToken, {
               'content-type': 'application/json',
-              'x-owner-id': ownerId,
-            },
+            }),
             body: JSON.stringify({ reason: 'kill.stop-all' }),
           });
           results.push(response.status);
@@ -62,10 +63,9 @@ export default function SecurityPanel({
           }
           const response = await fetch(shellRuntimeUrl('/security/grab-back'), {
             method: 'POST',
-            headers: {
+            headers: await ownerAuthHeaders(ownerId, getAccessToken, {
               'content-type': 'application/json',
-              'x-owner-id': ownerId,
-            },
+            }),
             body: JSON.stringify({
               dryRun: false,
               mainWallet,
@@ -99,10 +99,9 @@ export default function SecurityPanel({
       try {
         const response = await fetch(url, {
           method: 'POST',
-          headers: {
+          headers: await ownerAuthHeaders(ownerId, getAccessToken, {
             'content-type': 'application/json',
-            'x-owner-id': ownerId,
-          },
+          }),
           body: JSON.stringify({ frozen: freeze }),
         });
         const data = await response.json().catch(() => ({}));

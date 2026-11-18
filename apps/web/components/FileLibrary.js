@@ -55,7 +55,7 @@ function FileGroup({ label, files, onOpen }) {
   );
 }
 
-export default function FileLibrary({ bot, files = [], ownerId = null, onComputer, onEdit }) {
+export default function FileLibrary({ bot, files = [], ownerId = null, getAccessToken = null, onComputer, onEdit }) {
   const [filter, setFilter] = useState('all');
   const [preview, setPreview] = useState(null);
   const rows = filterLibrary(files, filter);
@@ -77,7 +77,7 @@ export default function FileLibrary({ bot, files = [], ownerId = null, onCompute
       </header>
       <section className="side-computer">
         <h3>Computer</h3>
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} screen onExpand={() => onComputer?.()} />
+        <LiveViewPanel botId={bot.id} ownerId={ownerId} getAccessToken={getAccessToken} screen onExpand={() => onComputer?.()} />
       </section>
       <div className="library-filters" role="tablist" aria-label="Library">
         {FILTERS.map(item => (
