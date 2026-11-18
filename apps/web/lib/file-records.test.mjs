@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { forgetOwnerFile, rememberOwnerFile } from './file-records.mjs';
+import { driveItemUrl, forgetOwnerFile, rememberOwnerFile } from './file-records.mjs';
 
 test('a file row is stored by hash and removed when the file is gone', async () => {
   const calls = [];
@@ -16,6 +16,7 @@ test('a file row is stored by hash and removed when the file is gone', async () 
     ownerId: 'did:privy:1',
     accountCode: '1234567890123456',
     secretHash: hash,
+    driveFileId: '1AbC_def-xyz',
     name: 'notes.txt',
     type: 'text/plain',
     size: 4,
@@ -24,7 +25,10 @@ test('a file row is stored by hash and removed when the file is gone', async () 
   assert.equal(saved.ok, true);
   const row = JSON.parse(calls[1].body);
   assert.equal(row.secret_hash, hash);
+  assert.equal(row.name, 'notes.txt');
   assert.equal(row.account_code, '1234567890123456');
+  assert.equal(row.drive_url, 'https://drive.google.com/file/d/1AbC_def-xyz/view');
+  assert.equal(driveItemUrl('https://drive.google.com/file/d/1AbC_def-xyz/view'), '');
   assert.equal(JSON.stringify(row).includes('z'.repeat(128)), false);
   const forgotten = await forgetOwnerFile({ env, fetcher, ownerId: 'did:privy:1', secretHash: hash });
   assert.equal(forgotten.ok, true);

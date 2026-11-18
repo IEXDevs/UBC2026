@@ -1,5 +1,6 @@
 -- Owner file records. The 128-character id is not stored. The row keeps its hash,
--- the 16-digit account id, and the name. A missing Drive file deletes the row.
+-- the 16-digit account id, the filename, and the private Drive item link.
+-- A missing Drive file deletes the row. Authenticated clients cannot read drive_url.
 
 create table if not exists owner_files (
   secret_hash text primary key,
@@ -8,13 +9,15 @@ create table if not exists owner_files (
   name text not null,
   mime_type text not null,
   size_bytes bigint not null,
+  drive_url text not null,
   added_at timestamptz not null default now(),
   check (secret_hash ~ '^[a-f0-9]{64}$'),
   check (owner_id ~ '^[a-zA-Z0-9:_-]{1,128}$'),
   check (account_code ~ '^[0-9]{16}$'),
   check (char_length(name) between 1 and 180),
   check (char_length(mime_type) between 1 and 120),
-  check (size_bytes >= 0 and size_bytes <= 512000000)
+  check (size_bytes >= 0 and size_bytes <= 512000000),
+  check (drive_url ~ '^https://drive\.google\.com/file/d/[A-Za-z0-9_-]{1,128}/view$')
 );
 
 create index if not exists owner_files_owner_idx on owner_files (owner_id, added_at desc);
@@ -27,8 +30,9 @@ create policy owner_files_owner_select on owner_files
   for select to authenticated
   using (owner_id = app_owner_id());
 
-revoke all on owner_files from public, anon;
-grant select on owner_files to authenticated;
+revoke all on owner_files from public, anon, authenticated;
+grant select (secret_hash, owner_id, account_code, name, mime_type, size_bytes, added_at)
+  on owner_files to authenticated;
 
 do $$
 begin

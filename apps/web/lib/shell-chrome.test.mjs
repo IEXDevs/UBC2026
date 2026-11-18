@@ -81,9 +81,9 @@ test('the first-agent create screen covers the page without scrollbars', () => {
 });
 
 /**
- * Achieves: verifies the stage header has no USDC chip, the handle row shows registered holdings, and the detail chip is that agent's wallet.
- * Fails when: the topbar still renders wallet-chip, the detail chip uses the owner glance, or the holdings shortcut is missing.
- * Oracle: topbar has no wallet-chip; AgentDetail keeps wallet-chip; page passes walletBalanceLabel(bot.walletId) and registeredHoldingsLabel.
+ * Achieves: verifies the stage header has no USDC chip, the right pane is files only, and the handle row shows registered holdings.
+ * Fails when: the topbar or the detail pane renders wallet-chip, or the holdings shortcut is missing.
+ * Oracle: topbar and AgentDetail have no wallet-chip; page passes registeredHoldingsLabel.
  * Side effects / state checked: page.js, AgentDetail.js, AccountMenu.js source.
  * Gaps: source snapshot only — no browser layout.
  */
@@ -95,8 +95,8 @@ test('the stage header has no USDC chip and the detail chip is the agent wallet'
   const topbarStart = page.indexOf('<header className="topbar">');
   const topbar = page.slice(topbarStart, page.indexOf('</header>', topbarStart));
   assert.equal(topbar.includes('wallet-chip'), false);
-  assert.match(detail, /className="wallet-chip"/);
-  assert.match(page, /walletBalanceLabel\(bot\.walletId, \{ wallets, positions, transfers, bots \}\)/);
+  assert.equal(detail.includes('wallet-chip'), false);
+  assert.match(detail, /FileLibrary/);
   assert.match(page, /holdingsLabel=\{registeredHoldingsLabel\(\{ wallets, positions, transfers, bots \}\)\}/);
   assert.match(menu, /shortcut: one shared USDC book, sum every registered wallet when each wallet stores its own holdings\./);
   assert.match(menu, /className="you-holdings"/);

@@ -125,6 +125,7 @@ test('save stores a hash and returns the secret once', async () => {
   assert.equal(saved.ok, true);
   assert.equal(saved.secret, SECRET);
   assert.equal(saved.ref, hashFileSecret(SECRET));
+  assert.equal(JSON.stringify(saved).includes('drive.google.com'), false);
   const stored = drive.rows.find(row => row.appProperties?.secretHash === saved.ref);
   assert.equal(stored.appProperties.ownerHash, hashOwnerId('did:privy:1'));
   assert.equal(stored.appProperties.accountCode, ACCOUNT);

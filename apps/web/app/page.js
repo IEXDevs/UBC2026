@@ -21,12 +21,11 @@ import PartySheet from '../components/PartySheet';
 import PluginsSheet from '../components/PluginsSheet';
 import StatisticsSheet from '../components/StatisticsSheet';
 import AgentDetail from '../components/AgentDetail';
-import AgentEdit from '../components/AgentEdit';
 import HoldButton from '../components/HoldButton';
 import ComputerSheet from '../components/ComputerSheet';
 import FileStage from '../components/FileStage';
 import RecallSearch from '../components/RecallSearch';
-import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletBalanceLabel, walletGlance } from '../lib/money-views.mjs';
+import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
 import { compactLines, contextUsage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -357,7 +356,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [detailWidth, setDetailWidth] = useState(280);
   const [paneDrag, setPaneDrag] = useState(false);
   const [activeBot, setActiveBot] = useState(null);
-  const [cornerEdit, setCornerEdit] = useState(null);
   const [pendingSend, setPendingSend] = useState(null);
   const [unlocked, setUnlocked] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
@@ -1653,24 +1651,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <AgentDetail
           bot={bot}
           files={library[bot.id] ?? []}
-          balanceLabel={walletBalanceLabel(bot.walletId, { wallets, positions, transfers, bots })}
           ownerId={ownerId}
           getAccessToken={getAccessToken}
           onResize={event => dragPane(event, 'right')}
-          onWallet={openWallet}
-          onComputer={() => onAccount('computer')}
-          onEdit={(event) => setCornerEdit({ x: event.clientX, y: event.clientY })}
           onMissingFile={onMissingFile}
-        />
-      ) : null}
-      {cornerEdit && bot ? (
-        <AgentEdit
-          bot={bot}
-          x={cornerEdit.x}
-          y={cornerEdit.y}
-          onClose={() => setCornerEdit(null)}
-          onSave={onEditLook}
-          onDelete={(id) => { onDelete(id); setCornerEdit(null); }}
         />
       ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} first={bots.length === 0} />

@@ -5577,13 +5577,11 @@ legend {
   min-width: 0;
   max-width: 100%;
   height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: none;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px 16px 28px;
+  gap: 0;
+  padding: 12px;
   border-left: 1px solid var(--line);
   background: var(--bg);
 }
@@ -5788,13 +5786,15 @@ legend {
 
 .file-library {
   position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 18px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   min-width: 0;
   max-width: 100%;
 }
+.file-scroll { flex: 1; min-height: 0; }
 .side-computer,
 .side-options {
   display: grid;
@@ -6008,6 +6008,85 @@ legend {
   padding: 8px 10px;
 }
 .library-menu [role="menuitem"]:hover { background: #2a2a2a; }
+.library-panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.library-panes button {
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #a3a3a3;
+  font-size: 13px;
+}
+.library-panes button[aria-selected='true'] {
+  background: #242424;
+  color: #f5f5f5;
+}
+.image-collage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.image-collage::-webkit-scrollbar { display: none; }
+.image-collage__tile {
+  position: relative;
+  flex: 1 1 46%;
+  height: 84px;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: #1c1c1c;
+  color: #f5f5f5;
+  cursor: pointer;
+  transition: flex-basis 0.32s cubic-bezier(0.22, 1, 0.36, 1), height 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.image-collage__tile[data-span='wide'] { flex-basis: 100%; height: 72px; }
+.image-collage__tile[data-span='tall'] { flex-basis: 58%; height: 120px; }
+.image-collage__tile:hover,
+.image-collage__tile:focus-visible {
+  flex: 3 1 100%;
+  height: 168px;
+  z-index: 1;
+  outline: none;
+}
+.image-collage__tile img,
+.image-collage__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.32s ease;
+}
+.image-collage__fill { background: linear-gradient(160deg, #2a2a2a, #161616); }
+.image-collage__tile:hover img,
+.image-collage__tile:focus-visible img { transform: scale(1.04); }
+.image-collage__name {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  overflow: hidden;
+  color: #f5f5f5;
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.image-collage__tile:hover .image-collage__name,
+.image-collage__tile:focus-visible .image-collage__name { opacity: 1; }
 .library-filters { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; width: 100%; }
 .library-filters button {
   border: 0;
@@ -6152,6 +6231,48 @@ legend {
 
 .browser-preview.is-open { opacity: 1; }
 
+.file-stage-actions {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  width: 80px;
+  height: 36px;
+}
+.file-stage-action {
+  position: absolute;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.72);
+  color: #f5f5f5;
+  cursor: pointer;
+  transform-origin: center;
+}
+.file-stage-download { right: 44px; opacity: 0; pointer-events: none; }
+.file-stage-close { right: 0; }
+.file-stage:hover .file-stage-download,
+.file-stage:focus-within .file-stage-download,
+.file-stage-download.is-image {
+  opacity: 1;
+  pointer-events: auto;
+}
+.file-stage-action.is-pressed {
+  animation: file-stage-press 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes file-stage-press {
+  0% { transform: scale(1) rotate(0deg); }
+  35% { transform: scale(0.86) rotate(-8deg); }
+  68% { transform: scale(1.08) rotate(3deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .file-stage-action.is-pressed { animation: none; }
+}
 .browser-preview-close {
   position: absolute;
   top: 16px;

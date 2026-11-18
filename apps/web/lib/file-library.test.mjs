@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fileKind, filterLibrary, libraryGroups } from './file-library.mjs';
+import { byRecent, fileKind, filterLibrary, isLibraryImage, libraryGroups } from './file-library.mjs';
 
 /**
  * Achieves: verifies MIME/name mapping into media, pages, and generic files buckets.
@@ -31,4 +31,11 @@ test('this week and older split on the added time', () => {
   assert.deepEqual(groups.fresh.map(file => file.id), ['new']);
   assert.deepEqual(groups.older.map(file => file.id), ['old']);
   assert.equal(filterLibrary(groups.fresh, 'media').length, 0);
+  const ordered = byRecent([
+    { id: 'old', addedAt: 1, type: 'image/png', name: 'old.png' },
+    { id: 'new', addedAt: 9, type: 'text/plain', name: 'new.txt' },
+    { id: 'mid', addedAt: 4, type: 'image/jpeg', name: 'mid.jpg' },
+  ]);
+  assert.deepEqual(ordered.map(file => file.id), ['new', 'mid', 'old']);
+  assert.deepEqual(ordered.filter(isLibraryImage).map(file => file.id), ['mid', 'old']);
 });

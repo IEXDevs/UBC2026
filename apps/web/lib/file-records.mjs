@@ -4,6 +4,14 @@
  */
 const OWNER = /^[a-zA-Z0-9:_-]{1,128}$/;
 const HASH = /^[a-f0-9]{64}$/;
+const DRIVE_FILE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** Private Drive item link. Built only from an id this service received from Drive. */
+export function driveItemUrl(fileId) {
+  const id = typeof fileId === 'string' ? fileId.trim() : '';
+  if (!DRIVE_FILE_ID.test(id)) return '';
+  return `https://drive.google.com/file/d/${id}/view`;
+}
 
 function originOf(value) {
   if (typeof value !== 'string' || !value.trim()) return '';
@@ -39,10 +47,12 @@ async function rest(fetcher, { origin, key }, path, options = {}) {
   return response;
 }
 
-export async function rememberOwnerFile({ env, fetcher = fetch, ownerId, accountCode, secretHash, name, type, size, addedAt } = {}) {
+export async function rememberOwnerFile({ env, fetcher = fetch, ownerId, accountCode, secretHash, driveFileId, name, type, size, addedAt } = {}) {
   const ready = configured(env);
   if (!ready) return { ok: true, skipped: true };
-  if (!OWNER.test(ownerId) || !HASH.test(secretHash)) return { ok: false, error: 'record_invalid' };
+  const driveUrl = driveItemUrl(driveFileId);
+  const filename = typeof name === 'string' ? name.trim().slice(0, 180) : '';
+  if (!OWNER.test(ownerId) || !HASH.test(secretHash) || !driveUrl || !filename) return { ok: false, error: 'record_invalid' };
   try {
     const userWrite = await rest(fetcher, ready, 'users?on_conflict=id', {
       method: 'POST',
@@ -57,9 +67,10 @@ export async function rememberOwnerFile({ env, fetcher = fetch, ownerId, account
         secret_hash: secretHash,
         owner_id: ownerId,
         account_code: accountCode,
-        name: String(name || 'file').slice(0, 180),
+        name: filename,
         mime_type: String(type || 'application/octet-stream').slice(0, 120),
         size_bytes: size,
+        drive_url: driveUrl,
         added_at: new Date(addedAt || Date.now()).toISOString(),
       },
     });

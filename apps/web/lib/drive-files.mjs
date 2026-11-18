@@ -229,6 +229,7 @@ export async function saveOwnerFile({
       ownerId,
       accountCode,
       secretHash,
+      driveFileId: driveId,
       name: safeName(name),
       type: typeof type === 'string' && type.trim() ? type.trim().slice(0, 120) : 'application/octet-stream',
       size: bytes.byteLength,

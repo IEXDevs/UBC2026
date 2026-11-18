@@ -2,9 +2,42 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { Cancel01Icon, Download01Icon } from '@hugeicons/core-free-icons';
 import { ensureAccountCode } from '../lib/account-code.mjs';
 import { readPreview, stageKind } from '../lib/file-view.mjs';
+
+function StageIcon({ icon, label, className = '', onClick }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      className={`file-stage-action${className ? ` ${className}` : ''}${pressed ? ' is-pressed' : ''}`}
+      aria-label={label}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+        setPressed(false);
+        requestAnimationFrame(() => setPressed(true));
+      }}
+      onAnimationEnd={() => setPressed(false)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.(event);
+      }}
+    >
+      <HugeiconsIcon icon={icon} size={18} strokeWidth={1.75} />
+    </button>
+  );
+}
+
+function saveFile(url, name) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = (name || 'file').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'file';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
 
 function viewUrl(file) {
   const url = typeof file?.url === 'string' ? file.url.trim() : '';
@@ -102,15 +135,17 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
       aria-label={name}
       onMouseDown={onClose}
     >
-      <button
-        type="button"
-        className="browser-preview-close"
-        aria-label="Close file"
-        onMouseDown={(event) => event.stopPropagation()}
-        onClick={onClose}
-      >
-        <X size={18} strokeWidth={1.75} />
-      </button>
+      <div className="file-stage-actions" onMouseDown={(event) => event.stopPropagation()}>
+        {url ? (
+          <StageIcon
+            icon={Download01Icon}
+            label={`Download ${name}`}
+            className={`file-stage-download${kind === 'image' ? ' is-image' : ''}`}
+            onClick={() => saveFile(url, name)}
+          />
+        ) : null}
+        <StageIcon icon={Cancel01Icon} label="Close file" className="file-stage-close" onClick={onClose} />
+      </div>
       <div className="browser-preview-stage" onMouseDown={(event) => event.stopPropagation()}>
         <figure className="file-stage-frame">
           {playable && kind === 'image' ? <img src={url} alt={name} /> : null}
