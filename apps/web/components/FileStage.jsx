@@ -3,10 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif)$/i;
-const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
-const AUDIO_EXT = /\.(mp3|wav|m4a|ogg)$/i;
+import { readPreview, stageKind } from '../lib/file-view.mjs';
 
 function viewUrl(file) {
   const url = typeof file?.url === 'string' ? file.url.trim() : '';
@@ -14,17 +11,10 @@ function viewUrl(file) {
   return '';
 }
 
-function mediaKind(file) {
-  const type = typeof file?.type === 'string' ? file.type : '';
-  const name = typeof file?.name === 'string' ? file.name : '';
-  if (type.startsWith('video/') || VIDEO_EXT.test(name)) return 'video';
-  if (type.startsWith('audio/') || AUDIO_EXT.test(name)) return 'audio';
-  if (type.startsWith('image/') || IMAGE_EXT.test(name)) return 'image';
-  return 'file';
-}
-
-export default function FileStage({ file, onClose }) {
+export default function FileStage({ file, ownerId = '', getAccessToken = null, onClose }) {
   const [shown, setShown] = useState(false);
+  const [remote, setRemote] = useState('');
+  const [body, setBody] = useState(null);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setShown(true));
@@ -38,11 +28,62 @@ export default function FileStage({ file, onClose }) {
     };
   }, [onClose]);
 
+  useEffect(() => {
+    if (viewUrl(file) || !ownerId || !/^[0-9a-z]{128}$/.test(file?.id || '')) {
+      setRemote('');
+      return undefined;
+    }
+    let gone = false;
+    let objectUrl = '';
+    (async () => {
+      const token = await getAccessToken?.();
+      if (!token || gone) return;
+      const response = await fetch(`/api/files/${file.id}`, {
+        headers: {
+          'x-owner-id': ownerId,
+          authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok || gone) return;
+      const bytes = await response.arrayBuffer();
+      const type = stageKind(file) === 'pdf'
+        ? 'application/pdf'
+        : (response.headers.get('content-type') || 'application/octet-stream');
+      objectUrl = URL.createObjectURL(new Blob([bytes], { type }));
+      if (!gone) setRemote(objectUrl);
+    })().catch(() => {});
+    return () => {
+      gone = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [file, ownerId, getAccessToken]);
+
+  const url = viewUrl(file) || (remote.startsWith('blob:') ? remote : '');
+  const kind = stageKind(file);
+
+  useEffect(() => {
+    if (!url || (kind !== 'code' && kind !== 'doc')) {
+      setBody(null);
+      return undefined;
+    }
+    let gone = false;
+    setBody(null);
+    readPreview(url, kind).then((next) => {
+      if (!gone) setBody(next);
+    }).catch(() => {
+      if (!gone) setBody({ error: 'empty' });
+    });
+    return () => {
+      gone = true;
+    };
+  }, [url, kind]);
+
   if (!file || typeof document === 'undefined') return null;
-  const url = viewUrl(file);
-  const kind = mediaKind(file);
   const name = file.name || 'File';
-  const playable = Boolean(url) && (kind === 'image' || kind === 'video' || kind === 'audio');
+  const playable = Boolean(url) && (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'pdf');
+  const codeText = kind === 'code' && typeof body?.text === 'string' ? body.text : '';
+  const paragraphs = kind === 'doc' && Array.isArray(body?.paragraphs) ? body.paragraphs : [];
+  const waiting = Boolean(url) && (kind === 'code' || kind === 'doc') && !body;
 
   return createPortal(
     <div
@@ -66,10 +107,31 @@ export default function FileStage({ file, onClose }) {
           {playable && kind === 'image' ? <img src={url} alt={name} /> : null}
           {playable && kind === 'video' ? <video src={url} controls playsInline /> : null}
           {playable && kind === 'audio' ? <audio src={url} controls /> : null}
-          {!playable ? (
+          {playable && kind === 'pdf' ? <iframe className="file-stage-pdf" src={url} title={name} /> : null}
+          {codeText ? <pre className="file-stage-code">{codeText}</pre> : null}
+          {paragraphs.length > 0 ? (
+            <article className="file-stage-doc">
+              {paragraphs.map((line, index) => <p key={`${index}-${line.slice(0, 24)}`}>{line}</p>)}
+            </article>
+          ) : null}
+          {waiting ? (
             <div className="file-stage-card">
               <strong>{name}</strong>
-              <p>This name is in the file catalog. Open the file again from this device to view it.</p>
+              <p>Opening this file.</p>
+            </div>
+          ) : null}
+          {!playable && !codeText && paragraphs.length === 0 && !waiting ? (
+            <div className="file-stage-card">
+              <strong>{name}</strong>
+              <p>
+                {kind === 'doc-old'
+                  ? 'This is an older Word file. Save it as .docx to view it here.'
+                  : body?.error === 'long'
+                    ? 'This file is too long to preview here.'
+                    : body?.error === 'doc' || body?.error === 'binary'
+                      ? 'This file did not open. Try it again from this device.'
+                      : 'This name is in the file catalog. Open the file again from this device to view it.'}
+              </p>
             </div>
           ) : null}
           <figcaption>{name}</figcaption>

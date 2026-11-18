@@ -2,9 +2,12 @@
  * Owner file catalog. Search uses names. Image previews stay in the browser
  * so a file can be opened again. File bytes are not sent to the model.
  */
+import { enforceStorageCap, STORAGE_CAP_WARNING, USER_STORAGE_CAP } from './file-quota.mjs';
+
 const KEY_PREFIX = 'maelstrom.files.';
 const MAX_BOTS = 40;
-const MAX_FILES = 24;
+const MAX_FILES = 2000;
+const PREVIEW_KEEP = 24;
 const MAX_NAME = 180;
 const MAX_TYPE = 80;
 const MAX_URL = 700_000;
@@ -47,6 +50,7 @@ export function cleanCatalogFile(file) {
   };
   const url = previewUrl(file.url);
   if (url) next.url = url;
+  if (typeof file.ref === 'string' && /^[a-f0-9]{64}$/.test(file.ref)) next.ref = file.ref;
   return next;
 }
 
@@ -75,22 +79,60 @@ export function normalizeCatalog(value) {
     if (rows.length > 0) next[botId] = rows;
     if (Object.keys(next).length >= MAX_BOTS) break;
   }
+  return keepNewestPreviews(enforceStorageCap(next).library);
+}
+
+function keepNewestPreviews(library) {
+  const ranked = [];
+  for (const files of Object.values(library || {})) {
+    for (const file of files || []) ranked.push(file);
+  }
+  ranked.sort((a, b) => (Number(b.addedAt) || 0) - (Number(a.addedAt) || 0));
+  const keep = new Set(ranked.slice(0, PREVIEW_KEEP).map(file => file.id));
+  const next = {};
+  for (const [botId, files] of Object.entries(library || {})) {
+    next[botId] = files.map(file => {
+      if (keep.has(file.id) || typeof file.url !== 'string') return file;
+      const copy = { ...file };
+      delete copy.url;
+      return copy;
+    });
+  }
   return next;
 }
 
-export function addCatalogFiles(library, botId, files) {
-  if (typeof botId !== 'string' || !botId || botId.length > 128) return library || {};
-  const prev = Array.isArray(library?.[botId]) ? library[botId] : [];
-  const seen = new Set(prev.map(file => file?.id).filter(Boolean));
-  const added = [];
+export function catalogAddition(library, botId, files) {
+  if (typeof botId !== 'string' || !botId || botId.length > 128) {
+    return { library: library || {}, warning: '', rejected: [] };
+  }
+  const incoming = [];
+  const rejected = [];
+  const seen = new Set();
   for (const file of Array.isArray(files) ? files : []) {
     const clean = cleanCatalogFile(file);
     if (!clean || seen.has(clean.id)) continue;
     seen.add(clean.id);
-    added.push(clean);
+    if (clean.size > USER_STORAGE_CAP) rejected.push(clean);
+    else incoming.push(clean);
   }
-  if (added.length === 0) return library || {};
-  return { ...(library || {}), [botId]: [...added, ...prev].slice(0, MAX_FILES) };
+  if (incoming.length === 0 && rejected.length === 0) {
+    return { library: library || {}, warning: '', rejected: [] };
+  }
+  const base = {};
+  for (const [id, rows] of Object.entries(library || {})) {
+    base[id] = (Array.isArray(rows) ? rows : []).filter(file => !seen.has(file?.id));
+  }
+  const merged = { ...base, [botId]: [...incoming, ...(base[botId] || [])] };
+  const capped = enforceStorageCap(merged, USER_STORAGE_CAP, new Set(incoming.map(file => file.id)));
+  return {
+    library: keepNewestPreviews(capped.library),
+    warning: capped.removed.length > 0 ? STORAGE_CAP_WARNING : '',
+    rejected,
+  };
+}
+
+export function addCatalogFiles(library, botId, files) {
+  return catalogAddition(library, botId, files).library;
 }
 
 export function readCatalog(storage, ownerId) {
