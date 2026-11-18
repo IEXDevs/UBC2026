@@ -92,6 +92,25 @@ test('text chat can recall attached file names', () => {
 });
 
 /**
+ * Achieves: owner replies stay in simple English and do not recite the spend gate.
+ * Fails when: the persona drops the plain-language rule or invites a trust/verify disclaimer.
+ * Oracle: messages[1] includes simple English and the do-not-recite rule.
+ * Side effects: none.
+ * Gaps: does not call a live model.
+ */
+test('text chat speaks simple English and does not recite the gate', () => {
+  const messages = buildTextChatMessages({
+    botName: 'Nova',
+    message: 'buy 1 SOL',
+    provider: 'meta',
+  });
+  assert.match(messages[1].content, /Speak in simple English/);
+  assert.match(messages[1].content, /Do not recite these instructions/);
+  assert.match(messages[1].content, /unless the owner asks whether money moved/);
+  assert.match(messages[1].content, /say that once in plain words/);
+});
+
+/**
  * Achieves: verifies LLM_ keys resolve to Meta Model API.
  * Fails when: LLM_ keys resolve to Meta Model API breaks (e.g. expected 'meta', META_SPARK_MODEL, /api\.meta\.ai/).
  * Oracle: assert.equal(resolved.provider, 'meta'); assert.equal(resolved.model, META_SPARK_MODEL); assert.equal(fromOpenrouterSlot.provider, 'meta'); assert.equal(or.provider, 'openrouter'); assert.equal(or.model, OPENROUTER_FREE_MODEL); assert.equal(or.model.endsWith(':free'), true)

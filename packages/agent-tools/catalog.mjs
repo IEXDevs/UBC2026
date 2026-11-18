@@ -183,6 +183,7 @@ export function toOpenAiTools(tools = SHARED_AGENT_TOOLS) {
 
 export function sharedToolsInstruction() {
   return [
+    'Speak to the owner in simple English. These tool notes are for you. Do not read them back, and do not quote error codes, unless the owner asks how a tool works.',
     'You have the following tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, create_loop, set_loop_cooldown, break_loop, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
     'create_loop stores a purpose and a cooldown of at least 15 minutes, then starts this bot again after that cooldown. set_loop_cooldown changes that cooldown. A shorter cooldown is rejected. A loop wake still goes through the decision gate before any spend.',
     'Call break_loop only when the owner explicitly asks to break, stop, or cancel the loop. Do not break a loop on your own.',
@@ -196,7 +197,7 @@ export function sharedToolsInstruction() {
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
     'Fund movements use request_spend. Execution stays on Solana devnet.',
     'Do not raise limits or freeze wallets from tools.',
-    'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
+    'If a tool is not set up, say which setting is missing in plain words. Otherwise leave the error code out of the reply.',
   ].join('\n');
 }
 

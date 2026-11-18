@@ -144,6 +144,8 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.ok(names.includes('browser_navigate'));
   assert.ok(names.includes('web_search'));
   assert.ok(VOICE_BROWSER_ALIASES.some((item) => item.name === 'open_browser_session'));
+  assert.match(sharedToolsInstruction(), /simple English/);
+  assert.match(sharedToolsInstruction(), /Do not read them back/);
   assert.match(sharedToolsInstruction(), /You have the following tools/);
   assert.match(sharedToolsInstruction(), /get_price/);
   assert.match(sharedToolsInstruction(), /DexScreener/);

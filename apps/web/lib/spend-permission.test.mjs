@@ -36,6 +36,9 @@ test('full permissions manages funds and the other modes still wait', () => {
   assert.match(permissionInstruction('review'), /review threshold/);
   assert.match(permissionInstruction('ask'), /ask every time/);
   assert.match(permissionInstruction('ask'), /mainnet price quote never authorizes/);
+  assert.match(permissionInstruction('ask'), /Do not repeat the check order/);
+  assert.match(permissionInstruction('full'), /Do not say that trust, verify, the budget reserve, or signing did not run/);
+  assert.match(permissionInstruction('review'), /unless the owner asks whether money moved/);
   assert.equal(toolAccessKind('ask', 'web_search'), 'inline');
   assert.equal(toolAccessKind('ask', 'get_wallets'), 'inline');
   assert.equal(toolAccessKind('ask', 'request_spend'), 'modal');
