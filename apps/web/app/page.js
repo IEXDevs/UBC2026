@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Search, Wallet } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
@@ -26,7 +26,7 @@ import HoldButton from '../components/HoldButton';
 import ComputerSheet from '../components/ComputerSheet';
 import FileStage from '../components/FileStage';
 import RecallSearch from '../components/RecallSearch';
-import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
+import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletBalanceLabel, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
 import { compactLines, contextUsage } from '../lib/context-usage.mjs';
@@ -1428,6 +1428,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             signedIn={signedIn}
             loginDisabled={loginDisabled}
             walletUnlocked={unlocked}
+            holdingsLabel={registeredHoldingsLabel({ wallets, positions, transfers, bots })}
             onLogin={onLogin}
             onPick={onAccount}
           />
@@ -1439,10 +1440,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <header className="topbar">
           <span className="topbar-side" />
           <PaneDock panes={SHELL_PANES} pane={pane} onChange={choosePane} />
-          <button type="button" className="wallet-chip" onClick={() => openWallet()}>
-            <Wallet size={16} strokeWidth={1.75} />
-            <span>{glance.balanceLabel || 'Wallet'}</span>
-          </button>
         </header>
         )}
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' ? ' is-chat' : ''}`}>
@@ -1607,7 +1604,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <AgentDetail
           bot={bot}
           files={library[bot.id] ?? []}
-          balanceLabel={glance.balanceLabel}
+          balanceLabel={walletBalanceLabel(bot.walletId, { wallets, positions, transfers, bots })}
           ownerId={ownerId}
           getAccessToken={getAccessToken}
           onResize={event => dragPane(event, 'right')}

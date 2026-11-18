@@ -148,6 +148,50 @@ export function walletGlance(wallets, positions, transfers = []) {
   };
 }
 
+function positionWalletId(position, bots) {
+  if (typeof position?.walletId === 'string' && position.walletId) return position.walletId;
+  const bot = Array.isArray(bots) ? bots.find(item => item?.id === position?.botId) : null;
+  return typeof bot?.walletId === 'string' && bot.walletId ? bot.walletId : null;
+}
+
+function sumWalletUsdc(positions, walletId, bots) {
+  let sum = 0n;
+  for (const position of Array.isArray(positions) ? positions : []) {
+    if (!position || position.asset !== 'USDC' || position.side === 'borrow') continue;
+    if (positionWalletId(position, bots) !== walletId) continue;
+    if (typeof position.amount !== 'string' || !/^-?(0|[1-9][0-9]*)$/.test(position.amount)) continue;
+    sum += BigInt(position.amount);
+  }
+  return sum;
+}
+
+function usesPlatformBook(transfers) {
+  return Array.isArray(transfers) && transfers.length > 0;
+}
+
+/** USDC on the wallet an agent is connected to. The platform book stays on the main wallet. */
+export function walletBalanceLabel(walletId, { wallets = [], positions = [], transfers = [], bots = [] } = {}) {
+  if (typeof walletId !== 'string' || !walletId) return '0 USDC';
+  if (usesPlatformBook(transfers)) {
+    const list = Array.isArray(wallets) ? wallets : [];
+    const main = list.find(wallet => wallet?.kind === 'main') ?? list[0] ?? null;
+    if (main?.id && main.id !== walletId) return '0 USDC';
+    return `${formatBaseUnits(platformBalance(transfers))} USDC`;
+  }
+  return `${formatBaseUnits(sumWalletUsdc(positions, walletId, bots).toString())} USDC`;
+}
+
+/** USDC across registered wallets. A single platform book is one total, not a per-wallet sum. */
+export function registeredHoldingsLabel({ wallets = [], positions = [], transfers = [], bots = [] } = {}) {
+  const list = (Array.isArray(wallets) ? wallets : []).filter(wallet => wallet && wallet.id);
+  if (usesPlatformBook(transfers) || list.length < 2) {
+    return walletGlance(list, positions, transfers).balanceLabel;
+  }
+  let sum = 0n;
+  for (const wallet of list) sum += sumWalletUsdc(positions, wallet.id, bots);
+  return `${formatBaseUnits(sum.toString())} USDC`;
+}
+
 function percentFromBps(value) {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,6})$/.test(value)) return null;
   const text = (Number(value) / 100).toFixed(2).replace(/\.?0+$/, '');

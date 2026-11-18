@@ -16,7 +16,7 @@ const ITEMS = [
   { id: 'computer', label: 'Computer', icon: Monitor },
 ];
 
-export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, onLogin, onPick }) {
+export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, holdingsLabel = '', onLogin, onPick }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
 
@@ -84,6 +84,8 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
         >
           <ProfileMark src={avatarUrl} label={accountLabel} className="you-mark is-round" />
           {collapsed ? null : <strong>{accountLabel}</strong>}
+          {/* shortcut: one shared USDC book, sum every registered wallet when each wallet stores its own holdings. */}
+          {collapsed || !holdingsLabel ? null : <span className="you-holdings">{holdingsLabel}</span>}
         </button>
       </div>
     </div>
