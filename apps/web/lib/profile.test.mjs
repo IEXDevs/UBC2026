@@ -9,6 +9,8 @@ import {
   profileRailLabel,
   profileSaveResult,
   recipientHint,
+  sendHandleHint,
+  sendHandleReady,
 } from './profile.mjs';
 
 /**
@@ -32,6 +34,30 @@ test('a message can name a handle or an SNS name', () => {
   assert.equal(profileRailLabel({ handle: '  @sid ', displayName: 'Sid Chevvan' }), '@sid');
   assert.equal(profileRailLabel({ displayName: 'Sid Chevvan', fallback: 'You' }), 'Sid Chevvan');
   assert.equal(profileRailLabel({ fallback: 'You' }), 'You');
+});
+
+/**
+ * Achieves: Send only enables a @handle after lookup finds a wallet address.
+ * Fails when: missing handles, wallet-less profiles, or loading state still count as ready.
+ * Oracle: address ready; missing/self-without-wallet blocked; hints name Maelstrom or wallet.
+ * Side effects / state checked: N/A.
+ * Gaps: does not call the directory.
+ */
+test('send blocks a handle until lookup finds a wallet', () => {
+  assert.equal(sendHandleReady({ kind: 'handle', handle: 'alex', missing: true }), false);
+  assert.equal(sendHandleReady({ kind: 'handle', handle: 'alex', missing: false }), false);
+  assert.equal(sendHandleReady({
+    kind: 'handle',
+    handle: 'alex',
+    missing: false,
+    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  }), true);
+  assert.equal(sendHandleHint(null, { looking: true, handle: 'alex' }), 'Looking up @alex.');
+  assert.equal(sendHandleHint({ kind: 'handle', handle: 'alex', missing: true }), '@alex is not on Maelstrom');
+  assert.equal(
+    sendHandleHint({ kind: 'handle', handle: 'royce', missing: false, self: true }),
+    '@royce does not have a wallet yet.',
+  );
 });
 
 /**

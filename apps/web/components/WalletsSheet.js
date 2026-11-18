@@ -33,6 +33,7 @@ import {
   tokenStorageKey,
   tradeableTokens,
 } from '../lib/wallet-desk.mjs';
+import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
 import { sendPreview, swapPreview } from '../lib/txn-preview.mjs';
 
 const PANES = [
@@ -63,6 +64,7 @@ export default function WalletsSheet({
   onReceipt,
   focusId = '',
   getAccessToken,
+  resolveRecipient = null,
 }) {
   const { mounted, leaving } = usePresence(open);
   const [pane, setPane] = useState('assets');
@@ -177,6 +179,7 @@ export default function WalletsSheet({
               observing={observing}
               onSend={onSend}
               onReceipt={onReceipt}
+              resolveRecipient={resolveRecipient}
             />
           ) : null}
           {pane === 'receive' ? (
@@ -429,7 +432,16 @@ function WalletSwitcher({ rows, activeId, onSelect }) {
   );
 }
 
-function SendPane({ active, destinations = [], tokens, frozen, observing = false, onSend, onReceipt }) {
+function SendPane({
+  active,
+  destinations = [],
+  tokens,
+  frozen,
+  observing = false,
+  onSend,
+  onReceipt,
+  resolveRecipient = null,
+}) {
   const [to, setTo] = useState('');
   const [pickedId, setPickedId] = useState('');
   const [amount, setAmount] = useState('');
@@ -445,6 +457,8 @@ function SendPane({ active, destinations = [], tokens, frozen, observing = false
   const units = asset ? displayToUnits(amount, asset.decimals) : null;
   const [snsAddress, setSnsAddress] = useState('');
   const [snsFailed, setSnsFailed] = useState(false);
+  const [handleRecipient, setHandleRecipient] = useState(null);
+  const [handleLooking, setHandleLooking] = useState(false);
   useEffect(() => {
     if (target?.kind !== 'sns') {
       setSnsAddress('');
@@ -465,18 +479,47 @@ function SendPane({ active, destinations = [], tokens, frozen, observing = false
       .catch(() => { if (!stop) setSnsFailed(true); });
     return () => { stop = true; };
   }, [target?.kind, target?.domain]);
+  useEffect(() => {
+    if (target?.kind !== 'handle') {
+      setHandleRecipient(null);
+      setHandleLooking(false);
+      return undefined;
+    }
+    let stop = false;
+    setHandleRecipient(null);
+    setHandleLooking(true);
+    const token = `@${target.handle}`;
+    const lookup = typeof resolveRecipient === 'function'
+      ? resolveRecipient(token)
+      : Promise.resolve({ kind: 'handle', handle: target.handle, missing: true });
+    Promise.resolve(lookup)
+      .then((recipient) => {
+        if (stop) return;
+        if (recipient?.kind === 'handle') setHandleRecipient(recipient);
+        else setHandleRecipient({ kind: 'handle', handle: target.handle, missing: true });
+        setHandleLooking(false);
+      })
+      .catch(() => {
+        if (stop) return;
+        setHandleRecipient({ kind: 'handle', handle: target.handle, missing: true });
+        setHandleLooking(false);
+      });
+    return () => { stop = true; };
+  }, [target?.kind, target?.handle, resolveRecipient]);
   const pricedSwap = asset && asset.symbol !== 'USDC'
     ? swapDraft(tokens, { from: asset.symbol, to: 'USDC', amountText: amount })
     : null;
   const walletReady = target?.kind === 'wallet' && target.spendable && asset?.symbol === 'USDC';
+  const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
   const ready = Boolean(
     active && !frozen && !observing && target && units && asset
     && (
       walletReady
-      || (target.kind !== 'address' && target.kind !== 'wallet' && (
-        (asset.symbol === 'USDC' && (target.kind !== 'sns' || snsAddress))
-        || (asset.symbol !== 'USDC' && target.kind === 'handle' && pricedSwap?.broadcast === false && pricedSwap.url)
+      || (target.kind === 'handle' && (
+        (asset.symbol === 'USDC' && handleReady)
+        || (asset.symbol !== 'USDC' && handleReady && pricedSwap?.broadcast === false && pricedSwap.url)
       ))
+      || (target.kind === 'sns' && asset.symbol === 'USDC' && snsAddress)
     )
   );
   const destination = target?.kind === 'wallet'
@@ -511,6 +554,15 @@ function SendPane({ active, destinations = [], tokens, frozen, observing = false
         <p className="quiet" role="status">Failed.</p>
       ) : target?.kind === 'sns' && snsAddress ? (
         <AddressCopy address={snsAddress} prefix={target.domain} />
+      ) : target?.kind === 'handle' && sendHandleReady(handleRecipient) ? (
+        <AddressCopy
+          address={handleRecipient.address}
+          prefix={handleRecipient.displayName || `@${handleRecipient.handle}`}
+        />
+      ) : target?.kind === 'handle' ? (
+        <p className="quiet" role="status">
+          {sendHandleHint(handleRecipient, { looking: handleLooking, handle: target.handle })}
+        </p>
       ) : (
         <p className="quiet">{targetHint(target)}</p>
       )}
@@ -574,7 +626,6 @@ function SendPane({ active, destinations = [], tokens, frozen, observing = false
 
 function targetHint(target) {
   if (!target) return 'Type a @handle or a .sol name, or pick a wallet.';
-  if (target.kind === 'handle') return `Sends USDC to @${target.handle} on the platform ledger.`;
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
   if (target.kind === 'wallet' && target.spendable === false) return 'That wallet is read only.';
   if (target.kind === 'wallet') return `Sends USDC on Solana devnet to ${target.caption}.`;

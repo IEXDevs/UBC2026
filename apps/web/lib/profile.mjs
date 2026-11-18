@@ -108,3 +108,22 @@ export function recipientHint(recipient) {
   const where = shortAddress(recipient.address);
   return where ? `${who}(${where})` : who;
 }
+
+/** Platform ledger sends need a found handle with a wallet address. */
+export function sendHandleReady(recipient) {
+  if (!recipient || recipient.kind !== 'handle' || recipient.missing) return false;
+  return typeof recipient.address === 'string' && recipient.address.length > 0;
+}
+
+/** Status line under Send To while a handle is resolved. */
+export function sendHandleHint(recipient, { looking = false, handle = '' } = {}) {
+  const name = typeof handle === 'string' && handle
+    ? handle.replace(/^@/, '')
+    : (typeof recipient?.handle === 'string' ? recipient.handle : '');
+  if (looking) return name ? `Looking up @${name}.` : 'Looking up that handle.';
+  if (!recipient) return name ? `@${name} is not on Maelstrom` : '';
+  if (recipient.missing === false && !recipient.address) {
+    return `@${recipient.handle || name} does not have a wallet yet.`;
+  }
+  return recipientHint(recipient);
+}

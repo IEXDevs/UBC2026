@@ -1756,6 +1756,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         onSend={onWalletSend}
         onReceipt={pushReceipt}
         getAccessToken={getAccessToken}
+        resolveRecipient={resolveMention}
       />
       <PartySheet
         open={Boolean(party)}
