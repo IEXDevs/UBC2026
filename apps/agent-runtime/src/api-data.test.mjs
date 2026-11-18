@@ -623,9 +623,9 @@ test('wallets.persist ignores foreign-owner wallet rows (owner header wins)', as
 });
 
 /**
- * Achieves: Worker Privy failure returns privy_failed with runtime secret guidance.
- * Fails when: error lacks detail naming runtime Privy secrets.
- * Oracle: 502 + privy_failed; detail matches /PRIVY_APP_SECRET|AUTHORIZATION/i.
+ * Achieves: Worker Privy failure returns privy_failed with the WalletError detail.
+ * Fails when: detail is dropped or replaced with a generic secrets hint only.
+ * Oracle: 502 + privy_failed; detail includes the upstream message (401).
  * Side effects / state checked: acceptLogin throws WalletError (no network).
  * Gaps: none for this failure mode
  */
@@ -649,7 +649,7 @@ test('wallet create surfaces runtime Privy guidance when acceptLogin fails on th
   assert.equal(res.status, 502);
   const body = await res.json();
   assert.equal(body.error, 'privy_failed');
-  assert.match(body.detail || '', /PRIVY_APP_SECRET|AUTHORIZATION|agent-runtime/i);
+  assert.match(body.detail || '', /Privy users failed \(401\)/);
 });
 
 /**

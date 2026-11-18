@@ -63,7 +63,7 @@ async function rpcCall(fetcher, rpcUrl, method, params) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(15000),
     });
   } catch {

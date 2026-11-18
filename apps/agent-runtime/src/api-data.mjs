@@ -122,9 +122,15 @@ export async function resolveOwner(request, env) {
   } catch (error) {
     if (error instanceof WalletError) {
       // Do not fall back to a client-supplied header after a failed Privy verify.
-      return { ownerId: null, user: null, token, error: error.code || 'privy_failed' };
+      const detail = typeof error.message === 'string'
+        ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
+        : undefined;
+      return { ownerId: null, user: null, token, error: error.code || 'privy_failed', detail };
     }
-    return { ownerId: null, user: null, token, error: 'privy_failed' };
+    const detail = typeof error?.message === 'string'
+      ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
+      : undefined;
+    return { ownerId: null, user: null, token, error: 'privy_failed', detail };
   }
 }
 
@@ -592,13 +598,13 @@ export async function handleApiData(request, env, matched) {
   }
 
   if (routeId === 'wallets.create') {
-    const { ownerId, user, token, error } = await resolveOwner(request, env);
+    const { ownerId, user, token, error, detail: ownerDetail } = await resolveOwner(request, env);
     if (error) {
-      const status = error === 'missing_origin' || error === 'worker_origin_forbidden' ? 502 : 502;
-      let detail;
-      if (error === 'worker_origin_forbidden' || error === 'missing_origin') {
+      const status = 502;
+      let detail = typeof ownerDetail === 'string' ? ownerDetail : undefined;
+      if (!detail && (error === 'worker_origin_forbidden' || error === 'missing_origin')) {
         detail = 'Privy login needs a JWT user id on Cloudflare Workers (users/me unavailable). Sign out and sign in again.';
-      } else if (error === 'privy_failed') {
+      } else if (!detail && error === 'privy_failed') {
         detail = 'Privy acceptLogin failed on agent-runtime. Confirm PRIVY_APP_SECRET and PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime.';
       }
       return json(detail ? { error, detail } : { error }, status);

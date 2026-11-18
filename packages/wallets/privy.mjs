@@ -508,11 +508,14 @@ export function createPrivyWalletClient({
   async function fetchJson(url, { method, headers, body }, code) {
     let response;
     try {
+      // Cloudflare Workers only allow redirect "follow" | "manual".
+      // `redirect: "error"` throws TypeError on workerd / OpenNext (the hosted
+      // "Privy request failed (TypeError)" regression).
       response = await fetcher(url, {
         method,
         headers,
         body: body == null ? undefined : JSON.stringify(body),
-        redirect: 'error',
+        redirect: 'manual',
         signal: abortAfter(15000),
       });
     } catch (error) {
@@ -524,6 +527,12 @@ export function createPrivyWalletClient({
       // Include a short, non-secret cause so Cloudflare / network misconfig is diagnosable.
       const cause = aborted ? 'timed out' : safeNetworkCause(error);
       fail(`${target} request ${cause}`, code);
+    }
+    {
+      const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
+      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+        fail(`${target} request failed (redirect)`, code);
+      }
     }
     const text = await response.text();
     let payload = null;

@@ -270,7 +270,7 @@ async function rpcBatch(fetcher, rpcUrl, calls) {
         method: call.method,
         params: call.params,
       }))),
-      redirect: 'error',
+      redirect: 'manual',
       signal: abortAfter(20000),
     });
   } catch (error) {

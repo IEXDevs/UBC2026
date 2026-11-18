@@ -236,6 +236,24 @@ test('forbidden Origin TypeError maps to worker_origin_forbidden', async () => {
 });
 
 /**
+ * Rigor audit — Workers reject redirect:"error"
+ * Achieves: every Privy fetch uses redirect:"manual" (workerd-safe).
+ * Fails when: fetchJson passes redirect:"error" (TypeError on Cloudflare).
+ * Oracle: Cloudflare fetch docs — only follow|manual.
+ * Side effects: inspects init.redirect on the first call.
+ */
+test('Privy fetch uses redirect manual for Cloudflare Workers', async () => {
+  const { fetcher, calls } = mockFetch([
+    {
+      match: url => url.includes(`/v1/users/${encodeURIComponent(privyUserId)}`),
+      body: { id: privyUserId, linked_accounts: [embedded(walletId)] },
+    },
+  ]);
+  await client({ fetcher }).acceptLogin({ accessToken: jwtFor(privyUserId) });
+  assert.equal(calls[0].init.redirect, 'manual');
+});
+
+/**
  * Rigor audit — local Node fallback with Origin
  * Achieves: when loadUser fails AND a sanitized Origin is present, `/users/me`
  *   is called with Bearer + Origin.
