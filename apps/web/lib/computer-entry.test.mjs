@@ -11,24 +11,23 @@ function source(path) {
 }
 
 /**
- * Achieves: verifies the live browser enters from the sidebar computer screen, not the chat thread.
- * Fails when: AgentThread embeds LiveViewPanel, FileLibrary loses side-computer/LiveViewPanel, or panel controls disappear.
- * Oracle: LiveViewPanel lives in FileLibrary/ComputerSheet; panel keeps Start Browser / Take control / Force stop.
+ * Achieves: verifies the live browser stays in the computer sheet, and the right pane is only files.
+ * Fails when: AgentThread or FileLibrary embed LiveViewPanel, or the computer sheet loses its controls.
+ * Oracle: LiveViewPanel lives in ComputerSheet; FileLibrary is a scrolling file list.
  * Side effects / state checked: component source text.
  * Gaps: source snapshot only — browser session HTTP not exercised.
  */
-test('the live browser opens from the sidebar computer screen', () => {
+test('the right pane is a file list and the computer sheet keeps the browser', () => {
   const thread = source('components/AgentThread.js');
   const library = source('components/FileLibrary.js');
   const sheet = source('components/ComputerSheet.js');
   const panel = source('components/LiveViewPanel.js');
 
   assert.equal(thread.includes('LiveViewPanel'), false);
-  assert.equal(library.includes('library-menu'), false);
-  assert.equal(library.includes('Bot&apos;s computer'), false);
-  assert.match(library, /className="side-computer"/);
-  assert.match(library, /<LiveViewPanel[\s\S]*screen/);
-  assert.match(library, /onExpand=\{/);
+  assert.equal(library.includes('LiveViewPanel'), false);
+  assert.equal(library.includes('library-filters'), false);
+  assert.match(library, /FileScroll/);
+  assert.match(library, /selectOnScroll/);
   assert.match(sheet, /browser-preview/);
   assert.match(sheet, /autoStart/);
   assert.match(sheet, /LiveViewPanel/);

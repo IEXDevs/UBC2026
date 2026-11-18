@@ -2,6 +2,7 @@
  * Thinking stops come from the model catalog. Each model advertises its own
  * reasoning efforts. A missing field falls back to the published list for that id.
  */
+import { contextWindowFor, rememberContextWindow, reportedContextWindow } from './context-usage.mjs';
 
 const ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -92,7 +93,9 @@ function displayName(id, model) {
 
 export function fallbackThinkingCatalog() {
   const id = 'muse-spark-1.3-contributor';
-  return [{ id, name: 'Muse Spark', levels: thinkingLevelsForModel(id) }];
+  const contextWindow = contextWindowFor(id);
+  rememberContextWindow(id, contextWindow);
+  return [{ id, name: 'Muse Spark', levels: thinkingLevelsForModel(id), contextWindow }];
 }
 
 export async function loadThinkingCatalog({ apiKey = '', baseUrl = '', fetcher = fetch } = {}) {
@@ -122,10 +125,13 @@ export function parseThinkingCatalog(payload) {
     if (!/^[A-Za-z0-9_.:/-]{1,80}$/.test(id)) continue;
     const levels = thinkingLevelsForModel(row);
     if (levels.length === 0) continue;
+    const contextWindow = contextWindowFor(id, reportedContextWindow(row));
+    rememberContextWindow(id, contextWindow);
     models.push({
       id,
       name: displayName(id, row),
       levels,
+      contextWindow,
     });
   }
   return models;

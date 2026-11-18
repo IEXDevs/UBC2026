@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compactLines, contextTone, contextUsage, estimateTokens, formatTokens } from './context-usage.mjs';
+import {
+  clipOwnerMessage,
+  compactLines,
+  contextTone,
+  contextUsage,
+  contextWindowFor,
+  estimateTokens,
+  formatTokens,
+  inputBudget,
+  MESSAGE_CHAR_CAP,
+} from './context-usage.mjs';
 
 /**
  * Achieves: verifies an empty thread reports zero usage against the 128k window.
@@ -65,4 +75,13 @@ test('a full window compacts earlier messages and keeps the recent tail', () => 
   assert.equal(next.at(-1).id, 'c');
   assert.ok(contextUsage(next, 80).percent < contextUsage(lines, 80).percent);
   assert.equal(compactLines(lines, 128000).length, 3);
+});
+
+test('the context window follows the model and a reported endpoint size', () => {
+  assert.equal(contextWindowFor('muse-spark-1.3-contributor'), 1_048_576);
+  assert.equal(contextWindowFor('meta-llama/llama-3.3-70b-instruct:free'), 131_072);
+  assert.equal(contextWindowFor('unknown-model'), 128000);
+  assert.equal(contextWindowFor('muse-spark-1.3-contributor', 32000), 32000);
+  assert.equal(inputBudget(1_048_576), 1_048_576 - 8192);
+  assert.equal(clipOwnerMessage('x'.repeat(600)).length, MESSAGE_CHAR_CAP);
 });

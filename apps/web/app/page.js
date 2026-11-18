@@ -21,15 +21,14 @@ import PartySheet from '../components/PartySheet';
 import PluginsSheet from '../components/PluginsSheet';
 import StatisticsSheet from '../components/StatisticsSheet';
 import AgentDetail from '../components/AgentDetail';
-import AgentEdit from '../components/AgentEdit';
 import HoldButton from '../components/HoldButton';
 import ComputerSheet from '../components/ComputerSheet';
 import FileStage from '../components/FileStage';
 import RecallSearch from '../components/RecallSearch';
-import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletBalanceLabel, walletGlance } from '../lib/money-views.mjs';
+import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
-import { compactLines, contextUsage } from '../lib/context-usage.mjs';
+import { compactLines, contextUsage, contextWindowFor } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
 import {
   adoptLegacyRoster,
@@ -69,7 +68,8 @@ import { SETUP_CARD_MS, accountSetupStep, clipAddress, readQuoteOut, readRecover
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { catalogAddition, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
 import { STORAGE_FILE_TOO_BIG } from '../lib/file-quota.mjs';
-import { applyStoredFile, storeAttachedFile, uploadNotice } from '../lib/store-file.mjs';
+import { ensureAccountCode } from '../lib/account-code.mjs';
+import { applyStoredFile, dropCatalogFile, storeAttachedFile, uploadNotice } from '../lib/store-file.mjs';
 import { searchRecall } from '../lib/recall-search.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
@@ -356,7 +356,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [detailWidth, setDetailWidth] = useState(280);
   const [paneDrag, setPaneDrag] = useState(false);
   const [activeBot, setActiveBot] = useState(null);
-  const [cornerEdit, setCornerEdit] = useState(null);
   const [pendingSend, setPendingSend] = useState(null);
   const [unlocked, setUnlocked] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
@@ -400,6 +399,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [library, setLibrary] = useState({});
   const [catalogReady, setCatalogReady] = useState(false);
   const [recall, setRecall] = useState('');
+  const [contextLimit, setContextLimit] = useState(() => contextWindowFor('muse-spark-1.3-contributor'));
   const [focusLine, setFocusLine] = useState(null);
   const [viewFile, setViewFile] = useState(null);
   const [voiceMs, setVoiceMs] = useState(0);
@@ -423,15 +423,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (!revised) return;
     setTalks(current => ({
       ...current,
-      [bot.id]: compactLines(revised.lines),
+      [bot.id]: compactLines(revised.lines, contextLimit),
     }));
   }
   const appendTalk = useCallback((botId, line) => {
     setTalks(current => ({
       ...current,
-      [botId]: compactLines([...(current[botId] ?? []), line].slice(-80)),
+      [botId]: compactLines([...(current[botId] ?? []), line], contextLimit),
     }));
-  }, []);
+  }, [contextLimit]);
   useEffect(() => {
     setLooks({});
     setRoster({ order: [], extra: [] });
@@ -760,6 +760,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       ? { ...bot, loop: loopOverrides[bot.id] }
       : bot
   ));
+  const onMissingFile = useCallback((id) => {
+    if (typeof id !== 'string' || !id) return;
+    setLibrary(current => dropCatalogFile(current, id));
+    setViewFile(current => (current?.id === id ? null : current));
+  }, []);
   const onBreakLoop = useCallback(async (id) => {
     if (typeof id !== 'string' || !id) return;
     setLoopOverrides((current) => ({ ...current, [id]: null }));
@@ -1593,7 +1598,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             onThinking={on => setThinkingBot(on ? bot.id : null)}
             onVoiceSpan={addVoice}
             resolveMention={resolveMention}
-            usage={contextUsage(talks[bot.id] ?? [])}
+            onContextWindow={setContextLimit}
+            usage={contextUsage(talks[bot.id] ?? [], contextLimit)}
             onEditLine={onEditLine}
             onPatchLine={(lineId, patch, forBot) => {
               const id = forBot || bot.id;
@@ -1619,7 +1625,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                 if (!item.blob || !ownerId) continue;
                 void (async () => {
                   const token = await getAccessToken?.();
-                  const saved = await storeAttachedFile({ ownerId, token, item });
+                  const accountCode = ensureAccountCode(localStorage, ownerId);
+                  const saved = await storeAttachedFile({ ownerId, accountCode, token, item });
                   const notice = uploadNotice(saved);
                   if (notice) {
                     toast?.({
@@ -1644,23 +1651,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <AgentDetail
           bot={bot}
           files={library[bot.id] ?? []}
-          balanceLabel={walletBalanceLabel(bot.walletId, { wallets, positions, transfers, bots })}
           ownerId={ownerId}
           getAccessToken={getAccessToken}
           onResize={event => dragPane(event, 'right')}
-          onWallet={openWallet}
-          onComputer={() => onAccount('computer')}
-          onEdit={(event) => setCornerEdit({ x: event.clientX, y: event.clientY })}
-        />
-      ) : null}
-      {cornerEdit && bot ? (
-        <AgentEdit
-          bot={bot}
-          x={cornerEdit.x}
-          y={cornerEdit.y}
-          onClose={() => setCornerEdit(null)}
-          onSave={onEditLook}
-          onDelete={(id) => { onDelete(id); setCornerEdit(null); }}
+          onMissingFile={onMissingFile}
         />
       ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} first={bots.length === 0} />
@@ -1723,7 +1717,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       />
       <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={CONNECTORS} />
       <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
-      {viewFile ? <FileStage file={viewFile} ownerId={ownerId} getAccessToken={getAccessToken} onClose={() => setViewFile(null)} /> : null}
+      {viewFile ? <FileStage file={viewFile} ownerId={ownerId} getAccessToken={getAccessToken} onMissing={onMissingFile} onClose={() => setViewFile(null)} /> : null}
       <StatisticsSheet
         open={statsOpen}
         onClose={closeStats}

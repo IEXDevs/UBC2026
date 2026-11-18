@@ -39,6 +39,7 @@ import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { stageKind } from '../lib/file-view.mjs';
+import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
 
 const LEAVE_MS = 760;
 const PROMPT_SOURCES = [
@@ -51,6 +52,7 @@ function promptModels(rows) {
     name: model.name,
     tag: 'Chat',
     levels: Array.isArray(model.levels) ? model.levels : [],
+    contextWindow: contextWindowFor(model.id, model.contextWindow),
   }));
 }
 const SUGGESTIONS = [
@@ -112,6 +114,7 @@ export default function Composer({
   onConfirm = null,
   onBindAccess = null,
   clientTools = null,
+  onContextWindow = null,
 }) {
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
@@ -238,6 +241,11 @@ export default function Composer({
       .catch(() => {});
     return () => { stop = true; };
   }, []);
+
+  useEffect(() => {
+    const model = models.find(item => item.key === chatModel) ?? models[0];
+    onContextWindow?.(contextWindowFor(model?.key, model?.contextWindow));
+  }, [models, chatModel, onContextWindow]);
 
   useEffect(() => {
     if (!settingsReady) return;
@@ -407,7 +415,7 @@ export default function Composer({
   async function sendMessage(text) {
     const spokenText = typeof text === 'string' ? text.trim() : draft.trim();
     const attached = files.map(file => file.name).join(', ');
-    const spoken = attached ? `${spokenText}${spokenText ? '\n' : ''}${attached}` : spokenText;
+    const spoken = clipOwnerMessage(attached ? `${spokenText}${spokenText ? '\n' : ''}${attached}` : spokenText);
     if (!spoken || sendingRef.current) return;
     const prior = lines;
     pushLine('user', spoken);
@@ -457,7 +465,7 @@ export default function Composer({
   }
 
   async function regenerate(text, prior) {
-    const spoken = typeof text === 'string' ? text.trim() : '';
+    const spoken = clipOwnerMessage(text);
     if (!spoken || sendingRef.current) return;
     setThinking(true);
     onThinking?.(true);
@@ -1107,6 +1115,7 @@ function chatFailureNote(code) {
   }
   if (code === 'not_found' || code === 'bot_not_found') return 'This agent was not found for your account.';
   if (code === 'invalid_request') return 'Sign in to chat with this agent.';
+  if (code === 'message_too_long') return 'That message is over 500 characters.';
   if (code === 'network') return 'Could not reach the chat API for a reply.';
   return 'I could not reply just now.';
 }

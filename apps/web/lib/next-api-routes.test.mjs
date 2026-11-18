@@ -232,9 +232,9 @@ test('GET /api/wallets reports config flags without secret values', async () => 
  *   before OpenRouter is called.
  * Fails when: validation order wrong (e.g. missing owner returns invalid_bot) or
  *   empty message proceeds to LLM.
- * Oracle: BOT_ID/OWNER regexes + non-empty trimmed message ≤ 4000.
+ * Oracle: BOT_ID/OWNER regexes + non-empty trimmed message ≤ 500.
  * Side effects: none (returns before LLM).
- * Gaps: none — closed: overlong message (>4000) also rejected.
+ * Gaps: none — closed: overlong message (>500) also rejected.
  */
 test('POST /api/bots/:botId/chat rejects invalid bot, missing owner, and empty message', async () => {
   const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
@@ -275,12 +275,12 @@ test('POST /api/bots/:botId/chat rejects invalid bot, missing owner, and empty m
     new Request('http://localhost/api/bots/bot_1/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-owner-id': 'did:privy:u1' },
-      body: JSON.stringify({ message: 'x'.repeat(4001) }),
+      body: JSON.stringify({ message: 'x'.repeat(501) }),
     }),
     { params: Promise.resolve({ botId: 'bot_1' }) },
   );
   assert.equal(tooLong.status, 400);
-  assert.equal((await tooLong.json()).error, 'message_required');
+  assert.equal((await tooLong.json()).error, 'message_too_long');
 });
 
 /**

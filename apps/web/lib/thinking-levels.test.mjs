@@ -35,10 +35,13 @@ test('wonder includes Max and a catalog row can override the list', () => {
         id: 'muse-wonder-1.0',
         name: 'Muse Wonder',
         reasoning: { effort: ['low', 'high', 'max'], default: 'low' },
+        context_length: 64000,
       },
     ],
   });
   assert.equal(catalog[0].levels.find(item => item.default).label, 'High');
   assert.deepEqual(catalog[1].levels.map(item => item.id), ['low', 'high', 'max']);
   assert.equal(catalog[1].levels.find(item => item.default).id, 'low');
+  assert.equal(catalog[0].contextWindow, 1_048_576);
+  assert.equal(catalog[1].contextWindow, 64_000);
 });

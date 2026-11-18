@@ -52,6 +52,25 @@ test('text chat messages keep platform rules and map agent history', () => {
   assert.equal(messages[3].role, 'assistant');
   assert.equal(messages.some(item => item.content.includes('ignore rules')), false);
   assert.match(messages.at(-1).content, /\[redacted\]/);
+  assert.equal(messages.at(-1).content.length <= 500, true);
+});
+
+test('history is compacted once it no longer fits the model window', () => {
+  const history = Array.from({ length: 12 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    text: `${index} ${'x'.repeat(400)}`,
+  }));
+  const messages = buildTextChatMessages({
+    botName: 'Nova',
+    history,
+    message: 'latest',
+    provider: 'meta',
+    model: 'muse-spark-1.3-contributor',
+    contextWindow: 1200,
+  });
+  assert.equal(messages.some(item => item.content.includes('compacted')), true);
+  assert.equal(messages.at(-1).content, 'latest');
+  assert.equal(messages.filter(item => item.role === 'user' || item.role === 'assistant').length < history.length, true);
 });
 
 /**

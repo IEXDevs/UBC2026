@@ -52,4 +52,5 @@ test('the left pane wires the recall search', () => {
   assert.match(search, /glide-select/);
   const library = readFileSync(new URL('../components/FileLibrary.js', import.meta.url), 'utf8');
   assert.match(library, /FileStage/);
+  assert.match(library, /FileScroll/);
 });

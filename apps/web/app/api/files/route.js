@@ -1,3 +1,4 @@
+import { isAccountCode } from '../../../lib/account-code.mjs';
 import { saveOwnerFile } from '../../../lib/drive-files.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 
@@ -14,9 +15,13 @@ function driveConfig() {
 
 export async function POST(request) {
   const ownerId = (request.headers.get('x-owner-id') || '').trim();
+  const accountCode = (request.headers.get('x-account-code') || '').trim();
   const bearer = request.headers.get('authorization') || '';
   if (!OWNER.test(ownerId) || !bearer.startsWith('Bearer ') || bearer.length < 12) {
     return Response.json({ error: 'owner_required' }, { status: 401, headers: NO_STORE });
+  }
+  if (!isAccountCode(accountCode)) {
+    return Response.json({ error: 'account_required' }, { status: 401, headers: NO_STORE });
   }
   let form = null;
   try {
@@ -31,6 +36,7 @@ export async function POST(request) {
   const saved = await saveOwnerFile({
     env: driveConfig(),
     ownerId,
+    accountCode,
     name: file.name,
     type: file.type,
     bytes: new Uint8Array(await file.arrayBuffer()),
