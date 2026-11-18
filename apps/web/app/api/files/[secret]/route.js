@@ -14,6 +14,7 @@ function driveConfig() {
 
 export async function GET(request, { params }) {
   const ownerId = (request.headers.get('x-owner-id') || '').trim();
+  const accountCode = (request.headers.get('x-account-code') || '').trim();
   const bearer = request.headers.get('authorization') || '';
   const secret = (await params)?.secret || '';
   if (!OWNER.test(ownerId) || !bearer.startsWith('Bearer ') || bearer.length < 12) {
@@ -22,11 +23,15 @@ export async function GET(request, { params }) {
   const read = await readOwnerFile({
     env: driveConfig(),
     ownerId,
+    accountCode,
     secret,
   });
   if (!read.ok) {
-    const status = read.error === 'drive_not_configured' ? 503 : 404;
-    return Response.json({ error: 'not_found' }, { status, headers: NO_STORE });
+    const status = read.error === 'drive_not_configured' ? 503
+      : read.error === 'unreachable' ? 502
+        : 404;
+    const body = read.gone ? { error: 'not_found', gone: true } : { error: 'not_found' };
+    return Response.json(body, { status, headers: NO_STORE });
   }
   return new Response(read.bytes, {
     headers: {

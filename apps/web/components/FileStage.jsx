@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { ensureAccountCode } from '../lib/account-code.mjs';
 import { readPreview, stageKind } from '../lib/file-view.mjs';
 
 function viewUrl(file) {
@@ -11,7 +12,7 @@ function viewUrl(file) {
   return '';
 }
 
-export default function FileStage({ file, ownerId = '', getAccessToken = null, onClose }) {
+export default function FileStage({ file, ownerId = '', getAccessToken = null, onClose, onMissing = null }) {
   const [shown, setShown] = useState(false);
   const [remote, setRemote] = useState('');
   const [body, setBody] = useState(null);
@@ -37,14 +38,22 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
     let objectUrl = '';
     (async () => {
       const token = await getAccessToken?.();
-      if (!token || gone) return;
+      const accountCode = ensureAccountCode(window.localStorage, ownerId);
+      if (!token || !accountCode || gone) return;
       const response = await fetch(`/api/files/${file.id}`, {
         headers: {
           'x-owner-id': ownerId,
+          'x-account-code': accountCode,
           authorization: `Bearer ${token}`,
         },
       });
-      if (!response.ok || gone) return;
+      if (!response.ok || gone) {
+        if (response && response.status === 404) {
+          const data = await response.json().catch(() => ({}));
+          if (data?.gone === true) onMissing?.(file.id);
+        }
+        return;
+      }
       const bytes = await response.arrayBuffer();
       const type = stageKind(file) === 'pdf'
         ? 'application/pdf'
@@ -56,7 +65,7 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
       gone = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, ownerId, getAccessToken]);
+  }, [file, ownerId, getAccessToken, onMissing]);
 
   const url = viewUrl(file) || (remote.startsWith('blob:') ? remote : '');
   const kind = stageKind(file);

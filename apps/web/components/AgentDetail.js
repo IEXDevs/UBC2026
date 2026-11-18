@@ -13,6 +13,7 @@ export default function AgentDetail({
   onWallet,
   onComputer,
   onEdit,
+  onMissingFile,
 }) {
   return (
     <aside className="agent-detail" aria-label={`${bot.name} details`}>
@@ -36,6 +37,7 @@ export default function AgentDetail({
         getAccessToken={getAccessToken}
         onComputer={onComputer}
         onEdit={onEdit}
+        onMissing={onMissingFile}
       />
     </aside>
   );

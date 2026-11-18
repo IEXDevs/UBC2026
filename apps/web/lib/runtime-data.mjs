@@ -7,6 +7,7 @@
 import { publicCardLoop } from '@ubc2026/contracts/card-loop';
 import { sanitizeActivity } from './chat-activity.mjs';
 import { catalogPayload } from './file-catalog.mjs';
+import { clipOwnerMessage, MESSAGE_CHAR_CAP } from './context-usage.mjs';
 import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
 
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -341,8 +342,10 @@ export async function sendBotChat({
   if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
     return { ok: false, error: 'invalid_request' };
   }
-  const text = typeof message === 'string' ? message.trim() : '';
-  if (!text) return { ok: false, error: 'message_required' };
+  const raw = typeof message === 'string' ? message.trim() : '';
+  if (!raw) return { ok: false, error: 'message_required' };
+  if (raw.length > MESSAGE_CHAR_CAP) return { ok: false, error: 'message_too_long' };
+  const text = clipOwnerMessage(raw);
   const catalog = catalogPayload(fileCatalog);
   const prior = Array.isArray(history)
     ? history
@@ -352,7 +355,7 @@ export async function sendBotChat({
         text: typeof line.text === 'string' ? line.text : '',
       }))
       .filter(line => line.text.trim())
-      .slice(-16)
+      .slice(-400)
     : [];
   try {
     const response = await fetch(url, {

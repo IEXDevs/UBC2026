@@ -6,6 +6,7 @@ import { withHeads } from '../lib/voice-float.mjs';
 import MentionText from './MentionText';
 import { AgentTrace, Reasoning, Sources } from './ai/elements';
 import { sanitizeActivity } from '../lib/chat-activity.mjs';
+import { MESSAGE_CHAR_CAP } from '../lib/context-usage.mjs';
 import { Bubble, BubbleContent } from './ui/bubble';
 import { Message, MessageContent, MessageGroup } from './ui/message';
 
@@ -45,7 +46,7 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
                     className="chat-revise"
                     onSubmit={(event) => {
                       event.preventDefault();
-                      const next = draft.trim();
+                      const next = draft.trim().slice(0, MESSAGE_CHAR_CAP);
                       if (!next) return;
                       setEditingId(null);
                       onEdit?.(line.id, next);
@@ -53,10 +54,11 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
                   >
                     <textarea
                       aria-label="Edit message"
+                      maxLength={MESSAGE_CHAR_CAP}
                       value={draft}
                       rows={Math.min(8, Math.max(2, draft.split('\n').length))}
                       autoFocus
-                      onChange={(event) => setDraft(event.target.value)}
+                      onChange={(event) => setDraft(event.target.value.slice(0, MESSAGE_CHAR_CAP))}
                       onKeyDown={(event) => {
                         if (event.key === 'Escape') {
                           event.preventDefault();

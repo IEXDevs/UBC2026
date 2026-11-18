@@ -9,6 +9,14 @@ import { thinkStep, toolStep } from './chat-activity.mjs';
 import { grantCovers, toolAccessRequest } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
 import { reasoningEffortFor } from './thinking-levels.mjs';
+import {
+  clipOwnerMessage,
+  contextWindowFor,
+  estimateTokens,
+  inputBudget,
+  MESSAGE_CHAR_CAP,
+  rememberedContextWindow,
+} from './context-usage.mjs';
 
 export { OPENROUTER_FREE_MODEL };
 
@@ -96,6 +104,8 @@ export function buildTextChatMessages({
   toolsInstruction = '',
   permission = '',
   fileCatalog = [],
+  model = '',
+  contextWindow = 0,
 } = {}) {
   const name = clip(redact(String(botName || 'Agent'), secrets), 80) || 'Agent';
   const goal = clip(redact(String(botGoal || 'Waiting for a goal.'), secrets), 2000);
@@ -122,16 +132,34 @@ export function buildTextChatMessages({
       ].join('\n'),
     },
   ];
-  const prior = Array.isArray(history) ? history.slice(-16) : [];
-  for (const item of prior) {
+  const windowSize = contextWindowFor(model, contextWindow || rememberedContextWindow(model));
+  const budget = inputBudget(windowSize);
+  const latest = clip(redact(clipOwnerMessage(message), secrets), MESSAGE_CHAR_CAP);
+  let room = budget - estimateTokens(messages.map(item => item.content).join('\n')) - estimateTokens(latest) - 24;
+  const prior = Array.isArray(history) ? history : [];
+  const kept = [];
+  let seen = 0;
+  for (let index = prior.length - 1; index >= 0; index -= 1) {
+    const item = prior[index];
     if (!item) continue;
     const role = item.role === 'user' ? 'user' : item.role === 'assistant' || item.role === 'agent' ? 'assistant' : null;
     if (!role) continue;
-    const content = clip(redact(typeof item.content === 'string' ? item.content : (item.text || ''), secrets), 2000);
+    const cap = role === 'user' ? MESSAGE_CHAR_CAP : 8000;
+    const content = clip(redact(typeof item.content === 'string' ? item.content : (item.text || ''), secrets), cap);
     if (!content) continue;
-    messages.push({ role, content });
+    seen += 1;
+    const tokens = estimateTokens(content);
+    if (tokens > room) break;
+    kept.unshift({ role, content });
+    room -= tokens;
   }
-  const latest = clip(redact(String(message || ''), secrets), 4000);
+  if (seen > kept.length) {
+    messages.push({
+      role: instructionRole,
+      content: 'Earlier messages were compacted to stay inside this model\'s context window.',
+    });
+  }
+  for (const item of kept) messages.push(item);
   if (latest) messages.push({ role: 'user', content: latest });
   return messages;
 }
@@ -378,6 +406,8 @@ export async function completeTextChat({
     toolsInstruction: toolList ? toolsInstruction : '',
     permission,
     fileCatalog,
+    model: modelId,
+    contextWindow: rememberedContextWindow(modelId),
   });
   const rounds = Number.isSafeInteger(maxToolRounds) && maxToolRounds > 0
     ? Math.min(maxToolRounds, 8)

@@ -1,3 +1,4 @@
+import { isAccountCode } from './account-code.mjs';
 import { FILE_BYTE_CAP, STORAGE_CAP_WARNING } from './file-quota.mjs';
 
 export const STORAGE_UPLOAD_TOO_BIG = 'That file is larger than 512 MB, so it was not saved.';
@@ -23,6 +24,15 @@ export function applyStoredFile(library, localId, saved) {
   return next;
 }
 
+export function dropCatalogFile(library, fileId) {
+  const next = {};
+  for (const [botId, files] of Object.entries(library || {})) {
+    const rows = (Array.isArray(files) ? files : []).filter(file => file?.id !== fileId);
+    if (rows.length > 0) next[botId] = rows;
+  }
+  return next;
+}
+
 export function uploadNotice(saved) {
   if (!saved) return '';
   if (saved.ok && Array.isArray(saved.removed) && saved.removed.length > 0) return STORAGE_CAP_WARNING;
@@ -30,13 +40,17 @@ export function uploadNotice(saved) {
   if (saved.error === 'file_too_large') return STORAGE_UPLOAD_TOO_BIG;
   if (saved.error === 'storage_full') return STORAGE_POOL_FULL;
   if (saved.error === 'drive_not_configured') return STORAGE_NOT_READY;
+  if (saved.error === 'account_required' || saved.error === 'account_mismatch') {
+    return 'This device does not have the account id for these files.';
+  }
   return STORAGE_SAVE_FAILED;
 }
 
-export async function storeAttachedFile({ fetcher = fetch, ownerId, token, item } = {}) {
+export async function storeAttachedFile({ fetcher = fetch, ownerId, accountCode, token, item } = {}) {
   const blob = item?.blob;
   const canRead = blob instanceof Blob || (blob && typeof blob.arrayBuffer === 'function');
   if (!ownerId || !token || !canRead) return null;
+  if (!isAccountCode(accountCode)) return { ok: false, error: 'account_required' };
   if (Number(item.size) > FILE_BYTE_CAP) return { ok: false, error: 'file_too_large' };
   const body = new FormData();
   body.append('file', item.blob, item.name || 'file');
@@ -44,6 +58,7 @@ export async function storeAttachedFile({ fetcher = fetch, ownerId, token, item 
     method: 'POST',
     headers: {
       'x-owner-id': ownerId,
+      'x-account-code': accountCode,
       authorization: `Bearer ${token}`,
     },
     body,

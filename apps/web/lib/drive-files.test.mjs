@@ -12,6 +12,7 @@ const ENV = {
 };
 
 const SECRET = 'a'.repeat(128);
+const ACCOUNT = '1234567890123456';
 
 function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -114,6 +115,7 @@ test('save stores a hash and returns the secret once', async () => {
     env: ENV,
     fetcher: drive.fetcher,
     ownerId: 'did:privy:1',
+    accountCode: ACCOUNT,
     name: "owner's notes.txt",
     type: 'text/plain',
     bytes: new Uint8Array([9, 8, 7]),
@@ -125,26 +127,59 @@ test('save stores a hash and returns the secret once', async () => {
   assert.equal(saved.ref, hashFileSecret(SECRET));
   const stored = drive.rows.find(row => row.appProperties?.secretHash === saved.ref);
   assert.equal(stored.appProperties.ownerHash, hashOwnerId('did:privy:1'));
+  assert.equal(stored.appProperties.accountCode, ACCOUNT);
   assert.equal(stored.name, "owner's notes.txt");
   assert.equal(drive.seen.some(line => line.includes(SECRET) || line.includes('refresh')), false);
   const recall = catalogRecallText([{ name: saved.name, type: saved.type, botName: 'Nova' }]);
   assert.equal(recall.includes(SECRET), false);
+  assert.equal(recall.includes(ACCOUNT), false);
   const read = await readOwnerFile({
     env: ENV,
     fetcher: drive.fetcher,
     ownerId: 'did:privy:1',
+    accountCode: ACCOUNT,
     secret: SECRET,
   });
   assert.equal(read.ok, true);
   assert.deepEqual([...read.bytes], [9, 8, 7]);
-  const wrong = await readOwnerFile({
+  const wrongOwner = await readOwnerFile({
     env: ENV,
     fetcher: drive.fetcher,
     ownerId: 'did:privy:2',
+    accountCode: ACCOUNT,
     secret: SECRET,
   });
-  assert.equal(wrong.ok, false);
-  assert.equal(wrong.error, 'not_found');
+  assert.equal(wrongOwner.ok, false);
+  assert.equal(wrongOwner.error, 'not_found');
+  const wrongAccount = await readOwnerFile({
+    env: ENV,
+    fetcher: drive.fetcher,
+    ownerId: 'did:privy:1',
+    accountCode: '0000000000000000',
+    secret: SECRET,
+  });
+  assert.equal(wrongAccount.ok, false);
+  assert.equal(wrongAccount.error, 'not_found');
+  assert.equal(wrongAccount.gone, undefined);
+  const missing = await readOwnerFile({
+    env: ENV,
+    fetcher: drive.fetcher,
+    ownerId: 'did:privy:1',
+    accountCode: ACCOUNT,
+    secret: 'c'.repeat(128),
+  });
+  assert.equal(missing.gone, true);
+  const mismatched = await saveOwnerFile({
+    env: ENV,
+    fetcher: drive.fetcher,
+    ownerId: 'did:privy:1',
+    accountCode: '0000000000000000',
+    name: 'other.txt',
+    bytes: new Uint8Array([1]),
+    createSecret: () => 'b'.repeat(128),
+  });
+  assert.equal(mismatched.ok, false);
+  assert.equal(mismatched.error, 'account_mismatch');
 });
 
 test('crossing 5 GB removes that owner oldest file only', async () => {
@@ -152,14 +187,15 @@ test('crossing 5 GB removes that owner oldest file only', async () => {
   const ownerHash = hashOwnerId('did:privy:1');
   drive.rows.push(
     { id: 'folder-0', name: 'Maelstrom', mimeType: 'application/vnd.google-apps.folder', size: '0', appProperties: {} },
-    { id: 'old', name: 'old.bin', size: String(4_000_000_000), mimeType: 'application/octet-stream', appProperties: { ownerHash, secretHash: 'a'.repeat(64), addedAt: '1' } },
-    { id: 'keep', name: 'keep.bin', size: String(2_000_000_000), mimeType: 'application/octet-stream', appProperties: { ownerHash, secretHash: 'b'.repeat(64), addedAt: '2' } },
+    { id: 'old', name: 'old.bin', size: String(4_000_000_000), mimeType: 'application/octet-stream', appProperties: { ownerHash, secretHash: 'a'.repeat(64), accountCode: ACCOUNT, addedAt: '1' } },
+    { id: 'keep', name: 'keep.bin', size: String(2_000_000_000), mimeType: 'application/octet-stream', appProperties: { ownerHash, secretHash: 'b'.repeat(64), accountCode: ACCOUNT, addedAt: '2' } },
     { id: 'other', name: 'other.bin', size: String(1_000_000_000), mimeType: 'application/octet-stream', appProperties: { ownerHash: hashOwnerId('did:privy:2'), secretHash: 'c'.repeat(64), addedAt: '1' } },
   );
   const saved = await saveOwnerFile({
     env: ENV,
     fetcher: drive.fetcher,
     ownerId: 'did:privy:1',
+    accountCode: ACCOUNT,
     name: 'new.bin',
     type: 'application/octet-stream',
     bytes: Uint8Array.from({ length: 8 }),
@@ -181,6 +217,7 @@ test('missing drive config and a bad refresh token stay generic', async () => {
     env: { ...ENV, GOOGLE_DRIVE_REFRESH_TOKEN: 'nope' },
     fetcher: drive.fetcher,
     ownerId: 'did:privy:1',
+    accountCode: ACCOUNT,
     name: 'a.txt',
     bytes: new Uint8Array([1]),
   });

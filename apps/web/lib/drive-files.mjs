@@ -2,6 +2,8 @@
  * Project Drive folder. Bytes live in Drive. The 128-character id is returned
  * once to the owner. Drive stores only its SHA-256.
  */
+import { isAccountCode } from './account-code.mjs';
+import { forgetOwnerFile, rememberOwnerFile } from './file-records.mjs';
 import { FILE_BYTE_CAP, PROJECT_STORAGE_CAP, USER_STORAGE_CAP } from './file-quota.mjs';
 import { createFileSecret, hashFileSecret, hashOwnerId } from './file-secret.mjs';
 
@@ -129,7 +131,7 @@ export function filesToEvict(userFiles, allFiles, incoming, caps = {}) {
   return { removed };
 }
 
-async function uploadBytes(fetcher, token, folderId, { name, type, bytes, ownerHash, secretHash, addedAt }) {
+async function uploadBytes(fetcher, token, folderId, { name, type, bytes, ownerHash, secretHash, accountCode, addedAt }) {
   const start = await fetcher(`${DRIVE_UPLOAD}?uploadType=resumable&fields=id`, {
     method: 'POST',
     headers: {
@@ -144,6 +146,7 @@ async function uploadBytes(fetcher, token, folderId, { name, type, bytes, ownerH
       appProperties: {
         ownerHash,
         secretHash,
+        accountCode,
         addedAt: String(addedAt),
       },
     }),
@@ -165,10 +168,26 @@ async function uploadBytes(fetcher, token, folderId, { name, type, bytes, ownerH
   return saved.id;
 }
 
+export async function clearProjectFiles({ env, fetcher = fetch } = {}) {
+  const ready = driveEnv(env);
+  if (!ready) return { ok: false, error: 'drive_not_configured' };
+  const token = await accessToken(ready, fetcher);
+  const folderId = await ensureFolder(fetcher, token);
+  const files = await listFiles(fetcher, token, `${quote(folderId)} in parents and trashed=false`);
+  let removed = 0;
+  for (const file of files) {
+    if (!file?.id || file.mimeType === FOLDER_TYPE) continue;
+    await driveJson(fetcher, `${DRIVE_FILES}/${encodeURIComponent(file.id)}`, token, { method: 'DELETE' });
+    removed += 1;
+  }
+  return { ok: true, removed };
+}
+
 export async function saveOwnerFile({
   env,
   fetcher = fetch,
   ownerId,
+  accountCode,
   name,
   type = 'application/octet-stream',
   bytes,
@@ -177,6 +196,7 @@ export async function saveOwnerFile({
 } = {}) {
   const ready = driveEnv(env);
   if (!ready) return { ok: false, error: 'drive_not_configured' };
+  if (!isAccountCode(accountCode)) return { ok: false, error: 'account_required' };
   if (!(bytes instanceof Uint8Array)) return { ok: false, error: 'file_required' };
   if (bytes.byteLength > FILE_BYTE_CAP) return { ok: false, error: 'file_too_large' };
   try {
@@ -185,6 +205,8 @@ export async function saveOwnerFile({
     const ownerHash = hashOwnerId(ownerId);
     const all = await listFiles(fetcher, token, `${quote(folderId)} in parents and trashed=false`);
     const mine = all.filter(file => file?.appProperties?.ownerHash === ownerHash);
+    const registered = mine.map(file => file?.appProperties?.accountCode).find(code => isAccountCode(code));
+    if (registered && registered !== accountCode) return { ok: false, error: 'account_mismatch' };
     const plan = filesToEvict(mine, all, bytes.byteLength);
     if (plan.error) return { ok: false, error: plan.error };
     for (const file of plan.removed) {
@@ -192,14 +214,30 @@ export async function saveOwnerFile({
     }
     const secret = createSecret();
     const secretHash = hashFileSecret(secret);
-    await uploadBytes(fetcher, token, folderId, {
+    const driveId = await uploadBytes(fetcher, token, folderId, {
       name: safeName(name),
       type: typeof type === 'string' && type.trim() ? type.trim().slice(0, 120) : 'application/octet-stream',
       bytes,
       ownerHash,
       secretHash,
+      accountCode,
       addedAt: now,
     });
+    const recorded = await rememberOwnerFile({
+      env,
+      fetcher,
+      ownerId,
+      accountCode,
+      secretHash,
+      name: safeName(name),
+      type: typeof type === 'string' && type.trim() ? type.trim().slice(0, 120) : 'application/octet-stream',
+      size: bytes.byteLength,
+      addedAt: now,
+    });
+    if (!recorded.ok) {
+      await driveJson(fetcher, `${DRIVE_FILES}/${encodeURIComponent(driveId)}`, token, { method: 'DELETE' }).catch(() => {});
+      return { ok: false, error: recorded.error || 'record_failed' };
+    }
     return {
       ok: true,
       secret,
@@ -215,10 +253,12 @@ export async function saveOwnerFile({
   }
 }
 
-export async function readOwnerFile({ env, fetcher = fetch, ownerId, secret } = {}) {
+export async function readOwnerFile({ env, fetcher = fetch, ownerId, accountCode, secret } = {}) {
   const ready = driveEnv(env);
   if (!ready) return { ok: false, error: 'drive_not_configured' };
-  if (typeof secret !== 'string' || !/^[0-9a-z]{128}$/.test(secret)) return { ok: false, error: 'not_found' };
+  if (!isAccountCode(accountCode) || typeof secret !== 'string' || !/^[0-9a-z]{128}$/.test(secret)) {
+    return { ok: false, error: 'not_found' };
+  }
   try {
     const token = await accessToken(ready, fetcher);
     const folderId = await ensureFolder(fetcher, token);
@@ -231,12 +271,23 @@ export async function readOwnerFile({ env, fetcher = fetch, ownerId, secret } = 
       `appProperties has { key='secretHash' and value=${quote(secretHash)} }`,
     ].join(' and ');
     const found = await listFiles(fetcher, token, query);
-    const file = found.find(item => item?.appProperties?.ownerHash === ownerHash && item?.appProperties?.secretHash === secretHash);
-    if (!file?.id) return { ok: false, error: 'not_found' };
+    const file = found.find(item => (
+      item?.appProperties?.ownerHash === ownerHash
+      && item?.appProperties?.secretHash === secretHash
+    ));
+    if (!file?.id) {
+      await forgetOwnerFile({ env, fetcher, ownerId, secretHash });
+      return { ok: false, error: 'not_found', gone: true };
+    }
+    if (file.appProperties?.accountCode !== accountCode) return { ok: false, error: 'not_found' };
     const media = await fetcher(`${DRIVE_FILES}/${encodeURIComponent(file.id)}?alt=media`, {
       headers: { authorization: `Bearer ${token}` },
     });
-    if (!media.ok) return { ok: false, error: 'not_found' };
+    if (media.status === 404 || media.status === 410) {
+      await forgetOwnerFile({ env, fetcher, ownerId, secretHash });
+      return { ok: false, error: 'not_found', gone: true };
+    }
+    if (!media.ok) return { ok: false, error: 'unreachable' };
     const buffer = new Uint8Array(await media.arrayBuffer());
     return {
       ok: true,

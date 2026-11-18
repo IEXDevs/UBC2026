@@ -7,11 +7,13 @@ test('a stored upload replaces the local id and drops removed hashes', async () 
   const secret = 'm'.repeat(128);
   const saved = await storeAttachedFile({
     ownerId: 'did:privy:1',
+    accountCode: '1234567890123456',
     token: 'token-value',
     item: { name: 'shot.png', size: 4, blob: new Blob([Uint8Array.from([1, 2, 3, 4])], { type: 'image/png' }) },
     fetcher: async (url, init) => {
       assert.equal(url, '/api/files');
       assert.equal(init.headers['x-owner-id'], 'did:privy:1');
+      assert.equal(init.headers['x-account-code'], '1234567890123456');
       assert.equal(init.headers.authorization, 'Bearer token-value');
       return Response.json({ secret, ref: 'ab'.repeat(32), removed: ['cd'.repeat(32)], addedAt: 8 });
     },

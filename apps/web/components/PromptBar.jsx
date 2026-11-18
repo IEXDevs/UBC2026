@@ -3,6 +3,7 @@
 import { isValidElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { animate, useMotionValue, useMotionValueEvent, useReducedMotion } from 'motion/react';
 import { HugeiconsIcon } from '@hugeicons/react';
+import { MESSAGE_CHAR_CAP } from '../lib/context-usage.mjs';
 import {
   Attachment01Icon,
   Calendar03Icon,
@@ -383,9 +384,9 @@ export default function PromptBar({
   const applyDictationText = (text) => {
     const base = dictateBase.current;
     const spoken = typeof text === 'string' ? text.trim() : '';
-    const next = spoken
+    const next = (spoken
       ? (base.trim() ? `${base.trimEnd()} ${spoken}` : spoken)
-      : base;
+      : base).slice(0, MESSAGE_CHAR_CAP);
     setDraft(next);
     latest.current.onDraftChange?.(next);
     return next;
@@ -586,11 +587,12 @@ export default function PromptBar({
           ref={inputRef}
           className="prompt-bar__input"
           rows={1}
+          maxLength={MESSAGE_CHAR_CAP}
           value={draft}
           placeholder={listening ? 'Listening…' : placeholder}
           aria-label={label}
           onChange={(e) => {
-            setDraft(e.target.value);
+            setDraft(e.target.value.slice(0, MESSAGE_CHAR_CAP));
             latest.current.onDraftChange?.(e.target.value);
             typing.current.energy = Math.min(1.6, typing.current.energy + 0.22);
             typing.current.strokes = Math.min(4, typing.current.strokes + 1);

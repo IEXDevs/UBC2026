@@ -8,6 +8,7 @@ import {
 import { fetchAgentRuntime } from '../../../../../lib/runtime-fetch.mjs';
 import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mjs';
 import { parsePermission, permissionInstruction, toolAccessKind } from '../../../../../lib/spend-permission.mjs';
+import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -55,8 +56,11 @@ export async function POST(request, context) {
     body = {};
   }
   const message = typeof body.message === 'string' ? body.message.trim() : '';
-  if (!message || message.length > 4000) {
+  if (!message) {
     return Response.json({ error: 'message_required' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+  }
+  if (message.length > MESSAGE_CHAR_CAP) {
+    return Response.json({ error: 'message_too_long' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
   }
 
   const permissionMode = parsePermission(body.permission);
@@ -97,7 +101,7 @@ export async function POST(request, context) {
       botName: typeof body.name === 'string' ? body.name : 'Agent',
       botGoal: typeof body.goal === 'string' ? body.goal : '',
       botType: typeof body.type === 'string' ? body.type : 'trading',
-      history: Array.isArray(body.history) ? body.history : [],
+      history: Array.isArray(body.history) ? body.history.slice(-400) : [],
       message,
       model: (typeof body.model === 'string' && /^[A-Za-z0-9_.:/-]{1,80}$/.test(body.model.trim()))
         ? body.model.trim()
