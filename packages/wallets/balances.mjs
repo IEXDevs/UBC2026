@@ -189,29 +189,68 @@ function knownSymbol(mint, cluster) {
   return known.symbol;
 }
 
-async function rpcCall(fetcher, rpcUrl, method, params) {
+/** OpenNext / workerd may lack AbortSignal.timeout — same guard as privy.mjs. */
+function abortAfter(ms) {
+  if (typeof AbortSignal === 'function' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms);
+  }
+  if (typeof AbortController !== 'function') return undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  if (typeof timer?.unref === 'function') timer.unref();
+  return controller.signal;
+}
+
+function rpcFailureCode(error) {
+  const name = String(error?.name || '');
+  const message = String(error?.message || '').toLowerCase();
+  if (name === 'AbortError' || /aborted|timeout|timed out/.test(message)) return 'rpc_timeout';
+  if (/429|rate.?limit|too many/.test(message)) return 'rpc_rate_limited';
+  return 'rpc_failed';
+}
+
+async function rpcCallOnce(fetcher, rpcUrl, method, params) {
   let response;
   try {
     response = await fetcher(rpcUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      // Cloudflare Workers only allow redirect "follow" | "manual".
       redirect: 'manual',
-      signal: AbortSignal.timeout(15000),
+      signal: abortAfter(15_000),
     });
-  } catch {
-    const error = new Error('rpc_failed');
-    error.code = 'rpc_failed';
-    throw error;
+  } catch (error) {
+    const failed = new Error(rpcFailureCode(error));
+    failed.code = rpcFailureCode(error);
+    throw failed;
   }
   let payload = null;
   try { payload = await response.json(); } catch { payload = null; }
+  if (response.status === 429) {
+    const failed = new Error('rpc_rate_limited');
+    failed.code = 'rpc_rate_limited';
+    throw failed;
+  }
   if (!response.ok || !payload || payload.error) {
-    const error = new Error('rpc_failed');
-    error.code = 'rpc_failed';
-    throw error;
+    const failed = new Error('rpc_failed');
+    failed.code = 'rpc_failed';
+    throw failed;
   }
   return payload.result;
+}
+
+async function rpcCall(fetcher, rpcUrl, method, params) {
+  try {
+    return await rpcCallOnce(fetcher, rpcUrl, method, params);
+  } catch (first) {
+    // One retry covers transient public-RPC 429 / cold starts on Workers.
+    try {
+      return await rpcCallOnce(fetcher, rpcUrl, method, params);
+    } catch (second) {
+      throw second?.code ? second : first;
+    }
+  }
 }
 
 function assertHttpsRpc(rpcUrl) {
@@ -377,8 +416,9 @@ export async function readClusterWalletBalances({
       tokens: parsed.tokens,
     };
     return { ...result, holdings: holdingsFromClusterResult(result) };
-  } catch {
-    return rejectBalance('rpc_failed', address, cluster);
+  } catch (error) {
+    const code = typeof error?.code === 'string' && error.code ? error.code : 'rpc_failed';
+    return rejectBalance(code, address, cluster);
   }
 }
 

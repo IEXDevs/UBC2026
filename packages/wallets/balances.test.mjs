@@ -310,6 +310,54 @@ test('readDevnetUsdcBalance returns USDC amount without RPC URL leakage', async 
  * Side effects: none.
  * Gaps: none.
  */
+/**
+ * Achieves: Solana RPC fetch uses Workers-safe redirect + soft timeout polyfill path;
+ *   one retry on throw; AbortError surfaces as rpc_timeout (not empty zero).
+ * Fails when: redirect error mode returns, first throw is not retried, or abort → rpc_failed.
+ * Oracle: init.redirect === 'manual'; call count 2 on throw-then-ok; abort code rpc_timeout.
+ * Side effects: injected fetcher only.
+ * Gaps: does not assert real workerd AbortSignal.timeout absence.
+ */
+test('rpcCall uses redirect manual, retries once, and maps abort to rpc_timeout', async () => {
+  let calls = 0;
+  const ok = await readClusterWalletBalances({
+    cluster: 'devnet',
+    rpcUrl,
+    address,
+    fetcher: async (_url, init) => {
+      calls += 1;
+      assert.equal(init.redirect, 'manual');
+      assert.ok(init.signal === undefined || typeof init.signal?.aborted === 'boolean');
+      if (calls === 1) throw new Error('network_blip');
+      const body = JSON.parse(init.body);
+      if (body.method === 'getGenesisHash') {
+        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+      }
+      if (body.method === 'getBalance') {
+        return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 9 } });
+      }
+      return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
+    },
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.solLamports, '9');
+  assert.ok(calls >= 2);
+
+  const aborted = await readClusterWalletBalances({
+    cluster: 'devnet',
+    rpcUrl,
+    address,
+    fetcher: async () => {
+      const error = new Error('The operation was aborted');
+      error.name = 'AbortError';
+      throw error;
+    },
+  });
+  assert.equal(aborted.ok, false);
+  assert.equal(aborted.code, 'rpc_timeout');
+  assert.equal(aborted.solLamports, null);
+});
+
 test('classifyBalanceRead keeps rpc_failed distinct from empty success', async () => {
   const { classifyBalanceRead, unavailableBalanceLabel } = await import('./balances.mjs');
   const failed = classifyBalanceRead({

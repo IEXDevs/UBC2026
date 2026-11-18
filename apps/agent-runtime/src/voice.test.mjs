@@ -7,8 +7,10 @@ import { permissionInstruction } from '../../web/lib/spend-permission.mjs';
 import {
   GROK_VOICE_MODEL,
   OPENROUTER_CHAT_COMPLETIONS,
+  VOICE_FIRST_MESSAGE,
   VOICE_SPEAK_PROMPT,
   VOICE_TOOLS,
+  filterVoiceLlmTools,
   handleVoiceRequest,
   ownerPermissionNote,
   provisionVoiceAgent,
@@ -91,7 +93,11 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.equal(spec.llm.upstream, 'https://api.meta.ai/v1/chat/completions');
   assert.equal(spec.llm.streaming, true);
   assert.equal(spec.llm.apiKeyIncluded, false);
-  const prompt = spec.elevenlabs.conversation_config.agent.prompt;
+  const conversation = spec.elevenlabs.conversation_config;
+  assert.equal(conversation.agent.first_message, VOICE_FIRST_MESSAGE);
+  assert.equal(conversation.turn.silence_end_call_timeout, -1);
+  assert.deepEqual(conversation.agent.prompt.built_in_tools, { end_call: null });
+  const prompt = conversation.agent.prompt;
   assert.equal(prompt.llm, 'custom-llm');
   assert.equal(prompt.custom_llm.model_id, GROK_VOICE_MODEL);
   assert.equal(prompt.custom_llm.api_type, 'chat_completions');
@@ -101,6 +107,7 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.equal(prompt.tools.some(item => item.name === 'web_search'), true);
   assert.equal(prompt.tools.some(item => item.name === 'get_price'), true);
   assert.equal(prompt.prompt, VOICE_SPEAK_PROMPT);
+  assert.match(prompt.prompt, /Never end the call/);
   assert.doesNotMatch(prompt.prompt, /platform rules are locked/);
   assert.doesNotMatch(prompt.prompt, /request_spend/);
   assert.equal(prompt.tools.some(item => item.name === 'browser_navigate'), true);
@@ -554,6 +561,10 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     body: JSON.stringify({
       // First ElevenLabs probe often has no owner utterance yet.
       messages: [{ role: 'system', content: 'Speak the custom LLM reply.' }],
+      tools: [
+        { type: 'function', function: { name: 'end_call' } },
+        { type: 'function', function: { name: 'web_search' } },
+      ],
     }),
   }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here' }), {
     fetcher: async (url, init) => {
@@ -570,6 +581,12 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     calls[0].body.messages.find(item => item.role === 'user').content,
     /just joined the voice call/,
   );
+  assert.match(
+    calls[0].body.messages.find(item => item.role === 'user').content,
+    /Do not end the call/,
+  );
+  // Greeting probe must not forward end_call (or any tools) to the model.
+  assert.equal(calls[0].body.tools, undefined);
 
   const blocked = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',
@@ -618,11 +635,24 @@ test('syncVoiceAgent writes custom LLM URL and webhook secret into the agent', a
   assert.equal(result.secretId, 'sec_1');
   assert.equal(result.customLlmUrl, `${ORIGIN}/voice/llm/chat/completions`);
   const patch = calls.find((call) => call.method === 'PATCH');
+  assert.equal(patch.body.conversation_config.agent.first_message, VOICE_FIRST_MESSAGE);
+  assert.equal(patch.body.conversation_config.turn.silence_end_call_timeout, -1);
+  assert.deepEqual(patch.body.conversation_config.agent.prompt.built_in_tools, { end_call: null });
   assert.equal(patch.body.conversation_config.agent.prompt.custom_llm.url, `${ORIGIN}/voice/llm/chat/completions`);
   assert.deepEqual(patch.body.conversation_config.agent.prompt.custom_llm.api_key, { secret_id: 'sec_1' });
   assert.deepEqual(
     patch.body.conversation_config.agent.prompt.custom_llm.request_headers['x-elevenlabs-webhook-secret'],
     { secret_id: 'sec_1' },
+  );
+
+  assert.equal(filterVoiceLlmTools(null), null);
+  assert.equal(filterVoiceLlmTools([{ type: 'function', function: { name: 'end_call' } }]), null);
+  assert.deepEqual(
+    filterVoiceLlmTools([
+      { type: 'function', function: { name: 'end_call' } },
+      { type: 'function', function: { name: 'get_wallets' } },
+    ]),
+    [{ type: 'function', function: { name: 'get_wallets' } }],
   );
 
   const denied = await handleVoiceRequest(new Request(`${ORIGIN}/voice/agent/sync`, {
