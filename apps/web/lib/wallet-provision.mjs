@@ -238,8 +238,11 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
   }
   if (code === 'privy_failed') {
     const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
+    if (/Invalid redirect|redirect value/i.test(detail)) {
+      return 'Worker fetch used an unsupported redirect mode. Redeploy web and agent-runtime (redirect:manual fix), then sign out/in and retry.';
+    }
     if (/TypeError/i.test(detail)) {
-      return 'Privy fetch failed inside the Worker (TypeError). Redeploy web+runtime after the agent-runtime proxy fix, put PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime, then sign out/in and retry.';
+      return 'Privy fetch failed inside the Worker (TypeError). Redeploy web and agent-runtime, confirm PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime, then sign out/in and retry.';
     }
     if (/forbidden_header|worker_origin/i.test(detail)) {
       return 'Hosted Cloudflare blocked a Privy Origin header. Sign out and sign in again, then retry wallet create.';

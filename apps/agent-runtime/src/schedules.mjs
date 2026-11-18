@@ -209,7 +209,7 @@ async function supabaseGet(env, path, fetcher) {
     response = await fetcher(`${config.origin}/rest/v1/${path}`, {
       method: 'GET',
       headers: supabaseHeaders(config.key),
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(15000),
     });
   } catch {

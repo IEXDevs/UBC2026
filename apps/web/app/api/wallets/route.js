@@ -39,11 +39,11 @@ async function persistAccount(login, ownerId) {
     prefer: 'resolution=merge-duplicates,return=minimal',
   };
   async function write(path, body) {
-    const response = await fetch(`${origin}/rest/v1/${path}`, {
+      const response = await fetch(`${origin}/rest/v1/${path}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      redirect: 'error',
+      redirect: 'manual',
     });
     return response.ok;
   }
@@ -158,7 +158,7 @@ export async function GET(request) {
           'privy-app-id': appId,
           accept: 'application/json',
         },
-        redirect: 'error',
+        redirect: 'manual',
         signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
       });
       probe.privyStatus = response.status;
