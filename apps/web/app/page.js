@@ -67,7 +67,9 @@ import {
 } from '../lib/wallet-provision.mjs';
 import { SETUP_CARD_MS, accountSetupStep, clipAddress, readQuoteOut, readRecoveryAck, swapSendSettlement, writeRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
-import { addCatalogFiles, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
+import { catalogAddition, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
+import { STORAGE_FILE_TOO_BIG } from '../lib/file-quota.mjs';
+import { applyStoredFile, storeAttachedFile, uploadNotice } from '../lib/store-file.mjs';
 import { searchRecall } from '../lib/recall-search.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
@@ -1566,7 +1568,33 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             onConfirm={askSlideConfirm}
             onBindAccess={(handler) => { accessRef.current = handler; }}
             onAttach={items => {
-              setLibrary(current => addCatalogFiles(current, bot.id, items));
+              setLibrary(current => {
+                const result = catalogAddition(current, bot.id, items);
+                if (result.rejected.length > 0) {
+                  toast?.({ id: 'storage-file-too-big', title: STORAGE_FILE_TOO_BIG, duration: 7000, closeButton: true });
+                }
+                if (result.warning) {
+                  toast?.({ id: 'storage-cap', title: result.warning, duration: 7000, closeButton: true });
+                }
+                return result.library;
+              });
+              for (const item of items) {
+                if (!item.blob || !ownerId) continue;
+                void (async () => {
+                  const token = await getAccessToken?.();
+                  const saved = await storeAttachedFile({ ownerId, token, item });
+                  const notice = uploadNotice(saved);
+                  if (notice) {
+                    toast?.({
+                      id: saved?.ok ? 'storage-cap' : 'storage-save',
+                      title: notice,
+                      duration: 7000,
+                      closeButton: true,
+                    });
+                  }
+                  if (saved?.ok) setLibrary(current => applyStoredFile(current, item.id, saved));
+                })();
+              }
             }}
           />
         ) : pane === 'Positions' ? null : (
@@ -1658,7 +1686,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       />
       <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={CONNECTORS} />
       <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
-      {viewFile ? <FileStage file={viewFile} onClose={() => setViewFile(null)} /> : null}
+      {viewFile ? <FileStage file={viewFile} ownerId={ownerId} getAccessToken={getAccessToken} onClose={() => setViewFile(null)} /> : null}
       <StatisticsSheet
         open={statsOpen}
         onClose={closeStats}

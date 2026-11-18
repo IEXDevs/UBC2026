@@ -5998,6 +5998,36 @@ legend {
 
 .file-stage-frame audio { width: min(100%, 480px); }
 
+.file-stage-pdf,
+.file-stage-doc,
+.file-stage-code {
+  width: min(100%, 920px);
+  height: min(72vh, 760px);
+  border: 0;
+  border-radius: 12px;
+  background: #fff;
+  color: #111;
+}
+
+.file-stage-code,
+.file-stage-doc {
+  overflow: auto;
+  margin: 0;
+  padding: 20px 22px;
+  text-align: left;
+}
+
+.file-stage-code {
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+}
+
+.file-stage-doc p {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
 .file-stage-frame figcaption {
   color: #d4d4d4;
   font-size: 13px;

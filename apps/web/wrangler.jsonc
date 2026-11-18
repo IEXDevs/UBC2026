@@ -54,5 +54,8 @@
   }
   // Public Next build names live in .env.example: NEXT_PUBLIC_PRIVY_APP_ID,
   // NEXT_PUBLIC_PRIVY_CLIENT_ID, NEXT_PUBLIC_AGENT_RUNTIME_URL.
+  // Secret names for this Worker, set with wrangler secret bulk on the top-level
+  // worker and again with --env dev: GOOGLE_DRIVE_CLIENT_ID,
+  // GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN.
   // Do not put PRIVY_APP_SECRET or any other secret value in this file.
 }

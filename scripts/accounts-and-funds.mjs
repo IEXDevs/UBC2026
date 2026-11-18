@@ -148,6 +148,17 @@ export const ACCOUNT_VENDORS = Object.freeze([
       'Create a shared secret and store it as ELEVENLABS_WEBHOOK_SECRET. ElevenLabs sends it on webhook tool calls and on the custom LLM. The Worker uses it only to authenticate those calls. Tests use a stand-in and do not call ElevenLabs.',
     ]),
   },
+  {
+    id: 'google-drive',
+    dashboard: 'https://console.cloud.google.com/auth/clients',
+    names: SECRET_GROUPS.googleDrive,
+    steps: Object.freeze([
+      'In Google Cloud, enable the Drive API and create a web OAuth client named Maelstrom Drive.',
+      'Put the client id and client secret in GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_CLIENT_SECRET.',
+      'Authorize https://www.googleapis.com/auth/drive.file once and store the refresh token as GOOGLE_DRIVE_REFRESH_TOKEN.',
+      'Leave the values empty in git. Do not paste them into chat.',
+    ]),
+  },
 ]);
 
 function walletToken(address) {

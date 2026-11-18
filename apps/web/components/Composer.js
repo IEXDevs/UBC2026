@@ -37,6 +37,7 @@ import {
 import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
+import { stageKind } from '../lib/file-view.mjs';
 
 const LEAVE_MS = 760;
 const PROMPT_SOURCES = [
@@ -61,7 +62,8 @@ const HOSTED_IMAGE_BYTES = 400_000;
 function previewUrl(file) {
   const image = isImageFile(file);
   const type = file?.type || '';
-  const playable = image || type.startsWith('video/') || type.startsWith('audio/');
+  const kind = stageKind(file);
+  const playable = image || type.startsWith('video/') || type.startsWith('audio/') || kind === 'pdf' || kind === 'doc' || kind === 'code';
   if (!playable || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return Promise.resolve('');
   if (image && file.size > 0 && file.size <= HOSTED_IMAGE_BYTES && typeof FileReader !== 'undefined') {
     return new Promise((resolve) => {
@@ -350,6 +352,7 @@ export default function Composer({
         size: file.size,
         type: file.type || 'file',
         url: await previewUrl(file),
+        blob: file,
         addedAt: Date.now(),
       });
     }

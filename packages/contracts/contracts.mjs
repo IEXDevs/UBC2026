@@ -174,6 +174,9 @@ export const SECRET_NAMES = Object.freeze([
   'ELEVENLABS_API_KEY',
   'ELEVENLABS_AGENT_ID',
   'ELEVENLABS_WEBHOOK_SECRET',
+  'GOOGLE_DRIVE_CLIENT_ID',
+  'GOOGLE_DRIVE_CLIENT_SECRET',
+  'GOOGLE_DRIVE_REFRESH_TOKEN',
 ]);
 
 export const PUBLIC_CONFIG_NAMES = Object.freeze([
@@ -195,6 +198,7 @@ export const SECRET_GROUPS = Object.freeze({
   quicknodeTestnet: Object.freeze(['QUICKNODE_TESTNET_RPC_URL']),
   quicknodeWebhook: Object.freeze(['QUICKNODE_WEBHOOK_SECRET']),
   elevenlabs: Object.freeze(['ELEVENLABS_API_KEY', 'ELEVENLABS_AGENT_ID', 'ELEVENLABS_WEBHOOK_SECRET']),
+  googleDrive: Object.freeze(['GOOGLE_DRIVE_CLIENT_ID', 'GOOGLE_DRIVE_CLIENT_SECRET', 'GOOGLE_DRIVE_REFRESH_TOKEN']),
   serverSigning: Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']),
 });
 

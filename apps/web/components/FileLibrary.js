@@ -105,7 +105,7 @@ export default function FileLibrary({ bot, files = [], ownerId = null, getAccess
       {!settingsOpen && rows.length === 0 ? <p className="library-empty">No files yet.</p> : null}
       {settingsOpen ? null : <FileGroup label="This week" files={fresh} onOpen={setPreview} />}
       {settingsOpen ? null : <FileGroup label="Older" files={older} onOpen={setPreview} />}
-      {preview ? <FileStage file={preview} onClose={() => setPreview(null)} /> : null}
+      {preview ? <FileStage file={preview} ownerId={ownerId} getAccessToken={getAccessToken} onClose={() => setPreview(null)} /> : null}
     </div>
   );
 }
