@@ -182,6 +182,12 @@ export function isCloudflareWorkerRuntime(global = globalThis) {
   } catch {
     /* ignore */
   }
+  try {
+    // workerd / OpenNext-on-Workers expose WebSocketPair; plain Node does not.
+    if (typeof global?.WebSocketPair === 'function') return true;
+  } catch {
+    /* ignore */
+  }
   return false;
 }
 
@@ -190,6 +196,20 @@ function isForbiddenOutboundHeaderError(error) {
   const message = typeof error?.message === 'string' ? error.message : '';
   if (!message && name !== 'TypeError') return false;
   return /origin|referer|forbidden header name|immutable/i.test(`${name} ${message}`);
+}
+
+/** Short non-secret cause for failed outbound fetch (Workers often throw bare TypeError). */
+function safeNetworkCause(error) {
+  const name = typeof error?.name === 'string' && error.name ? error.name : 'Error';
+  const raw = typeof error?.message === 'string' ? error.message.replace(/[\r\n]+/g, ' ').trim() : '';
+  const clipped = raw
+    .replace(/(sk_[A-Za-z0-9]+)/g, 'sk_[redacted]')
+    .replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1[redacted]')
+    .slice(0, 100);
+  if (clipped && clipped.length > 2 && !/(secret|password|api[_-]?key)/i.test(clipped)) {
+    return `failed (${name}: ${clipped})`;
+  }
+  return name && name !== 'Error' ? `failed (${name})` : 'failed';
 }
 
 function decodeBase64(value, label) {
@@ -502,11 +522,7 @@ export function createPrivyWalletClient({
         fail(`${target} request failed (forbidden_header)`, code === 'rpc_failed' ? code : 'worker_origin_forbidden');
       }
       // Include a short, non-secret cause so Cloudflare / network misconfig is diagnosable.
-      const cause = aborted
-        ? 'timed out'
-        : (typeof error?.name === 'string' && error.name && error.name !== 'Error'
-          ? `failed (${error.name})`
-          : 'failed');
+      const cause = aborted ? 'timed out' : safeNetworkCause(error);
       fail(`${target} request ${cause}`, code);
     }
     const text = await response.text();

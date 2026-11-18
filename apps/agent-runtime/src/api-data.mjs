@@ -2,7 +2,7 @@
  * Live /api/* data routes backed by Supabase + Privy when secrets exist.
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
-import { createPrivyWalletClientFromEnv, sanitizeOrigin } from '@ubc2026/wallets/privy';
+import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
 import {
   ConfigError,
   httpsAvatarUrl,
@@ -66,27 +66,15 @@ function bearerToken(request) {
 function privyClient(env) {
   if (env.transferClient) return env.transferClient;
   try {
-    return createPrivyWalletClientFromEnv(env, { fetcher: env.fetch ?? fetch });
+    // Workers cannot set outbound Origin — never fall through to /users/me here.
+    return createPrivyWalletClientFromEnv(env, {
+      fetcher: env.fetch ?? fetch,
+      allowUsersMeFallback: false,
+    });
   } catch (error) {
     if (error instanceof ConfigError || error?.code === 'missing_secrets') return null;
     throw error;
   }
-}
-
-/** Browser Origin for Privy /users/me — required when creating/syncing wallets. */
-function requestOrigin(request, env = {}) {
-  const headerOrigin = sanitizeOrigin(request.headers.get('origin') || request.headers.get('Origin'));
-  if (headerOrigin) return headerOrigin;
-  const maelstrom = sanitizeOrigin(request.headers.get('x-maelstrom-origin'));
-  if (maelstrom) return maelstrom;
-  const referer = request.headers.get('referer') || request.headers.get('Referer');
-  if (typeof referer === 'string' && referer.trim()) {
-    try {
-      const fromReferer = sanitizeOrigin(new URL(referer.trim()).origin);
-      if (fromReferer) return fromReferer;
-    } catch { /* ignore */ }
-  }
-  return sanitizeOrigin(env.WEB_ORIGIN || env.PRIVY_ALLOWED_ORIGIN || '');
 }
 
 function privySecretsPresent(env) {
@@ -119,7 +107,7 @@ export async function resolveOwner(request, env) {
     const result = await client.acceptLogin({
       accessToken: token,
       ownerId: header || undefined,
-      origin: requestOrigin(request, env),
+      // Workers cannot set outbound Origin; JWT sub / owner id drive loadUser.
     });
     const verified = result?.main?.ownerId || result?.userId || null;
     if (header && verified && header !== verified) {
@@ -606,21 +594,23 @@ export async function handleApiData(request, env, matched) {
   if (routeId === 'wallets.create') {
     const { ownerId, user, token, error } = await resolveOwner(request, env);
     if (error) {
-      const status = error === 'missing_origin' ? 503 : 502;
-      const detail = error === 'privy_failed' || error === 'missing_origin'
-        ? 'Worker cannot set Origin for Privy; use POST /api/wallets on Next then /api/wallets/persist'
-        : undefined;
+      const status = error === 'missing_origin' || error === 'worker_origin_forbidden' ? 502 : 502;
+      let detail;
+      if (error === 'worker_origin_forbidden' || error === 'missing_origin') {
+        detail = 'Privy login needs a JWT user id on Cloudflare Workers (users/me unavailable). Sign out and sign in again.';
+      } else if (error === 'privy_failed') {
+        detail = 'Privy acceptLogin failed on agent-runtime. Confirm PRIVY_APP_SECRET and PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime.';
+      }
       return json(detail ? { error, detail } : { error }, status);
     }
     if (!token) return json({ error: 'login_required' }, 401);
     const client = privyClient(env);
     if (!client) return json({ error: 'signer_not_configured' }, 503);
     try {
-      const origin = requestOrigin(request, env);
+      // Do not pass Origin — Workers forbid that outbound header.
       const login = user || await client.acceptLogin({
         accessToken: token,
         ownerId: ownerId || undefined,
-        origin,
       });
       const owner = ownerId || login.main?.ownerId;
       await persistLogin(env, login, owner);
