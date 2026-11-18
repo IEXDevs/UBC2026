@@ -38,17 +38,28 @@ function sameText(left, right) {
   return diff === 0;
 }
 
+function iterationCount(value) {
+  const number = typeof value === 'string' && /^[0-9]+$/.test(value) ? Number(value) : value;
+  if (!Number.isSafeInteger(number) || number < 10000 || number > 2000000) return null;
+  return number;
+}
+
+function hexText(value, size) {
+  if (typeof value !== 'string') return null;
+  const hex = value.trim().toLowerCase();
+  if (hex.length !== size || !/^[0-9a-f]+$/.test(hex)) return null;
+  return hex;
+}
+
 export function parseDeskVerifier(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   const names = Object.keys(body).map(key => key.replace(/[^A-Za-z0-9]/g, '').toLowerCase());
   if (names.some(name => SECRET_FIELDS.includes(name))) return null;
-  const iterations = typeof body.iterations === 'string' && /^[1-9][0-9]{0,6}$/.test(body.iterations)
-    ? Number(body.iterations)
-    : body.iterations;
-  if (!Number.isSafeInteger(iterations) || iterations < 10000 || iterations > 2000000) return null;
-  if (typeof body.salt !== 'string' || !HEX_32.test(body.salt)) return null;
-  if (typeof body.hash !== 'string' || !HEX_64.test(body.hash)) return null;
-  return { iterations, salt: body.salt, hash: body.hash };
+  const iterations = iterationCount(body.iterations);
+  const salt = hexText(body.salt, 32);
+  const hash = hexText(body.hash, 64);
+  if (iterations == null || !salt || !hash) return null;
+  return { iterations, salt, hash };
 }
 
 /** Deployed Workers throw above this. Do not derive a higher count. */

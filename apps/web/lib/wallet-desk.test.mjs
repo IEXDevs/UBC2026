@@ -100,6 +100,20 @@ test('send targets accept a handle, an SNS name, or an address', () => {
 });
 
 /**
+ * Achieves: a mistyped pubkey is flagged before the slide, not treated as a blank To field.
+ * Fails when: invalid base58 / wrong length collapses to null, or a short draft is marked invalid.
+ * Oracle: 0OIl typo → invalid-address; too-short base58 → null; valid ADDRESS stays address.
+ * Side effects / state checked: N/A.
+ * Gaps: does not check on-chain account existence.
+ */
+test('a mistyped wallet address is flagged as invalid', () => {
+  assert.deepEqual(parseSendTarget('4zMMC0srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'), { kind: 'invalid-address' });
+  assert.deepEqual(parseSendTarget('A'.repeat(50)), { kind: 'invalid-address' });
+  assert.equal(parseSendTarget('hi there'), null);
+  assert.deepEqual(parseSendTarget(ADDRESS), { kind: 'address', address: ADDRESS });
+});
+
+/**
  * Achieves: verifies display amounts become base units.
  * Fails when: display amounts become base units breaks (e.g. expected 6, 9, 6); failure/null paths flip.
  * Oracle: assert.equal(displayToUnits('1.5', 6); assert.equal(displayToUnits('0.000000001', 9); assert.equal(displayToUnits('0', 6); assert.equal(displayToUnits('1.1234567', 6)

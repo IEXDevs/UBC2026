@@ -853,7 +853,7 @@ async function handleCustomLlm(request, env, fetcher) {
   const conversationId = typeof incoming.conversation_id === 'string' ? incoming.conversation_id.trim().slice(0, 128) : '';
   rememberUtterance(conversationId, messages);
   const provider = resolved.provider === 'openrouter' ? 'openrouter' : 'meta';
-  const adapted = voiceDecisionMessages({
+  let adapted = voiceDecisionMessages({
     botName: incoming.botName,
     botGoal: incoming.botGoal,
     botType: incoming.botType,
@@ -862,7 +862,18 @@ async function handleCustomLlm(request, env, fetcher) {
     secrets,
     provider,
   });
-  if (!adapted.some(item => item.role === 'user' && item.content)) return json({ error: 'invalid_body' }, 400);
+  // ElevenLabs often probes the custom LLM before any owner utterance (first
+  // message / greeting). Meta Muse rejects developer-only prompts with HTTP 400,
+  // which made live voice look dead after connect. Seed a short user turn.
+  if (!adapted.some(item => item.role === 'user' && item.content)) {
+    adapted = [
+      ...adapted,
+      {
+        role: 'user',
+        content: 'The owner just joined the voice call. Greet them briefly and wait.',
+      },
+    ];
+  }
   let model = grokVoiceModel(env);
   if (resolved.provider === 'openrouter') {
     const selected = selectFreeOpenRouterModel(model);

@@ -531,6 +531,30 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.equal(calls[0].body.messages.some(item => /voice remote/.test(String(item.content))), false);
   assert.equal(calls[0].body.model, 'muse-spark-1.3');
 
+  calls.length = 0;
+  const greeting = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
+    body: JSON.stringify({
+      // First ElevenLabs probe often has no owner utterance yet.
+      messages: [{ role: 'system', content: 'Speak the custom LLM reply.' }],
+    }),
+  }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here' }), {
+    fetcher: async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      return new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    },
+  });
+  assert.equal(greeting.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.messages.some(item => item.role === 'user'), true);
+  assert.match(
+    calls[0].body.messages.find(item => item.role === 'user').content,
+    /just joined the voice call/,
+  );
+
   const blocked = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },

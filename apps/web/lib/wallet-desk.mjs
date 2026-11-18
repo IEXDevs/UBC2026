@@ -171,11 +171,20 @@ export function tradeableTokens(rows) {
   return rows.filter(row => row.tradeable && !row.hidden);
 }
 
+/** Long base58-ish text that is not a valid Solana pubkey (wrong length or 0/O/I/l). */
+function looksLikeInvalidAddress(token) {
+  if (typeof token !== 'string' || token.length < 20) return false;
+  if (token.includes('@') || /\s/.test(token) || token.toLowerCase().endsWith('.sol')) return false;
+  if (MINT.test(token)) return false;
+  return /^[1-9A-HJ-NP-Za-km-z0OIl]{20,88}$/.test(token) || /^[A-Za-z0-9]{32,88}$/.test(token);
+}
+
 export function parseSendTarget(value) {
   const parsed = parseRecipient(value);
   if (parsed) return parsed;
   const token = typeof value === 'string' ? value.trim() : '';
   if (MINT.test(token)) return { kind: 'address', address: token };
+  if (looksLikeInvalidAddress(token)) return { kind: 'invalid-address' };
   return null;
 }
 
