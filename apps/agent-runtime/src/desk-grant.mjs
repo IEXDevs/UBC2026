@@ -62,17 +62,35 @@ export function parseDeskVerifier(body) {
   return { iterations, salt, hash };
 }
 
+/** Deployed Workers throw above this. Do not derive a higher count. */
+export const WORKER_PBKDF2_MAX = 100000;
+
 export async function passwordMatches(password, verifier) {
   const parsed = parseDeskVerifier(verifier);
   const clean = typeof password === 'string' ? password.normalize('NFC') : '';
   if (!parsed || clean.length < 8 || clean.length > 128) return false;
+  if (parsed.iterations > WORKER_PBKDF2_MAX) {
+    const error = new Error('password_check_unsupported');
+    error.code = 'password_check_unsupported';
+    throw error;
+  }
   const key = await crypto.subtle.importKey('raw', textEncoder.encode(clean), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({
-    name: 'PBKDF2',
-    salt: hexToBytes(parsed.salt),
-    iterations: parsed.iterations,
-    hash: 'SHA-256',
-  }, key, 256);
+  let bits;
+  try {
+    bits = await crypto.subtle.deriveBits({
+      name: 'PBKDF2',
+      salt: hexToBytes(parsed.salt),
+      iterations: parsed.iterations,
+      hash: 'SHA-256',
+    }, key, 256);
+  } catch (error) {
+    if (error?.name === 'NotSupportedError') {
+      const unsupported = new Error('password_check_unsupported');
+      unsupported.code = 'password_check_unsupported';
+      throw unsupported;
+    }
+    throw error;
+  }
   return sameBytes(new Uint8Array(bits), hexToBytes(parsed.hash));
 }
 

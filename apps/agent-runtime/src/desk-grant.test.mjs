@@ -18,9 +18,15 @@ const SUPABASE = {
  */
 test('a password matches only its verifier and a password field is rejected', async () => {
   const verifier = await createDeskLock('correct horse');
+  assert.equal(verifier.iterations, 100000);
   assert.equal(await passwordMatches('correct horse', verifier), true);
+  assert.equal(await passwordMatches('correct horse', { ...verifier, iterations: '100000' }), true);
   assert.equal(await passwordMatches('wrong horse', verifier), false);
   assert.equal(await passwordMatches('correct horse', { ...verifier, password: 'correct horse' }), false);
+  await assert.rejects(
+    () => passwordMatches('correct horse', { ...verifier, iterations: 120000 }),
+    (error) => error.code === 'password_check_unsupported',
+  );
 });
 
 /**
@@ -237,4 +243,33 @@ test('a later desk password replaces the stored verifier and can unlock', async 
   }), env);
   assert.equal(otherAccount.status, 404);
   assert.equal((await otherAccount.json()).error, 'desk_lock_missing');
+});
+
+/**
+ * Achieves: a verifier above the Worker PBKDF2 cap is refused before deriveBits.
+ * Fails when: 120000 iterations throws a 500 or is treated as a wrong password.
+ * Oracle: HTTP 409 password_check_unsupported.
+ * Side effects: in-memory desk row.
+ * Gaps: the browser hashes new passwords at 100000, which this route can check.
+ */
+test('unlock refuses a verifier the Worker cannot check', async () => {
+  const env = {
+    PRODUCT: 'Maelstrom',
+    CLUSTER: 'devnet',
+    ...SUPABASE,
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.includes('select=salt')) {
+        return Response.json([{ salt: 'ab'.repeat(16), hash: 'cd'.repeat(32), iterations: 120000 }]);
+      }
+      return Response.json({ error: 'unexpected' }, { status: 500 });
+    },
+  };
+  const response = await worker.fetch(new Request('https://runtime/api/desk/unlock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ password: 'correct horse' }),
+  }), env);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, 'password_check_unsupported');
 });
