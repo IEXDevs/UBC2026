@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BotStateMachine } from './bot-do.mjs';
-import { LOOP_STEPS } from './loop-engine.mjs';
+import { LOOP_STEPS, decideTask, isTradingGoal } from './loop-engine.mjs';
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
 import { createOpenRouter } from './openrouter.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
@@ -550,4 +550,125 @@ test('decide requests Jupiter trust and full permission trades without asking', 
   const downBody = await down.json();
   assert.equal(downBody.run.pauseReason, 'trust-unavailable');
   assert.equal(downTransfer.calls.length, 0);
+});
+
+const TRADING_GOAL = 'beat usd inflation in the long run with long term trading';
+
+/**
+ * Achieves: a trading goal tells decide to propose one devnet trade and forbids a summary-only stop.
+ * Fails when: the decide task omits the trade or a research goal is told to trade.
+ * Oracle: task text includes the concrete-trade line only for a trading goal.
+ * Side effects / state checked: none.
+ * Gaps: the model still has to return JSON. The loop test covers that path.
+ */
+test('a trading goal tells decide to propose a concrete devnet trade', () => {
+  const task = decideTask(TRADING_GOAL, { type: 'trading' });
+  assert.match(task, /Role: decide/);
+  assert.match(task, /Propose one concrete Solana devnet trade/);
+  assert.match(task, /Do not stop after a summary/);
+  assert.match(task, /Do not sign or broadcast/);
+  assert.match(task, /meme coin/);
+  assert.match(task, /day trade/);
+  assert.match(task, /non-devnet trade/);
+  assert.equal(isTradingGoal(TRADING_GOAL, { type: 'research' }), true);
+  const quiet = decideTask('compare prices', { type: 'research' });
+  assert.equal(quiet.includes('Propose one concrete Solana devnet trade'), false);
+});
+
+/**
+ * Achieves: a normal start with no checkpoint creates a run and pursues the trading goal
+ *   through research, decide, Jupiter trust, and the gate. Fully-automatic does not ask.
+ * Fails when: the route returns no_run, decide is not told to trade, or execution skips the gate.
+ * Oracle: run.goal, Jupiter score 700, approval.automatic, one devnet signature.
+ * Side effects / state checked: in-memory run, mocked search, Jupiter, and signer.
+ * Gaps: live Jupiter and Privy are not called.
+ */
+test('start_task creates a run and a fully-automatic trading goal passes the gate', async () => {
+  const machine = new BotStateMachine();
+  const models = scriptedOpenRouter();
+  const transfer = transferDouble();
+  const searches = [];
+  const urls = [];
+  const response = await postLoop(machine, {
+    openRouter: models.openRouter,
+    transferClient: transfer.client,
+    search: async query => {
+      searches.push(query);
+      return [{ title: 'CPI', url: 'https://example.com/cpi', snippet: 'long-run inflation' }];
+    },
+    trustLookup: resolveTrustLookup({
+      fetch: async (url) => {
+        urls.push(String(url));
+        return Response.json(jupiterToken(70, true));
+      },
+    }),
+  }, payload({ goal: TRADING_GOAL }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.error, undefined);
+  assert.equal(body.done, true);
+  assert.equal(body.run.goal, TRADING_GOAL);
+  assert.equal(body.run.botId, 'bot_1');
+  assert.equal(searches[0], TRADING_GOAL);
+  assert.equal(body.run.checkpoints.research.status, 'done');
+  const decideCall = models.calls.find(call => call.messages.some(message => (
+    typeof message.content === 'string' && message.content.includes('Role: decide')
+  )));
+  const decideText = decideCall.messages.map(message => message.content).join('\n');
+  assert.match(decideText, /Propose one concrete Solana devnet trade/);
+  assert.match(decideText, /Do not stop after a summary/);
+  assert.match(urls[0], /api\.jup\.ag\/tokens\/v2\/search\?query=/);
+  assert.equal(body.run.checkpoints.decide.trust.score, '700');
+  assert.equal(body.run.checkpoints['trust-gate'].trust.state, 'allowed');
+  assert.equal(body.run.checkpoints.approval.automatic, true);
+  assert.equal(body.run.checkpoints.execute.signature, 'sig_devnet_1');
+  assert.equal(body.run.checkpoints.execute.cluster, 'devnet');
+  assert.equal(transfer.calls.length, 1);
+  assert.equal(typeof transfer.calls[0].transaction, 'string');
+  assert.equal(transfer.calls[0].wallet.address, wallet.address);
+
+  const asking = new BotStateMachine();
+  const askModels = scriptedOpenRouter();
+  const askTransfer = transferDouble();
+  const full = await postLoop(asking, {
+    openRouter: askModels.openRouter,
+    transferClient: askTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async () => Response.json(jupiterToken(70, true)),
+    }),
+    loadLoopContext: async ({ botId, ownerId }) => {
+      assert.equal(botId, 'bot_1');
+      assert.equal(ownerId, 'user_1');
+      return {
+        bot: { ...bot, approvalMode: 'ask', goal: TRADING_GOAL },
+        wallet,
+        ledger,
+      };
+    },
+  }, { goal: TRADING_GOAL, botId: 'bot_1', now: NOW, ownerPermission: 'full' });
+  const fullBody = await full.json();
+  assert.equal(full.status, 200);
+  assert.equal(fullBody.run.goal, TRADING_GOAL);
+  assert.equal(fullBody.run.checkpoints.approval.automatic, true);
+  assert.equal(fullBody.run.checkpoints.execute.signature, 'sig_devnet_1');
+  assert.equal(askTransfer.calls.length, 1);
+
+  const blocked = new BotStateMachine();
+  const blockedModels = scriptedOpenRouter();
+  const blockedTransfer = transferDouble();
+  const low = await postLoop(blocked, {
+    openRouter: blockedModels.openRouter,
+    transferClient: blockedTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async () => Response.json(jupiterToken(10, false)),
+    }),
+  }, payload({
+    goal: TRADING_GOAL,
+    bot: { ...bot, approvalMode: 'fully-automatic' },
+    ownerPermission: 'full',
+  }));
+  const lowBody = await low.json();
+  assert.equal(lowBody.run.pauseReason, 'trust-confirmation');
+  assert.equal(lowBody.run.checkpoints.execute, undefined);
+  assert.equal(blockedTransfer.calls.length, 0);
 });

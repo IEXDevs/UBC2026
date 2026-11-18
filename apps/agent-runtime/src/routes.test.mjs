@@ -110,6 +110,63 @@ test('the loop route reaches the Durable Object', async () => {
 });
 
 /**
+ * Achieves: start_task's loop post loads the bot, wallet, and ledger and keeps the goal.
+ * Fails when: the Durable Object is forwarded an empty body and later returns no_run.
+ * Oracle: forwarded JSON includes botId, goal, bot, wallet, and ledger.
+ * Side effects / state checked: loadLoopContext mock.
+ * Gaps: the Durable Object run itself is covered in loop-engine.test.mjs.
+ */
+test('the loop route attaches the assigned bot context for a goal-only start', async () => {
+  let seen = null;
+  const wallet = {
+    id: 'w_main',
+    ownerId: 'user_1',
+    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    frozen: false,
+  };
+  const bot = {
+    id: 'bot_1',
+    ownerId: 'user_1',
+    goal: 'stored goal',
+    type: 'trading',
+    approvalMode: 'fully-automatic',
+    walletId: 'w_main',
+    cap: { asset: 'USDC' },
+  };
+  const ledger = { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
+  const env = fakeEnv({
+    BOT: {
+      idFromName: name => name,
+      get: () => ({
+        fetch: async request => {
+          seen = JSON.parse(await request.text());
+          return Response.json({ forwarded: new URL(request.url).pathname });
+        },
+      }),
+    },
+    loadLoopContext: async (wake) => {
+      assert.equal(wake.botId, 'bot_1');
+      assert.equal(wake.ownerId, 'user_1');
+      return { bot, wallet, ledger };
+    },
+  });
+  const goal = 'beat usd inflation in the long run with long term trading';
+  const loop = await worker.fetch(new Request('https://runtime/bots/bot_1/loop', {
+    method: 'POST',
+    headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+    body: JSON.stringify({ goal, permission: 'full' }),
+  }), env);
+  assert.equal(loop.status, 200);
+  assert.equal(seen.botId, 'bot_1');
+  assert.equal(seen.goal, goal);
+  assert.equal(seen.ownerPermission, 'full');
+  assert.equal(seen.bot.id, 'bot_1');
+  assert.equal(seen.bot.approvalMode, 'fully-automatic');
+  assert.equal(seen.wallet.address, wallet.address);
+  assert.equal(seen.ledger.botId, 'bot_1');
+});
+
+/**
  * Achieves: bot control routes forward to DO.
  * Fails when: routing miss/404.
  * Oracle: forwarded pathname.

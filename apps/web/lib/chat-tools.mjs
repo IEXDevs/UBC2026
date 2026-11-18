@@ -524,6 +524,7 @@ export function createChatToolInvoker({
     if (args.permission === 'ask' || args.permission === 'review' || args.permission === 'full') {
       body.permission = args.permission;
     }
+    if (name === 'start_task' && args.ownerPermission === 'full') body.ownerPermission = 'full';
     return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body);
   }
 

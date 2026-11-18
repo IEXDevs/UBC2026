@@ -89,6 +89,80 @@ function forwardToBot(stub, target, request, ownerId = null) {
   return stub.fetch(new Request(target, init));
 }
 
+const LOOP_BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
+
+function clipLoopGoal(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, 2000);
+}
+
+async function readLoopPayload(request) {
+  const text = await request.text();
+  if (!text.trim()) return { kind: 'json', value: {} };
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'raw', text };
+    return { kind: 'json', value: parsed };
+  } catch {
+    return { kind: 'raw', text };
+  }
+}
+
+async function enrichLoopPayload(body, env, botId, ownerId) {
+  const next = { ...body };
+  if (!LOOP_BOT_ID.test(typeof next.botId === 'string' ? next.botId : '')) next.botId = botId;
+  const suppliedGoal = clipLoopGoal(next.goal);
+  if (suppliedGoal) next.goal = suppliedGoal;
+  else delete next.goal;
+  if (next.permission === 'full' && next.ownerPermission == null) next.ownerPermission = 'full';
+  if (next.ownerPermission !== 'full' && next.ownerPermission !== 'review') delete next.ownerPermission;
+  const complete = next.bot && next.wallet && next.ledger;
+  if (!complete && typeof env.loadLoopContext === 'function') {
+    try {
+      const loaded = await env.loadLoopContext({
+        botId,
+        ownerId,
+        goal: next.goal || '',
+      });
+      if (loaded && typeof loaded === 'object') {
+        if (!next.bot && loaded.bot) next.bot = loaded.bot;
+        if (!next.wallet && loaded.wallet) next.wallet = loaded.wallet;
+        if (!next.ledger && loaded.ledger) next.ledger = loaded.ledger;
+      }
+    } catch {
+      // A missing record is reported by the loop. Do not invent a bot or a balance.
+    }
+  }
+  if (!next.goal) {
+    const fromBot = clipLoopGoal(next.bot?.goal);
+    if (fromBot) next.goal = fromBot;
+  }
+  return next;
+}
+
+function forwardPrepared(stub, target, request, ownerId, body, raw = false) {
+  const headers = new Headers(request.headers);
+  headers.delete(INTERNAL_POSITION_HEADER);
+  headers.delete('content-length');
+  if (ownerId) headers.set(OWNER_HEADER, ownerId);
+  if (!raw) headers.set('content-type', 'application/json');
+  return stub.fetch(new Request(target, {
+    method: 'POST',
+    headers,
+    body: raw ? body : JSON.stringify(body),
+  }));
+}
+
+async function forwardBotAction(stub, target, request, ownerId, env, botId, action) {
+  if (action === 'loop' && request.method === 'POST') {
+    const read = await readLoopPayload(request);
+    if (read.kind === 'raw') return forwardPrepared(stub, target, request, ownerId, read.text, true);
+    const payload = await enrichLoopPayload(read.value, env, botId, ownerId);
+    return forwardPrepared(stub, target, request, ownerId, payload, false);
+  }
+  return forwardToBot(stub, target, request, ownerId);
+}
+
 export { BotDurableObject };
 
 function json(data, status = 200) {
@@ -191,7 +265,7 @@ async function dispatch(request, env, rawEnv = env) {
       const target = rest.startsWith('/browser/')
         ? new URL(`https://bot/id/${encodeURIComponent(botId)}${rest}`)
         : new URL(`https://bot/${matched.route.action}`);
-      return forwardToBot(stub, target, request, ownerId);
+      return forwardBotAction(stub, target, request, ownerId, env, botId, matched.route.action);
     }
 
     // Live data / wallet routes (Supabase + Privy when secrets exist).
@@ -238,7 +312,7 @@ async function dispatch(request, env, rawEnv = env) {
       }
       const stub = botStub(env, botId);
       const target = new URL(`https://bot/${action}`);
-      return forwardToBot(stub, target, request, ownerId);
+      return forwardBotAction(stub, target, request, ownerId, env, botId, action);
     }
 
     return json({ error: 'not_found' }, 404);

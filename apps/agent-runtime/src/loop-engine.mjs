@@ -174,6 +174,53 @@ function goalFor(run, bot) {
   return run.goal || bot.goal || '';
 }
 
+/** Trading goals, including a long-term inflation goal, must leave decide with a proposal. */
+export function isTradingGoal(goal, bot) {
+  if (bot?.type === 'trading') return true;
+  const text = `${goal || ''}`.toLowerCase();
+  return /\b(trad(?:e|ing)|inflation)\b/.test(text);
+}
+
+/** Full permission continues. Ask is not an override of a fully-automatic bot. */
+function trustedOwnerPermission(input) {
+  const value = input?.ownerPermission;
+  if (value === 'full' || value === 'review') return value;
+  return undefined;
+}
+
+function approvalOptions(input) {
+  const ownerPermission = trustedOwnerPermission(input);
+  if (!ownerPermission) return {};
+  return {
+    ownerPermission,
+    confirmed: input?.confirmed === true,
+    reviewCap: typeof input?.reviewCap === 'string' ? input.reviewCap : undefined,
+  };
+}
+
+export function decideTask(goal, bot) {
+  const lines = [
+    'Role: decide',
+    'Return JSON only with summary, facts, and proposal.',
+    'facts fields: asset, mint, cluster, price, amount, trustScore, reasonSummary.',
+    'When a Jupiter trust lookup is configured, the platform replaces trustScore with the Jupiter Tokens API v2 score before the trust gate. A model-invented score does not pass that gate.',
+    'When a mainnet price lookup is configured, the platform replaces price with that paper quote before verify. A price quote does not sign, broadcast, or authorize a transaction.',
+    'proposal fields: asset, recipient, outflow, expectedReceive, expectedReceiveAsset, maxFee, expiresAt, cluster.',
+    'cluster must be devnet or testnet. Amounts are integer strings in base units.',
+    'Do not invent an API key or a signature.',
+  ];
+  if (isTradingGoal(goal, bot)) {
+    lines.push(
+      'The goal is trading. Long-term trading to beat USD inflation is in scope.',
+      'Propose one concrete Solana devnet trade in proposal. Do not stop after a summary.',
+      'Use the bot cap asset and the assigned wallet. cluster is devnet or testnet only.',
+      'Do not propose mainnet, a meme coin, or a day trade. Do not sign or broadcast.',
+      'The platform gate still blocks a failed trust check, a failed verify, a policy or cap block, and any non-devnet trade.',
+    );
+  }
+  return lines.join('\n');
+}
+
 function resolvePause(run, ctx) {
   if (!run.paused) return run;
   if (APPROVAL_RETRY.has(run.pauseReason) && ctx.input.approval) return resumeRun(run, ctx.now);
@@ -250,16 +297,7 @@ async function performDecide(run, ctx) {
     const completion = await ctx.models.complete({
       role: 'decide',
       goal: goalFor(run, ctx.bot),
-      task: [
-        'Role: decide',
-        'Return JSON only with summary, facts, and proposal.',
-        'facts fields: asset, mint, cluster, price, amount, trustScore, reasonSummary.',
-        'When a Jupiter trust lookup is configured, the platform replaces trustScore with the Jupiter Tokens API v2 score before the trust gate. A model-invented score does not pass that gate.',
-        'When a mainnet price lookup is configured, the platform replaces price with that paper quote before verify. A price quote does not sign, broadcast, or authorize a transaction.',
-        'proposal fields: asset, recipient, outflow, expectedReceive, expectedReceiveAsset, maxFee, expiresAt, cluster.',
-        'cluster must be devnet or testnet. Amounts are integer strings in base units.',
-        'Do not invent an API key or a signature.',
-      ].join('\n'),
+      task: decideTask(goalFor(run, ctx.bot), ctx.bot),
       untrusted: [{ role: 'user', content: `Untrusted research summary:\n${clip(research?.summary ?? '', 2000)}` }],
     });
     model = completion.model;
@@ -454,7 +492,7 @@ function performPolicy(run, ctx) {
   if (policy.state === 'blocked') return waitStep(run, 'policy', policy.reason ?? 'blocked', { policy: slimPolicy(policy) }, ctx.now);
   let needed;
   try {
-    needed = approvalRequirement(ctx.bot, policy, { ownerPermission: ctx.input?.ownerPermission });
+    needed = approvalRequirement(ctx.bot, policy, approvalOptions(ctx.input));
   } catch {
     return waitStep(run, 'policy', 'policy-invalid', { policy: slimPolicy(policy) }, ctx.now);
   }

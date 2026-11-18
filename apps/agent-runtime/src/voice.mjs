@@ -492,6 +492,22 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
     return { calls: toolDef.calls.map(entry => ({ method: entry.method, path: entry.path })), list: summary, paused };
   }
   let params = { ...parameters };
+  if (toolDef.name === 'start_task' && trustedSpendPermission(options.spendPermission) === 'full') {
+    const entry = toolDef.calls[0];
+    const outbound = requestFor(entry, params, owner);
+    if (!outbound) return { error: 'invalid_parameters' };
+    const payload = await outbound.json().catch(() => ({}));
+    payload.ownerPermission = 'full';
+    const stamped = new Request(outbound.url, {
+      method: 'POST',
+      headers: outbound.headers,
+      body: JSON.stringify(payload),
+    });
+    const response = await fetchApi(stamped, env);
+    return {
+      calls: [{ method: entry.method, path: entry.path, ...(await speakable(response, secrets)) }],
+    };
+  }
   if (toolDef.name === 'request_spend') {
     const body = {
       botId: params.botId,

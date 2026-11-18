@@ -401,6 +401,27 @@ test('createChatToolInvoker enriches shell wallet addresses via QuickNode', asyn
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
+test('start_task posts the goal and full permission to the loop route', async () => {
+  let seen = null;
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_dx4dl12n',
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (url, options) => {
+      seen = { url: String(url), method: options.method, body: JSON.parse(options.body) };
+      return Response.json({ ok: true, done: true });
+    },
+  });
+  const goal = 'beat usd inflation in the long run with long term trading';
+  const started = await invoke('start_task', { botId: 'bot_dx4dl12n', goal, ownerPermission: 'full' });
+  assert.equal(started.ok, true);
+  assert.equal(seen.method, 'POST');
+  assert.match(seen.url, /\/bots\/bot_dx4dl12n\/loop$/);
+  assert.equal(seen.body.goal, goal);
+  assert.equal(seen.body.ownerPermission, 'full');
+  assert.equal(seen.body.bot, undefined);
+});
+
 test('createChatToolInvoker pauses a bot via Worker', async () => {
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',

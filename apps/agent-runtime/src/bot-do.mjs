@@ -35,6 +35,47 @@ function ownerFrom(request) {
   return ownerId;
 }
 
+const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
+
+function clipGoal(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, 2000);
+}
+
+function loopBotId(body, meta) {
+  const candidates = [body?.botId, body?.bot?.id, meta?.botId];
+  for (const value of candidates) {
+    if (typeof value === 'string' && BOT_ID.test(value)) return value;
+  }
+  return '';
+}
+
+function loopInput(body) {
+  const input = { ...body };
+  if (input.ownerPermission == null && input.permission === 'full') input.ownerPermission = 'full';
+  if (input.ownerPermission === 'ask') delete input.ownerPermission;
+  return input;
+}
+
+async function loopContext(env, body, ownerId) {
+  const bot = body?.bot && typeof body.bot === 'object' ? body.bot : null;
+  const wallet = body?.wallet && typeof body.wallet === 'object' ? body.wallet : null;
+  const ledger = body?.ledger && typeof body.ledger === 'object' ? body.ledger : null;
+  if (bot && wallet && ledger) return { bot, wallet, ledger };
+  const botId = loopBotId(body, null);
+  if (!botId || typeof env.loadLoopContext !== 'function') return { bot, wallet, ledger };
+  try {
+    const loaded = await env.loadLoopContext({ botId, ownerId, goal: clipGoal(body?.goal) });
+    return {
+      bot: bot || loaded?.bot || null,
+      wallet: wallet || loaded?.wallet || null,
+      ledger: ledger || loaded?.ledger || null,
+    };
+  } catch {
+    return { bot, wallet, ledger };
+  }
+}
+
 function isInternalPositionCheck(request) {
   return request.headers.get(INTERNAL_POSITION_HEADER) === INTERNAL_POSITION_VALUE;
 }
@@ -364,9 +405,26 @@ export class BotStateMachine {
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
         return Response.json({ error: 'invalid_json' }, { status: 400 });
       }
-      const run = await this.get('run');
-      if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
-      const now = Number.isSafeInteger(body.now) ? body.now : Date.now();
+      const loopNow = Number.isSafeInteger(body.now) ? body.now : Date.now();
+      const context = await loopContext(env, body, ownerId);
+      const meta = await this.get('meta');
+      const botId = loopBotId({ ...body, bot: context.bot || body.bot }, meta);
+      const goal = clipGoal(body.goal) || clipGoal(context.bot?.goal) || '';
+      let run = await this.get('run');
+      if (!run) {
+        if (!botId) return Response.json({ error: 'no_run' }, { status: 404 });
+        run = createEmptyRun({ runId: `run_${loopNow}`, botId, goal, now: loopNow });
+        await this.put('run', run);
+        await this.put('meta', {
+          botId,
+          ownerId,
+          cluster: env.CLUSTER ?? 'devnet',
+          updatedAt: loopNow,
+        });
+      } else if (goal && !run.goal) {
+        run = { ...run, goal };
+        await this.put('run', run);
+      }
       const models = env.openRouter ?? createOpenRouterFromEnv(env, env.fetch ?? fetch);
       const deps = {
         search: env.search ?? (env.FIRECRAWL_API_KEY
@@ -381,27 +439,28 @@ export class BotStateMachine {
         recentBlockhash: env.recentBlockhash,
         secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
       };
+      const input = loopInput(body);
       try {
         const result = await runBotLoop({
           run,
-          bot: body.bot,
-          wallet: body.wallet,
-          ledger: body.ledger,
+          bot: context.bot,
+          wallet: context.wallet,
+          ledger: context.ledger,
           ownerId,
-          input: body,
+          input,
           models,
           deps,
-          now,
+          now: loopNow,
           persist: async next => { await this.put('run', next); },
         });
         const alert = alertFromPauseReason(result.run?.pauseReason);
-        if (alert && body.bot?.id) {
+        if (alert && context.bot?.id) {
           await rememberBotAlert(env, this, {
             alert,
-            botId: body.bot.id,
+            botId: context.bot.id,
             ownerId,
-            at: now,
-            scope: result.run?.runId || now,
+            at: loopNow,
+            scope: result.run?.runId || loopNow,
           });
         }
         return Response.json({ ok: true, ...result });
