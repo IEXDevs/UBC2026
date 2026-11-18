@@ -464,3 +464,90 @@ test('a locked desk does not answer before the spend gates', async () => {
   assert.equal(lossBody.error, undefined);
   assert.equal(signed, 1);
 });
+
+/**
+ * Achieves: a 1 USDC buy with no destination reaches trust, verify, reserve, and permission.
+ * Fails when: the body dies as invalid_spend, the cap is skipped, or an over-cap buy reserves.
+ * Oracle: amount 1000000 reserves once; 72860000 stops with per-transaction and does not sign.
+ * Side effects: in-memory ledger. No live Jupiter or Privy.
+ * Gaps: the swap itself is not a USDC transfer, so this path does not broadcast.
+ */
+test('a 1 USDC buy is not invalid_spend and an over-cap buy stops at the cap', async () => {
+  const trading = {
+    ...bot,
+    id: 'bot_e0madta8',
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '20000000', maxPerTransaction: '1000000' },
+  };
+  const book = { botId: 'bot_e0madta8', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
+  const ledgerApi = createMemoryLedger();
+  await ledgerApi.reset({
+    users: [{ id: 'user_1', privyUserId: 'did:privy:user_1' }],
+    wallets: [wallet],
+    bots: [trading],
+    ledgers: [book],
+  });
+  let signed = 0;
+  const client = {
+    async getDevnetBlockhash() {
+      return { cluster: 'devnet', blockhash: DESTINATION };
+    },
+    async signAndBroadcastDevnet() {
+      signed += 1;
+      return { cluster: 'devnet', signature: 'sig_should_not' };
+    },
+  };
+  const env = spendEnv({
+    transferClient: client,
+    ledgerApi,
+    loadSpendContext: async () => ({ bot: trading, wallet, ledger: book }),
+  });
+  const within = await worker.fetch(spendRequest({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'buy',
+    amount: 1000000,
+    asset: 'USDC',
+    quoteCluster: 'devnet',
+  }), env);
+  const body = await within.json();
+  assert.equal(body.error, undefined);
+  assert.equal(within.status, 200);
+  assert.equal(body.signed, false);
+  assert.equal(body.state, 'reserved');
+  assert.equal(body.cluster, 'devnet');
+  assert.equal(body.steps.includes('trust-gate'), true);
+  assert.equal(body.steps.includes('verify-consensus'), true);
+  assert.equal(body.steps.includes('wallet-freeze'), true);
+  assert.equal(body.steps.includes('bot-policy'), true);
+  assert.equal(body.steps.includes('approval-mode'), true);
+  assert.equal(body.steps.includes('reserve'), true);
+  assert.equal(body.steps.includes('sign'), false);
+  assert.equal(signed, 0);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+
+  const over = await worker.fetch(spendRequest({
+    permission: 'full',
+    confirmed: true,
+    botId: 'bot_e0madta8',
+    action: 'buy',
+    amount: '72860000',
+    asset: 'USDC',
+    quoteCluster: 'devnet',
+    idempotencyKey: 'over_cap',
+  }), env);
+  const overBody = await over.json();
+  assert.equal(over.status, 409);
+  assert.equal(overBody.error, undefined);
+  assert.equal(overBody.signed, false);
+  assert.equal(overBody.state, 'approval-needed');
+  assert.equal(overBody.reason, 'per-transaction');
+  assert.equal(overBody.steps.includes('trust-gate'), true);
+  assert.equal(overBody.steps.includes('verify-consensus'), true);
+  assert.equal(overBody.steps.includes('bot-policy'), true);
+  assert.equal(overBody.steps.includes('approval-mode'), true);
+  assert.equal(overBody.steps.includes('reserve'), false);
+  assert.equal(overBody.steps.includes('sign'), false);
+  assert.equal(signed, 0);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+});

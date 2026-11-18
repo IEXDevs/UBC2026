@@ -90,6 +90,10 @@ export async function handleSpend(request, env = {}) {
     }, 409);
   }
   const trustScore = trust.score;
+  const recipient = parsed.destination || parsed.handle || (parsed.selfCustody ? context.wallet.address : '');
+  if (typeof recipient !== 'string' || recipient.length < 1) {
+    return json({ error: 'invalid_spend', signed: false }, 400);
+  }
   const facts = {
     asset: 'USDC',
     mint: DEVNET_USDC_MINT,
@@ -104,7 +108,7 @@ export async function handleSpend(request, env = {}) {
     botId: parsed.botId,
     cluster: 'devnet',
     asset: 'USDC',
-    recipient: parsed.destination || parsed.handle,
+    recipient,
     quoteId: parsed.quote?.pricingCluster === 'mainnet' ? 'mainnet-quote' : 'devnet',
     outflow: parsed.amount,
     expectedReceive: parsed.amount,
@@ -167,7 +171,7 @@ export async function handleSpend(request, env = {}) {
 
   let state = result.state;
   if (!grantOk && state === 'signer-not-configured') state = 'desk_locked';
-  else if (state === 'signer-not-configured' && !parsed.destination) state = 'recipient_address_missing';
+  else if (state === 'signer-not-configured' && !parsed.destination && !parsed.selfCustody) state = 'recipient_address_missing';
   const body = {
     ok: result.signed === true,
     state,
@@ -188,6 +192,8 @@ export async function handleSpend(request, env = {}) {
       scope: parsed.idempotencyKey || `${parsed.action}_${parsed.amount}`,
     });
   }
-  const status = result.signed && grantOk ? 200 : (state === 'desk_locked' ? 403 : 409);
+  const status = state === 'desk_locked'
+    ? 403
+    : ((result.signed && grantOk) || state === 'reserved' ? 200 : 409);
   return json(body, status);
 }

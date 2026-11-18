@@ -217,7 +217,18 @@ export async function runPermissionedSpend({
   steps.push('approval-mode');
   const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed, reviewCap });
   if (approvalNeeded) {
-    return { state: 'approval-needed', steps, signed: false, policy };
+    const capReason = policy.state === 'over-budget'
+      ? (policy.violations?.includes('per-transaction')
+        ? 'per-transaction'
+        : (policy.violations?.[0] || 'over-budget'))
+      : null;
+    return {
+      state: 'approval-needed',
+      steps,
+      signed: false,
+      policy,
+      ...(capReason ? { reason: capReason } : {}),
+    };
   }
   if (proposal.cluster !== 'devnet') {
     return { state: 'wrong-cluster', steps, signed: false };
@@ -225,11 +236,9 @@ export async function runPermissionedSpend({
   if (mainnetQuoteBlocksSpend(quote)) {
     return { state: 'quote-not-authorization', steps, signed: false };
   }
-  if (typeof signDevnet !== 'function') {
-    return { state: 'signer-not-configured', steps, signed: false };
-  }
 
   const memo = memoFromDecision(consensus.decisionRecord);
+  let reservedOk = false;
   if (typeof beforeSign === 'function') {
     steps.push('reserve');
     let reserved;
@@ -247,6 +256,14 @@ export async function runPermissionedSpend({
         signed: false,
       };
     }
+    reservedOk = true;
+  }
+  if (typeof signDevnet !== 'function') {
+    return {
+      state: reservedOk ? 'reserved' : 'signer-not-configured',
+      steps,
+      signed: false,
+    };
   }
 
   steps.push('sign');

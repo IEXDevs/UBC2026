@@ -704,6 +704,7 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
     if (typeof params.destination === 'string') body.destination = params.destination;
     if (typeof params.handle === 'string') body.handle = params.handle;
     if (typeof params.asset === 'string') body.asset = params.asset;
+    if (params.quoteCluster === 'devnet' || params.quoteCluster === 'mainnet') body.quoteCluster = params.quoteCluster;
     if (params.quoteCluster === 'mainnet') {
       body.quote = { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false };
     }

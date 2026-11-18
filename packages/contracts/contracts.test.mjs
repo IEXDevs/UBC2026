@@ -434,6 +434,48 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
   assert.equal(parsePermissionedSpendBody({
     permission: 'review', botId: 'bot_1', amount: '42', destination: dest, reviewCap: '0',
   }), null);
+
+  const buy = parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'buy',
+    amount: 1000000,
+    asset: 'USDC',
+    quoteCluster: 'devnet',
+  });
+  assert.equal(buy.amount, '1000000');
+  assert.equal(buy.asset, 'USDC');
+  assert.equal(buy.action, 'buy');
+  assert.equal(buy.selfCustody, true);
+  assert.equal(buy.destination, null);
+  assert.equal(buy.quote.pricingCluster, 'devnet');
+  assert.equal(buy.quote.cluster, 'devnet');
+  assert.equal(buy.quote.authorizesTransaction, false);
+  assert.equal(buy.quote.paperPnl, undefined);
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'spend',
+    amount: '1000000',
+    asset: 'USDC',
+    quoteCluster: 'devnet',
+  }), null);
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'buy',
+    amount: '1000000',
+    asset: 'SOL',
+    quoteCluster: 'devnet',
+  }), null);
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'buy',
+    amount: '1000000',
+    asset: 'USDC',
+    quoteCluster: 'mainnet-beta',
+  }), null);
   assert.throws(
     () => buildPermissionedSpendRequest({ permission: 'full', botId: 'bot_1', amount: '1' }),
     ContractError,

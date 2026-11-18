@@ -739,3 +739,45 @@ test('request_spend carries a desk grant and a gate result is not an ask-mode ho
   assert.equal(paused.status, 'paused');
   assert.equal(calls[1].grant, null);
 });
+
+test('request_spend posts a 1 USDC buy without a destination', async () => {
+  const calls = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_e0madta8',
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push(body);
+      return Response.json({
+        ok: false,
+        state: 'reserved',
+        steps: ['trust-gate', 'verify-consensus', 'bot-policy', 'approval-mode', 'reserve'],
+        signed: false,
+        cluster: 'devnet',
+      });
+    },
+  });
+  const spent = await invoke('request_spend', {
+    action: 'buy',
+    amount: 1000000,
+    asset: 'USDC',
+    botId: 'bot_e0madta8',
+    quoteCluster: 'devnet',
+    permission: 'full',
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].action, 'buy');
+  assert.equal(calls[0].amount, '1000000');
+  assert.equal(calls[0].asset, 'USDC');
+  assert.equal(calls[0].botId, 'bot_e0madta8');
+  assert.equal(calls[0].quoteCluster, 'devnet');
+  assert.equal(calls[0].permission, 'full');
+  assert.equal(calls[0].destination, undefined);
+  assert.equal(spent.error, undefined);
+  assert.equal(spent.signed, false);
+  assert.equal(spent.state, 'reserved');
+  assert.equal(spent.steps.includes('trust-gate'), true);
+  assert.equal(spent.steps.includes('reserve'), true);
+  assert.equal(spent.steps.includes('approval-mode'), true);
+});

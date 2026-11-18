@@ -1058,3 +1058,168 @@ test('an owner ask runs one fully-automatic SOL to USDC trade through memo and n
   const lossAlerts = await lossMachine.get('alerts');
   assert.equal(lossAlerts.some(event => event.kind === 'bot.paused' && event.summary.includes('Max loss')), true);
 });
+
+function usdcBuyDecide(models, inAmount) {
+  const decide = models.openRouter;
+  const original = decide.complete.bind(decide);
+  decide.complete = async (input) => {
+    const task = typeof input?.task === 'string' ? input.task : '';
+    if (task.includes('Role: decide')) {
+      return {
+        model: 'test',
+        text: JSON.stringify({
+          summary: 'Buy wrapped SOL with USDC',
+          facts: {
+            asset: 'SOL',
+            mint: SOL_MINT,
+            cluster: 'devnet',
+            price: '72980000',
+            amount: '1000000000',
+            trustScore: '100',
+            reasonSummary: 'Buy wrapped SOL with the USDC cap',
+          },
+          proposal: {
+            asset: 'SOL',
+            recipient: DESTINATION,
+            outflow: '1000000000',
+            expectedReceive: '13700000',
+            expectedReceiveAsset: 'SOL',
+            maxFee: '0',
+            expiresAt: NOW + 60_000,
+            cluster: 'devnet',
+            ...(inAmount ? { swap: { inputMint: USDC_MINT, outputMint: SOL_MINT, inAmount } } : {}),
+          },
+        }),
+      };
+    }
+    return original(input);
+  };
+  return decide;
+}
+
+/**
+ * Achieves: a SOL quote whose spend is USDC inside the per-transaction cap
+ *   passes accounting, trust, verify, reserve, and permission. An over-cap
+ *   spend stops at the cap. A different asset with no cap-asset spend still mismatches.
+ * Fails when: decide pauses on accounting-asset-mismatch for a USDC input,
+ *   the cap is skipped, or the paper quote signs a mainnet trade.
+ * Oracle: outflow 1000000 USDC, paper label, reserved 1000000; 72860000 is per-transaction.
+ * Side effects: in-memory run and ledger. Jupiter, price, and the signer are injected.
+ * Gaps: live Jupiter and Privy are not called.
+ */
+test('a within-cap USDC buy of wrapped SOL clears the gates and an over-cap buy stops at the cap', async () => {
+  const capped = {
+    ...bot,
+    goal: TRADING_GOAL,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '20000000', maxPerTransaction: '1000000' },
+  };
+  const task = decideTask(TRADING_GOAL, capped);
+  assert.match(task, /inputMint is that asset/);
+  assert.match(task, /1000000/);
+  assert.match(task, /paper only/);
+
+  const ledgerApi = createMemoryLedger();
+  await ledgerApi.reset({
+    users: [{ id: 'user_1', privyUserId: 'did:privy:user_1' }],
+    wallets: [wallet],
+    bots: [capped],
+    ledgers: [{ botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' }],
+  });
+  const machine = new BotStateMachine();
+  const models = scriptedOpenRouter();
+  const transfer = transferDouble();
+  const quote = async (mint) => ({
+    mint,
+    priceUsd: mint === USDC_MINT ? '1.00' : '72.98',
+    quoteSource: 'dexscreener',
+    pricingCluster: 'mainnet',
+    executionCluster: 'devnet',
+    label: 'devnet execution, mainnet pricing',
+    fetchedAt: new Date(NOW).toISOString(),
+  });
+  const response = await postLoop(machine, {
+    openRouter: usdcBuyDecide(models, '1000000'),
+    transferClient: transfer.client,
+    lookupPrice: quote,
+    trustLookup: async () => ({ score: '800', source: 'jupiter-tokens-v2' }),
+    ledgerApi,
+    swapQuote: async (swap) => ({
+      inputMint: swap.inputMint,
+      outputMint: swap.outputMint,
+      inAmount: swap.inAmount,
+      outAmount: '13700000',
+      quoteSource: 'jupiter-swap-v1',
+      pricingCluster: 'mainnet',
+      executionCluster: 'devnet',
+      label: 'devnet execution, mainnet pricing',
+      broadcast: false,
+      authorizesTransaction: false,
+    }),
+  }, payload({ goal: TRADING_GOAL, bot: capped }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.done, true);
+  assert.equal(body.run.pauseReason, undefined);
+  const decided = body.run.checkpoints.decide;
+  assert.equal(decided.proposal.asset, 'USDC');
+  assert.equal(decided.proposal.outflow, '1000000');
+  assert.equal(decided.proposal.expectedReceiveAsset, 'SOL');
+  assert.equal(decided.proposal.swap.inputMint, USDC_MINT);
+  assert.equal(decided.proposal.swap.outputMint, SOL_MINT);
+  assert.equal(decided.proposal.swap.inAmount, '1000000');
+  assert.equal(decided.facts.asset, 'USDC');
+  assert.equal(decided.facts.amount, '1000000');
+  assert.equal(decided.facts.mint, SOL_MINT);
+  assert.equal(body.run.checkpoints['trust-gate'].trust.state, 'allowed');
+  assert.equal(body.run.checkpoints.verify.decisionRecord.outcome, 'consensus');
+  assert.equal(body.run.checkpoints.verify.priceQuote.label, 'devnet execution, mainnet pricing');
+  assert.equal(body.run.checkpoints.verify.priceQuote.authorizesTransaction, false);
+  assert.equal(body.run.checkpoints.policy.policy.state, 'approval-needed');
+  assert.equal(body.run.checkpoints.approval.automatic, true);
+  const execute = body.run.checkpoints.execute;
+  assert.equal(execute.cluster, 'devnet');
+  assert.equal(execute.signature, 'sig_devnet_1');
+  assert.equal(execute.reserved, true);
+  assert.equal(execute.paper.mint, SOL_MINT);
+  assert.equal(execute.paper.broadcast, false);
+  assert.equal(execute.paper.label, 'devnet execution, mainnet pricing');
+  assert.equal(execute.swapQuote.inputMint, USDC_MINT);
+  assert.equal(execute.swapQuote.broadcast, false);
+  assert.equal(transfer.calls.length, 1);
+  assert.equal(transfer.calls[0].wallet.address, wallet.address);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+
+  const overMachine = new BotStateMachine();
+  const overModels = scriptedOpenRouter();
+  const overTransfer = transferDouble();
+  const over = await postLoop(overMachine, {
+    openRouter: usdcBuyDecide(overModels, '72860000'),
+    transferClient: overTransfer.client,
+    lookupPrice: quote,
+    trustLookup: async () => ({ score: '800', source: 'jupiter-tokens-v2' }),
+  }, payload({ goal: TRADING_GOAL, bot: capped, ownerPermission: 'full' }));
+  const overBody = await over.json();
+  assert.equal(overBody.run.pauseReason, 'approval-needed');
+  assert.notEqual(overBody.run.pauseReason, 'accounting-asset-mismatch');
+  assert.equal(overBody.run.checkpoints.decide.proposal.asset, 'USDC');
+  assert.equal(overBody.run.checkpoints.decide.proposal.outflow, '72860000');
+  assert.equal(overBody.run.checkpoints['trust-gate'].trust.state, 'allowed');
+  assert.equal(overBody.run.checkpoints.verify.decisionRecord.outcome, 'consensus');
+  assert.equal(overBody.run.checkpoints.policy.policy.state, 'over-budget');
+  assert.equal(overBody.run.checkpoints.policy.policy.violations.includes('per-transaction'), true);
+  assert.equal(overBody.run.checkpoints.execute, undefined);
+  assert.equal(overTransfer.calls.length, 0);
+
+  const mismatchMachine = new BotStateMachine();
+  const mismatchModels = scriptedOpenRouter();
+  const mismatchTransfer = transferDouble();
+  const mismatch = await postLoop(mismatchMachine, {
+    openRouter: usdcBuyDecide(mismatchModels, null),
+    transferClient: mismatchTransfer.client,
+  }, payload({ goal: TRADING_GOAL, bot: capped }));
+  const mismatchBody = await mismatch.json();
+  assert.equal(mismatchBody.run.pauseReason, 'accounting-asset-mismatch');
+  assert.equal(mismatchBody.run.checkpoints['trust-gate'], undefined);
+  assert.equal(mismatchTransfer.calls.length, 0);
+});

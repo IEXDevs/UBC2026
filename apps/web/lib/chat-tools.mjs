@@ -570,6 +570,7 @@ export function createChatToolInvoker({
     for (const key of entry.body || []) {
       let raw = args[key];
       if (key === 'cooldownMinutes' && Number.isInteger(raw)) raw = String(raw);
+      if (key === 'amount' && typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0) raw = String(raw);
       if (typeof raw === 'string' && raw.trim()) body[key] = raw.trim();
     }
     if (args.confirmed === true) body.confirmed = true;
