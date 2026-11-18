@@ -542,3 +542,186 @@ test('review permission auto-continues only inside the owner threshold', async (
   assert.equal(over.state, 'approval-needed');
   assert.equal(over.signed, false);
 });
+
+/**
+ * Achieves: a missing trust score forces confirmation for fully-automatic and still runs the later gates.
+ * Fails when: verify is skipped, an invented score signs, or a mainnet quote signs after confirmation.
+ * Oracle: unconfirmed stays at trust-confirmation-required after verify; confirmed devnet signs once.
+ * Side effects: none. signDevnet is injected.
+ * Gaps: the spend route covers Jupiter fetch failures.
+ */
+test('unavailable trust forces confirmation without skipping the spend gates', async () => {
+  const openFacts = {
+    asset: 'USDC',
+    mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    cluster: 'devnet',
+    price: '1000000',
+    amount: '1000',
+    trustUnavailable: true,
+    reasonSummary: 'Transfer under cap',
+  };
+  const automatic = { ...bot, approvalMode: 'fully-automatic' };
+  let verifies = 0;
+  let reserves = 0;
+  let signs = 0;
+  const held = await runPermissionedSpend({
+    bot: automatic,
+    wallet,
+    ledger,
+    proposal,
+    trustUnavailable: true,
+    ownerPermission: 'full',
+    confirmed: false,
+    mainFn: async () => { verifies += 1; return openFacts; },
+    verifyFn: async () => openFacts,
+    now: Date.now(),
+    beforeSign: async () => { reserves += 1; return { state: 'reserved' }; },
+    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_should_not' }; },
+  });
+  assert.equal(held.state, 'trust-confirmation-required');
+  assert.equal(held.signed, false);
+  assert.equal(held.trust.score, null);
+  assert.equal(held.trust.prompt, 'This has a low trust score, are you sure you want to buy?');
+  assert.equal(verifies, 1);
+  assert.equal(reserves, 0);
+  assert.equal(signs, 0);
+  assert.equal(held.steps.includes('verify-consensus'), true);
+  assert.equal(held.steps.includes('wallet-freeze'), true);
+  assert.equal(held.steps.includes('bot-policy'), true);
+  assert.equal(held.steps.includes('approval-mode'), true);
+  assert.equal(held.steps.includes('reserve'), false);
+  assert.equal(held.steps.includes('sign'), false);
+
+  const passed = await runPermissionedSpend({
+    bot: automatic,
+    wallet,
+    ledger,
+    proposal,
+    trustUnavailable: true,
+    ownerPermission: 'full',
+    confirmed: true,
+    mainFn: async () => openFacts,
+    verifyFn: async () => openFacts,
+    now: Date.now(),
+    beforeSign: async () => { reserves += 1; return { state: 'reserved' }; },
+    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_devnet_open' }; },
+  });
+  assert.equal(passed.state, 'signed');
+  assert.equal(passed.signature, 'sig_devnet_open');
+  assert.equal(passed.cluster, 'devnet');
+  assert.equal(reserves, 1);
+  assert.equal(signs, 1);
+  assert.equal(passed.steps.includes('reserve'), true);
+  assert.equal(passed.steps.includes('sign'), true);
+
+  const quoted = await runPermissionedSpend({
+    bot: automatic,
+    wallet,
+    ledger,
+    proposal,
+    trustUnavailable: true,
+    ownerPermission: 'full',
+    confirmed: true,
+    quote: { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false },
+    mainFn: async () => openFacts,
+    verifyFn: async () => openFacts,
+    now: Date.now(),
+    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_mainnet' }; },
+  });
+  assert.equal(quoted.state, 'quote-not-authorization');
+  assert.equal(quoted.signed, false);
+  assert.equal(signs, 1);
+
+  const frozen = await runPermissionedSpend({
+    bot: automatic,
+    wallet: { ...wallet, frozen: true },
+    ledger,
+    proposal,
+    trustUnavailable: true,
+    ownerPermission: 'full',
+    confirmed: true,
+    mainFn: async () => openFacts,
+    verifyFn: async () => openFacts,
+    now: Date.now(),
+    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_frozen' }; },
+  });
+  assert.equal(frozen.state, 'blocked');
+  assert.equal(frozen.reason, 'spend-frozen');
+  assert.equal(signs, 1);
+
+  const loss = await runPermissionedSpend({
+    bot: { ...automatic, cap: { ...automatic.cap, maxLoss: '10' } },
+    wallet,
+    ledger: { ...ledger, realizedLoss: '10' },
+    proposal,
+    trustUnavailable: true,
+    ownerPermission: 'full',
+    confirmed: true,
+    mainFn: async () => openFacts,
+    verifyFn: async () => openFacts,
+    now: Date.now(),
+    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_loss' }; },
+  });
+  assert.equal(loss.state, 'blocked');
+  assert.equal(loss.reason, 'max-loss-reached');
+  assert.equal(signs, 1);
+
+  const overCap = await runPermissionedSpend({
+    bot: automatic,
+    wallet,
+    ledger,
+    proposal: { ...proposal, outflow: '60000' },
+    trustUnavailable: true,
+    ownerPermission: 'full',
+    confirmed: true,
+    mainFn: async () => ({ ...openFacts, amount: '60000' }),
+    verifyFn: async () => ({ ...openFacts, amount: '60000' }),
+    now: Date.now(),
+    beforeSign: async () => { reserves += 1; return { state: 'reserved' }; },
+    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_cap' }; },
+  });
+  assert.equal(overCap.state, 'approval-needed');
+  assert.equal(overCap.reason, 'per-transaction');
+  assert.equal(overCap.signed, false);
+  assert.equal(reserves, 1);
+  assert.equal(signs, 1);
+
+  let lowVerified = false;
+  const low = await runPermissionedSpend({
+    bot: automatic,
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '100',
+    ownerPermission: 'full',
+    confirmed: true,
+    mainFn: async () => { lowVerified = true; return facts; },
+    verifyFn: async () => facts,
+    now: Date.now(),
+    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_low' }; },
+  });
+  assert.equal(low.state, 'trust-confirmation-required');
+  assert.equal(low.signed, false);
+  assert.equal(lowVerified, false);
+  assert.deepEqual(low.steps, ['trust-gate']);
+  assert.equal(signs, 1);
+
+  await assert.rejects(
+    () => runPermissionedSpend({
+      bot: automatic,
+      wallet,
+      ledger,
+      proposal,
+      trustScore: '800',
+      trustUnavailable: true,
+      ownerPermission: 'full',
+      confirmed: true,
+      mainFn: async () => facts,
+      verifyFn: async () => facts,
+      now: Date.now(),
+      signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_invented' }; },
+    }),
+    /cannot be invented/,
+  );
+  assert.equal(signs, 1);
+});

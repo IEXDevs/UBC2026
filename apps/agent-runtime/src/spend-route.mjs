@@ -20,20 +20,20 @@ function readLookupScore(looked) {
   return '';
 }
 
-/** Jupiter score when a lookup is configured. A failed lookup blocks the spend. */
+/** Jupiter score when a lookup is configured. A missing score is not invented. */
 async function spendTrustScore(env) {
   const lookup = resolveTrustLookup(env);
   if (lookup) {
     try {
       const score = readLookupScore(await lookup(DEVNET_USDC_MINT));
-      if (!/^(0|[1-9][0-9]{0,2}|1000)$/.test(score)) return { ok: false, state: 'trust-unavailable' };
-      return { ok: true, score };
+      if (!/^(0|[1-9][0-9]{0,2}|1000)$/.test(score)) return { unavailable: true };
+      return { score };
     } catch {
-      return { ok: false, state: 'trust-unavailable' };
+      return { unavailable: true };
     }
   }
-  if (typeof env.spendTrustScore === 'string') return { ok: true, score: env.spendTrustScore };
-  return { ok: true, score: '800' };
+  if (typeof env.spendTrustScore === 'string') return { score: env.spendTrustScore };
+  return { score: '800' };
 }
 
 function json(body, status = 200) {
@@ -78,18 +78,9 @@ export async function handleSpend(request, env = {}) {
   }
 
   const now = Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now();
-  const trust = await spendTrustScore(env);
-  if (!trust.ok) {
-    return json({
-      ok: false,
-      state: trust.state,
-      steps: ['trust-gate'],
-      signed: false,
-      cluster: 'devnet',
-      reason: trust.state,
-    }, 409);
-  }
-  const trustScore = trust.score;
+  const lookedUp = await spendTrustScore(env);
+  const trustUnavailable = lookedUp.unavailable === true;
+  const trustScore = trustUnavailable ? undefined : lookedUp.score;
   const recipient = parsed.destination || parsed.handle || (parsed.selfCustody ? context.wallet.address : '');
   if (typeof recipient !== 'string' || recipient.length < 1) {
     return json({ error: 'invalid_spend', signed: false }, 400);
@@ -100,7 +91,7 @@ export async function handleSpend(request, env = {}) {
     cluster: 'devnet',
     price: '1000000',
     amount: parsed.amount,
-    trustScore,
+    ...(trustUnavailable ? { trustUnavailable: true } : { trustScore }),
     reasonSummary: `${parsed.action} ${parsed.amount} USDC on devnet`,
   };
   const proposal = {
@@ -140,6 +131,7 @@ export async function handleSpend(request, env = {}) {
       ledger: context.ledger,
       proposal,
       trustScore,
+      trustUnavailable,
       mainFn: async () => facts,
       verifyFn: typeof env.spendVerifyFn === 'function'
         ? env.spendVerifyFn
@@ -148,6 +140,7 @@ export async function handleSpend(request, env = {}) {
           proposal,
           parsed,
           trustScore,
+          trustUnavailable,
           mint: DEVNET_USDC_MINT,
         }),
       now,
@@ -181,6 +174,7 @@ export async function handleSpend(request, env = {}) {
     reason: result.reason || null,
   };
   if (state === 'desk_locked') body.error = 'desk_locked';
+  if (typeof result.trust?.prompt === 'string') body.prompt = result.trust.prompt;
   if (result.signed === true && grantOk) body.signature = result.signature;
   const alert = alertFromSpend(result, parsed);
   if (alert) {

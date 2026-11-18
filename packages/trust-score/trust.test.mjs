@@ -69,6 +69,25 @@ test('low trust scores require an explicit user confirmation', () => {
 });
 
 /**
+ * Achieves: a missing score uses the low-score confirmation and does not invent a number.
+ * Fails when: an unavailable score is allowed, or a supplied number is kept beside the flag.
+ * Oracle: confirmation-required with score null; confirmed yields allowed-with-confirmation.
+ * Side effects: none.
+ * Gaps: the spend route covers the gate order.
+ */
+test('an unavailable trust score forces confirmation without inventing one', () => {
+  const decision = evaluateTrust({ unavailable: true });
+  assert.equal(decision.state, 'confirmation-required');
+  assert.equal(decision.score, null);
+  assert.equal(decision.unavailable, true);
+  assert.equal(decision.prompt, 'This has a low trust score, are you sure you want to buy?');
+  const confirmed = evaluateTrust({ unavailable: true, confirmed: true });
+  assert.equal(confirmed.state, 'allowed-with-confirmation');
+  assert.equal(confirmed.score, null);
+  assert.throws(() => evaluateTrust({ unavailable: true, score: '800' }));
+});
+
+/**
  * Achieves: Configured provider returns score+decision; bad mint and missing config fail with stable codes.
  * Fails when: Bad mints succeed or missing config returns a default score.
  * Oracle: Trust provider configuration + mint validation.

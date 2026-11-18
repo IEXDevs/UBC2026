@@ -172,6 +172,7 @@ export async function runPermissionedSpend({
   ledger,
   proposal,
   trustScore,
+  trustUnavailable = false,
   trustConfirmed = false,
   trustThreshold = '400',
   mainFn,
@@ -190,8 +191,17 @@ export async function runPermissionedSpend({
   if (!Number.isSafeInteger(now)) fail('Explicit server time is required');
 
   steps.push('trust-gate');
-  const trust = evaluateTrust({ score: trustScore, threshold: trustThreshold, confirmed: trustConfirmed });
-  if (trust.state === 'confirmation-required') {
+  if (trustUnavailable === true && trustScore != null && trustScore !== '') {
+    fail('An unavailable trust score cannot be invented');
+  }
+  const trust = trustUnavailable === true
+    ? evaluateTrust({
+      unavailable: true,
+      threshold: trustThreshold,
+      confirmed: trustConfirmed === true || confirmed === true,
+    })
+    : evaluateTrust({ score: trustScore, threshold: trustThreshold, confirmed: trustConfirmed });
+  if (trust.state === 'confirmation-required' && trust.unavailable !== true) {
     return { state: 'trust-confirmation-required', steps, signed: false, trust };
   }
 
@@ -199,6 +209,9 @@ export async function runPermissionedSpend({
   const consensus = await reachConsensus({ mainFn, verifyFn });
   if (consensus.state !== 'consensus') {
     return { state: 'verify-mismatch', steps, signed: false, trust, consensus };
+  }
+  if (trust.unavailable === true && consensus.facts?.trustScore != null) {
+    return { state: 'blocked', reason: 'trust-unavailable', steps, signed: false, trust };
   }
 
   steps.push('wallet-freeze');
@@ -235,6 +248,9 @@ export async function runPermissionedSpend({
   }
   if (mainnetQuoteBlocksSpend(quote)) {
     return { state: 'quote-not-authorization', steps, signed: false };
+  }
+  if (trust.unavailable === true && trust.state === 'confirmation-required') {
+    return { state: 'trust-confirmation-required', steps, signed: false, trust };
   }
 
   const memo = memoFromDecision(consensus.decisionRecord);

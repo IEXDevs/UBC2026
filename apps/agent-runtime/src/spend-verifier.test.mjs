@@ -56,3 +56,23 @@ test('verifier refuses an outflow that is not the requested amount', () => {
   });
   assert.equal(verified.amount, '1');
 });
+
+/**
+ * Achieves: a missing Jupiter score stays off the verifier facts.
+ * Fails when: the verifier fills 800 or any other score.
+ * Oracle: trustUnavailable true and no trustScore field.
+ * Side effects: none.
+ * Gaps: the spend route covers the confirmation prompt.
+ */
+test('verifier does not invent a trust score when Jupiter is unavailable', () => {
+  const verified = verifierFacts({
+    facts: { ...facts, trustScore: undefined, trustUnavailable: true },
+    proposal,
+    parsed: { amount: '1000', destination: mint, action: 'buy' },
+    trustUnavailable: true,
+    mint,
+  });
+  assert.equal(verified.trustUnavailable, true);
+  assert.equal(Object.hasOwn(verified, 'trustScore'), false);
+  assert.equal(verified.amount, '1000');
+});

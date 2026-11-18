@@ -13,10 +13,30 @@ export function normalizeScore(value) {
   fail('Trust score must be an integer from 0 to 1000');
 }
 
-export function evaluateTrust({ score, threshold = '400', confirmed = false }) {
-  const normalized = normalizeScore(score);
-  const limit = normalizeScore(threshold);
+export function evaluateTrust({ score, threshold = '400', confirmed = false, unavailable = false }) {
   if (typeof confirmed !== 'boolean') fail('Confirmation flag must be boolean');
+  const limit = normalizeScore(threshold);
+  if (unavailable === true) {
+    if (score != null && score !== '') fail('An unavailable trust score cannot be invented');
+    if (confirmed) {
+      return {
+        state: 'allowed-with-confirmation',
+        score: null,
+        threshold: limit,
+        requiresConfirmation: true,
+        unavailable: true,
+      };
+    }
+    return {
+      state: 'confirmation-required',
+      score: null,
+      threshold: limit,
+      requiresConfirmation: true,
+      unavailable: true,
+      prompt: 'This has a low trust score, are you sure you want to buy?',
+    };
+  }
+  const normalized = normalizeScore(score);
   if (BigInt(normalized) >= BigInt(limit)) {
     return { state: 'allowed', score: normalized, threshold: limit, requiresConfirmation: false };
   }
