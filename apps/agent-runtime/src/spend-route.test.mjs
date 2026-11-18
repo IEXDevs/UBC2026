@@ -36,6 +36,7 @@ function spendEnv(extra = {}) {
     PRODUCT: 'Maelstrom',
     CLUSTER: 'devnet',
     spendNow: NOW,
+    trustLookup: null,
     loadSpendContext: async () => ({ bot, wallet, ledger }),
     ...extra,
   };
@@ -185,6 +186,92 @@ test('voice request_spend keeps the session permission and posts the shared rout
  * Side effects / state checked: loadSpendContext must not run on ownerless call.
  * Gaps: desk lock 403 path covered in desk-grant.test.mjs.
  */
+/**
+ * Achieves: full permission trades without a confirm slide, and a Jupiter miss or low score still blocks.
+ * Fails when: unconfirmed full skips signing on a passing gate, or a failed/low trust lookup signs.
+ * Oracle: Jupiter search score 800 signs; score 100 and a thrown lookup do not.
+ * Side effects / state checked: signer call count.
+ * Gaps: live Jupiter is not called.
+ */
+test('full permission signs after Jupiter trust and a failed lookup does not', async () => {
+  const mint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  let signed = 0;
+  const client = {
+    async getDevnetBlockhash() {
+      return { cluster: 'devnet', blockhash: DESTINATION };
+    },
+    async signAndBroadcastDevnet() {
+      signed += 1;
+      return { cluster: 'devnet', signature: 'sig_jupiter_full' };
+    },
+  };
+  const highEnv = spendEnv({
+    transferClient: client,
+    fetch: async (url) => {
+      assert.match(String(url), /api\.jup\.ag\/tokens\/v2\/search/);
+      return Response.json([{
+        id: mint,
+        organicScore: 80,
+        isVerified: true,
+        audit: { mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
+      }]);
+    },
+  });
+  delete highEnv.trustLookup;
+  const passed = await worker.fetch(spendRequest({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'buy',
+    amount: '1000',
+    destination: DESTINATION,
+  }), highEnv);
+  const okBody = await passed.json();
+  assert.equal(passed.status, 200);
+  assert.equal(okBody.signed, true);
+  assert.equal(okBody.signature, 'sig_jupiter_full');
+  assert.equal(okBody.steps[0], 'trust-gate');
+  assert.equal(okBody.steps.at(-1), 'sign');
+  assert.equal(signed, 1);
+
+  const lowEnv = spendEnv({
+    transferClient: client,
+    fetch: async () => Response.json([{
+      id: mint,
+      organicScore: 10,
+      isVerified: false,
+    }]),
+  });
+  delete lowEnv.trustLookup;
+  const low = await worker.fetch(spendRequest({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'buy',
+    amount: '1000',
+    destination: DESTINATION,
+  }), lowEnv);
+  const lowBody = await low.json();
+  assert.equal(lowBody.signed, false);
+  assert.equal(lowBody.state, 'trust-confirmation-required');
+  assert.equal(signed, 1);
+
+  const failedEnv = spendEnv({
+    transferClient: client,
+    fetch: async () => { throw new Error('jupiter down'); },
+  });
+  delete failedEnv.trustLookup;
+  const failed = await worker.fetch(spendRequest({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'buy',
+    amount: '1000',
+    destination: DESTINATION,
+  }), failedEnv);
+  const failedBody = await failed.json();
+  assert.equal(failedBody.signed, false);
+  assert.equal(failedBody.state, 'trust-unavailable');
+  assert.equal(signed, 1);
+});
+
 test('spend route rejects missing owner and invalid bodies', async () => {
   let loaded = 0;
   const denied = await worker.fetch(new Request('https://runtime/api/spend', {

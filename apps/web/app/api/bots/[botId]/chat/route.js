@@ -106,9 +106,9 @@ export async function POST(request, context) {
       grants,
       invokeTool: async (name, args) => {
         const next = args && typeof args === 'object' ? { ...args } : {};
-        if (toolAccessKind(permissionMode, name) && (permissionMode === 'full' || name === 'request_spend' || name === 'sns_send' || name === 'prepare_shopping')) {
-          next.confirmed = true;
+        if (name === 'request_spend' || name === 'sns_send' || name === 'prepare_shopping') {
           next.permission = permissionMode;
+          if (permissionMode !== 'full' && toolAccessKind(permissionMode, name)) next.confirmed = true;
         }
         return serializeToolResult(await invokeRaw(name, next));
       },

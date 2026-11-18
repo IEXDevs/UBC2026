@@ -461,8 +461,9 @@ test('ask mode holds a tool for an inline access request until it is granted', a
   assert.deepEqual(seen, ['web_search']);
 });
 
-test('full permissions holds a fund tool for the confirm slide', async () => {
+test('full permissions call a fund tool without asking the owner', async () => {
   const seen = [];
+  let rounds = 0;
   const result = await completeTextChat({
     modelApiKey: META_KEY,
     message: 'send it',
@@ -471,21 +472,25 @@ test('full permissions holds a fund tool for the confirm slide', async () => {
       type: 'function',
       function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object', properties: {} } },
     }],
-    invokeTool: async (name) => { seen.push(name); return { ok: true }; },
+    invokeTool: async (name) => { seen.push(name); return { ok: true, signed: false, state: 'trust-confirmation-required' }; },
     fetcher: async (_url, options) => {
       if (isTurnVerify(options)) return turnAllowed();
-      return Response.json({
-        choices: [{
-          finish_reason: 'tool_calls',
-          message: {
-            content: null,
-            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1","handle":"bob"}' } }],
-          },
-        }],
-      });
+      rounds += 1;
+      if (rounds === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1","handle":"bob"}' } }],
+            },
+          }],
+        });
+      }
+      return Response.json({ choices: [{ message: { content: 'The gate blocked the trade.' } }] });
     },
   });
-  assert.equal(result.hold.kind, 'modal');
-  assert.match(result.hold.prompt, /Slide to confirm/);
-  assert.deepEqual(seen, []);
+  assert.equal(result.hold, undefined);
+  assert.deepEqual(seen, ['request_spend']);
+  assert.equal(result.text, 'The gate blocked the trade.');
 });
