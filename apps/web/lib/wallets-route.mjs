@@ -42,5 +42,7 @@ export function walletErrorFields(error) {
 
 /** Status codes the wallets POST route returns for known WalletError codes. */
 export function walletErrorStatus(code) {
-  return code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin' ? 503 : 502;
+  if (code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin') return 503;
+  if (code === 'worker_origin_forbidden') return 502;
+  return 502;
 }

@@ -232,8 +232,14 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
   if (code === 'missing_origin' || (/must_specify_origin/i.test(typeof body.detail === 'string' ? body.detail : ''))) {
     return 'Privy users/me needs Origin. Sign in again so the shell can send your Privy user id, or allowlist this site under Privy → Domains.';
   }
+  if (code === 'worker_origin_forbidden') {
+    return 'Hosted Cloudflare cannot call Privy /users/me. Sign out and sign in again so the access token includes a user id, then retry wallet create.';
+  }
   if (code === 'privy_failed') {
     const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
+    if (/forbidden_header|worker_origin/i.test(detail)) {
+      return 'Hosted Cloudflare blocked a Privy Origin header. Sign out and sign in again, then retry wallet create.';
+    }
     if (/403/i.test(detail) && /insufficient_app_secret_permissions/i.test(detail)) {
       return 'PRIVY_APP_SECRET is read-only. In Privy → App settings → API keys, create a full-access secret, put it in root .env.local, restart Next, and sign in again.';
     }

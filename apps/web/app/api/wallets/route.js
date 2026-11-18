@@ -90,17 +90,28 @@ export async function POST(request) {
   }
 
   try {
+    // OpenNext / Cloudflare Workers cannot set outbound Origin/Referer. Keep the
+    // local Node `/users/me` fallback off whenever we detect the Worker runtime.
+    let onCloudflareWorker = false;
+    try {
+      const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+      const ctx = await getCloudflareContext({ async: true });
+      onCloudflareWorker = Boolean(ctx?.env);
+    } catch {
+      onCloudflareWorker = false;
+    }
     const client = createPrivyWalletClient({
       appId: resolvePrivyAppId(env),
       appSecret: env.PRIVY_APP_SECRET,
       // acceptLogin does not call RPC; allow empty and require it only for signing routes.
       rpcUrl: env.QUICKNODE_DEVNET_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
+      allowUsersMeFallback: !onCloudflareWorker,
     });
     const ownerHeader = request.headers.get('x-owner-id');
     const result = await client.acceptLogin({
       accessToken,
-      origin: requestOrigin(request),
+      origin: onCloudflareWorker ? undefined : requestOrigin(request),
       ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
     });
     const ownerId = typeof ownerHeader === 'string' && ownerHeader.trim()

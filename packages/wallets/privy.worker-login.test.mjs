@@ -192,6 +192,50 @@ test('loadUser 403 without Origin does not fall through to users/me', async () =
 });
 
 /**
+ * Rigor audit — OpenNext / Workers must not fall through to users/me
+ * Achieves: even with Origin present, allowUsersMeFallback:false rethrows loadUser
+ *   failure and never calls /users/me (avoids forbidden Origin header TypeError).
+ * Fails when: hosted path still retries users/me whenever Origin is set.
+ * Oracle: Cloudflare Workers cannot set outbound Origin/Referer.
+ * Side effects: zero /users/me calls.
+ */
+test('Workers disable users/me fallback even when Origin is present', async () => {
+  const { fetcher, calls } = mockFetch([
+    {
+      match: url => url.includes(`/v1/users/${encodeURIComponent(privyUserId)}`),
+      status: 403,
+      body: { error: 'invalid_authorization_signature' },
+    },
+    {
+      match: url => url.endsWith('/users/me'),
+      body: { id: privyUserId, linked_accounts: [embedded(walletId)] },
+    },
+  ]);
+  await assert.rejects(
+    () => client({ fetcher, allowUsersMeFallback: false }).acceptLogin({
+      accessToken: jwtFor(privyUserId),
+      origin: 'https://dev.maelstrom.iexdevs.com',
+    }),
+    error => error instanceof WalletError && error.code === 'privy_failed',
+  );
+  assert.equal(calls.some(call => call.url.includes('/users/me')), false);
+});
+
+test('forbidden Origin TypeError maps to worker_origin_forbidden', async () => {
+  const fetcher = async () => {
+    const error = new TypeError("Can't set header Origin");
+    throw error;
+  };
+  await assert.rejects(
+    () => client({ fetcher, allowUsersMeFallback: true }).acceptLogin({
+      accessToken: 'opaque-privy-access-token-value',
+      origin: 'https://dev.maelstrom.iexdevs.com',
+    }),
+    error => error instanceof WalletError && error.code === 'worker_origin_forbidden',
+  );
+});
+
+/**
  * Rigor audit — local Node fallback with Origin
  * Achieves: when loadUser fails AND a sanitized Origin is present, `/users/me`
  *   is called with Bearer + Origin.

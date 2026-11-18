@@ -265,6 +265,17 @@ test('wallet provision notes stay actionable and secret-free', () => {
   );
   assert.equal(walletProvisionNote({ error: 'missing_config', missing: ['evil; drop'] }).includes('evil'), false);
   assert.match(walletProvisionNote({ error: 'token_missing' }), /access token/);
+  assert.match(
+    walletProvisionNote({ error: 'worker_origin_forbidden' }),
+    /Sign out and sign in again/,
+  );
+  assert.match(
+    walletProvisionNote({
+      error: 'privy_failed',
+      detail: 'Privy users/me request failed (forbidden_header)',
+    }),
+    /Origin header|Sign out/i,
+  );
   assert.match(walletConfigNote({ missing: ['PRIVY_APP_SECRET'] }), /PRIVY_APP_SECRET/);
   assert.match(walletConfigNote({ hasAppSecret: true, hasAuthorizationKey: false }), /PRIVY_AUTHORIZATION_KEY/);
   assert.equal(walletConfigNote({ hasAppId: true, hasAppSecret: true, hasAuthorizationKey: true }), '');
