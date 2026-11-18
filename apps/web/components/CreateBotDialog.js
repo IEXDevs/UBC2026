@@ -82,7 +82,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
   }
 
   return (
-    <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
+    <div className={`backdrop is-center${first ? ' is-cover' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={onClose}>
       {celebrate ? (
         <div className="create-splash" aria-hidden="true">
           {SPLASH.map(piece => (

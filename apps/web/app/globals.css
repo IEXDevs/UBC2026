@@ -4284,6 +4284,21 @@ button.chat-edit:disabled:focus-visible {
   max-height: calc(100dvh - 32px);
   overflow: auto;
 }
+.backdrop.is-center.is-cover {
+  background: #141414;
+  overflow: hidden;
+}
+.backdrop.is-center.is-cover > .create-splash,
+.backdrop.is-center.is-cover > .sheet {
+  overflow: hidden;
+}
+.backdrop.is-center.is-cover > .sheet {
+  width: min(440px, 100%);
+}
+html:has(.backdrop.is-cover),
+body:has(.backdrop.is-cover) {
+  overflow: hidden;
+}
 .backdrop.is-corner { place-items: end start; padding: 16px; }
 .backdrop.is-leaving { animation: fade-out 420ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 
