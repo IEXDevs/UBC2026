@@ -96,6 +96,9 @@ export async function POST(request, context) {
     // Price hosts must not ride the runtime service binding. A 404 from the
     // Worker is not a DexScreener outage.
     priceFetch: fetch,
+    // Firecrawl must not ride the runtime service binding. A Worker 404 is
+    // not a research outage.
+    searchFetch: fetch,
   });
 
   try {

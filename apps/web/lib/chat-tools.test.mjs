@@ -279,6 +279,101 @@ test('createChatToolInvoker returns search_not_configured without Firecrawl', as
 });
 
 /**
+ * Achieves: web_search posts to Firecrawl directly. A Worker 404 is not provider_failed.
+ * Fails when: the runtime fetcher is called, a missing key is provider_failed, or a 503 is not provider_failed.
+ * Oracle: https://api.firecrawl.dev/v1/search and error codes search_not_configured, client_missing, provider_failed.
+ * Side effects: injected fetchers only.
+ * Gaps: live Firecrawl is not part of this test.
+ */
+test('web_search calls Firecrawl directly and does not label a missing key provider_failed', async () => {
+  let runtimeCalls = 0;
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: { FIRECRAWL_API_KEY: 'fc-test' },
+    fetcher: async () => {
+      runtimeCalls += 1;
+      return Response.json({ error: 'not_found' }, { status: 404 });
+    },
+    searchFetch: async (url, options) => {
+      assert.equal(String(url), 'https://api.firecrawl.dev/v1/search');
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers.Authorization, 'Bearer fc-test');
+      assert.equal(JSON.parse(options.body).query, 'conservative long-term Solana tokens');
+      return Response.json({
+        success: true,
+        data: [{ title: 'SOL', url: 'https://example.com/sol', description: 'Fundamentals' }],
+      });
+    },
+  });
+  const result = await invoke('web_search', { query: 'conservative long-term Solana tokens' });
+  assert.equal(result.results[0].url, 'https://example.com/sol');
+  assert.equal(result.results[0].snippet, 'Fundamentals');
+  assert.equal(result.event.name, 'web_search');
+  assert.equal(JSON.stringify(result).includes('fc-test'), false);
+  assert.equal(runtimeCalls, 0);
+
+  const down = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: { FIRECRAWL_API_KEY: 'fc-test' },
+    fetcher: async () => {
+      throw new Error('runtime must not be called');
+    },
+    searchFetch: async () => new Response('down', { status: 503 }),
+  });
+  const failed = await down('web_search', { query: 'SOL fundamentals' });
+  assert.equal(failed.error, 'provider_failed');
+  assert.match(failed.hint, /research provider is down/);
+
+  const missing = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: { FIRECRAWL_API_KEY: '   ' },
+    fetcher: async () => Response.json({ error: 'not_found' }, { status: 404 }),
+    searchFetch: async () => {
+      throw new Error('must not call Firecrawl without a key');
+    },
+  });
+  const unconfigured = await missing('web_search', { query: 'SOL fundamentals' });
+  assert.equal(unconfigured.error, 'search_not_configured');
+  assert.match(unconfigured.hint, /FIRECRAWL_API_KEY/);
+  assert.notEqual(unconfigured.error, 'provider_failed');
+
+  let scrapeRuntime = 0;
+  const scrape = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: { FIRECRAWL_API_KEY: 'fc-test' },
+    fetcher: async () => {
+      scrapeRuntime += 1;
+      return Response.json({ error: 'not_found' }, { status: 404 });
+    },
+    searchFetch: async (url) => {
+      assert.equal(String(url), 'https://api.firecrawl.dev/v1/scrape');
+      return Response.json({
+        success: true,
+        data: { markdown: 'SOL notes', metadata: { title: 'Notes' } },
+      });
+    },
+  });
+  const page = await scrape('web_scrape', { url: 'https://example.com/sol' });
+  assert.equal(page.page.title, 'Notes');
+  assert.equal(scrapeRuntime, 0);
+
+  const noClient = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: { FIRECRAWL_API_KEY: 'fc-test' },
+    fetcher: async () => Response.json({ error: 'not_found' }, { status: 404 }),
+    searchFetch: null,
+  });
+  const client = await noClient('web_search', { query: 'SOL fundamentals' });
+  assert.equal(client.error, 'client_missing');
+  assert.notEqual(client.error, 'provider_failed');
+});
+
+/**
  * Achieves: verifies createChatToolInvoker lists bots via Worker dashboard tools.
  * Fails when: createChatToolInvoker lists bots via Worker dashboard tools breaks (e.g. expected 'bot_1', /\/api\/bots$/, 'GET').
  * Oracle: assert.equal(listed.items[0].id, 'bot_1'); assert.equal(calls[0].method, 'GET'); assert.equal(calls[0].owner, 'did:privy:owner1'); assert.match(calls[0].url, /\/api\/bots$/)
