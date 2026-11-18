@@ -1427,6 +1427,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                   key={bot.id}
                   bot={bot}
                   ownerId={ownerId}
+                  getAccessToken={getAccessToken}
                   lines={talks[bot.id] ?? []}
                   thinking={thinkingBot === bot.id}
                   onParty={setParty}
@@ -1448,6 +1449,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               <LogsPanel
                 bots={bots}
                 ownerId={ownerId}
+                getAccessToken={getAccessToken}
                 onParty={setParty}
                 receipts={receipts}
                 payments={payments}
@@ -1458,6 +1460,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               <SecurityPanel
                 bots={bots}
                 ownerId={ownerId}
+                getAccessToken={getAccessToken}
                 accountLabel={accountLabel}
                 wallets={wallets}
                 walletUnlocked={unlocked}
@@ -1537,6 +1540,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           files={library[bot.id] ?? []}
           balanceLabel={glance.balanceLabel}
           ownerId={ownerId}
+          getAccessToken={getAccessToken}
           onResize={event => dragPane(event, 'right')}
           onWallet={openWallet}
           onComputer={() => onAccount('computer')}
@@ -1612,12 +1616,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         resolve={resolveMention}
       />
       <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={CONNECTORS} />
-      <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} />
+      <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
       <StatisticsSheet
         open={statsOpen}
         onClose={closeStats}
         bots={bots}
         ownerId={ownerId}
+        getAccessToken={getAccessToken}
         voiceMs={voiceMs}
         talks={talks}
         payments={payments}

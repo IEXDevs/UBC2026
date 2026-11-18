@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { shoppingComparisonView } from '../lib/shopping-comparison.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 
 /**
  * Shopping bot controls (Isaac / 6B): prepare sandbox or Laso challenge via the Worker.
  * Settlement still requires owner approval + signer on the runtime.
  */
-export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
+export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = null, onEvent = null }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -68,7 +69,9 @@ export default function ShoppingPanel({ bot, ownerId = null, onEvent = null }) {
         };
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-owner-id': ownerId },
+        headers: await ownerAuthHeaders(ownerId, getAccessToken, {
+          'content-type': 'application/json',
+        }),
         body: JSON.stringify(body),
       });
       const data = await response.json();

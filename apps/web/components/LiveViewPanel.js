@@ -3,18 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { browserErrorNote, browserStatusNote } from '../lib/browser-status.mjs';
 import { browserSessionUrl, liveViewFrame, pickOpenSession } from '../lib/live-view.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import LatticeLoader from './bits/LatticeLoader';
 import HoldButton from './HoldButton';
 
 const runtimeBase = 'shell';
 
-async function ownerFetch(url, ownerId, method, body) {
+async function ownerFetch(url, ownerId, getAccessToken, method, body) {
   const response = await fetch(url, {
     method,
-    headers: {
+    headers: await ownerAuthHeaders(ownerId, getAccessToken, {
       'content-type': 'application/json',
-      'x-owner-id': ownerId,
-    },
+    }),
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: 'no-store',
   });
@@ -31,7 +31,15 @@ async function ownerFetch(url, ownerId, method, body) {
  * or a link href, never copied into the timeline or button text.
  * Chat-opened sessions live in the same Worker store — adopt them on load.
  */
-export default function LiveViewPanel({ botId, ownerId = null, fill = false, screen = false, autoStart = false, onExpand = null }) {
+export default function LiveViewPanel({
+  botId,
+  ownerId = null,
+  getAccessToken = null,
+  fill = false,
+  screen = false,
+  autoStart = false,
+  onExpand = null,
+}) {
   const [sessionRecordId, setSessionRecordId] = useState(null);
   const [openCount, setOpenCount] = useState(0);
   const [frame, setFrame] = useState(null);
@@ -55,7 +63,7 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false, scr
       setOpenCount(0);
       return null;
     }
-    const listed = await ownerFetch(sessionUrl, ownerId, 'GET');
+    const listed = await ownerFetch(sessionUrl, ownerId, getAccessToken, 'GET');
     const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
     setOpenCount(sessions.length);
     const picked = pickOpenSession(listed);
@@ -65,7 +73,7 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false, scr
     }
     setSessionRecordId(null);
     return null;
-  }, [ownerId, sessionUrl]);
+  }, [ownerId, sessionUrl, getAccessToken]);
 
   useEffect(() => {
     let stopped = false;
@@ -109,7 +117,7 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false, scr
         }
         try {
           const url = browserSessionUrl(runtimeBase, botId);
-          const opened = await ownerFetch(url, ownerId, 'POST', { purpose: 'browse' });
+          const opened = await ownerFetch(url, ownerId, getAccessToken, 'POST', { purpose: 'browse' });
           setSessionRecordId(opened.sessionRecordId);
           setOpenCount(current => Math.max(current, 1));
           setFrame(null);
@@ -134,7 +142,7 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false, scr
         if (!id) throw new Error('session_not_found');
         const next = action === 'view' ? undefined : action;
         const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'live-view' });
-        const view = await ownerFetch(url, ownerId, 'POST', next ? { control: next } : {});
+        const view = await ownerFetch(url, ownerId, getAccessToken, 'POST', next ? { control: next } : {});
         setSessionRecordId(id);
         setControl(view.control === 'owner' ? 'owner' : 'agent');
         setFrame(liveViewFrame(view));
@@ -146,7 +154,7 @@ export default function LiveViewPanel({ botId, ownerId = null, fill = false, scr
       }
       if (!id) throw new Error('session_not_found');
       const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'release' });
-      await ownerFetch(url, ownerId, 'POST', {});
+      await ownerFetch(url, ownerId, getAccessToken, 'POST', {});
       setSessionRecordId(null);
       setOpenCount(0);
       setFrame(null);

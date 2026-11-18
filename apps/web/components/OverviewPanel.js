@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { buildOverview, pickOwnerRollup } from '../lib/overview.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import AnimatedList from './AnimatedList';
 import { listLook } from './listLook';
 
-export default function OverviewPanel({ bots, ownerId = null }) {
+export default function OverviewPanel({ bots, ownerId = null, getAccessToken = null }) {
   const [remoteMetric, setRemoteMetric] = useState(null);
 
   useEffect(() => {
@@ -16,7 +17,7 @@ export default function OverviewPanel({ bots, ownerId = null }) {
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json();
@@ -33,7 +34,7 @@ export default function OverviewPanel({ bots, ownerId = null }) {
       stop = true;
       clearInterval(timer);
     };
-  }, [ownerId]);
+  }, [ownerId, getAccessToken]);
 
   const overview = buildOverview({ bots, ownerId: ownerId || '', remoteMetric });
 

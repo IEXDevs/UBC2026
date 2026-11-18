@@ -6,6 +6,7 @@ import BotTimeline from './BotTimeline';
 import ShoppingPanel from './ShoppingPanel';
 import WhyView from './WhyView';
 import { buildBotPage, normalizeLiveEvent } from '../lib/bot-experience.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 
 function liveEventsUrl(botId) {
@@ -18,7 +19,7 @@ function liveDecisionsUrl(botId) {
   return shellRuntimeUrl(`/api/decisions?botId=${encodeURIComponent(botId)}`);
 }
 
-export default function BotPage({ bot, ownerId = null, onConversationEvent = null }) {
+export default function BotPage({ bot, ownerId = null, getAccessToken = null, onConversationEvent = null }) {
   const [remoteEvents, setRemoteEvents] = useState([]);
   const [decision, setDecision] = useState(null);
   const [focus, setFocus] = useState(null);
@@ -38,7 +39,7 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json();
@@ -59,7 +60,7 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
       stop = true;
       clearInterval(timer);
     };
-  }, [bot.id, ownerId]);
+  }, [bot.id, ownerId, getAccessToken]);
 
   useEffect(() => {
     const url = liveDecisionsUrl(bot.id);
@@ -68,7 +69,7 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json();
@@ -82,7 +83,7 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
     }
     load();
     return () => { stop = true; };
-  }, [bot.id, ownerId]);
+  }, [bot.id, ownerId, getAccessToken]);
 
   const page = buildBotPage({
     botId: bot.id,
@@ -104,7 +105,7 @@ export default function BotPage({ bot, ownerId = null, onConversationEvent = nul
     <div className="bot-page">
       {eventsNote ? <p className="preview-note">{eventsNote}</p> : null}
       {approval ? <ApprovalPreview preview={approval} botType={bot.type} /> : null}
-      {bot.type === 'shopping' ? <ShoppingPanel bot={bot} ownerId={ownerId} onEvent={note} /> : null}
+      {bot.type === 'shopping' ? <ShoppingPanel bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} onEvent={note} /> : null}
       <BotTimeline
         entries={entries}
         live={Boolean(ownerId)}

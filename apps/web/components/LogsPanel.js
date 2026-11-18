@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import MentionText from './MentionText';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { formatLogTime, logRows } from '../lib/txn-preview.mjs';
 
 export default function LogsPanel({
   bots,
   ownerId = null,
+  getAccessToken = null,
   onParty,
   receipts = [],
   payments = [],
@@ -25,7 +27,7 @@ export default function LogsPanel({
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json();
@@ -41,7 +43,7 @@ export default function LogsPanel({
       stop = true;
       clearInterval(timer);
     };
-  }, [ownerId]);
+  }, [ownerId, getAccessToken]);
 
   const moneyRows = logRows({
     receipts,

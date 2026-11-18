@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { loopStepsFromRun } from '../lib/loop-steps.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import LiveViewPanel from './LiveViewPanel';
 import LoopSteps from './LoopSteps';
 import { usePresence } from './usePresence';
 
-export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
+export default function ComputerSheet({ open, onClose, bot, ownerId = null, getAccessToken = null }) {
   const { mounted, leaving } = usePresence(open, 180);
   const [shown, setShown] = useState(false);
   const [steps, setSteps] = useState(() => loopStepsFromRun(null));
@@ -44,7 +45,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json().catch(() => ({}));
@@ -67,7 +68,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
       stop = true;
       clearInterval(timer);
     };
-  }, [mounted, bot?.id, ownerId]);
+  }, [mounted, bot?.id, ownerId, getAccessToken]);
 
   if (!mounted || !bot || typeof document === 'undefined') return null;
 
@@ -84,7 +85,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
       </button>
       <div className="browser-preview-stage" onMouseDown={event => event.stopPropagation()}>
         {hasRun ? <LoopSteps steps={steps} note={loopNote} /> : null}
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} fill autoStart />
+        <LiveViewPanel botId={bot.id} ownerId={ownerId} getAccessToken={getAccessToken} fill autoStart />
       </div>
     </div>,
     document.body,
