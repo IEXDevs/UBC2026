@@ -19,7 +19,8 @@ test('PLATFORM_PROMPT locks versioned company rules', () => {
   assert.match(PLATFORM_PROMPT, /devnet or testnet only/i);
   assert.match(PLATFORM_PROMPT, /Never ask for.*private keys/i);
   assert.match(PLATFORM_PROMPT, /do not sign/i);
-  assert.match(PLATFORM_PROMPT, /Never call yourself a bot/i);
+  assert.match(PLATFORM_PROMPT, /You can request actions from the platform gate/);
+  assert.match(PLATFORM_PROMPT, /Maelstrom bot/);
   assert.match(PLATFORM_PROMPT, /No meme coins/i);
   assert.ok(!PLATFORM_PROMPT.includes('\n\n\n'), 'prompt should be single joined block');
 });

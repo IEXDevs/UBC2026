@@ -28,8 +28,10 @@ test('full permissions manages funds and the other modes still wait', () => {
   assert.equal(transactionNeedsPerson('full'), false);
   assert.equal(transactionNeedsPerson('ask'), true);
   assert.equal(transactionNeedsPerson('review'), true);
+  assert.match(permissionInstruction('full'), /Permissions are fully granted/);
   assert.match(permissionInstruction('full'), /manage funds/);
   assert.match(permissionInstruction('full'), /Do not ask whether they are going to buy, sell, spend, or pay/);
+  assert.match(permissionInstruction('full'), /platform gate, and the permissioned spend API/);
   assert.match(permissionInstruction('review'), /review by AI/);
   assert.match(permissionInstruction('review'), /review threshold/);
   assert.match(permissionInstruction('ask'), /ask every time/);

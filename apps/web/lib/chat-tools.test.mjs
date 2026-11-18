@@ -9,8 +9,8 @@ import {
 
 /**
  * Achieves: verifies openAiAgentTools maps shared research and dashboard schemas.
- * Fails when: openAiAgentTools maps shared research and dashboard schemas breaks (e.g. expected /same tools on text and voice/, /get_price/, /devnet execution, mainnet pricing/).
- * Oracle: assert.match(chatToolsInstruction(), /same tools on text and voice/); assert.match(chatToolsInstruction(), /get_price/); assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/); assert.ok(tools.some(tool => tool.function.name === 'get_price'); assert.ok(tools.some(tool => tool.function.name === 'web_search'); assert.ok(tools.some(tool => tool.function.name === 'browser_open')
+ * Fails when: openAiAgentTools maps shared research and dashboard schemas breaks (e.g. expected /You have the following tools/, /get_price/, /devnet execution, mainnet pricing/).
+ * Oracle: assert.match(chatToolsInstruction(), /You have the following tools/); assert.match(chatToolsInstruction(), /get_price/); assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/); assert.ok(tools.some(tool => tool.function.name === 'get_price'); assert.ok(tools.some(tool => tool.function.name === 'web_search'); assert.ok(tools.some(tool => tool.function.name === 'browser_open')
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
@@ -21,7 +21,7 @@ test('openAiAgentTools maps shared research and dashboard schemas', () => {
   assert.ok(tools.some(tool => tool.function.name === 'browser_open'));
   assert.ok(tools.some(tool => tool.function.name === 'list_bots'));
   assert.ok(tools.some(tool => tool.function.name === 'pause_bot'));
-  assert.match(chatToolsInstruction(), /same tools on text and voice/);
+  assert.match(chatToolsInstruction(), /You have the following tools/);
   assert.match(chatToolsInstruction(), /get_price/);
   assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/);
 });
