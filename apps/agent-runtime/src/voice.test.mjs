@@ -282,6 +282,29 @@ test('pause, loop, and stop_all go through the worker routes', async () => {
   const loopBody = await loop.json();
   assert.equal(loopBody.result.calls[0].body.forwarded, '/loop');
 
+  let stamped = null;
+  const full = await worker.fetch(toolRequest('start_task', {
+    headers: { 'x-spend-permission': 'full' },
+    body: { parameters: { botId: 'bot_1', goal: 'beat usd inflation in the long run with long term trading', ownerPermission: 'ask' } },
+  }), env({
+    BOT: {
+      idFromName: name => name,
+      get: () => ({
+        fetch: async request => {
+          stamped = JSON.parse(await request.text());
+          return Response.json({
+            forwarded: new URL(request.url).pathname,
+            owner: request.headers.get('x-owner-id'),
+          });
+        },
+      }),
+    },
+  }));
+  assert.equal(full.status, 200);
+  assert.equal(stamped.goal, 'beat usd inflation in the long run with long term trading');
+  assert.equal(stamped.ownerPermission, 'full');
+  assert.equal(stamped.botId, 'bot_1');
+
   const activity = await worker.fetch(toolRequest('get_activity', {
     body: { parameters: { botId: 'bot_meteora' } },
   }), env());

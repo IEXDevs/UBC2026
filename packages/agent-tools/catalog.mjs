@@ -68,7 +68,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
     botId,
     goal: { type: 'string', description: 'Optional goal text' },
   }, [call('POST', '/bots/:botId/wake', { body: ['goal'] })]),
-  dashboard('start_task', 'Start the research / decide / approval loop for one bot.', ['botId'], {
+  dashboard('start_task', 'Start the research / decide / approval loop for one bot. Creates a run when the bot has none, then pursues the goal through the checkpointed loop.', ['botId'], {
     botId,
     goal: { type: 'string', description: 'Optional goal text' },
   }, [call('POST', '/bots/:botId/loop', { body: ['goal'] })]),
