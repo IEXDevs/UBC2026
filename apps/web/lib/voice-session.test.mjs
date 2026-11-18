@@ -16,19 +16,23 @@ test('isVoiceOverrideError matches portal override failures', () => {
 });
 
 /**
- * Achieves: startVoiceConversation retries without overrides after failure.
- * Fails when: first success is ignored, or retry never drops overrides.
- * Oracle: second call has no overrides; returns retry session.
+ * Achieves: startVoiceConversation connects without overrides first.
+ * Fails when: overrides are required on startSession or session is dropped.
+ * Oracle: startSession has no overrides; setOverrides called with tts.
  * Side effects / state checked: call shapes.
  * Gaps: none.
  */
-test('startVoiceConversation retries without overrides', async () => {
+test('startVoiceConversation connects without overrides first', async () => {
   const calls = [];
   const Conversation = {
     async startSession(options) {
       calls.push(options);
       if (options.overrides) throw new Error('Override voice_id is not allowed');
-      return { id: 'conv_ok', getId: () => 'conv_ok' };
+      return {
+        id: 'conv_ok',
+        getId: () => 'conv_ok',
+        async setOverrides(next) { calls.push({ setOverrides: next }); },
+      };
     },
   };
   const live = await startVoiceConversation(Conversation, {
@@ -37,21 +41,19 @@ test('startVoiceConversation retries without overrides', async () => {
     dynamicVariables: { owner_id: 'did:privy:1' },
   });
   assert.equal(live.id, 'conv_ok');
-  assert.equal(calls.length, 2);
-  assert.deepEqual(calls[0].overrides, { tts: { voiceId: 'v1', speed: 1 } });
-  assert.equal(Object.prototype.hasOwnProperty.call(calls[1], 'overrides'), false);
-  assert.equal(calls[1].conversationToken, 'tok');
-  assert.equal(calls[1].dynamicVariables.owner_id, 'did:privy:1');
+  assert.equal(calls[0].conversationToken, 'tok');
+  assert.equal(Object.prototype.hasOwnProperty.call(calls[0], 'overrides'), false);
+  assert.deepEqual(calls[1].setOverrides, { tts: { voiceId: 'v1', speed: 1 } });
 });
 
 /**
- * Achieves: successful first start does not retry.
- * Fails when: a second startSession is issued.
- * Oracle: one call; returned session is first.
+ * Achieves: missing setOverrides still returns the connected session.
+ * Fails when: override apply failure aborts the call.
+ * Oracle: one startSession; live id kept.
  * Side effects / state checked: call count.
  * Gaps: none.
  */
-test('startVoiceConversation keeps the first session when overrides work', async () => {
+test('startVoiceConversation keeps the session when setOverrides is missing', async () => {
   let count = 0;
   const Conversation = {
     async startSession() {
