@@ -88,6 +88,21 @@ test('the chat top bar does not cover messages or the scrollbar', () => {
  * Side effects / state checked: in-memory storage double writes/reads.
  * Gaps: none.
  */
+/**
+ * Achieves: verifies permission notes in the voice script stay in the side column, off the orb.
+ * Fails when: a centered full-width chat-note can cross the voice ball.
+ * Oracle: .voice-script .chat-note is flex-start, left aligned, and no wider than the side column.
+ * Side effects / state checked: app/globals.css source.
+ * Gaps: source snapshot only — no live voice session.
+ */
+test('permission notes stay beside the voice orb', () => {
+  const note = css.slice(css.indexOf('.voice-script .chat-note {'), css.indexOf('.voice-script [data-slot=\'message\'][data-align=\'end\']'));
+  assert.match(note, /align-self:\s*flex-start;/);
+  assert.match(note, /text-align:\s*left;/);
+  assert.match(note, /max-width:\s*calc\(50% - \(var\(--voice-ball\) \/ 2\) - 12px\);/);
+  assert.doesNotMatch(note, /text-align:\s*center;/);
+});
+
 test('a chat message stays on its own side of the midline', () => {
   const block = css.slice(
     css.indexOf(".agent-thread [data-slot='message-content']"),

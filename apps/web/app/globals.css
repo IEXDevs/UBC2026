@@ -3088,6 +3088,13 @@ button.wallet-export:not(:disabled):hover {
   max-width: calc(50% - (var(--voice-ball) / 2) - 12px);
 }
 
+.voice-script .chat-note {
+  align-self: flex-start;
+  width: auto;
+  max-width: calc(50% - (var(--voice-ball) / 2) - 12px);
+  text-align: left;
+}
+
 .voice-script [data-slot='message'][data-align='end'] [data-slot='message-content'] {
   margin-left: auto;
 }
