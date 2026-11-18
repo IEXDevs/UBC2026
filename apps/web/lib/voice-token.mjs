@@ -20,7 +20,7 @@ async function readToken(response) {
   return body.token.trim();
 }
 
-/** Conversation token for live ElevenLabs agent (voice mode). */
+/** Conversation token for live ElevenLabs agent (WebRTC / LiveKit). */
 export async function requestVoiceToken({ apiKey, agentId, fetcher = fetch } = {}) {
   if (typeof apiKey !== 'string' || apiKey.trim() === '' || typeof agentId !== 'string' || agentId.trim() === '') {
     throw new VoiceTokenError('voice_unconfigured');
@@ -34,6 +34,32 @@ export async function requestVoiceToken({ apiKey, agentId, fetcher = fetch } = {
     throw new VoiceTokenError('voice_unreachable');
   }
   return readToken(response);
+}
+
+/**
+ * Signed WebSocket URL for ConvAI voice. Prefer this when LiveKit/WebRTC drops
+ * rooms shortly after connect; same agent, different transport.
+ */
+export async function requestVoiceSignedUrl({ apiKey, agentId, fetcher = fetch } = {}) {
+  if (typeof apiKey !== 'string' || apiKey.trim() === '' || typeof agentId !== 'string' || agentId.trim() === '') {
+    throw new VoiceTokenError('voice_unconfigured');
+  }
+  const url = new URL('https://api.elevenlabs.io/v1/convai/conversation/get-signed-url');
+  url.searchParams.set('agent_id', agentId.trim());
+  let response;
+  try {
+    response = await fetcher(url, { headers: { 'xi-api-key': apiKey.trim() } });
+  } catch {
+    throw new VoiceTokenError('voice_unreachable');
+  }
+  if (!response?.ok) throw new VoiceTokenError('voice_rejected');
+  const body = await response.json().catch(() => null);
+  const signed = typeof body?.signed_url === 'string' ? body.signed_url.trim()
+    : (typeof body?.signedUrl === 'string' ? body.signedUrl.trim() : '');
+  if (!signed.startsWith('wss://') && !signed.startsWith('ws://')) {
+    throw new VoiceTokenError('voice_rejected');
+  }
+  return signed;
 }
 
 /** Single-use Scribe token for prompt-bar dictation (speech → text draft). */

@@ -576,8 +576,10 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
     body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
   }), env());
-  assert.equal(blocked.status, 503);
-  assert.equal((await blocked.json()).error, 'openrouter_not_configured');
+  // Soft-fail as speakable SSE so LiveKit does not tear down on missing model secrets.
+  assert.equal(blocked.status, 200);
+  assert.match(blocked.headers.get('content-type') || '', /text\/event-stream/);
+  assert.match(await blocked.text(), /not configured|try again/i);
   assert.equal(calls.length, 1);
 });
 

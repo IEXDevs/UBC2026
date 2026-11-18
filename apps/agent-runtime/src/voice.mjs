@@ -990,12 +990,33 @@ export function voiceDecisionMessages({
   return [...prefix, ...turns];
 }
 
+/** Keep the LiveKit room up when the upstream model fails — JSON 5xx drops the call. */
+export function spokenVoiceSse(text) {
+  const content = typeof text === 'string' && text.trim()
+    ? text.trim().slice(0, 500)
+    : 'I hit a model error. Please try again in a moment.';
+  const chunk = {
+    id: 'chatcmpl-voice',
+    object: 'chat.completion.chunk',
+    choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }],
+  };
+  const done = { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+  const sse = `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(done)}\n\ndata: [DONE]\n\n`;
+  return new Response(sse, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
+  });
+}
+
 async function handleCustomLlm(request, env, fetcher) {
   const denied = authorize(request, env);
   if (denied) return denied;
   const resolved = resolveModelProvider(env);
   const apiKey = modelApiKey(env);
-  if (!apiKey) return json({ error: 'openrouter_not_configured' }, 503);
+  if (!apiKey) {
+    // Auth is fine; model secrets are not. Speak instead of 503 so WebRTC stays up.
+    return spokenVoiceSse('Voice reasoning is not configured yet. Please try again after setup.');
+  }
   const secrets = knownSecrets(env);
   const incoming = await request.json().catch(() => null);
   if (!incoming || typeof incoming !== 'object') return json({ error: 'invalid_body' }, 400);
@@ -1028,7 +1049,9 @@ async function handleCustomLlm(request, env, fetcher) {
   let model = grokVoiceModel(env);
   if (resolved.provider === 'openrouter') {
     const selected = selectFreeOpenRouterModel(model);
-    if (!selected) return json({ error: 'openrouter_paid_model' }, 400);
+    if (!selected) {
+      return spokenVoiceSse('That voice model is not available right now. Please try again.');
+    }
     model = selected;
   }
   const payload = {
@@ -1070,10 +1093,14 @@ async function handleCustomLlm(request, env, fetcher) {
       response = await callModel(spokenOnly);
     }
   } catch {
-    return json({ error: 'openrouter_unavailable' }, 502);
+    return spokenVoiceSse('I could not reach the model. Please try speaking again in a moment.');
   }
   if (!response?.ok) {
-    return json({ error: response?.status === 401 ? 'openrouter_unauthorized' : 'openrouter_failed' }, response?.status === 401 ? 401 : 502);
+    return spokenVoiceSse(
+      response?.status === 401
+        ? 'The voice model rejected the request. Please try again after credentials are refreshed.'
+        : 'The voice model failed this turn. Please try again.',
+    );
   }
   const type = response.headers?.get?.('content-type') ?? '';
   if (type.includes('text/event-stream') && response.body) {
@@ -1095,12 +1122,5 @@ async function handleCustomLlm(request, env, fetcher) {
   } catch {
     text = BLOCKED_TURN;
   }
-  const chunk = {
-    id: 'chatcmpl-voice',
-    object: 'chat.completion.chunk',
-    choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
-  };
-  const done = { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
-  const sse = `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(done)}\n\ndata: [DONE]\n\n`;
-  return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' } });
+  return spokenVoiceSse(text || 'I am here. What should we look at?');
 }

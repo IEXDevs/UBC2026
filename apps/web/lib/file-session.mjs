@@ -65,22 +65,27 @@ export function clearSessionFiles() {
   sessions.clear();
 }
 
-export function fileAvailability({ id = '', url = '', remoteStatus = '' } = {}) {
+export function fileAvailability({ id = '', url = '', remoteStatus = '', remoteMessage = '' } = {}) {
   const view = typeof url === 'string' ? url.trim() : '';
   if (view) return { state: 'ready', message: '' };
   if (remoteStatus === 'loading') {
     return { state: 'loading', message: 'Opening this file.' };
   }
   if (remoteStatus === 'gone') {
-    return { state: 'gone', message: 'This file is no longer in storage. Remove it from the catalog or attach a new copy.' };
+    return {
+      state: 'gone',
+      message: remoteMessage || 'This file is no longer in storage. Remove it from the catalog or attach a new copy.',
+    };
   }
   if (remoteStatus === 'error') {
-    return { state: 'error', message: 'Could not load this file. Check your connection and try again.' };
+    return {
+      state: 'error',
+      message: remoteMessage || 'Could not load this file. Check your connection and try again.',
+    };
   }
-  const secret = typeof id === 'string' && /^[0-9a-z]{128}$/.test(id.trim());
-  if (secret && remoteStatus === '') {
-    return { state: 'loading', message: 'Opening this file.' };
-  }
+  // Do not treat a stored secret with an empty status as loading — that left
+  // the UI stuck on "Opening this file" when the fetch never started or hung
+  // without flipping status. Callers must set remoteStatus: 'loading' explicitly.
   return {
     state: 'device_local',
     message: 'This file stayed on this device and is not available after a reload. Attach it again to preview it here.',

@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Cancel01Icon, Download01Icon } from '@hugeicons/core-free-icons';
 import { ensureAccountCode } from '../lib/account-code.mjs';
 import { displayFileName } from '../lib/file-name.mjs';
+import { fetchFilePreviewBytes, isStoredFileSecret } from '../lib/file-preview-load.mjs';
 import { fileAvailability, sessionPreviewUrl } from '../lib/file-session.mjs';
 import { readPreview, stageKind } from '../lib/file-view.mjs';
 
@@ -53,8 +54,14 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
   const [shown, setShown] = useState(false);
   const [remote, setRemote] = useState('');
   const [remoteStatus, setRemoteStatus] = useState('');
+  const [remoteMessage, setRemoteMessage] = useState('');
   const [retryTick, setRetryTick] = useState(0);
   const [body, setBody] = useState(null);
+  const getAccessTokenRef = useRef(getAccessToken);
+  const onMissingRef = useRef(onMissing);
+  getAccessTokenRef.current = getAccessToken;
+  onMissingRef.current = onMissing;
+  const fileId = typeof file?.id === 'string' ? file.id : '';
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setShown(true));
@@ -69,63 +76,76 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
   }, [onClose]);
 
   useEffect(() => {
-    if (viewUrl(file) || !ownerId || !/^[0-9a-z]{128}$/.test(file?.id || '')) {
+    if (viewUrl(file) || !ownerId || !isStoredFileSecret(fileId)) {
       setRemote('');
       setRemoteStatus('');
+      setRemoteMessage('');
       return undefined;
     }
     let gone = false;
     let objectUrl = '';
+    setRemote('');
     setRemoteStatus('loading');
+    setRemoteMessage('');
+    setBody(null);
     (async () => {
-      const token = await getAccessToken?.();
+      let token = '';
+      try {
+        token = (await getAccessTokenRef.current?.()) || '';
+      } catch {
+        token = '';
+      }
       const accountCode = ensureAccountCode(window.localStorage, ownerId);
       if (!token || !accountCode || gone) {
-        if (!gone) setRemoteStatus('error');
+        if (!gone) {
+          setRemoteStatus('error');
+          setRemoteMessage('Sign in again to open this file, or attach a fresh copy from this device.');
+        }
         return;
       }
-      const response = await fetch(`/api/files/${file.id}`, {
+      const loaded = await fetchFilePreviewBytes({
+        url: `/api/files/${fileId}`,
         headers: {
           'x-owner-id': ownerId,
           'x-account-code': accountCode,
           authorization: `Bearer ${token}`,
         },
       });
-      if (!response.ok || gone) {
-        if (response && response.status === 404) {
-          const data = await response.json().catch(() => ({}));
-          if (data?.gone === true) {
-            if (!gone) {
-              setRemoteStatus('gone');
-              onMissing?.(file.id);
-            }
-            return;
-          }
-        }
-        if (!gone) setRemoteStatus('error');
+      if (gone) return;
+      if (!loaded.ok) {
+        setRemoteStatus(loaded.state);
+        setRemoteMessage(loaded.message);
+        if (loaded.state === 'gone') onMissingRef.current?.(fileId);
         return;
       }
-      const bytes = await response.arrayBuffer();
       const type = stageKind(file) === 'pdf'
         ? 'application/pdf'
-        : (response.headers.get('content-type') || 'application/octet-stream');
-      objectUrl = URL.createObjectURL(new Blob([bytes], { type }));
-      if (!gone) {
-        setRemote(objectUrl);
-        setRemoteStatus('');
-      }
+        : (loaded.type || 'application/octet-stream');
+      objectUrl = URL.createObjectURL(new Blob([loaded.bytes], { type }));
+      setRemote(objectUrl);
+      setRemoteStatus('');
+      setRemoteMessage('');
     })().catch(() => {
-      if (!gone) setRemoteStatus('error');
+      if (!gone) {
+        setRemoteStatus('error');
+        setRemoteMessage('Could not load this file. Check your connection and try again.');
+      }
     });
     return () => {
       gone = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, ownerId, getAccessToken, onMissing, retryTick]);
+  // Depend on stable ids only — callback identity must not restart the load.
+  }, [fileId, ownerId, retryTick, file]);
 
   const url = viewUrl(file) || (remote.startsWith('blob:') ? remote : '');
   const kind = stageKind(file);
-  const availability = fileAvailability({ id: file?.id, url, remoteStatus });
+  const availability = fileAvailability({
+    id: fileId,
+    url,
+    remoteStatus,
+    remoteMessage,
+  });
 
   useEffect(() => {
     if (!url || (kind !== 'code' && kind !== 'doc')) {
@@ -134,13 +154,19 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
     }
     let gone = false;
     setBody(null);
+    const timer = window.setTimeout(() => {
+      if (!gone) setBody({ error: 'empty' });
+    }, 12_000);
     readPreview(url, kind).then((next) => {
       if (!gone) setBody(next);
     }).catch(() => {
       if (!gone) setBody({ error: 'empty' });
+    }).finally(() => {
+      window.clearTimeout(timer);
     });
     return () => {
       gone = true;
+      window.clearTimeout(timer);
     };
   }, [url, kind]);
 
@@ -199,9 +225,11 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
                     ? 'This file is too long to preview here.'
                     : body?.error === 'doc' || body?.error === 'binary'
                       ? 'This file did not open. Try attaching a fresh copy from this device.'
-                      : availability.message}
+                      : body?.error === 'empty' && url
+                        ? 'This file did not open. Try again or attach a fresh copy from this device.'
+                        : availability.message}
               </p>
-              {availability.state === 'error' ? (
+              {availability.state === 'error' || body?.error === 'empty' ? (
                 <button type="button" className="solid" onClick={() => setRetryTick(value => value + 1)}>
                   Try again
                 </button>

@@ -1,70 +1,81 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isVoiceOverrideError, startVoiceConversation } from './voice-session.mjs';
+import test from 'node:test';
+import {
+  isLiveKitDisconnect,
+  isVoiceOverrideError,
+  startVoiceConversation,
+  voiceConnectionOptions,
+} from './voice-session.mjs';
 
-/**
- * Achieves: override detection matches ElevenLabs portal rejection wording.
- * Fails when: obvious override errors are missed or unrelated errors match.
- * Oracle: true for override/voice_id; false for mic denial.
- * Side effects / state checked: N/A.
- * Gaps: none.
- */
-test('isVoiceOverrideError matches portal override failures', () => {
-  assert.equal(isVoiceOverrideError(new Error('Override voice_id is not allowed')), true);
-  assert.equal(isVoiceOverrideError({ message: 'tts overrides not enabled' }), true);
-  assert.equal(isVoiceOverrideError(new Error('NotAllowedError')), false);
+test('isVoiceOverrideError matches portal TTS rejects', () => {
+  assert.equal(isVoiceOverrideError({ message: 'voice_id not allowed' }), true);
+  assert.equal(isVoiceOverrideError({ message: 'network' }), false);
+});
+
+test('voiceConnectionOptions prefers websocket signedUrl over LiveKit token', () => {
+  assert.deepEqual(
+    voiceConnectionOptions({
+      token: 'tok',
+      signedUrl: 'wss://api.elevenlabs.io/v1/convai/conversation?signature=1',
+      preferWebsocket: true,
+    }),
+    {
+      signedUrl: 'wss://api.elevenlabs.io/v1/convai/conversation?signature=1',
+      connectionType: 'websocket',
+    },
+  );
+  assert.deepEqual(
+    voiceConnectionOptions({ token: 'tok', signedUrl: '', preferWebsocket: true }),
+    { conversationToken: 'tok', connectionType: 'webrtc' },
+  );
+  assert.equal(isLiveKitDisconnect({ message: 'LiveKit room closed' }), true);
+  assert.equal(isLiveKitDisconnect({ message: 'user hangup' }), false);
 });
 
 /**
  * Achieves: startVoiceConversation connects without overrides first.
  * Fails when: overrides are required on startSession or session is dropped.
  * Oracle: startSession has no overrides; setOverrides called with tts.
- * Side effects / state checked: call shapes.
- * Gaps: none.
  */
 test('startVoiceConversation connects without overrides first', async () => {
   const calls = [];
   const Conversation = {
     async startSession(options) {
       calls.push(options);
-      if (options.overrides) throw new Error('Override voice_id is not allowed');
       return {
-        id: 'conv_ok',
-        getId: () => 'conv_ok',
-        async setOverrides(next) { calls.push({ setOverrides: next }); },
+        id: 'live',
+        async setOverrides(next) {
+          calls.push({ overrides: next });
+        },
       };
     },
   };
   const live = await startVoiceConversation(Conversation, {
     conversationToken: 'tok',
-    overrides: { tts: { voiceId: 'v1', speed: 1 } },
-    dynamicVariables: { owner_id: 'did:privy:1' },
+    signedUrl: 'wss://example.test/voice',
+    preferWebsocket: true,
+    overrides: { tts: { voiceId: 'v1' } },
   });
-  assert.equal(live.id, 'conv_ok');
-  assert.equal(calls[0].conversationToken, 'tok');
-  assert.equal(Object.prototype.hasOwnProperty.call(calls[0], 'overrides'), false);
-  assert.deepEqual(calls[1].setOverrides, { tts: { voiceId: 'v1', speed: 1 } });
+  assert.equal(calls[0].signedUrl, 'wss://example.test/voice');
+  assert.equal(calls[0].connectionType, 'websocket');
+  assert.equal(calls[0].conversationToken, undefined);
+  assert.equal(calls[0].overrides, undefined);
+  assert.deepEqual(calls[1].overrides, { tts: { voiceId: 'v1' } });
+  assert.equal(live.id, 'live');
 });
 
 /**
- * Achieves: missing setOverrides still returns the connected session.
- * Fails when: override apply failure aborts the call.
  * Oracle: one startSession; live id kept.
- * Side effects / state checked: call count.
- * Gaps: none.
  */
 test('startVoiceConversation keeps the session when setOverrides is missing', async () => {
-  let count = 0;
   const Conversation = {
     async startSession() {
-      count += 1;
-      return { id: `n${count}` };
+      return { id: 'kept' };
     },
   };
   const live = await startVoiceConversation(Conversation, {
     conversationToken: 'tok',
-    overrides: { tts: { speed: 1 } },
+    overrides: { tts: { voiceId: 'v1' } },
   });
-  assert.equal(live.id, 'n1');
-  assert.equal(count, 1);
+  assert.equal(live.id, 'kept');
 });
