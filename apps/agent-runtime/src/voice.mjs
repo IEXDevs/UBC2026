@@ -7,6 +7,7 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 import { OPENROUTER_FREE_MODEL, SECRET_NAMES, selectFreeOpenRouterModel } from '@ubc2026/contracts';
+import { LOOP_BREAK_HEADER, LOOP_BREAK_VALUE, ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
 import { createScrape, createSearch } from '@ubc2026/browser-search';
 import {
   DASHBOARD_TOOLS,
@@ -37,6 +38,8 @@ const MODEL_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
 /** conversation_id → ownerId for the life of this isolate (plus Cache API when available). */
 const voiceOwners = new Map();
+/** conversation_id → latest owner utterance seen by the custom LLM. Not tool parameters. */
+const voiceUtterances = new Map();
 
 export function ownerPermissionNote(value) {
   if (value === 'full') {
@@ -300,6 +303,30 @@ async function recallVoiceOwner(conversationId) {
   }
 }
 
+function ownerUtterance(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return '';
+  for (const key of ['user_message', 'userMessage', 'utterance']) {
+    if (typeof body[key] === 'string' && body[key].trim()) return body[key].trim().slice(0, 4000);
+  }
+  return '';
+}
+
+function rememberUtterance(conversationId, messages) {
+  if (!ID.test(conversationId) || !Array.isArray(messages)) return;
+  let last = '';
+  for (const message of messages) {
+    if (message?.role === 'user' && typeof message.content === 'string' && message.content.trim()) {
+      last = message.content.trim().slice(0, 4000);
+    }
+  }
+  if (last) voiceUtterances.set(conversationId, last);
+}
+
+function recallUtterance(conversationId) {
+  if (!ID.test(conversationId) || !voiceUtterances.has(conversationId)) return '';
+  return voiceUtterances.get(conversationId);
+}
+
 function parameterBag(body, name) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'invalid_body' };
   if (typeof body.tool_name === 'string' && body.tool_name !== name) return { error: 'tool_name_mismatch' };
@@ -331,9 +358,11 @@ function requestFor(entry, parameters, owner) {
   if (entry.method !== 'GET') {
     const body = {};
     for (const key of entry.body) {
-      if (typeof parameters[key] !== 'string' || parameters[key].trim() === '') continue;
-      const max = key === 'url' || key === 'goal' ? 2000 : 256;
-      body[key] = parameters[key].trim().slice(0, max);
+      let raw = parameters[key];
+      if (key === 'cooldownMinutes' && Number.isInteger(raw)) raw = String(raw);
+      if (typeof raw !== 'string' || raw.trim() === '') continue;
+      const max = key === 'url' || key === 'goal' ? 2000 : key === 'purpose' ? 500 : 256;
+      body[key] = raw.trim().slice(0, max);
     }
     if (entry.path.endsWith('/browser/sessions') && body.purpose == null) body.purpose = 'browse';
     init.headers['content-type'] = 'application/json';
@@ -506,6 +535,23 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
     const response = await fetchApi(stamped, env);
     return {
       calls: [{ method: entry.method, path: entry.path, ...(await speakable(response, secrets)) }],
+    };
+  }
+  if (toolDef.name === 'break_loop') {
+    if (!ownerAskedToBreakLoop(options.ownerUtterance)) return { error: 'owner_must_ask' };
+    const entry = toolDef.calls[0];
+    const outbound = requestFor(entry, params, owner);
+    if (!outbound) return { error: 'invalid_parameters' };
+    const headers = new Headers(outbound.headers);
+    headers.set(LOOP_BREAK_HEADER, LOOP_BREAK_VALUE);
+    const stamped = new Request(outbound.url, {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    const response = await fetchApi(stamped, env);
+    return {
+      calls: [{ method: 'POST', path: entry.path, ...(await speakable(response, secrets)) }],
     };
   }
   if (toolDef.name === 'request_spend') {
@@ -692,12 +738,16 @@ async function handleTool(name, request, env, fetchApi) {
       if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
       result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env, {
         spendPermission: request.headers.get('x-spend-permission'),
+        ownerUtterance: ownerUtterance(body) || recallUtterance(parsed.conversationId),
       });
     }
   } catch {
     return json({ error: 'voice_api_failed' }, 502);
   }
-  if (result.error) return json({ error: result.error }, result.error === 'session_not_found' ? 404 : 400);
+  if (result.error) {
+    const status = result.error === 'session_not_found' ? 404 : result.error === 'owner_must_ask' ? 403 : 400;
+    return json({ error: result.error }, status);
+  }
   return json({
     result: {
       tool: name,
@@ -800,6 +850,8 @@ async function handleCustomLlm(request, env, fetcher) {
   if (!incoming || typeof incoming !== 'object') return json({ error: 'invalid_body' }, 400);
   const messages = sanitizeMessages(incoming.messages, secrets);
   if (!messages) return json({ error: 'invalid_body' }, 400);
+  const conversationId = typeof incoming.conversation_id === 'string' ? incoming.conversation_id.trim().slice(0, 128) : '';
+  rememberUtterance(conversationId, messages);
   const provider = resolved.provider === 'openrouter' ? 'openrouter' : 'meta';
   const adapted = voiceDecisionMessages({
     botName: incoming.botName,

@@ -478,3 +478,69 @@ test('what happened while away reads events and does not spend', async () => {
   assert.equal(bad.error, 'invalid_parameters');
   assert.equal(seen.length, 1);
 });
+
+/**
+ * Achieves: create_loop stores purpose and cooldown on this bot; break_loop waits for the owner.
+ * Fails when: a short path is skipped, break fires without the owner asking, or ownerAsked in args is forwarded.
+ * Oracle: request URL, body, and x-loop-break header.
+ * Side effects: mocked fetch only.
+ * Gaps: the rail click is covered by the shell source test.
+ */
+test('create_loop and break_loop stay on this bot and the owner ask', async () => {
+  const calls = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_dx4dl12n',
+    runtimeBase: 'https://runtime.example',
+    ownerMessage: 'Check positions on a loop',
+    fetcher: async (url, options) => {
+      calls.push({
+        url: String(url),
+        method: options.method,
+        body: JSON.parse(options.body),
+        breakHeader: options.headers['x-loop-break'] || null,
+      });
+      return Response.json({ ok: true, loop: { active: true, purpose: 'Check positions', cooldownMinutes: 15, cooldownLabel: '15m' } });
+    },
+  });
+  const created = await invoke('create_loop', {
+    botId: 'bot_other',
+    purpose: 'Check positions',
+    cooldownMinutes: '15',
+    ownerAsked: true,
+  });
+  assert.equal(created.ok, true);
+  assert.match(calls[0].url, /\/bots\/bot_dx4dl12n\/card-loop$/);
+  assert.equal(calls[0].body.purpose, 'Check positions');
+  assert.equal(calls[0].body.cooldownMinutes, '15');
+  assert.equal(calls[0].body.ownerAsked, undefined);
+  const refused = await invoke('break_loop', { ownerAsked: true, userAsked: true });
+  assert.equal(refused.error, 'owner_must_ask');
+  assert.equal(calls.length, 1);
+
+  const asking = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_dx4dl12n',
+    runtimeBase: 'https://runtime.example',
+    ownerMessage: 'Please break the loop',
+    fetcher: async (url, options) => {
+      calls.push({
+        url: String(url),
+        method: options.method,
+        body: JSON.parse(options.body || '{}'),
+        breakHeader: options.headers['x-loop-break'] || null,
+      });
+      return Response.json({ ok: true, loop: null });
+    },
+  });
+  const broken = await asking('break_loop', { ownerAsked: false });
+  assert.equal(broken.ok, true);
+  assert.match(calls[1].url, /\/bots\/bot_dx4dl12n\/card-loop\/break$/);
+  assert.equal(calls[1].breakHeader, 'owner-asked');
+  assert.equal(calls[1].body.ownerAsked, undefined);
+
+  const cooled = await asking('set_loop_cooldown', { cooldownMinutes: 30 });
+  assert.match(calls[2].url, /\/card-loop\/cooldown$/);
+  assert.equal(calls[2].body.cooldownMinutes, '30');
+  assert.equal(calls[2].breakHeader, null);
+});

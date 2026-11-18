@@ -37,6 +37,9 @@ const OWNER_BOT_ACTIONS = new Set([
   'advance',
   'decide',
   'loop',
+  'card-loop',
+  'card-loop/cooldown',
+  'card-loop/break',
 ]);
 
 function isOwnerBotAction(action) {
@@ -159,6 +162,12 @@ async function forwardBotAction(stub, target, request, ownerId, env, botId, acti
     if (read.kind === 'raw') return forwardPrepared(stub, target, request, ownerId, read.text, true);
     const payload = await enrichLoopPayload(read.value, env, botId, ownerId);
     return forwardPrepared(stub, target, request, ownerId, payload, false);
+  }
+  if (typeof action === 'string' && action.startsWith('card-loop') && request.method === 'POST') {
+    const read = await readLoopPayload(request);
+    const value = read.kind === 'json' ? { ...read.value } : {};
+    value.botId = botId;
+    return forwardPrepared(stub, target, request, ownerId, value, false);
   }
   return forwardToBot(stub, target, request, ownerId);
 }

@@ -40,6 +40,30 @@ function agentIcon(bot, size, onPhoto) {
   );
 }
 
+function loopMark(bot, onBreak) {
+  const loop = bot?.loop;
+  if (!loop || loop.active !== true || typeof loop.cooldownLabel !== 'string' || !loop.cooldownLabel) return null;
+  const label = loop.cooldownLabel;
+  const purpose = typeof loop.purpose === 'string' ? loop.purpose : '';
+  return (
+    <button
+      type="button"
+      className="agent-loop"
+      aria-label={purpose ? `Loop every ${label}. ${purpose}. Break loop.` : `Loop every ${label}. Break loop.`}
+      title={purpose || `Loop every ${label}`}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onBreak?.(bot.id);
+      }}
+    >
+      <span className="agent-loop__time">{label}</span>
+      <span className="agent-loop__x" aria-hidden="true">×</span>
+    </button>
+  );
+}
+
 function blockNativeMenu(event) {
   event.preventDefault();
 }
@@ -48,7 +72,7 @@ function placeMenu(event) {
   return { x: event.clientX, y: event.clientY };
 }
 
-export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, onReorder, onDelete, onEdit, onCreate }) {
+export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, onReorder, onDelete, onEdit, onCreate, onBreakLoop }) {
   const activeIndex = bots.findIndex(bot => bot.id === activeId);
   const [menu, setMenu] = useState(null);
   const fileRef = useRef(null);
@@ -82,6 +106,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
 
   if (collapsed) {
     const items = bots.map((bot, index) => {
+      const mark = loopMark(bot, onBreakLoop);
       const rows = [];
       if (canDrag) {
         rows.push(
@@ -102,6 +127,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
       return {
         icon: agentIcon(bot, 54, startPhoto),
         label: bot.name,
+        ...(mark ? { badge: mark } : {}),
         active: bot.id === activeId,
         onClick: () => onSelect(bot.id),
         menu: rows,
@@ -150,6 +176,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
           icon: agentIcon(bot, 60, startPhoto),
           title: bot.name,
           description: bot.goal,
+          meta: loopMark(bot, onBreakLoop),
         }))}
         onItemSelect={item => onSelect(item.id)}
         onItemContextMenu={(item, _index, event) => {

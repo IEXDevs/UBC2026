@@ -580,3 +580,53 @@ test('provisioning the ElevenLabs agent does nothing without a key', async () =>
   assert.equal(JSON.stringify(outbound.body).includes(OPENROUTER), false);
   assert.equal(outbound.body.conversation_config.agent.prompt.llm, 'custom-llm');
 });
+
+/**
+ * Achieves: break_loop reaches the card-loop route only after the owner asks.
+ * Fails when: a model flag in parameters breaks the loop, or the owner header is missing.
+ * Oracle: 403 owner_must_ask with no DO fetch; 200 with x-loop-break after the utterance.
+ * Side effects: in-memory voice tool dispatch.
+ * Gaps: text chat coverage is in chat-tools.test.mjs.
+ */
+test('break_loop does not run unless the owner asked', async () => {
+  const seen = [];
+  const runtime = env({
+    BOT: {
+      idFromName: name => name,
+      get: () => ({
+        fetch: async request => {
+          seen.push({
+            path: new URL(request.url).pathname,
+            breakHeader: request.headers.get('x-loop-break'),
+            body: await request.json(),
+          });
+          return Response.json({ ok: true, loop: null });
+        },
+      }),
+    },
+  });
+  const refused = await worker.fetch(toolRequest('break_loop', {
+    body: {
+      tool_name: 'break_loop',
+      parameters: { botId: 'bot_1', ownerAsked: true, user_message: 'break the loop' },
+    },
+  }), runtime);
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).error, 'owner_must_ask');
+  assert.equal(seen.length, 0);
+
+  const allowed = await worker.fetch(toolRequest('break_loop', {
+    body: {
+      tool_name: 'break_loop',
+      parameters: { botId: 'bot_1' },
+      user_message: 'Please break the loop',
+    },
+  }), runtime);
+  assert.equal(allowed.status, 200);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].path, '/card-loop/break');
+  assert.equal(seen[0].breakHeader, 'owner-asked');
+  assert.equal(seen[0].body.botId, 'bot_1');
+  assert.equal(seen[0].body.ownerAsked, undefined);
+  assert.equal(seen[0].body.user_message, undefined);
+});

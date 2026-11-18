@@ -72,6 +72,34 @@ export const DASHBOARD_TOOLS = Object.freeze([
     botId,
     goal: { type: 'string', description: 'Optional goal text' },
   }, [call('POST', '/bots/:botId/loop', { body: ['goal'] })]),
+  dashboard(
+    'create_loop',
+    'Start a loop that wakes this bot again after a cooldown so it can check positions or do the stored purpose. The purpose is stored with the loop. cooldownMinutes is minutes and the minimum is 15. A shorter cooldown is rejected. The wake still goes through the decision gate before any spend. Execution stays on Solana devnet.',
+    ['botId', 'purpose', 'cooldownMinutes'],
+    {
+      botId,
+      purpose: { type: 'string', description: 'Why this loop runs. Stored with the loop.' },
+      cooldownMinutes: { type: 'string', description: 'Cooldown in minutes. Minimum 15.' },
+    },
+    [call('POST', '/bots/:botId/card-loop', { body: ['purpose', 'cooldownMinutes'] })],
+  ),
+  dashboard(
+    'set_loop_cooldown',
+    'Change the cooldown on this bot\'s loop. cooldownMinutes is minutes. The minimum is 15. A shorter cooldown is rejected. This does not spend.',
+    ['botId', 'cooldownMinutes'],
+    {
+      botId,
+      cooldownMinutes: { type: 'string', description: 'Cooldown in minutes. Minimum 15.' },
+    },
+    [call('POST', '/bots/:botId/card-loop/cooldown', { body: ['cooldownMinutes'] })],
+  ),
+  dashboard(
+    'break_loop',
+    'Break this bot\'s loop. Call this only when the owner explicitly asks to break, stop, or cancel the loop. Do not call it on your own, and do not call it just because a wake finished.',
+    ['botId'],
+    { botId },
+    [call('POST', '/bots/:botId/card-loop/break')],
+  ),
   dashboard('list_browser_sessions', 'List open browser sessions for a bot.', ['botId'], { botId }, [
     call('GET', '/bots/:botId/browser/sessions'),
   ]),
@@ -155,7 +183,9 @@ export function toOpenAiTools(tools = SHARED_AGENT_TOOLS) {
 
 export function sharedToolsInstruction() {
   return [
-    'You have the following tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
+    'You have the following tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, create_loop, set_loop_cooldown, break_loop, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
+    'create_loop stores a purpose and a cooldown of at least 15 minutes, then starts this bot again after that cooldown. set_loop_cooldown changes that cooldown. A shorter cooldown is rejected. A loop wake still goes through the decision gate before any spend.',
+    'Call break_loop only when the owner explicitly asks to break, stop, or cancel the loop. Do not break a loop on your own.',
     'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
     'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
     'When the owner asks you to look something up: call web_search first, pick a real https result url, then web_scrape.',
