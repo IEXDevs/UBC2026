@@ -563,6 +563,8 @@ function SendPane({
         <p className="quiet" role="status">
           {sendHandleHint(handleRecipient, { looking: handleLooking, handle: target.handle })}
         </p>
+      ) : target?.kind === 'invalid-address' || target?.kind === 'address' ? (
+        <p className="quiet" role="status">{targetHint(target)}</p>
       ) : (
         <p className="quiet">{targetHint(target)}</p>
       )}
@@ -629,6 +631,7 @@ function targetHint(target) {
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
   if (target.kind === 'wallet' && target.spendable === false) return 'That wallet is read only.';
   if (target.kind === 'wallet') return `Sends USDC on Solana devnet to ${target.caption}.`;
+  if (target.kind === 'invalid-address') return 'That address is not a valid Solana pubkey.';
   return 'Raw addresses are not on the platform ledger yet.';
 }
 
