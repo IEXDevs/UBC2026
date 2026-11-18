@@ -65,6 +65,7 @@ export default function WalletsSheet({
   focusId = '',
   getAccessToken,
   resolveRecipient = null,
+  devnetBalance = null,
 }) {
   const { mounted, leaving } = usePresence(open);
   const [pane, setPane] = useState('assets');
@@ -119,7 +120,12 @@ export default function WalletsSheet({
   const active = rows.find(row => row.id === walletId) || rows[0] || null;
   const activeRaw = wallets.find(wallet => wallet.id === active?.id) || null;
   const observing = activeRaw?.spendable === false;
-  const tokens = deskTokens({ positions, transfers, prefs: { ...prefs, sns: prefs.sns || sns || '' } });
+  const tokens = deskTokens({
+    positions,
+    transfers,
+    prefs: { ...prefs, sns: prefs.sns || sns || '' },
+    devnet: devnetBalance,
+  });
 
   return (
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>

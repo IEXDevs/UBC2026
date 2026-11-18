@@ -133,6 +133,23 @@ test('registered holdings sum wallets and the agent chip is not the owner total'
   assert.equal(walletBalanceLabel('w_shop', { wallets, positions, transfers, bots }), '0 USDC');
 });
 
+/**
+ * Achieves: a confirmed devnet SOL/USDC label replaces the platform book, even with no ledger rows.
+ * Fails when: the chip stays on the transfer net, or a mainnet-looking label is shown.
+ * Oracle: chainLabel '0 SOL · 20 USDC' wins over a 5 USDC book and over empty positions.
+ * Side effects / state checked: N/A.
+ * Gaps: does not call RPC.
+ */
+test('devnet chain label is the holdings number when the wallet read is in', () => {
+  const wallets = [{ id: 'w_main', kind: 'main', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' }];
+  const transfers = [{ asset: 'USDC', amount: '5000000', direction: 'in' }];
+  const chainLabel = '0 SOL · 20 USDC';
+  assert.equal(registeredHoldingsLabel({ wallets, positions: [], transfers, chainLabel }), chainLabel);
+  assert.equal(registeredHoldingsLabel({ wallets: [], positions: [], transfers: [], chainLabel }), chainLabel);
+  assert.equal(walletGlance(wallets, [], transfers, chainLabel).balanceLabel, chainLabel);
+  assert.equal(registeredHoldingsLabel({ wallets, positions: [], transfers, chainLabel: '9 SOL' }), '5 USDC');
+});
+
 test('wallet addresses show the first five and last five characters', () => {
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
   assert.equal(shortAddress(address), '4zMMC...DncDU');
