@@ -7,11 +7,10 @@ import {
   createDeskLock,
   passwordProblem,
   readDeskLock,
-  unlockDesk,
   writeDeskGrant,
   writeDeskLock,
 } from '../lib/desk-lock.mjs';
-import { openDeskGrant, readDeskLockState, registerDeskVerifier } from '../lib/desk-grant-client.mjs';
+import { acceptEnteredPassword, openDeskGrant, readDeskLockState, registerDeskVerifier } from '../lib/desk-grant-client.mjs';
 import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
 
 function controlValue(form, name) {
@@ -109,19 +108,29 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
         }
         setRecord(created);
         setReplacing(false);
-      } else if (record) {
-        const ok = await unlockDesk(nextPassword, record);
-        if (!ok) {
-          setNote('Wrong password.');
+        const opened = await openDeskGrant(fetch, { ownerId, token, password: nextPassword });
+        if (!opened.ok || !writeDeskGrant(window.sessionStorage, ownerId, opened.grant, opened.until)) {
+          setNote('The password was not accepted for spends.');
           setPending(false);
           return;
         }
-      }
-      const opened = await openDeskGrant(fetch, { ownerId, token, password: nextPassword });
-      if (!opened.ok || !writeDeskGrant(window.sessionStorage, ownerId, opened.grant, opened.until)) {
-        setNote('The password was not accepted for spends.');
-        setPending(false);
-        return;
+      } else {
+        const accepted = await acceptEnteredPassword({
+          fetchImpl: fetch,
+          ownerId,
+          token,
+          password: nextPassword,
+          record,
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+        });
+        if (!accepted.ok) {
+          setNote(accepted.error === 'wrong_password'
+            ? 'Wrong password.'
+            : 'The password was not accepted for spends.');
+          setPending(false);
+          return;
+        }
       }
       setPassword('');
       setConfirm('');
