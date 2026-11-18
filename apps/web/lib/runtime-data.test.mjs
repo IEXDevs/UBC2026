@@ -232,6 +232,15 @@ test('sendBotChat forwards Bearer access token', async () => {
     assert.equal(calls[0].headers.authorization, 'Bearer tok');
     assert.equal(calls[0].headers['x-owner-id'], 'did:privy:abc');
     assert.equal(calls[0].body.shellWallets[0].id, 'w_main');
+    const grant = 'ab'.repeat(32);
+    await sendBotChat({
+      ownerId: 'did:privy:abc',
+      botId: 'bot_1',
+      message: 'buy',
+      deskGrant: grant,
+    });
+    assert.equal(calls[1].headers['x-desk-grant'], grant);
+    assert.equal(JSON.stringify(calls[1].body).includes(grant), false);
   } finally {
     globalThis.fetch = prior;
   }

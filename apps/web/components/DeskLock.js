@@ -28,6 +28,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
   const [generated, setGenerated] = useState(false);
   const [copied, setCopied] = useState(false);
   const [serverLocked, setServerLocked] = useState(false);
+  const [replacing, setReplacing] = useState(false);
 
   useEffect(() => {
     let stopped = false;
@@ -42,6 +43,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
     setGenerated(false);
     setCopied(false);
     setServerLocked(false);
+    setReplacing(false);
     (async () => {
       const token = typeof getAccessToken === 'function' ? await getAccessToken() : '';
       const state = await readDeskLockState(fetch, { ownerId, token }).catch(() => ({ locked: false }));
@@ -58,7 +60,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const setting = record == null && !serverLocked;
+  const setting = replacing || (record == null && !serverLocked);
 
   async function submit(event) {
     event.preventDefault();
@@ -92,6 +94,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           ownerId,
           token,
           verifier: created,
+          replace: replacing,
         });
         if (registered.exists) {
           setServerLocked(true);
@@ -105,6 +108,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           return;
         }
         setRecord(created);
+        setReplacing(false);
       } else if (record) {
         const ok = await unlockDesk(nextPassword, record);
         if (!ok) {
@@ -139,7 +143,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
         onMouseDown={event => event.stopPropagation()}
       >
         <div className="sheet-head">
-          <h2 id="desk-lock-title">{setting ? 'Set a password' : 'Enter Password'}</h2>
+          <h2 id="desk-lock-title">{replacing ? 'Reset password' : (setting ? 'Set a password' : 'Enter Password')}</h2>
           <button type="button" className="icon-btn" aria-label="Close" onClick={() => onClose?.()}>
             <X size={18} strokeWidth={1.75} />
           </button>
@@ -197,8 +201,25 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           ) : null}
           {note ? <p className="quiet" role="status">{note}</p> : null}
           <button type="submit" className="solid" disabled={record === undefined || pending || (setting && !secretAcceptAllowed({ generated, copied }))}>
-            {pending ? 'Checking…' : (setting ? 'Set password' : 'Unlock')}
+            {pending ? 'Checking…' : (replacing ? 'Reset password' : (setting ? 'Set password' : 'Unlock'))}
           </button>
+          {!setting ? (
+            <button
+              type="button"
+              className="quiet"
+              disabled={pending}
+              onClick={() => {
+                setReplacing(true);
+                setPassword('');
+                setConfirm('');
+                setNote('');
+                setGenerated(false);
+                setCopied(false);
+              }}
+            >
+              Reset password
+            </button>
+          ) : null}
         </form>
       </section>
     </div>

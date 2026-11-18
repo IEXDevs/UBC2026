@@ -1487,7 +1487,24 @@ export async function handleApiData(request, env, matched) {
     if (existing.status !== 200 || !Array.isArray(existing.rows)) {
       return json({ error: 'desk_lock_unavailable' }, 503);
     }
-    if (existing.rows[0]) return json({ error: 'desk_lock_exists' }, 409);
+    if (existing.rows[0]) {
+      if (body.replace !== true) return json({ error: 'desk_lock_exists' }, 409);
+      const replaced = await supabaseWrite(env, {
+        path: `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}`,
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: {
+          salt: verifier.salt,
+          hash: verifier.hash,
+          iterations: verifier.iterations,
+          grant_hash: null,
+          grant_until: null,
+        },
+        fetcher,
+      });
+      if (replaced?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
+      return json({ ok: true, replaced: true });
+    }
     const userWrite = await supabaseWrite(env, {
       path: 'users?on_conflict=id',
       method: 'POST',

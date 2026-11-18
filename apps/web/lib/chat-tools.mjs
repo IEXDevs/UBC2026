@@ -22,6 +22,7 @@ import {
 } from '@ubc2026/agent-tools';
 import { ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
 import { normalizePriceMint, readAgentPriceQuote } from '@ubc2026/prices';
+import { ownerAsksForOneTrade } from './owner-trade.mjs';
 import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
@@ -45,11 +46,32 @@ function clipJson(value) {
   return `${text.slice(0, MAX_TOOL_RESULT)}…[truncated]`;
 }
 
+function gateFields(detail) {
+  if (!detail || typeof detail !== 'object') return {};
+  const steps = Array.isArray(detail.steps)
+    ? detail.steps.filter(step => typeof step === 'string').slice(0, 8)
+    : [];
+  return {
+    ...(typeof detail.state === 'string' ? { state: detail.state } : {}),
+    ...(steps.length > 0 ? { steps } : {}),
+    ...(typeof detail.signed === 'boolean' ? { signed: detail.signed } : {}),
+    ...(typeof detail.reason === 'string' ? { reason: detail.reason } : {}),
+    ...(typeof detail.cluster === 'string' ? { cluster: detail.cluster } : {}),
+  };
+}
+
 function toolErrorPayload(error) {
   const code = typeof error?.code === 'string' && error.code
     ? error.code
     : (error instanceof ProviderError || error instanceof SessionError ? error.code : 'tool_failed');
-  return { error: code };
+  const gate = gateFields(error?.detail);
+  return {
+    error: code,
+    ...gate,
+    ...(code === 'desk_locked' && !gate.state
+      ? { hint: 'Desk lock is not an approval hold.' }
+      : {}),
+  };
 }
 
 async function workerJson(fetcher, url, ownerId, method, body, accessToken = '', extraHeaders = null) {
@@ -59,6 +81,13 @@ async function workerJson(fetcher, url, ownerId, method, body, accessToken = '',
   };
   if (extraHeaders && extraHeaders['x-loop-break'] === 'owner-asked') {
     headers['x-loop-break'] = 'owner-asked';
+  }
+  if (
+    extraHeaders
+    && typeof extraHeaders['x-desk-grant'] === 'string'
+    && /^[0-9a-f]{64}$/.test(extraHeaders['x-desk-grant'])
+  ) {
+    headers['x-desk-grant'] = extraHeaders['x-desk-grant'];
   }
   if (typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000) {
     headers.authorization = `Bearer ${accessToken.trim()}`;
@@ -71,9 +100,12 @@ async function workerJson(fetcher, url, ownerId, method, body, accessToken = '',
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const code = typeof data.error === 'string' ? data.error : 'browser_request_failed';
+    const code = typeof data.error === 'string'
+      ? data.error
+      : (typeof data.state === 'string' ? data.state : 'browser_request_failed');
     const err = new Error(code);
     err.code = code;
+    err.detail = gateFields(data);
     throw err;
   }
   return data;
@@ -357,6 +389,7 @@ export function createChatToolInvoker({
   accessToken = '',
   ownerMessage = '',
   priceFetch = null,
+  deskGrant = '',
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
@@ -367,12 +400,17 @@ export function createChatToolInvoker({
   const localBots = shellBotItems(shellBots);
   const localWallets = shellWalletItems(shellWallets);
   const token = typeof accessToken === 'string' ? accessToken.trim() : '';
+  const spendGrant = typeof deskGrant === 'string' && /^[0-9a-f]{64}$/.test(deskGrant) ? deskGrant : '';
   const balanceHint = typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
     ? shellBalanceLabel.trim().slice(0, 64)
     : null;
 
   function callWorker(url, method, body, extraHeaders) {
-    return workerJson(fetcher, url, ownerId, method, body, token, extraHeaders);
+    const headers = { ...(extraHeaders || {}) };
+    if (spendGrant && typeof url === 'string' && url.includes('/api/spend')) {
+      headers['x-desk-grant'] = spendGrant;
+    }
+    return workerJson(fetcher, url, ownerId, method, body, token, headers);
   }
 
   async function invokeBrowser(name, args = {}) {
@@ -534,6 +572,7 @@ export function createChatToolInvoker({
       body.permission = args.permission;
     }
     if (name === 'start_task' && args.ownerPermission === 'full') body.ownerPermission = 'full';
+    if (name === 'wake_bot' && ownerAsksForOneTrade(ownerMessage)) body.reason = 'owner-ask';
     if (name === 'break_loop') {
       if (!ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
       return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body, { 'x-loop-break': 'owner-asked' });

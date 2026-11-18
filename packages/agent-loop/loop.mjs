@@ -182,6 +182,7 @@ export async function runPermissionedSpend({
   reviewCap = null,
   quote = null,
   signDevnet,
+  beforeSign,
 } = {}) {
   const steps = [];
   if (!bot || !wallet || !ledger || !proposal) fail('bot, wallet, ledger, and proposal are required');
@@ -228,8 +229,27 @@ export async function runPermissionedSpend({
     return { state: 'signer-not-configured', steps, signed: false };
   }
 
-  steps.push('sign');
   const memo = memoFromDecision(consensus.decisionRecord);
+  if (typeof beforeSign === 'function') {
+    steps.push('reserve');
+    let reserved;
+    try {
+      reserved = await beforeSign({ bot, wallet, ledger, proposal, policy, memo });
+    } catch (error) {
+      return { state: 'blocked', reason: error?.code || 'reserve-failed', steps, signed: false };
+    }
+    const reservedState = reserved?.state;
+    if (reservedState !== 'reserved' && reservedState !== 'ready-to-reserve') {
+      return {
+        state: 'blocked',
+        reason: reserved?.reason || reservedState || 'reserve-blocked',
+        steps,
+        signed: false,
+      };
+    }
+  }
+
+  steps.push('sign');
   let signed;
   try {
     signed = await signDevnet({ bot, wallet, proposal, memo, cluster: 'devnet' });

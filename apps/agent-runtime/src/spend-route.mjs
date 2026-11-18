@@ -53,7 +53,10 @@ export async function handleSpend(request, env = {}) {
   const ownerId = ownerIdFrom(request);
   if (!ownerId) return json({ error: 'owner_required', signed: false }, 401);
   const desk = await deskSpendAllowed(env, request, ownerId, env.fetch ?? fetch, Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now());
-  if (!desk.ok) {
+  // A locked desk (missing or expired grant) is not a substitute for the gates
+  // and must not answer before them. No lock row, or a lock store that cannot
+  // be read, still refuses here. The grant is never invented.
+  if (!desk.ok && desk.error !== 'desk_locked') {
     const status = desk.error === 'desk_lock_unavailable' ? 503 : 403;
     return json({ error: desk.error, signed: false }, status);
   }
@@ -109,7 +112,8 @@ export async function handleSpend(request, env = {}) {
     maxFee: '0',
     expiresAt: now + 120_000,
   };
-  const canSign = Boolean(parsed.destination && env.transferClient);
+  const grantOk = desk.ok === true;
+  const canSign = grantOk && Boolean(parsed.destination && env.transferClient);
   const signDevnet = canSign
     ? async ({ bot, wallet, memo }) => {
       const sent = await transferDevnetUsdc({
@@ -133,26 +137,37 @@ export async function handleSpend(request, env = {}) {
       proposal,
       trustScore,
       mainFn: async () => facts,
-      verifyFn: async () => verifierFacts({
-        facts,
-        proposal,
-        parsed,
-        trustScore,
-        mint: DEVNET_USDC_MINT,
-      }),
+      verifyFn: typeof env.spendVerifyFn === 'function'
+        ? env.spendVerifyFn
+        : async () => verifierFacts({
+          facts,
+          proposal,
+          parsed,
+          trustScore,
+          mint: DEVNET_USDC_MINT,
+        }),
       now,
       ownerPermission: parsed.permission,
       confirmed: parsed.confirmed,
       reviewCap: parsed.reviewCap,
       quote: parsed.quote,
       signDevnet,
+      beforeSign: grantOk && env.ledgerApi && typeof env.ledgerApi.reserveBudget === 'function'
+        ? ({ proposal: spendProposal }) => env.ledgerApi.reserveBudget({
+          ownerId,
+          now,
+          idempotencyKey: parsed.idempotencyKey || spendProposal.id,
+          proposal: spendProposal,
+        })
+        : undefined,
     });
   } catch {
     return json({ error: 'spend_failed', signed: false }, 400);
   }
 
   let state = result.state;
-  if (state === 'signer-not-configured' && !parsed.destination) state = 'recipient_address_missing';
+  if (!grantOk && state === 'signer-not-configured') state = 'desk_locked';
+  else if (state === 'signer-not-configured' && !parsed.destination) state = 'recipient_address_missing';
   const body = {
     ok: result.signed === true,
     state,
@@ -161,7 +176,8 @@ export async function handleSpend(request, env = {}) {
     cluster: 'devnet',
     reason: result.reason || null,
   };
-  if (result.signed === true) body.signature = result.signature;
+  if (state === 'desk_locked') body.error = 'desk_locked';
+  if (result.signed === true && grantOk) body.signature = result.signature;
   const alert = alertFromSpend(result, parsed);
   if (alert) {
     await publishBotAlert(env, {
@@ -172,5 +188,6 @@ export async function handleSpend(request, env = {}) {
       scope: parsed.idempotencyKey || `${parsed.action}_${parsed.amount}`,
     });
   }
-  return json(body, result.signed ? 200 : 409);
+  const status = result.signed && grantOk ? 200 : (state === 'desk_locked' ? 403 : 409);
+  return json(body, status);
 }

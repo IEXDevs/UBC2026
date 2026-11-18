@@ -4,6 +4,8 @@ import { BotStateMachine } from './bot-do.mjs';
 import { LOOP_STEPS, decideTask, isTradingGoal } from './loop-engine.mjs';
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
 import { createOpenRouter } from './openrouter.mjs';
+import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
+import { createMainnetPriceProvider } from '@ubc2026/prices';
 import { resolveTrustLookup } from './trust-lookup.mjs';
 
 const API_KEY = 'test-openrouter-key-value';
@@ -816,4 +818,243 @@ test('a trading swap follows the gate, quotes Jupiter, signs on devnet, and mark
   assert.equal(downTransfer.calls.length, 0);
   const alerts = await downMachine.get('alerts');
   assert.equal(Array.isArray(alerts) && alerts.some(event => event.kind === 'run.checkpoint' && event.summary.includes('Price provider is down')), true);
+});
+
+function solDecide(models) {
+  const decide = models.openRouter;
+  const original = decide.complete.bind(decide);
+  decide.complete = async (input) => {
+    const task = typeof input?.task === 'string' ? input.task : '';
+    if (task.includes('Role: decide')) {
+      return {
+        model: 'test',
+        text: JSON.stringify({
+          summary: 'Move a slice of SOL into USDC',
+          facts: {
+            asset: 'USDC',
+            mint: SOL_MINT,
+            cluster: 'devnet',
+            price: '74730000',
+            amount: '1000000',
+            trustScore: '100',
+            reasonSummary: 'Move SOL into USDC',
+          },
+          proposal: {
+            asset: 'USDC',
+            recipient: DESTINATION,
+            outflow: '1000000',
+            expectedReceive: '1000000',
+            expectedReceiveAsset: 'USDC',
+            maxFee: '0',
+            expiresAt: NOW + 60_000,
+            cluster: 'devnet',
+            swap: { inputMint: SOL_MINT, outputMint: USDC_MINT, inAmount: '10000000' },
+          },
+        }),
+      };
+    }
+    return original(input);
+  };
+  return decide;
+}
+
+/**
+ * Achieves: an owner ask wakes the bot and one fully-automatic SOL to USDC trade
+ *   finishes research, decide, trust, verify, reserve, approval, devnet sign, memo, and notify.
+ * Fails when: paper is missing, broadcast is true, the memo or timeline is missing,
+ *   low trust signs, five verifier mismatches execute, or max loss signs with approval.
+ * Oracle: paper quantity 1000000, broadcast false, memo digest, verify.settled,
+ *   trust-confirmation, manual-review after 5, max-loss-reached.
+ * Side effects: in-memory run, ledger reservation, and injected price, trust, and swap fetchers.
+ * Gaps: live Jupiter, Privy, and Supabase are not called.
+ */
+test('an owner ask runs one fully-automatic SOL to USDC trade through memo and notify', async () => {
+  const wide = {
+    ...bot,
+    goal: TRADING_GOAL,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '50000000', maxPerTransaction: '5000000' },
+  };
+  const machine = new BotStateMachine();
+  await machine.put('positions', [{
+    mint: USDC_MINT,
+    amount: '1',
+    decimals: 6,
+    entryPriceUsd: '1.00',
+  }]);
+  const woke = await machine.handle(new Request('https://bot/wake', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ botId: 'bot_1', goal: TRADING_GOAL, reason: 'owner-ask', ownerId: 'user_1' }),
+  }));
+  assert.equal(woke.status, 200);
+  const hosts = [];
+  const lookupPrice = createMainnetPriceProvider({
+    fetcher: async (url) => {
+      const href = String(url);
+      hosts.push(new URL(href).host);
+      if (href.includes('dexscreener')) return new Response('down', { status: 503 });
+      const mint = new URL(href).searchParams.get('ids');
+      const usdPrice = mint === USDC_MINT ? 1 : 74.73;
+      return Response.json({ [mint]: { usdPrice, liquidity: 9, blockId: 1 } });
+    },
+  });
+  let trustCalls = 0;
+  const trustLookup = resolveTrustLookup({
+    fetch: async (url) => {
+      trustCalls += 1;
+      const mint = new URL(String(url)).searchParams.get('query');
+      return Response.json([{
+        id: mint,
+        organicScore: 80,
+        isVerified: true,
+        audit: { mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
+      }]);
+    },
+  });
+  const ledgerApi = createMemoryLedger();
+  await ledgerApi.reset({
+    users: [{ id: 'user_1', privyUserId: 'did:privy:user_1' }],
+    wallets: [wallet],
+    bots: [wide],
+    ledgers: [{ botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' }],
+  });
+  const models = scriptedOpenRouter();
+  const transfer = transferDouble();
+  let swaps = 0;
+  const response = await postLoop(machine, {
+    openRouter: solDecide(models),
+    transferClient: transfer.client,
+    search: async () => [{ title: 'SOL', url: 'https://example.com/sol', snippet: 'blue chip' }],
+    lookupPrice,
+    trustLookup,
+    ledgerApi,
+    fetch: async (url) => {
+      swaps += 1;
+      const href = String(url);
+      assert.match(href, /lite-api\.jup\.ag\/swap\/v1\/quote/);
+      const params = new URL(href).searchParams;
+      assert.equal(params.get('inputMint'), SOL_MINT);
+      assert.equal(params.get('outputMint'), USDC_MINT);
+      assert.equal(params.get('amount'), '10000000');
+      return Response.json({ outAmount: '1000000' });
+    },
+  }, payload({ goal: TRADING_GOAL, bot: wide }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.done, true);
+  assert.equal(body.run.events.some(event => event.summary === 'owner-ask'), true);
+  assert.equal(body.run.events.some(event => String(event.summary).includes('stream-drop')), false);
+  assert.equal(body.run.checkpoints.research.read.positionCount, 1);
+  assert.equal(body.run.checkpoints.research.read.type, 'trading');
+  assert.equal(body.run.checkpoints.research.read.walletId, wallet.id);
+  assert.equal(body.run.checkpoints.research.read.approvalMode, 'fully-automatic');
+  assert.equal(body.run.checkpoints.research.read.cap.maxPerTransaction, '5000000');
+  assert.equal(hosts[0].includes('dexscreener'), true);
+  assert.equal(hosts[1].includes('jup.ag'), true);
+  assert.equal(trustCalls > 0, true);
+  assert.equal(body.run.checkpoints.decide.trust.score, '800');
+  assert.equal(body.run.checkpoints['trust-gate'].trust.state, 'allowed');
+  assert.equal(body.run.checkpoints.verify.decisionRecord.outcome, 'consensus');
+  assert.equal(body.run.checkpoints.approval.automatic, true);
+  assert.equal(swaps, 1);
+  const execute = body.run.checkpoints.execute;
+  assert.equal(execute.cluster, 'devnet');
+  assert.equal(execute.signature, 'sig_devnet_1');
+  assert.equal(execute.reserved, true);
+  assert.equal(execute.paper.broadcast, false);
+  assert.equal(execute.paper.mode, 'paper');
+  assert.equal(execute.paper.quantity, '1000000');
+  assert.equal(execute.paper.mint, USDC_MINT);
+  assert.equal(execute.paper.label, 'devnet execution, mainnet pricing');
+  assert.equal(execute.swapQuote.broadcast, false);
+  assert.equal(execute.swapQuote.label, 'devnet execution, mainnet pricing');
+  const memo = JSON.parse(body.run.checkpoints.memo.memo);
+  assert.equal(memo.r, body.run.checkpoints.memo.digest);
+  assert.equal(body.run.checkpoints.memo.attached, true);
+  const timeline = await machine.get('timeline');
+  assert.equal(timeline[0].kind, 'verify.settled');
+  assert.match(timeline[0].summary, /Trust 800/);
+  assert.match(timeline[0].summary, /devnet execution, mainnet pricing/);
+  const snap = await ledgerApi.snapshot();
+  assert.equal(snap.ledgers[0].reserved, '1000000');
+  assert.equal(snap.reservations.length, 1);
+  const again = await postLoop(machine, {
+    openRouter: models.openRouter,
+    transferClient: transfer.client,
+    lookupPrice,
+    trustLookup,
+    ledgerApi,
+  }, payload({ goal: TRADING_GOAL, bot: wide }));
+  assert.equal(again.status, 200);
+  assert.equal(transfer.calls.length, 1);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+
+  const lowMachine = new BotStateMachine();
+  const lowModels = scriptedOpenRouter();
+  const lowTransfer = transferDouble();
+  const low = await postLoop(lowMachine, {
+    openRouter: solDecide(lowModels),
+    transferClient: lowTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async (url) => {
+        const mint = new URL(String(url)).searchParams.get('query');
+        return Response.json([{ id: mint, organicScore: 10, isVerified: false }]);
+      },
+    }),
+  }, payload({
+    goal: TRADING_GOAL,
+    bot: wide,
+    ownerPermission: 'full',
+  }));
+  const lowBody = await low.json();
+  assert.equal(lowBody.run.pauseReason, 'trust-confirmation');
+  assert.equal(lowBody.run.checkpoints.execute, undefined);
+  assert.equal(lowTransfer.calls.length, 0);
+
+  const mismatchMachine = new BotStateMachine();
+  const mismatchModels = scriptedOpenRouter();
+  const mismatchTransfer = transferDouble();
+  let mismatches = 0;
+  const mismatched = await postLoop(mismatchMachine, {
+    openRouter: mismatchModels.openRouter,
+    transferClient: mismatchTransfer.client,
+    verifyFn: async () => {
+      mismatches += 1;
+      return { ...facts, price: '1' };
+    },
+  }, payload({ goal: TRADING_GOAL, bot: wide, ownerPermission: 'full' }));
+  const mismatchBody = await mismatched.json();
+  assert.equal(mismatches, 5);
+  assert.equal(mismatchBody.run.pauseReason, 'verify-mismatch');
+  assert.equal(mismatchBody.run.checkpoints.verify.outcome, 'manual-review');
+  assert.equal(mismatchBody.run.checkpoints.verify.attemptCount, 5);
+  assert.equal(mismatchBody.run.checkpoints.execute, undefined);
+  assert.equal(mismatchTransfer.calls.length, 0);
+  const mismatchAlerts = await mismatchMachine.get('alerts');
+  assert.equal(mismatchAlerts.some(event => event.kind === 'verify.mismatch'), true);
+
+  const lossMachine = new BotStateMachine();
+  const lossModels = scriptedOpenRouter();
+  const lossTransfer = transferDouble();
+  const lossBot = {
+    ...wide,
+    cap: { ...wide.cap, maxLoss: '10' },
+  };
+  const loss = await postLoop(lossMachine, {
+    openRouter: lossModels.openRouter,
+    transferClient: lossTransfer.client,
+  }, payload({
+    goal: TRADING_GOAL,
+    bot: lossBot,
+    ledger: { ...ledger, realizedLoss: '10' },
+    ownerPermission: 'full',
+    approval: { action: 'approve', ownerId: 'user_1' },
+  }));
+  const lossBody = await loss.json();
+  assert.equal(lossBody.run.pauseReason, 'max-loss-reached');
+  assert.equal(lossBody.run.checkpoints.execute, undefined);
+  assert.equal(lossTransfer.calls.length, 0);
+  const lossAlerts = await lossMachine.get('alerts');
+  assert.equal(lossAlerts.some(event => event.kind === 'bot.paused' && event.summary.includes('Max loss')), true);
 });
