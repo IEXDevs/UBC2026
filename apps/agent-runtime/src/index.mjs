@@ -228,6 +228,11 @@ async function dispatch(request, env, rawEnv = env) {
           SUPABASE_URL: flag('SUPABASE_URL'),
           SUPABASE_ANON_KEY: flag('SUPABASE_ANON_KEY'),
           SUPABASE_SERVICE_ROLE_KEY: flag('SUPABASE_SERVICE_ROLE_KEY'),
+          META_MODEL_API_KEY: flag('META_MODEL_API_KEY'),
+          OPENROUTER_API_KEY: flag('OPENROUTER_API_KEY'),
+          ELEVENLABS_API_KEY: flag('ELEVENLABS_API_KEY'),
+          ELEVENLABS_AGENT_ID: flag('ELEVENLABS_AGENT_ID'),
+          ELEVENLABS_WEBHOOK_SECRET: flag('ELEVENLABS_WEBHOOK_SECRET'),
         },
       });
     }

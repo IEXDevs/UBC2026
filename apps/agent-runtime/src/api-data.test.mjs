@@ -1119,6 +1119,20 @@ test('health reports signing and supabase readiness flags', async () => {
   assert.equal(body.signing, true);
   assert.equal(body.supabase, true);
   assert.equal(body.secrets.SUPABASE_URL.set, true);
+  assert.equal(body.secrets.META_MODEL_API_KEY.set, false);
+  assert.equal(body.secrets.ELEVENLABS_WEBHOOK_SECRET.set, false);
+
+  const voiceReady = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
+    META_MODEL_API_KEY: 'LLM_test',
+    ELEVENLABS_API_KEY: 'el_test',
+    ELEVENLABS_AGENT_ID: 'agent_test',
+    ELEVENLABS_WEBHOOK_SECRET: 'whsec_test',
+  }));
+  const voiceBody = await voiceReady.json();
+  assert.equal(voiceBody.secrets.META_MODEL_API_KEY.set, true);
+  assert.equal(voiceBody.secrets.ELEVENLABS_API_KEY.set, true);
+  assert.equal(voiceBody.secrets.ELEVENLABS_AGENT_ID.set, true);
+  assert.equal(voiceBody.secrets.ELEVENLABS_WEBHOOK_SECRET.set, true);
 });
 
 /**
