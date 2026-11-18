@@ -3,7 +3,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createDeskLock, readDeskGrant, readDeskLock, unlockDesk } from './desk-lock.mjs';
 import {
+  acceptEnteredPassword,
   openDeskGrant,
   readDeskLockState,
   registerDeskVerifier,
@@ -141,4 +143,77 @@ test('openDeskGrant posts password once and returns grant without echoing it', a
     new Response(JSON.stringify({ until: 1 }), { status: 200 })
   ), { ownerId: 'did:privy:u1', password: 'x' });
   assert.deepEqual(missingGrant, { ok: false, error: 'desk_locked' });
+});
+
+function memoryStorage() {
+  const values = new Map();
+  return {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, String(value)); },
+    removeItem(key) { values.delete(key); },
+  };
+}
+
+/**
+ * Achieves: Enter Password replaces a different account verifier and stores a grant.
+ * Fails when: a local match leaves the old verifier, a wrong password replaces it, or the grant is missing.
+ * Oracle: replace:true lock body has no password; session grant is readable for the next spend.
+ * Side effects: in-memory storage and stub fetch. PBKDF2 only.
+ * Gaps: the React dialog is not mounted.
+ */
+test('Enter Password replaces the stored account verifier and issues a grant', async () => {
+  const ownerId = 'did:privy:u1';
+  const local = memoryStorage();
+  const session = memoryStorage();
+  const browserCopy = await createDeskLock('fresh horse');
+  let account = await createDeskLock('older horse');
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (String(url).includes('/desk/unlock')) {
+      const matches = await unlockDesk(body.password, account);
+      if (!matches) return new Response(JSON.stringify({ error: 'desk_locked' }), { status: 401 });
+      return new Response(JSON.stringify({ grant: 'cd'.repeat(32), until: Date.now() + 60_000 }), { status: 200 });
+    }
+    if (String(url).includes('/desk/lock')) {
+      account = { v: 1, salt: body.salt, hash: body.hash, iterations: body.iterations };
+      return new Response(JSON.stringify({ ok: true, replaced: true }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+  };
+
+  const refused = await acceptEnteredPassword({
+    fetchImpl,
+    ownerId,
+    token: 'tok',
+    password: 'not the copy',
+    record: browserCopy,
+    localStorage: local,
+    sessionStorage: session,
+  });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, 'wrong_password');
+  assert.equal(calls.length, 0);
+
+  const accepted = await acceptEnteredPassword({
+    fetchImpl,
+    ownerId,
+    token: 'tok',
+    password: 'fresh horse',
+    record: browserCopy,
+    localStorage: local,
+    sessionStorage: session,
+  });
+  assert.equal(accepted.ok, true);
+  const lockCall = calls.find(call => String(call.url).includes('/desk/lock'));
+  assert.equal(lockCall.body.replace, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(lockCall.body, 'password'), false);
+  assert.equal(await unlockDesk('fresh horse', account), true);
+  assert.equal(await unlockDesk('older horse', account), false);
+  const stored = readDeskLock(local, ownerId);
+  assert.equal(await unlockDesk('fresh horse', stored), true);
+  const grant = readDeskGrant(session, ownerId, Date.now());
+  assert.equal(grant.grant, 'cd'.repeat(32));
+  assert.equal(JSON.stringify(calls).includes('cd'.repeat(32)), false);
 });
