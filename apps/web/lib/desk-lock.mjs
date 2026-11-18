@@ -4,7 +4,9 @@
  * expiry, so a refresh stays open until that time, then the wallet locks.
  */
 
-export const DESK_LOCK_ITERATIONS = 120000;
+// Workers reject PBKDF2 above 100000 iterations. A higher count saves, then
+// every unlock throws and the desk says the password was not accepted.
+export const DESK_LOCK_ITERATIONS = 100000;
 export const DESK_LOCK_IDLE_MS = 30 * 60 * 1000;
 export const DESK_LOCK_MIN_LENGTH = 8;
 

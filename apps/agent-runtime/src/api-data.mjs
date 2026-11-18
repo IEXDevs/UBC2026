@@ -1546,11 +1546,19 @@ export async function handleApiData(request, env, matched) {
     }
     const row = existing.rows[0];
     if (!row) return json({ error: 'desk_lock_missing' }, 404);
-    const matches = await passwordMatches(password, {
-      salt: row.salt,
-      hash: row.hash,
-      iterations: row.iterations,
-    });
+    let matches = false;
+    try {
+      matches = await passwordMatches(password, {
+        salt: row.salt,
+        hash: row.hash,
+        iterations: row.iterations,
+      });
+    } catch (error) {
+      if (error?.code === 'password_check_unsupported') {
+        return json({ error: 'password_check_unsupported' }, 409);
+      }
+      throw error;
+    }
     if (!matches) return json({ error: 'desk_locked' }, 401);
     const grant = newDeskGrant();
     const grantHash = await sha256Hex(grant);

@@ -42,24 +42,44 @@ export function parseDeskVerifier(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   const names = Object.keys(body).map(key => key.replace(/[^A-Za-z0-9]/g, '').toLowerCase());
   if (names.some(name => SECRET_FIELDS.includes(name))) return null;
-  const iterations = body.iterations;
+  const iterations = typeof body.iterations === 'string' && /^[1-9][0-9]{0,6}$/.test(body.iterations)
+    ? Number(body.iterations)
+    : body.iterations;
   if (!Number.isSafeInteger(iterations) || iterations < 10000 || iterations > 2000000) return null;
   if (typeof body.salt !== 'string' || !HEX_32.test(body.salt)) return null;
   if (typeof body.hash !== 'string' || !HEX_64.test(body.hash)) return null;
   return { iterations, salt: body.salt, hash: body.hash };
 }
 
+/** Deployed Workers throw above this. Do not derive a higher count. */
+export const WORKER_PBKDF2_MAX = 100000;
+
 export async function passwordMatches(password, verifier) {
   const parsed = parseDeskVerifier(verifier);
   const clean = typeof password === 'string' ? password.normalize('NFC') : '';
   if (!parsed || clean.length < 8 || clean.length > 128) return false;
+  if (parsed.iterations > WORKER_PBKDF2_MAX) {
+    const error = new Error('password_check_unsupported');
+    error.code = 'password_check_unsupported';
+    throw error;
+  }
   const key = await crypto.subtle.importKey('raw', textEncoder.encode(clean), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({
-    name: 'PBKDF2',
-    salt: hexToBytes(parsed.salt),
-    iterations: parsed.iterations,
-    hash: 'SHA-256',
-  }, key, 256);
+  let bits;
+  try {
+    bits = await crypto.subtle.deriveBits({
+      name: 'PBKDF2',
+      salt: hexToBytes(parsed.salt),
+      iterations: parsed.iterations,
+      hash: 'SHA-256',
+    }, key, 256);
+  } catch (error) {
+    if (error?.name === 'NotSupportedError') {
+      const unsupported = new Error('password_check_unsupported');
+      unsupported.code = 'password_check_unsupported';
+      throw unsupported;
+    }
+    throw error;
+  }
   return sameBytes(new Uint8Array(bits), hexToBytes(parsed.hash));
 }
 
