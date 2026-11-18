@@ -336,6 +336,7 @@ export async function sendBotChat({
   shellBalanceLabel = null,
   fileCatalog = null,
   accessToken = '',
+  deskGrant = '',
   runtimeBase = runtimeBaseUrl(),
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
@@ -357,6 +358,7 @@ export async function sendBotChat({
       .filter(line => line.text.trim())
       .slice(-400)
     : [];
+  const grant = typeof deskGrant === 'string' && /^[0-9a-f]{64}$/.test(deskGrant) ? deskGrant : '';
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -366,6 +368,7 @@ export async function sendBotChat({
         ...(typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000
           ? { authorization: `Bearer ${accessToken.trim()}` }
           : {}),
+        ...(grant ? { 'x-desk-grant': grant } : {}),
       },
       body: JSON.stringify({
         message: text,

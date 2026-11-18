@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
+import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { sha256Hex } from './desk-grant.mjs';
 import worker from './index.mjs';
 import { handleVoiceRequest } from './voice.mjs';
 
@@ -298,4 +301,166 @@ test('spend route rejects missing owner and invalid bodies', async () => {
   const invalid = await worker.fetch(spendRequest({ nope: true }), spendEnv());
   assert.equal(invalid.status, 400);
   assert.equal((await invalid.json()).error, 'invalid_spend');
+});
+
+function lockedDeskEnv(extra = {}, grantHash = 'ab'.repeat(32)) {
+  return spendEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.includes('desk_locks') && href.includes('grant_hash')) {
+        return Response.json([{
+          grant_hash: grantHash,
+          grant_until: new Date(NOW + 60_000).toISOString(),
+        }]);
+      }
+      return Response.json([]);
+    },
+    ...extra,
+  });
+}
+
+/**
+ * Achieves: a missing grant cannot finish a spend, and a valid grant still runs every gate before devnet sign.
+ * Fails when: a bare owner signs, a valid grant skips trust or reserve, or max loss signs.
+ * Oracle: no grant stays unsigned after trust and approval; 1000000 with the grant signs once.
+ * Side effects: in-memory ledger and mocked desk row. The grant value is a test hash, not a password.
+ * Gaps: live Supabase and Privy are not called.
+ */
+test('a locked desk does not answer before the spend gates', async () => {
+  const trading = {
+    ...bot,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '50000000', maxPerTransaction: '5000000' },
+  };
+  const ledgerApi = createMemoryLedger();
+  await ledgerApi.reset({
+    users: [{ id: 'user_1', privyUserId: 'did:privy:user_1' }],
+    wallets: [wallet],
+    bots: [trading],
+    ledgers: [{ botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' }],
+  });
+  let reserves = 0;
+  const counting = {
+    reserveBudget: async (input) => {
+      reserves += 1;
+      return ledgerApi.reserveBudget(input);
+    },
+  };
+  let signed = 0;
+  const client = {
+    async getDevnetBlockhash() {
+      return { cluster: 'devnet', blockhash: DESTINATION };
+    },
+    async signAndBroadcastDevnet() {
+      signed += 1;
+      return { cluster: 'devnet', signature: 'sig_locked_desk' };
+    },
+  };
+  const body = {
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'buy',
+    amount: '1000000',
+    destination: DESTINATION,
+    idempotencyKey: 'spend_once',
+  };
+  const bare = spendRequest(body);
+  assert.equal(bare.headers.get('x-desk-grant'), null);
+  const held = await worker.fetch(bare, lockedDeskEnv({
+    transferClient: client,
+    ledgerApi: counting,
+    loadSpendContext: async () => ({ bot: trading, wallet, ledger }),
+  }));
+  const heldBody = await held.json();
+  assert.equal(held.status, 403);
+  assert.equal(heldBody.error, 'desk_locked');
+  assert.equal(heldBody.signed, false);
+  assert.equal(heldBody.signature, undefined);
+  assert.equal(heldBody.steps.includes('trust-gate'), true);
+  assert.equal(heldBody.steps.includes('verify-consensus'), true);
+  assert.equal(heldBody.steps.includes('approval-mode'), true);
+  assert.equal(heldBody.steps.includes('sign'), false);
+  assert.equal(heldBody.steps.includes('reserve'), false);
+  assert.equal(reserves, 0);
+  assert.equal(signed, 0);
+
+  const grant = 'cd'.repeat(32);
+  const granted = await worker.fetch(spendRequest(body, { 'x-desk-grant': grant }), lockedDeskEnv({
+    transferClient: client,
+    ledgerApi: counting,
+    loadSpendContext: async () => ({ bot: trading, wallet, ledger }),
+  }, await sha256Hex(grant)));
+  const passed = await granted.json();
+  assert.equal(granted.status, 200);
+  assert.equal(passed.error, undefined);
+  assert.equal(passed.signed, true);
+  assert.equal(passed.signature, 'sig_locked_desk');
+  assert.equal(passed.state, 'signed');
+  assert.deepEqual(passed.steps, [
+    'trust-gate',
+    'verify-consensus',
+    'wallet-freeze',
+    'bot-policy',
+    'approval-mode',
+    'reserve',
+    'sign',
+  ]);
+  assert.equal(reserves, 1);
+  assert.equal(signed, 1);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+  assert.equal(JSON.stringify(passed).includes(grant), false);
+
+  const low = await worker.fetch(spendRequest(body), lockedDeskEnv({
+    spendTrustScore: '100',
+    transferClient: client,
+    loadSpendContext: async () => ({ bot: trading, wallet, ledger }),
+  }));
+  const lowBody = await low.json();
+  assert.equal(low.status, 409);
+  assert.equal(lowBody.error, undefined);
+  assert.equal(lowBody.state, 'trust-confirmation-required');
+  assert.equal(lowBody.signed, false);
+  assert.equal(lowBody.steps[0], 'trust-gate');
+
+  let checks = 0;
+  const mismatched = await worker.fetch(spendRequest(body), lockedDeskEnv({
+    transferClient: client,
+    loadSpendContext: async () => ({ bot: trading, wallet, ledger }),
+    spendVerifyFn: async () => {
+      checks += 1;
+      return {
+        asset: 'USDC',
+        mint: DEVNET_USDC_MINT,
+        cluster: 'devnet',
+        price: '1000000',
+        amount: '1',
+        trustScore: '800',
+        reasonSummary: 'disagree',
+      };
+    },
+  }));
+  const mismatchBody = await mismatched.json();
+  assert.equal(checks, 5);
+  assert.equal(mismatchBody.state, 'verify-mismatch');
+  assert.equal(mismatchBody.signed, false);
+  assert.equal(mismatchBody.error, undefined);
+  assert.deepEqual(mismatchBody.steps, ['trust-gate', 'verify-consensus']);
+
+  const lossBot = { ...trading, cap: { ...trading.cap, maxLoss: '10' } };
+  const loss = await worker.fetch(spendRequest({ ...body, permission: 'full', confirmed: true }), lockedDeskEnv({
+    transferClient: client,
+    loadSpendContext: async () => ({
+      bot: lossBot,
+      wallet,
+      ledger: { ...ledger, realizedLoss: '10' },
+    }),
+  }));
+  const lossBody = await loss.json();
+  assert.equal(lossBody.state, 'blocked');
+  assert.equal(lossBody.reason, 'max-loss-reached');
+  assert.equal(lossBody.signed, false);
+  assert.equal(lossBody.error, undefined);
+  assert.equal(signed, 1);
 });

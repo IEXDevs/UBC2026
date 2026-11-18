@@ -158,6 +158,9 @@ test('position manager stops at max loss and accounting asset must match', () =>
   const manager = { ...bot, type: 'position-management', cap: { mode: 'limited', asset: 'USDC', maxLoss: '10' } };
   assert.equal(evaluateProposal(manager, p, { ...ledger, realizedLoss: '10' }, 1000).reason, 'max-loss-reached');
   assert.equal(evaluateProposal(bot, { ...p, asset: 'SOL' }, ledger, 1000).reason, 'accounting-asset-mismatch');
+  const trader = { ...bot, cap: { ...bot.cap, maxLoss: '10' } };
+  assert.equal(evaluateProposal(trader, p, { ...ledger, realizedLoss: '10' }, 1000).reason, 'max-loss-reached');
+  assert.equal(evaluateProposal(trader, p, { ...ledger, realizedLoss: '9' }, 1000).reason, undefined);
 });
 
 /**

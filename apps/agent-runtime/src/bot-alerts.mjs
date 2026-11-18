@@ -159,6 +159,58 @@ export async function rememberBotAlert(env, storage, input, fetcher = env?.fetch
   return event;
 }
 
+/**
+ * Timeline row for a finished decision memo.
+ * The memo hash stays on the run. This event records that it was written.
+ */
+export async function rememberDecisionMemo(env, storage, input, fetcher = env?.fetch ?? fetch) {
+  const digest = typeof input?.digest === 'string' && /^[a-f0-9]{64}$/.test(input.digest) ? input.digest : '';
+  const trust = typeof input?.trustScore === 'string' && /^(0|[1-9][0-9]{0,3})$/.test(input.trustScore)
+    ? input.trustScore
+    : '';
+  const approval = typeof input?.approval === 'string' && input.approval.length <= 32 ? input.approval : 'recorded';
+  const summary = [
+    'Decision memo recorded.',
+    trust ? `Trust ${trust}.` : '',
+    'Verifier consensus.',
+    `Approval ${approval}.`,
+    'devnet execution, mainnet pricing.',
+  ].filter(Boolean).join(' ').slice(0, 500);
+  const rawId = `evt_memo_${input?.runId || input?.at || 'run'}`;
+  const id = rawId.replace(/[^a-zA-Z0-9:_.-]/g, '_').slice(0, 256);
+  let event;
+  try {
+    event = validateTimelineEvent({
+      id,
+      botId: input?.botId,
+      ownerId: input?.ownerId,
+      kind: 'verify.settled',
+      summary,
+      at: input?.at,
+      prevHash: digest || null,
+    });
+  } catch {
+    return null;
+  }
+  if (storage && typeof storage.get === 'function' && typeof storage.put === 'function') {
+    try {
+      const prior = await storage.get('timeline');
+      const list = Array.isArray(prior) ? prior : [];
+      if (!list.some(row => row && row.id === event.id)) {
+        await storage.put('timeline', [...list, event].slice(-100));
+      }
+    } catch {
+      /* The timeline row can still land. */
+    }
+  }
+  try {
+    await writeTimeline(env, event, fetcher);
+  } catch {
+    /* Offline tests have no database. The bot object holds the event. */
+  }
+  return event;
+}
+
 export async function publishBotAlert(env, input, fetcher = env?.fetch ?? fetch) {
   const event = await rememberBotAlert(env, null, input, fetcher);
   if (!event || !env?.BOT || typeof env.BOT.idFromName !== 'function' || typeof env.BOT.get !== 'function') {

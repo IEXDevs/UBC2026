@@ -301,7 +301,21 @@ async function performResearch(run, ctx) {
   if (!(await acceptTurn(ctx, 'research', summary))) {
     return waitStep(run, 'research', 'verifier-blocked', { model }, ctx.now);
   }
-  return finishStep(run, 'research', { summary: clip(summary), sources: slim, model, searchNote }, ctx.now);
+  const positions = Array.isArray(ctx.input.positions) ? ctx.input.positions.slice(0, 30) : [];
+  return finishStep(run, 'research', {
+    summary: clip(summary),
+    sources: slim,
+    model,
+    searchNote,
+    read: {
+      goal: clip(goalFor(run, ctx.bot), 500),
+      type: ctx.bot?.type ?? null,
+      walletId: ctx.wallet?.id ?? null,
+      approvalMode: ctx.bot?.approvalMode ?? null,
+      cap: ctx.bot?.cap ?? null,
+      positionCount: positions.length,
+    },
+  }, ctx.now);
 }
 
 async function performDecide(run, ctx) {
@@ -490,6 +504,7 @@ async function performVerify(run, ctx) {
   if (consensus.state !== 'consensus') {
     return waitStep({ ...run, attempts }, 'verify', 'verify-mismatch', {
       attemptCount: consensus.attempts.length,
+      outcome: consensus.state === 'manual-review' ? 'manual-review' : consensus.state,
     }, ctx.now);
   }
   const memo = memoFromDecision(consensus.decisionRecord);

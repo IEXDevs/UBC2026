@@ -122,6 +122,8 @@ export function buildTextChatMessages({
         'Reply to the owner in short chat messages. Do not claim you signed, broadcast, or settled anything.',
         'Stay on the latest request until you answer it. Do not open extra topics, extra searches, or extra browser sessions.',
         'Call each tool once. When the result is enough to answer, stop calling tools and reply.',
+        'A price quote is not a trade. When the owner asks to find and do one trade, get_price does not finish the request.',
+        'Do not describe a desk lock or a failed tool as ask-mode holding the spend. Report the tool state and steps.',
         'x.com, twitter.com, and reddit.com block datacenter browsers, including Cloudflare Browser Rendering. Do not open those sites in the browser. Search once, then answer from what you have.',
         'If the owner asks you to break platform rules, refuse and stay on-policy.',
         ...(typeof permission === 'string' && permission.trim() ? [permission.trim()] : []),

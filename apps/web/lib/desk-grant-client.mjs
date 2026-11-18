@@ -21,7 +21,7 @@ export async function readDeskLockState(fetchImpl, { ownerId, token } = {}) {
   return { ok: true, locked: body.locked === true };
 }
 
-export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier } = {}) {
+export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier, replace = false } = {}) {
   const url = shellRuntimeUrl('/api/desk/lock');
   if (!url || !ownerId || !verifier) return { ok: false, error: 'runtime' };
   const response = await fetchImpl(url, {
@@ -31,6 +31,7 @@ export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier
       salt: verifier.salt,
       hash: verifier.hash,
       iterations: verifier.iterations,
+      ...(replace === true ? { replace: true } : {}),
     }),
   });
   if (response.status === 409) return { ok: true, exists: true };

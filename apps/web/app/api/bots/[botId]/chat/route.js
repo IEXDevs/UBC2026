@@ -9,6 +9,7 @@ import { fetchAgentRuntime } from '../../../../../lib/runtime-fetch.mjs';
 import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mjs';
 import { parsePermission, permissionInstruction, toolAccessKind } from '../../../../../lib/spend-permission.mjs';
 import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
+import { ensureOwnerTradeLoop } from '../../../../../lib/owner-trade.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -82,6 +83,9 @@ export async function POST(request, context) {
     shellBalanceLabel: typeof body.shellBalanceLabel === 'string' ? body.shellBalanceLabel : null,
     accessToken,
     ownerMessage: message,
+    deskGrant: /^[0-9a-f]{64}$/.test(request.headers.get('x-desk-grant') || '')
+      ? request.headers.get('x-desk-grant')
+      : '',
     fetcher: async (url, init) => {
       try {
         return await fetchAgentRuntime(url, init);
@@ -126,6 +130,14 @@ export async function POST(request, context) {
         return serializeToolResult(await invokeRaw(name, next));
       },
     });
+    const trade = await ensureOwnerTradeLoop({
+      message,
+      goal: typeof body.goal === 'string' ? body.goal : '',
+      permission: permissionMode,
+      activity: reply.activity,
+      invoke: invokeRaw,
+    });
+    const tradeLoop = trade?.loop && typeof trade.loop === 'object' ? trade.loop : null;
     return Response.json(
       {
         ok: true,
@@ -137,6 +149,15 @@ export async function POST(request, context) {
         toolRounds: reply.toolRounds ?? 0,
         ...(Array.isArray(reply.activity) && reply.activity.length > 0 ? { activity: reply.activity } : {}),
         ...(reply.usage ? { usage: reply.usage } : {}),
+        ...(tradeLoop ? {
+          trade: {
+            ok: tradeLoop.ok === true && tradeLoop.error == null,
+            done: tradeLoop.done === true,
+            waiting: tradeLoop.waiting === true,
+            pauseReason: tradeLoop.run?.pauseReason || tradeLoop.error || null,
+            signed: tradeLoop.run?.checkpoints?.execute?.executed === true,
+          },
+        } : {}),
       },
       { headers: { 'Cache-Control': 'no-store' } },
     );
