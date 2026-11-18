@@ -12,13 +12,11 @@ import { createScrape, createSearch } from '@ubc2026/browser-search';
 import {
   DASHBOARD_TOOLS,
   PRICE_TOOLS,
-  SHARED_AGENT_TOOLS,
   VOICE_BROWSER_ALIASES,
   VOICE_RESEARCH_WEBHOOKS,
   parseAwaySince,
   sharedToolsInstruction,
   spokenAwayBriefing,
-  toOpenAiTools,
 } from '@ubc2026/agent-tools';
 import { buildTextChatMessages } from '../../web/lib/text-chat.mjs';
 import { permissionInstruction } from '../../web/lib/spend-permission.mjs';
@@ -208,16 +206,148 @@ export async function provisionVoiceAgent({ env = {}, origin, fetcher = fetch } 
   return { ok: Boolean(agentId), error: agentId ? undefined : 'elevenlabs_invalid_response', agentId, network: true };
 }
 
+/**
+ * Push the live Worker URLs + webhook secret into the existing ElevenLabs agent.
+ * Without this, custom LLM calls often 401 (unsubstituted {{secret}}) and voice
+ * connects with no replies.
+ */
+export async function syncVoiceAgent({ env = {}, origin, fetcher = fetch } = {}) {
+  const apiKey = typeof env.ELEVENLABS_API_KEY === 'string' ? env.ELEVENLABS_API_KEY.trim() : '';
+  const agentId = typeof env.ELEVENLABS_AGENT_ID === 'string' ? env.ELEVENLABS_AGENT_ID.trim() : '';
+  const webhookSecret = typeof env.ELEVENLABS_WEBHOOK_SECRET === 'string'
+    ? env.ELEVENLABS_WEBHOOK_SECRET.trim()
+    : '';
+  if (!apiKey || !agentId) return { ok: false, error: 'elevenlabs_not_configured', network: false };
+  if (!webhookSecret) return { ok: false, error: 'elevenlabs_webhook_not_configured', network: false };
+
+  const headers = {
+    'xi-api-key': apiKey,
+    'content-type': 'application/json',
+    accept: 'application/json',
+  };
+
+  let secretId = null;
+  try {
+    const listed = await fetcher('https://api.elevenlabs.io/v1/convai/secrets', {
+      method: 'GET',
+      headers: { 'xi-api-key': apiKey, accept: 'application/json' },
+    });
+    const listedBody = listed?.ok ? await listed.json().catch(() => ({})) : {};
+    const rows = Array.isArray(listedBody?.secrets)
+      ? listedBody.secrets
+      : (Array.isArray(listedBody) ? listedBody : []);
+    const existing = rows.find((row) => row?.name === 'ELEVENLABS_WEBHOOK_SECRET' && typeof row?.secret_id === 'string');
+    if (existing) secretId = existing.secret_id;
+  } catch {
+    /* create below */
+  }
+
+  if (!secretId) {
+    try {
+      const created = await fetcher('https://api.elevenlabs.io/v1/convai/secrets', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'new',
+          name: 'ELEVENLABS_WEBHOOK_SECRET',
+          value: webhookSecret,
+        }),
+      });
+      const createdBody = created?.ok ? await created.json().catch(() => ({})) : {};
+      secretId = typeof createdBody?.secret_id === 'string' ? createdBody.secret_id : null;
+      if (!secretId) {
+        return {
+          ok: false,
+          error: 'elevenlabs_secret_failed',
+          status: created?.status ?? 502,
+          network: true,
+        };
+      }
+    } catch {
+      return { ok: false, error: 'elevenlabs_unavailable', network: true };
+    }
+  }
+
+  const base = String(origin ?? '').replace(/\/$/, '');
+  const modelId = grokVoiceModel(env);
+  const secretRef = { secret_id: secretId };
+  const patchBody = {
+    conversation_config: {
+      agent: {
+        prompt: {
+          prompt: VOICE_SPEAK_PROMPT,
+          llm: 'custom-llm',
+          custom_llm: {
+            url: `${base}/voice/llm/chat/completions`,
+            model_id: modelId,
+            api_type: 'chat_completions',
+            // ElevenLabs sends this as Authorization: Bearer <value>.
+            api_key: secretRef,
+            request_headers: {
+              [WEBHOOK_HEADER]: secretRef,
+            },
+          },
+          tools: VOICE_TOOLS.map(item => ({
+            type: 'webhook',
+            name: item.name,
+            description: item.description,
+            response_timeout_secs: 20,
+            api_schema: {
+              url: `${base}/voice/tools/${item.name}`,
+              method: 'POST',
+              request_headers: {
+                [WEBHOOK_HEADER]: secretRef,
+                'x-owner-id': '{{owner_id}}',
+                'x-spend-permission': '{{spend_permission}}',
+              },
+              request_body_schema: {
+                type: 'object',
+                properties: { ...item.properties },
+                required: [...item.required],
+              },
+            },
+          })),
+        },
+      },
+    },
+  };
+
+  let response;
+  try {
+    response = await fetcher(`https://api.elevenlabs.io/v1/convai/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(patchBody),
+    });
+  } catch {
+    return { ok: false, error: 'elevenlabs_unavailable', network: true };
+  }
+  if (!response?.ok) {
+    return { ok: false, error: 'elevenlabs_sync_failed', status: response?.status ?? 502, network: true };
+  }
+  return {
+    ok: true,
+    agentId,
+    secretId,
+    customLlmUrl: `${base}/voice/llm/chat/completions`,
+    network: true,
+  };
+}
+
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
 }
 
 function presentedSecret(request) {
   const header = request.headers.get(WEBHOOK_HEADER);
-  if (typeof header === 'string' && header !== '') return header;
+  if (typeof header === 'string' && header !== '' && !header.includes('{{')) return header;
   const authorization = request.headers.get('authorization') ?? '';
   const match = /^Bearer\s+(\S+)$/i.exec(authorization);
-  return match ? match[1] : '';
+  if (match && !match[1].includes('{{')) return match[1];
+  // Custom LLM "API key" secrets sometimes arrive as xi-api-key.
+  const xi = request.headers.get('xi-api-key');
+  if (typeof xi === 'string' && xi !== '' && !xi.includes('{{')) return xi;
+  return '';
 }
 
 function secretMatches(expected, presented) {
@@ -668,6 +798,17 @@ function validateParameters(toolDef, parameters) {
 export async function handleVoiceRequest(request, env = {}, { fetchApi, fetcher = fetch } = {}) {
   const url = new URL(request.url);
   if (url.pathname === '/voice/agent' && request.method === 'GET') return json(voiceAgentSpec(request, env));
+  if (url.pathname === '/voice/agent/sync' && request.method === 'POST') {
+    const denied = authorize(request, env);
+    if (denied) return denied;
+    const result = await syncVoiceAgent({
+      env,
+      origin: url.origin,
+      fetcher,
+    });
+    const status = result.ok ? 200 : (result.status || (result.network ? 502 : 503));
+    return json(result, status);
+  }
   if (url.pathname === '/voice/llm/chat/completions' && request.method === 'POST') {
     return handleCustomLlm(request, env, fetcher);
   }
@@ -887,11 +1028,18 @@ async function handleCustomLlm(request, env, fetcher) {
   };
   if (provider !== 'meta') payload.temperature = 0.5;
   else payload.reasoning_effort = 'minimal';
-  payload.tools = toOpenAiTools(SHARED_AGENT_TOOLS);
-  payload.tool_choice = 'auto';
-  let response;
-  try {
-    response = await fetcher(voiceChatCompletionsUrl(env), {
+  // Prefer tool schemas ElevenLabs already attached. Forcing our full catalog
+  // into Meta Muse often yields tool_call streams with no spoken content, so
+  // the call connects and then stays silent.
+  const elTools = Array.isArray(incoming.tools) && incoming.tools.length > 0
+    ? incoming.tools.slice(0, 32)
+    : null;
+  if (elTools) {
+    payload.tools = elTools;
+    payload.tool_choice = 'auto';
+  }
+  async function callModel(body) {
+    return fetcher(voiceChatCompletionsUrl(env), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -899,8 +1047,18 @@ async function handleCustomLlm(request, env, fetcher) {
         'content-type': 'application/json',
         'x-title': 'Maelstrom',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
+  }
+  let response;
+  try {
+    response = await callModel(payload);
+    if (!response?.ok && payload.tools) {
+      const spokenOnly = { ...payload };
+      delete spokenOnly.tools;
+      delete spokenOnly.tool_choice;
+      response = await callModel(spokenOnly);
+    }
   } catch {
     return json({ error: 'openrouter_unavailable' }, 502);
   }

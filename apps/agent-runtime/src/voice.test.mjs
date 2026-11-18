@@ -12,6 +12,7 @@ import {
   handleVoiceRequest,
   ownerPermissionNote,
   provisionVoiceAgent,
+  syncVoiceAgent,
   voiceDecisionMessages,
 } from './voice.mjs';
 import { eventsUrl } from '../../web/lib/bot-experience.mjs';
@@ -502,8 +503,23 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.match(calls[0].body.messages[0].content, /platform rules are locked/);
   assert.match(calls[0].body.messages[1].content, /You have the following tools/);
   assert.equal(calls[0].body.messages.some(item => /voice remote/.test(String(item.content))), false);
-  assert.equal(calls[0].body.tools.some(tool => tool.function.name === 'request_spend'), true);
-  assert.equal(calls[0].body.tools.some(tool => tool.function.name === 'web_search'), true);
+  // Speak-only by default when ElevenLabs did not attach tools on the request.
+  assert.equal(calls[0].body.tools, undefined);
+
+  calls.length = 0;
+  const withTools = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${SECRET}`,
+    },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [{ type: 'function', function: { name: 'web_search', parameters: { type: 'object' } } }],
+    }),
+  }), env({ OPENROUTER_API_KEY: OPENROUTER }), { fetcher });
+  assert.equal(withTools.status, 200);
+  assert.equal(calls[0].body.tools[0].function.name, 'web_search');
 
   calls.length = 0;
   const stream = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
@@ -572,6 +588,47 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
  * Side effects / state checked: fetch guard.
  * Gaps: none
  */
+test('syncVoiceAgent writes custom LLM URL and webhook secret into the agent', async () => {
+  const calls = [];
+  const result = await syncVoiceAgent({
+    env: {
+      ELEVENLABS_API_KEY: ELEVEN,
+      ELEVENLABS_AGENT_ID: 'agent_live',
+      ELEVENLABS_WEBHOOK_SECRET: SECRET,
+    },
+    origin: ORIGIN,
+    fetcher: async (url, init) => {
+      calls.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : null });
+      if (String(url).endsWith('/secrets') && init.method === 'GET') {
+        return Response.json({ secrets: [] });
+      }
+      if (String(url).endsWith('/secrets') && init.method === 'POST') {
+        return Response.json({ secret_id: 'sec_1' });
+      }
+      if (String(url).includes('/agents/agent_live')) {
+        return Response.json({ agent_id: 'agent_live' });
+      }
+      return new Response('nope', { status: 404 });
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.agentId, 'agent_live');
+  assert.equal(result.secretId, 'sec_1');
+  assert.equal(result.customLlmUrl, `${ORIGIN}/voice/llm/chat/completions`);
+  const patch = calls.find((call) => call.method === 'PATCH');
+  assert.equal(patch.body.conversation_config.agent.prompt.custom_llm.url, `${ORIGIN}/voice/llm/chat/completions`);
+  assert.deepEqual(patch.body.conversation_config.agent.prompt.custom_llm.api_key, { secret_id: 'sec_1' });
+  assert.deepEqual(
+    patch.body.conversation_config.agent.prompt.custom_llm.request_headers['x-elevenlabs-webhook-secret'],
+    { secret_id: 'sec_1' },
+  );
+
+  const denied = await handleVoiceRequest(new Request(`${ORIGIN}/voice/agent/sync`, {
+    method: 'POST',
+  }), env());
+  assert.equal(denied.status, 401);
+});
+
 test('provisioning the ElevenLabs agent does nothing without a key', async () => {
   let called = false;
   const skipped = await provisionVoiceAgent({

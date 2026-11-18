@@ -1,6 +1,7 @@
 /**
- * Start an ElevenLabs voice conversation, retrying without TTS overrides when
- * the agent portal has Voice ID / Speed overrides disabled.
+ * Start an ElevenLabs voice conversation.
+ * Prefer a plain session first — portal agents often reject TTS overrides and
+ * that used to kill the whole call before any audio.
  */
 
 export function isVoiceOverrideError(error) {
@@ -17,21 +18,16 @@ export async function startVoiceConversation(Conversation, options = {}) {
     throw new Error('voice_client_missing');
   }
   const { overrides, ...rest } = options;
-  if (!overrides || typeof overrides !== 'object') {
-    return Conversation.startSession(rest);
-  }
+  // Connect without overrides first so Voice ID / Speed portal gates cannot
+  // block the call. Optionally upgrade with overrides after connect.
+  const live = await Conversation.startSession(rest);
+  if (!overrides || typeof overrides !== 'object') return live;
   try {
-    return await Conversation.startSession({ ...rest, overrides });
-  } catch (error) {
-    // Always retry once without overrides: portal agents often mint tokens
-    // but reject client TTS overrides, which used to abort the whole call.
-    try {
-      return await Conversation.startSession(rest);
-    } catch (retryError) {
-      if (isVoiceOverrideError(error) && !isVoiceOverrideError(retryError)) {
-        throw retryError;
-      }
-      throw error;
+    if (typeof live?.setOverrides === 'function') {
+      await live.setOverrides(overrides);
     }
+  } catch {
+    /* keep the connected session; voice still works with agent defaults */
   }
+  return live;
 }
