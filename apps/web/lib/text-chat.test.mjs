@@ -342,6 +342,7 @@ test('an empty tool finish still returns an answer instead of stopping', async (
 test('the hidden verifier blocks a tool and a reply that it does not allow', async () => {
   const seen = [];
   let calls = 0;
+  const verifyRoles = [];
   const result = await completeTextChat({
     modelApiKey: META_KEY,
     message: 'search',
@@ -355,6 +356,8 @@ test('the hidden verifier blocks a tool and a reply that it does not allow', asy
     },
     fetcher: async (_url, options) => {
       if (isTurnVerify(options)) {
+        const body = JSON.parse(options.body);
+        verifyRoles.push(...body.messages.map(item => item.role));
         return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
       }
       calls += 1;
@@ -373,6 +376,22 @@ test('the hidden verifier blocks a tool and a reply that it does not allow', asy
     },
   });
   assert.deepEqual(seen, []);
+  assert.equal(result.text, 'That step did not pass the check.');
+  assert.ok(verifyRoles.includes('developer'));
+  assert.ok(verifyRoles.includes('user'));
+});
+
+test('verifier API failures fail closed instead of failing the chat', async () => {
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'hello',
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        return Response.json({ error: { message: '`messages` must contain at least one message with role `user` or `tool`' } }, { status: 400 });
+      }
+      return Response.json({ choices: [{ message: { content: 'Hello from the agent.' } }] });
+    },
+  });
   assert.equal(result.text, 'That step did not pass the check.');
 });
 
