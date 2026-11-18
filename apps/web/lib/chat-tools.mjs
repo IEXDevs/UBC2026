@@ -21,7 +21,7 @@ import {
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
 import { ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
-import { readAgentPriceQuote } from '@ubc2026/prices';
+import { normalizePriceMint, readAgentPriceQuote } from '@ubc2026/prices';
 import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
@@ -356,6 +356,7 @@ export function createChatToolInvoker({
   shellBalanceLabel = null,
   accessToken = '',
   ownerMessage = '',
+  priceFetch = null,
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
@@ -548,12 +549,26 @@ export function createChatToolInvoker({
     }
     try {
       if (name === 'get_price') {
-        const mint = typeof args.mint === 'string' ? args.mint.trim() : '';
+        const mint = normalizePriceMint(typeof args.mint === 'string' ? args.mint : '');
         const apiKey = typeof env.JUPITER_API_KEY === 'string' && env.JUPITER_API_KEY.trim()
           ? env.JUPITER_API_KEY.trim()
           : null;
-        const quote = await readAgentPriceQuote(mint, { fetcher, apiKey });
-        return { ok: true, quote };
+        const client = typeof priceFetch === 'function' ? priceFetch : fetcher;
+        if (typeof client !== 'function') {
+          return { error: 'client_missing', hint: 'The price client is not configured.' };
+        }
+        try {
+          const quote = await readAgentPriceQuote(mint, { fetcher: client, apiKey });
+          return { ok: true, quote };
+        } catch (error) {
+          const code = typeof error?.code === 'string' ? error.code : 'price_unavailable';
+          if (code === 'client_missing') return { error: code, hint: 'The price client is not configured.' };
+          if (code === 'invalid_mint') return { error: code, hint: 'That is not a Solana mint.' };
+          if (code === 'provider_failed' || code === 'provider_unavailable') {
+            return { error: code, hint: 'The price provider is down.' };
+          }
+          return { error: code };
+        }
       }
       if (name === 'web_search' || name === 'web_scrape') {
         return await local.invokeTool(name, args, identity);

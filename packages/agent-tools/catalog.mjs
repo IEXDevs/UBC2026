@@ -188,6 +188,7 @@ export function sharedToolsInstruction() {
     'Call break_loop only when the owner explicitly asks to break, stop, or cancel the loop. Do not break a loop on your own.',
     'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
     'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
+    'When the owner asks you to find and do one trade, call get_price for the mint, then start_task. get_price does not place the trade. start_task runs the existing loop. provider_failed means the price provider is down. client_missing means the price client is not configured. invalid_mint means the mint is not a Solana address.',
     'When the owner asks you to look something up: call web_search first, pick a real https result url, then web_scrape.',
     'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayBalanceLabel / holdings (whatever is non-zero on the address).',
     'Never claim you lack a browser while these tools are available.',

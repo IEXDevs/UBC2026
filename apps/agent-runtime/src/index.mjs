@@ -510,13 +510,13 @@ function deliverCheck(env, bot, details) {
         positions: payload.positions,
       }).catch(() => {});
     }
-    if (recorded.flag === 'max-loss' && payload.ownerId) {
+    if ((recorded.flag === 'max-loss' || recorded.flag === 'near-max-loss') && payload.ownerId) {
       await rememberBotAlert(env, null, {
-        alert: 'max-loss',
+        alert: recorded.flag === 'max-loss' ? 'max-loss' : 'near-max-loss',
         botId: bot.id,
         ownerId: payload.ownerId,
         at: payload.now,
-        scope: payload.now,
+        scope: recorded.flag === 'near-max-loss' ? 'near-max-loss' : payload.now,
       });
     }
     return delivered;

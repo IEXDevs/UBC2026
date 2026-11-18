@@ -22,6 +22,8 @@ const mint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 test('each bot alert stays inside EVENT_KINDS and names only that bot', () => {
   const cases = [
     ['max-loss', 'bot.paused'],
+    ['near-max-loss', 'run.checkpoint'],
+    ['price-down', 'run.checkpoint'],
     ['verify-mismatch', 'verify.mismatch'],
     ['unapproved-spend', 'approval.requested'],
   ];

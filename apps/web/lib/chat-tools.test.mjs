@@ -58,6 +58,64 @@ test('get_price returns a paper quote and does not sign', async () => {
 });
 
 /**
+ * Achieves: get_price for a UI-wrapped SOL mint uses the public price client, not the runtime fetcher.
+ * Fails when: the runtime fetcher is called, the mint is not unwrapped, or a 503 is not provider_failed.
+ * Oracle: DexScreener URL for the wrapped-SOL mint and PriceError codes.
+ * Side effects: injected fetchers only.
+ * Gaps: live DexScreener is not part of this test.
+ */
+test('get_price uses the public client for wrapped SOL and reports a real outage', async () => {
+  const mint = 'So11111111111111111111111111111111111111112';
+  let runtimeCalls = 0;
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: {},
+    fetcher: async () => {
+      runtimeCalls += 1;
+      return new Response('worker', { status: 404 });
+    },
+    priceFetch: async (url) => {
+      assert.equal(String(url), `https://api.dexscreener.com/tokens/v1/solana/${mint}`);
+      return Response.json([{
+        baseToken: { address: mint },
+        priceUsd: '74.73',
+        liquidity: { usd: 9 },
+        pairAddress: 'pair',
+      }]);
+    },
+  });
+  const result = await invoke('get_price', { mint: `SOL (${mint})` });
+  assert.equal(result.ok, true);
+  assert.equal(result.quote.mint, mint);
+  assert.equal(result.quote.priceUsd, '74.73');
+  assert.equal(result.quote.quoteSource, 'dexscreener');
+  assert.equal(result.quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(result.quote.authorizesTransaction, false);
+  assert.equal(runtimeCalls, 0);
+
+  const down = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: {},
+    priceFetch: async () => new Response('down', { status: 503 }),
+  });
+  const failed = await down('get_price', { mint });
+  assert.equal(failed.error, 'provider_failed');
+  assert.match(failed.hint, /provider is down/);
+
+  const missing = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: {},
+    fetcher: null,
+    priceFetch: null,
+  });
+  const client = await missing('get_price', { mint });
+  assert.equal(client.error, 'client_missing');
+});
+
+/**
  * Achieves: verifies serializeToolResult strips viewerUrl.
  * Fails when: serializeToolResult strips viewerUrl breaks (e.g. expected false, false, /bs_1/).
  * Oracle: assert.equal(text.includes('viewerUrl'), false); assert.equal(text.includes('secret'), false); assert.match(text, /bs_1/)

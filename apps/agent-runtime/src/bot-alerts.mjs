@@ -13,6 +13,14 @@ const ALERTS = Object.freeze({
     kind: 'bot.paused',
     summary: 'Max loss reached on this bot. The bot stops, and nothing was signed.',
   },
+  'near-max-loss': {
+    kind: 'run.checkpoint',
+    summary: 'Nearing max loss on this bot. Nothing was signed.',
+  },
+  'price-down': {
+    kind: 'run.checkpoint',
+    summary: 'Price provider is down on this bot. Nothing was signed.',
+  },
   'verify-mismatch': {
     kind: 'verify.mismatch',
     summary: 'Verify mismatch on this bot. Re-checks did not settle, so the spend stays unsigned.',
@@ -62,6 +70,7 @@ export function alertFromGate(gate) {
   if (!gate) return null;
   if (gate.state === 'verify-mismatch') return 'verify-mismatch';
   if (gate.reason === 'max-loss-reached') return 'max-loss';
+  if (gate.reason === 'near-max-loss') return 'near-max-loss';
   if (gate.reason === 'invalid-approval' || gate.reason === 'budget-override-required') return 'unapproved-spend';
   return null;
 }
@@ -69,6 +78,7 @@ export function alertFromGate(gate) {
 export function alertFromPauseReason(reason) {
   if (reason === 'verify-mismatch') return 'verify-mismatch';
   if (reason === 'max-loss-reached') return 'max-loss';
+  if (reason === 'provider_failed' || reason === 'provider_unavailable') return 'price-down';
   if (reason === 'invalid-approval' || reason === 'approval-denied' || reason === 'budget-override-required') {
     return 'unapproved-spend';
   }
