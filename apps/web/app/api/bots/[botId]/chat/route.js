@@ -5,6 +5,7 @@ import {
   openAiAgentTools,
   serializeToolResult,
 } from '../../../../../lib/chat-tools.mjs';
+import { fetchAgentRuntime } from '../../../../../lib/runtime-fetch.mjs';
 import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mjs';
 import { parsePermission, permissionInstruction, toolAccessKind } from '../../../../../lib/spend-permission.mjs';
 
@@ -61,6 +62,10 @@ export async function POST(request, context) {
   const grants = Array.isArray(body.grants)
     ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
     : [];
+  const authHeader = request.headers.get('authorization') ?? '';
+  const accessToken = authHeader.startsWith('Bearer ')
+    ? authHeader.slice('Bearer '.length).trim()
+    : (typeof body.accessToken === 'string' ? body.accessToken.trim() : '');
   const env = chatToolEnv();
   const invokeRaw = createChatToolInvoker({
     ownerId,
@@ -70,6 +75,14 @@ export async function POST(request, context) {
     shellBots: Array.isArray(body.shellBots) ? body.shellBots.slice(0, 40) : null,
     shellWallets: Array.isArray(body.shellWallets) ? body.shellWallets.slice(0, 40) : null,
     shellBalanceLabel: typeof body.shellBalanceLabel === 'string' ? body.shellBalanceLabel : null,
+    accessToken,
+    fetcher: async (url, init) => {
+      try {
+        return await fetchAgentRuntime(url, init);
+      } catch {
+        return fetch(url, init);
+      }
+    },
   });
 
   try {
