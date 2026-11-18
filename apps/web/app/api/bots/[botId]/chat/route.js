@@ -27,6 +27,7 @@ function chatToolEnv() {
       || (typeof process.env.QUICKNODE_TESTNET_RPC_URL === 'string'
         ? process.env.QUICKNODE_TESTNET_RPC_URL.trim()
         : ''),
+    JUPITER_API_KEY: readRootEnv('JUPITER_API_KEY'),
     NEXT_PUBLIC_AGENT_RUNTIME_URL: readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL')
       || (typeof process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL === 'string'
         ? process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL.trim()
@@ -84,6 +85,9 @@ export async function POST(request, context) {
         return fetch(url, init);
       }
     },
+    // Price hosts must not ride the runtime service binding. A 404 from the
+    // Worker is not a DexScreener outage.
+    priceFetch: fetch,
   });
 
   try {

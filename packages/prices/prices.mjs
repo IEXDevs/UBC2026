@@ -8,46 +8,95 @@ export class PriceError extends Error {
 
 const mintPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
+/** Mainnet wrapped SOL. Native SOL has no mint; this is the price identity. */
+export const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
+export const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const JUPITER_SWAP_QUOTE_URL = 'https://lite-api.jup.ag/swap/v1/quote';
+
+/**
+ * Unwrap a UI label such as `SOL (So11…112)` down to the mint.
+ * A symbol of SOL or WSOL is the wrapped-SOL mint.
+ */
+export function normalizePriceMint(mint) {
+  if (typeof mint !== 'string') return mint;
+  const text = mint.trim();
+  if (/^(?:sol|wsol|wrapped\s+sol)$/i.test(text)) return WRAPPED_SOL_MINT;
+  if (text.includes(WRAPPED_SOL_MINT)) return WRAPPED_SOL_MINT;
+  return text;
+}
+
 function assertMint(mint) {
-  if (typeof mint !== 'string' || !mintPattern.test(mint)) throw new PriceError('invalid_mint', 400);
-  return mint;
+  const normalized = normalizePriceMint(mint);
+  if (typeof normalized !== 'string' || !mintPattern.test(normalized)) throw new PriceError('invalid_mint', 400);
+  return normalized;
+}
+
+function requireFetcher(fetcher) {
+  if (typeof fetcher !== 'function') throw new PriceError('client_missing', 503);
+  return fetcher;
+}
+
+/**
+ * provider_failed is an upstream outage (HTTP 5xx).
+ * A bad mint, a missing client, or a 4xx from the wrong host is not an outage.
+ */
+function providerStatus(status) {
+  if (status === 429) return new PriceError('provider_rate_limited', 429);
+  if (status === 404) return new PriceError('price_not_found', 404);
+  if (status === 400) return new PriceError('invalid_mint', 400);
+  if (status === 401 || status === 403) return new PriceError('client_missing', 401);
+  if (status >= 500 && status <= 599) return new PriceError('provider_failed', 502);
+  return new PriceError('provider_rejected', 502);
 }
 
 /**
  * DexScreener free tokens endpoint. No API key.
  * Picks the highest-liquidity USD-priced pair for the mint.
  */
+function pairRows(body) {
+  if (Array.isArray(body)) return body;
+  if (body && typeof body === 'object' && Array.isArray(body.pairs)) return body.pairs;
+  return null;
+}
+
+function pairPriceUsd(pair) {
+  try { return formatUsdPrice(pair?.priceUsd); } catch { return null; }
+}
+
 export function createDexScreenerPriceProvider({
   fetcher = fetch,
   baseUrl = 'https://api.dexscreener.com/tokens/v1/solana',
 } = {}) {
-  return async function lookupPrice(mint) {
-    assertMint(mint);
+  const client = requireFetcher(fetcher);
+  return async function lookupPrice(rawMint) {
+    const mint = assertMint(rawMint);
     let response;
     try {
-      response = await fetcher(`${baseUrl}/${encodeURIComponent(mint)}`, {
+      response = await client(`${baseUrl}/${encodeURIComponent(mint)}`, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(15000),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof PriceError) throw error;
       throw new PriceError('provider_unavailable');
     }
-    if (!response.ok) {
-      throw new PriceError(response.status === 429 ? 'provider_rate_limited' : 'provider_failed', response.status === 429 ? 429 : 502);
-    }
-    let pairs;
-    try { pairs = await response.json(); } catch { throw new PriceError('invalid_provider_response'); }
-    if (!Array.isArray(pairs) || pairs.length < 1) throw new PriceError('price_not_found', 404);
+    if (!response.ok) throw providerStatus(response.status);
+    let body;
+    try { body = await response.json(); } catch { throw new PriceError('invalid_provider_response'); }
+    const pairs = pairRows(body);
+    if (!pairs) throw new PriceError('invalid_provider_response');
+    if (pairs.length < 1) throw new PriceError('price_not_found', 404);
 
     const scored = pairs
-      .filter(pair => pair && pair.baseToken?.address === mint && typeof pair.priceUsd === 'string' && pair.priceUsd.length > 0)
+      .filter(pair => pair && pair.baseToken?.address === mint && pairPriceUsd(pair))
       .map(pair => ({
         pair,
+        priceUsd: pairPriceUsd(pair),
         liquidityUsd: typeof pair.liquidity?.usd === 'number' ? pair.liquidity.usd : 0,
       }))
       .sort((a, b) => b.liquidityUsd - a.liquidityUsd);
 
-    const best = scored[0]?.pair;
+    const best = scored[0];
     if (!best) throw new PriceError('price_not_found', 404);
     const priceUsd = best.priceUsd;
     if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(priceUsd)) throw new PriceError('invalid_provider_response');
@@ -59,8 +108,8 @@ export function createDexScreenerPriceProvider({
       pricingCluster: 'mainnet',
       executionCluster: 'devnet',
       label: 'devnet execution, mainnet pricing',
-      pairAddress: typeof best.pairAddress === 'string' ? best.pairAddress : null,
-      liquidityUsd: typeof best.liquidity?.usd === 'number' ? best.liquidity.usd : null,
+      pairAddress: typeof best.pair.pairAddress === 'string' ? best.pair.pairAddress : null,
+      liquidityUsd: typeof best.pair.liquidity?.usd === 'number' ? best.pair.liquidity.usd : null,
       fetchedAt: new Date().toISOString(),
     };
   };
@@ -130,10 +179,13 @@ export function usdPriceBaseUnits(priceUsd) {
  * The result never carries a signature, a transaction, or permission to broadcast.
  */
 export async function readAgentPriceQuote(mint, options = {}) {
+  if (options.fetcher != null && typeof options.fetcher !== 'function' && typeof options.lookup !== 'function') {
+    throw new PriceError('client_missing', 503);
+  }
   const lookup = typeof options.lookup === 'function'
     ? options.lookup
     : createMainnetPriceProvider(options);
-  const quote = await lookup(mint);
+  const quote = await lookup(normalizePriceMint(mint));
   if (
     !quote
     || quote.label !== PRICE_LABEL
@@ -178,22 +230,22 @@ export function createJupiterPriceProvider({
   apiKey = null,
   baseUrl = 'https://api.jup.ag/price/v3',
 } = {}) {
-  return async function lookupPrice(mint) {
-    assertMint(mint);
+  const client = requireFetcher(fetcher);
+  return async function lookupPrice(rawMint) {
+    const mint = assertMint(rawMint);
     const headers = { Accept: 'application/json' };
     if (apiKey) headers['x-api-key'] = apiKey;
     let response;
     try {
-      response = await fetcher(`${baseUrl}?ids=${encodeURIComponent(mint)}`, {
+      response = await client(`${baseUrl}?ids=${encodeURIComponent(mint)}`, {
         headers,
         signal: AbortSignal.timeout(15000),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof PriceError) throw error;
       throw new PriceError('provider_unavailable');
     }
-    if (!response.ok) {
-      throw new PriceError(response.status === 429 ? 'provider_rate_limited' : 'provider_failed', response.status === 429 ? 429 : 502);
-    }
+    if (!response.ok) throw providerStatus(response.status);
     let data;
     try { data = await response.json(); } catch { throw new PriceError('invalid_provider_response'); }
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new PriceError('invalid_provider_response');
@@ -237,5 +289,62 @@ export function createMainnetPriceProvider({
       const quote = await jupiter(mint);
       return { ...quote, fallbackFrom: 'dexscreener' };
     }
+  };
+}
+
+const AMOUNT = /^(?:[1-9][0-9]{0,39})$/;
+
+/**
+ * Jupiter swap quote. Read-only. The response never includes a transaction
+ * to sign, and it does not authorize a mainnet broadcast.
+ */
+export function jupiterSwapQuoteUrl({ inputMint, outputMint, amount, slippageBps = '50' } = {}) {
+  const input = assertMint(inputMint);
+  const output = assertMint(outputMint);
+  if (input === output) throw new PriceError('invalid_mint', 400);
+  if (typeof amount !== 'string' || !AMOUNT.test(amount)) throw new PriceError('invalid_quote', 400);
+  if (slippageBps !== '50') throw new PriceError('invalid_quote', 400);
+  const url = new URL(JUPITER_SWAP_QUOTE_URL);
+  url.searchParams.set('inputMint', input);
+  url.searchParams.set('outputMint', output);
+  url.searchParams.set('amount', amount);
+  url.searchParams.set('slippageBps', slippageBps);
+  return url.toString();
+}
+
+export async function readJupiterSwapQuote({
+  inputMint,
+  outputMint,
+  amount,
+  fetcher = fetch,
+  apiKey = null,
+} = {}) {
+  const client = requireFetcher(fetcher);
+  const url = jupiterSwapQuoteUrl({ inputMint, outputMint, amount });
+  const headers = { Accept: 'application/json' };
+  if (apiKey) headers['x-api-key'] = apiKey;
+  let response;
+  try {
+    response = await client(url, { headers, signal: AbortSignal.timeout(15000) });
+  } catch (error) {
+    if (error instanceof PriceError) throw error;
+    throw new PriceError('provider_unavailable');
+  }
+  if (!response.ok) throw providerStatus(response.status);
+  let data;
+  try { data = await response.json(); } catch { throw new PriceError('invalid_provider_response'); }
+  const outAmount = data?.outAmount;
+  if (typeof outAmount !== 'string' || !AMOUNT.test(outAmount)) throw new PriceError('invalid_provider_response');
+  return {
+    inputMint: assertMint(inputMint),
+    outputMint: assertMint(outputMint),
+    inAmount: amount,
+    outAmount,
+    quoteSource: 'jupiter-swap-v1',
+    pricingCluster: 'mainnet',
+    executionCluster: 'devnet',
+    label: PRICE_LABEL,
+    broadcast: false,
+    authorizesTransaction: false,
   };
 }

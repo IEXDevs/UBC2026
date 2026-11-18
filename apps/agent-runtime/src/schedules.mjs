@@ -159,6 +159,14 @@ export function assessPositions({ bot, positions, quotes, balance, reason, now }
   if (rows.length > 0) {
     status = lossKnown ? 'checked' : 'partial';
     if (maxLoss != null && lossKnown && loss > maxLoss) flag = 'max-loss';
+    else if (
+      maxLoss != null
+      && maxLoss > 0n
+      && lossKnown
+      && loss > 0n
+      && loss < maxLoss
+      && loss * 5n >= maxLoss * 4n
+    ) flag = 'near-max-loss';
     else if (!lossKnown) flag = 'unpriced';
     else flag = 'within-cap';
   }

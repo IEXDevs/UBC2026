@@ -102,6 +102,15 @@ test('paper loss flags max-loss without keeping provider extras', () => {
     quotes: { [address]: { priceUsd: '1.50' } },
   });
   assert.equal(held.flag, 'within-cap');
+
+  const near = assessPositions({
+    bot: { id: 'desk', maxLoss: '500000' },
+    now,
+    positions: [{ mint: address, amount: '1000000', decimals: 6, entryPriceUsd: '1.90' }],
+    quotes: { [address]: { priceUsd: '1.50' } },
+  });
+  assert.equal(near.unrealizedLossMicroUsd, '400000');
+  assert.equal(near.flag, 'near-max-loss');
 });
 
 /**

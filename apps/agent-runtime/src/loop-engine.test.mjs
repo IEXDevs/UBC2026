@@ -672,3 +672,148 @@ test('start_task creates a run and a fully-automatic trading goal passes the gat
   assert.equal(lowBody.run.checkpoints.execute, undefined);
   assert.equal(blockedTransfer.calls.length, 0);
 });
+
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+/**
+ * Achieves: one SOL-to-USDC trade quotes Jupiter, signs on devnet, and marks a paper position from the mainnet price.
+ * Fails when: the swap is broadcast, the signature is not devnet, or a provider outage still signs.
+ * Oracle: execute checkpoint swap quote, paper label, and devnet signature.
+ * Side effects: in-memory run, position book, and mocked quote/signer.
+ * Gaps: live Jupiter and Privy are not called.
+ */
+test('a trading swap follows the gate, quotes Jupiter, signs on devnet, and marks paper', async () => {
+  const machine = new BotStateMachine();
+  const models = scriptedOpenRouter();
+  const decide = models.openRouter;
+  const original = decide.complete.bind(decide);
+  decide.complete = async (input) => {
+    const task = typeof input?.task === 'string' ? input.task : '';
+    if (task.includes('Role: decide')) {
+      return {
+        model: 'test',
+        text: JSON.stringify({
+          summary: 'Move a slice of SOL into USDC',
+          facts: { ...facts, mint: SOL_MINT, price: '74730000', reasonSummary: 'Move SOL into USDC' },
+          proposal: {
+            ...proposal,
+            swap: { inputMint: SOL_MINT, outputMint: USDC_MINT, inAmount: '10000000' },
+          },
+        }),
+      };
+    }
+    return original(input);
+  };
+  const transfer = transferDouble();
+  let quoted = 0;
+  const response = await postLoop(machine, {
+    openRouter: decide,
+    transferClient: transfer.client,
+    search: async () => [{ title: 'CPI', url: 'https://example.com/cpi', snippet: 'long-run inflation' }],
+    swapQuote: async (swap) => {
+      quoted += 1;
+      assert.equal(swap.inputMint, SOL_MINT);
+      assert.equal(swap.outputMint, USDC_MINT);
+      assert.equal(swap.inAmount, '10000000');
+      return {
+        inputMint: SOL_MINT,
+        outputMint: USDC_MINT,
+        inAmount: '10000000',
+        outAmount: '747000',
+        quoteSource: 'jupiter-swap-v1',
+        pricingCluster: 'mainnet',
+        executionCluster: 'devnet',
+        label: 'devnet execution, mainnet pricing',
+        broadcast: false,
+        authorizesTransaction: false,
+      };
+    },
+    lookupPrice: async (mint) => ({
+      mint,
+      priceUsd: mint === USDC_MINT ? '1.00' : '74.73',
+      quoteSource: 'dexscreener',
+      pricingCluster: 'mainnet',
+      executionCluster: 'devnet',
+      label: 'devnet execution, mainnet pricing',
+      fetchedAt: new Date(NOW).toISOString(),
+    }),
+  }, payload({ goal: TRADING_GOAL }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.error, undefined);
+  assert.equal(body.done, true);
+  assert.equal(quoted, 1);
+  const execute = body.run.checkpoints.execute;
+  assert.equal(execute.cluster, 'devnet');
+  assert.equal(execute.signature, 'sig_devnet_1');
+  assert.equal(execute.swapQuote.quoteSource, 'jupiter-swap-v1');
+  assert.equal(execute.swapQuote.inputMint, SOL_MINT);
+  assert.equal(execute.swapQuote.outAmount, '747000');
+  assert.equal(execute.swapQuote.broadcast, false);
+  assert.equal(execute.swapQuote.authorizesTransaction, false);
+  assert.equal(execute.swapQuote.executionCluster, 'devnet');
+  assert.equal(execute.swapQuote.label, 'devnet execution, mainnet pricing');
+  assert.equal(Object.hasOwn(execute.swapQuote, 'swapTransaction'), false);
+  assert.equal(execute.paper.mode, 'paper');
+  assert.equal(execute.paper.broadcast, false);
+  assert.equal(execute.paper.mint, USDC_MINT);
+  assert.equal(execute.paper.quantity, '747000');
+  assert.equal(execute.paper.label, 'devnet execution, mainnet pricing');
+  assert.equal(execute.paper.cluster, 'devnet');
+  assert.equal(transfer.calls.length, 1);
+  assert.equal(transfer.calls[0].wallet.address, wallet.address);
+  const stored = await machine.get('positions');
+  assert.equal(stored[0].mint, USDC_MINT);
+  assert.equal(stored[0].amount, '747000');
+  assert.equal(stored[0].mode, 'paper');
+  assert.equal(stored[0].label, 'devnet execution, mainnet pricing');
+
+  const downMachine = new BotStateMachine();
+  const downModels = scriptedOpenRouter();
+  const downDecide = downModels.openRouter;
+  const downOriginal = downDecide.complete.bind(downDecide);
+  downDecide.complete = async (input) => {
+    const task = typeof input?.task === 'string' ? input.task : '';
+    if (task.includes('Role: decide')) {
+      return {
+        model: 'test',
+        text: JSON.stringify({
+          summary: 'Move a slice of SOL into USDC',
+          facts: { ...facts, mint: SOL_MINT, price: '74730000', reasonSummary: 'Move SOL into USDC' },
+          proposal: {
+            ...proposal,
+            swap: { inputMint: SOL_MINT, outputMint: USDC_MINT, inAmount: '10000000' },
+          },
+        }),
+      };
+    }
+    return downOriginal(input);
+  };
+  const downTransfer = transferDouble();
+  const down = await postLoop(downMachine, {
+    openRouter: downDecide,
+    transferClient: downTransfer.client,
+    swapQuote: async () => {
+      const error = new Error('provider_failed');
+      error.code = 'provider_failed';
+      throw error;
+    },
+    lookupPrice: async (mint) => ({
+      mint,
+      priceUsd: '74.73',
+      quoteSource: 'dexscreener',
+      pricingCluster: 'mainnet',
+      executionCluster: 'devnet',
+      label: 'devnet execution, mainnet pricing',
+      fetchedAt: new Date(NOW).toISOString(),
+    }),
+  }, payload({ goal: TRADING_GOAL }));
+  const downBody = await down.json();
+  assert.equal(downBody.run.pauseReason, 'provider_failed');
+  assert.equal(downBody.run.checkpoints.execute?.status, 'waiting');
+  assert.equal(downBody.run.checkpoints.execute?.signature, undefined);
+  assert.equal(downTransfer.calls.length, 0);
+  const alerts = await downMachine.get('alerts');
+  assert.equal(Array.isArray(alerts) && alerts.some(event => event.kind === 'run.checkpoint' && event.summary.includes('Price provider is down')), true);
+});

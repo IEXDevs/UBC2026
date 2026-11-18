@@ -5,7 +5,8 @@
  * Signing goes through an injected devnet transfer client. This module does not call x402.
  */
 import { approvalRequirement } from '@ubc2026/agent-loop';
-import { usdPriceBaseUnits } from '@ubc2026/prices';
+import { assetByMint, createPaperBook, openPaperPosition } from '@ubc2026/paper-positions';
+import { readJupiterSwapQuote, usdPriceBaseUnits } from '@ubc2026/prices';
 import { evaluateProposal, validateApproval } from '@ubc2026/bot-policy';
 import { evaluateTrust } from '@ubc2026/trust-score';
 import { transferDevnetUsdc } from '@ubc2026/transfers';
@@ -105,6 +106,20 @@ function asAmount(value) {
   return typeof value === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(value) ? value : null;
 }
 
+const SWAP_MINT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+function readSwap(raw) {
+  const swap = raw?.swap;
+  if (!swap || typeof swap !== 'object') return null;
+  const inputMint = typeof swap.inputMint === 'string' ? swap.inputMint.trim() : '';
+  const outputMint = typeof swap.outputMint === 'string' ? swap.outputMint.trim() : '';
+  const inAmount = asAmount(swap.inAmount);
+  if (!SWAP_MINT.test(inputMint) || !SWAP_MINT.test(outputMint) || inputMint === outputMint) return null;
+  if (!inAmount || inAmount === '0') return null;
+  if (!assetByMint(inputMint) || !assetByMint(outputMint)) return null;
+  return { inputMint, outputMint, inAmount };
+}
+
 function proposalFrom(raw, bot, run) {
   if (!raw || typeof raw !== 'object') return null;
   const cluster = raw.cluster == null ? 'devnet' : raw.cluster;
@@ -121,6 +136,7 @@ function proposalFrom(raw, bot, run) {
   const expectedReceiveAsset = typeof raw.expectedReceiveAsset === 'string' && raw.expectedReceiveAsset.length <= 64
     ? raw.expectedReceiveAsset
     : raw.asset;
+  const swap = readSwap(raw);
   return {
     proposal: {
       id,
@@ -134,6 +150,7 @@ function proposalFrom(raw, bot, run) {
       expectedReceiveAsset,
       maxFee,
       expiresAt: raw.expiresAt,
+      ...(swap ? { swap } : {}),
     },
   };
 }
@@ -215,6 +232,10 @@ export function decideTask(goal, bot) {
       'Propose one concrete Solana devnet trade in proposal. Do not stop after a summary.',
       'Use the bot cap asset and the assigned wallet. cluster is devnet or testnet only.',
       'Do not propose mainnet, a meme coin, or a day trade. Do not sign or broadcast.',
+      'For that one trade, include swap with inputMint, outputMint, and inAmount.',
+      'inputMint and outputMint are wrapped SOL, USDC, or USDT. inAmount is base units of inputMint.',
+      'A move of SOL into USDC uses wrapped SOL as inputMint and USDC as outputMint.',
+      'Do not include a swap transaction. The platform quotes Jupiter, signs on devnet only, and marks the paper position from the mainnet price.',
       'The platform gate still blocks a failed trust check, a failed verify, a policy or cap block, and any non-devnet trade.',
     );
   }
@@ -547,11 +568,126 @@ function performApproval(run, ctx) {
   }, ctx.now);
 }
 
+function priceErrorCode(error) {
+  const code = typeof error?.code === 'string' ? error.code : '';
+  if (code === 'client_missing' || code === 'invalid_mint' || code === 'provider_failed' || code === 'provider_unavailable' || code === 'price_not_found' || code === 'provider_rate_limited') {
+    return code;
+  }
+  return 'provider_failed';
+}
+
+function publicSwapQuote(swap, outAmount) {
+  return {
+    inputMint: swap.inputMint,
+    outputMint: swap.outputMint,
+    inAmount: swap.inAmount,
+    outAmount,
+    quoteSource: 'jupiter-swap-v1',
+    pricingCluster: 'mainnet',
+    executionCluster: 'devnet',
+    label: 'devnet execution, mainnet pricing',
+    broadcast: false,
+    authorizesTransaction: false,
+  };
+}
+
+/**
+ * Jupiter quote, then a paper lot marked with the mainnet price.
+ * The quote is not a transaction. Signing stays on the devnet transfer below.
+ */
+async function tradeQuoteAndPaper(swap, ctx, idempotencyKey) {
+  const fetcher = typeof ctx.deps.fetch === 'function' ? ctx.deps.fetch : null;
+  const quoteFn = typeof ctx.deps.swapQuote === 'function'
+    ? ctx.deps.swapQuote
+    : (fetcher
+      ? intent => readJupiterSwapQuote({
+        inputMint: intent.inputMint,
+        outputMint: intent.outputMint,
+        amount: intent.inAmount,
+        fetcher,
+        apiKey: ctx.deps.jupiterApiKey ?? null,
+      })
+      : null);
+  if (!quoteFn) return { error: 'client_missing' };
+  let quoted;
+  try {
+    quoted = await quoteFn(swap);
+  } catch (error) {
+    return { error: priceErrorCode(error) };
+  }
+  if (
+    !quoted
+    || quoted.authorizesTransaction === true
+    || quoted.broadcast === true
+    || quoted.executionCluster !== 'devnet'
+    || quoted.swapTransaction != null
+    || quoted.serializedTransaction != null
+  ) {
+    return { error: 'mainnet_trade_refused' };
+  }
+  const outAmount = typeof quoted.outAmount === 'string' ? quoted.outAmount : '';
+  if (!/^(?:[1-9][0-9]{0,39})$/.test(outAmount)) return { error: 'invalid_quote' };
+  if (typeof ctx.deps.lookupPrice !== 'function') return { error: 'client_missing' };
+  let priceQuote;
+  try {
+    priceQuote = await ctx.deps.lookupPrice(swap.outputMint);
+  } catch (error) {
+    return { error: priceErrorCode(error) };
+  }
+  if (!priceQuote || priceQuote.label !== 'devnet execution, mainnet pricing' || priceQuote.mint !== swap.outputMint) {
+    return { error: 'invalid_quote' };
+  }
+  const fetchedAt = Date.parse(priceQuote.fetchedAt);
+  const markedAt = Number.isFinite(fetchedAt) ? fetchedAt : ctx.now;
+  let opened;
+  try {
+    opened = openPaperPosition({
+      book: createPaperBook(),
+      bot: ctx.bot,
+      mint: swap.outputMint,
+      quantity: outAmount,
+      quote: priceQuote,
+      now: markedAt,
+      idempotencyKey,
+      cluster: 'devnet',
+    });
+  } catch (error) {
+    const code = typeof error?.code === 'string' ? error.code : 'paper_failed';
+    return { error: code === 'live_trade_refused' || code === 'mainnet_trade_refused' ? 'mainnet_trade_refused' : code };
+  }
+  if (opened.fill?.broadcast !== false || opened.position?.mode !== 'paper' || opened.position?.label !== 'devnet execution, mainnet pricing') {
+    return { error: 'mainnet_trade_refused' };
+  }
+  return {
+    swapQuote: publicSwapQuote(swap, outAmount),
+    paper: {
+      positionId: opened.position.id,
+      mint: opened.position.mint,
+      symbol: opened.position.symbol,
+      decimals: opened.position.decimals,
+      quantity: opened.position.quantity,
+      entryPriceUsd: opened.position.entryPriceUsd,
+      label: opened.position.label,
+      mode: 'paper',
+      broadcast: false,
+      cluster: opened.position.cluster,
+    },
+  };
+}
+
 async function performExecute(run, ctx) {
   const memo = run.checkpoints.verify?.memo;
   const proposal = run.checkpoints.decide?.proposal;
   if (typeof memo !== 'string' || !memo || !proposal) return waitStep(run, 'execute', 'memo-missing', {}, ctx.now);
   const idempotencyKey = run.runId;
+  let swapQuote = null;
+  let paper = null;
+  if (ctx.bot?.type === 'trading' && proposal.swap) {
+    const traded = await tradeQuoteAndPaper(proposal.swap, ctx, idempotencyKey);
+    if (traded.error) return waitStep(run, 'execute', traded.error, { idempotencyKey }, ctx.now);
+    swapQuote = traded.swapQuote;
+    paper = traded.paper;
+  }
   if (!ctx.deps.transferClient && typeof ctx.deps.execute !== 'function') {
     return waitStep(run, 'execute', 'signer-not-configured', { idempotencyKey }, ctx.now);
   }
@@ -622,6 +758,8 @@ async function performExecute(run, ctx) {
     cluster,
     executed: true,
     reserved: reservation?.state === 'reserved' || reservation?.ok === true,
+    ...(swapQuote ? { swapQuote } : {}),
+    ...(paper ? { paper } : {}),
   }, ctx.now);
 }
 

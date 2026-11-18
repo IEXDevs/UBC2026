@@ -82,6 +82,11 @@ function loopDeps(env) {
     verifyFn: env.verifyFn,
     lookupPrice: resolvePriceLookup(env),
     trustLookup: resolveTrustLookup(env),
+    fetch: typeof env.fetch === 'function' ? env.fetch : fetch,
+    jupiterApiKey: typeof env.JUPITER_API_KEY === 'string' && env.JUPITER_API_KEY.trim()
+      ? env.JUPITER_API_KEY.trim()
+      : null,
+    swapQuote: typeof env.swapQuote === 'function' ? env.swapQuote : null,
     recentBlockhash: env.recentBlockhash,
     secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
   };
@@ -335,13 +340,13 @@ export class BotStateMachine {
       const history = await this.get('positionCheckHistory');
       const prior = Array.isArray(history) ? history : [];
       await this.put('positionCheckHistory', [...prior, check].slice(-48));
-      if (check.flag === 'max-loss' && ownerId) {
+      if ((check.flag === 'max-loss' || check.flag === 'near-max-loss') && ownerId) {
         await rememberBotAlert(env, this, {
-          alert: 'max-loss',
+          alert: check.flag === 'max-loss' ? 'max-loss' : 'near-max-loss',
           botId,
           ownerId,
           at: checkedAt,
-          scope: checkedAt,
+          scope: check.flag === 'near-max-loss' ? 'near-max-loss' : checkedAt,
         });
       }
       return Response.json({ ok: true, check }, { headers: { 'Cache-Control': 'no-store' } });
@@ -495,6 +500,29 @@ export class BotStateMachine {
             at: loopNow,
             scope: result.run?.runId || loopNow,
           });
+        }
+        const paper = result.run?.checkpoints?.execute?.paper;
+        if (
+          paper
+          && paper.mode === 'paper'
+          && paper.broadcast === false
+          && paper.label === 'devnet execution, mainnet pricing'
+          && typeof paper.mint === 'string'
+          && typeof paper.quantity === 'string'
+        ) {
+          const stored = await this.get('positions');
+          const list = Array.isArray(stored) ? stored : [];
+          const row = {
+            mint: paper.mint,
+            amount: paper.quantity,
+            decimals: Number.isInteger(paper.decimals) ? paper.decimals : 6,
+            entryPriceUsd: paper.entryPriceUsd,
+            symbol: paper.symbol,
+            mode: 'paper',
+            label: paper.label,
+          };
+          const seen = list.some(item => item && item.mint === row.mint && item.amount === row.amount && item.entryPriceUsd === row.entryPriceUsd);
+          if (!seen) await this.put('positions', [...list, row].slice(-30));
         }
         return Response.json({ ok: true, ...result });
       } catch (error) {

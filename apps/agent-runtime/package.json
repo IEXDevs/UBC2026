@@ -17,6 +17,7 @@
     "@ubc2026/browser-search": "0.1.0",
     "@ubc2026/browser-session": "0.1.0",
     "@ubc2026/contracts": "0.1.0",
+    "@ubc2026/paper-positions": "0.1.0",
     "@ubc2026/prices": "0.1.0",
     "@ubc2026/quicknode-streams": "0.1.0",
     "@ubc2026/shopping": "0.1.0",
