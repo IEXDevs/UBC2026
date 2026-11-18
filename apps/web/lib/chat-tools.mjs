@@ -1,7 +1,8 @@
 /**
  * Shared agent tools for same-origin text chat (parity with voice).
  * Browser open/live-view/release prefer the Worker (same DO store as Live View).
- * Search/scrape use Firecrawl from root env when present.
+ * Search/scrape call https://api.firecrawl.dev/v1 with FIRECRAWL_API_KEY.
+ * They do not ride the runtime service binding.
  * Dashboard tools call the same owner HTTP routes as voice webhooks.
  */
 
@@ -111,11 +112,12 @@ async function workerJson(fetcher, url, ownerId, method, body, accessToken = '',
   return data;
 }
 
-function localBrowserService(env = {}, fetcher = fetch) {
+function localBrowserService(env = {}, fetcher = fetch, researchFetch = fetch) {
+  const apiKey = typeof env.FIRECRAWL_API_KEY === 'string' ? env.FIRECRAWL_API_KEY.trim() : '';
   return createBrowserSessionService({
     store: createMemoryStore(),
-    search: createSearch({ apiKey: env.FIRECRAWL_API_KEY, fetcher }),
-    scrape: createScrape({ apiKey: env.FIRECRAWL_API_KEY, fetcher }),
+    search: createSearch({ apiKey, fetcher: researchFetch }),
+    scrape: createScrape({ apiKey, fetcher: researchFetch }),
     browsers: createBrowserProvider({
       accountId: env.CLOUDFLARE_ACCOUNT_ID,
       apiToken: env.CLOUDFLARE_API_TOKEN,
@@ -389,13 +391,16 @@ export function createChatToolInvoker({
   accessToken = '',
   ownerMessage = '',
   priceFetch = null,
+  searchFetch = fetch,
   deskGrant = '',
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
   }
   const identity = { ownerId, botId };
-  const local = localBrowserService(env, fetcher);
+  // Firecrawl must not ride the runtime fetcher. A Worker 404 is not an outage.
+  const researchFetch = typeof searchFetch === 'function' ? searchFetch : null;
+  const local = localBrowserService(env, fetcher, researchFetch);
   const root = runtimeBaseUrl(runtimeBase);
   const localBots = shellBotItems(shellBots);
   const localWallets = shellWalletItems(shellWallets);
@@ -610,7 +615,21 @@ export function createChatToolInvoker({
         }
       }
       if (name === 'web_search' || name === 'web_scrape') {
-        return await local.invokeTool(name, args, identity);
+        try {
+          return await local.invokeTool(name, args, identity);
+        } catch (error) {
+          const code = typeof error?.code === 'string' ? error.code : 'tool_failed';
+          if (code === 'search_not_configured' || code === 'scrape_not_configured') {
+            return { error: code, hint: 'FIRECRAWL_API_KEY is not configured.' };
+          }
+          if (code === 'client_missing') {
+            return { error: code, hint: 'The research client is not configured.' };
+          }
+          if (code === 'provider_failed') {
+            return { error: code, hint: 'The research provider is down.' };
+          }
+          return toolErrorPayload(error);
+        }
       }
       if (
         name === 'browser_open'

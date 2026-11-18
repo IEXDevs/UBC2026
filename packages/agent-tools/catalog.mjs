@@ -190,7 +190,7 @@ export function sharedToolsInstruction() {
     'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
     'When the owner asks you to find and do one trade, call get_price for the mint, then start_task. get_price does not place the trade. start_task runs the existing loop. provider_failed means the price provider is down. client_missing means the price client is not configured. invalid_mint means the mint is not a Solana address.',
     'request_spend posts the shared spend route. A locked desk is not an approval hold and does not replace trust, verify, reserve, or the permission gate. Fully-automatic still runs those gates. 1000000 is 1 USDC in base units. Do not describe a desk lock as ask-mode.',
-    'When the owner asks you to look something up: call web_search first, pick a real https result url, then web_scrape.',
+    'When the owner asks you to look something up: call web_search first, pick a real https result url, then web_scrape. search_not_configured and client_missing mean FIRECRAWL_API_KEY or the research client is not configured. provider_failed means Firecrawl returned a server error. Do not invent search results.',
     'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayBalanceLabel / holdings (whatever is non-zero on the address).',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',

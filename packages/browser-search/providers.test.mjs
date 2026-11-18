@@ -54,6 +54,44 @@ test('search validates before calling upstream', async () => {
  * Side effects: none.
  * Gaps: Does not cover non-JSON success payloads.
  */
+/**
+ * Achieves: provider_failed is only an upstream 5xx. A missing key, a missing client, and a 4xx stay distinct.
+ * Fails when: a 401 or 404 is provider_failed, a blank key calls Firecrawl, or a null fetcher is an outage.
+ * Oracle: search_not_configured, client_missing, provider_rejected, provider_failed.
+ * Side effects: none (injected fetcher).
+ * Gaps: live Firecrawl is not part of this test.
+ */
+test('Firecrawl search reserves provider_failed for a server error', async () => {
+  await assert.rejects(
+    createSearch({ apiKey: '   ', fetcher: () => assert.fail('blank key must not call Firecrawl') })('SOL fundamentals'),
+    { code: 'search_not_configured', status: 503 },
+  );
+  await assert.rejects(
+    createSearch({ apiKey: 'fc-test', fetcher: null })('SOL fundamentals'),
+    { code: 'client_missing', status: 503 },
+  );
+  await assert.rejects(
+    createSearch({ apiKey: 'fc-test', fetcher: async () => new Response('no', { status: 401 }) })('SOL fundamentals'),
+    (err) => {
+      assert.equal(err.code, 'client_missing');
+      assert.equal(String(err.message).includes('no'), false);
+      return true;
+    },
+  );
+  await assert.rejects(
+    createSearch({ apiKey: 'fc-test', fetcher: async () => new Response('miss', { status: 404 }) })('SOL fundamentals'),
+    (err) => {
+      assert.equal(err.code, 'provider_rejected');
+      assert.notEqual(err.code, 'provider_failed');
+      return true;
+    },
+  );
+  await assert.rejects(
+    createSearch({ apiKey: 'fc-test', fetcher: async () => new Response('down', { status: 503 }) })('SOL fundamentals'),
+    { code: 'provider_failed', status: 502 },
+  );
+});
+
 test('rate limits and network failures have sanitized errors', async () => {
   await assert.rejects(
     createSearch({ apiKey: 'test', fetcher: async () => new Response('secret', { status: 429 }) })('test'),

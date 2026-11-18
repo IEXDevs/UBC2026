@@ -14,6 +14,35 @@ async function jsonRequest(fetcher, url, options) {
   try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
 }
 
+/**
+ * provider_failed is a Firecrawl server error (HTTP 5xx).
+ * A missing key, a missing client, or a 4xx from the wrong host is not an outage.
+ */
+function firecrawlStatus(status) {
+  if (status === 429) return new ProviderError('provider_rate_limited', 429);
+  if (status === 401 || status === 403) return new ProviderError('client_missing', status);
+  if (status >= 500 && status <= 599) return new ProviderError('provider_failed', 502);
+  return new ProviderError('provider_rejected', 502);
+}
+
+function firecrawlKey(apiKey) {
+  return typeof apiKey === 'string' ? apiKey.trim() : '';
+}
+
+async function firecrawlRequest(fetcher, url, options) {
+  if (typeof fetcher !== 'function') throw new ProviderError('client_missing', 503);
+  let response;
+  try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(30000) }); }
+  catch (error) {
+    if (error instanceof ProviderError) throw error;
+    throw new ProviderError('provider_unavailable');
+  }
+  if (!response.ok) throw firecrawlStatus(response.status);
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
+}
+
 function firecrawlHeaders(apiKey) {
   return {
     Authorization: `Bearer ${apiKey}`,
@@ -27,14 +56,16 @@ function firecrawlHeaders(apiKey) {
  * API key must come from Worker secrets (FIRECRAWL_API_KEY), never the model or client.
  */
 export function createSearch({ apiKey, fetcher = fetch, baseUrl = 'https://api.firecrawl.dev/v1' }) {
+  const key = firecrawlKey(apiKey);
   return async function search(query, limit = 5) {
-    if (!apiKey) throw new ProviderError('search_not_configured', 503);
+    if (!key) throw new ProviderError('search_not_configured', 503);
+    if (typeof fetcher !== 'function') throw new ProviderError('client_missing', 503);
     if (typeof query !== 'string' || !query.trim() || query.length > 1000 || !Number.isInteger(limit) || limit < 1 || limit > 10) {
       throw new ProviderError('invalid_search', 400);
     }
-    const data = await jsonRequest(fetcher, `${baseUrl}/search`, {
+    const data = await firecrawlRequest(fetcher, `${baseUrl}/search`, {
       method: 'POST',
-      headers: firecrawlHeaders(apiKey),
+      headers: firecrawlHeaders(key),
       body: JSON.stringify({ query: query.trim(), limit, ignoreInvalidURLs: true }),
     });
     if (!data || data.success !== true || !Array.isArray(data.data)) throw new ProviderError('invalid_provider_response');
@@ -58,8 +89,10 @@ export function createSearch({ apiKey, fetcher = fetch, baseUrl = 'https://api.f
  * Firecrawl page→Markdown scrape for research. Caps markdown size so tool events stay concise.
  */
 export function createScrape({ apiKey, fetcher = fetch, baseUrl = 'https://api.firecrawl.dev/v1', maxMarkdownChars = 12000 }) {
+  const key = firecrawlKey(apiKey);
   return async function scrape(url) {
-    if (!apiKey) throw new ProviderError('scrape_not_configured', 503);
+    if (!key) throw new ProviderError('scrape_not_configured', 503);
+    if (typeof fetcher !== 'function') throw new ProviderError('client_missing', 503);
     if (typeof url !== 'string' || !url.trim() || url.length > 2000) throw new ProviderError('invalid_scrape', 400);
     let target;
     try {
@@ -69,9 +102,9 @@ export function createScrape({ apiKey, fetcher = fetch, baseUrl = 'https://api.f
     if (!Number.isSafeInteger(maxMarkdownChars) || maxMarkdownChars < 500 || maxMarkdownChars > 50000) {
       throw new ProviderError('invalid_scrape', 400);
     }
-    const data = await jsonRequest(fetcher, `${baseUrl}/scrape`, {
+    const data = await firecrawlRequest(fetcher, `${baseUrl}/scrape`, {
       method: 'POST',
-      headers: firecrawlHeaders(apiKey),
+      headers: firecrawlHeaders(key),
       body: JSON.stringify({ url: target.href, formats: ['markdown'], onlyMainContent: true }),
     });
     if (!data || data.success !== true || !data.data || typeof data.data !== 'object') {
