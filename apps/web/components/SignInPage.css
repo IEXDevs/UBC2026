@@ -67,6 +67,105 @@
   align-items: center;
   justify-content: center;
   gap: 6px 20px;
+  margin-top: 18px;
+}
+
+.sign-in-email {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(360px, 100%);
+  margin: 0 auto 8px;
+}
+
+.sign-in-email-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+}
+
+.sign-in-email-label {
+  margin: 0;
+  color: #ddd4f2;
+  font-family: var(--font-chat), ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.sign-in-email input[type='email'] {
+  width: 100%;
+  border: 1px solid rgba(244, 241, 251, 0.28);
+  border-radius: 16px;
+  background: rgba(7, 6, 12, 0.55);
+  color: #f4f1fb;
+  font: inherit;
+  font-size: 1rem;
+  padding: 14px 16px;
+  outline: none;
+}
+
+.sign-in-email input[type='email']::placeholder {
+  color: #8f86a3;
+}
+
+.sign-in-email input[type='email']:focus {
+  border-color: rgba(244, 241, 251, 0.7);
+}
+
+.sign-in-email-submit {
+  width: 100%;
+  border: 0;
+  border-radius: 20px;
+  background: #f4f1fb;
+  color: #120f17;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 14px 18px;
+  cursor: pointer;
+}
+
+.sign-in-email-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sign-in-email-message {
+  margin: 0;
+  color: #ffb4a8;
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.sign-in-email-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px 18px;
+}
+
+.sign-in-email-link {
+  border: 0;
+  background: transparent;
+  color: #ddd4f2;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sign-in-email-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .sign-in button.specular-button:not(:disabled):hover,
