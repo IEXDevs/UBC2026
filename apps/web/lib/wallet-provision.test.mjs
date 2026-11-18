@@ -269,3 +269,27 @@ test('wallet provision notes stay actionable and secret-free', () => {
   assert.match(walletConfigNote({ hasAppSecret: true, hasAuthorizationKey: false }), /PRIVY_AUTHORIZATION_KEY/);
   assert.equal(walletConfigNote({ hasAppId: true, hasAppSecret: true, hasAuthorizationKey: true }), '');
 });
+
+test('walletConfigFlags reports alignment without leaking app ids', async () => {
+  const { walletConfigFlags } = await import('./wallet-provision.mjs');
+  const aligned = walletConfigFlags({
+    PRIVY_APP_ID: 'cm_test_app',
+    NEXT_PUBLIC_PRIVY_APP_ID: 'cm_test_app',
+    PRIVY_APP_SECRET: 'secret',
+    PRIVY_AUTHORIZATION_KEY: 'wallet-auth:test',
+    QUICKNODE_DEVNET_RPC_URL: 'https://example.quiknode.pro/x',
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://runtime.maelstrom.iexdevs.com',
+  });
+  assert.equal(aligned.appIdAligned, true);
+  assert.equal(aligned.runtimeHostOk, true);
+  assert.equal(aligned.hasRuntimeUrl, true);
+  assert.equal(JSON.stringify(aligned).includes('cm_test_app'), false);
+
+  const mismatched = walletConfigFlags({
+    PRIVY_APP_ID: 'cm_server',
+    NEXT_PUBLIC_PRIVY_APP_ID: 'cm_public',
+    PRIVY_APP_SECRET: 'secret',
+  });
+  assert.equal(mismatched.appIdAligned, false);
+  assert.equal(mismatched.hasPublicAppId, true);
+});

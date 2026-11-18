@@ -474,7 +474,13 @@ export function createPrivyWalletClient({
     } catch (error) {
       const aborted = error?.name === 'AbortError' || error?.name === 'TimeoutError';
       const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
-      fail(`${target} request ${aborted ? 'timed out' : 'failed'}`, code);
+      // Include a short, non-secret cause so Cloudflare / network misconfig is diagnosable.
+      const cause = aborted
+        ? 'timed out'
+        : (typeof error?.name === 'string' && error.name && error.name !== 'Error'
+          ? `failed (${error.name})`
+          : 'failed');
+      fail(`${target} request ${cause}`, code);
     }
     const text = await response.text();
     let payload = null;

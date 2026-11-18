@@ -206,11 +206,23 @@ test('GET /api/wallets reports config flags without secret values', async () => 
   assert.equal(typeof body.hasAppSecret, 'boolean');
   assert.equal(typeof body.hasRpc, 'boolean');
   assert.equal(typeof body.hasAuthorizationKey, 'boolean');
+  assert.equal(typeof body.hasPublicAppId, 'boolean');
+  assert.equal(typeof body.hasRuntimeUrl, 'boolean');
+  assert.equal(typeof body.runtimeHostOk, 'boolean');
+  assert.equal(typeof body.appIdAligned, 'boolean');
   assert.ok(Array.isArray(body.missing));
   const raw = JSON.stringify(body);
-  assert.equal(/sk_|Bearer |wallet-auth:/.test(raw), false);
+  assert.equal(/sk_|Bearer |wallet-auth:|cm[a-z0-9]{10,}/.test(raw), false);
   assert.equal(Object.keys(body).sort().join(','), [
-    'hasAppId', 'hasAppSecret', 'hasAuthorizationKey', 'hasRpc', 'missing',
+    'appIdAligned',
+    'hasAppId',
+    'hasAppSecret',
+    'hasAuthorizationKey',
+    'hasPublicAppId',
+    'hasRpc',
+    'hasRuntimeUrl',
+    'missing',
+    'runtimeHostOk',
   ].sort().join(','));
 });
 

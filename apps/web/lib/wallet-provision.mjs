@@ -36,6 +36,43 @@ export function missingWalletSecrets(env = {}) {
   return missing;
 }
 
+/**
+ * Safe Cloudflare / Privy config flags for GET /api/wallets.
+ * Never includes secret values or the raw app id.
+ */
+export function walletConfigFlags(env = {}) {
+  const serverId = typeof env.PRIVY_APP_ID === 'string' ? env.PRIVY_APP_ID.trim() : '';
+  const publicId = typeof env.NEXT_PUBLIC_PRIVY_APP_ID === 'string' ? env.NEXT_PUBLIC_PRIVY_APP_ID.trim() : '';
+  const runtimeUrl = typeof env.NEXT_PUBLIC_AGENT_RUNTIME_URL === 'string'
+    ? env.NEXT_PUBLIC_AGENT_RUNTIME_URL.trim()
+    : '';
+  let runtimeHostOk = false;
+  if (runtimeUrl) {
+    try {
+      const parsed = new URL(runtimeUrl);
+      runtimeHostOk = (parsed.protocol === 'https:' || parsed.protocol === 'http:')
+        && !parsed.username
+        && !parsed.password
+        && /maelstrom\.iexdevs\.com$/i.test(parsed.hostname);
+    } catch {
+      runtimeHostOk = false;
+    }
+  }
+  const bothIds = Boolean(serverId && publicId);
+  return {
+    hasAppId: Boolean(serverId || publicId),
+    hasPublicAppId: Boolean(publicId),
+    hasAppSecret: Boolean(typeof env.PRIVY_APP_SECRET === 'string' && env.PRIVY_APP_SECRET.trim()),
+    hasRpc: Boolean(typeof env.QUICKNODE_DEVNET_RPC_URL === 'string' && env.QUICKNODE_DEVNET_RPC_URL.trim()),
+    hasAuthorizationKey: Boolean(typeof env.PRIVY_AUTHORIZATION_KEY === 'string' && env.PRIVY_AUTHORIZATION_KEY.trim()),
+    hasRuntimeUrl: Boolean(runtimeUrl),
+    runtimeHostOk,
+    // When both server + public ids are set they must match the same Privy app.
+    appIdAligned: bothIds ? serverId === publicId : true,
+    missing: missingWalletSecrets(env),
+  };
+}
+
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 const CLIENT_LABELS = Object.freeze({
