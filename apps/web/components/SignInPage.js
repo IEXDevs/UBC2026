@@ -2,9 +2,13 @@
 
 import Topography from './Topography';
 import SpecularButton from './SpecularButton';
+import EmailSignIn from './EmailSignIn';
+import { usePrivyPublic } from './PrivyRoot';
 import './SignInPage.css';
 
 export default function SignInPage({ disabled = false, onLogin, onDeveloperPreview = null }) {
+  const { configured } = usePrivyPublic();
+
   return (
     <div className="sign-in">
       <div className="sign-in-field" aria-hidden="true">
@@ -25,6 +29,7 @@ export default function SignInPage({ disabled = false, onLogin, onDeveloperPrevi
         <div className="sign-in-copy">
           <h1 className="sign-in-mark">Maelstrom</h1>
           <p className="sign-in-slogan">Your agent. Your call.</p>
+          {configured ? <EmailSignIn disabled={disabled} /> : null}
           <div className="sign-in-actions">
             <SpecularButton
               size="lg"
@@ -35,7 +40,7 @@ export default function SignInPage({ disabled = false, onLogin, onDeveloperPrevi
               disabled={disabled || !onLogin}
               onClick={onLogin}
             >
-              Continue
+              {configured ? 'More ways to continue' : 'Continue'}
             </SpecularButton>
           </div>
           {onDeveloperPreview ? (

@@ -92,6 +92,52 @@ test('desk tokens use the platform USDC book and hide nothing by default', () =>
  * Side effects / state checked: N/A.
  * Gaps: does not call RPC.
  */
+test('desk tokens show unavailable labels on rpc_failed instead of inventing zeros', () => {
+  const rows = deskTokens({
+    transfers: [],
+    positions: [],
+    devnet: {
+      ok: false,
+      code: 'rpc_failed',
+      cluster: 'devnet',
+      solLamports: null,
+      usdcAmount: null,
+      tokens: [],
+    },
+  });
+  assert.equal(rows[0].symbol, 'USDC');
+  assert.equal(rows[0].amount, null);
+  assert.equal(rows[0].amountKnown, false);
+  assert.match(rows[0].amountLabel, /USDC unavailable \(rpc_failed\)/);
+  assert.equal(rows[0].amountLabel.includes('0 USDC'), false);
+  assert.equal(rows[1].symbol, 'SOL');
+  assert.equal(rows[1].amount, null);
+  assert.match(rows[1].amountLabel, /SOL unavailable/);
+  assert.equal(rows[1].balanceStatus, 'rpc_failed');
+});
+
+test('desk tokens show partial known SOL with unavailable USDC', () => {
+  const rows = deskTokens({
+    transfers: [],
+    positions: [],
+    devnet: {
+      ok: false,
+      code: 'rpc_failed',
+      cluster: 'devnet',
+      solLamports: '2500000000',
+      usdcAmount: null,
+      tokens: [],
+    },
+  });
+  // Failed overall read must not invent a zero USDC book from empty positions.
+  assert.equal(rows[0].amount, null);
+  assert.match(rows[0].amountLabel, /unavailable/);
+  // Known SOL amount is still shown when present on a failed/partial body.
+  assert.equal(rows[1].amount, '2500000000');
+  assert.equal(rows[1].amountLabel, '2.5 SOL');
+  assert.equal(rows[1].amountKnown, true);
+});
+
 test('desk tokens show devnet SOL and USDC even when the ledger is empty', () => {
   const bonk = 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
   const rows = deskTokens({

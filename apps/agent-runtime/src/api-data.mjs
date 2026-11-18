@@ -31,7 +31,12 @@ import {
   transferErrorCode,
   transferRequest,
 } from './platform-transfer.mjs';
-import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
+import {
+  BALANCE_READ_FAILED,
+  classifyBalanceRead,
+  readWalletBalancesAcrossClusters,
+  unavailableBalanceLabel,
+} from '@ubc2026/wallets/balances';
 import {
   deskSpendAllowed,
   newDeskGrant,
@@ -449,8 +454,13 @@ function walletDisplayParts(wallet) {
 }
 
 function walletBalanceSummary(items, platform) {
+  const classified = classifyBalanceRead({ items });
+  const failed = classified.ok === false;
   const onchainUsdc = sumField(items, 'usdcBalance');
-  const onchainSol = sumField(items, 'solLamports');
+  const onchainSolKnown = Array.isArray(items) && items.some((wallet) => (
+    typeof wallet?.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports)
+  ));
+  const onchainSol = onchainSolKnown ? sumField(items, 'solLamports') : null;
   const tokens = mergeTokenHoldings(items);
   const holdings = [];
   for (const wallet of Array.isArray(items) ? items : []) {
@@ -459,7 +469,7 @@ function walletBalanceSummary(items, platform) {
     }
   }
   const hasPlatform = platform.transferCount > 0 && platform.amount != null;
-  const hasSol = onchainSol !== '0';
+  const hasSol = onchainSol != null && onchainSol !== '0';
   const parts = [];
   if (hasPlatform) parts.push(platform.label);
   if (holdings.length) {
@@ -471,28 +481,34 @@ function walletBalanceSummary(items, platform) {
     }
   }
   if (!parts.length) {
-    parts.push(formatSolLabel(onchainSol) || formatUsdcLabel(onchainUsdc));
+    if (failed) parts.push(unavailableBalanceLabel(classified.code || 'rpc_failed'));
+    else parts.push(formatSolLabel(onchainSol || '0') || formatUsdcLabel(onchainUsdc || '0'));
   }
-  const displayBalanceLabel = joinBalanceParts(parts);
+  const displayBalanceLabel = failed && !holdings.length && !hasSol
+    ? unavailableBalanceLabel(classified.code || 'rpc_failed')
+    : joinBalanceParts(parts);
   const displaySource = hasPlatform
     ? (hasSol || tokens.length || holdings.length ? 'mixed' : 'platform')
     : 'onchain';
-  const displayUsdc = hasPlatform ? platform.amount : onchainUsdc;
+  const displayUsdc = hasPlatform ? platform.amount : (failed ? null : onchainUsdc);
   return {
     platformUsdc: platform.amount,
     platformUsdcLabel: platform.label,
     platformTransferCount: platform.transferCount,
-    onchainUsdc,
-    onchainUsdcLabel: formatUsdcLabel(onchainUsdc),
+    onchainUsdc: failed && !hasPlatform ? null : onchainUsdc,
+    onchainUsdcLabel: failed && !hasPlatform ? null : formatUsdcLabel(onchainUsdc),
     onchainSol,
-    onchainSolLabel: formatSolLabel(onchainSol),
+    onchainSolLabel: onchainSol != null ? formatSolLabel(onchainSol) : null,
+    balanceStatus: classified.status,
+    balanceCode: classified.code,
+    ok: classified.ok,
     tokens,
     tokensLabel: tokensLabel(tokens),
     holdings,
     displayUsdc,
-    displayUsdcLabel: formatUsdcLabel(displayUsdc),
+    displayUsdcLabel: displayUsdc != null ? formatUsdcLabel(displayUsdc) : null,
     displaySol: onchainSol,
-    displaySolLabel: formatSolLabel(onchainSol),
+    displaySolLabel: onchainSol != null ? formatSolLabel(onchainSol) : null,
     displayBalanceLabel,
     displaySource,
   };

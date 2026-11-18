@@ -147,6 +147,14 @@ test('devnet chain label is the holdings number when the wallet read is in', () 
   assert.equal(registeredHoldingsLabel({ wallets, positions: [], transfers, chainLabel }), chainLabel);
   assert.equal(registeredHoldingsLabel({ wallets: [], positions: [], transfers: [], chainLabel }), chainLabel);
   assert.equal(walletGlance(wallets, [], transfers, chainLabel).balanceLabel, chainLabel);
+  assert.match(
+    walletGlance(wallets, [], [], null, { ok: false, code: 'rpc_failed' }).balanceLabel,
+    /balance unavailable \(rpc_failed\)/,
+  );
+  assert.equal(
+    walletGlance(wallets, [], [], null, { ok: false, code: 'rpc_failed' }).balanceLabel.includes('0'),
+    false,
+  );
   assert.equal(registeredHoldingsLabel({ wallets, positions: [], transfers, chainLabel: '9 SOL' }), '5 USDC');
 });
 

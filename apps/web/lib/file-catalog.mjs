@@ -3,12 +3,12 @@
  * so a file can be opened again. File bytes are not sent to the model.
  */
 import { enforceStorageCap, STORAGE_CAP_WARNING, USER_STORAGE_CAP } from './file-quota.mjs';
+import { canonicalFileName, displayFileName } from './file-name.mjs';
 
 const KEY_PREFIX = 'maelstrom.files.';
 const MAX_BOTS = 40;
 const MAX_FILES = 2000;
 const PREVIEW_KEEP = 24;
-const MAX_NAME = 180;
 const MAX_TYPE = 80;
 const MAX_URL = 700_000;
 const IMAGE_URL = /^data:image\/(png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/i;
@@ -18,11 +18,6 @@ export function catalogStorageKey(ownerId) {
   const id = ownerId.trim();
   if (!id || id.length > 256) return '';
   return `${KEY_PREFIX}${id}`;
-}
-
-function cleanName(value) {
-  if (typeof value !== 'string') return '';
-  return value.replace(/\s+/g, ' ').trim().slice(0, MAX_NAME);
 }
 
 function previewUrl(value) {
@@ -36,7 +31,7 @@ function previewUrl(value) {
 
 export function cleanCatalogFile(file) {
   if (!file || typeof file !== 'object') return null;
-  const name = cleanName(file.name);
+  const name = displayFileName(file.name) || canonicalFileName(file.name);
   const id = typeof file.id === 'string' ? file.id.trim().slice(0, 160) : '';
   if (!name || !id) return null;
   const size = Number(file.size);
@@ -166,7 +161,7 @@ export function catalogForChat(library, bots = []) {
   const rows = [];
   for (const [botId, files] of Object.entries(library || {})) {
     for (const file of Array.isArray(files) ? files : []) {
-      const name = cleanName(file?.name);
+      const name = displayFileName(file?.name) || canonicalFileName(file?.name);
       if (!name) continue;
       rows.push({
         name,
@@ -183,12 +178,12 @@ export function catalogPayload(entries) {
   if (!Array.isArray(entries)) return [];
   const rows = [];
   for (const entry of entries) {
-    const name = cleanName(entry?.name);
+    const name = displayFileName(entry?.name) || canonicalFileName(entry?.name);
     if (!name) continue;
     rows.push({
       name,
       type: typeof entry?.type === 'string' && entry.type.trim() ? entry.type.trim().slice(0, MAX_TYPE) : 'file',
-      botName: cleanName(entry?.botName),
+      botName: displayFileName(entry?.botName) || canonicalFileName(entry?.botName),
     });
     if (rows.length >= 40) break;
   }
@@ -199,10 +194,10 @@ export function catalogRecallText(entries) {
   const rows = Array.isArray(entries) ? entries : [];
   const lines = [];
   for (const entry of rows) {
-    const name = cleanName(entry?.name);
+    const name = displayFileName(entry?.name) || canonicalFileName(entry?.name);
     if (!name) continue;
     const type = typeof entry.type === 'string' && entry.type.trim() ? entry.type.trim().slice(0, MAX_TYPE) : 'file';
-    const botName = cleanName(entry?.botName);
+    const botName = displayFileName(entry?.botName) || canonicalFileName(entry?.botName);
     lines.push(botName ? `- ${name} (${type}, ${botName})` : `- ${name} (${type})`);
     if (lines.length >= 40) break;
   }

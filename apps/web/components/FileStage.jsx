@@ -5,6 +5,8 @@ import { createPortal } from 'react-dom';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Cancel01Icon, Download01Icon } from '@hugeicons/core-free-icons';
 import { ensureAccountCode } from '../lib/account-code.mjs';
+import { displayFileName } from '../lib/file-name.mjs';
+import { fileAvailability, sessionPreviewUrl } from '../lib/file-session.mjs';
 import { readPreview, stageKind } from '../lib/file-view.mjs';
 
 function StageIcon({ icon, label, className = '', onClick }) {
@@ -42,12 +44,16 @@ function saveFile(url, name) {
 function viewUrl(file) {
   const url = typeof file?.url === 'string' ? file.url.trim() : '';
   if (url.startsWith('blob:') || url.startsWith('data:image/') || url.startsWith('data:video/') || url.startsWith('data:audio/')) return url;
+  const session = sessionPreviewUrl(file?.id);
+  if (session.startsWith('blob:')) return session;
   return '';
 }
 
 export default function FileStage({ file, ownerId = '', getAccessToken = null, onClose, onMissing = null }) {
   const [shown, setShown] = useState(false);
   const [remote, setRemote] = useState('');
+  const [remoteStatus, setRemoteStatus] = useState('');
+  const [retryTick, setRetryTick] = useState(0);
   const [body, setBody] = useState(null);
 
   useEffect(() => {
@@ -65,14 +71,19 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
   useEffect(() => {
     if (viewUrl(file) || !ownerId || !/^[0-9a-z]{128}$/.test(file?.id || '')) {
       setRemote('');
+      setRemoteStatus('');
       return undefined;
     }
     let gone = false;
     let objectUrl = '';
+    setRemoteStatus('loading');
     (async () => {
       const token = await getAccessToken?.();
       const accountCode = ensureAccountCode(window.localStorage, ownerId);
-      if (!token || !accountCode || gone) return;
+      if (!token || !accountCode || gone) {
+        if (!gone) setRemoteStatus('error');
+        return;
+      }
       const response = await fetch(`/api/files/${file.id}`, {
         headers: {
           'x-owner-id': ownerId,
@@ -83,8 +94,15 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
       if (!response.ok || gone) {
         if (response && response.status === 404) {
           const data = await response.json().catch(() => ({}));
-          if (data?.gone === true) onMissing?.(file.id);
+          if (data?.gone === true) {
+            if (!gone) {
+              setRemoteStatus('gone');
+              onMissing?.(file.id);
+            }
+            return;
+          }
         }
+        if (!gone) setRemoteStatus('error');
         return;
       }
       const bytes = await response.arrayBuffer();
@@ -92,16 +110,22 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
         ? 'application/pdf'
         : (response.headers.get('content-type') || 'application/octet-stream');
       objectUrl = URL.createObjectURL(new Blob([bytes], { type }));
-      if (!gone) setRemote(objectUrl);
-    })().catch(() => {});
+      if (!gone) {
+        setRemote(objectUrl);
+        setRemoteStatus('');
+      }
+    })().catch(() => {
+      if (!gone) setRemoteStatus('error');
+    });
     return () => {
       gone = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, ownerId, getAccessToken, onMissing]);
+  }, [file, ownerId, getAccessToken, onMissing, retryTick]);
 
   const url = viewUrl(file) || (remote.startsWith('blob:') ? remote : '');
   const kind = stageKind(file);
+  const availability = fileAvailability({ id: file?.id, url, remoteStatus });
 
   useEffect(() => {
     if (!url || (kind !== 'code' && kind !== 'doc')) {
@@ -121,11 +145,12 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
   }, [url, kind]);
 
   if (!file || typeof document === 'undefined') return null;
-  const name = file.name || 'File';
+  const name = displayFileName(file.name) || file.name || 'File';
   const playable = Boolean(url) && (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'pdf');
   const codeText = kind === 'code' && typeof body?.text === 'string' ? body.text : '';
   const paragraphs = kind === 'doc' && Array.isArray(body?.paragraphs) ? body.paragraphs : [];
   const waiting = Boolean(url) && (kind === 'code' || kind === 'doc') && !body;
+  const emptyPreview = !playable && !codeText && paragraphs.length === 0 && !waiting;
 
   return createPortal(
     <div
@@ -158,13 +183,13 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
               {paragraphs.map((line, index) => <p key={`${index}-${line.slice(0, 24)}`}>{line}</p>)}
             </article>
           ) : null}
-          {waiting ? (
+          {waiting || (emptyPreview && availability.state === 'loading') ? (
             <div className="file-stage-card">
               <strong>{name}</strong>
               <p>Opening this file.</p>
             </div>
           ) : null}
-          {!playable && !codeText && paragraphs.length === 0 && !waiting ? (
+          {emptyPreview && availability.state !== 'loading' ? (
             <div className="file-stage-card">
               <strong>{name}</strong>
               <p>
@@ -173,9 +198,14 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
                   : body?.error === 'long'
                     ? 'This file is too long to preview here.'
                     : body?.error === 'doc' || body?.error === 'binary'
-                      ? 'This file did not open. Try it again from this device.'
-                      : 'This name is in the file catalog. Open the file again from this device to view it.'}
+                      ? 'This file did not open. Try attaching a fresh copy from this device.'
+                      : availability.message}
               </p>
+              {availability.state === 'error' ? (
+                <button type="button" className="solid" onClick={() => setRetryTick(value => value + 1)}>
+                  Try again
+                </button>
+              ) : null}
             </div>
           ) : null}
           <figcaption>{name}</figcaption>

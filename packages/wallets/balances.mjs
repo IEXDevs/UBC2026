@@ -44,6 +44,139 @@ function rejectBalance(code, address = null, cluster = 'devnet') {
   };
 }
 
+/** Distinct read outcomes — never collapse rpc_failed into a zero balance. */
+export const BALANCE_READ_OK = 'ok';
+export const BALANCE_READ_EMPTY = 'empty';
+export const BALANCE_READ_FAILED = 'failed';
+export const BALANCE_READ_PARTIAL = 'partial';
+export const BALANCE_READ_STALE = 'stale';
+
+export function unavailableBalanceLabel(code = 'rpc_failed') {
+  const safe = typeof code === 'string' && /^[a-z0-9_]{1,64}$/i.test(code.trim())
+    ? code.trim()
+    : 'rpc_failed';
+  return `balance unavailable (${safe})`;
+}
+
+/**
+ * Classify a wallet list (or single balance) for agents and UI.
+ * Failed / partial reads keep amounts null where unknown and never invent "0 SOL".
+ */
+export function classifyBalanceRead(input = {}) {
+  const items = Array.isArray(input?.items)
+    ? input.items
+    : (input && typeof input === 'object' && (input.ok === true || input.ok === false || input.balanceStatus)
+      ? [input]
+      : []);
+  if (items.length === 0) {
+    return {
+      status: BALANCE_READ_EMPTY,
+      code: null,
+      ok: true,
+      displayBalanceLabel: '0 SOL',
+      asOf: typeof input?.asOf === 'string' ? input.asOf : null,
+    };
+  }
+  let okCount = 0;
+  let emptyCount = 0;
+  let failedCount = 0;
+  let partialCount = 0;
+  let staleCount = 0;
+  let failCode = null;
+  const labels = [];
+  for (const item of items) {
+    const status = typeof item?.balanceStatus === 'string' && item.balanceStatus
+      ? item.balanceStatus
+      : (item?.ok === false
+        ? (item.code || BALANCE_READ_FAILED)
+        : (item?.status || null));
+    const holdings = Array.isArray(item?.holdings) ? item.holdings.filter((row) => row?.label) : [];
+    const sol = item?.solLamports;
+    const usdc = item?.usdcAmount ?? item?.usdcBalance;
+    const solKnown = typeof sol === 'string' && integerAmount.test(sol);
+    const usdcKnown = typeof usdc === 'string' && integerAmount.test(usdc);
+    const hasFunds = holdings.length > 0
+      || (solKnown && sol !== '0')
+      || (usdcKnown && usdc !== '0');
+    if (status === BALANCE_READ_STALE || item?.stale === true) {
+      staleCount += 1;
+      if (typeof item?.displayBalanceLabel === 'string' && item.displayBalanceLabel) {
+        labels.push(item.displayBalanceLabel);
+      }
+      continue;
+    }
+    if (status && status !== 'ok' && status !== 'empty' && status !== BALANCE_READ_PARTIAL) {
+      failedCount += 1;
+      if (!failCode) failCode = status === BALANCE_READ_FAILED ? (item.code || 'rpc_failed') : status;
+      if (solKnown || usdcKnown || holdings.length > 0) partialCount += 1;
+      continue;
+    }
+    if (item?.ok === false) {
+      failedCount += 1;
+      if (!failCode) failCode = item.code || 'rpc_failed';
+      if (solKnown || usdcKnown || holdings.length > 0) partialCount += 1;
+      continue;
+    }
+    if (hasFunds) {
+      okCount += 1;
+      if (typeof item?.displayBalanceLabel === 'string' && item.displayBalanceLabel) {
+        labels.push(item.displayBalanceLabel);
+      } else {
+        for (const row of holdings) labels.push(row.label);
+      }
+    } else {
+      emptyCount += 1;
+    }
+  }
+  const asOf = typeof input?.asOf === 'string' ? input.asOf : null;
+  if (staleCount > 0 && okCount === 0 && failedCount === 0) {
+    return {
+      status: BALANCE_READ_STALE,
+      code: null,
+      ok: true,
+      displayBalanceLabel: labels.filter(Boolean).join(' · ') || 'balance stale',
+      asOf,
+    };
+  }
+  if (failedCount > 0 && okCount === 0 && partialCount === 0) {
+    return {
+      status: BALANCE_READ_FAILED,
+      code: failCode || 'rpc_failed',
+      ok: false,
+      displayBalanceLabel: unavailableBalanceLabel(failCode || 'rpc_failed'),
+      asOf,
+    };
+  }
+  if (failedCount > 0 && (okCount > 0 || partialCount > 0)) {
+    return {
+      status: BALANCE_READ_PARTIAL,
+      code: failCode || 'rpc_failed',
+      ok: false,
+      displayBalanceLabel: [
+        ...labels.filter(Boolean),
+        unavailableBalanceLabel(failCode || 'rpc_failed'),
+      ].join(' · '),
+      asOf,
+    };
+  }
+  if (okCount > 0) {
+    return {
+      status: BALANCE_READ_OK,
+      code: null,
+      ok: true,
+      displayBalanceLabel: labels.filter(Boolean).join(' · ') || null,
+      asOf,
+    };
+  }
+  return {
+    status: BALANCE_READ_EMPTY,
+    code: null,
+    ok: true,
+    displayBalanceLabel: '0 SOL',
+    asOf,
+  };
+}
+
 function shortMint(mint) {
   if (typeof mint !== 'string' || mint.length < 8) return 'TOKEN';
   return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
@@ -319,7 +452,10 @@ export async function readWalletBalancesAcrossClusters({
     mint: DEVNET_USDC_MINT,
     tokens,
     displayBalanceLabel: holdings.map((row) => row.label).filter(Boolean).join(' · ')
-      || (anyOk ? null : `balance unavailable (${devnet.code || testnet.code || 'rpc_failed'})`),
+      || (anyOk ? null : unavailableBalanceLabel(devnet.code || testnet.code || 'rpc_failed')),
+    balanceStatus: anyOk
+      ? ((holdings.length > 0 || solLamports !== '0') ? BALANCE_READ_OK : BALANCE_READ_EMPTY)
+      : BALANCE_READ_FAILED,
   };
 }
 

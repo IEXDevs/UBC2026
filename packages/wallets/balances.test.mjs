@@ -302,3 +302,76 @@ test('readDevnetUsdcBalance returns USDC amount without RPC URL leakage', async 
   assert.equal(failed.ok, false);
   assert.equal(failed.amount, null);
 });
+
+/**
+ * Achieves: rpc_failed stays distinct from empty success in classifyBalanceRead.
+ * Fails when: failed reads collapse to empty/"0 SOL".
+ * Oracle: status failed; unavailable label; empty success stays empty.
+ * Side effects: none.
+ * Gaps: none.
+ */
+test('classifyBalanceRead keeps rpc_failed distinct from empty success', async () => {
+  const { classifyBalanceRead, unavailableBalanceLabel } = await import('./balances.mjs');
+  const failed = classifyBalanceRead({
+    items: [{
+      balanceStatus: 'rpc_failed',
+      ok: false,
+      code: 'rpc_failed',
+      solLamports: null,
+      usdcBalance: null,
+      holdings: [],
+    }],
+  });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.ok, false);
+  assert.equal(failed.displayBalanceLabel, unavailableBalanceLabel('rpc_failed'));
+  assert.equal(failed.displayBalanceLabel.includes('0 SOL'), false);
+
+  const empty = classifyBalanceRead({
+    items: [{
+      balanceStatus: 'ok',
+      ok: true,
+      solLamports: '0',
+      usdcBalance: '0',
+      holdings: [],
+    }],
+  });
+  assert.equal(empty.status, 'empty');
+  assert.equal(empty.ok, true);
+  assert.equal(empty.displayBalanceLabel, '0 SOL');
+
+  const funded = classifyBalanceRead({
+    items: [{
+      balanceStatus: 'ok',
+      ok: true,
+      solLamports: '1000000000',
+      holdings: [{ label: '1 SOL (devnet)' }],
+      displayBalanceLabel: '1 SOL (devnet)',
+    }],
+  });
+  assert.equal(funded.status, 'ok');
+  assert.match(funded.displayBalanceLabel, /1 SOL/);
+
+  const partial = classifyBalanceRead({
+    items: [
+      {
+        balanceStatus: 'ok',
+        ok: true,
+        solLamports: '1000000000',
+        holdings: [{ label: '1 SOL (devnet)' }],
+        displayBalanceLabel: '1 SOL (devnet)',
+      },
+      {
+        balanceStatus: 'rpc_failed',
+        ok: false,
+        code: 'rpc_failed',
+        solLamports: null,
+        holdings: [],
+      },
+    ],
+  });
+  assert.equal(partial.status, 'partial');
+  assert.equal(partial.ok, false);
+  assert.match(partial.displayBalanceLabel, /1 SOL/);
+  assert.match(partial.displayBalanceLabel, /unavailable/);
+});
