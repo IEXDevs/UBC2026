@@ -95,6 +95,7 @@ export default function Composer({
   shellWallets = null,
   shellBalanceLabel = null,
   fileCatalog = null,
+  getAccessToken = null,
   lines = [],
   onLine,
   onThinking,
@@ -421,6 +422,8 @@ export default function Composer({
           : 'Sign in to chat with this agent.');
         return;
       }
+      let accessToken = '';
+      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
       const result = await sendBotChat({
         ownerId,
         botId,
@@ -436,6 +439,7 @@ export default function Composer({
         shellWallets,
         shellBalanceLabel,
         fileCatalog: catalogRef.current,
+        accessToken,
       });
       await settleChat(result, spoken, prior);
     } catch {
@@ -461,6 +465,8 @@ export default function Composer({
           : 'Sign in to chat with this agent.');
         return;
       }
+      let accessToken = '';
+      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
       const result = await sendBotChat({
         ownerId,
         botId,
@@ -476,6 +482,7 @@ export default function Composer({
         shellWallets,
         shellBalanceLabel,
         fileCatalog: catalogRef.current,
+        accessToken,
       });
       if (!result.ok) pushLine('agent', chatFailureNote(result.error));
       else await settleChat(result, spoken, prior);
@@ -525,6 +532,8 @@ export default function Composer({
     onThinking?.(true);
     sendingRef.current = true;
     try {
+      let accessToken = '';
+      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
       const result = await sendBotChat({
         ownerId,
         botId: botIdRef.current,
@@ -541,6 +550,7 @@ export default function Composer({
         shellWallets,
         shellBalanceLabel,
         fileCatalog: catalogRef.current,
+        accessToken,
       });
       await settleChat(result, spoken, prior, grants);
     } catch {

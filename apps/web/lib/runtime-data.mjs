@@ -330,6 +330,7 @@ export async function sendBotChat({
   shellWallets = null,
   shellBalanceLabel = null,
   fileCatalog = null,
+  accessToken = '',
   runtimeBase = runtimeBaseUrl(),
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
@@ -355,6 +356,9 @@ export async function sendBotChat({
       headers: {
         'content-type': 'application/json',
         'x-owner-id': ownerId,
+        ...(typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000
+          ? { authorization: `Bearer ${accessToken.trim()}` }
+          : {}),
       },
       body: JSON.stringify({
         message: text,

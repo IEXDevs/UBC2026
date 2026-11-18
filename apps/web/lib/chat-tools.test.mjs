@@ -233,8 +233,14 @@ test('createChatToolInvoker lists bots via Worker dashboard tools', async () => 
     ownerId: 'did:privy:owner1',
     botId: 'bot_1',
     runtimeBase: 'https://runtime.example',
+    accessToken: 'privy-jwt',
     fetcher: async (url, options) => {
-      calls.push({ url: String(url), method: options.method, owner: options.headers['x-owner-id'] });
+      calls.push({
+        url: String(url),
+        method: options.method,
+        owner: options.headers['x-owner-id'],
+        auth: options.headers.authorization ?? null,
+      });
       return Response.json({ items: [{ id: 'bot_1', name: 'Alpha' }] });
     },
   });
@@ -243,6 +249,44 @@ test('createChatToolInvoker lists bots via Worker dashboard tools', async () => 
   assert.match(calls[0].url, /\/api\/bots$/);
   assert.equal(calls[0].method, 'GET');
   assert.equal(calls[0].owner, 'did:privy:owner1');
+  assert.equal(calls[0].auth, 'Bearer privy-jwt');
+});
+
+/**
+ * Achieves: verifies get_wallets sends Bearer and falls back to shell on login_required.
+ * Fails when: Bearer is omitted or login_required surfaces instead of shell wallets.
+ * Oracle: auth header is Bearer; shell fallback returns local wallet id.
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
+test('createChatToolInvoker get_wallets sends Bearer and falls back on login_required', async () => {
+  const calls = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_local',
+    runtimeBase: 'https://runtime.example',
+    accessToken: 'privy-jwt',
+    shellWallets: [{ id: 'w_main', label: 'Main', address: 'Addr1111111111111111111111111111111111', kind: 'main' }],
+    shellBalanceLabel: '1 USDC',
+    fetcher: async (url, options) => {
+      calls.push({
+        url: String(url),
+        method: options.method,
+        auth: options.headers.authorization ?? null,
+      });
+      if (String(url).includes('/api/wallets')) {
+        return Response.json({ error: 'login_required' }, { status: 401 });
+      }
+      if (String(url).includes('/api/transfers')) {
+        return Response.json({ error: 'login_required' }, { status: 401 });
+      }
+      return Response.json({ ok: true, items: [] });
+    },
+  });
+  const wallets = await invoke('get_wallets', {});
+  assert.equal(wallets.source, 'shell');
+  assert.equal(wallets.items[0].id, 'w_main');
+  assert.ok(calls.some((call) => call.auth === 'Bearer privy-jwt'));
 });
 
 /**
