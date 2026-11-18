@@ -144,15 +144,43 @@ export function usdcUnits({ positions = [], transfers = [] } = {}) {
   return positionUnits(positions, 'USDC');
 }
 
-export function deskTokens({ positions = [], transfers = [], prefs } = {}) {
+export function deskTokens({ positions = [], transfers = [], prefs, devnet = null } = {}) {
   const clean = normalizeTokenPrefs(prefs);
-  const book = usdcUnits({ positions, transfers });
+  const onchain = devnet?.ok === true && devnet?.cluster === 'devnet';
+  const book = onchain && UNITS.test(devnet.usdcAmount)
+    ? devnet.usdcAmount
+    : usdcUnits({ positions, transfers });
+  const solUnits = onchain && UNITS.test(devnet.solLamports) ? devnet.solLamports : null;
   const rows = [
     ...CORE_TOKENS.map(token => ({ ...token })),
     ...clean.extra.map(token => ({ ...token, core: false })),
   ];
+  const seen = new Set(rows.map(token => token.mint));
+  if (onchain && Array.isArray(devnet.tokens)) {
+    for (const token of devnet.tokens) {
+      if (!token || typeof token.mint !== 'string' || !MINT.test(token.mint) || seen.has(token.mint)) continue;
+      if (token.symbol === 'USDC' || token.symbol === 'SOL' || token.mint === USDC_MINT || token.mint === SOL_MINT) continue;
+      if (!UNITS.test(token.amount) || token.amount === '0') continue;
+      if (!Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 18) continue;
+      const symbol = typeof token.symbol === 'string' ? token.symbol.trim() : '';
+      if (!symbol || symbol.length > 16 || /\s/.test(symbol)) continue;
+      seen.add(token.mint);
+      rows.push({
+        symbol,
+        mint: token.mint,
+        decimals: token.decimals,
+        core: false,
+        amount: token.amount,
+      });
+    }
+  }
   return rows.map(token => {
-    const amount = token.symbol === 'USDC' ? book : positionUnits(positions, token.symbol);
+    let amount = token.amount;
+    if (amount == null) {
+      if (token.symbol === 'USDC') amount = book;
+      else if (token.symbol === 'SOL' && solUnits != null) amount = solUnits;
+      else amount = positionUnits(positions, token.symbol);
+    }
     return {
       ...token,
       amount,

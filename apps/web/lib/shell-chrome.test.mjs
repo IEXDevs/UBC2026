@@ -97,8 +97,8 @@ test('the stage header has no USDC chip and the detail chip is the agent wallet'
   assert.equal(topbar.includes('wallet-chip'), false);
   assert.equal(detail.includes('wallet-chip'), false);
   assert.match(detail, /FileLibrary/);
-  assert.match(page, /holdingsLabel=\{registeredHoldingsLabel\(\{ wallets, positions, transfers, bots \}\)\}/);
-  assert.match(menu, /shortcut: one shared USDC book, sum every registered wallet when each wallet stores its own holdings\./);
+  assert.match(page, /holdingsLabel=\{registeredHoldingsLabel\(\{ wallets, positions, transfers, bots, chainLabel \}\)\}/);
+  assert.match(menu, /Assigned wallet devnet SOL and USDC when the chain read is in\./);
   assert.match(menu, /className="you-holdings"/);
 });
 

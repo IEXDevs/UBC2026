@@ -165,14 +165,24 @@ export function glanceBalance(positions) {
   return `${formatBaseUnits(sum.toString())} USDC`;
 }
 
-export function walletGlance(wallets, positions, transfers = []) {
+function spendableChainLabel(value) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  if (!text || text.length > 180) return '';
+  if (!/^[0-9A-Za-z .…·]+$/.test(text)) return '';
+  if (!text.includes('SOL') || !text.includes('USDC')) return '';
+  return text;
+}
+
+export function walletGlance(wallets, positions, transfers = [], chainLabel = null) {
   const main = wallets.find(wallet => wallet.kind === 'main') ?? wallets[0] ?? null;
   const platform = Array.isArray(transfers) && transfers.length > 0;
+  const chain = spendableChainLabel(chainLabel);
   return {
     label: main?.label ?? 'Wallet',
     address: main?.address ?? '',
     short: shortAddress(main?.address),
-    balanceLabel: platform ? `${formatBaseUnits(platformBalance(transfers))} USDC` : glanceBalance(positions),
+    balanceLabel: chain || (platform ? `${formatBaseUnits(platformBalance(transfers))} USDC` : glanceBalance(positions)),
     platform,
   };
 }
@@ -210,8 +220,16 @@ export function walletBalanceLabel(walletId, { wallets = [], positions = [], tra
   return `${formatBaseUnits(sumWalletUsdc(positions, walletId, bots).toString())} USDC`;
 }
 
-/** USDC across registered wallets. A single platform book is one total, not a per-wallet sum. */
-export function registeredHoldingsLabel({ wallets = [], positions = [], transfers = [], bots = [] } = {}) {
+/** USDC across registered wallets. A devnet chain label replaces the book. */
+export function registeredHoldingsLabel({
+  wallets = [],
+  positions = [],
+  transfers = [],
+  bots = [],
+  chainLabel = null,
+} = {}) {
+  const chain = spendableChainLabel(chainLabel);
+  if (chain) return chain;
   const list = (Array.isArray(wallets) ? wallets : []).filter(wallet => wallet && wallet.id);
   if (usesPlatformBook(transfers) || list.length < 2) {
     return walletGlance(list, positions, transfers).balanceLabel;

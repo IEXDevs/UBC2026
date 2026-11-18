@@ -113,9 +113,11 @@ test('readDevnetWalletBalances returns SOL and SPL tokens without leaking the RP
         return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
       }
       if (body.method === 'getBalance') {
+        assert.deepEqual(body.params[1], { commitment: 'confirmed' });
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 1_000_000_000 } });
       }
       assert.equal(body.method, 'getTokenAccountsByOwner');
+      assert.equal(body.params[2].commitment, 'confirmed');
       if (body.params[1].programId !== SPL_TOKEN_PROGRAM_ID) {
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
       }

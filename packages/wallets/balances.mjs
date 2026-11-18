@@ -194,9 +194,9 @@ export async function readClusterWalletBalances({
     if (genesis !== expectedGenesis) {
       return rejectBalance('wrong_cluster', address, cluster);
     }
-    const encoding = { encoding: 'jsonParsed' };
+    const encoding = { encoding: 'jsonParsed', commitment: 'confirmed' };
     const [lamportsRaw, classic, token2022] = await Promise.all([
-      rpcCall(fetcher, target, 'getBalance', [address]),
+      rpcCall(fetcher, target, 'getBalance', [address, { commitment: 'confirmed' }]),
       rpcCall(fetcher, target, 'getTokenAccountsByOwner', [
         address,
         { programId: SPL_TOKEN_PROGRAM_ID },

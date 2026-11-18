@@ -26,6 +26,7 @@ import ComputerSheet from '../components/ComputerSheet';
 import FileStage from '../components/FileStage';
 import RecallSearch from '../components/RecallSearch';
 import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletGlance } from '../lib/money-views.mjs';
+import { assignedWalletAddress, devnetSpendableLabel } from '../lib/devnet-balance.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
 import { compactLines, contextUsage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -388,6 +389,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [hideWalletError, setHideWalletError] = useState(false);
   const [claimWelcome, setClaimWelcome] = useState(false);
   const [transfers, setTransfers] = useState([]);
+  const [devnetBalance, setDevnetBalance] = useState(null);
   const [receipts, setReceipts] = useState([]);
   const pushReceipt = useCallback((receipt) => {
     if (!receipt || typeof receipt.id !== 'string' || !receipt.id) return;
@@ -794,6 +796,42 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     setActiveBot(bots[0].id);
   }, [devPreview, activeBot, bots]);
   const wallets = pickWalletList(assigned.wallets, remoteLists.wallets);
+  const walletAddress = assignedWalletAddress(wallets);
+  useEffect(() => {
+    if (devPreview || !signedIn || !walletAddress) {
+      setDevnetBalance(null);
+      return undefined;
+    }
+    let stop = false;
+    (async () => {
+      let token = '';
+      try { token = (await getAccessToken?.()) || ''; } catch { token = ''; }
+      if (stop) return;
+      if (!token) {
+        setDevnetBalance(null);
+        return;
+      }
+      try {
+        const response = await fetch(`/api/devnet-balance?address=${encodeURIComponent(walletAddress)}`, {
+          headers: {
+            authorization: `Bearer ${token}`,
+            ...(ownerId ? { 'x-owner-id': ownerId } : {}),
+          },
+          cache: 'no-store',
+        });
+        const body = await response.json().catch(() => null);
+        if (stop) return;
+        if (response.ok && body?.ok === true && body.cluster === 'devnet' && body.address === walletAddress) {
+          setDevnetBalance(body);
+        } else {
+          setDevnetBalance(null);
+        }
+      } catch {
+        if (!stop) setDevnetBalance(null);
+      }
+    })();
+    return () => { stop = true; };
+  }, [walletAddress, signedIn, ownerId, getAccessToken, devPreview, walletsOpen]);
   const payments = remoteLists.payments || [];
   const paymentCrossCheck = remoteLists.paymentCrossCheck || [];
   const positions = remoteLists.positions || [];
@@ -805,7 +843,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   );
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
-  const glance = walletGlance(wallets, positions, transfers);
+  const chainLabel = devnetSpendableLabel(devnetBalance);
+  const glance = walletGlance(wallets, positions, transfers, chainLabel);
   const setupStep = devPreview ? null : accountSetupStep({
     signedIn,
     profileReady,
@@ -1522,7 +1561,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             signedIn={signedIn}
             loginDisabled={loginDisabled}
             walletUnlocked={unlocked}
-            holdingsLabel={registeredHoldingsLabel({ wallets, positions, transfers, bots })}
+            holdingsLabel={registeredHoldingsLabel({ wallets, positions, transfers, bots, chainLabel })}
             onLogin={onLogin}
             onPick={onAccount}
           />
@@ -1757,6 +1796,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         onReceipt={pushReceipt}
         getAccessToken={getAccessToken}
         resolveRecipient={resolveMention}
+        devnetBalance={devnetBalance}
       />
       <PartySheet
         open={Boolean(party)}

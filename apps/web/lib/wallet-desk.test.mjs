@@ -86,6 +86,36 @@ test('desk tokens use the platform USDC book and hide nothing by default', () =>
 });
 
 /**
+ * Achieves: desk SOL and USDC follow the confirmed devnet read, and a token with no ledger row stays listed.
+ * Fails when: the platform book hides the faucet amount, or an on-wallet token is dropped.
+ * Oracle: 20 USDC and 1 SOL from devnet; BONK row present with empty positions and transfers.
+ * Side effects / state checked: N/A.
+ * Gaps: does not call RPC.
+ */
+test('desk tokens show devnet SOL and USDC even when the ledger is empty', () => {
+  const bonk = 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
+  const rows = deskTokens({
+    transfers: [{ asset: 'USDC', amount: '4000000', direction: 'in' }],
+    positions: [],
+    devnet: {
+      ok: true,
+      cluster: 'devnet',
+      solLamports: '1000000000',
+      usdcAmount: '20000000',
+      tokens: [
+        { mint: USDC_MINT, symbol: 'USDC', amount: '20000000', decimals: 6 },
+        { mint: bonk, symbol: 'JUP', amount: '3000000', decimals: 6 },
+      ],
+    },
+  });
+  assert.equal(rows[0].amountLabel, '20 USDC');
+  assert.equal(rows[1].amountLabel, '1 SOL');
+  const extra = rows.find(row => row.symbol === 'JUP');
+  assert.equal(extra.amountLabel, '3 JUP');
+  assert.equal(extra.mint, bonk);
+});
+
+/**
  * Achieves: verifies send targets accept a handle, an SNS name, or an address.
  * Fails when: send targets accept a handle, an SNS name, or an address breaks (e.g. expected { kind: 'handle', handle: 'alex' }, { kind: 'sns', domain: 'richclub.sol' }, { kind: 'address', address: ADDRESS }); failure/null paths flip.
  * Oracle: assert.equal(parseSendTarget('hello there'), null); assert.deepEqual(parseSendTarget('@Alex'), { kind: 'handle', handle: 'alex' }); assert.deepEqual(parseSendTarget('richclub.sol'), { kind: 'sns', domain: 'richclub.sol' }); assert.deepEqual(parseSendTarget(ADDRESS), { kind: 'address', address: ADDRESS })

@@ -84,7 +84,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
         >
           <ProfileMark src={avatarUrl} label={accountLabel} className="you-mark is-round" />
           {collapsed ? null : <strong>{accountLabel}</strong>}
-          {/* shortcut: one shared USDC book, sum every registered wallet when each wallet stores its own holdings. */}
+          {/* Assigned wallet devnet SOL and USDC when the chain read is in. Otherwise the shared USDC book. */}
           {collapsed || !holdingsLabel ? null : <span className="you-holdings">{holdingsLabel}</span>}
         </button>
       </div>
