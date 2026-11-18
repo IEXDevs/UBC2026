@@ -1,6 +1,15 @@
 import { createSearch } from '@ubc2026/browser-search';
 import { createBrowserSessionService, createDefaultBrowserSessionService, ProviderError, SessionError } from '@ubc2026/browser-session';
 import { SECRET_NAMES } from '@ubc2026/contracts';
+import {
+  CardLoopError,
+  cardLoopDue,
+  createCardLoop,
+  LOOP_BREAK_HEADER,
+  ownerBreakAuthorized,
+  publicCardLoop,
+  setCardLoopCooldown,
+} from '@ubc2026/contracts/card-loop';
 import { TransferError } from '@ubc2026/transfers';
 import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mjs';
 import { decideFromCheckpoint } from './decide.mjs';
@@ -17,6 +26,7 @@ const OWNER_HEADER = 'x-owner-id';
 /** Set only by the Worker cron path that calls the DO stub directly — never from the public edge. */
 export const INTERNAL_POSITION_HEADER = 'x-maelstrom-internal';
 export const INTERNAL_POSITION_VALUE = 'position-check';
+export const INTERNAL_CARD_LOOP_VALUE = 'card-loop';
 
 function noStore(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -57,6 +67,26 @@ function loopInput(body) {
   return input;
 }
 
+function loopModels(env) {
+  return env.openRouter ?? createOpenRouterFromEnv(env, env.fetch ?? fetch);
+}
+
+function loopDeps(env) {
+  return {
+    search: env.search ?? (env.FIRECRAWL_API_KEY
+      ? createSearch({ apiKey: env.FIRECRAWL_API_KEY, fetcher: env.fetch ?? fetch })
+      : null),
+    transferClient: env.transferClient ?? null,
+    execute: env.execute ?? null,
+    ledgerApi: env.ledgerApi ?? null,
+    verifyFn: env.verifyFn,
+    lookupPrice: resolvePriceLookup(env),
+    trustLookup: resolveTrustLookup(env),
+    recentBlockhash: env.recentBlockhash,
+    secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
+  };
+}
+
 async function loopContext(env, body, ownerId) {
   const bot = body?.bot && typeof body.bot === 'object' ? body.bot : null;
   const wallet = body?.wallet && typeof body.wallet === 'object' ? body.wallet : null;
@@ -78,6 +108,10 @@ async function loopContext(env, body, ownerId) {
 
 function isInternalPositionCheck(request) {
   return request.headers.get(INTERNAL_POSITION_HEADER) === INTERNAL_POSITION_VALUE;
+}
+
+function isInternalCardLoop(request) {
+  return request.headers.get(INTERNAL_POSITION_HEADER) === INTERNAL_CARD_LOOP_VALUE;
 }
 
 function publicMeta(meta) {
@@ -160,8 +194,17 @@ function browserService(machine, env) {
  * without a live workerd. The Cloudflare export wraps it below.
  */
 export class BotStateMachine {
-  constructor(storage = new Map()) {
+  constructor(storage = new Map(), hooks = {}) {
     this.storage = storage;
+    this.hooks = hooks && typeof hooks === 'object' ? hooks : {};
+  }
+
+  async armAlarm(at) {
+    if (typeof this.hooks.arm === 'function' && Number.isSafeInteger(at)) await this.hooks.arm(at);
+  }
+
+  async clearAlarm() {
+    if (typeof this.hooks.clear === 'function') await this.hooks.clear();
   }
 
   async get(key) {
@@ -225,11 +268,13 @@ export class BotStateMachine {
       }
       const run = await this.get('run');
       const positionCheck = await this.get('lastPositionCheck');
+      const cardLoop = publicCardLoop(await this.get('cardLoop'));
       return Response.json({
         ok: true,
         meta,
         run,
         positionCheck,
+        cardLoop,
       }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
@@ -425,20 +470,8 @@ export class BotStateMachine {
         run = { ...run, goal };
         await this.put('run', run);
       }
-      const models = env.openRouter ?? createOpenRouterFromEnv(env, env.fetch ?? fetch);
-      const deps = {
-        search: env.search ?? (env.FIRECRAWL_API_KEY
-          ? createSearch({ apiKey: env.FIRECRAWL_API_KEY, fetcher: env.fetch ?? fetch })
-          : null),
-        transferClient: env.transferClient ?? null,
-        execute: env.execute ?? null,
-        ledgerApi: env.ledgerApi ?? null,
-        verifyFn: env.verifyFn,
-        lookupPrice: resolvePriceLookup(env),
-        trustLookup: resolveTrustLookup(env),
-        recentBlockhash: env.recentBlockhash,
-        secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
-      };
+      const models = loopModels(env);
+      const deps = loopDeps(env);
       const input = loopInput(body);
       try {
         const result = await runBotLoop({
@@ -520,6 +553,18 @@ export class BotStateMachine {
       }
     }
 
+    if (url.pathname === '/card-loop/tick' && request.method === 'POST') {
+      if (!isInternalCardLoop(request)) return Response.json({ error: 'not_found' }, { status: 404 });
+      const body = await request.json().catch(() => ({}));
+      const tickNow = Number.isSafeInteger(body?.now) ? body.now : now;
+      const woke = await this.wakeCardLoop(env, tickNow);
+      return Response.json({ ok: true, ...woke }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    if (url.pathname === '/card-loop' || url.pathname === '/card-loop/cooldown' || url.pathname === '/card-loop/break') {
+      return this.handleCardLoop(request, env, url.pathname, now);
+    }
+
     const browserPath = url.pathname.match(/^\/id\/([^/]+)\/browser\/sessions(?:\/([^/]+)\/(live-view|release|navigate))?$/);
     if (browserPath) {
       return this.handleBrowser(request, env, {
@@ -530,6 +575,107 @@ export class BotStateMachine {
     }
 
     return Response.json({ error: 'not_found' }, { status: 404 });
+  }
+
+  async handleCardLoop(request, env, pathname, now) {
+    if (request.method !== 'POST') return Response.json({ error: 'method_not_allowed' }, { status: 405 });
+    const ownerId = ownerFrom(request);
+    if (!ownerId) return Response.json({ error: 'owner_required' }, { status: 401 });
+    const ownerGate = await this.requireBoundOwner(request);
+    if (ownerGate) return ownerGate;
+    const body = await request.json().catch(() => ({}));
+    const meta = await this.get('meta');
+    const botId = loopBotId({ botId: body?.botId }, meta);
+    if (!botId) return Response.json({ error: 'invalid_bot' }, { status: 400 });
+    if (!meta?.ownerId) {
+      await this.put('meta', {
+        ...(meta && typeof meta === 'object' ? meta : {}),
+        botId,
+        ownerId,
+        cluster: meta?.cluster || env.CLUSTER || 'devnet',
+        updatedAt: now,
+      });
+    }
+    try {
+      if (pathname === '/card-loop') {
+        const loop = createCardLoop({
+          botId,
+          purpose: body?.purpose,
+          cooldownMinutes: body?.cooldownMinutes,
+          now,
+        });
+        await this.put('cardLoop', loop);
+        await this.armAlarm(loop.nextWakeAt);
+        return Response.json({ ok: true, loop: publicCardLoop(loop) }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (pathname === '/card-loop/cooldown') {
+        const current = await this.get('cardLoop');
+        const loop = setCardLoopCooldown(current, body?.cooldownMinutes, now);
+        await this.put('cardLoop', loop);
+        await this.armAlarm(loop.nextWakeAt);
+        return Response.json({ ok: true, loop: publicCardLoop(loop) }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (!ownerBreakAuthorized(request.headers.get(LOOP_BREAK_HEADER))) {
+        return Response.json({ error: 'owner_must_ask' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+      }
+      await this.delete('cardLoop');
+      await this.clearAlarm();
+      return Response.json({ ok: true, loop: null }, { headers: { 'Cache-Control': 'no-store' } });
+    } catch (error) {
+      if (error instanceof CardLoopError) {
+        return Response.json({ error: error.code }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+      }
+      return Response.json({ error: 'loop_failed' }, { status: 500 });
+    }
+  }
+
+  /**
+   * Cooldown elapsed. Start the bot again through runBotLoop, which runs the
+   * decision gate before any spend. This method does not sign on its own.
+   */
+  async wakeCardLoop(env, now) {
+    const loop = await this.get('cardLoop');
+    if (!loop?.active) return { woke: false, reason: 'no_loop', spent: false };
+    if (!cardLoopDue(loop, now)) return { woke: false, reason: 'cooling', spent: false };
+    const meta = await this.get('meta');
+    const ownerId = typeof meta?.ownerId === 'string' ? meta.ownerId : null;
+    const botId = loop.botId;
+    let run = await this.get('run');
+    if (!run && botId) {
+      run = createEmptyRun({ runId: `run_${now}`, botId, goal: loop.purpose, now });
+      await this.put('run', run);
+    }
+    const context = await loopContext(env, { botId, goal: loop.purpose }, ownerId);
+    let gate = 'not-run';
+    let spent = false;
+    try {
+      const result = await runBotLoop({
+        run,
+        bot: context.bot,
+        wallet: context.wallet,
+        ledger: context.ledger,
+        ownerId,
+        input: loopInput({ goal: loop.purpose, botId }),
+        models: loopModels(env),
+        deps: loopDeps(env),
+        now,
+        persist: async (next) => { await this.put('run', next); },
+      });
+      gate = result.run?.pauseReason || (result.waiting ? 'waiting' : 'ran');
+      spent = result.run?.checkpoints?.execute?.status === 'done';
+    } catch (error) {
+      gate = typeof error?.code === 'string' ? error.code : 'loop_failed';
+    }
+    const minutes = loop.cooldownMinutes;
+    const next = {
+      ...loop,
+      lastWakeAt: now,
+      lastGate: gate,
+      nextWakeAt: now + minutes * 60_000,
+    };
+    await this.put('cardLoop', next);
+    await this.armAlarm(next.nextWakeAt);
+    return { woke: true, gate, throughGate: true, spent, loop: publicCardLoop(next) };
   }
 
   async handleBrowser(request, env, { botId, sessionRecordId, leaf }) {
@@ -642,8 +788,29 @@ export class BotDurableObject {
     this.machine.put = (key, value) => store.put(key, value);
     this.machine.delete = key => store.delete(key);
     this.machine.list = prefix => store.list(prefix);
+    this.machine.hooks = {
+      arm: (at) => {
+        const storage = this.state?.storage;
+        if (storage && typeof storage.setAlarm === 'function') return storage.setAlarm(at);
+        return undefined;
+      },
+      clear: () => {
+        const storage = this.state?.storage;
+        if (storage && typeof storage.deleteAlarm === 'function') return storage.deleteAlarm();
+        return undefined;
+      },
+    };
     this._ready = true;
     return this.machine;
+  }
+
+  async alarm() {
+    const machine = await this.#machine();
+    const request = new Request('https://bot/card-loop/tick', {
+      method: 'POST',
+      headers: { [INTERNAL_POSITION_HEADER]: INTERNAL_CARD_LOOP_VALUE },
+    });
+    await machine.handle(request, this.env);
   }
 
   async fetch(request) {

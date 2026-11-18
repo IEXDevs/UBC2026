@@ -11,6 +11,9 @@ const LABELS = Object.freeze({
   browser_live_view: 'Checked the live view',
   browser_release: 'Released the browser',
   get_price: 'Checked a price',
+  create_loop: 'Started a loop',
+  set_loop_cooldown: 'Set the loop cooldown',
+  break_loop: 'Broke the loop',
 });
 
 const PAGE_TOOLS = new Set(['web_scrape', 'browser_navigate', 'browser_open']);

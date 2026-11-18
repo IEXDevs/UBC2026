@@ -76,6 +76,7 @@ export async function POST(request, context) {
     shellWallets: Array.isArray(body.shellWallets) ? body.shellWallets.slice(0, 40) : null,
     shellBalanceLabel: typeof body.shellBalanceLabel === 'string' ? body.shellBalanceLabel : null,
     accessToken,
+    ownerMessage: message,
     fetcher: async (url, init) => {
       try {
         return await fetchAgentRuntime(url, init);

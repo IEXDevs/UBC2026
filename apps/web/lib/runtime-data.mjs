@@ -4,6 +4,7 @@
  * Worker URL is configured on the server. Empty arrays when unsigned or unconfigured.
  * Never invent PreviewMain / demo bots.
  */
+import { publicCardLoop } from '@ubc2026/contracts/card-loop';
 import { sanitizeActivity } from './chat-activity.mjs';
 import { catalogPayload } from './file-catalog.mjs';
 import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
@@ -45,6 +46,7 @@ export function shellBotFromRemote(row, looks = {}) {
     enabled,
     frozen,
     record: row,
+    loop: publicCardLoop(row.loop),
   };
 }
 
@@ -177,6 +179,8 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
     if (!url) return;
     const status = await getJson(url, headers, fetcher);
     if (!status.ok) return;
+    const loop = publicCardLoop(status.body?.cardLoop);
+    if (loop) bot.loop = loop;
     positions.push(...positionsFromStatus(bot.id, status.body));
   }));
   const source = botsRes.body?.source || walletsRes.body?.source || paymentsRes.body?.source || 'unknown';

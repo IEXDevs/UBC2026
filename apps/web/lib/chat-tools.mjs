@@ -20,6 +20,7 @@ import {
   spokenAwayBriefing,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
+import { ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
 import { readAgentPriceQuote } from '@ubc2026/prices';
 import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
@@ -51,11 +52,14 @@ function toolErrorPayload(error) {
   return { error: code };
 }
 
-async function workerJson(fetcher, url, ownerId, method, body, accessToken = '') {
+async function workerJson(fetcher, url, ownerId, method, body, accessToken = '', extraHeaders = null) {
   const headers = {
     'content-type': 'application/json',
     'x-owner-id': ownerId,
   };
+  if (extraHeaders && extraHeaders['x-loop-break'] === 'owner-asked') {
+    headers['x-loop-break'] = 'owner-asked';
+  }
   if (typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000) {
     headers.authorization = `Bearer ${accessToken.trim()}`;
   }
@@ -351,6 +355,7 @@ export function createChatToolInvoker({
   shellWallets = null,
   shellBalanceLabel = null,
   accessToken = '',
+  ownerMessage = '',
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
@@ -365,8 +370,8 @@ export function createChatToolInvoker({
     ? shellBalanceLabel.trim().slice(0, 64)
     : null;
 
-  function callWorker(url, method, body) {
-    return workerJson(fetcher, url, ownerId, method, body, token);
+  function callWorker(url, method, body, extraHeaders) {
+    return workerJson(fetcher, url, ownerId, method, body, token, extraHeaders);
   }
 
   async function invokeBrowser(name, args = {}) {
@@ -477,6 +482,7 @@ export function createChatToolInvoker({
   const apiBase = root || 'shell';
 
   async function invokeDashboard(name, args = {}, { sessionBot = true } = {}) {
+    if (name === 'break_loop' && !ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
     const def = DASHBOARD_TOOLS.find((tool) => tool.name === name);
     if (!def?.voiceCalls?.length) return { error: 'unknown_tool' };
     if (name === 'stop_all') {
@@ -518,17 +524,28 @@ export function createChatToolInvoker({
     }
     const body = {};
     for (const key of entry.body || []) {
-      if (typeof args[key] === 'string' && args[key].trim()) body[key] = args[key].trim();
+      let raw = args[key];
+      if (key === 'cooldownMinutes' && Number.isInteger(raw)) raw = String(raw);
+      if (typeof raw === 'string' && raw.trim()) body[key] = raw.trim();
     }
     if (args.confirmed === true) body.confirmed = true;
     if (args.permission === 'ask' || args.permission === 'review' || args.permission === 'full') {
       body.permission = args.permission;
     }
     if (name === 'start_task' && args.ownerPermission === 'full') body.ownerPermission = 'full';
+    if (name === 'break_loop') {
+      if (!ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
+      return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body, { 'x-loop-break': 'owner-asked' });
+    }
     return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body);
   }
 
   return async function invokeTool(name, args = {}) {
+    if (name === 'create_loop' || name === 'set_loop_cooldown' || name === 'break_loop') {
+      args = { ...args, botId };
+      delete args.ownerAsked;
+      delete args.userAsked;
+    }
     try {
       if (name === 'get_price') {
         const mint = typeof args.mint === 'string' ? args.mint.trim() : '';

@@ -34,6 +34,9 @@ test('shared catalog covers research and dashboard tools', () => {
     'get_wallets',
     'pause_bot',
     'start_task',
+    'create_loop',
+    'set_loop_cooldown',
+    'break_loop',
     'request_spend',
   ]) {
     assert.ok(SHARED_TOOL_NAMES.includes(name), name);
@@ -147,6 +150,18 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.match(sharedToolsInstruction(), /devnet execution, mainnet pricing/);
   assert.match(sharedToolsInstruction(), /balances\.displayBalanceLabel/);
   assert.match(sharedToolsInstruction(), /what_happened_while_away/);
+  assert.match(sharedToolsInstruction(), /create_loop stores a purpose/);
+  assert.match(sharedToolsInstruction(), /at least 15 minutes/);
+  assert.match(sharedToolsInstruction(), /decision gate before any spend/);
+  assert.match(sharedToolsInstruction(), /Do not break a loop on your own/);
+  const created = DASHBOARD_TOOLS.find((tool) => tool.name === 'create_loop');
+  assert.deepEqual(created.parameters.required, ['botId', 'purpose', 'cooldownMinutes']);
+  assert.equal(created.voiceCalls[0].path, '/bots/:botId/card-loop');
+  const cooldown = DASHBOARD_TOOLS.find((tool) => tool.name === 'set_loop_cooldown');
+  assert.match(cooldown.description, /minimum is 15/i);
+  const broken = DASHBOARD_TOOLS.find((tool) => tool.name === 'break_loop');
+  assert.match(broken.description, /only when the owner explicitly asks/);
+  assert.equal(broken.parameters.properties.ownerAsked, undefined);
   const away = DASHBOARD_TOOLS.find((tool) => tool.name === 'what_happened_while_away');
   assert.deepEqual(away.voiceCalls.map((entry) => ({ method: entry.method, path: entry.path })), [
     { method: 'GET', path: '/api/events' },

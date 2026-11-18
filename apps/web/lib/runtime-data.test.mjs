@@ -49,7 +49,21 @@ test('shell bot mapping never invents preview experience', () => {
   assert.equal(bot.shape, 'hex');
   assert.equal(bot.status, 'watching');
   assert.equal(bot.experience, undefined);
+  assert.equal(bot.loop, null);
   assert.equal(shellBotFromRemote(null), null);
+  const marked = shellBotFromRemote({
+    id: 'bot_1',
+    name: 'Live',
+    loop: { active: true, purpose: 'Check positions', cooldownMinutes: 15, cooldownLabel: '15m', nextWakeAt: 1 },
+  });
+  assert.equal(marked.loop.purpose, 'Check positions');
+  assert.equal(marked.loop.cooldownLabel, '15m');
+  const short = shellBotFromRemote({
+    id: 'bot_1',
+    name: 'Live',
+    loop: { active: true, purpose: 'Check positions', cooldownMinutes: 10, cooldownLabel: '10m' },
+  });
+  assert.equal(short.loop, null);
 });
 
 /**

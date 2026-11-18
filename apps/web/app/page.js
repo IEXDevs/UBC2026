@@ -379,6 +379,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [rosterReady, setRosterReady] = useState(false);
   const [thinkingBot, setThinkingBot] = useState(null);
   const [botRecords, setBotRecords] = useState([]);
+  const [loopOverrides, setLoopOverrides] = useState({});
+  const [listsTick, setListsTick] = useState(0);
   const [remoteLists, setRemoteLists] = useState(() => emptyMoneyState());
   const [profile, setProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
@@ -619,13 +621,22 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       }
       try {
         const lists = await fetchOwnerLists(ownerId, { accessToken });
-        if (!stop && lists) setRemoteLists(lists);
+        if (!stop && lists) {
+          setRemoteLists(lists);
+          setLoopOverrides((current) => {
+            const next = { ...current };
+            for (const row of lists.bots || []) {
+              if (row?.loop?.active) delete next[row.id];
+            }
+            return next;
+          });
+        }
       } catch {
         if (!stop) setRemoteLists(emptyMoneyState());
       }
     })();
     return () => { stop = true; };
-  }, [ownerId, signedIn, user, getAccessToken, liveWallets]);
+  }, [ownerId, signedIn, user, getAccessToken, liveWallets, listsTick]);
 
   // Backfill local-only roster bots into Supabase once a Supabase wallet exists.
   // Do not use liveWallets-only ids — bots.create 404s with wallet_not_found.
@@ -744,7 +755,34 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     return sample ? [sample] : looked;
   }, [seedBots, looks, devPreview]);
   const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
-  const bots = assigned.bots;
+  const bots = assigned.bots.map((bot) => (
+    Object.prototype.hasOwnProperty.call(loopOverrides, bot.id)
+      ? { ...bot, loop: loopOverrides[bot.id] }
+      : bot
+  ));
+  const onBreakLoop = useCallback(async (id) => {
+    if (typeof id !== 'string' || !id) return;
+    setLoopOverrides((current) => ({ ...current, [id]: null }));
+    const url = shellRuntimeUrl(`/bots/${encodeURIComponent(id)}/card-loop/break`);
+    if (!url || !ownerId) return;
+    let accessToken = '';
+    try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-owner-id': ownerId,
+          'x-loop-break': 'owner-asked',
+          ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: '{}',
+        cache: 'no-store',
+      });
+    } catch {
+      // The mark is already gone. The next list refresh keeps it gone if the break landed.
+    }
+  }, [ownerId, getAccessToken]);
   useEffect(() => {
     if (!devPreview || bots.length === 0) return;
     if (bots.some(item => item.id === activeBot)) return;
@@ -1416,6 +1454,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           onDelete={onDelete}
           onEdit={onEditLook}
           onCreate={() => setCreateOpen(true)}
+          onBreakLoop={onBreakLoop}
         />
         <footer className="you">
           <AccountMenu
@@ -1532,6 +1571,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             onLine={(line, forBot) => {
               const id = forBot || bot.id;
               appendTalk(id, line);
+              if (line.role === 'agent') setListsTick((tick) => tick + 1);
               if (line.role !== 'user') return;
               const command = parsePlatformSend(line.text);
               if (!command || !ownerId) return;
