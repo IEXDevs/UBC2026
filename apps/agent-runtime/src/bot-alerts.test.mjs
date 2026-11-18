@@ -226,6 +226,7 @@ test('an over-cap spend attempt is an unapproved alert on that bot', async () =>
     PRODUCT: 'Maelstrom',
     CLUSTER: 'devnet',
     spendNow: at,
+    trustLookup: null,
     loadSpendContext: async () => ({
       bot: {
         id: 'bot_1',

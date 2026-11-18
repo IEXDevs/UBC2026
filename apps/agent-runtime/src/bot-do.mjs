@@ -8,6 +8,7 @@ import { verifierFacts } from './spend-verifier.mjs';
 import { LoopEngineError, runBotLoop } from './loop-engine.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
+import { resolveTrustLookup } from './trust-lookup.mjs';
 import { assessPositions } from './schedules.mjs';
 import { alertFromGate, alertFromPauseReason, rememberBotAlert } from './bot-alerts.mjs';
 import { enrichEnv } from './runtime-env.mjs';
@@ -376,7 +377,7 @@ export class BotStateMachine {
         ledgerApi: env.ledgerApi ?? null,
         verifyFn: env.verifyFn,
         lookupPrice: resolvePriceLookup(env),
-        trustLookup: env.trustLookup,
+        trustLookup: resolveTrustLookup(env),
         recentBlockhash: env.recentBlockhash,
         secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
       };

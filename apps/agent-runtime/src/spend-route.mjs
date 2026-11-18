@@ -12,6 +12,29 @@ import { loadOwnerLoopContext, supabaseConfig } from './supabase-rest.mjs';
 import { alertFromSpend, publishBotAlert } from './bot-alerts.mjs';
 import { deskSpendAllowed } from './desk-grant.mjs';
 import { verifierFacts } from './spend-verifier.mjs';
+import { resolveTrustLookup } from './trust-lookup.mjs';
+
+function readLookupScore(looked) {
+  if (typeof looked === 'string' || typeof looked === 'number') return String(looked);
+  if (looked && (typeof looked.score === 'string' || typeof looked.score === 'number')) return String(looked.score);
+  return '';
+}
+
+/** Jupiter score when a lookup is configured. A failed lookup blocks the spend. */
+async function spendTrustScore(env) {
+  const lookup = resolveTrustLookup(env);
+  if (lookup) {
+    try {
+      const score = readLookupScore(await lookup(DEVNET_USDC_MINT));
+      if (!/^(0|[1-9][0-9]{0,2}|1000)$/.test(score)) return { ok: false, state: 'trust-unavailable' };
+      return { ok: true, score };
+    } catch {
+      return { ok: false, state: 'trust-unavailable' };
+    }
+  }
+  if (typeof env.spendTrustScore === 'string') return { ok: true, score: env.spendTrustScore };
+  return { ok: true, score: '800' };
+}
 
 function json(body, status = 200) {
   return Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
@@ -52,7 +75,18 @@ export async function handleSpend(request, env = {}) {
   }
 
   const now = Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now();
-  const trustScore = typeof env.spendTrustScore === 'string' ? env.spendTrustScore : '800';
+  const trust = await spendTrustScore(env);
+  if (!trust.ok) {
+    return json({
+      ok: false,
+      state: trust.state,
+      steps: ['trust-gate'],
+      signed: false,
+      cluster: 'devnet',
+      reason: trust.state,
+    }, 409);
+  }
+  const trustScore = trust.score;
   const facts = {
     asset: 'USDC',
     mint: DEVNET_USDC_MINT,

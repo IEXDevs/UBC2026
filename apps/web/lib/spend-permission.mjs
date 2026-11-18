@@ -148,10 +148,11 @@ function accessDetail(name, args) {
   return ACCESS_COPY[name] || `Use ${name}`;
 }
 
-/** Ask shows an inline access request for tools. Fund moves use the confirm slide in ask and full. */
+/** Ask shows an inline access request for tools. Fund moves use the confirm slide in ask.
+ * Full permission does not ask. The spend still goes through the same gate. */
 export function toolAccessKind(mode, name) {
   if (typeof name !== 'string' || !name.trim()) return null;
-  if (FUND_TOOLS.has(name) && (mode === 'ask' || mode === 'full')) return 'modal';
+  if (FUND_TOOLS.has(name) && mode === 'ask') return 'modal';
   if (mode === 'ask') return 'inline';
   return null;
 }

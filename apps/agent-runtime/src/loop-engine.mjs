@@ -254,6 +254,7 @@ async function performDecide(run, ctx) {
         'Role: decide',
         'Return JSON only with summary, facts, and proposal.',
         'facts fields: asset, mint, cluster, price, amount, trustScore, reasonSummary.',
+        'When a Jupiter trust lookup is configured, the platform replaces trustScore with the Jupiter Tokens API v2 score before the trust gate. A model-invented score does not pass that gate.',
         'When a mainnet price lookup is configured, the platform replaces price with that paper quote before verify. A price quote does not sign, broadcast, or authorize a transaction.',
         'proposal fields: asset, recipient, outflow, expectedReceive, expectedReceiveAsset, maxFee, expiresAt, cluster.',
         'cluster must be devnet or testnet. Amounts are integer strings in base units.',
@@ -277,18 +278,52 @@ async function performDecide(run, ctx) {
   if (facts.amount !== built.proposal.outflow || facts.cluster !== built.proposal.cluster || facts.asset !== built.proposal.asset) {
     return waitStep(run, 'decide', 'amount-mismatch', { model }, ctx.now);
   }
+  const looked = await requestJupiterTrust(facts, ctx);
+  if (looked?.error) return waitStep(run, 'decide', looked.error, { model }, ctx.now);
+  if (looked?.score) facts.trustScore = looked.score;
   if (!(await acceptTurn(ctx, 'decide', summary))) {
     return waitStep(run, 'decide', 'verifier-blocked', { model }, ctx.now);
   }
-  return finishStep(run, 'decide', { summary: clip(summary, 500), proposal: built.proposal, facts, model }, ctx.now);
+  return finishStep(run, 'decide', {
+    summary: clip(summary, 500),
+    proposal: built.proposal,
+    facts,
+    model,
+    ...(looked?.score ? { trust: { score: looked.score, source: looked.source } } : {}),
+  }, ctx.now);
+}
+
+function readLookupScore(looked) {
+  if (typeof looked === 'string' || typeof looked === 'number') return String(looked);
+  if (looked && (typeof looked.score === 'string' || typeof looked.score === 'number')) return String(looked.score);
+  return null;
+}
+
+/** Request a Jupiter trust score while deciding. Null when no lookup is configured. */
+async function requestJupiterTrust(facts, ctx) {
+  if (typeof ctx.deps.trustLookup !== 'function') return null;
+  try {
+    const looked = await ctx.deps.trustLookup(facts.mint);
+    const score = readLookupScore(looked);
+    if (!score) return { error: 'trust-unavailable' };
+    const source = looked && typeof looked === 'object' && typeof looked.source === 'string'
+      ? looked.source
+      : 'jupiter-tokens-v2';
+    return { score, source };
+  } catch {
+    return { error: 'trust-unavailable' };
+  }
 }
 
 async function performTrust(run, ctx) {
   const facts = run.checkpoints.decide.facts;
-  let score = ctx.input.trustScore;
+  const recorded = run.checkpoints.decide.trust;
+  let score = recorded?.score ?? null;
+  if (score == null) score = ctx.input.trustScore;
   if (score == null && typeof ctx.deps.trustLookup === 'function') {
-    const looked = await ctx.deps.trustLookup(facts.mint);
-    score = typeof looked === 'string' || typeof looked === 'number' ? looked : looked?.score;
+    const looked = await requestJupiterTrust(facts, ctx);
+    if (looked?.error) return waitStep(run, 'trust-gate', looked.error, {}, ctx.now);
+    score = looked?.score ?? null;
   }
   if (score == null) return waitStep(run, 'trust-gate', 'trust-not-configured', {}, ctx.now);
   let trust;

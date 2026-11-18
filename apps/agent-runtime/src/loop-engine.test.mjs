@@ -4,6 +4,7 @@ import { BotStateMachine } from './bot-do.mjs';
 import { LOOP_STEPS } from './loop-engine.mjs';
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
 import { createOpenRouter } from './openrouter.mjs';
+import { resolveTrustLookup } from './trust-lookup.mjs';
 
 const API_KEY = 'test-openrouter-key-value';
 const NOW = 1_700_000_000_000;
@@ -109,9 +110,9 @@ async function wake(machine) {
 }
 
 async function postLoop(machine, env, body, owner = 'user_1') {
-  const runtime = env && Object.prototype.hasOwnProperty.call(env, 'lookupPrice')
-    ? env
-    : { ...env, lookupPrice: null };
+  const runtime = { ...(env || {}) };
+  if (!Object.prototype.hasOwnProperty.call(env || {}, 'lookupPrice')) runtime.lookupPrice = null;
+  if (!Object.prototype.hasOwnProperty.call(env || {}, 'trustLookup')) runtime.trustLookup = null;
   return machine.handle(new Request('https://bot/loop', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-owner-id': owner },
@@ -149,6 +150,7 @@ test('a missing lookupPrice reads DexScreener instead of asking the model for a 
     OPENROUTER_API_KEY: API_KEY,
     openRouter: models.openRouter,
     transferClient: transfer.client,
+    trustLookup: null,
     search: async () => [{ title: 'Pool', url: 'https://example.com/pool', snippet: 'devnet apy' }],
     fetch: async (url) => {
       seen.push(String(url));
@@ -463,4 +465,89 @@ test('over-budget automatic mode still requires approve-once', async () => {
   assert.equal(done.done, true);
   assert.equal(done.run.checkpoints.approval.action, 'approve-once');
   assert.equal(transfer.calls.length, 1);
+});
+
+function jupiterToken(organicScore, isVerified) {
+  return [{
+    id: facts.mint,
+    organicScore,
+    isVerified,
+    audit: { mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
+  }];
+}
+
+/**
+ * Achieves: decide calls Jupiter Tokens API v2, the trust gate uses that score,
+ *   and full permission executes without an owner approval when the score passes.
+ * Fails when: the model score is kept, the gate is skipped, or ask-mode still waits under full.
+ * Oracle: organicScore 70 → 700; approval.automatic; one devnet signature.
+ * Side effects / state checked: mocked Jupiter fetch and signer.
+ * Gaps: live Jupiter is not called.
+ */
+test('decide requests Jupiter trust and full permission trades without asking', async () => {
+  const machine = new BotStateMachine();
+  await wake(machine);
+  const models = scriptedOpenRouter();
+  const transfer = transferDouble();
+  const urls = [];
+  const env = {
+    OPENROUTER_API_KEY: API_KEY,
+    openRouter: models.openRouter,
+    transferClient: transfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async (url) => {
+        urls.push(String(url));
+        return Response.json(jupiterToken(70, true));
+      },
+    }),
+  };
+  const response = await postLoop(machine, env, payload({
+    bot: { ...bot, approvalMode: 'ask' },
+    ownerPermission: 'full',
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.done, true);
+  assert.equal(urls.length >= 1, true);
+  assert.match(urls[0], /api\.jup\.ag\/tokens\/v2\/search\?query=/);
+  assert.equal(body.run.checkpoints.decide.trust.score, '700');
+  assert.equal(body.run.checkpoints.decide.trust.source, 'jupiter-tokens-v2');
+  assert.equal(body.run.checkpoints.decide.facts.trustScore, '700');
+  assert.equal(body.run.checkpoints['trust-gate'].trust.score, '700');
+  assert.equal(body.run.checkpoints['trust-gate'].trust.state, 'allowed');
+  assert.equal(body.run.checkpoints.approval.automatic, true);
+  assert.equal(body.run.checkpoints.execute.signature, 'sig_devnet_1');
+  assert.equal(transfer.calls.length, 1);
+
+  const lowMachine = new BotStateMachine();
+  await wake(lowMachine);
+  const lowModels = scriptedOpenRouter();
+  const lowTransfer = transferDouble();
+  const low = await postLoop(lowMachine, {
+    openRouter: lowModels.openRouter,
+    transferClient: lowTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async () => Response.json(jupiterToken(10, false)),
+    }),
+  }, payload({ bot: { ...bot, approvalMode: 'ask' }, ownerPermission: 'full' }));
+  const lowBody = await low.json();
+  assert.equal(lowBody.run.pauseReason, 'trust-confirmation');
+  assert.equal(lowBody.run.checkpoints.decide.trust.score, '100');
+  assert.equal(lowTransfer.calls.length, 0);
+  assert.equal(lowBody.run.checkpoints.execute, undefined);
+
+  const downMachine = new BotStateMachine();
+  await wake(downMachine);
+  const downModels = scriptedOpenRouter();
+  const downTransfer = transferDouble();
+  const down = await postLoop(downMachine, {
+    openRouter: downModels.openRouter,
+    transferClient: downTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async () => { throw new Error('jupiter down'); },
+    }),
+  }, payload({ bot: { ...bot, approvalMode: 'ask' }, ownerPermission: 'full' }));
+  const downBody = await down.json();
+  assert.equal(downBody.run.pauseReason, 'trust-unavailable');
+  assert.equal(downTransfer.calls.length, 0);
 });

@@ -182,8 +182,10 @@ test('verify mismatch does not attach a memo', async () => {
 });
 
 /**
- * Achieves: approvalRequirement follows bot mode, over-budget, and ownerPermission+confirmed.
- * Fails when: Over-budget skips humans, or unconfirmed full permission auto-approves.
+ * Achieves: approvalRequirement follows bot mode, over-budget, and ownerPermission.
+ * Full permission maps to fully-automatic: no owner request. Over-budget still waits.
+ * Fails when: Over-budget skips humans, or full permission skips a blocked policy's wait
+ *   by treating over-budget as automatic.
  * Oracle: Explicit truth table of (mode, state, permission, confirmed) → boolean.
  * Side effects: none.
  * Gaps: Unknown permission throws — covered below.
@@ -207,10 +209,15 @@ test('approval requirement follows the bot mode and still holds over-budget', ()
     { ownerPermission: 'full', confirmed: true },
   ), false);
   assert.equal(approvalRequirement(
+    { approvalMode: 'ask' },
+    { state: 'ready-to-reserve', debit: '1000' },
+    { ownerPermission: 'full' },
+  ), false);
+  assert.equal(approvalRequirement(
     { approvalMode: 'fully-automatic' },
     { state: 'ready-to-reserve', debit: '1000' },
     { ownerPermission: 'full' },
-  ), true);
+  ), false);
   assert.equal(approvalRequirement(
     { approvalMode: 'fully-automatic' },
     { state: 'over-budget', debit: '1000' },
@@ -315,6 +322,48 @@ test('full permissions manage funds and a mainnet quote never signs', async () =
   });
   assert.equal(asking.state, 'approval-needed');
   assert.equal(asking.steps.at(-1), 'approval-mode');
+
+  let unconfirmedSigned = false;
+  const unconfirmed = await runPermissionedSpend({
+    bot,
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '800',
+    ownerPermission: 'full',
+    confirmed: false,
+    mainFn: async () => facts,
+    verifyFn: async () => facts,
+    now: Date.now(),
+    signDevnet: async () => {
+      unconfirmedSigned = true;
+      return { cluster: 'devnet', signature: 'sig_full_unconfirmed' };
+    },
+  });
+  assert.equal(unconfirmed.state, 'signed');
+  assert.equal(unconfirmed.signed, true);
+  assert.equal(unconfirmed.signature, 'sig_full_unconfirmed');
+  assert.equal(unconfirmedSigned, true);
+  assert.deepEqual(unconfirmed.steps, [...PERMISSIONED_SPEND_STEPS]);
+
+  let lowSigned = false;
+  const low = await runPermissionedSpend({
+    bot,
+    wallet,
+    ledger,
+    proposal,
+    trustScore: '100',
+    ownerPermission: 'full',
+    confirmed: false,
+    mainFn: async () => { throw new Error('verify should not run'); },
+    verifyFn: async () => { throw new Error('verify should not run'); },
+    now: Date.now(),
+    signDevnet: async () => { lowSigned = true; return { cluster: 'devnet', signature: 'no' }; },
+  });
+  assert.equal(low.state, 'trust-confirmation-required');
+  assert.equal(low.signed, false);
+  assert.equal(lowSigned, false);
+  assert.equal(low.steps.includes('sign'), false);
 });
 
 /**
