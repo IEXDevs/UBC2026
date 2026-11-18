@@ -2,6 +2,12 @@
  * Browser calls for the desk verifier and the spend grant.
  * The password is sent once on unlock and is not written to storage.
  */
+import {
+  createDeskLock,
+  unlockDesk,
+  writeDeskGrant,
+  writeDeskLock,
+} from './desk-lock.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
 
 function headers(ownerId, token) {
@@ -52,4 +58,43 @@ export async function openDeskGrant(fetchImpl, { ownerId, token, password } = {}
     return { ok: false, error: body.error || 'desk_locked' };
   }
   return { ok: true, grant: body.grant, until: body.until };
+}
+
+/**
+ * Enter Password. The browser copy is checked first. When that copy matches
+ * and the account verifier does not, the submitted password replaces the
+ * account verifier and a grant is issued. A mismatch stays "wrong password"
+ * and does not replace anything.
+ */
+export async function acceptEnteredPassword({
+  fetchImpl,
+  ownerId,
+  token,
+  password,
+  record,
+  localStorage,
+  sessionStorage,
+} = {}) {
+  if (record) {
+    const matches = await unlockDesk(password, record);
+    if (!matches) return { ok: false, error: 'wrong_password' };
+  }
+  let opened = await openDeskGrant(fetchImpl, { ownerId, token, password });
+  if (!opened.ok && record) {
+    const created = await createDeskLock(password);
+    const registered = await registerDeskVerifier(fetchImpl, {
+      ownerId,
+      token,
+      verifier: created,
+      replace: true,
+    });
+    if (!registered.ok || registered.exists || !writeDeskLock(localStorage, ownerId, created)) {
+      return { ok: false, error: 'desk_lock_failed' };
+    }
+    opened = await openDeskGrant(fetchImpl, { ownerId, token, password });
+  }
+  if (!opened.ok || !writeDeskGrant(sessionStorage, ownerId, opened.grant, opened.until)) {
+    return { ok: false, error: opened.error || 'desk_locked' };
+  }
+  return { ok: true };
 }
