@@ -120,29 +120,46 @@ function readSwap(raw) {
   return { inputMint, outputMint, inAmount };
 }
 
+/** Swap whose input mint is the ledger cap asset. The debit is that spend, not the bought asset. */
+function capAssetSpend(raw, bot) {
+  const swap = readSwap(raw);
+  if (!swap || typeof bot?.cap?.asset !== 'string' || !bot.cap.asset) return null;
+  const input = assetByMint(swap.inputMint);
+  const output = assetByMint(swap.outputMint);
+  if (!input || input.symbol !== bot.cap.asset || !output) return null;
+  return { swap, output };
+}
+
 function proposalFrom(raw, bot, run) {
   if (!raw || typeof raw !== 'object') return null;
   const cluster = raw.cluster == null ? 'devnet' : raw.cluster;
   if (cluster !== 'devnet' && cluster !== 'testnet') return { rejectedCluster: String(cluster).slice(0, 32) };
-  if (raw.asset !== bot.cap?.asset) return { assetMismatch: true };
-  const outflow = asAmount(raw.outflow);
+  const spend = raw.asset === bot.cap?.asset ? null : capAssetSpend(raw, bot);
+  if (raw.asset !== bot.cap?.asset && !spend) return { assetMismatch: true };
+  const asset = spend ? bot.cap.asset : raw.asset;
+  const outflow = spend ? spend.swap.inAmount : asAmount(raw.outflow);
   const expectedReceive = asAmount(raw.expectedReceive);
   const maxFee = asAmount(raw.maxFee);
-  if (!outflow || outflow === '0' || !expectedReceive || !maxFee) return null;
+  if (!outflow || outflow === '0' || !expectedReceive || maxFee == null) return null;
   if (typeof raw.recipient !== 'string' || raw.recipient.length < 32 || raw.recipient.length > 64) return null;
   if (!Number.isSafeInteger(raw.expiresAt) || raw.expiresAt <= 0) return null;
   const id = typeof raw.id === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(raw.id) ? raw.id : `p_${run.runId}`;
   const quoteId = typeof raw.quoteId === 'string' && quoteIdOk(raw.quoteId) ? raw.quoteId : `q_${run.runId}`;
-  const expectedReceiveAsset = typeof raw.expectedReceiveAsset === 'string' && raw.expectedReceiveAsset.length <= 64
+  const namedReceive = typeof raw.expectedReceiveAsset === 'string'
+    && raw.expectedReceiveAsset.length > 0
+    && raw.expectedReceiveAsset.length <= 64
     ? raw.expectedReceiveAsset
-    : raw.asset;
-  const swap = readSwap(raw);
+    : null;
+  const expectedReceiveAsset = spend ? spend.output.symbol : (namedReceive || asset);
+  const swap = spend ? spend.swap : readSwap(raw);
   return {
+    expressedSpend: Boolean(spend),
+    outputMint: spend ? spend.swap.outputMint : null,
     proposal: {
       id,
       botId: bot.id,
       cluster,
-      asset: raw.asset,
+      asset,
       recipient: raw.recipient,
       quoteId,
       outflow,
@@ -235,9 +252,18 @@ export function decideTask(goal, bot) {
       'For that one trade, include swap with inputMint, outputMint, and inAmount.',
       'inputMint and outputMint are wrapped SOL, USDC, or USDT. inAmount is base units of inputMint.',
       'A move of SOL into USDC uses wrapped SOL as inputMint and USDC as outputMint.',
+      'A buy of wrapped SOL spends the cap asset: inputMint is that asset and outputMint is wrapped SOL.',
+      'inAmount is base units of the cap asset and must stay at or under the per-transaction cap.',
+      'A mainnet price is paper only. It is not the spend and it does not raise the cap.',
       'Do not include a swap transaction. The platform quotes Jupiter, signs on devnet only, and marks the paper position from the mainnet price.',
       'The platform gate still blocks a failed trust check, a failed verify, a policy or cap block, and any non-devnet trade.',
     );
+    if (typeof bot?.cap?.asset === 'string' && bot.cap.asset) {
+      lines.push(`The accounting asset is ${String(bot.cap.asset).slice(0, 32)}.`);
+      if (typeof bot.cap.maxPerTransaction === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(bot.cap.maxPerTransaction)) {
+        lines.push(`The per-transaction cap is ${bot.cap.maxPerTransaction} base units of that asset.`);
+      }
+    }
   }
   return lines.join('\n');
 }
@@ -348,6 +374,11 @@ async function performDecide(run, ctx) {
   if (built.assetMismatch) return waitStep(run, 'decide', 'accounting-asset-mismatch', { model }, ctx.now);
   const facts = factsFrom(rawFacts);
   if (!facts) return waitStep(run, 'decide', 'decide-invalid', { model }, ctx.now);
+  if (built.expressedSpend) {
+    facts.asset = built.proposal.asset;
+    facts.amount = built.proposal.outflow;
+    if (built.outputMint) facts.mint = built.outputMint;
+  }
   if (facts.amount !== built.proposal.outflow || facts.cluster !== built.proposal.cluster || facts.asset !== built.proposal.asset) {
     return waitStep(run, 'decide', 'amount-mismatch', { model }, ctx.now);
   }

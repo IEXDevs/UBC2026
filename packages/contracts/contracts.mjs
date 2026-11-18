@@ -368,6 +368,22 @@ function sanitizeSpendQuote(quote) {
   };
 }
 
+function spendUnits(value) {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return value;
+}
+
+/** A devnet quote does not authorize. A mainnet quote stays paper and never signs. */
+function quoteFromCluster(cluster) {
+  if (cluster === 'mainnet') {
+    return { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false };
+  }
+  if (cluster === 'devnet') {
+    return { pricingCluster: 'devnet', cluster: 'devnet', authorizesTransaction: false };
+  }
+  return null;
+}
+
 /** Shared body for voice, the glass UI, and Grok Bot. Returns null when the body cannot be a spend. */
 export function parsePermissionedSpendBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
@@ -375,14 +391,19 @@ export function parsePermissionedSpendBody(body) {
   if (!idOk(body.botId)) return null;
   if (body.action != null && !FUND_ACTIONS.includes(body.action)) return null;
   let units;
-  try { units = amount(body.amount); } catch { return null; }
+  try { units = amount(spendUnits(body.amount)); } catch { return null; }
   if (units === '0') return null;
   const destination = typeof body.destination === 'string' && base58.test(body.destination) ? body.destination : null;
   const handle = typeof body.handle === 'string' ? normalizeHandle(body.handle) : null;
-  if (!destination && !handle) return null;
+  const action = FUND_ACTIONS.includes(body.action) ? body.action : 'spend';
   if (body.asset != null && body.asset !== 'USDC') return null;
-  const quote = sanitizeSpendQuote(body.quote);
+  // A USDC buy of wrapped SOL stays in the assigned wallet. The spend is the cap asset.
+  const selfCustody = action === 'buy' && !destination && !handle;
+  if (!destination && !handle && !selfCustody) return null;
+  if (body.quoteCluster != null && body.quoteCluster !== 'devnet' && body.quoteCluster !== 'mainnet') return null;
+  let quote = sanitizeSpendQuote(body.quote);
   if (body.quote != null && quote == null && body.quote !== null) return null;
+  if (quote == null && body.quoteCluster != null) quote = quoteFromCluster(body.quoteCluster);
   let reviewCap = null;
   if (body.reviewCap != null) {
     try { reviewCap = amount(body.reviewCap); } catch { return null; }
@@ -391,11 +412,12 @@ export function parsePermissionedSpendBody(body) {
   return {
     permission: body.permission,
     botId: body.botId,
-    action: FUND_ACTIONS.includes(body.action) ? body.action : 'spend',
+    action,
     amount: units,
     asset: 'USDC',
     destination,
     handle,
+    selfCustody,
     confirmed: body.confirmed === true,
     reviewCap,
     quote,
