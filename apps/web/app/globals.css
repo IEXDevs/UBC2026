@@ -126,6 +126,7 @@ button:focus-visible, input:focus-visible {
 
   .side.is-collapsed .you-id { width: auto; padding: 0; justify-content: center; }
   .side.is-collapsed .you-id strong,
+  .side.is-collapsed .you-holdings,
   .side.is-collapsed .you-apps { display: none; }
 }
 
@@ -856,9 +857,18 @@ button.add-agent:not(:disabled):hover {
 
 .you-id strong {
   overflow: hidden;
+  min-width: 0;
   font-size: 14px;
   font-weight: 560;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.you-holdings {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 560;
   white-space: nowrap;
 }
 

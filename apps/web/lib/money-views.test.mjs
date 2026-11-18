@@ -10,9 +10,11 @@ import {
   describeWallets,
   formatBaseUnits,
   moneyPane,
+  registeredHoldingsLabel,
   solanaExplorerTxUrl,
   solscanTxUrl,
   shortAddress,
+  walletBalanceLabel,
   walletGlance,
 } from './money-views.mjs';
 
@@ -99,6 +101,36 @@ test('demo money rows match the contract shapes', () => {
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
+/**
+ * Achieves: verifies registered holdings add each wallet and an agent chip stays on its own wallet.
+ * Fails when: a second wallet is dropped from the total, or a non-main wallet is labeled with the platform book.
+ * Oracle: positions 4 + 1 → 5 USDC; shop chip 1 USDC; platform book 5 USDC stays on main and shop chip is 0 USDC.
+ * Side effects / state checked: N/A.
+ * Gaps: does not price non-USDC holdings.
+ */
+test('registered holdings sum wallets and the agent chip is not the owner total', () => {
+  const wallets = [
+    { id: 'w_main', kind: 'main' },
+    { id: 'w_shop', kind: 'additional' },
+  ];
+  const bots = [
+    { id: 'bot_main', walletId: 'w_main' },
+    { id: 'bot_shop', walletId: 'w_shop' },
+  ];
+  const positions = [
+    { asset: 'USDC', amount: '4000000', side: 'supply', botId: 'bot_main' },
+    { asset: 'USDC', amount: '1000000', side: 'supply', walletId: 'w_shop' },
+    { asset: 'USDC', amount: '9000000', side: 'borrow', walletId: 'w_main' },
+  ];
+  assert.equal(registeredHoldingsLabel({ wallets, positions, bots }), '5 USDC');
+  assert.equal(walletBalanceLabel('w_main', { wallets, positions, bots }), '4 USDC');
+  assert.equal(walletBalanceLabel('w_shop', { wallets, positions, bots }), '1 USDC');
+  const transfers = [{ asset: 'USDC', amount: '5000000', direction: 'in' }];
+  assert.equal(registeredHoldingsLabel({ wallets, positions, transfers, bots }), '5 USDC');
+  assert.equal(walletBalanceLabel('w_main', { wallets, positions, transfers, bots }), '5 USDC');
+  assert.equal(walletBalanceLabel('w_shop', { wallets, positions, transfers, bots }), '0 USDC');
+});
+
 test('wallet addresses show the first five and last five characters', () => {
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
   assert.equal(shortAddress(address), '4zMMC...DncDU');
