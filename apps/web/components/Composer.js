@@ -37,6 +37,7 @@ import {
 import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
+import { startVoiceConversation } from '../lib/voice-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -697,7 +698,8 @@ export default function Composer({
       const { Conversation } = await import('@elevenlabs/client');
       const tools = clientToolsRef.current;
       const owner = typeof ownerId === 'string' ? ownerId.trim() : '';
-      const live = await Conversation.startSession({
+      let live = null;
+      const sessionOptions = {
         conversationToken: payload.token,
         overrides: payload.overrides ?? voiceOverrides(payload),
         // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
@@ -729,7 +731,9 @@ export default function Composer({
           vadRef.current = 0;
           closeStage();
         },
-      });
+      };
+      // Retry without TTS overrides when the portal agent rejects voiceId/speed.
+      live = await startVoiceConversation(Conversation, sessionOptions);
       if (!connectingRef.current) {
         micGate.current.setMuted(true);
         micGate.current.stop();
@@ -1099,6 +1103,10 @@ function voiceFailureNote(error) {
   if (error?.message === 'voice_unconfigured') return 'Voice is not configured on the server.';
   if (error?.message === 'voice_rejected') return 'The voice service refused the session. Publish the agent and turn on Voice ID and Speed overrides.';
   if (error?.message === 'voice_unreachable') return 'The voice service did not respond.';
+  const detail = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (/override|voice_id|not allowed|not enabled/i.test(detail)) {
+    return 'The voice agent rejected session overrides. Publish it and enable Voice ID and Speed, or try again.';
+  }
   return 'The voice session did not start.';
 }
 
