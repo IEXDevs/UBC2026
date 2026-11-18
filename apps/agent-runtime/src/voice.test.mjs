@@ -627,6 +627,24 @@ test('syncVoiceAgent writes custom LLM URL and webhook secret into the agent', a
     method: 'POST',
   }), env());
   assert.equal(denied.status, 401);
+
+  const viaApiKey = await handleVoiceRequest(new Request(`${ORIGIN}/voice/agent/sync`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${ELEVEN}` },
+  }), env({
+    ELEVENLABS_API_KEY: ELEVEN,
+    ELEVENLABS_AGENT_ID: 'agent_live',
+  }), {
+    fetcher: async (url, init) => {
+      if (String(url).endsWith('/secrets') && init.method === 'GET') {
+        return Response.json({ secrets: [{ name: 'ELEVENLABS_WEBHOOK_SECRET', secret_id: 'sec_1' }] });
+      }
+      if (String(url).includes('/agents/agent_live')) return Response.json({ agent_id: 'agent_live' });
+      return new Response('nope', { status: 404 });
+    },
+  });
+  assert.equal(viaApiKey.status, 200);
+  assert.equal((await viaApiKey.json()).ok, true);
 });
 
 test('provisioning the ElevenLabs agent does nothing without a key', async () => {
