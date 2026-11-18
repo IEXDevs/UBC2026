@@ -425,7 +425,7 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
   assert.match(voice[1].content, /Nova/);
   assert.match(voice[1].content, /trading/);
   assert.match(voice[1].content, /Watch SOL/);
-  assert.match(voice[1].content, /Permission is full/);
+  assert.match(voice[1].content, /Permissions are fully granted/);
   assert.match(voice[1].content, /trust, verify, wallet freeze, bot policy, approval, then sign/);
   assert.equal(voice.some(item => String(item.content).includes('voice remote')), false);
   assert.equal(voice.some(item => String(item.content).includes('Use mainnet')), false);
@@ -477,7 +477,7 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.equal(calls[0].body.stream, true);
   assert.equal(calls[0].body.messages[0].content.includes(OPENROUTER), false);
   assert.match(calls[0].body.messages[0].content, /platform rules are locked/);
-  assert.match(calls[0].body.messages[1].content, /same tools on text and voice/);
+  assert.match(calls[0].body.messages[1].content, /You have the following tools/);
   assert.equal(calls[0].body.messages.some(item => /voice remote/.test(String(item.content))), false);
   assert.equal(calls[0].body.tools.some(tool => tool.function.name === 'request_spend'), true);
   assert.equal(calls[0].body.tools.some(tool => tool.function.name === 'web_search'), true);

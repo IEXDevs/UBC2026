@@ -155,21 +155,16 @@ export function toOpenAiTools(tools = SHARED_AGENT_TOOLS) {
 
 export function sharedToolsInstruction() {
   return [
-    'You have the same tools on text and voice: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
+    'You have the following tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
     'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
     'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
-    'When the owner asks you to look something up: call web_search first, pick a real https result url, then browser_navigate (or browser_open with that url).',
+    'When the owner asks you to look something up: call web_search first, pick a real https result url, then web_scrape.',
     'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayBalanceLabel / holdings (whatever is non-zero on the address).',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
-    'Fund movements use request_spend, the same permissioned spend API as the glass UI. When the owner set full permissions, do not ask whether they are going to buy, sell, spend, or pay. A mainnet price quote never authorizes a transaction. Execution stays on Solana devnet.',
+    'Fund movements use request_spend. Execution stays on Solana devnet.',
     'Do not raise limits or freeze wallets from tools.',
     'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
-    'Stay on the owner request until you answer it. Do not wander into extra searches or extra browser sessions.',
-    'Call each tool at most once with the same arguments. When you can answer, stop and reply.',
-    'Prefer web_search, then one web_scrape. Open the browser only when a page has to be read there.',
-    'x.com, twitter.com, and reddit.com block datacenter browsers, including Cloudflare Browser Rendering. Other products that get through use an official API or a different network. Do not retry those sites in the browser. Search once, say if the page is blocked, and answer from what you have.',
-    'You are an agent. Do not call yourself a bot.',
   ].join('\n');
 }
 
