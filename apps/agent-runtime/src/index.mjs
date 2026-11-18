@@ -140,6 +140,7 @@ async function dispatch(request, env, rawEnv = env) {
         secrets: {
           PRIVY_APP_ID: flag('PRIVY_APP_ID'),
           PRIVY_APP_SECRET: flag('PRIVY_APP_SECRET'),
+          PRIVY_AUTHORIZATION_KEY: flag('PRIVY_AUTHORIZATION_KEY'),
           QUICKNODE_DEVNET_RPC_URL: flag('QUICKNODE_DEVNET_RPC_URL'),
           SUPABASE_URL: flag('SUPABASE_URL'),
           SUPABASE_ANON_KEY: flag('SUPABASE_ANON_KEY'),

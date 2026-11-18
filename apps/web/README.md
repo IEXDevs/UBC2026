@@ -30,9 +30,15 @@ The Main pane leads with Live View plus chat and the voice composer. Overview an
 
 Hosting is OpenNext on Cloudflare Workers (`wrangler.jsonc`, `open-next.config.ts`). This package does not deploy by itself.
 
+- Production worker `maelstrom-web` → `maelstrom.iexdevs.com`
+- Dev worker `maelstrom-web-dev` → `dev.maelstrom.iexdevs.com` (`npm run deploy:dev -w @ubc2026/web`)
+- Both bind `AGENT_RUNTIME` → `maelstrom-agent-runtime` (`runtime.maelstrom.iexdevs.com`)
+- Put secrets on the **matching** worker (`wrangler secret put NAME` vs `wrangler secret put NAME --env=dev`). `NEXT_PUBLIC_PRIVY_APP_ID` must match `PRIVY_APP_ID`.
+
 ```bash
 npm run dev -w @ubc2026/web
 npm test -w @ubc2026/web
 npm run preview -w @ubc2026/web
 npm run deploy -w @ubc2026/web
+npm run deploy:dev -w @ubc2026/web
 ```

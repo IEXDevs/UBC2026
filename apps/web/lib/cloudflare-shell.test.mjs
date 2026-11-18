@@ -40,6 +40,10 @@ test('OpenNext wrangler config targets Cloudflare', () => {
   assert.match(pkg.scripts.build, /next build/);
   assert.match(pkg.scripts.preview, /opennextjs-cloudflare build && opennextjs-cloudflare preview/);
   assert.match(pkg.scripts.deploy, /opennextjs-cloudflare build && opennextjs-cloudflare deploy/);
+  assert.match(pkg.scripts['deploy:dev'], /--env=dev/);
+  assert.equal(wrangler.env.dev.name, 'maelstrom-web-dev');
+  assert.equal(wrangler.env.dev.routes[0].pattern, 'dev.maelstrom.iexdevs.com');
+  assert.equal(wrangler.env.dev.routes[0].custom_domain, true);
   assert.ok(pkg.dependencies['@opennextjs/cloudflare']);
   assert.ok(pkg.dependencies['@privy-io/react-auth']);
 });

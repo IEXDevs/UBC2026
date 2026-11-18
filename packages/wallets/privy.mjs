@@ -171,6 +171,27 @@ export function sanitizeOrigin(value) {
   }
 }
 
+/**
+ * Cloudflare Workers / OpenNext forbid setting outbound `Origin` / `Referer`.
+ * Calling `/users/me` there throws TypeError → opaque "Privy request failed".
+ */
+export function isCloudflareWorkerRuntime(global = globalThis) {
+  try {
+    const ua = global?.navigator?.userAgent;
+    if (typeof ua === 'string' && ua.includes('Cloudflare-Workers')) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+function isForbiddenOutboundHeaderError(error) {
+  const name = typeof error?.name === 'string' ? error.name : '';
+  const message = typeof error?.message === 'string' ? error.message : '';
+  if (!message && name !== 'TypeError') return false;
+  return /origin|referer|forbidden header name|immutable/i.test(`${name} ${message}`);
+}
+
 function decodeBase64(value, label) {
   if (typeof value !== 'string' || value.length < 4 || value.length > 4096 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
     fail(`${label} must be base64`, 'invalid_transaction');
@@ -441,6 +462,8 @@ export function createPrivyWalletClient({
   now = () => Date.now(),
   apiBase = PRIVY_API_BASE,
   authBase = PRIVY_AUTH_BASE,
+  // OpenNext / workerd cannot set Origin; keep users/me fallback off there.
+  allowUsersMeFallback = !isCloudflareWorkerRuntime(),
 } = {}) {
   const id = assertHeaderSafe(appId, 'Privy app id');
   const secret = assertHeaderSafe(appSecret, 'Privy app secret');
@@ -449,6 +472,7 @@ export function createPrivyWalletClient({
   const privyApi = assertHttps(apiBase, 'Privy API');
   const privyAuth = assertHttps(authBase, 'Privy auth API');
   const authKey = authorizationKey == null || authorizationKey === '' ? null : authorizationKey;
+  const usersMeFallback = allowUsersMeFallback === true;
 
   function abortAfter(ms) {
     // OpenNext Cloudflare for Dev / workerd may lack AbortSignal.timeout.
@@ -474,7 +498,16 @@ export function createPrivyWalletClient({
     } catch (error) {
       const aborted = error?.name === 'AbortError' || error?.name === 'TimeoutError';
       const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
-      fail(`${target} request ${aborted ? 'timed out' : 'failed'}`, code);
+      if (isForbiddenOutboundHeaderError(error)) {
+        fail(`${target} request failed (forbidden_header)`, code === 'rpc_failed' ? code : 'worker_origin_forbidden');
+      }
+      // Include a short, non-secret cause so Cloudflare / network misconfig is diagnosable.
+      const cause = aborted
+        ? 'timed out'
+        : (typeof error?.name === 'string' && error.name && error.name !== 'Error'
+          ? `failed (${error.name})`
+          : 'failed');
+      fail(`${target} request ${cause}`, code);
     }
     const text = await response.text();
     let payload = null;
@@ -731,9 +764,9 @@ export function createPrivyWalletClient({
     /**
      * Provision / sync Solana wallets after Privy login.
      * Prefer the app-secret `/v1/users/:id` path when the access token JWT has a
-     * `sub` — Cloudflare Workers strip outbound `Origin`, so `/users/me` 403s on
-     * the hosted web and agent-runtime Workers (invalid_origin / must_specify_origin).
-     * Fall back to `/users/me` only when the token has no usable `sub`.
+     * `sub` — Cloudflare Workers strip outbound `Origin`, so `/users/me` throws
+     * (forbidden header) or 403s on hosted OpenNext / agent-runtime Workers.
+     * Fall back to `/users/me` only on local Node when Origin is available.
      */
     async acceptLogin({ accessToken, ownerId, origin } = {}) {
       const token = assertHeaderSafe(accessToken, 'Privy access token');
@@ -743,14 +776,22 @@ export function createPrivyWalletClient({
         : '';
       // Prefer JWT `sub` (source of truth). A stale x-owner-id must not block provision.
       const serverUserId = fromJwt || headerOwner;
+      const canUseUsersMe = usersMeFallback && Boolean(sanitizeOrigin(origin));
       if (serverUserId) {
         try {
           const user = await loadUser(serverUserId);
           return syncWallets(user, serverUserId, token);
         } catch (error) {
-          // Fall through to /users/me when Origin is available (local Node).
-          if (!sanitizeOrigin(origin) || !(error instanceof WalletError)) throw error;
+          // Never fall through to /users/me on Workers — Origin cannot be set.
+          if (!canUseUsersMe || !(error instanceof WalletError)) throw error;
         }
+      } else if (!usersMeFallback) {
+        fail(
+          'Privy login needs a JWT sub or owner id on Cloudflare Workers (users/me unavailable)',
+          'worker_origin_forbidden',
+        );
+      } else if (!sanitizeOrigin(origin)) {
+        fail('Privy users/me requires Origin (e.g. http://localhost:3000)', 'missing_origin');
       }
       const session = await this.readSession({ accessToken: token, ownerId, origin });
       return syncWallets(session.user, session.ownerId, session.accessToken);

@@ -4,7 +4,7 @@ import { accountWriteBodies } from '@ubc2026/wallets';
 import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { fetchAgentRuntime } from '../../../lib/runtime-fetch.mjs';
-import { missingWalletSecrets, resolvePrivyAppId } from '../../../lib/wallet-provision.mjs';
+import { missingWalletSecrets, resolvePrivyAppId, walletConfigFlags } from '../../../lib/wallet-provision.mjs';
 import {
   publicWallet,
   requestOrigin,
@@ -66,14 +66,11 @@ function rootWalletEnv() {
 
 /** Config presence only — no secret values. */
 export async function GET() {
-  const env = rootWalletEnv();
-  return Response.json({
-    hasAppId: Boolean(resolvePrivyAppId(env)),
-    hasAppSecret: Boolean(env.PRIVY_APP_SECRET),
-    hasRpc: Boolean(env.QUICKNODE_DEVNET_RPC_URL),
-    hasAuthorizationKey: Boolean(env.PRIVY_AUTHORIZATION_KEY),
-    missing: missingWalletSecrets(env),
-  }, { headers: { 'Cache-Control': 'no-store' } });
+  const env = {
+    ...rootWalletEnv(),
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL'),
+  };
+  return Response.json(walletConfigFlags(env), { headers: { 'Cache-Control': 'no-store' } });
 }
 
 export async function POST(request) {
@@ -93,17 +90,28 @@ export async function POST(request) {
   }
 
   try {
+    // OpenNext / Cloudflare Workers cannot set outbound Origin/Referer. Keep the
+    // local Node `/users/me` fallback off whenever we detect the Worker runtime.
+    let onCloudflareWorker = false;
+    try {
+      const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+      const ctx = await getCloudflareContext({ async: true });
+      onCloudflareWorker = Boolean(ctx?.env);
+    } catch {
+      onCloudflareWorker = false;
+    }
     const client = createPrivyWalletClient({
       appId: resolvePrivyAppId(env),
       appSecret: env.PRIVY_APP_SECRET,
       // acceptLogin does not call RPC; allow empty and require it only for signing routes.
       rpcUrl: env.QUICKNODE_DEVNET_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
+      allowUsersMeFallback: !onCloudflareWorker,
     });
     const ownerHeader = request.headers.get('x-owner-id');
     const result = await client.acceptLogin({
       accessToken,
-      origin: requestOrigin(request),
+      origin: onCloudflareWorker ? undefined : requestOrigin(request),
       ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
     });
     const ownerId = typeof ownerHeader === 'string' && ownerHeader.trim()
