@@ -398,21 +398,33 @@ export async function completeTextChat({
   }
 
   async function allowStep(kind, detail) {
-    const completion = await postCompletion({
-      resolved,
-      modelId,
-      messages: [{
-        role: resolved.provider === 'meta' ? 'developer' : 'system',
-        content: turnVerifyTask(kind, detail),
-      }],
-      tools: null,
-      secrets,
-      fetcher,
-      reasoningEffort: '',
-    });
-    const content = typeof completion.message?.content === 'string' ? completion.message.content : '';
-    usage = addUsage(usage, completion.usage);
-    return parseTurnVerdict(content).allow;
+    // Meta Muse requires at least one user|tool message; a lone developer/system
+    // verifier prompt returns HTTP 400 and used to fail the whole chat.
+    try {
+      const completion = await postCompletion({
+        resolved,
+        modelId,
+        messages: [
+          {
+            role: resolved.provider === 'meta' ? 'developer' : 'system',
+            content: turnVerifyTask(kind, detail),
+          },
+          {
+            role: 'user',
+            content: 'Return the JSON verdict now.',
+          },
+        ],
+        tools: null,
+        secrets,
+        fetcher,
+        reasoningEffort: '',
+      });
+      const content = typeof completion.message?.content === 'string' ? completion.message.content : '';
+      usage = addUsage(usage, completion.usage);
+      return parseTurnVerdict(content).allow;
+    } catch {
+      return false;
+    }
   }
 
   async function runCalls(calls) {

@@ -42,6 +42,7 @@ import {
 import { ownerIdFromPrivyUser, privyAccountLabel, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '../lib/profile.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import {
   deleteOwnerBot,
   emptyMoneyState,
@@ -520,7 +521,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     let stop = false;
     (async () => {
       try {
-        const headers = { 'x-owner-id': ownerId };
+        const headers = await ownerAuthHeaders(ownerId, getAccessToken);
         const [response] = await Promise.all([
           fetch(profileUrl, { headers, cache: 'no-store', signal: AbortSignal.timeout(SETUP_CARD_MS) }),
           accountUrl ? fetch(accountUrl, { headers, cache: 'no-store', signal: AbortSignal.timeout(SETUP_CARD_MS) }).catch(() => null) : null,
@@ -544,7 +545,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       }
     })();
     return () => { stop = true; };
-  }, [ownerId]);
+  }, [ownerId, getAccessToken]);
 
   useEffect(() => {
     if (!ownerId) {
