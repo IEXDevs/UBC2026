@@ -76,6 +76,23 @@
   transform: translateY(-2px);
 }
 
+.sign-in-legal {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  margin: 28px 0 0;
+  font-size: 0.875rem;
+}
+
+.sign-in-legal a {
+  color: #b7adc8;
+  text-decoration: none;
+}
+
+.sign-in-legal a:hover {
+  color: #f4f1fb;
+}
+
 .sign-in-dev {
   display: inline-flex;
   margin: 22px 0 0;

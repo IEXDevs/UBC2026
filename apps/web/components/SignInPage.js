@@ -43,6 +43,10 @@ export default function SignInPage({ disabled = false, onLogin, onDeveloperPrevi
               Developer preview
             </button>
           ) : null}
+          <p className="sign-in-legal">
+            <a href="/privacy">Privacy</a>
+            <a href="/tos">Terms</a>
+          </p>
         </div>
       </main>
     </div>
