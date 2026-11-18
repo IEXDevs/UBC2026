@@ -19,7 +19,7 @@ import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
 import { assessPositions } from './schedules.mjs';
-import { alertFromGate, alertFromPauseReason, rememberBotAlert } from './bot-alerts.mjs';
+import { alertFromGate, alertFromPauseReason, rememberBotAlert, rememberDecisionMemo } from './bot-alerts.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
@@ -478,6 +478,8 @@ export class BotStateMachine {
       const models = loopModels(env);
       const deps = loopDeps(env);
       const input = loopInput(body);
+      const storedPositions = await this.get('positions');
+      if (!Array.isArray(input.positions) && Array.isArray(storedPositions)) input.positions = storedPositions;
       try {
         const result = await runBotLoop({
           run,
@@ -499,6 +501,19 @@ export class BotStateMachine {
             ownerId,
             at: loopNow,
             scope: result.run?.runId || loopNow,
+          });
+        }
+        const memoStep = result.run?.checkpoints?.memo;
+        if (memoStep?.status === 'done' && typeof memoStep.digest === 'string' && context.bot?.id) {
+          const approval = result.run?.checkpoints?.approval;
+          await rememberDecisionMemo(env, this, {
+            botId: context.bot.id,
+            ownerId,
+            at: loopNow,
+            runId: result.run.runId,
+            digest: memoStep.digest,
+            trustScore: result.run?.checkpoints?.decide?.facts?.trustScore,
+            approval: approval?.automatic === true ? 'auto' : (approval?.action || 'recorded'),
           });
         }
         const paper = result.run?.checkpoints?.execute?.paper;

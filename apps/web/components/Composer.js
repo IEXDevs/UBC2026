@@ -37,6 +37,7 @@ import {
 import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
+import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 
 const LEAVE_MS = 760;
@@ -443,6 +444,7 @@ export default function Composer({
         shellBalanceLabel,
         fileCatalog: catalogRef.current,
         accessToken,
+        deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
       });
       await settleChat(result, spoken, prior);
     } catch {
@@ -486,6 +488,7 @@ export default function Composer({
         shellBalanceLabel,
         fileCatalog: catalogRef.current,
         accessToken,
+        deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
       });
       if (!result.ok) pushLine('agent', chatFailureNote(result.error));
       else await settleChat(result, spoken, prior);
@@ -554,6 +557,7 @@ export default function Composer({
         shellBalanceLabel,
         fileCatalog: catalogRef.current,
         accessToken,
+        deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
       });
       await settleChat(result, spoken, prior, grants);
     } catch {

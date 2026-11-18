@@ -138,3 +138,89 @@ test('desk unlock stores a grant hash and spend rejects a bare owner', async () 
   }), env);
   assert.equal(wrong.status, 401);
 });
+
+/**
+ * Achieves: a later password replaces the account verifier, clears the old grant, and unlocks.
+ * Fails when: the second password stays 409, the old password still unlocks, or the new one does not.
+ * Oracle: replaced hash, null grant, unlock status.
+ * Side effects: in-memory desk row. The passwords stay in the request fixtures.
+ * Gaps: live Supabase is not called.
+ */
+test('a later desk password replaces the stored verifier and can unlock', async () => {
+  const first = await createDeskLock('correct horse');
+  const second = await createDeskLock('later horse');
+  let row = null;
+  const env = {
+    PRODUCT: 'Maelstrom',
+    CLUSTER: 'devnet',
+    ...SUPABASE,
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      const method = init.method || 'GET';
+      if (href.includes('/rest/v1/users')) return Response.json([], { status: 201 });
+      if (href.includes('/rest/v1/desk_locks') && method === 'POST') {
+        row = JSON.parse(init.body);
+        return new Response(null, { status: 201 });
+      }
+      if (href.includes('/rest/v1/desk_locks') && method === 'PATCH') {
+        const patch = JSON.parse(init.body);
+        Object.assign(row, patch);
+        if (patch.grant_hash === null) row.grant_hash = null;
+        if (patch.grant_until === null) row.grant_until = null;
+        return new Response(null, { status: 204 });
+      }
+      if (href.includes('/rest/v1/desk_locks') && href.includes('select=owner_id')) {
+        return Response.json(row ? [{ owner_id: 'user_1' }] : []);
+      }
+      if (href.includes('/rest/v1/desk_locks') && href.includes('select=salt')) {
+        return Response.json(row ? [{ salt: row.salt, hash: row.hash, iterations: row.iterations }] : []);
+      }
+      if (href.includes('/rest/v1/desk_locks') && href.includes('grant_hash')) {
+        return Response.json(row?.grant_hash ? [{ grant_hash: row.grant_hash, grant_until: row.grant_until }] : [{ grant_hash: null, grant_until: null }]);
+      }
+      return Response.json({ error: 'unexpected' }, { status: 500 });
+    },
+  };
+  const saved = await worker.fetch(new Request('https://runtime/api/desk/lock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ salt: first.salt, hash: first.hash, iterations: first.iterations }),
+  }), env);
+  assert.equal(saved.status, 200);
+  const blocked = await worker.fetch(new Request('https://runtime/api/desk/lock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ salt: second.salt, hash: second.hash, iterations: second.iterations }),
+  }), env);
+  assert.equal(blocked.status, 409);
+  assert.equal((await blocked.json()).error, 'desk_lock_exists');
+  assert.equal(row.hash, first.hash);
+
+  const replaced = await worker.fetch(new Request('https://runtime/api/desk/lock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ salt: second.salt, hash: second.hash, iterations: second.iterations, replace: true }),
+  }), env);
+  assert.equal(replaced.status, 200);
+  assert.equal((await replaced.json()).replaced, true);
+  assert.equal(row.hash, second.hash);
+  assert.equal(row.grant_hash, null);
+  assert.equal(JSON.stringify(row).includes('later horse'), false);
+
+  const oldPassword = await worker.fetch(new Request('https://runtime/api/desk/unlock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ password: 'correct horse' }),
+  }), env);
+  assert.equal(oldPassword.status, 401);
+
+  const opened = await worker.fetch(new Request('https://runtime/api/desk/unlock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ password: 'later horse' }),
+  }), env);
+  assert.equal(opened.status, 200);
+  const grantBody = await opened.json();
+  assert.match(grantBody.grant, /^[0-9a-f]{64}$/);
+  assert.notEqual(row.grant_hash, grantBody.grant);
+});

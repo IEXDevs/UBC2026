@@ -602,3 +602,45 @@ test('create_loop and break_loop stay on this bot and the owner ask', async () =
   assert.equal(calls[2].body.cooldownMinutes, '30');
   assert.equal(calls[2].breakHeader, null);
 });
+
+test('request_spend carries a desk grant and a gate result is not an ask-mode hold', async () => {
+  const grant = 'ab'.repeat(32);
+  const calls = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    runtimeBase: 'https://runtime.example',
+    deskGrant: grant,
+    fetcher: async (url, options) => {
+      calls.push({
+        url: String(url),
+        grant: options.headers['x-desk-grant'] || null,
+      });
+      if (String(url).includes('/api/spend')) {
+        return Response.json({
+          ok: false,
+          state: 'approval-needed',
+          steps: ['trust-gate', 'verify-consensus', 'approval-mode'],
+          signed: false,
+        }, { status: 409 });
+      }
+      return Response.json({ status: 'paused' });
+    },
+  });
+  const spent = await invoke('request_spend', {
+    botId: 'bot_1',
+    action: 'buy',
+    amount: '1000000',
+    destination: '11111111111111111111111111111111',
+  });
+  assert.equal(spent.error, 'approval-needed');
+  assert.equal(spent.state, 'approval-needed');
+  assert.equal(spent.signed, false);
+  assert.equal(spent.steps[0], 'trust-gate');
+  assert.match(calls[0].url, /\/api\/spend$/);
+  assert.equal(calls[0].grant, grant);
+  assert.equal(JSON.stringify(spent).includes(grant), false);
+  const paused = await invoke('pause_bot', { botId: 'bot_1' });
+  assert.equal(paused.status, 'paused');
+  assert.equal(calls[1].grant, null);
+});

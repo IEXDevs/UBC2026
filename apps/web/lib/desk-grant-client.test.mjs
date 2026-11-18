@@ -96,6 +96,19 @@ test('registerDeskVerifier treats 409 as exists and never sends the password', a
     verifier: { salt: 's', hash: 'h', iterations: 1 },
   });
   assert.deepEqual(ok, { ok: true });
+
+  let replaced;
+  const again = await registerDeskVerifier(async (_url, init) => {
+    replaced = JSON.parse(init.body);
+    return new Response('', { status: 200 });
+  }, {
+    ownerId: 'did:privy:u1',
+    verifier: { salt: 's', hash: 'h', iterations: 1 },
+    replace: true,
+  });
+  assert.deepEqual(again, { ok: true });
+  assert.equal(replaced.replace, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(replaced, 'password'), false);
 });
 
 /**
