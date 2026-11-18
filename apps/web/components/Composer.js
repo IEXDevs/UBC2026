@@ -39,6 +39,8 @@ import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
 import { startVoiceConversation } from '../lib/voice-session.mjs';
 import { classifyVoiceDisconnect, voiceErrorNote } from '../lib/voice-disconnect.mjs';
+import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
+import { rememberSessionFile } from '../lib/file-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -358,12 +360,18 @@ export default function Composer({
     const picked = [...list].slice(0, room);
     const next = [];
     for (const file of picked) {
+      const name = displayFileName(file.name) || canonicalFileName(file.name) || 'file';
+      const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const sessionUrl = rememberSessionFile(id, file);
+      const url = (await previewUrl(file)) || sessionUrl;
       next.push({
-        id: `${file.name}-${file.size}-${file.lastModified}`,
-        name: file.name,
+        id,
+        name,
         size: file.size,
         type: file.type || 'file',
-        url: await previewUrl(file),
+        url,
         blob: file,
         addedAt: Date.now(),
       });

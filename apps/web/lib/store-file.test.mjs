@@ -26,6 +26,7 @@ test('a stored upload replaces the local id and drops removed hashes', async () 
   }, 'local', saved);
   assert.equal(library.bot_1[0].id, secret);
   assert.equal(library.bot_1[0].ref, 'ab'.repeat(32));
+  assert.equal(library.bot_1[0].name, 'shot.png');
   assert.equal(library.bot_1.length, 1);
   assert.match(uploadNotice(saved), /5 GB/);
   assert.equal(uploadNotice(saved).includes('google'), false);

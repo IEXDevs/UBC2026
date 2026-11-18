@@ -34,8 +34,12 @@ function quote(value) {
 }
 
 function safeName(name) {
-  const cleaned = String(name || 'file').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
-  return cleaned || 'file';
+  // Keep in sync with apps/web/lib/file-name.mjs canonicalFileName / displayFileName.
+  const raw = String(name || 'file').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
+  const base = (raw.split(/[/\\]/).pop() || raw).slice(0, 180);
+  const stuck = base.match(/^(.+?\.(?:txt|md|pdf|png|jpe?g|gif|webp|docx?|csv|json|html?|jsx?|mjs|tsx?|css|zip|mp[34]|wav|mov|webm|log))([A-Za-z][\w .+-]*\.[A-Za-z0-9]{1,8})$/i);
+  if (stuck) return `${stuck[1].trim()} · ${stuck[2].trim()}`.slice(0, 180) || 'file';
+  return base || 'file';
 }
 
 async function driveJson(fetcher, url, token, init = {}) {

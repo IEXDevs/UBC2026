@@ -75,10 +75,27 @@ test('agent recall lists names and skips file contents', () => {
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
+test('catalog keeps separate names for two attached text fixtures', () => {
+  const library = addCatalogFiles({}, 'bot_1', [
+    { id: 'u1', name: 'Untitled 3.txt', type: 'text/plain', size: 8, addedAt: 1 },
+    { id: 'f1', name: 'maelstrom-qa-fixture.txt', type: 'text/plain', size: 12, addedAt: 2 },
+  ]);
+  assert.equal(library.bot_1.length, 2);
+  const names = library.bot_1.map(file => file.name).sort();
+  assert.deepEqual(names, ['Untitled 3.txt', 'maelstrom-qa-fixture.txt']);
+  assert.equal(library.bot_1.some(file => /txtmaelstrom/.test(file.name)), false);
+});
+
+test('catalog separates a stuck concatenated filename for display', () => {
+  const library = addCatalogFiles({}, 'bot_1', [
+    { id: 'stuck', name: 'Untitled 3.txtmaelstrom-qa-fixture.txt', type: 'text/plain', size: 8, addedAt: 1 },
+  ]);
+  assert.equal(library.bot_1[0].name, 'Untitled 3.txt · maelstrom-qa-fixture.txt');
+});
+
 test('catalog storage rejects a bad preview and an empty owner', () => {
   const saved = normalizeCatalog({
-    bot_1: [{ id: 'a', name: 'page.html', url: 'javascript:alert(1)' }],
-  });
+    bot_1: [{ id: 'a', name: 'page.html', url: 'javascript:alert(1)' }],  });
   assert.equal(saved.bot_1[0].url, undefined);
   assert.equal(catalogStorageKey(''), '');
   assert.equal(catalogStorageKey(null), '');

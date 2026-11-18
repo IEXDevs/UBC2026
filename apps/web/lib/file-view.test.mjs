@@ -53,3 +53,20 @@ test('code preview returns text and refuses a binary blob', async () => {
   const binary = await readPreview('blob:bin', 'code', async () => new Response(new Uint8Array([65, 0, 66])));
   assert.equal(binary.error, 'binary');
 });
+
+test('known text fixture previews from session bytes and missing bytes stay actionable', async () => {
+  const { clearSessionFiles, fileAvailability, rememberSessionFile, sessionPreviewUrl } = await import('./file-session.mjs');
+  const { displayFileName } = await import('./file-name.mjs');
+  clearSessionFiles();
+  const fixture = 'maelstrom-qa-fixture: open positions check\n';
+  const id = 'local-fixture';
+  const url = rememberSessionFile(id, new Blob([fixture], { type: 'text/plain' }));
+  assert.equal(displayFileName('maelstrom-qa-fixture.txt'), 'maelstrom-qa-fixture.txt');
+  assert.equal(sessionPreviewUrl(id), url);
+  const preview = await readPreview(url, 'code', async () => new Response(fixture));
+  assert.equal(preview.text, fixture);
+  assert.equal(fileAvailability({ id, url }).state, 'ready');
+  assert.equal(fileAvailability({ id: 'stale-local' }).state, 'device_local');
+  assert.match(fileAvailability({ id: 'stale-local' }).message, /attach it again/i);
+  clearSessionFiles();
+});

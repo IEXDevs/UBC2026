@@ -1,5 +1,7 @@
 import { isAccountCode } from './account-code.mjs';
 import { FILE_BYTE_CAP, STORAGE_CAP_WARNING } from './file-quota.mjs';
+import { canonicalFileName, displayFileName } from './file-name.mjs';
+import { moveSessionFile } from './file-session.mjs';
 
 export const STORAGE_UPLOAD_TOO_BIG = 'That file is larger than 512 MB, so it was not saved.';
 export const STORAGE_POOL_FULL = 'File storage is full. This file was not saved.';
@@ -14,7 +16,15 @@ export function applyStoredFile(library, localId, saved) {
     for (const file of files) {
       if (file?.ref && removed.has(file.ref)) continue;
       if (file?.id === localId && saved?.secret) {
-        rows.push({ ...file, id: saved.secret, ref: saved.ref, addedAt: saved.addedAt || file.addedAt });
+        const name = displayFileName(saved.name) || canonicalFileName(saved.name) || file.name;
+        moveSessionFile(localId, saved.secret);
+        rows.push({
+          ...file,
+          id: saved.secret,
+          ref: saved.ref,
+          name,
+          addedAt: saved.addedAt || file.addedAt,
+        });
       } else {
         rows.push(file);
       }
@@ -53,7 +63,8 @@ export async function storeAttachedFile({ fetcher = fetch, ownerId, accountCode,
   if (!isAccountCode(accountCode)) return { ok: false, error: 'account_required' };
   if (Number(item.size) > FILE_BYTE_CAP) return { ok: false, error: 'file_too_large' };
   const body = new FormData();
-  body.append('file', item.blob, item.name || 'file');
+  const name = displayFileName(item.name) || canonicalFileName(item.name) || 'file';
+  body.append('file', item.blob, name);
   const response = await fetcher('/api/files', {
     method: 'POST',
     headers: {

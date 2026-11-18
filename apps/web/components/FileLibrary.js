@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { FileText, Film, Image as ImageIcon, Music } from 'lucide-react';
 import { formatFileSize } from './Attachments';
 import { byRecent, isLibraryImage } from '../lib/file-library.mjs';
+import { displayFileName } from '../lib/file-name.mjs';
 import FileScroll from './FileScroll';
 import FileStage from './FileStage';
 import ImageCollage from './ImageCollage';
@@ -40,9 +41,9 @@ export default function FileLibrary({ files = [], ownerId = null, getAccessToken
           className="file-scroll"
           items={docs.map(file => ({
             id: file.id,
-            title: file.name || 'File',
+            title: displayFileName(file.name) || file.name || 'File',
             description: formatFileSize(file.size),
-            file,
+            file: { ...file, name: displayFileName(file.name) || file.name },
           }))}
           selectOnScroll
           radius={6}
