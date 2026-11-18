@@ -13,15 +13,19 @@ function urlsIn(text) {
   return [...String(text || '').matchAll(/https?:\/\/[^\s)]+/g)].map((match) => match[0]);
 }
 
-export default function ChatBubbles({ lines, className = '', thinking = false, onParty, onEdit, onAccess }) {
+export default function ChatBubbles({ lines, className = '', thinking = false, onParty, onEdit, onAccess, focusId = null }) {
   const tailRef = useRef(null);
   const rows = withHeads(lines);
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState('');
 
   useEffect(() => {
+    if (focusId) {
+      document.getElementById(`chat-line-${focusId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
     tailRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  }, [lines, thinking]);
+  }, [lines, thinking, focusId]);
 
   if (rows.length === 0 && !thinking) return null;
 
@@ -29,12 +33,12 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
     <MessageGroup className={className}>
       {rows.map((line) => {
         if (line.role === 'note') {
-          return <p key={line.id} className="chat-note" role="status">{line.text}</p>;
+          return <p key={line.id} id={`chat-line-${line.id}`} className="chat-note" data-hit={focusId === line.id ? '' : undefined} role="status">{line.text}</p>;
         }
         if (line.role === 'user') {
           const editing = editingId === line.id;
           return (
-            <Message key={line.id} align="end" tabIndex={onEdit && !editing ? 0 : undefined}>
+            <Message key={line.id} id={`chat-line-${line.id}`} align="end" data-hit={focusId === line.id ? '' : undefined} tabIndex={onEdit && !editing ? 0 : undefined}>
               <MessageContent>
                 {editing ? (
                   <form
@@ -99,7 +103,7 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
         const urls = urlsIn(line.text);
         const steps = sanitizeActivity(line.activity);
         return (
-          <Message key={line.id}>
+          <Message key={line.id} id={`chat-line-${line.id}`} data-hit={focusId === line.id ? '' : undefined}>
             <MessageContent>
               <AgentTrace steps={steps} />
               <Bubble align="start" variant="secondary">

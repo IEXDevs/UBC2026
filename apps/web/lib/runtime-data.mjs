@@ -5,6 +5,7 @@
  * Never invent PreviewMain / demo bots.
  */
 import { sanitizeActivity } from './chat-activity.mjs';
+import { catalogPayload } from './file-catalog.mjs';
 import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
 
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -328,6 +329,7 @@ export async function sendBotChat({
   shellBots = null,
   shellWallets = null,
   shellBalanceLabel = null,
+  fileCatalog = null,
   runtimeBase = runtimeBaseUrl(),
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
@@ -336,6 +338,7 @@ export async function sendBotChat({
   }
   const text = typeof message === 'string' ? message.trim() : '';
   if (!text) return { ok: false, error: 'message_required' };
+  const catalog = catalogPayload(fileCatalog);
   const prior = Array.isArray(history)
     ? history
       .filter(line => line && (line.role === 'user' || line.role === 'agent' || line.role === 'assistant'))
@@ -368,6 +371,7 @@ export async function sendBotChat({
         ...(typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
           ? { shellBalanceLabel: shellBalanceLabel.trim().slice(0, 64) }
           : {}),
+        ...(catalog.length > 0 ? { fileCatalog: catalog } : {}),
       }),
       cache: 'no-store',
     });

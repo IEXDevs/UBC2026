@@ -24,6 +24,8 @@ import AgentDetail from '../components/AgentDetail';
 import AgentEdit from '../components/AgentEdit';
 import HoldButton from '../components/HoldButton';
 import ComputerSheet from '../components/ComputerSheet';
+import FileStage from '../components/FileStage';
+import RecallSearch from '../components/RecallSearch';
 import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
@@ -65,6 +67,8 @@ import {
 } from '../lib/wallet-provision.mjs';
 import { SETUP_CARD_MS, accountSetupStep, clipAddress, readQuoteOut, readRecoveryAck, swapSendSettlement, writeRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
+import { addCatalogFiles, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
+import { searchRecall } from '../lib/recall-search.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
@@ -390,6 +394,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [statsOpen, setStatsOpen] = useState(false);
   const [computerOpen, setComputerOpen] = useState(false);
   const [library, setLibrary] = useState({});
+  const [catalogReady, setCatalogReady] = useState(false);
+  const [recall, setRecall] = useState('');
+  const [focusLine, setFocusLine] = useState(null);
+  const [viewFile, setViewFile] = useState(null);
   const [voiceMs, setVoiceMs] = useState(0);
   const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
@@ -475,6 +483,27 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (!talksReady || !ownerId) return;
     writeTalks(localStorage, ownerId, talks);
   }, [talks, talksReady, ownerId]);
+
+  useEffect(() => {
+    setCatalogReady(false);
+    setViewFile(null);
+    if (!ownerId) {
+      setLibrary({});
+      setCatalogReady(true);
+      return;
+    }
+    try {
+      setLibrary(readCatalog(localStorage, ownerId));
+    } catch {
+      setLibrary({});
+    }
+    setCatalogReady(true);
+  }, [ownerId]);
+
+  useEffect(() => {
+    if (!catalogReady || !ownerId) return;
+    writeCatalog(localStorage, ownerId, library);
+  }, [library, catalogReady, ownerId]);
 
   useEffect(() => {
     try {
@@ -724,6 +753,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const paymentCrossCheck = remoteLists.paymentCrossCheck || [];
   const positions = remoteLists.positions || [];
   const visible = bots.filter(bot => bot.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const fileCatalog = useMemo(() => catalogForChat(library, bots), [library, bots]);
+  const recallHits = useMemo(
+    () => searchRecall({ query: recall, bots, talks, files: library }),
+    [recall, bots, talks, library],
+  );
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
   const glance = walletGlance(wallets, positions, transfers);
@@ -1035,6 +1069,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       setSlide('left');
       setPane('Main');
     }
+  }
+
+  function onRecall(hit) {
+    if (!hit) return;
+    if (hit.kind === 'file' && hit.file) setViewFile(hit.file);
+    if (hit.botId) openChat(hit.botId);
+    setFocusLine(hit.kind === 'message' && hit.lineId ? { botId: hit.botId, lineId: hit.lineId } : null);
+    setRecall('');
   }
 
   function onCreate(created) {
@@ -1362,6 +1404,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             <Plus size={16} strokeWidth={1.75} />
           </button>
         </div>
+        <RecallSearch query={recall} hits={recallHits} onQuery={setRecall} onSelect={onRecall} />
         <BotRail
           bots={visible}
           activeId={bot?.id}
@@ -1434,6 +1477,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                   onParty={setParty}
                   onEdit={onEditLine}
                   onAccess={(line, accepted) => accessRef.current?.(line, accepted)}
+                  focusLine={focusLine?.botId === bot.id ? focusLine.lineId : null}
                 />
             ) : null}
             {!noAgents && money ? (
@@ -1482,6 +1526,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             shellBots={bots}
             shellWallets={wallets}
             shellBalanceLabel={glance.balanceLabel}
+            fileCatalog={fileCatalog}
             clientTools={clientTools}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {
@@ -1520,13 +1565,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             onConfirm={askSlideConfirm}
             onBindAccess={(handler) => { accessRef.current = handler; }}
             onAttach={items => {
-              setLibrary(current => {
-                const prev = current[bot.id] ?? [];
-                const seen = new Set(prev.map(file => file.id));
-                const added = items.filter(file => !seen.has(file.id));
-                if (added.length === 0) return current;
-                return { ...current, [bot.id]: [...added, ...prev] };
-              });
+              setLibrary(current => addCatalogFiles(current, bot.id, items));
             }}
           />
         ) : pane === 'Positions' ? null : (
@@ -1618,6 +1657,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       />
       <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={CONNECTORS} />
       <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
+      {viewFile ? <FileStage file={viewFile} onClose={() => setViewFile(null)} /> : null}
       <StatisticsSheet
         open={statsOpen}
         onClose={closeStats}
