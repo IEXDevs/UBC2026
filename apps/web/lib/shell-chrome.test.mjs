@@ -62,6 +62,25 @@ test('the home shell does not render the demo fixture', () => {
 });
 
 /**
+ * Achieves: verifies the first-agent create dialog is an opaque viewport cover and neither it nor the page scrolls.
+ * Fails when: is-cover drops off the first-agent backdrop, the cover stays translucent, or overflow stays auto.
+ * Oracle: CreateBotDialog adds is-cover when first; cover background #141414 and overflow hidden; html/body overflow hidden.
+ * Side effects / state checked: CreateBotDialog.js + globals.css source.
+ * Gaps: source snapshot only — no browser layout.
+ */
+test('the first-agent create screen covers the page without scrollbars', () => {
+  const root = dirname(fileURLToPath(import.meta.url));
+  const dialog = readFileSync(join(root, '../components/CreateBotDialog.js'), 'utf8');
+  const css = readFileSync(join(root, '../app/globals.css'), 'utf8');
+  assert.match(dialog, /backdrop is-center\$\{first \? ' is-cover' : ''\}/);
+  const cover = css.slice(css.indexOf('.backdrop.is-center.is-cover'), css.indexOf('.backdrop.is-corner'));
+  assert.match(cover, /\.backdrop\.is-center\.is-cover \{\s*background:\s*#141414;\s*overflow:\s*hidden;/);
+  assert.match(cover, /\.backdrop\.is-center\.is-cover > \.create-splash,\s*\.backdrop\.is-center\.is-cover > \.sheet \{\s*overflow:\s*hidden;/);
+  assert.match(css, /\.backdrop \{\s*[^}]*background:\s*rgba\(0,\s*0,\s*0,\s*0\.46\)/);
+  assert.match(css, /html:has\(\.backdrop\.is-cover\),\s*body:has\(\.backdrop\.is-cover\)\s*\{\s*overflow:\s*hidden;/);
+});
+
+/**
  * Achieves: verifies claim-handle overlay sits outside the fading shell and CSS disables pointer events.
  * Fails when: ClaimHandle/DeskLock move inside shell, is-claim class wiring drops, or opacity/pointer-events rules vanish.
  * Oracle: page markup order ProfileSheet → ClaimHandle/DeskLock; .shell.is-claim opacity 0 + pointer-events none.
