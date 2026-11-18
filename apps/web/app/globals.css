@@ -6296,3 +6296,90 @@ body.maelstrom-terms-gate [id^="headlessui-dialog"] {
   color: var(--text);
   background: var(--hover);
 }
+
+.legal {
+  width: 100%;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.legal-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 24px;
+  padding: 22px clamp(24px, 5vw, 72px);
+  border-bottom: 1px solid var(--line);
+}
+
+.legal-mark {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  text-decoration: none;
+}
+
+.legal-nav {
+  display: flex;
+  gap: 22px;
+}
+
+.legal-nav a {
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.legal-nav a[aria-current='page'],
+.legal-nav a:hover {
+  color: var(--text);
+}
+
+.legal-body {
+  width: 100%;
+  max-width: 980px;
+  padding: 56px clamp(24px, 5vw, 72px) 96px;
+}
+
+.legal-body h1 {
+  margin: 0;
+  font-size: clamp(40px, 6vw, 64px);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+
+.legal-updated {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.legal-intro {
+  margin: 28px 0 0;
+  max-width: 68ch;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.legal-body section {
+  margin-top: 36px;
+}
+
+.legal-body h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.legal-body section p {
+  margin: 0 0 12px;
+  max-width: 72ch;
+  color: #d6d6d6;
+  font-size: 16px;
+  line-height: 1.6;
+}
