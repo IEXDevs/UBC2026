@@ -126,6 +126,35 @@ export function shortAddress(address) {
   return `${address.slice(0, 5)}...${address.slice(-5)}`;
 }
 
+/** `4zMMC...DncDU (Meteora)`. A bot name wins over the wallet label. */
+export function walletSendCaption(row) {
+  const clipped = shortAddress(typeof row?.address === 'string' ? row.address : '');
+  const bot = Array.isArray(row?.bots)
+    ? row.bots.find(name => typeof name === 'string' && name.trim())
+    : '';
+  const label = typeof row?.label === 'string' ? row.label.trim() : '';
+  const name = bot ? bot.trim() : label;
+  return name ? `${clipped} (${name})` : clipped;
+}
+
+/** Other desk wallets for the Send To menu. The active wallet is left out. */
+export function sendDestinations(wallets, bots, activeId) {
+  const list = Array.isArray(wallets) ? wallets : [];
+  return describeWallets(list, Array.isArray(bots) ? bots : [])
+    .filter(row => row.id && row.id !== activeId && row.address)
+    .map(row => {
+      const source = list.find(wallet => wallet?.id === row.id);
+      const privy = source?.provider === 'privy';
+      return {
+        id: row.id,
+        address: row.address,
+        caption: walletSendCaption(row),
+        frozen: Boolean(row.frozen),
+        spendable: privy && source?.spendable !== false && !row.frozen,
+      };
+    });
+}
+
 export function glanceBalance(positions) {
   let sum = 0n;
   for (const position of positions) {

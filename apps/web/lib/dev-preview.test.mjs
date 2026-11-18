@@ -10,11 +10,14 @@ import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from './dev-preview.mjs
  * Gaps: none for fixtures; UI wiring of preview mode is out of scope.
  */
 test('the preview wallet is visible and cannot spend', () => {
-  const [wallet] = previewWallets();
-  assert.equal(wallet.ownerId, DEV_PREVIEW_OWNER);
-  assert.equal(wallet.spendable, false);
-  assert.equal(wallet.readOnly, true);
-  assert.equal(wallet.kind, 'main');
+  const wallets = previewWallets();
+  assert.equal(wallets.length, 2);
+  assert.equal(wallets[0].ownerId, DEV_PREVIEW_OWNER);
+  assert.equal(wallets[0].spendable, false);
+  assert.equal(wallets[0].readOnly, true);
+  assert.equal(wallets[0].kind, 'main');
+  assert.equal(wallets[1].kind, 'additional');
+  assert.equal(wallets[1].spendable, false);
   const bot = previewBot();
   assert.equal(bot.id, 'bot_preview');
   assert.equal(bot.name, 'Preview');

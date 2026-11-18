@@ -13,9 +13,11 @@ import {
   registeredHoldingsLabel,
   solanaExplorerTxUrl,
   solscanTxUrl,
+  sendDestinations,
   shortAddress,
   walletBalanceLabel,
   walletGlance,
+  walletSendCaption,
 } from './money-views.mjs';
 
 /**
@@ -135,6 +137,24 @@ test('wallet addresses show the first five and last five characters', () => {
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
   assert.equal(shortAddress(address), '4zMMC...DncDU');
   assert.equal(shortAddress('short'), 'short');
+});
+
+/**
+ * Achieves: Send To captions prefer a bot name, then the wallet label, and skip the wallet you are sending from.
+ * Fails when: the wallet label replaces a bot name, or the active wallet stays in the menu.
+ * Oracle: main caption ends with (Meteora); a label-only row uses that label; destinations omit the active id.
+ * Side effects / state checked: N/A.
+ * Gaps: does not render the combobox.
+ */
+test('send captions use the bot name, then the wallet name', () => {
+  const state = getDemoShellState();
+  const rows = describeWallets(state.wallets, state.bots);
+  assert.equal(walletSendCaption(rows[0]), `${shortAddress(rows[0].address)} (Meteora)`);
+  assert.equal(walletSendCaption({ address: rows[1].address, label: 'Shop', bots: [] }), `${shortAddress(rows[1].address)} (Shop)`);
+  assert.equal(walletSendCaption({ address: rows[0].address, label: '', bots: [] }), shortAddress(rows[0].address));
+  const menu = sendDestinations(state.wallets, state.bots, rows[0].id);
+  assert.equal(menu.some(row => row.id === rows[0].id), false);
+  assert.equal(menu[0].caption, walletSendCaption(rows.find(row => row.id === menu[0].id)));
 });
 
 /**

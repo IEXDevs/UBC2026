@@ -924,6 +924,56 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         return { ok: false, message: 'The send did not post.' };
       }
     }
+    if (target?.kind === 'wallet') {
+      const list = Array.isArray(liveWallets) ? liveWallets : wallets;
+      const from = list.find(item => item?.id === pending.fromWalletId) || null;
+      const dest = list.find(item => item?.id === target.id && item?.address === target.address) || null;
+      if (!from || !dest) return { ok: false, message: 'That wallet is not on this desk.' };
+      if (pending.asset !== 'USDC') return { ok: false, message: 'Wallet sends are USDC.' };
+      try {
+        if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
+        const token = await getAccessToken?.();
+        const response = await fetch('/api/wallets/move', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+            'x-owner-id': ownerId,
+          },
+          body: JSON.stringify({ from, to: dest, amount: pending.amount }),
+        });
+        const body = await response.json().catch(() => ({}));
+        const where = target.caption || clipAddress(target.address);
+        if (body.error === 'missing_config') {
+          const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'QUICKNODE_DEVNET_RPC_URL';
+          return { ok: false, message: `The devnet send needs ${names}.` };
+        }
+        if (body.error === 'wallet_frozen') return { ok: false, message: 'That wallet is frozen.' };
+        if (body.error === 'invalid_destination') return { ok: false, message: 'Pick a different wallet.' };
+        if (!response.ok || !body.signature) return { ok: false, message: `The send to ${where} did not post.` };
+        const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
+        return {
+          ok: true,
+          message: `Sent ${amountLabel} to ${where}.`,
+          signature: body.signature,
+          receipt: {
+            id: `move_${body.signature}`,
+            at: new Date().toISOString(),
+            title: `Send ${amountLabel}`,
+            lines: [
+              { label: 'To', value: where },
+              { label: 'Amount', value: amountLabel },
+              { label: 'Signature', value: body.signature },
+              { label: 'Network', value: 'devnet execution, mainnet pricing' },
+            ],
+            signature: body.signature,
+            cluster: 'devnet',
+          },
+        };
+      } catch {
+        return { ok: false, message: 'The send did not post.' };
+      }
+    }
     if (target?.kind !== 'handle') {
       return { ok: false, message: 'Platform sends go to a @handle.' };
     }

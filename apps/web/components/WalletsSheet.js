@@ -12,13 +12,14 @@ import TokenScreen from './TokenScreen';
 import SlideCommit from './bits/SlideCommit';
 import Spotlight from './bits/Spotlight';
 import TxnLog from './TxnLog';
+import SendToField from './SendToField';
 import TxnPreview from './TxnPreview';
 import { usePresence } from './usePresence';
 import { DEV_PREVIEW_OWNER, samplePortfolio } from '../lib/dev-preview.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { partyFromToken } from '../lib/party-book.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
-import { describeWallets, formatBaseUnits, walletGlance } from '../lib/money-views.mjs';
+import { describeWallets, formatBaseUnits, sendDestinations, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
   displayToUnits,
@@ -170,6 +171,7 @@ export default function WalletsSheet({
           {pane === 'send' ? (
             <SendPane
               active={active}
+              destinations={sendDestinations(wallets, bots, active?.id || '')}
               tokens={tradeableTokens(tokens)}
               frozen={Boolean(active?.frozen)}
               observing={observing}
@@ -427,15 +429,19 @@ function WalletSwitcher({ rows, activeId, onSelect }) {
   );
 }
 
-function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt }) {
+function SendPane({ active, destinations = [], tokens, frozen, observing = false, onSend, onReceipt }) {
   const [to, setTo] = useState('');
+  const [pickedId, setPickedId] = useState('');
   const [amount, setAmount] = useState('');
   const [symbol, setSymbol] = useState('USDC');
   const [status, setStatus] = useState('');
   const [resetKey, setResetKey] = useState(0);
   const [folded, setFolded] = useState(false);
   const asset = tokens.find(token => token.symbol === symbol) || tokens[0] || null;
-  const target = parseSendTarget(to);
+  const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
+  const target = picked
+    ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, spendable: picked.spendable }
+    : parseSendTarget(to);
   const units = asset ? displayToUnits(amount, asset.decimals) : null;
   const [snsAddress, setSnsAddress] = useState('');
   const [snsFailed, setSnsFailed] = useState(false);
@@ -462,18 +468,24 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
   const pricedSwap = asset && asset.symbol !== 'USDC'
     ? swapDraft(tokens, { from: asset.symbol, to: 'USDC', amountText: amount })
     : null;
+  const walletReady = target?.kind === 'wallet' && target.spendable && asset?.symbol === 'USDC';
   const ready = Boolean(
-    active && !frozen && !observing && target && target.kind !== 'address' && units && asset
+    active && !frozen && !observing && target && units && asset
     && (
-      (asset.symbol === 'USDC' && (target.kind !== 'sns' || snsAddress))
-      || (asset.symbol !== 'USDC' && target.kind === 'handle' && pricedSwap?.broadcast === false && pricedSwap.url)
+      walletReady
+      || (target.kind !== 'address' && target.kind !== 'wallet' && (
+        (asset.symbol === 'USDC' && (target.kind !== 'sns' || snsAddress))
+        || (asset.symbol !== 'USDC' && target.kind === 'handle' && pricedSwap?.broadcast === false && pricedSwap.url)
+      ))
     )
   );
-  const destination = target?.kind === 'handle'
-    ? `@${target.handle}`
-    : target?.kind === 'sns'
-      ? (snsAddress || target.domain)
-      : '';
+  const destination = target?.kind === 'wallet'
+    ? target.caption
+    : target?.kind === 'handle'
+      ? `@${target.handle}`
+      : target?.kind === 'sns'
+        ? (snsAddress || target.domain)
+        : '';
   const preview = ready ? sendPreview({
     from: active?.label || 'Agent wallet',
     to: destination,
@@ -487,12 +499,12 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
       {frozen ? <p className="quiet" role="status">This wallet is frozen.</p> : null}
       <label>
         To
-        <input
+        <SendToField
           value={to}
-          placeholder="@alex or name.sol"
-          autoCapitalize="none"
-          spellCheck={false}
-          onChange={event => { setTo(event.target.value); setStatus(''); setFolded(false); }}
+          destinations={destinations}
+          selectedId={picked?.id || ''}
+          onChange={(next) => { setTo(next); setStatus(''); setFolded(false); }}
+          onPick={(row) => setPickedId(row?.id || '')}
         />
       </label>
       {target?.kind === 'sns' && snsFailed ? (
@@ -536,6 +548,7 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
         onCommit={() => {
           const pending = {
             target,
+            fromWalletId: active.id,
             amount: units,
             asset: asset.symbol,
             amountText: amount.trim(),
@@ -560,9 +573,11 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
 }
 
 function targetHint(target) {
-  if (!target) return 'Use a Maelstrom @handle or a .sol name.';
+  if (!target) return 'Type a @handle or a .sol name, or pick a wallet.';
   if (target.kind === 'handle') return `Sends USDC to @${target.handle} on the platform ledger.`;
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
+  if (target.kind === 'wallet' && target.spendable === false) return 'That wallet is read only.';
+  if (target.kind === 'wallet') return `Sends USDC on Solana devnet to ${target.caption}.`;
   return 'Raw addresses are not on the platform ledger yet.';
 }
 

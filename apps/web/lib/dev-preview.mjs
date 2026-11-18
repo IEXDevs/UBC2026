@@ -10,18 +10,32 @@ const BONK = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263';
 
 export const DEV_PREVIEW_OWNER = 'developer';
 
-/** One non-spendable wallet so the preview desk can open the sheet from the top bar and the positions book. */
+/** Sample wallets so the preview desk can open the sheet and show Send destinations. */
 export function previewWallets() {
-  return [{
-    id: 'w_preview',
-    ownerId: DEV_PREVIEW_OWNER,
-    kind: 'main',
-    label: 'Preview',
-    address: '11111111111111111111111111111111',
-    frozen: false,
-    spendable: false,
-    readOnly: true,
-  }];
+  return [
+    {
+      id: 'w_preview',
+      ownerId: DEV_PREVIEW_OWNER,
+      kind: 'main',
+      label: 'Preview',
+      address: '11111111111111111111111111111111',
+      frozen: false,
+      spendable: false,
+      readOnly: true,
+      provider: 'privy',
+    },
+    {
+      id: 'w_preview_shop',
+      ownerId: DEV_PREVIEW_OWNER,
+      kind: 'additional',
+      label: 'Shop',
+      address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+      frozen: false,
+      spendable: false,
+      readOnly: true,
+      provider: 'privy',
+    },
+  ];
 }
 
 export function previewBot() {
