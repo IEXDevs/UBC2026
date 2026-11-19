@@ -37,7 +37,7 @@ import {
 import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
-import { startVoiceConversation } from '../lib/voice-session.mjs';
+import { isLiveKitDisconnect, startVoiceConversation } from '../lib/voice-session.mjs';
 import { classifyVoiceDisconnect, voiceErrorNote } from '../lib/voice-disconnect.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
@@ -323,8 +323,12 @@ export default function Composer({
     const generation = gate.generation;
     const live = sessionRef.current;
     sessionRef.current = null;
-    gate.stop();
-    Promise.resolve(live?.endSession?.()).finally(() => gate.disarm(generation));
+    Promise.resolve(live?.endSession?.())
+      .catch(() => {})
+      .finally(() => {
+        gate.stop();
+        gate.disarm(generation);
+      });
   }, []);
 
   useEffect(() => {
@@ -639,10 +643,12 @@ export default function Composer({
     } catch {
       /* the track lock covers the hang-up */
     }
-    gate.stop();
+    // End the session before stopping tracks so LiveKit is not told the peer
+    // vanished mid-hangup (that showed up as a LiveKit disconnect on retry).
     Promise.resolve(live?.endSession?.())
       .catch(() => {})
       .finally(() => {
+        gate.stop();
         gate.disarm(generation);
         userEndedRef.current = false;
       });
@@ -717,6 +723,10 @@ export default function Composer({
       let live = null;
       const sessionOptions = {
         conversationToken: payload.token,
+        signedUrl: typeof payload.signedUrl === 'string' ? payload.signedUrl : '',
+        // Prefer websocket when signedUrl is present — LiveKit/WebRTC was dropping
+        // rooms shortly after connect on Chrome.
+        preferWebsocket: true,
         overrides: payload.overrides ?? voiceOverrides(payload),
         // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
         ...(owner ? { dynamicVariables: { owner_id: owner, spend_permission: permissionRef.current } } : {}),
@@ -747,8 +757,12 @@ export default function Composer({
           sessionRef.current = null;
           modeRef.current = 'listening';
           vadRef.current = 0;
-          if (outcome.note) setNote(outcome.note);
-          closeStage(Boolean(outcome.note));
+          let note = outcome.note;
+          if (note && isLiveKitDisconnect(details)) {
+            note = `${note} If this keeps happening, tap Talk again — the next try uses a safer connection when available.`;
+          }
+          if (note) setNote(note);
+          closeStage(Boolean(note));
         },
       };
       // Retry without TTS overrides when the portal agent rejects voiceId/speed.

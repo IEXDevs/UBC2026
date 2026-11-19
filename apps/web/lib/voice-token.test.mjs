@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VoiceTokenError, requestScribeToken, requestVoiceToken } from './voice-token.mjs';
+import { VoiceTokenError, requestScribeToken, requestVoiceSignedUrl, requestVoiceToken } from './voice-token.mjs';
 
 /**
  * Achieves: verifies conversation token mint uses xi-api-key, returns only the token, and maps empty key / HTTP / network failures.
@@ -54,6 +54,27 @@ test('a voice token request uses the server key and returns only the token', asy
  * Side effects / state checked: stub fetcher records method/href/key.
  * Gaps: none for requestScribeToken error surface.
  */
+test('a voice signed URL request returns a websocket URL', async () => {
+  const signed = await requestVoiceSignedUrl({
+    apiKey: 'server-key',
+    agentId: 'agent_test',
+    fetcher: async (url, init) => {
+      assert.equal(String(url), 'https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=agent_test');
+      assert.equal(init.headers['xi-api-key'], 'server-key');
+      return { ok: true, json: async () => ({ signed_url: 'wss://api.elevenlabs.io/v1/convai/conversation?sig=1' }) };
+    },
+  });
+  assert.equal(signed, 'wss://api.elevenlabs.io/v1/convai/conversation?sig=1');
+  await assert.rejects(
+    () => requestVoiceSignedUrl({
+      apiKey: 'server-key',
+      agentId: 'agent_test',
+      fetcher: async () => ({ ok: true, json: async () => ({ signed_url: 'https://not-ws.example' }) }),
+    }),
+    error => error.code === 'voice_rejected',
+  );
+});
+
 test('a scribe token request mints a single-use realtime_scribe token', async () => {
   await assert.rejects(
     () => requestScribeToken({ apiKey: '' }),

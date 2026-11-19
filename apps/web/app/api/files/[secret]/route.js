@@ -28,10 +28,13 @@ export async function GET(request, { params }) {
   });
   if (!read.ok) {
     const status = read.error === 'drive_not_configured' ? 503
-      : read.error === 'unreachable' ? 502
+      : read.error === 'unreachable' || read.error === 'drive_failed' ? 502
         : 404;
-    const body = read.gone ? { error: 'not_found', gone: true } : { error: 'not_found' };
-    return Response.json(body, { status, headers: NO_STORE });
+    if (read.gone) {
+      return Response.json({ error: 'not_found', gone: true }, { status: 404, headers: NO_STORE });
+    }
+    const error = typeof read.error === 'string' && read.error ? read.error : 'not_found';
+    return Response.json({ error }, { status, headers: NO_STORE });
   }
   return new Response(read.bytes, {
     headers: {

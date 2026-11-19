@@ -156,7 +156,9 @@ export function portfolioErrorNote(body = {}) {
   if (code === 'invalid_rpc') return 'The QuickNode portfolio URL must be https.';
   if (code === 'wrong_cluster') return 'QuickNode returned a cluster this portfolio does not read.';
   if (code === 'login_required') return 'Sign in again to read the portfolio.';
-  if (code === 'rpc_failed') return 'QuickNode did not return balances. Try again in a moment.';
+  if (code === 'rpc_failed' || code === 'rpc_timeout' || code === 'rpc_rate_limited') {
+    return 'QuickNode did not return balances. Try again in a moment.';
+  }
   return 'The portfolio could not be read.';
 }
 

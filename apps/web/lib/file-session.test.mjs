@@ -31,4 +31,6 @@ test('fileAvailability distinguishes ready, device-local, gone, and error', () =
   assert.equal(fileAvailability({ id: 'a'.repeat(128), remoteStatus: 'gone' }).state, 'gone');
   assert.equal(fileAvailability({ id: 'a'.repeat(128), remoteStatus: 'error' }).state, 'error');
   assert.equal(fileAvailability({ id: 'a'.repeat(128), remoteStatus: 'loading' }).state, 'loading');
+  // A stored secret with no explicit loading flag must not look like an open-in-progress.
+  assert.equal(fileAvailability({ id: 'a'.repeat(128), remoteStatus: '' }).state, 'device_local');
 });

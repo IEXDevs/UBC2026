@@ -55,8 +55,92 @@ export function ownerPermissionNote(value) {
 /**
  * ElevenLabs only transcribes and speaks. Policy, tools, and the permission
  * line are applied on the custom LLM, the same way as text chat.
+ * Never hang up from silence or a greeting — the owner ends the call.
  */
-export const VOICE_SPEAK_PROMPT = 'Transcribe the owner and speak the custom LLM reply. Do not add a policy.';
+export const VOICE_SPEAK_PROMPT = [
+  'Transcribe the owner and speak the custom LLM reply. Do not add a policy.',
+  'Never end the call, hang up, or call end_call unless the owner clearly says goodbye.',
+].join(' ');
+
+/** Spoken immediately on connect so silence does not trip agent hangup. */
+export const VOICE_FIRST_MESSAGE = "Hey — I'm here. What should we look at?";
+
+/** System tools ElevenLabs may inject; keep them out of the custom LLM. */
+const VOICE_BLOCKED_TOOL = /^(end_call|end call|hang_up|hangup|leave_call)$/i;
+
+export function isBlockedVoiceToolName(name) {
+  return typeof name === 'string' && VOICE_BLOCKED_TOOL.test(name.trim());
+}
+
+/**
+ * Drop hangup / system tools ElevenLabs attaches so the model cannot end the call.
+ */
+export function filterVoiceLlmTools(tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return null;
+  const kept = tools.filter((tool) => {
+    const name = tool?.function?.name || tool?.name || '';
+    return name && !isBlockedVoiceToolName(name);
+  }).slice(0, 32);
+  return kept.length > 0 ? kept : null;
+}
+
+function voiceAgentConversationConfig({ origin, modelId, webhookSecretRef }) {
+  const base = String(origin ?? '').replace(/\/$/, '');
+  return {
+    agent: {
+      first_message: VOICE_FIRST_MESSAGE,
+      language: 'en',
+      disable_first_message_interruptions: false,
+      prompt: {
+        prompt: VOICE_SPEAK_PROMPT,
+        llm: 'custom-llm',
+        // null removes dashboard-default end_call (empty {} does not clear it).
+        built_in_tools: { end_call: null },
+        custom_llm: {
+          url: `${base}/voice/llm/chat/completions`,
+          model_id: modelId,
+          api_type: 'chat_completions',
+          ...(webhookSecretRef
+            ? {
+              api_key: webhookSecretRef,
+              request_headers: { [WEBHOOK_HEADER]: webhookSecretRef },
+            }
+            : {
+              request_headers: { [WEBHOOK_HEADER]: SECRET_PLACEHOLDER },
+            }),
+        },
+        tools: VOICE_TOOLS.map(item => ({
+          type: 'webhook',
+          name: item.name,
+          description: item.description,
+          response_timeout_secs: 20,
+          api_schema: {
+            url: `${base}/voice/tools/${item.name}`,
+            method: 'POST',
+            request_headers: webhookSecretRef
+              ? {
+                [WEBHOOK_HEADER]: webhookSecretRef,
+                'x-owner-id': '{{owner_id}}',
+                'x-spend-permission': '{{spend_permission}}',
+              }
+              : { ...webhookHeaders() },
+            request_body_schema: {
+              type: 'object',
+              properties: { ...item.properties },
+              required: [...item.required],
+            },
+          },
+        })),
+      },
+    },
+    turn: {
+      // -1 disables silence hangup (dashboard agents often set a short timeout).
+      silence_end_call_timeout: -1,
+      turn_timeout: 20,
+      turn_eagerness: 'patient',
+    },
+  };
+}
 
 function toVoiceTool(def) {
   const required = Array.isArray(def.required)
@@ -120,39 +204,9 @@ function webhookHeaders() {
 }
 
 export function voiceAgentCreateBody({ origin, modelId = DEFAULT_VOICE_MODEL } = {}) {
-  const base = String(origin ?? '').replace(/\/$/, '');
   return {
     name: 'Maelstrom operator',
-    conversation_config: {
-      agent: {
-        prompt: {
-          prompt: VOICE_SPEAK_PROMPT,
-          llm: 'custom-llm',
-          custom_llm: {
-            url: `${base}/voice/llm/chat/completions`,
-            model_id: modelId,
-            api_type: 'chat_completions',
-            request_headers: { [WEBHOOK_HEADER]: SECRET_PLACEHOLDER },
-          },
-          tools: VOICE_TOOLS.map(item => ({
-            type: 'webhook',
-            name: item.name,
-            description: item.description,
-            response_timeout_secs: 20,
-            api_schema: {
-              url: `${base}/voice/tools/${item.name}`,
-              method: 'POST',
-              request_headers: { ...webhookHeaders() },
-              request_body_schema: {
-                type: 'object',
-                properties: { ...item.properties },
-                required: [...item.required],
-              },
-            },
-          })),
-        },
-      },
-    },
+    conversation_config: voiceAgentConversationConfig({ origin, modelId }),
   };
 }
 
@@ -272,44 +326,11 @@ export async function syncVoiceAgent({ env = {}, origin, fetcher = fetch } = {})
   const modelId = grokVoiceModel(env);
   const secretRef = { secret_id: secretId };
   const patchBody = {
-    conversation_config: {
-      agent: {
-        prompt: {
-          prompt: VOICE_SPEAK_PROMPT,
-          llm: 'custom-llm',
-          custom_llm: {
-            url: `${base}/voice/llm/chat/completions`,
-            model_id: modelId,
-            api_type: 'chat_completions',
-            // ElevenLabs sends this as Authorization: Bearer <value>.
-            api_key: secretRef,
-            request_headers: {
-              [WEBHOOK_HEADER]: secretRef,
-            },
-          },
-          tools: VOICE_TOOLS.map(item => ({
-            type: 'webhook',
-            name: item.name,
-            description: item.description,
-            response_timeout_secs: 20,
-            api_schema: {
-              url: `${base}/voice/tools/${item.name}`,
-              method: 'POST',
-              request_headers: {
-                [WEBHOOK_HEADER]: secretRef,
-                'x-owner-id': '{{owner_id}}',
-                'x-spend-permission': '{{spend_permission}}',
-              },
-              request_body_schema: {
-                type: 'object',
-                properties: { ...item.properties },
-                required: [...item.required],
-              },
-            },
-          })),
-        },
-      },
-    },
+    conversation_config: voiceAgentConversationConfig({
+      origin: base,
+      modelId,
+      webhookSecretRef: secretRef,
+    }),
   };
 
   let response;
@@ -990,12 +1011,33 @@ export function voiceDecisionMessages({
   return [...prefix, ...turns];
 }
 
+/** Keep the LiveKit room up when the upstream model fails — JSON 5xx drops the call. */
+export function spokenVoiceSse(text) {
+  const content = typeof text === 'string' && text.trim()
+    ? text.trim().slice(0, 500)
+    : 'I hit a model error. Please try again in a moment.';
+  const chunk = {
+    id: 'chatcmpl-voice',
+    object: 'chat.completion.chunk',
+    choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }],
+  };
+  const done = { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+  const sse = `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(done)}\n\ndata: [DONE]\n\n`;
+  return new Response(sse, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
+  });
+}
+
 async function handleCustomLlm(request, env, fetcher) {
   const denied = authorize(request, env);
   if (denied) return denied;
   const resolved = resolveModelProvider(env);
   const apiKey = modelApiKey(env);
-  if (!apiKey) return json({ error: 'openrouter_not_configured' }, 503);
+  if (!apiKey) {
+    // Auth is fine; model secrets are not. Speak instead of 503 so WebRTC stays up.
+    return spokenVoiceSse('Voice reasoning is not configured yet. Please try again after setup.');
+  }
   const secrets = knownSecrets(env);
   const incoming = await request.json().catch(() => null);
   if (!incoming || typeof incoming !== 'object') return json({ error: 'invalid_body' }, 400);
@@ -1016,19 +1058,22 @@ async function handleCustomLlm(request, env, fetcher) {
   // ElevenLabs often probes the custom LLM before any owner utterance (first
   // message / greeting). Meta Muse rejects developer-only prompts with HTTP 400,
   // which made live voice look dead after connect. Seed a short user turn.
-  if (!adapted.some(item => item.role === 'user' && item.content)) {
+  const seededGreeting = !adapted.some(item => item.role === 'user' && item.content);
+  if (seededGreeting) {
     adapted = [
       ...adapted,
       {
         role: 'user',
-        content: 'The owner just joined the voice call. Greet them briefly and wait.',
+        content: 'The owner just joined the voice call. Greet them briefly and wait. Do not end the call.',
       },
     ];
   }
   let model = grokVoiceModel(env);
   if (resolved.provider === 'openrouter') {
     const selected = selectFreeOpenRouterModel(model);
-    if (!selected) return json({ error: 'openrouter_paid_model' }, 400);
+    if (!selected) {
+      return spokenVoiceSse('That voice model is not available right now. Please try again.');
+    }
     model = selected;
   }
   const payload = {
@@ -1040,10 +1085,8 @@ async function handleCustomLlm(request, env, fetcher) {
   else payload.reasoning_effort = 'minimal';
   // Prefer tool schemas ElevenLabs already attached. Forcing our full catalog
   // into Meta Muse often yields tool_call streams with no spoken content, so
-  // the call connects and then stays silent.
-  const elTools = Array.isArray(incoming.tools) && incoming.tools.length > 0
-    ? incoming.tools.slice(0, 32)
-    : null;
+  // the call connects and then stays silent. Never forward end_call on greetings.
+  const elTools = seededGreeting ? null : filterVoiceLlmTools(incoming.tools);
   if (elTools) {
     payload.tools = elTools;
     payload.tool_choice = 'auto';
@@ -1070,10 +1113,14 @@ async function handleCustomLlm(request, env, fetcher) {
       response = await callModel(spokenOnly);
     }
   } catch {
-    return json({ error: 'openrouter_unavailable' }, 502);
+    return spokenVoiceSse('I could not reach the model. Please try speaking again in a moment.');
   }
   if (!response?.ok) {
-    return json({ error: response?.status === 401 ? 'openrouter_unauthorized' : 'openrouter_failed' }, response?.status === 401 ? 401 : 502);
+    return spokenVoiceSse(
+      response?.status === 401
+        ? 'The voice model rejected the request. Please try again after credentials are refreshed.'
+        : 'The voice model failed this turn. Please try again.',
+    );
   }
   const type = response.headers?.get?.('content-type') ?? '';
   if (type.includes('text/event-stream') && response.body) {
@@ -1095,12 +1142,5 @@ async function handleCustomLlm(request, env, fetcher) {
   } catch {
     text = BLOCKED_TURN;
   }
-  const chunk = {
-    id: 'chatcmpl-voice',
-    object: 'chat.completion.chunk',
-    choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
-  };
-  const done = { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
-  const sse = `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(done)}\n\ndata: [DONE]\n\n`;
-  return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' } });
+  return spokenVoiceSse(text || 'I am here. What should we look at?');
 }
