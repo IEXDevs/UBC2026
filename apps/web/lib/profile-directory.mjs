@@ -2,7 +2,15 @@
  * Profile directory writes for the claim screen when the agent runtime URL is unset.
  * The service role stays on the server. Callers never receive it.
  */
-import { directoryFailureCode, httpsAvatarUrl, normalizeDisplayName, normalizeHandle, postgrestEq } from '@ubc2026/contracts';
+import {
+  directoryFailureCode,
+  httpsAvatarUrl,
+  lookupHandleFilter,
+  normalizeDisplayName,
+  normalizeHandle,
+  parseLookupQuery,
+  postgrestEq,
+} from '@ubc2026/contracts';
 
 const OWNER = /^[a-zA-Z0-9:_-]{1,128}$/;
 
@@ -63,7 +71,9 @@ export async function localHandleLookup(request, { env = {}, fetcher = fetch } =
   const origin = supabaseOrigin(env.SUPABASE_URL);
   const key = typeof env.SUPABASE_SERVICE_ROLE_KEY === 'string' ? env.SUPABASE_SERVICE_ROLE_KEY.trim() : '';
   if (!origin || !key) return json({ ok: false, error: 'directory_unconfigured', source: 'unconfigured' }, 503);
-  const handle = normalizeHandle(new URL(request.url).searchParams.get('q') || '');
+  const parsed = parseLookupQuery(new URL(request.url).searchParams.get('q') || '');
+  if (parsed?.kind === 'sns') return json({ error: 'invalid_recipient' }, 400);
+  const handle = parsed?.kind === 'handle' ? parsed.handle : '';
   if (!handle) return json({ error: 'invalid_recipient' }, 400);
   let response;
   try {
@@ -71,7 +81,7 @@ export async function localHandleLookup(request, { env = {}, fetcher = fetch } =
       fetcher,
       origin,
       key,
-      `profiles?handle=eq.${encodeURIComponent(handle)}&select=owner_id,handle,display_name,avatar_url&limit=1`,
+      `profiles?${lookupHandleFilter(handle)}&select=owner_id,handle,display_name,avatar_url&limit=1`,
     );
   } catch {
     return json({ error: 'profile_read_failed' }, 502);

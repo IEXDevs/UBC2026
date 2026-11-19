@@ -57,7 +57,7 @@ import {
   upsertOwnerBot,
 } from '../lib/runtime-data.mjs';
 import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
-import { buildPermissionedSpendRequest, parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
+import { buildPermissionedSpendRequest, lookupHandleKey, parseLookupQuery, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import {
   mergeObservedWallets,
@@ -778,7 +778,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   }, [ownerId, user]);
 
   const resolveMention = useCallback(async (token) => {
-    const parsed = parseRecipient(token);
+    const parsed = parseLookupQuery(token);
     if (!parsed) return null;
     const lookupPath = ownerId ? shellRuntimeUrl(`/api/profiles/lookup?q=${encodeURIComponent(token)}`) : null;
     if (lookupPath && ownerId) {
@@ -793,7 +793,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         // Fall through to the profile stored on this device.
       }
     }
-    if (parsed.kind === 'handle' && profile?.handle === parsed.handle) {
+    if (parsed.kind === 'handle' && lookupHandleKey(profile?.handle) === parsed.handle) {
       return { kind: 'handle', handle: profile.handle, displayName: profile.displayName, self: true };
     }
     if (parsed.kind === 'sns') return resolveSnsProxy(parsed.domain);

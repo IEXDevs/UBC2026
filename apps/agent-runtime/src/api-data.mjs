@@ -8,7 +8,8 @@ import {
   httpsAvatarUrl,
   normalizeDisplayName,
   normalizeHandle,
-  parseRecipient,
+  lookupHandleFilter,
+  parseLookupQuery,
   postgrestEq,
 } from '@ubc2026/contracts';
 import { createSnsResolver, resolveSnsOwner, SnsError } from '@ubc2026/sns';
@@ -1306,7 +1307,7 @@ export async function handleApiData(request, env, matched) {
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const query = new URL(request.url).searchParams.get('q') || '';
-    const parsed = parseRecipient(query);
+    const parsed = parseLookupQuery(query);
     if (!parsed) return json({ error: 'invalid_recipient' }, 400);
     if (parsed.kind === 'sns') {
       try {
@@ -1335,7 +1336,7 @@ export async function handleApiData(request, env, matched) {
     }
     const found = await supabaseGet(
       env,
-      `profiles?handle=eq.${encodeURIComponent(parsed.handle)}&select=owner_id,handle,display_name,avatar_url`,
+      `profiles?${lookupHandleFilter(parsed.handle)}&select=owner_id,handle,display_name,avatar_url`,
       fetcher,
     );
     if (found.status !== 200) {

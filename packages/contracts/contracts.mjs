@@ -341,6 +341,56 @@ export function parseRecipient(value) {
   return null;
 }
 
+const LOOKUP_SKIP = new Set([
+  'a', 'an', 'the', 'up', 'look', 'lookup', 'find', 'for', 'me', 'my', 'please',
+  'what', 'whats', 'is', 'can', 'you', 'show', 'check', 'who', 'send', 'to', 'of',
+  'and', 'their', 'his', 'her', 'hey', 'hi', 'wallet', 'handle', 'address', 'user',
+  'profile', 'name', 'about', 'with', 'from', 'this', 'that', 'just', 'like', 'do',
+  'does', 'has', 'have', 'on', 'in', 'at', 'it', 'its', 'get', 'tell', 'where',
+  'which', 'your', 'our', 'them', 'him', 'pay', 'money', 'usdc', 'solana',
+  'maelstrom', 'account',
+]);
+
+/** Letters and numbers only, for a lookup. Underscores and other marks drop out. */
+export function lookupHandleKey(value) {
+  if (typeof value !== 'string') return '';
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * A lookup can be a sentence. Pull out a .sol name or a handle and keep only
+ * letters and numbers on the handle. A bare send token still uses parseRecipient.
+ */
+export function parseLookupQuery(value) {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (!raw || raw.length > 240) return null;
+  const lower = raw.toLowerCase().replace(/[’']s\b/g, '').replace(/[’']/g, '');
+  const sns = lower.match(/\b([a-z0-9][a-z0-9-]{0,62}\.sol)\b/);
+  if (sns && SNS_NAME.test(sns[1])) return { kind: 'sns', domain: sns[1] };
+  const mention = lower.match(/@([a-z0-9][a-z0-9._-]{0,64})/);
+  if (mention) {
+    const handle = lookupHandleKey(mention[1]);
+    if (/^[a-z0-9]{2,32}$/.test(handle)) return { kind: 'handle', handle };
+  }
+  const handle = lookupHandleKey(
+    lower
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word && !LOOKUP_SKIP.has(word))
+      .join(''),
+  );
+  if (/^[a-z0-9]{2,32}$/.test(handle)) return { kind: 'handle', handle };
+  return null;
+}
+
+/** Exact handle, or the same letters and numbers with weird marks between them. */
+export function lookupHandleFilter(handle) {
+  if (!/^[a-z0-9]{2,32}$/.test(handle)) return '';
+  const pattern = `^${handle.split('').join('[^a-z0-9]*')}$`;
+  return `or=(handle.eq.${encodeURIComponent(handle)},handle.imatch.${encodeURIComponent(pattern)})`;
+}
+
 export function profileInitials(label) {
   const text = typeof label === 'string' ? label.trim().replace(/^@/, '') : '';
   if (!text) return '?';
