@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
-import { DEV_PREVIEW_OWNER, samplePortfolio } from '../lib/dev-preview.mjs';
 import { dexTokenView, enrichPortfolio, readDexTokens } from '../lib/dex-token.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import { formatUsdMicro, portfolioErrorNote } from '../lib/portfolio.mjs';
@@ -21,12 +20,11 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-export default function TokenScreen({ open, preview = false, onSend, onReceive, onSwap }) {
-  const { user, getAccessToken, linkWallet, ready, authenticated } = usePrivy();
+export default function TokenScreen({ open, address = '', onSend, onReceive, onSwap }) {
+  const { user, getAccessToken } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [pricing, setPricing] = useState(false);
   const [selected, setSelected] = useState(null);
   const accounts = linkedKey(user);
 
@@ -34,31 +32,6 @@ export default function TokenScreen({ open, preview = false, onSend, onReceive, 
     if (!open) return undefined;
     let stopped = false;
     setLoading(true);
-    if (preview) {
-      setError('');
-      setPricing(true);
-      (async () => {
-        try {
-          const enriched = await enrichPortfolio(samplePortfolio(), {
-            userId: DEV_PREVIEW_OWNER,
-            storage: window.localStorage,
-          });
-          if (stopped) return;
-          setPortfolio({
-            ...enriched.portfolio,
-            note: samplePortfolio().note,
-          });
-        } catch {
-          if (!stopped) setError('DexScreener did not price the preview.');
-        } finally {
-          if (!stopped) {
-            setLoading(false);
-            setPricing(false);
-          }
-        }
-      })();
-      return () => { stopped = true; };
-    }
     (async () => {
       try {
         const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
@@ -84,7 +57,6 @@ export default function TokenScreen({ open, preview = false, onSend, onReceive, 
         }
         setPortfolio(body);
         setError('');
-        setPricing(true);
         const enriched = await enrichPortfolio(body, {
           userId: user?.id,
           storage: window.localStorage,
@@ -93,24 +65,25 @@ export default function TokenScreen({ open, preview = false, onSend, onReceive, 
       } catch {
         if (!stopped) setError(portfolioErrorNote({ error: 'rpc_failed' }));
       } finally {
-        if (!stopped) {
-          setLoading(false);
-          setPricing(false);
-        }
+        if (!stopped) setLoading(false);
       }
     })();
     return () => { stopped = true; };
-  }, [open, preview, accounts, getAccessToken, user?.id]);
+  }, [open, accounts, getAccessToken, user?.id]);
 
-  const holdings = combineHoldings(portfolio);
+  const scoped = address && Array.isArray(portfolio?.wallets)
+    ? { ...portfolio, wallets: portfolio.wallets.filter(row => row?.address === address) }
+    : portfolio;
+  const holdings = combineHoldings(scoped);
+  const total = holdings.reduce((sum, row) => sum + BigInt(row.usdMicro || '0'), 0n).toString();
   if (selected) {
     const holding = holdings.find(row => row.mint === selected) || null;
     return (
       <TokenDetail
         mint={selected}
         holding={holding}
-        cluster={portfolio?.cluster || 'mainnet'}
-        userId={preview ? DEV_PREVIEW_OWNER : user?.id}
+        cluster={portfolio?.cluster || 'devnet'}
+        userId={user?.id}
         onBack={() => setSelected(null)}
         onSend={() => onSend?.(holding?.symbol)}
         onReceive={onReceive}
@@ -121,10 +94,8 @@ export default function TokenScreen({ open, preview = false, onSend, onReceive, 
 
   return (
     <div className="token-screen">
-      <p className="wallet-figure">{formatUsdMicro(portfolio?.totalUsdMicro || '0')}</p>
-      <p className="quiet">{portfolio?.note || 'Balances from QuickNode. Dollar values use mainnet prices.'}</p>
-      {loading ? <p className="quiet">Reading wallets from QuickNode…</p> : null}
-      {pricing ? <p className="quiet">Reading prices from DexScreener…</p> : null}
+      {holdings.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
+      {loading ? <p className="quiet">Reading devnet balances.</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
       <ul className="token-rows">
         {holdings.map(row => (
@@ -134,22 +105,12 @@ export default function TokenScreen({ open, preview = false, onSend, onReceive, 
                 <strong>{row.symbol}</strong>
                 <small>{formatBaseUnits(row.amount, row.decimals)} {row.symbol}</small>
               </span>
-              <b>{formatUsdMicro(row.usdMicro)}</b>
+              <b>{row.usdMicro && row.usdMicro !== '0' ? formatUsdMicro(row.usdMicro) : ''}</b>
             </button>
           </li>
         ))}
       </ul>
-      {holdings.length === 0 && !loading ? <p className="quiet">No priced tokens in the connected wallets yet.</p> : null}
-      <div className="portfolio-actions">
-        <button
-          type="button"
-          className="ghost"
-          disabled={!ready || !authenticated}
-          onClick={() => linkWallet({ walletChainType: 'solana-only' })}
-        >
-          Connect a wallet
-        </button>
-      </div>
+      {holdings.length === 0 && !loading && !error ? <p className="quiet">No assets in this wallet yet.</p> : null}
     </div>
   );
 }
@@ -240,7 +201,6 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
         <button type="button" onClick={onSwap}>Swap</button>
       </div>
       {error ? <p className="quiet" role="status">{error}</p> : null}
-      {view?.note ? <p className="quiet">{view.note}</p> : null}
     </div>
   );
 }

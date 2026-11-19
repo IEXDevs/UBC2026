@@ -63,6 +63,7 @@ create table if not exists wallets (
   provider text not null default 'privy' check (provider = 'privy'),
   frozen boolean not null default false,
   created_at timestamptz not null default now(),
+  deleted_at timestamptz,
   unique (owner_id, address)
 );
 

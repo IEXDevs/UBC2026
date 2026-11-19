@@ -155,6 +155,38 @@ export function sendDestinations(wallets, bots, activeId) {
     });
 }
 
+/** Recent @handles and .sol names from sends, after the wallet menu. */
+export function recentCounterparties(transfers = [], payments = []) {
+  const seen = new Set();
+  const rows = [];
+  const sources = [
+    ...(Array.isArray(transfers) ? transfers : []),
+    ...(Array.isArray(payments) ? payments : []),
+  ];
+  for (const row of sources) {
+    let caption = '';
+    if (typeof row?.handle === 'string' && row.handle.trim()) {
+      caption = `@${row.handle.trim().replace(/^@/, '')}`;
+    } else if (typeof row?.counterparty === 'string') {
+      const text = row.counterparty.trim();
+      if (text.startsWith('@') || /\.sol$/i.test(text)) caption = text;
+    }
+    const key = caption.toLowerCase();
+    if (!caption || caption.length > 80 || seen.has(key)) continue;
+    seen.add(key);
+    rows.push({
+      id: `recent:${key}`,
+      caption,
+      kind: 'recent',
+      address: '',
+      frozen: false,
+      spendable: true,
+    });
+    if (rows.length >= 8) break;
+  }
+  return rows;
+}
+
 export function glanceBalance(positions) {
   let sum = 0n;
   for (const position of positions) {

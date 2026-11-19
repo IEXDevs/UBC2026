@@ -154,7 +154,14 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 1px;
+  max-height: min(240px, 46vh);
+  overflow-y: auto;
+  scrollbar-width: none;
   touch-action: none;
+}
+
+.glide-select__list::-webkit-scrollbar {
+  display: none;
 }
 
 .glide-select__action {
