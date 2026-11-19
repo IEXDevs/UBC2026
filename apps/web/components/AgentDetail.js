@@ -79,14 +79,16 @@ export default function AgentDetail({
         </div>
       </header>
 
-      <LiveViewPanel
-        key={`${ownerId}:${bot.id}`}
-        botId={bot.id}
-        ownerId={ownerId}
-        getAccessToken={getAccessToken}
-        screen
-        onExpand={onComputer}
-      />
+      {bot.record && ownerId ? (
+        <LiveViewPanel
+          key={`${ownerId}:${bot.id}`}
+          botId={bot.id}
+          ownerId={ownerId}
+          getAccessToken={getAccessToken}
+          screen
+          onExpand={onComputer}
+        />
+      ) : null}
       {offer ? (
         <p className="hint">
           <a href={offer.href} target="_blank" rel="noreferrer">
