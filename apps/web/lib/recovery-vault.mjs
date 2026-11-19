@@ -105,16 +105,20 @@ function headers(ownerId, token) {
 
 /**
  * Account seed state: none, issued (vault comes back), or confirmed.
- * `local: true` means no account store is configured, so the ceremony stays on this browser.
+ * Developer preview can opt into browser-only recovery without an account store.
  */
-export async function readRecoveryState(fetchImpl, { ownerId, token } = {}) {
+export async function readRecoveryState(fetchImpl, { ownerId, token, allowLocal = false } = {}) {
   const url = shellRuntimeUrl('/api/recovery');
   if (!url || !ownerId) return { ok: false, error: 'runtime' };
   try {
     const response = await fetchImpl(url, { headers: headers(ownerId, token), cache: 'no-store' });
     const body = await response.json().catch(() => ({}));
     // The proxy answers 503 with source unconfigured when no worker origin is set.
-    if (body?.source === 'unconfigured') return { ok: true, local: true, state: 'none' };
+    if (body?.source === 'unconfigured') {
+      return allowLocal
+        ? { ok: true, local: true, state: 'none' }
+        : { ok: false, error: 'runtime_unconfigured' };
+    }
     if (!response.ok) return { ok: false, error: body.error || 'recovery_unavailable' };
     return {
       ok: true,
@@ -136,6 +140,15 @@ export function shouldRetryRecovery(error, attempt) {
 export function recoveryFailureNote(error) {
   if (error === 'login_required' || error === 'owner_required') {
     return 'Your sign-in expired. Sign in again to save the seed.';
+  }
+  if (error === 'account_state_schema_missing' || error === 'runtime_unconfigured') {
+    return 'Account recovery storage needs setup. Ask a Maelstrom administrator to check it.';
+  }
+  if (error === 'account_state_access_failed') {
+    return 'Maelstrom could not access account recovery storage. Ask an administrator to check it.';
+  }
+  if (error === 'account_state_unavailable') {
+    return 'Account recovery storage is temporarily unavailable. Try again shortly.';
   }
   return 'Could not reach your account to check your seed. Check the connection and try again.';
 }
@@ -178,7 +191,7 @@ export async function verifyRecovery(fetchImpl, { ownerId, token, words, verifie
       body: JSON.stringify({ proof, ...(confirm ? { confirm: true } : {}) }),
     });
     const body = await response.json().catch(() => ({}));
-    if (response.status === 401) return { ok: false, mismatch: true };
+    if (response.status === 401 && body.error === 'recovery_mismatch') return { ok: false, mismatch: true };
     if (!response.ok) return { ok: false, error: body.error || 'recovery_failed' };
     return { ok: true, state: body.state };
   } catch {

@@ -26,6 +26,8 @@ After login the shell calls `POST /api/wallets`. That needs **server** names in 
 
 Set `NEXT_PUBLIC_AGENT_RUNTIME_URL` to the deployed agent-runtime origin (for example `https://maelstrom-agent-runtime.<subdomain>.workers.dev`). That is not the Next dev server on port 3000.
 
+Account state and seed recovery require `owner_state` and `owner_recovery` in the project configured on the agent runtime. The migration `20261118210000_account_state.sql` creates both tables and grants access to the service role. A signed-in response of `account_state_schema_missing` means those tables or columns are unavailable to PostgREST. `account_state_access_failed` means the runtime's database request was rejected.
+
 The Main pane leads with Live View plus chat and the voice composer. Overview and Security stay available in the dock. Shopping bots get a prepare panel for sandbox/Laso. Talk uses `@elevenlabs/client` when `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` (and the Worker `ELEVENLABS_*` secrets) are set.
 
 Hosting is OpenNext on Cloudflare Workers (`wrangler.jsonc`, `open-next.config.ts`). Deploy from your machine (local OpenNext build + `wrangler deploy`) — that does **not** spend Cloudflare Builds minutes.
