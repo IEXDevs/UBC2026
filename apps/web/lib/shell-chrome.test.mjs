@@ -102,6 +102,9 @@ test('the stage header has no USDC chip and the detail chip is the agent wallet'
   assert.match(page, /holdingsLabel=\{registeredHoldingsLabel\(\{ wallets, positions, transfers, bots, chainLabel \}\)\}/);
   assert.match(menu, /Assigned wallet devnet SOL and USDC when the chain read is in\./);
   assert.match(menu, /className="you-holdings"/);
+  assert.equal(menu.includes('aria-hidden={!open}'), false);
+  assert.match(menu, /triggerRef\.current\?\.focus\(\)/);
+  assert.match(menu, /inert=\{open \? undefined : true\}/);
 });
 
 /**
