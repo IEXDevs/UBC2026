@@ -20,6 +20,28 @@ function providerAt(target, path) {
   return current && typeof current === 'object' ? current : null;
 }
 
+/**
+ * Sentence for a failed Privy link. Closing the modal is not a failure.
+ * @param {{ privyErrorCode?: string } | string | null | undefined} error
+ */
+export function linkAccountNote(error) {
+  const code = typeof error === 'string'
+    ? error
+    : (typeof error?.privyErrorCode === 'string' ? error.privyErrorCode : '');
+  if (code === 'exited_link_flow' || code === 'exited_auth_flow') return '';
+  if (code === 'linked_to_another_user') {
+    return 'That wallet already belongs to another account. Sign in with it instead.';
+  }
+  return 'That wallet could not be linked. If it already belongs to another account, sign in with it instead.';
+}
+
+/** Drop a stale injected session, then open Privy’s Solana link modal. */
+export async function connectSolanaWallet(linkWallet, target = globalThis) {
+  await releaseInjectedSolanaWallets(target);
+  if (typeof linkWallet !== 'function') return undefined;
+  return linkWallet({ walletChainType: 'solana-only' });
+}
+
 /** Disconnect each distinct injected Solana provider. Failures are ignored. */
 export async function releaseInjectedSolanaWallets(target = globalThis) {
   const seen = new Set();

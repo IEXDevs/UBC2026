@@ -19,6 +19,14 @@ const ITEMS = [
 export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, holdingsLabel = '', onLogin, onPick }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
+  const triggerRef = useRef(null);
+
+  function closeMenu() {
+    const pop = rootRef.current?.querySelector('.account-pop');
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    if (active && pop?.contains(active)) triggerRef.current?.focus();
+    setOpen(false);
+  }
 
   useEffect(() => {
     if (signedIn) markSeenLogin(window.localStorage);
@@ -27,10 +35,10 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
   useEffect(() => {
     if (!open) return undefined;
     function onPointer(event) {
-      if (!rootRef.current?.contains(event.target)) setOpen(false);
+      if (!rootRef.current?.contains(event.target)) closeMenu();
     }
     function onKey(event) {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') closeMenu();
     }
     document.addEventListener('pointerdown', onPointer);
     window.addEventListener('keydown', onKey);
@@ -52,7 +60,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
 
   return (
     <div className={`account-menu${open ? ' is-open' : ''}`} ref={rootRef}>
-      <div className="account-pop" role="menu" aria-label="Account" aria-hidden={!open}>
+      <div className="account-pop" role="menu" aria-label="Account" inert={open ? undefined : true}>
         {[...ITEMS, ...(walletUnlocked ? [{ id: 'lock-wallet', label: 'Lock wallet', icon: Lock }] : [])].map((item) => {
           const Icon = item.icon;
           return (
@@ -63,6 +71,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
               className="account-item"
               tabIndex={open ? 0 : -1}
               onClick={() => {
+                triggerRef.current?.focus();
                 setOpen(false);
                 onPick(item.id);
               }}
@@ -80,7 +89,8 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
           aria-label={accountLabel}
           aria-haspopup="menu"
           aria-expanded={open}
-          onClick={() => setOpen(value => !value)}
+          ref={triggerRef}
+          onClick={() => (open ? closeMenu() : setOpen(true))}
         >
           <ProfileMark src={avatarUrl} label={accountLabel} className="you-mark is-round" />
           {collapsed ? null : <strong>{accountLabel}</strong>}

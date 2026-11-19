@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { releaseInjectedSolanaWallets } from './solana-wallet-login.mjs';
+import { connectSolanaWallet, linkAccountNote, releaseInjectedSolanaWallets } from './solana-wallet-login.mjs';
 import { walletLoginFailureNote } from './siws-login-diagnostic.mjs';
 
 /**
@@ -53,4 +53,25 @@ test('the sign-in card names the SIWS code and drops secrets', () => {
   );
   assert.equal(walletLoginFailureNote('header.payload.signature'), '');
   assert.equal(walletLoginFailureNote(''), '');
+});
+
+/**
+ * Achieves: verifies linking a Solana wallet clears the injected session first.
+ * Fails when: linking a Solana wallet clears the injected session first breaks (e.g. expected ['solana-only'], 1).
+ * Oracle: assert.deepEqual(calls, [{ walletChainType: 'solana-only' }]); assert.equal(disconnects, 1)
+ * Side effects / state checked: one disconnect and one linkWallet call.
+ * Gaps: does not open the Privy modal.
+ */
+test('linking a Solana wallet clears the injected session first', async () => {
+  let disconnects = 0;
+  const calls = [];
+  await connectSolanaWallet(
+    (options) => { calls.push(options); },
+    { solana: { disconnect() { disconnects += 1; } } },
+  );
+  assert.equal(disconnects, 1);
+  assert.deepEqual(calls, [{ walletChainType: 'solana-only' }]);
+  assert.equal(linkAccountNote({ privyErrorCode: 'exited_link_flow' }), '');
+  assert.match(linkAccountNote({ privyErrorCode: 'linked_to_another_user' }), /another account/);
+  assert.match(linkAccountNote({ privyErrorCode: 'failed_to_link_account' }), /could not be linked/);
 });
