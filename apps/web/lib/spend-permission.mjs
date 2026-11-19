@@ -64,6 +64,22 @@ export function readReviewThreshold(storage) {
   }
 }
 
+/** Whole USDC dollars string for the Review by AI editor, from stored base units. */
+export function reviewCapToDollars(baseUnits) {
+  if (typeof baseUnits !== 'string' || !AMOUNT.test(baseUnits) || baseUnits === '0') return '';
+  const padded = baseUnits.padStart(7, '0');
+  const whole = padded.slice(0, -6).replace(/^0+(?=\d)/, '') || '0';
+  const frac = padded.slice(-6).replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : whole;
+}
+
+export function writeReviewCap(storage, reviewCap) {
+  const cap = typeof reviewCap === 'string' && AMOUNT.test(reviewCap) && reviewCap !== '0' ? reviewCap : null;
+  if (!storage || !cap) throw new Error('review_cap');
+  storage.setItem(REVIEW_THRESHOLD_KEY, cap);
+  return cap;
+}
+
 export function readAcceptanceAck(storage, ownerId) {
   const key = acceptanceStorageKey(ownerId);
   if (!storage || !key) return false;

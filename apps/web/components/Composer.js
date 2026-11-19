@@ -34,7 +34,14 @@ import {
   parseVoiceSettings,
   voiceOverrides,
 } from '../lib/voice-settings.mjs';
-import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/spend-permission.mjs';
+import {
+  SPEND_PERMISSION_KEY,
+  parsePermission,
+  permissionById,
+  readReviewThreshold,
+  reviewCapToDollars,
+  writeReviewCap,
+} from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
 import { isLiveKitDisconnect, startVoiceConversation } from '../lib/voice-session.mjs';
@@ -128,6 +135,7 @@ export default function Composer({
   const [dragging, setDragging] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_VOICE_SETTINGS);
   const [permission, setPermission] = useState('ask');
+  const [reviewCap, setReviewCap] = useState('');
   const [models, setModels] = useState(() => promptModels());
   const [chatModel, setChatModel] = useState(() => promptModels()[0]?.key || '');
   const [providerOpen, setProviderOpen] = useState(false);
@@ -230,6 +238,7 @@ export default function Composer({
     }
     setSettingsReady(true);
     setPermission(parsePermission(localStorage.getItem(SPEND_PERMISSION_KEY)));
+    setReviewCap(readReviewThreshold(localStorage) || '');
   }, []);
 
   useEffect(() => {
@@ -749,7 +758,14 @@ export default function Composer({
         },
         onError: (message, context) => {
           if (sessionRef.current !== live && live != null) return;
-          setNote(voiceErrorNote(message, context));
+          const text = typeof message === 'string'
+            ? message
+            : (typeof message?.message === 'string' ? message.message : '');
+          const detail = {
+            ...(context && typeof context === 'object' ? context : {}),
+            ...(message && typeof message === 'object' ? message : {}),
+          };
+          setNote(voiceErrorNote(text, detail));
         },
         onDisconnect: (details) => {
           if (sessionRef.current !== live && live != null) return;
@@ -967,6 +983,7 @@ export default function Composer({
           onSend={(text) => sendMessage(text)}
           onDictate={live ? undefined : runDictation}
           permission={permission}
+          reviewCapDollars={reviewCapToDollars(reviewCap)}
           onEffortChange={(label) => { effortRef.current = label; }}
           onAddProvider={() => setProviderOpen(true)}
           onModelChange={(key) => {
@@ -983,7 +1000,18 @@ export default function Composer({
             if (mode === permissionRef.current) return;
             setPermission(mode);
             localStorage.setItem(SPEND_PERMISSION_KEY, mode);
+            window.dispatchEvent(new Event('storage'));
             pushLine('note', `Permissions set to ${permissionById(mode).label}`);
+          }}
+          onReviewCapChange={(next) => {
+            try {
+              const saved = writeReviewCap(localStorage, next);
+              setReviewCap(saved);
+              window.dispatchEvent(new Event('storage'));
+              pushLine('note', `Review by AI maximum set to ${reviewCapToDollars(saved)} USDC`);
+            } catch {
+              /* keep the prior threshold when the amount is invalid */
+            }
           }}
           accessory={usage ? <ContextUsage usage={usage} /> : null}
           endSlot={(

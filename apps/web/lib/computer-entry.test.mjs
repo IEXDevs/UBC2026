@@ -11,14 +11,17 @@ function source(path) {
 }
 
 /**
- * Achieves: verifies the live browser stays in the computer sheet, and the right pane is only files.
- * Fails when: AgentThread or FileLibrary embed LiveViewPanel, or the computer sheet loses its controls.
- * Oracle: LiveViewPanel lives in ComputerSheet; FileLibrary is a scrolling file list.
+ * Achieves: verifies the right pane mirrors the active agent and keeps a computer + files stack,
+ * while the full browser controls stay in the computer sheet.
+ * Fails when: AgentThread embeds LiveViewPanel, FileLibrary embeds LiveViewPanel, AgentDetail
+ * drops the agent head / computer / files stack, or the computer sheet loses its controls.
+ * Oracle: AgentDetail hosts LiveViewPanel screen + FileLibrary; ComputerSheet keeps fill autoStart.
  * Side effects / state checked: component source text.
  * Gaps: source snapshot only — browser session HTTP not exercised.
  */
-test('the right pane is a file list and the computer sheet keeps the browser', () => {
+test('the right pane mirrors the agent and the computer sheet keeps the browser', () => {
   const thread = source('components/AgentThread.js');
+  const detail = source('components/AgentDetail.js');
   const library = source('components/FileLibrary.js');
   const sheet = source('components/ComputerSheet.js');
   const panel = source('components/LiveViewPanel.js');
@@ -28,6 +31,13 @@ test('the right pane is a file list and the computer sheet keeps the browser', (
   assert.equal(library.includes('library-filters'), false);
   assert.match(library, /FileScroll/);
   assert.match(library, /selectOnScroll/);
+  assert.match(library, /library-panes__pill/);
+  assert.match(detail, /BotMark/);
+  assert.match(detail, /side-computer/);
+  assert.match(detail, /FileLibrary/);
+  assert.match(detail, /LiveViewPanel/);
+  assert.match(detail, /screen/);
+  assert.match(detail, /permissionById|readStoredPermission/);
   assert.match(sheet, /browser-preview/);
   assert.match(sheet, /autoStart/);
   assert.match(sheet, /LiveViewPanel/);

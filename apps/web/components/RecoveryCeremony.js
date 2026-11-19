@@ -14,8 +14,9 @@ import {
 } from '../lib/wallet-desk.mjs';
 
 const EMPTY_SLOTS = () => Array.from({ length: 12 }, () => '');
+const EXIT_MS = 720;
 
-function PhraseEntry({ slots, onChange }) {
+function PhraseEntry({ slots, onChange, disabled = false }) {
   const refs = useRef([]);
 
   function focus(index) {
@@ -52,7 +53,8 @@ function PhraseEntry({ slots, onChange }) {
               autoCapitalize="none"
               autoComplete="off"
               autoCorrect="off"
-              autoFocus={index === 0}
+              disabled={disabled}
+              autoFocus={index === 0 && !disabled}
               onChange={event => writeFrom(index, event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === ' ') {
@@ -80,6 +82,8 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   const [slots, setSlots] = useState(EMPTY_SLOTS);
   const [note, setNote] = useState('');
   const [step, setStep] = useState(null);
+  const [leaving, setLeaving] = useState(false);
+  const finishTimer = useRef(0);
 
   useEffect(() => {
     let raw = '';
@@ -95,7 +99,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   }, [ownerId]);
 
   useEffect(() => {
-    if (!step || step === 'done') return;
+    if (!step || step === 'done' || step === 'success') return;
     try { writeRecoveryStep(localStorage, ownerId, step); } catch { /* the step stays on this screen */ }
   }, [ownerId, step]);
 
@@ -108,6 +112,10 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       .catch(() => { if (!stop) setNote('Could not create a seed. Reload and try again.'); });
     return () => { stop = true; };
   }, [step]);
+
+  useEffect(() => () => {
+    window.clearTimeout(finishTimer.current);
+  }, []);
 
   function download() {
     if (!words || !password) return;
@@ -130,12 +138,31 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
     setStep('confirm');
   }
 
+  function finishConfirm(event) {
+    event.preventDefault();
+    if (leaving || step === 'success') return;
+    if (!phraseMatches(slots.join(' '), words)) {
+      setNote('Those words do not match. Check the file and try again.');
+      return;
+    }
+    setWords(null);
+    setPassword('');
+    setRepeat('');
+    setSlots(EMPTY_SLOTS());
+    setNote('');
+    setStep('success');
+    setLeaving(true);
+    finishTimer.current = window.setTimeout(() => {
+      onDone?.();
+    }, EXIT_MS);
+  }
+
   if (!step) return null;
 
   return (
-    <div className="backdrop is-center">
+    <div className={`backdrop is-center${leaving ? ' is-leaving' : ''}`}>
       <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
-        <h2 id="recovery-title">Save your seed</h2>
+        <h2 id="recovery-title">{step === 'success' ? 'Seed confirmed' : 'Save your seed'}</h2>
         {step === 'tell' ? (
           <>
             <p className="quiet">
@@ -200,27 +227,19 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
           </>
         ) : null}
         {step === 'confirm' ? (
-          <form
-            className="field"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!phraseMatches(slots.join(' '), words)) {
-                setNote('Those words do not match. Check the file and try again.');
-                return;
-              }
-              setWords(null);
-              setPassword('');
-              setRepeat('');
-              setSlots(EMPTY_SLOTS());
-              onDone?.();
-            }}
-          >
+          <form className="field" onSubmit={finishConfirm}>
             <p className="quiet">Type the 12 words</p>
-            <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); setNote(''); }} />
-            <button type="submit" className="solid">Confirm seed</button>
+            <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); setNote(''); }} disabled={leaving} />
+            <button type="submit" className="solid" disabled={leaving}>Confirm seed</button>
           </form>
         ) : null}
-        {note ? <p className="quiet" role="status">{note}</p> : null}
+        {step === 'success' ? (
+          <div className="recovery-success" role="status">
+            <p className="acceptance-ok">Seed confirmed. You are set.</p>
+            <p className="quiet">Opening your desk…</p>
+          </div>
+        ) : null}
+        {note && step !== 'success' ? <p className="quiet" role="status">{note}</p> : null}
       </section>
     </div>
   );

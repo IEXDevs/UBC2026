@@ -9,34 +9,53 @@ const COPY = Object.freeze({
   full: 'The agent can manage funds. You still slide to confirm, and a mainnet price quote never authorizes a transaction.',
 });
 
+const EXIT_MS = 480;
+
 export default function SpendAcceptance({ onContinue }) {
   const [permission, setPermission] = useState('ask');
   const [dollars, setDollars] = useState('');
   const [note, setNote] = useState('');
+  const [leaving, setLeaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const cap = dollarsToBaseUnits(dollars);
+  const reviewNeeded = permission === 'review';
 
   function submit(event) {
     event.preventDefault();
+    if (leaving) return;
     if (!cap) {
-      setNote('Enter a maximum above zero, in USDC.');
+      setNote(reviewNeeded
+        ? 'Enter a Review by AI maximum above zero, in USDC.'
+        : 'Enter a Review by AI maximum above zero. It is stored for when you switch modes.');
       return;
     }
-    onContinue?.({ permission, reviewCap: cap });
+    setNote('');
+    setSaved(true);
+    setLeaving(true);
+    window.setTimeout(() => {
+      onContinue?.({ permission, reviewCap: cap });
+    }, EXIT_MS);
   }
 
   return (
-    <div className="backdrop is-center">
+    <div className={`backdrop is-center${leaving ? ' is-leaving' : ''}`}>
       <form className="sheet wallet-gate acceptance" onSubmit={submit} aria-labelledby="acceptance-title">
+        <p className="acceptance-kicker">Welcome to onboarding</p>
         <h2 id="acceptance-title">How spends are approved</h2>
-        <p className="quiet">Three modes. The second one needs a maximum from you before you continue.</p>
+        <p className="quiet">First pick a spend mode and a Review by AI maximum. Next you will save and confirm your seed.</p>
         <div className="acceptance-tiers" role="radiogroup" aria-label="Spend approval">
           {PERMISSIONS.map(item => (
-            <label key={item.id} className={permission === item.id ? 'is-on' : ''}>
+            <label
+              key={item.id}
+              className={permission === item.id ? 'is-on' : ''}
+              style={permission === item.id ? { '--acceptance-accent': item.color } : undefined}
+            >
               <input
                 type="radio"
                 name="permission"
                 value={item.id}
                 checked={permission === item.id}
+                disabled={leaving}
                 onChange={() => setPermission(item.id)}
               />
               <span>{item.label}</span>
@@ -44,21 +63,23 @@ export default function SpendAcceptance({ onContinue }) {
             </label>
           ))}
         </div>
-        <label className="field">
+        <label className={`field${reviewNeeded ? ' is-emphasis' : ''}`}>
           <span>Review by AI maximum (USDC)</span>
           <input
             inputMode="decimal"
             autoComplete="off"
             value={dollars}
             placeholder="25"
+            disabled={leaving}
             onChange={(event) => {
               setDollars(event.target.value);
               setNote('');
             }}
           />
         </label>
-        {note ? <p className="quiet">{note}</p> : null}
-        <button type="submit" className="solid" disabled={!cap}>Continue</button>
+        {note ? <p className="quiet" role="status">{note}</p> : null}
+        {saved ? <p className="acceptance-ok" role="status">Saved. Opening seed backup…</p> : null}
+        <button type="submit" className="solid" disabled={!cap || leaving}>Continue</button>
       </form>
     </div>
   );

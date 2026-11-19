@@ -1775,6 +1775,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           getAccessToken={getAccessToken}
           onResize={event => dragPane(event, 'right')}
           onMissingFile={onMissingFile}
+          onComputer={() => setComputerOpen(true)}
         />
       ) : null}
       <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} first={bots.length === 0} />

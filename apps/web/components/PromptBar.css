@@ -503,6 +503,7 @@
 .permit-menu button {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   height: 28px;
   padding: 0 8px;
   border: 1px solid transparent;
@@ -513,11 +514,34 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.permit-chip:hover,
+.permit-chip.is-open,
+.permit-menu button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.permit-chip:active,
+.permit-menu button:active {
+  transform: scale(0.97);
 }
 
 .permit-chip.is-full,
 .permit-menu button.is-full {
   border-color: #e10600;
+}
+
+.permit-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--permit-color, #f5f5f5);
+  flex: none;
 }
 
 .permit-menu {
@@ -527,14 +551,57 @@
   left: 0;
   display: grid;
   gap: 4px;
-  min-width: 180px;
+  min-width: 220px;
   padding: 6px;
   border-radius: 12px;
   background: #27272a;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-.permit-menu button { width: 100%; justify-content: flex-start; }
+.permit-menu button {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.permit-menu button.is-on {
+  background: color-mix(in srgb, var(--permit-color, #f5f5f5) 16%, transparent);
+  border-color: color-mix(in srgb, var(--permit-color, #f5f5f5) 45%, transparent);
+}
+
+.permit-check {
+  margin-left: auto;
+  color: var(--permit-color, #f5f5f5);
+  font-size: 12px;
+}
+
+.permit-cap {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 8px 6px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #a3a3a3;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.permit-cap input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
+  background: #18181b;
+  color: #f5f5f5;
+  font: inherit;
+  font-size: 13px;
+}
+
+.permit-cap-note {
+  margin: 0 6px 2px;
+  color: #3dbe6a;
+  font-size: 11px;
+  font-weight: 600;
+}
 
 .spend-confirm {
   width: min(440px, calc(100vw - 32px));

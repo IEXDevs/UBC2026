@@ -8,10 +8,12 @@ import {
   parsePermission,
   permissionInstruction,
   readAcceptanceAck,
+  reviewCapToDollars,
   toolAccessKind,
   toolAccessRequest,
   transactionNeedsPerson,
   writeAcceptance,
+  writeReviewCap,
 } from './spend-permission.mjs';
 
 /**
@@ -74,7 +76,12 @@ test('onboarding stores the review maximum in base units', () => {
   assert.equal(readAcceptanceAck(memory, 'user_1'), true);
   assert.equal(memory.getItem('maelstrom.spendPermission'), 'ask');
   assert.equal(memory.getItem('maelstrom.reviewThreshold'), '25000000');
+  assert.equal(reviewCapToDollars('25000000'), '25');
+  assert.equal(reviewCapToDollars('500000'), '0.5');
+  assert.equal(writeReviewCap(memory, '10000000'), '10000000');
+  assert.equal(memory.getItem('maelstrom.reviewThreshold'), '10000000');
   assert.throws(() => writeAcceptance(memory, 'user_1', { permission: 'review', reviewCap: '0' }));
+  assert.throws(() => writeReviewCap(memory, '0'));
 });
 
 test('a send summary shows the outflow and the net', () => {
