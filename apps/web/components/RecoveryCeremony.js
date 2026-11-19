@@ -93,11 +93,21 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
         setSlideReset(value => value + 1);
         return;
       }
+      let saved = false;
+      try {
+        saved = onDone?.() === true;
+      } catch {
+        saved = false;
+      }
+      if (!saved) {
+        setNote('Could not save that you finished. Allow storage for this site and try the slider again.');
+        setSlideReset(value => value + 1);
+        return;
+      }
       setWords(null);
       setPassphrase('');
       setAgain('');
       setRetype('');
-      onDone?.();
     }).catch(() => {
       setNote('The phrase did not check out.');
       setSlideReset(value => value + 1);

@@ -13,6 +13,7 @@ import {
   phraseComplete,
   phraseFromEntropy,
   quoteUrl,
+  persistRecoveryAck,
   readQuoteOut,
   readRecoveryAck,
   recoveryAcknowledged,
@@ -135,6 +136,12 @@ test('a recovery phrase is a real 12-word BIP39 mnemonic and the ack stores no w
   writeRecoveryAck(memory, 'did:privy:abc');
   assert.equal([...storage.values()][0].includes('abandon'), false);
   assert.equal(readRecoveryAck(memory, 'did:privy:abc'), true);
+  assert.equal(persistRecoveryAck(memory, 'did:privy:abc'), true);
+  assert.equal(persistRecoveryAck(memory, ''), false);
+  assert.equal(persistRecoveryAck({
+    getItem: () => null,
+    setItem: () => { throw new Error('quota'); },
+  }, 'did:privy:abc'), false);
 });
 
 test('swap quotes skip restricted tokens and signup claims a handle before recovery', () => {

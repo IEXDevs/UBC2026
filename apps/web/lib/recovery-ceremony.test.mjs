@@ -25,5 +25,8 @@ test('slide-to-finish still commits when the track has no width and resets after
 test('a stored recovery ack is read on the first paint so returning users skip the ceremony', () => {
   assert.match(page, /useState\(\(\) => \{/);
   assert.match(page, /readRecoveryAck\(window\.localStorage, ownerId\)/);
-  assert.match(page, /writeRecoveryAck\(localStorage, ownerId\)/);
+  assert.match(page, /persistRecoveryAck\(window\.localStorage, ownerId\)/);
+  assert.match(page, /if \(saved\) setRecoveryAck\(true\)/);
+  assert.match(ceremony, /onDone\?\.\(\) === true/);
+  assert.match(ceremony, /Could not save that you finished/);
 });

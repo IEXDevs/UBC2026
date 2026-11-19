@@ -55,7 +55,7 @@ import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBot
 import { buildPermissionedSpendRequest, parseRecipient, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import { mergeObservedWallets, walletConfigNote, walletProvisionNote, walletsFromPrivyUser } from '../lib/wallet-provision.mjs';
-import { SETUP_CARD_MS, accountSetupStep, clipAddress, readRecoveryAck, writeRecoveryAck } from '../lib/wallet-desk.mjs';
+import { SETUP_CARD_MS, accountSetupStep, clipAddress, persistRecoveryAck, readRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
@@ -1536,8 +1536,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           wallets={liveWallets || []}
           handle={profile?.handle || ''}
           onDone={() => {
-            try { writeRecoveryAck(localStorage, ownerId); } catch { /* the phrase stays in the download only */ }
-            setRecoveryAck(true);
+            const saved = persistRecoveryAck(window.localStorage, ownerId);
+            if (saved) setRecoveryAck(true);
+            return saved;
           }}
         />
       ) : null}

@@ -331,6 +331,16 @@ export function writeRecoveryAck(storage, ownerId) {
   storage.setItem(key, recoveryAckRecord());
 }
 
+/** Write the ack, then read it back. Never stores the phrase. */
+export function persistRecoveryAck(storage, ownerId) {
+  try {
+    writeRecoveryAck(storage, ownerId);
+    return readRecoveryAck(storage, ownerId) === true;
+  } catch {
+    return false;
+  }
+}
+
 export function readTokenPrefs(storage, ownerId) {
   const key = tokenStorageKey(ownerId);
   if (!storage || !key) return emptyTokenPrefs();
