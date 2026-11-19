@@ -85,7 +85,6 @@ import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSi
 import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-preview.mjs';
 import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
-import { releaseInjectedSolanaWallets } from '../lib/solana-wallet-login.mjs';
 
 function readAccessToken(getAccessToken) {
   return getPrivyAccessToken(getAccessToken, window.localStorage);
@@ -160,13 +159,9 @@ function AuthedShell() {
 
   const onLogout = useCallback(async () => {
     await logout?.();
-    await releaseInjectedSolanaWallets();
   }, [logout]);
 
-  const onLogin = useCallback(async () => {
-    await releaseInjectedSolanaWallets();
-    return login?.();
-  }, [login]);
+  const onLogin = useCallback(() => login?.(), [login]);
 
   useEffect(() => {
     if (!devAllowed) return undefined;
