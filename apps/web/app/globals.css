@@ -1724,7 +1724,17 @@ button.add-agent:not(:disabled):hover {
 }
 .wallet-add { display: grid; gap: 8px; margin: 0 0 14px; }
 .wallet-add .specular-button { width: 100%; }
-.wallet-add-create { width: 100%; }
+.wallet-add-create {
+  width: 100%;
+  flex-wrap: nowrap;
+}
+.wallet-add-create button {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
 .wallet-roster { display: grid; gap: 8px; margin: 0 0 16px; }
 .wallet-roster-row {
   display: grid;

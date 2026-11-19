@@ -140,6 +140,7 @@ test('the main stage has a top-right wallet control and the detail pane does not
   const detail = readFileSync(join(root, '../components/AgentDetail.js'), 'utf8');
   const dock = readFileSync(join(root, '../components/WalletDock.js'), 'utf8');
   const sheet = readFileSync(join(root, '../components/WalletsSheet.js'), 'utf8');
+  const css = readFileSync(join(root, '../app/globals.css'), 'utf8');
   const stageStart = page.indexOf('<section className={`stage');
   const stage = page.slice(stageStart, page.indexOf('{bot ? (', stageStart));
   assert.match(stage, /<WalletDock/);
@@ -152,6 +153,7 @@ test('the main stage has a top-right wallet control and the detail pane does not
   assert.match(sheet, /SpecularButton/);
   assert.match(sheet, /Generate New Wallet/);
   assert.match(sheet, /wallet-add-create/);
+  assert.match(css, /\.wallet-add-create \{[^}]*flex-wrap:\s*nowrap/);
   assert.equal(dock.includes('A connected wallet is read-only'), false);
   assert.equal(sheet.includes('The phrase and the private key are not stored here'), false);
   assert.match(page, /if \(bots\.length === 0\) return;/);
