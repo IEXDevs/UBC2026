@@ -47,6 +47,21 @@ export function previewBot() {
   });
 }
 
+/** Sample balances addressed to the preview wallet the sheet is showing. */
+export function previewPortfolioFor(wallets) {
+  const sample = samplePortfolio();
+  const list = Array.isArray(wallets) ? wallets : [];
+  const main = list.find(wallet => wallet?.kind === 'main') || list[0];
+  if (!main?.address || !Array.isArray(sample.wallets) || sample.wallets.length === 0) return sample;
+  return {
+    ...sample,
+    wallets: [
+      { ...sample.wallets[0], address: main.address, label: main.label || sample.wallets[0].label },
+      ...sample.wallets.slice(1),
+    ],
+  };
+}
+
 export function samplePortfolio() {
   return {
     cluster: 'mainnet',

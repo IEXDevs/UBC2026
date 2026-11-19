@@ -6401,6 +6401,11 @@ legend {
 }
 
 .side-computer { gap: 8px; }
+.side-computer .agent-run {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
 .live-view.is-screen { margin: 0; }
 

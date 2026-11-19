@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from './dev-preview.mjs';
+import { DEV_PREVIEW_OWNER, previewBot, previewPortfolioFor, previewWallets } from './dev-preview.mjs';
 
 /**
  * Achieves: verifies the preview wallet is owner-scoped, read-only, and non-spendable.
@@ -21,4 +21,7 @@ test('the preview wallet is visible and cannot spend', () => {
   const bot = previewBot();
   assert.equal(bot.id, 'bot_preview');
   assert.equal(bot.name, 'Preview');
+  const book = previewPortfolioFor(wallets);
+  assert.equal(book.wallets[0].address, wallets[0].address);
+  assert.equal(book.authorizesTransaction, false);
 });

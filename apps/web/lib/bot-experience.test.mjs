@@ -15,6 +15,7 @@ import {
   logsUrl,
   timelineEntries,
   whyExplanation,
+  whyFromListedDecision,
 } from './bot-experience.mjs';
 import { getDemoShellState } from './demo-state.mjs';
 
@@ -209,4 +210,27 @@ test('demo shell bots carry a bot page and money panes stay empty placeholders',
   assert.match(page, /PositionBook|MoneyPane/);
   assert.equal(page.includes('Payments feed'), false);
   assert.equal(page.includes('Wallet page'), false);
+});
+
+const FACTS = 'a'.repeat(64);
+const PROPOSAL = 'b'.repeat(64);
+
+test('a listed decision becomes a why view only when the digests and status are real', () => {
+  const why = whyFromListedDecision({
+    factsDigest: FACTS,
+    proposalDigest: PROPOSAL,
+    status: 'approved',
+    cluster: 'devnet',
+  });
+  assert.equal(why.title, 'Why did it do this?');
+  assert.match(why.lines[0], /approved on devnet/);
+  assert.match(why.lines[1], /Facts digest/);
+  assert.equal(whyFromListedDecision({ factsDigest: FACTS, proposalDigest: PROPOSAL, status: 'approved', cluster: 'mainnet' }), null);
+  assert.equal(whyFromListedDecision({ status: 'approved', cluster: 'devnet' }), null);
+  assert.match(whyFromListedDecision({
+    factsDigest: FACTS,
+    proposalDigest: PROPOSAL,
+    status: 'mismatch',
+    cluster: 'devnet',
+  }).lines[0], /unsigned/);
 });

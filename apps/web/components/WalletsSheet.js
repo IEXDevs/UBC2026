@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
 import { X } from 'lucide-react';
@@ -36,6 +36,7 @@ import {
 import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
 import { sendPreview } from '../lib/txn-preview.mjs';
+import { previewPortfolioFor } from '../lib/dev-preview.mjs';
 
 const PANES = [
   { id: 'assets', label: 'Assets' },
@@ -66,6 +67,7 @@ export default function WalletsSheet({
   resolveRecipient = null,
   devnetBalance = null,
   onRetire = null,
+  devPreview = false,
 }) {
   const { mounted, leaving } = usePresence(open);
   const [pane, setPane] = useState('assets');
@@ -112,8 +114,6 @@ export default function WalletsSheet({
     if (key) accountStorage.setItem(key, JSON.stringify(clean));
   }
 
-  if (!mounted) return null;
-
   const wallets = (state?.wallets || []).filter(wallet => wallet && !wallet.deletedAt && !wallet.deleted_at);
   const bots = state?.bots || [];
   const positions = state?.positions || [];
@@ -130,12 +130,19 @@ export default function WalletsSheet({
     )),
   ];
   const needsWallet = pane === 'send' || pane === 'receive' || pane === 'swap';
+  const previewBook = useMemo(() => (
+    devPreview && activeRaw?.address
+      ? previewPortfolioFor([{ kind: 'main', address: activeRaw.address, label: activeRaw.label }])
+      : null
+  ), [devPreview, activeRaw?.address, activeRaw?.label]);
   const tokens = deskTokens({
     positions,
     transfers,
     prefs: { ...prefs, sns: prefs.sns || sns || '' },
     devnet: devnetBalance,
   });
+
+  if (!mounted) return null;
 
   return (
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
@@ -196,6 +203,7 @@ export default function WalletsSheet({
                 <TokenScreen
                   open={open}
                   address={active.address}
+                  previewPortfolio={previewBook}
                   onSend={() => setPane('send')}
                   onReceive={() => setPane('receive')}
                   onSwap={() => setPane('swap')}
@@ -205,7 +213,7 @@ export default function WalletsSheet({
             </>
           ) : null}
           {pane === 'portfolio' ? (
-            signedIn ? <ConnectedPortfolio open={open} /> : <p className="quiet">Sign in to read balances.</p>
+            signedIn ? <ConnectedPortfolio open={open} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>
           ) : null}
           {pane === 'send' ? (
             <SendPane
@@ -271,7 +279,7 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-function ConnectedPortfolio({ open }) {
+function ConnectedPortfolio({ open, previewPortfolio = null }) {
   const { user, getAccessToken, unlinkWallet, ready, authenticated } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
@@ -284,6 +292,21 @@ function ConnectedPortfolio({ open }) {
 
   useEffect(() => {
     if (!open) return undefined;
+    if (previewPortfolio) {
+      setPortfolio(previewPortfolio);
+      setError('');
+      setLoading(true);
+      let stopped = false;
+      enrichPortfolio(previewPortfolio, { storage: window.localStorage })
+        .then((enriched) => {
+          if (!stopped) setPortfolio(enriched.portfolio);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!stopped) setLoading(false);
+        });
+      return () => { stopped = true; };
+    }
     let stopped = false;
     setLoading(true);
     setError('');
@@ -327,7 +350,7 @@ function ConnectedPortfolio({ open }) {
       }
     })();
     return () => { stopped = true; };
-  }, [open, accounts, getAccessToken, user?.id]);
+  }, [open, accounts, getAccessToken, user?.id, previewPortfolio]);
 
   async function remove(address) {
     setRemoving(address);

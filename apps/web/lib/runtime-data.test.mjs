@@ -6,6 +6,7 @@ import {
   emptyMoneyState,
   fetchOwnerLists,
   firstAssignableWalletId,
+  positionsFromBook,
   positionsFromStatus,
   runtimeBaseUrl,
   sendBotChat,
@@ -154,6 +155,25 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
         ],
       });
     }
+    if (url.endsWith('/api/positions')) {
+      return jsonResponse({
+        items: [
+          {
+            id: 'pos_1',
+            botId: 'bot_live',
+            mint: 'So11111111111111111111111111111111111111112',
+            symbol: 'SOL',
+            quantity: '25000000',
+            entryMicroUsdc: '2000',
+            realizedMicroUsdc: '0',
+            cluster: 'devnet',
+            mode: 'supply',
+          },
+          { id: 'pos_zero', botId: 'bot_live', quantity: '0', mint: 'mint' },
+          { id: 'bad' },
+        ],
+      });
+    }
     if (url.endsWith('/status')) {
       return jsonResponse({
         positionCheck: {
@@ -180,10 +200,15 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
   assert.equal(lists.payments.length, 1);
   assert.equal(lists.paymentCrossCheck.length, 1);
   assert.equal(lists.paymentCrossCheck[0].walletId, 'w1');
+  assert.ok(calls.some(url => url.endsWith('/api/positions')));
   assert.equal(lists.positions.length, 1);
+  assert.equal(lists.positions[0].id, 'pos_1');
+  assert.equal(lists.positions[0].amount, '25000000');
+  assert.equal(lists.positions[0].asset, 'SOL');
   assert.equal(lists.positions[0].pnlMicroUsdc, '-500');
   assert.equal(lists.positions[0].botId, 'bot_live');
   assert.equal(lists.positions[0].market, 'mainnet price');
+  assert.deepEqual(positionsFromBook([{ id: 'x', botId: 'bot_live', quantity: 'nope' }], []), []);
   assert.deepEqual(positionsFromStatus('bot_live', { positionCheck: { positions: [{ amount: 'nope' }] } }), []);
   const unsigned = await fetchOwnerLists('');
   assert.equal(unsigned.source, 'unsigned');
