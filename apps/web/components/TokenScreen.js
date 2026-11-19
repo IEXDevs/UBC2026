@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useLinkAccount, usePrivy } from '@privy-io/react-auth';
-import { connectSolanaWallet, linkAccountNote } from '../lib/solana-wallet-login.mjs';
+import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
 import { DEV_PREVIEW_OWNER, samplePortfolio } from '../lib/dev-preview.mjs';
 import { dexTokenView, enrichPortfolio, readDexTokens } from '../lib/dex-token.mjs';
@@ -23,15 +22,9 @@ function linkedKey(user) {
 }
 
 export default function TokenScreen({ open, preview = false, onSend, onReceive, onSwap }) {
-  const { user, getAccessToken, ready, authenticated } = usePrivy();
+  const { user, getAccessToken, linkWallet, ready, authenticated } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
-  const { linkWallet } = useLinkAccount({
-    onError: (failure) => {
-      const next = linkAccountNote(failure);
-      if (next) setError(next);
-    },
-  });
   const [loading, setLoading] = useState(false);
   const [pricing, setPricing] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -152,9 +145,7 @@ export default function TokenScreen({ open, preview = false, onSend, onReceive, 
           type="button"
           className="ghost"
           disabled={!ready || !authenticated}
-          onClick={() => {
-            if (ready && authenticated) connectSolanaWallet(linkWallet);
-          }}
+          onClick={() => linkWallet({ walletChainType: 'solana-only' })}
         >
           Connect a wallet
         </button>

@@ -35,7 +35,6 @@ import {
 } from '../lib/wallet-desk.mjs';
 import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
-import { connectSolanaWallet, linkAccountNote } from '../lib/solana-wallet-login.mjs';
 import { sendPreview, swapPreview } from '../lib/txn-preview.mjs';
 
 const PANES = [
@@ -244,14 +243,11 @@ function linkedKey(user) {
 
 function ConnectedPortfolio({ open, preview = false }) {
   const { user, getAccessToken, unlinkWallet, ready, authenticated } = usePrivy();
+  const { linkWallet } = useLinkAccount({
+    onError: () => setError('That wallet could not be linked. If it already belongs to another account, sign in with it instead.'),
+  });
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
-  const { linkWallet } = useLinkAccount({
-    onError: (failure) => {
-      const next = linkAccountNote(failure);
-      if (next) setError(next);
-    },
-  });
   const [loading, setLoading] = useState(false);
   const [removing, setRemoving] = useState('');
   const accounts = linkedKey(user);
@@ -338,7 +334,7 @@ function ConnectedPortfolio({ open, preview = false }) {
       loading={loading}
       removing={removing}
       onConnect={() => {
-        if (ready && authenticated) connectSolanaWallet(linkWallet);
+        if (ready && authenticated) linkWallet({ walletChainType: 'solana-only' });
       }}
       onRemove={remove}
     />

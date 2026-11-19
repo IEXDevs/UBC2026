@@ -1,10 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Topography from './Topography';
 import SpecularButton from './SpecularButton';
 import EmailSignIn from './EmailSignIn';
-import { WALLET_LOGIN_EVENT, walletLoginFailureNote } from '../lib/siws-login-diagnostic.mjs';
 import { usePrivyPublic } from './PrivyRoot';
 import './SignInPage.css';
 
@@ -15,16 +13,6 @@ export default function SignInPage({
   onHoldChange = null,
 }) {
   const { configured } = usePrivyPublic();
-  const [walletNote, setWalletNote] = useState('');
-
-  useEffect(() => {
-    function onWalletLogin(event) {
-      const note = walletLoginFailureNote(event?.detail);
-      if (note) setWalletNote(note);
-    }
-    window.addEventListener(WALLET_LOGIN_EVENT, onWalletLogin);
-    return () => window.removeEventListener(WALLET_LOGIN_EVENT, onWalletLogin);
-  }, []);
 
   return (
     <div className="sign-in">
@@ -55,15 +43,11 @@ export default function SignInPage({
                 tintOpacity={0.94}
                 textColor="#120f17"
                 disabled={disabled || !onLogin}
-                onClick={() => {
-                  setWalletNote('');
-                  onLogin?.();
-                }}
+                onClick={onLogin}
               >
                 {configured ? 'More ways to continue' : 'Continue'}
               </SpecularButton>
             </div>
-            {walletNote ? <p className="sign-in-wallet-note" role="status">{walletNote}</p> : null}
             {onDeveloperPreview ? (
               <button type="button" className="sign-in-dev" onClick={onDeveloperPreview}>
                 Developer preview

@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  WALLET_LOGIN_EVENT,
   installSiwsLoginDiagnostic,
   safeSiwsCode,
   siwsPostName,
@@ -164,35 +163,6 @@ test('other fetches and network failures stay quiet about secrets', async () => 
   assert.equal(lines[0].includes('header.payload'), false);
   assert.equal(lines[0].includes('sig-secret'), false);
   assert.equal(calls.length, 2);
-});
-
-/**
- * Achieves: verifies a failed SIWS post is announced for the sign-in card.
- * Fails when: a failed SIWS post is announced for the sign-in card breaks (e.g. expected '[wallet-login] siws/authenticate 400 invalid_data', 1).
- * Oracle: assert.equal(events[0].detail, '[wallet-login] siws/authenticate 400 invalid_data')
- * Side effects / state checked: one CustomEvent on the fake window.
- * Gaps: does not render the card.
- */
-test('a failed SIWS post is announced for the sign-in card', async () => {
-  const events = [];
-  const target = {
-    CustomEvent: class CustomEvent {
-      constructor(type, init) {
-        this.type = type;
-        this.detail = init?.detail;
-      }
-    },
-    dispatchEvent(event) {
-      events.push(event);
-    },
-    fetch: async () => jsonResponse(400, { code: 'invalid_data', error: `bad ${ADDRESS}` }),
-  };
-  installSiwsLoginDiagnostic(target, () => {});
-  await target.fetch(AUTH, { method: 'POST' });
-  assert.equal(events.length, 1);
-  assert.equal(events[0].type, WALLET_LOGIN_EVENT);
-  assert.equal(events[0].detail, '[wallet-login] siws/authenticate 400 invalid_data');
-  assert.equal(events[0].detail.includes(ADDRESS), false);
 });
 
 /**
