@@ -126,8 +126,12 @@ function sameText(left, right) {
   return diff === 0;
 }
 
-function unavailable() {
-  return json({ error: 'account_state_unavailable' }, 503);
+function storageError(read) {
+  if (read.code === 'PGRST205' || read.code === '42P01' || read.code === '42703') {
+    return 'account_state_schema_missing';
+  }
+  if (read.status === 401 || read.status === 403) return 'account_state_access_failed';
+  return 'account_state_unavailable';
 }
 
 async function ensureUser(env, ownerId, fetcher) {
@@ -147,7 +151,7 @@ async function readRecoveryRow(env, ownerId, fetcher) {
     `owner_recovery?owner_id=eq.${encodeURIComponent(ownerId)}&select=status,vault,verifier_salt,verifier_hash,verifier_iterations`,
     fetcher,
   );
-  if (read.status !== 200 || !Array.isArray(read.rows)) return { error: true };
+  if (read.status !== 200 || !Array.isArray(read.rows)) return { error: storageError(read) };
   return { row: read.rows[0] ?? null };
 }
 
@@ -174,7 +178,7 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
       `owner_state?owner_id=eq.${encodeURIComponent(ownerId)}&select=name,value,updated_at`,
       fetcher,
     );
-    if (read.status !== 200 || !Array.isArray(read.rows)) return unavailable();
+    if (read.status !== 200 || !Array.isArray(read.rows)) return json({ error: storageError(read) }, 503);
     const items = read.rows
       .filter(row => row && STATE_NAMES.includes(row.name) && typeof row.value === 'string')
       .map(row => ({ name: row.name, value: row.value, updatedAt: row.updated_at ?? null }));
@@ -232,7 +236,7 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
 
   if (routeId === 'recovery.status') {
     const result = await readRecoveryRow(env, ownerId, fetcher);
-    if (result.error) return unavailable();
+    if (result.error) return json({ error: result.error }, 503);
     return json({ ok: true, source: 'supabase', ...recoveryView(result.row) });
   }
 
@@ -241,7 +245,7 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
     const issue = parseRecoveryIssue(body);
     if (!issue) return json({ error: 'invalid_recovery' }, 400);
     const existing = await readRecoveryRow(env, ownerId, fetcher);
-    if (existing.error) return unavailable();
+    if (existing.error) return json({ error: existing.error }, 503);
     if (existing.row) return json({ error: 'recovery_exists', ...recoveryView(existing.row) }, 409);
     if (!(await ensureUser(env, ownerId, fetcher))) return json({ error: 'recovery_failed' }, 502);
     const written = await supabaseWrite(env, {
@@ -260,7 +264,7 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
     });
     if (written?.status === 409) {
       const raced = await readRecoveryRow(env, ownerId, fetcher);
-      if (raced.error) return unavailable();
+      if (raced.error) return json({ error: raced.error }, 503);
       return json({ error: 'recovery_exists', ...recoveryView(raced.row) }, 409);
     }
     if (written?.ok !== true) return json({ error: 'recovery_failed' }, 502);
@@ -272,7 +276,7 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
     const proof = body && typeof body === 'object' ? hexText(body.proof, HEX_64) : null;
     if (!proof) return json({ error: 'invalid_recovery' }, 400);
     const result = await readRecoveryRow(env, ownerId, fetcher);
-    if (result.error) return unavailable();
+    if (result.error) return json({ error: result.error }, 503);
     if (!result.row) return json({ error: 'recovery_missing' }, 404);
     if (!sameText(proof, result.row.verifier_hash)) return json({ error: 'recovery_mismatch' }, 401);
     if (body.confirm === true && result.row.status !== 'confirmed') {

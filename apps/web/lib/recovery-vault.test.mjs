@@ -31,7 +31,8 @@ test('a sealed phrase opens with its password only and the payload carries no wo
   assert.equal(sealed.vault.iterations, VAULT_ITERATIONS);
   assert.deepEqual(await openRecovery(sealed.vault, 'correct horse battery'), words);
   assert.equal(await openRecovery(sealed.vault, 'wrong horse battery'), null);
-  assert.equal(await openRecovery({ ...sealed.vault, ct: sealed.vault.ct.replace(/.$/, '0') }, 'correct horse battery'), null);
+  const tampered = sealed.vault.ct.replace(/.$/, digit => digit === '0' ? '1' : '0');
+  assert.equal(await openRecovery({ ...sealed.vault, ct: tampered }, 'correct horse battery'), null);
   const text = JSON.stringify(sealed);
   for (const word of new Set(words)) assert.equal(text.includes(`"${word}"`), false);
   assert.equal(Object.keys(sealed.vault).sort().join(','), 'ct,iterations,iv,salt,v');
@@ -77,9 +78,11 @@ test('seed state reads none, issued, confirmed, local, and unreachable', async (
   assert.equal(seen[0].init.headers.authorization, 'Bearer jwt');
   assert.equal((await readRecoveryState(fetcher({ ok: true, state: 'confirmed' }), { ownerId: 'alice' })).state, 'confirmed');
   assert.equal((await readRecoveryState(fetcher({ ok: true, state: 'none' }), { ownerId: 'alice' })).state, 'none');
-  const local = await readRecoveryState(fetcher({ ok: true, source: 'unconfigured', state: 'none' }), { ownerId: 'alice' });
+  const unconfigured = fetcher({ ok: true, source: 'unconfigured', state: 'none' });
+  assert.deepEqual(await readRecoveryState(unconfigured, { ownerId: 'alice' }), { ok: false, error: 'runtime_unconfigured' });
+  const local = await readRecoveryState(unconfigured, { ownerId: 'alice', allowLocal: true });
   assert.equal(local.local, true);
-  const local503 = await readRecoveryState(fetcher({ ok: false, error: 'runtime_unconfigured', source: 'unconfigured' }, 503), { ownerId: 'alice' });
+  const local503 = await readRecoveryState(fetcher({ ok: false, error: 'runtime_unconfigured', source: 'unconfigured' }, 503), { ownerId: 'alice', allowLocal: true });
   assert.equal(local503.ok, true);
   assert.equal(local503.local, true);
   assert.equal((await readRecoveryState(fetcher({ error: 'account_state_unavailable' }, 503), { ownerId: 'alice' })).ok, false);
@@ -87,6 +90,8 @@ test('seed state reads none, issued, confirmed, local, and unreachable', async (
   assert.equal(shouldRetryRecovery('login_required', 3), false);
   assert.equal(shouldRetryRecovery('account_state_unavailable', 0), false);
   assert.match(recoveryFailureNote('login_required'), /Sign in again/);
+  assert.match(recoveryFailureNote('account_state_schema_missing'), /storage needs setup/);
+  assert.match(recoveryFailureNote('account_state_access_failed'), /could not access account recovery storage/);
   assert.match(recoveryFailureNote('recovery_unavailable'), /check your seed/);
   assert.equal((await readRecoveryState(fetcher(new Error('offline')), { ownerId: 'alice' })).ok, false);
   assert.equal((await readRecoveryState(fetcher({}), {})).ok, false);
@@ -119,6 +124,8 @@ test('issue refuses a second seed and verify separates a mismatch from a failure
   assert.equal(proofBody.proof, sealed.verifier.hash);
   const mismatch = await verifyRecovery(() => reply({ error: 'recovery_mismatch' }, 401), { ownerId: 'alice', words, verifier: sealed.verifier });
   assert.equal(mismatch.mismatch, true);
+  const expired = await verifyRecovery(() => reply({ error: 'login_required' }, 401), { ownerId: 'alice', words, verifier: sealed.verifier });
+  assert.deepEqual(expired, { ok: false, error: 'login_required' });
   const bad = await verifyRecovery(() => reply({}), { ownerId: 'alice', words: ['abandon'], verifier: sealed.verifier });
   assert.equal(bad.error, 'invalid_phrase');
 });

@@ -2008,6 +2008,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           handle={profile?.handle || ''}
           ownerId={ownerId || ''}
           getAccessToken={getAccessToken}
+          allowLocal={devPreview}
           onSessionExpired={devPreview ? null : onLogout}
           onDone={() => {
             try { writeRecoveryAck(localStorage, ownerId); } catch { /* the phrase stays in the download only */ }
