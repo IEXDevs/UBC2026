@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AddressCopy from './AddressCopy';
 import SlideCommit from './bits/SlideCommit';
 import SecretDraft from './SecretDraft';
-import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
+import { recoveryPassStepReady } from '../lib/secret-generate.mjs';
 import {
   createRecoveryPhrase,
   normalizePassphrase,
@@ -44,6 +44,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
   const bank = useMemo(() => (joined ? shuffledPhrase(joined) : []), [joined]);
   const phraseReady = words ? phraseComplete(picked, words.length) : false;
   const passReady = normalizePassphrase(retype) === passphrase && passphrase.length > 0;
+  const passStepReady = recoveryPassStepReady({ generated, copied, passphrase, again });
 
   function makePhrase() {
     createRecoveryPhrase()
@@ -93,16 +94,10 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
         setSlideReset(value => value + 1);
         return;
       }
-      let saved = false;
       try {
-        saved = onDone?.() === true;
+        onDone?.();
       } catch {
-        saved = false;
-      }
-      if (!saved) {
-        setNote('Could not save that you finished. Allow storage for this site and try the slider again.');
-        setSlideReset(value => value + 1);
-        return;
+        // Phrase is in the download. Ack may only last this visit.
       }
       setWords(null);
       setPassphrase('');
@@ -140,8 +135,8 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
                 setNote('Use the same passphrase, 8 to 64 characters.');
                 return;
               }
-              if (!secretAcceptAllowed({ generated, copied })) {
-                setNote('Copy the generated passphrase before you continue.');
+              if (!passStepReady) {
+                setNote('Copy the generated passphrase, or type the same value in both fields.');
                 return;
               }
               if (!words) {
@@ -175,7 +170,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
             {!words ? (
               <button type="button" className="ghost" onClick={makePhrase}>Retry phrase</button>
             ) : null}
-            <button type="submit" className="solid" disabled={!words || !secretAcceptAllowed({ generated, copied })}>Continue</button>
+            <button type="submit" className="solid" disabled={!words || !passStepReady}>Continue</button>
           </form>
         ) : null}
         {step === 'save' ? (

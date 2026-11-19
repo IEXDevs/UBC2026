@@ -25,7 +25,9 @@ test('copyText falls back to execCommand when clipboard write is denied', async 
     value: '',
     style: {},
     setAttribute() {},
+    focus() {},
     select() {},
+    setSelectionRange() {},
     remove() { removed.push(true); },
   };
   const io = {
@@ -48,6 +50,8 @@ test('copyText falls back to execCommand when clipboard write is denied', async 
   };
   assert.equal(await copyText('four word pass phrase', io), true);
   assert.equal(node.value, 'four word pass phrase');
+  assert.equal(node.style.left, '0');
+  assert.equal(node.style.top, '0');
   assert.equal(removed.length, 1);
 });
 

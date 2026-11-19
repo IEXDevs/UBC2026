@@ -1537,9 +1537,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           wallets={liveWallets || []}
           handle={profile?.handle || ''}
           onDone={() => {
-            const saved = persistRecoveryAck(window.localStorage, ownerId);
-            if (saved) setRecoveryAck(true);
-            return saved;
+            persistRecoveryAck(window.localStorage, ownerId);
+            setRecoveryAck(true);
           }}
         />
       ) : null}

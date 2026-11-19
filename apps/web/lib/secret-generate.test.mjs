@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { passwordProblem } from './desk-lock.mjs';
-import { generatePassphrase, generatePassword, secretAcceptAllowed } from './secret-generate.mjs';
+import { generatePassphrase, generatePassword, recoveryPassStepReady, secretAcceptAllowed } from './secret-generate.mjs';
 import { normalizePassphrase } from './wallet-desk.mjs';
 
 function fill(bytes) {
@@ -21,6 +21,24 @@ test('generated password and passphrase fit the create rules without being logge
   assert.equal(secretAcceptAllowed({ generated: true, copied: true }), true);
   assert.equal(secretAcceptAllowed({ generated: true, copied: false, acknowledged: true }), false);
   assert.equal(secretAcceptAllowed({ generated: false }), true);
+  assert.equal(recoveryPassStepReady({
+    generated: true,
+    copied: false,
+    passphrase: 'correct horse battery staple',
+    again: 'correct horse battery staple',
+  }), true);
+  assert.equal(recoveryPassStepReady({
+    generated: true,
+    copied: false,
+    passphrase: 'correct horse battery staple',
+    again: 'wrong phrase here!!',
+  }), false);
+  assert.equal(recoveryPassStepReady({
+    generated: true,
+    copied: true,
+    passphrase: 'short',
+    again: 'nope',
+  }), true);
 });
 
 test('each create screen keeps one generator beside the field and a copy icon inside it', () => {

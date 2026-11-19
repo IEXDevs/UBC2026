@@ -65,7 +65,11 @@ export default function SlideCommit({
 
   function pointerDown(event) {
     if (disabled || done) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Capture is optional; window listeners still see the gesture.
+    }
     dragRef.current = {
       x: event.clientX,
       origin: offsetRef.current,

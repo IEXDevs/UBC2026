@@ -20,13 +20,19 @@ test('slide-to-finish still commits when the track has no width and resets after
   assert.match(slide, /max <= 0 \|\| offsetRef\.current >= max \* 0\.92/);
   assert.match(slide, /window\.addEventListener\('pointerup'/);
   assert.match(slide, /\[resetKey\]/);
+  assert.match(slide, /setPointerCapture\(event\.pointerId\)/);
+  assert.match(slide, /Capture is optional/);
 });
 
 test('a stored recovery ack is read on the first paint so returning users skip the ceremony', () => {
   assert.match(page, /useState\(\(\) => \{/);
   assert.match(page, /readRecoveryAck\(window\.localStorage, ownerId\)/);
   assert.match(page, /persistRecoveryAck\(window\.localStorage, ownerId\)/);
-  assert.match(page, /if \(saved\) setRecoveryAck\(true\)/);
-  assert.match(ceremony, /onDone\?\.\(\) === true/);
-  assert.match(ceremony, /Could not save that you finished/);
+  assert.match(page, /setRecoveryAck\(true\)/);
+  assert.doesNotMatch(page, /if \(saved\) setRecoveryAck\(true\)/);
+  assert.match(ceremony, /onDone\?\.\(\)/);
+  assert.doesNotMatch(ceremony, /onDone\?\.\(\) === true/);
+  assert.doesNotMatch(ceremony, /Could not save that you finished/);
+  assert.match(ceremony, /recoveryPassStepReady/);
+  assert.match(ceremony, /disabled=\{!words \|\| !passStepReady\}/);
 });
