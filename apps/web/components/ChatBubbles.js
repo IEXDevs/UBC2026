@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
+import { formatAgentOutput } from '../lib/agent-output.mjs';
 import { withHeads } from '../lib/voice-float.mjs';
 import MentionText from './MentionText';
 import { AgentTrace, Reasoning, Sources } from './ai/elements';
@@ -138,13 +139,16 @@ export default function ChatBubbles({
         }
         const urls = urlsIn(line.text);
         const steps = sanitizeActivity(line.activity);
+        const text = line.role === 'agent' || line.role === 'assistant'
+          ? formatAgentOutput(line.text)
+          : line.text;
         return (
           <Message key={line.id} id={`chat-line-${line.id}`} className={fresh.current.has(line.id) ? 'is-fresh' : undefined} data-hit={focusId === line.id ? '' : undefined}>
             <MessageContent>
               <AgentTrace steps={steps} />
               <Bubble align="start" variant="secondary">
                 <BubbleContent>
-                  <MentionText text={line.text} onParty={onParty} />
+                  <MentionText text={text} onParty={onParty} />
                 </BubbleContent>
               </Bubble>
               <Sources urls={urls} />
