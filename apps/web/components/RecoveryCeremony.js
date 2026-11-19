@@ -14,6 +14,19 @@ import {
   verifyRecoveryPhrase,
 } from '../lib/wallet-desk.mjs';
 
+function downloadRecoveryCard(text) {
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'maelstrom-recovery.txt';
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) {
   const [words, setWords] = useState(null);
   const [passphrase, setPassphrase] = useState('');
@@ -26,17 +39,20 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
   const [step, setStep] = useState('pass');
   const [generated, setGenerated] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [slideReset, setSlideReset] = useState(0);
   const joined = words ? words.join(' ') : '';
   const bank = useMemo(() => (joined ? shuffledPhrase(joined) : []), [joined]);
   const phraseReady = words ? phraseComplete(picked, words.length) : false;
   const passReady = normalizePassphrase(retype) === passphrase && passphrase.length > 0;
 
-  useEffect(() => {
-    let stop = false;
+  function makePhrase() {
     createRecoveryPhrase()
-      .then(phrase => { if (!stop) setWords(phrase); })
-      .catch(() => { if (!stop) setNote('This browser could not create a recovery phrase. Reload and try again.'); });
-    return () => { stop = true; };
+      .then(phrase => { setWords(phrase); setNote(''); })
+      .catch(() => { setNote('This browser could not create a recovery phrase. Reload and try again.'); });
+  }
+
+  useEffect(() => {
+    makePhrase();
   }, []);
 
   function download() {
@@ -44,22 +60,19 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
       setNote('Show the phrase, then download it.');
       return;
     }
-    const text = recoveryCard({
-      words,
-      passphrase,
-      wallets,
-      handle,
-      at: new Date().toISOString(),
-    });
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'maelstrom-recovery.txt';
-    link.click();
-    URL.revokeObjectURL(url);
-    setDownloaded(true);
-    setNote('Downloaded. Keep that file offline.');
+    try {
+      downloadRecoveryCard(recoveryCard({
+        words,
+        passphrase,
+        wallets,
+        handle,
+        at: new Date().toISOString(),
+      }));
+      setDownloaded(true);
+      setNote('Downloaded. Keep that file offline.');
+    } catch {
+      setNote('Download failed. Show the phrase and copy it by hand, then try again.');
+    }
   }
 
   function pick(index) {
@@ -71,6 +84,24 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
     const next = [...picked, index];
     setPicked(next);
     setNote(phraseComplete(next, words.length) ? 'Phrase confirmed.' : '');
+  }
+
+  function finish() {
+    verifyRecoveryPhrase(words).then(valid => {
+      if (!valid || !passReady) {
+        setNote('The phrase did not check out. Download a new copy and try again.');
+        setSlideReset(value => value + 1);
+        return;
+      }
+      setWords(null);
+      setPassphrase('');
+      setAgain('');
+      setRetype('');
+      onDone?.();
+    }).catch(() => {
+      setNote('The phrase did not check out.');
+      setSlideReset(value => value + 1);
+    });
   }
 
   return (
@@ -103,6 +134,10 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
                 setNote('Copy the generated passphrase before you continue.');
                 return;
               }
+              if (!words) {
+                setNote('Wait for the recovery phrase, or tap Retry.');
+                return;
+              }
               setPassphrase(left);
               setNote('');
               setStep('save');
@@ -115,7 +150,6 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
               value={passphrase}
               generated={generated}
               copied={copied}
-              disabled={!words}
               onValue={setPassphrase}
               onFill={(next) => {
                 setPassphrase(next);
@@ -128,6 +162,9 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
               Confirm passphrase
               <input type="password" value={again} autoComplete="new-password" onChange={event => setAgain(event.target.value)} />
             </label>
+            {!words ? (
+              <button type="button" className="ghost" onClick={makePhrase}>Retry phrase</button>
+            ) : null}
             <button type="submit" className="solid" disabled={!words || !secretAcceptAllowed({ generated, copied })}>Continue</button>
           </form>
         ) : null}
@@ -181,29 +218,16 @@ export default function RecoveryCeremony({ wallets = [], handle = '', onDone }) 
               Passphrase
               <input type="password" value={retype} autoComplete="new-password" onChange={event => setRetype(event.target.value)} />
             </label>
+            <SlideCommit
+              label="Slide to finish"
+              doneLabel="Saved"
+              disabled={!phraseReady || !passReady}
+              resetKey={`${slideReset}:${picked.join('-')}`}
+              onCommit={finish}
+            />
           </>
         ) : null}
         {note ? <p className="quiet" role="status">{note}</p> : null}
-        <SlideCommit
-          label="Slide to finish"
-          doneLabel="Saved"
-          disabled={step !== 'confirm' || !phraseReady || !passReady}
-          onCommit={() => {
-            verifyRecoveryPhrase(words).then(valid => {
-              if (!valid || !passReady) {
-                setNote('The phrase did not check out. Download a new copy and try again.');
-                return;
-              }
-              setWords(null);
-              setPassphrase('');
-              setAgain('');
-              setRetype('');
-              onDone?.();
-            }).catch(() => {
-              setNote('The phrase did not check out.');
-            });
-          }}
-        />
       </section>
     </div>
   );

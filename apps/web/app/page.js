@@ -367,7 +367,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [remoteLists, setRemoteLists] = useState(() => emptyMoneyState());
   const [profile, setProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
-  const [recoveryAck, setRecoveryAck] = useState(null);
+  const [recoveryAck, setRecoveryAck] = useState(() => {
+    if (typeof window === 'undefined' || !ownerId) return null;
+    try {
+      return readRecoveryAck(window.localStorage, ownerId);
+    } catch {
+      return false;
+    }
+  });
   const [hideWalletError, setHideWalletError] = useState(false);
   const [claimWelcome, setClaimWelcome] = useState(false);
   const [transfers, setTransfers] = useState([]);

@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { Copy } from 'lucide-react';
+import { copyText } from '../lib/copy-text.mjs';
 import { generatePassphrase, generatePassword } from '../lib/secret-generate.mjs';
 
 export default function SecretDraft({
@@ -17,22 +19,22 @@ export default function SecretDraft({
   name = 'secret',
   disabled = false,
 }) {
+  const [copyFailed, setCopyFailed] = useState(false);
+
   function fill() {
     const next = kind === 'passphrase' ? generatePassphrase() : generatePassword();
     onGenerated(kind === 'passphrase' ? 'passphrase' : 'password');
     if (onFill) onFill(next);
     else onValue(next);
     onCopied(false);
+    setCopyFailed(false);
   }
 
   async function copy() {
     if (!value) return;
-    try {
-      await navigator.clipboard.writeText(value);
-      onCopied(true);
-    } catch {
-      onCopied(false);
-    }
+    const ok = await copyText(value);
+    onCopied(ok);
+    setCopyFailed(!ok);
   }
 
   const action = kind === 'passphrase' ? 'Generate passphrase' : 'Generate password';
@@ -53,9 +55,14 @@ export default function SecretDraft({
             spellCheck={false}
             value={value}
             disabled={disabled}
+            onCopy={() => {
+              onCopied(true);
+              setCopyFailed(false);
+            }}
             onChange={(event) => {
               onGenerated(false);
               onCopied(false);
+              setCopyFailed(false);
               onValue(event.target.value);
             }}
           />
@@ -71,7 +78,11 @@ export default function SecretDraft({
         </div>
       </div>
       {generated && value ? (
-        <p className="secret-warning" role="status">Copy this before you continue. It stays on this screen only until you accept.</p>
+        <p className="secret-warning" role="status">
+          {copyFailed
+            ? 'Copy failed. Select the field and copy it yourself, then continue.'
+            : 'Copy this before you continue. It stays on this screen only until you accept.'}
+        </p>
       ) : null}
     </div>
   );

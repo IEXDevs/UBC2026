@@ -40,6 +40,7 @@ test('each create screen keeps one generator beside the field and a copy icon in
   assert.equal(desk.includes('Generate passphrase'), false);
   assert.equal(desk.includes('acknowledged'), false);
   assert.match(recovery, /kind="passphrase"/);
+  assert.match(recovery, /Retry phrase/);
   assert.equal(recovery.includes('Generate password'), false);
   assert.equal(recovery.includes('acknowledged'), false);
 });
