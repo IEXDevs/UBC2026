@@ -8,8 +8,11 @@ import {
   GROK_VOICE_MODEL,
   OPENROUTER_CHAT_COMPLETIONS,
   VOICE_FIRST_MESSAGE,
+  VOICE_SPEAK_BEFORE_TOOLS,
   VOICE_SPEAK_PROMPT,
+  VOICE_TOOL_FILLER,
   VOICE_TOOLS,
+  ensureSpokenToolSse,
   filterVoiceLlmTools,
   handleVoiceRequest,
   ownerPermissionNote,
@@ -34,6 +37,34 @@ test('voice permission note follows the owner chip and ignores unknown modes', (
   assert.match(ownerPermissionNote('full'), /Do not ask whether they are going to buy, sell, spend, or pay/);
   assert.match(ownerPermissionNote('ask'), /buy, sell, spend, or pay/);
   assert.equal(ownerPermissionNote('sometimes'), '');
+});
+
+/**
+ * Achieves: tool-only SSE gets a spoken filler so ElevenLabs does not drop the call.
+ * Fails when: filler missing on tool-only streams, or spoken streams are rewritten.
+ * Oracle: ensureSpokenToolSse prepends VOICE_TOOL_FILLER only when content is absent.
+ * Side effects / state checked: pure string transform.
+ * Gaps: does not run a live ElevenLabs session.
+ */
+test('ensureSpokenToolSse prepends filler when the model returns tools only', () => {
+  const toolOnly = [
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_wallets","arguments":"{}"}}],"role":"assistant"},"finish_reason":null}]}',
+    'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+  const fixed = ensureSpokenToolSse(toolOnly);
+  assert.match(fixed, new RegExp(VOICE_TOOL_FILLER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.ok(fixed.indexOf(VOICE_TOOL_FILLER) < fixed.indexOf('tool_calls'));
+
+  const spoken = [
+    'data: {"choices":[{"delta":{"content":"Checking now.","role":"assistant"},"finish_reason":null}]}',
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_wallets","arguments":"{}"}}]},"finish_reason":null}]}',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+  assert.equal(ensureSpokenToolSse(spoken), spoken);
+  assert.match(VOICE_SPEAK_BEFORE_TOOLS, /speak one short sentence/i);
 });
 
 const SECRET = 'test-elevenlabs-webhook-secret';
@@ -527,6 +558,10 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   }), env({ OPENROUTER_API_KEY: OPENROUTER }), { fetcher });
   assert.equal(withTools.status, 200);
   assert.equal(calls[0].body.tools[0].function.name, 'web_search');
+  assert.equal(
+    calls[0].body.messages.some((item) => item.role === 'system' && /speak one short sentence/i.test(item.content)),
+    true,
+  );
 
   calls.length = 0;
   const stream = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
@@ -587,6 +622,31 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   );
   // Greeting probe must not forward end_call (or any tools) to the model.
   assert.equal(calls[0].body.tools, undefined);
+
+  calls.length = 0;
+  const toolOnlyStream = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'check my wallets' }],
+      tools: [{ type: 'function', function: { name: 'get_wallets', parameters: { type: 'object' } } }],
+    }),
+  }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here' }), {
+    fetcher: async (_url, init) => {
+      calls.push({ body: JSON.parse(init.body) });
+      const sse = [
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_wallets","arguments":"{}"}}],"role":"assistant"},"finish_reason":null}]}',
+        'data: [DONE]',
+        '',
+      ].join('\n');
+      return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+    },
+  });
+  assert.equal(toolOnlyStream.status, 200);
+  const toolSse = await toolOnlyStream.text();
+  assert.match(toolSse, new RegExp(VOICE_TOOL_FILLER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(toolSse, /get_wallets/);
+  assert.equal(calls[0].body.tools[0].function.name, 'get_wallets');
 
   const blocked = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',

@@ -62,8 +62,14 @@ export const VOICE_SPEAK_PROMPT = [
   'Never end the call, hang up, or call end_call unless the owner clearly says goodbye.',
 ].join(' ');
 
+/** Meta often returns tool_calls with empty content; ElevenLabs then ends with custom_llm generation failed. */
+export const VOICE_SPEAK_BEFORE_TOOLS = 'Before any tool call, speak one short sentence to the owner. Never reply with tools only.';
+
 /** Spoken immediately on connect so silence does not trip agent hangup. */
 export const VOICE_FIRST_MESSAGE = "Hey — I'm here. What should we look at?";
+
+/** Fallback line when the model emits tool_calls with no spoken text. */
+export const VOICE_TOOL_FILLER = 'On it.';
 
 /** System tools ElevenLabs may inject; keep them out of the custom LLM. */
 const VOICE_BLOCKED_TOOL = /^(end_call|end call|hang_up|hangup|leave_call)$/i;
@@ -970,12 +976,15 @@ function sanitizeContent(content, secrets) {
 }
 
 function sanitizeMessages(messages, secrets) {
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 32) return null;
-  const roles = new Set(['system', 'user', 'assistant', 'tool']);
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 48) return null;
+  const roles = new Set(['system', 'user', 'assistant', 'tool', 'developer']);
   const cleaned = [];
   for (const message of messages) {
-    if (!message || !roles.has(message.role)) return null;
-    const next = { role: message.role, content: sanitizeContent(message.content, secrets) };
+    if (!message || typeof message !== 'object') continue;
+    // Skip unknown roles instead of failing the whole ElevenLabs turn.
+    if (!roles.has(message.role)) continue;
+    const role = message.role === 'developer' ? 'system' : message.role;
+    const next = { role, content: sanitizeContent(message.content, secrets) };
     if (typeof message.tool_call_id === 'string') next.tool_call_id = clip(message.tool_call_id, 128);
     if (Array.isArray(message.tool_calls) && message.tool_calls.length <= 8) {
       next.tool_calls = message.tool_calls.map(callItem => ({
@@ -989,7 +998,42 @@ function sanitizeMessages(messages, secrets) {
     }
     cleaned.push(next);
   }
-  return cleaned;
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/**
+ * ElevenLabs drops the call when a custom LLM stream has tool_calls and no
+ * spoken content ("custom_llm generation failed"). Prepend a short line.
+ */
+export function ensureSpokenToolSse(raw, filler = VOICE_TOOL_FILLER) {
+  const text = typeof raw === 'string' ? raw : '';
+  if (!text.includes('tool_calls')) return text;
+  let hasSpoken = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') continue;
+    try {
+      const parsed = JSON.parse(payload);
+      const content = parsed?.choices?.[0]?.delta?.content
+        ?? parsed?.choices?.[0]?.message?.content
+        ?? '';
+      if (typeof content === 'string' && content.trim() !== '') {
+        hasSpoken = true;
+        break;
+      }
+    } catch {
+      /* keep scanning */
+    }
+  }
+  if (hasSpoken) return text;
+  const spoken = typeof filler === 'string' && filler.trim() ? filler.trim().slice(0, 120) : VOICE_TOOL_FILLER;
+  const chunk = {
+    id: 'chatcmpl-voice-tool',
+    object: 'chat.completion.chunk',
+    choices: [{ index: 0, delta: { role: 'assistant', content: spoken }, finish_reason: null }],
+  };
+  return `data: ${JSON.stringify(chunk)}\n\n${text.endsWith('\n') ? text : `${text}\n`}`;
 }
 
 /**
@@ -1069,9 +1113,13 @@ async function handleCustomLlm(request, env, fetcher) {
   }
   const secrets = knownSecrets(env);
   const incoming = await request.json().catch(() => null);
-  if (!incoming || typeof incoming !== 'object') return json({ error: 'invalid_body' }, 400);
+  if (!incoming || typeof incoming !== 'object') {
+    return spokenVoiceSse('I could not read that turn. Please try again.');
+  }
   const messages = sanitizeMessages(incoming.messages, secrets);
-  if (!messages) return json({ error: 'invalid_body' }, 400);
+  if (!messages) {
+    return spokenVoiceSse('I could not read that turn. Please try again.');
+  }
   const conversationId = typeof incoming.conversation_id === 'string' ? incoming.conversation_id.trim().slice(0, 128) : '';
   rememberUtterance(conversationId, messages);
   const provider = resolved.provider === 'openrouter' ? 'openrouter' : 'meta';
@@ -1105,6 +1153,16 @@ async function handleCustomLlm(request, env, fetcher) {
     }
     model = selected;
   }
+  // Prefer tool schemas ElevenLabs already attached. Forcing our full catalog
+  // into Meta Muse often yields tool_call streams with no spoken content, so
+  // the call connects and then stays silent. Never forward end_call on greetings.
+  const elTools = seededGreeting ? null : filterVoiceLlmTools(incoming.tools);
+  if (elTools) {
+    adapted = [
+      ...adapted,
+      { role: 'system', content: VOICE_SPEAK_BEFORE_TOOLS },
+    ];
+  }
   const payload = {
     model,
     messages: adapted,
@@ -1112,10 +1170,6 @@ async function handleCustomLlm(request, env, fetcher) {
   };
   if (provider !== 'meta') payload.temperature = 0.5;
   else payload.reasoning_effort = 'minimal';
-  // Prefer tool schemas ElevenLabs already attached. Forcing our full catalog
-  // into Meta Muse often yields tool_call streams with no spoken content, so
-  // the call connects and then stays silent. Never forward end_call on greetings.
-  const elTools = seededGreeting ? null : filterVoiceLlmTools(incoming.tools);
   if (elTools) {
     payload.tools = elTools;
     payload.tool_choice = 'auto';
@@ -1153,6 +1207,15 @@ async function handleCustomLlm(request, env, fetcher) {
   }
   const type = response.headers?.get?.('content-type') ?? '';
   if (type.includes('text/event-stream') && response.body) {
+    // Buffer tool turns so we can inject spoken text when Meta returns tools only.
+    if (elTools) {
+      const raw = await response.text().catch(() => '');
+      const sse = ensureSpokenToolSse(raw);
+      return new Response(sse, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
+      });
+    }
     return new Response(response.body, {
       status: 200,
       headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
