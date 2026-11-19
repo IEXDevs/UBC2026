@@ -13,7 +13,9 @@ test('privacy and terms name the product rules and the liability limit', () => {
   const terms = textOf(TERMS);
   assert.equal(PRIVACY.updated, LEGAL_UPDATED);
   assert.equal(TERMS.updated, LEGAL_UPDATED);
-  assert.match(privacy, /does not store seed phrases or private keys/);
+  assert.match(privacy, /does not keep your seed phrase or private keys after you confirm them/);
+  assert.match(privacy, /one seed phrase/);
+  assert.match(privacy, /never a new one/);
   assert.match(privacy, /5 GB/);
   assert.match(privacy, /512 MB/);
   assert.match(privacy, /devnet execution, mainnet pricing/);

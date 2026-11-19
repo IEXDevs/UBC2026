@@ -74,7 +74,7 @@ No award amounts are results. The track, chain award, and bounties above are wha
 Do not invent a recording. Say these facts only.
 
 1. Open https://dev.maelstrom.iexdevs.com. Sign in with Privy. The desk is Solana devnet execution with mainnet prices.
-2. Finish the handle, then the password and the seed download. Say that Maelstrom does not store the seed or the password. If the download is gone, it is gone.
+2. Finish the handle, then the password and the seed download. Say that each account gets one seed, an encrypted copy that only the password opens is held until the owner confirms it, and Maelstrom keeps no copy after that. If the download is gone, it is gone.
 3. Create one agent with an ask-every-time permission and a USDC cap. Show the top-right balance opening the wallet sheet, then the same sheet from Profile and from a positions wallet card.
 4. Copy the address from the first-five, last-five line. Price a non-USDC send and point at the label "devnet execution, mainnet pricing". Say the quote is not broadcast. The slide sends the quoted USDC on the platform ledger.
 5. Set the desk password, unlock, and send a small amount of the 20 devnet USDC already on `8VPb8xEorh3yis3cnvJRUhFs5oZhYYyj3CNJoKGG7U42`. The same desk grant is what the Worker requires before a spend.

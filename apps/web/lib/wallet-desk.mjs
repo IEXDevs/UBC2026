@@ -473,8 +473,11 @@ export function accountSetupStep({
   walletsReady,
   acceptanceConfirmed,
   recoveryConfirmed,
+  stateReady,
 } = {}) {
   if (signedIn !== true) return null;
+  // Account state decides whether permissions were already accepted. Wait for it.
+  if (stateReady === false) return 'loading';
   if (profileReady !== true || walletsReady !== true) return 'loading';
   if (typeof handle !== 'string' || !handle.trim()) return 'handle';
   if (acceptanceConfirmed !== true) return 'acceptance';

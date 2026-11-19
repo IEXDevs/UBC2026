@@ -49,6 +49,7 @@ import { classifyVoiceDisconnect, voiceErrorNote } from '../lib/voice-disconnect
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
+import { accountStorage } from '../lib/account-state.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
 
@@ -263,7 +264,7 @@ export default function Composer({
 
   useEffect(() => {
     if (!settingsReady) return;
-    localStorage.setItem(VOICE_STORAGE_KEY, JSON.stringify(settings));
+    accountStorage.setItem(VOICE_STORAGE_KEY, JSON.stringify(settings));
   }, [settings, settingsReady]);
 
   const editToken = editTokenIn(lines);
@@ -999,13 +1000,13 @@ export default function Composer({
             const mode = parsePermission(next);
             if (mode === permissionRef.current) return;
             setPermission(mode);
-            localStorage.setItem(SPEND_PERMISSION_KEY, mode);
+            accountStorage.setItem(SPEND_PERMISSION_KEY, mode);
             window.dispatchEvent(new Event('storage'));
             pushLine('note', `Permissions set to ${permissionById(mode).label}`);
           }}
           onReviewCapChange={(next) => {
             try {
-              const saved = writeReviewCap(localStorage, next);
+              const saved = writeReviewCap(accountStorage, next);
               setReviewCap(saved);
               window.dispatchEvent(new Event('storage'));
               pushLine('note', `Review by AI maximum set to ${reviewCapToDollars(saved)} USDC`);

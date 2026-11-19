@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Cancel01Icon, Download01Icon } from '@hugeicons/core-free-icons';
 import { ensureAccountCode } from '../lib/account-code.mjs';
+import { accountStorage } from '../lib/account-state.mjs';
 import { displayFileName } from '../lib/file-name.mjs';
 import { fetchFilePreviewBytes, isStoredFileSecret } from '../lib/file-preview-load.mjs';
 import { fileAvailability, sessionPreviewUrl } from '../lib/file-session.mjs';
@@ -95,7 +96,7 @@ export default function FileStage({ file, ownerId = '', getAccessToken = null, o
       } catch {
         token = '';
       }
-      const accountCode = ensureAccountCode(window.localStorage, ownerId);
+      const accountCode = ensureAccountCode(accountStorage, ownerId);
       if (!token || !accountCode || gone) {
         if (!gone) {
           setRemoteStatus('error');
