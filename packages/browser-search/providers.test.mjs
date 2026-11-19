@@ -264,16 +264,56 @@ test('close deletes the Browser Run session and create uses the browser-run path
     accountId: 'acct',
     apiToken: 'tok',
     fetcher: async (url, options) => {
-      calls.push({ url, method: options.method });
+      calls.push({ url, method: options.method, body: options.body });
       if (options.method === 'DELETE') return Response.json({ status: 'closing' });
       return Response.json({ success: true, result: { sessionId: 'sess-1', webSocketDebuggerUrl: 'wss://secret' } });
     },
   });
   assert.deepEqual(await provider.createSession(), { sessionId: 'sess-1' });
   assert.match(calls[0].url, /\/browser-run\/devtools\/browser\?keep_alive=600000&targets=true$/);
+  assert.equal(calls[0].body, undefined);
   assert.deepEqual(await provider.closeSession('sess-1'), { status: 'closing' });
   assert.equal(calls[1].method, 'DELETE');
   assert.match(calls[1].url, /\/browser-run\/devtools\/browser\/sess-1$/);
+});
+
+/**
+ * Achieves: a 404 on browser-run retries browser-rendering, and a 401 is not provider_failed.
+ * Fails when: the fallback is skipped, or an auth failure is labeled an outage.
+ * Oracle: second URL contains /browser-rendering/; 401 code is browser_not_configured.
+ * Side effects: none (injected fetcher).
+ * Gaps: does not call Cloudflare.
+ */
+test('browser sessions fall back when browser-run is missing and keep auth distinct', async () => {
+  const urls = [];
+  const provider = createBrowserProvider({
+    accountId: 'acct',
+    apiToken: 'tok',
+    fetcher: async (url) => {
+      urls.push(url);
+      if (url.includes('/browser-run/')) return new Response('missing', { status: 404 });
+      return Response.json({ sessionId: 'sess-2' });
+    },
+  });
+  assert.deepEqual(await provider.createSession(), { sessionId: 'sess-2' });
+  assert.match(urls[0], /\/browser-run\/devtools\/browser/);
+  assert.match(urls[1], /\/browser-rendering\/devtools\/browser/);
+  const denied = createBrowserProvider({
+    accountId: 'acct',
+    apiToken: 'tok',
+    fetcher: async () => new Response('no', { status: 401 }),
+  });
+  await assert.rejects(denied.createSession(), (err) => {
+    assert.equal(err.code, 'browser_not_configured');
+    assert.notEqual(err.code, 'provider_failed');
+    return true;
+  });
+  const down = createBrowserProvider({
+    accountId: 'acct',
+    apiToken: 'tok',
+    fetcher: async () => new Response('down', { status: 503 }),
+  });
+  await assert.rejects(down.createSession(), { code: 'provider_failed', status: 502 });
 });
 
 /**

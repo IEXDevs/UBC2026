@@ -150,6 +150,7 @@ export function sendDestinations(wallets, bots, activeId) {
         address: row.address,
         caption: walletSendCaption(row),
         frozen: Boolean(row.frozen),
+        walletKind: row.kind === 'main' ? 'main' : 'additional',
         spendable: privy && source?.spendable !== false && !row.frozen,
       };
     });

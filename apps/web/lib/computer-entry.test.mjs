@@ -58,6 +58,9 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(panel, /live-idle-bar/);
   assert.match(panel, /live-chip/);
   assert.match(panel, /Open browser session/);
+  assert.doesNotMatch(detail, /Run the goal/);
+  assert.doesNotMatch(detail, />Wake</);
+  assert.match(css, /\.library-panes \{[^}]*margin:\s*0 auto 8px/);
   assert.doesNotMatch(panel, /live-row/);
   assert.doesNotMatch(panel, /You can interact/);
 });

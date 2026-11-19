@@ -43,5 +43,14 @@ export function browserErrorNote(code) {
     return 'That browser session was not found. Refresh or open a new one.';
   }
   if (key === 'browser_request_failed') return 'The Worker did not open a browser session.';
+  if (key === 'browser_endpoint_missing') {
+    return 'Cloudflare did not recognize the browser session API. Confirm CLOUDFLARE_ACCOUNT_ID on the agent runtime.';
+  }
+  if (key === 'browser_provider_failed' || key === 'provider_rejected') {
+    return 'Cloudflare Browser Run rejected the session. The API token needs Browser Rendering Edit.';
+  }
+  if (key === 'provider_failed') {
+    return 'Cloudflare Browser Run failed to open a session. Retry in a moment.';
+  }
   return `Browser request failed (${key}).`;
 }

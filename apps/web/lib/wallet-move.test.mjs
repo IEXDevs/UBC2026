@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planWalletMove } from './wallet-move.mjs';
+import { planConnectedDeposit, planWalletMove } from './wallet-move.mjs';
 
 const env = {
   PRIVY_APP_ID: 'app',
@@ -44,4 +44,21 @@ test('a wallet move plans two different Privy wallets', () => {
   const bare = planWalletMove({ from, to, amount: '1', ownerId: from.ownerId, env: {} });
   assert.equal(bare.error, 'missing_config');
   assert.ok(bare.missing.includes('QUICKNODE_DEVNET_RPC_URL'));
+});
+
+/**
+ * Achieves: a connected wallet can fund the main wallet, and a spendable wallet cannot use that plan.
+ * Fails when: a Privy wallet is treated as connected, or the destination is not the main wallet.
+ * Oracle: memo deposit; not_connected for spendable sources; invalid_destination when the target is not main.
+ * Side effects / state checked: N/A.
+ * Gaps: does not sign in the browser or broadcast.
+ */
+test('a connected wallet deposit plans a transfer into the main wallet', () => {
+  const connected = wallet('linked_phantom', 'Hp6Qyx3K9McpE1w2V7LbNU1NpwjwpqRiiggrcveNrtHF', { spendable: false, kind: 'additional' });
+  const plan = planConnectedDeposit({ from: connected, to: from, amount: '2500000', ownerId: from.ownerId, env });
+  assert.equal(plan.memo, 'deposit');
+  assert.equal(plan.amount, '2500000');
+  assert.equal(plan.to.kind, 'main');
+  assert.equal(planConnectedDeposit({ from, to: connected, amount: '1', ownerId: from.ownerId, env }).error, 'not_connected');
+  assert.equal(planConnectedDeposit({ from: connected, to, amount: '1', ownerId: from.ownerId, env }).error, 'invalid_destination');
 });

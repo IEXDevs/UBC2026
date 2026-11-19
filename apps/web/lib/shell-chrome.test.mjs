@@ -149,4 +149,11 @@ test('the main stage has a top-right wallet control and the detail pane does not
   assert.match(dock, /<WalletAdd/);
   assert.match(dock, /Open wallet details/);
   assert.match(sheet, /Connect a wallet/);
+  assert.match(sheet, /SpecularButton/);
+  assert.match(sheet, /Generate New Wallet/);
+  assert.match(sheet, /wallet-add-create/);
+  assert.equal(dock.includes('A connected wallet is read-only'), false);
+  assert.equal(sheet.includes('The phrase and the private key are not stored here'), false);
+  assert.match(page, /if \(bots\.length === 0\) return;/);
+  assert.equal(page.includes('if (!devPreview || bots.length === 0) return;'), false);
 });
