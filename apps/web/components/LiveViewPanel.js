@@ -40,10 +40,10 @@ export default function LiveViewPanel({
   autoStart = false,
   onExpand = null,
 }) {
-  const [sessionRecordId, setSessionRecordId] = useState(null);
+  const [session, setSession] = useState(null);
+  const sessionRecordId = session?.id;
+  const frame = session?.frame;
   const [openCount, setOpenCount] = useState(0);
-  const [frame, setFrame] = useState(null);
-  const [control, setControl] = useState('agent');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const shown = useRef(null);
@@ -59,20 +59,19 @@ export default function LiveViewPanel({
 
   const syncSessions = useCallback(async () => {
     if (!ownerId || !sessionUrl) {
-      setSessionRecordId(null);
+      setSession(null);
       setOpenCount(0);
       return null;
     }
     const listed = await ownerFetch(sessionUrl, ownerId, getAccessToken, 'GET');
     const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
     setOpenCount(sessions.length);
-    const picked = pickOpenSession(listed);
-    if (picked?.sessionRecordId) {
-      setSessionRecordId(picked.sessionRecordId);
-      return picked.sessionRecordId;
-    }
-    setSessionRecordId(null);
-    return null;
+    const id = pickOpenSession(listed)?.sessionRecordId ?? null;
+    setSession(current => {
+      if (!id) return null;
+      return current?.id === id ? current : { id };
+    });
+    return id;
   }, [ownerId, sessionUrl, getAccessToken]);
 
   useEffect(() => {
@@ -99,10 +98,9 @@ export default function LiveViewPanel({
   }, [syncSessions]);
 
   useEffect(() => {
-    if (!sessionRecordId || shown.current === sessionRecordId) return undefined;
+    if (shown.current === sessionRecordId) return;
     shown.current = sessionRecordId;
-    run('view');
-    return undefined;
+    if (sessionRecordId) run('view');
   }, [sessionRecordId]);
 
   async function run(action) {
@@ -111,25 +109,18 @@ export default function LiveViewPanel({
     try {
       if (action === 'open') {
         const existing = await syncSessions().catch(() => sessionRecordId);
-        if (existing) {
-          setSessionRecordId(existing);
-          return;
-        }
+        if (existing) return;
         try {
           const url = browserSessionUrl(runtimeBase, botId);
           const opened = await ownerFetch(url, ownerId, getAccessToken, 'POST', { purpose: 'browse' });
-          setSessionRecordId(opened.sessionRecordId);
+          setSession({ id: opened.sessionRecordId });
           setOpenCount(current => Math.max(current, 1));
-          setFrame(null);
           return;
         } catch (caught) {
           const code = caught instanceof Error ? caught.message : 'browser_request_failed';
           if (code === 'concurrency_limit') {
             const adopted = await syncSessions().catch(() => null);
-            if (adopted) {
-              setSessionRecordId(adopted);
-              return;
-            }
+            if (adopted) return;
           }
           throw caught;
         }
@@ -143,9 +134,10 @@ export default function LiveViewPanel({
         const next = action === 'view' ? undefined : action;
         const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'live-view' });
         const view = await ownerFetch(url, ownerId, getAccessToken, 'POST', next ? { control: next } : {});
-        setSessionRecordId(id);
-        setControl(view.control === 'owner' ? 'owner' : 'agent');
-        setFrame(liveViewFrame(view));
+        const nextFrame = liveViewFrame(view);
+        setSession(current => current?.id === id
+          ? { id, frame: nextFrame, control: view.control }
+          : current);
         return;
       }
       let id = sessionRecordId;
@@ -155,9 +147,8 @@ export default function LiveViewPanel({
       if (!id) throw new Error('session_not_found');
       const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'release' });
       await ownerFetch(url, ownerId, getAccessToken, 'POST', {});
-      setSessionRecordId(null);
+      setSession(current => current?.id === id ? null : current);
       setOpenCount(0);
-      setFrame(null);
       await syncSessions().catch(() => null);
     } catch (caught) {
       const code = caught instanceof Error ? caught.message : 'browser_request_failed';
@@ -168,36 +159,37 @@ export default function LiveViewPanel({
   }
 
   const ready = Boolean(ownerId) && Boolean(sessionUrl);
-  const driving = control === 'owner';
+  const driving = session?.control === 'owner';
   const framed = Boolean(frame?.embed && frame.src);
 
   if (screen) {
+    if (!sessionRecordId) return null;
     return (
-      <div className="live-view is-screen">
-        <div className={`computer-screen${framed ? '' : ' is-off'}`}>
-          {framed ? (
-            <iframe
-              className="live-frame"
-              title="Browser live view"
-              src={frame.src}
-              referrerPolicy={frame.referrerPolicy}
-            />
-          ) : (busy ? <LatticeLoader label="Browser" /> : null)}
-          <button
-            type="button"
-            className="computer-screen-hit"
-            aria-label={framed ? 'Watch' : 'Start Browser'}
-            disabled={busy}
-            onClick={() => {
-              if (!framed) run('open');
-              onExpand?.();
-            }}
-          >
-            {busy ? null : <span className="computer-screen-label">{framed ? 'Watch' : 'Start Browser'}</span>}
-          </button>
-          {error ? <p className="preview-note" role="alert">{error}</p> : null}
+      <section className="side-computer" aria-label="Computer">
+        <h3>Computer</h3>
+        <div className="live-view is-screen">
+          <div className={`computer-screen${framed ? '' : ' is-off'}`}>
+            {framed ? (
+              <iframe
+                className="live-frame"
+                title="Browser live view"
+                src={frame.src}
+                referrerPolicy={frame.referrerPolicy}
+              />
+            ) : (busy ? <LatticeLoader label="Browser" /> : null)}
+            <button
+              type="button"
+              className="computer-screen-hit"
+              aria-label={framed ? 'Watch' : 'Open Computer'}
+              disabled={busy}
+              onClick={onExpand}
+            >
+              {busy ? null : <span className="computer-screen-label">{framed ? 'Watch' : 'Open Computer'}</span>}
+            </button>
+            {error ? <p className="preview-note" role="alert">{error}</p> : null}
+          </div>
         </div>
-      </div>
+      </section>
     );
   }
 

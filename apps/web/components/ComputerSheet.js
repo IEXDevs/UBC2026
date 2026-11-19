@@ -85,7 +85,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null, getA
       </button>
       <div className="browser-preview-stage" onMouseDown={event => event.stopPropagation()}>
         {hasRun ? <LoopSteps steps={steps} note={loopNote} /> : null}
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} getAccessToken={getAccessToken} fill autoStart />
+        <LiveViewPanel key={`${ownerId}:${bot.id}`} botId={bot.id} ownerId={ownerId} getAccessToken={getAccessToken} fill autoStart />
       </div>
     </div>,
     document.body,

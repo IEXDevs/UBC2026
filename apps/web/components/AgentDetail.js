@@ -79,23 +79,21 @@ export default function AgentDetail({
         </div>
       </header>
 
-      <section className="side-computer" aria-label="Computer">
-        <h3>Computer</h3>
-        <LiveViewPanel
-          botId={bot.id}
-          ownerId={ownerId}
-          getAccessToken={getAccessToken}
-          screen
-          onExpand={onComputer}
-        />
-        {offer ? (
-          <p className="hint">
-            <a href={offer.href} target="_blank" rel="noreferrer">
-              Signal {offer.signalId} · {offer.amountLabel} USDC
-            </a>
-          </p>
-        ) : null}
-      </section>
+      <LiveViewPanel
+        key={`${ownerId}:${bot.id}`}
+        botId={bot.id}
+        ownerId={ownerId}
+        getAccessToken={getAccessToken}
+        screen
+        onExpand={onComputer}
+      />
+      {offer ? (
+        <p className="hint">
+          <a href={offer.href} target="_blank" rel="noreferrer">
+            Signal {offer.signalId} · {offer.amountLabel} USDC
+          </a>
+        </p>
+      ) : null}
 
       <FileLibrary
         files={files}

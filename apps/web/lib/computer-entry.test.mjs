@@ -15,7 +15,7 @@ function source(path) {
  * while the full browser controls stay in the computer sheet.
  * Fails when: AgentThread embeds LiveViewPanel, FileLibrary embeds LiveViewPanel, AgentDetail
  * drops the agent head / computer / files stack, or the computer sheet loses its controls.
- * Oracle: AgentDetail hosts LiveViewPanel screen + FileLibrary; ComputerSheet keeps fill autoStart.
+ * Oracle: only an open session renders the sidebar Computer section; ComputerSheet keeps fill autoStart.
  * Side effects / state checked: component source text.
  * Gaps: source snapshot only — browser session HTTP not exercised.
  */
@@ -33,7 +33,6 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(library, /selectOnScroll/);
   assert.match(library, /library-panes__pill/);
   assert.match(detail, /BotMark/);
-  assert.match(detail, /side-computer/);
   assert.match(detail, /FileLibrary/);
   assert.match(detail, /LiveViewPanel/);
   assert.match(detail, /screen/);
@@ -49,9 +48,10 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(sheet, /LiveViewPanel/);
   assert.match(sheet, /LoopSteps/);
   assert.match(panel, /computer-screen/);
+  assert.match(panel, /if \(screen\) \{\s*if \(!sessionRecordId\) return null;\s*return \(\s*<section className="side-computer"/);
   assert.match(panel, /is-off/);
-  assert.match(panel, /Start Browser/);
-  assert.match(panel, /framed \? 'Watch' : 'Start Browser'/);
+  assert.match(panel, /framed \? 'Watch' : 'Open Computer'/);
+  assert.match(source('components/AccountMenu.js'), /id: 'computer', label: 'Computer'/);
   assert.match(panel, /Take control/);
   assert.match(panel, /Return control/);
   assert.match(panel, /Force stop/);
