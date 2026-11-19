@@ -14,11 +14,12 @@
 export const PRIVY_AUTH_API_URL = 'https://auth.privy.io';
 
 const SOLANA_WALLETS = Object.freeze([
-  'detected_solana_wallets',
   'phantom',
   'solflare',
   'backpack',
   'jupiter',
+  'detected_solana_wallets',
+  'wallet_connect_qr_solana',
 ]);
 
 const SOLANA_LOGIN = Object.freeze({

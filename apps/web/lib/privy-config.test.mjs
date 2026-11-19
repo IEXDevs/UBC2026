@@ -29,11 +29,12 @@ test('Privy provider props stay public and Solana-only', () => {
   assert.equal(props.config.sessions.cookieWriteBehavior, 'never');
   assert.equal(props.config.appearance.walletChainType, 'solana-only');
   assert.deepEqual(props.config.appearance.walletList, [
-    'detected_solana_wallets',
     'phantom',
     'solflare',
     'backpack',
     'jupiter',
+    'detected_solana_wallets',
+    'wallet_connect_qr_solana',
   ]);
   assert.equal(props.config.embeddedWallets.ethereum.createOnLogin, 'off');
   assert.equal(props.config.embeddedWallets.solana.createOnLogin, 'off');
