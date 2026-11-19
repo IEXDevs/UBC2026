@@ -113,8 +113,9 @@ export async function readRecoveryState(fetchImpl, { ownerId, token } = {}) {
   try {
     const response = await fetchImpl(url, { headers: headers(ownerId, token), cache: 'no-store' });
     const body = await response.json().catch(() => ({}));
+    // The proxy answers 503 with source unconfigured when no worker origin is set.
+    if (body?.source === 'unconfigured') return { ok: true, local: true, state: 'none' };
     if (!response.ok) return { ok: false, error: body.error || 'recovery_unavailable' };
-    if (body.source === 'unconfigured') return { ok: true, local: true, state: 'none' };
     return {
       ok: true,
       state: body.state === 'confirmed' || body.state === 'issued' ? body.state : 'none',
@@ -124,6 +125,19 @@ export async function readRecoveryState(fetchImpl, { ownerId, token } = {}) {
   } catch {
     return { ok: false, error: 'recovery_unavailable' };
   }
+}
+
+/** A missing token during signup should be asked again. A real outage should not. */
+export function shouldRetryRecovery(error, attempt) {
+  if (!Number.isInteger(attempt) || attempt < 0 || attempt >= 3) return false;
+  return error === 'login_required' || error === 'owner_required';
+}
+
+export function recoveryFailureNote(error) {
+  if (error === 'login_required' || error === 'owner_required') {
+    return 'Sign in is still settling. Try again in a moment.';
+  }
+  return 'Could not reach your account to check your seed. Check the connection and try again.';
 }
 
 /** Stores the sealed phrase. A 409 means this account already has one. */
