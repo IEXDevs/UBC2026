@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { describeLoginMethods } from '../lib/privy-config.mjs';
+import { connectSolanaWallet, linkAccountNote } from '../lib/solana-wallet-login.mjs';
 import AddressCopy from './AddressCopy';
 
 const CLIENT_LABELS = {
@@ -21,8 +22,9 @@ export default function LinkedLogins() {
   const { user, ready, authenticated } = usePrivy();
   const [note, setNote] = useState('');
   const { linkEmail, linkGoogle, linkGithub, linkDiscord, linkWallet } = useLinkAccount({
-    onError: () => {
-      setNote('That sign-in method could not be linked. If it already belongs to another account, sign in with it instead.');
+    onError: (error) => {
+      const next = linkAccountNote(error);
+      if (next) setNote(next);
     },
   });
   const described = describeLoginMethods(user);
@@ -39,7 +41,7 @@ export default function LinkedLogins() {
       setNote('Sign in again, then add the wallet.');
       return;
     }
-    linkWallet({ walletChainType: 'solana-only' });
+    connectSolanaWallet(linkWallet);
   }
 
   function addMethod(id) {
