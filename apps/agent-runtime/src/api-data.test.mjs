@@ -829,7 +829,7 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
   const fetcher = async (url) => {
     const href = String(url);
-    if (href.includes('profiles?handle=eq.alex')) {
+    if (href.includes('handle.eq.alex')) {
       return Response.json([{ owner_id: 'user_2', handle: 'alex', display_name: 'Alex', avatar_url: null }]);
     }
     if (href.includes('wallets?')) return Response.json([{ address }]);

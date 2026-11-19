@@ -26,6 +26,9 @@ import {
   CLUSTERS,
   postgrestEq,
   directoryFailureCode,
+  lookupHandleFilter,
+  lookupHandleKey,
+  parseLookupQuery,
   parseRecipient,
   profileInitials,
   OPENROUTER_FREE_MODEL,
@@ -330,6 +333,13 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.deepEqual(parseRecipient('@Alex'), { kind: 'handle', handle: 'alex' });
   assert.deepEqual(parseRecipient('@richclub.sol'), { kind: 'sns', domain: 'richclub.sol' });
   assert.equal(parseRecipient('not a handle'), null);
+  assert.deepEqual(parseLookupQuery('can you look up @Alex_Smith please'), { kind: 'handle', handle: 'alexsmith' });
+  assert.deepEqual(parseLookupQuery("what's @BOB's wallet"), { kind: 'handle', handle: 'bob' });
+  assert.deepEqual(parseLookupQuery('find richclub.sol for me'), { kind: 'sns', domain: 'richclub.sol' });
+  assert.equal(parseLookupQuery('look up the wallet'), null);
+  assert.equal(lookupHandleKey('Alex_Smith'), 'alexsmith');
+  assert.match(lookupHandleFilter('alexsmith'), /handle\.eq\.alexsmith/);
+  assert.match(lookupHandleFilter('alexsmith'), /handle\.imatch\./);
   assert.equal(profileInitials('Alex Rivera'), 'AR');
 });
 

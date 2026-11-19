@@ -89,6 +89,30 @@ test('a handle lookup refuses a name another owner already stored', async () => 
 });
 
 /**
+ * Achieves: a spoken lookup lowercases a weird handle to letters and numbers.
+ * Fails when: the directory is queried with the raw sentence or the underscore.
+ * Oracle: the filter is handle.eq.alexsmith and the stored row is still returned.
+ * Side effects: none beyond the fake fetcher.
+ */
+test('a spoken lookup lowercases the handle to letters and numbers', async () => {
+  let href = '';
+  const response = await localHandleLookup(new Request(`https://app.local/api/profiles/lookup?q=${encodeURIComponent("look up @Alex_Smith's wallet")}`, {
+    headers: { 'x-owner-id': 'did:privy:user_2' },
+  }), {
+    env: ENV,
+    fetcher: async (url) => {
+      href = String(url);
+      return Response.json([{ owner_id: 'did:privy:user_1', handle: 'alex_smith', display_name: 'Alex' }]);
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.match(href, /handle\.eq\.alexsmith/);
+  const body = await response.json();
+  assert.equal(body.recipient.missing, false);
+  assert.equal(body.recipient.handle, 'alex_smith');
+});
+
+/**
  * Achieves: verifies a taken handle stays a conflict and does not look like a saved claim.
  * Fails when: a taken handle stays a conflict and does not look like a saved claim breaks (e.g. expected 409, { error: 'handle_taken' }).
  * Oracle: assert.equal(response.status, 409); assert.deepEqual(await response.json(), { error: 'handle_taken' })
