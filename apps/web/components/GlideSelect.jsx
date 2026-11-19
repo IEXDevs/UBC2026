@@ -50,6 +50,8 @@ export default function GlideSelect({
   ariaLabel = 'Select',
   className = '',
   menuAction = null,
+  closeSignal = 0,
+  onOpenChange = null,
 }) {
   const items = options.map(norm);
   const [inner, setInner] = useState(defaultValue ?? '');
@@ -118,6 +120,7 @@ export default function GlideSelect({
     instant.current = true;
     setActive(selected >= 0 ? selected : viaKey ? 0 : null);
     setPhase('open');
+    onOpenChange?.(true);
   };
   const close = (mode) => {
     setActive(null);
@@ -125,11 +128,13 @@ export default function GlideSelect({
     const menu = menuRef.current;
     if (mode === 'instant' || !menu) {
       setPhase('closed');
+      onOpenChange?.(false);
       return;
     }
     menu.style.transitionDuration = '';
     menu.dataset.state = 'closed';
     setPhase('closing');
+    onOpenChange?.(false);
     closeTimer.current = setTimeout(() => setPhase('closed'), popOut + 20);
   };
   const pick = (index, viaKey) => {
@@ -188,6 +193,12 @@ export default function GlideSelect({
   useEffect(() => {
     if (disabled && phase !== 'closed') close('instant');
   }, [disabled, phase]);
+
+  useEffect(() => {
+    if (!closeSignal) return;
+    setActive(null);
+    setPhase('closed');
+  }, [closeSignal]);
 
   useEffect(() => () => clearTimeout(closeTimer.current), []);
 

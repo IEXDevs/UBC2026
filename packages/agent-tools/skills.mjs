@@ -1,7 +1,13 @@
 /**
  * Harness skills the owner can start from chat with /goal and the same
  * commands. The text is instruction for the agent. It is not a second policy.
+ *
+ * Skills in ./available stay out of this catalog. They enter a turn only
+ * when the owner calls that command.
  */
+import { AVAILABLE_SKILLS as availableSkillList } from './available-skills.mjs';
+
+export const AVAILABLE_SKILLS = availableSkillList;
 
 export const AGENT_SKILLS = Object.freeze([
   Object.freeze({
@@ -78,7 +84,10 @@ export const AGENT_SKILLS = Object.freeze([
   }),
 ]);
 
-const SKILL_BY_ID = new Map(AGENT_SKILLS.map(skill => [skill.id, skill]));
+const SKILL_BY_ID = new Map([
+  ...AVAILABLE_SKILLS.map(skill => [skill.id, skill]),
+  ...AGENT_SKILLS.map(skill => [skill.id, skill]),
+]);
 
 export function skillById(id) {
   return typeof id === 'string' ? SKILL_BY_ID.get(id.trim().toLowerCase()) || null : null;
@@ -105,5 +114,5 @@ export function skillInstruction(id) {
 
 export function skillsCatalogInstruction() {
   const names = AGENT_SKILLS.map(skill => `${skill.command} (${skill.description})`).join('; ');
-  return `The owner can start a skill with ${names}. Follow that skill when the message uses its command.`;
+  return `The owner can start a skill with ${names}. Follow that skill when the message uses its command. Other skills stay out of this prompt until the owner calls one.`;
 }

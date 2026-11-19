@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { contextTone, formatTokens, meterWidth } from '../lib/context-usage.mjs';
 
 const OPEN_DELAY = 80;
@@ -49,7 +49,7 @@ function Ring({ percent, color, used }) {
   );
 }
 
-export default function ContextUsage({ usage }) {
+export default function ContextUsage({ usage, closeSignal = 0, onOpen, onClose }) {
   const [open, setOpen] = useState(false);
   const timer = useRef(0);
   const panelId = useId();
@@ -58,13 +58,25 @@ export default function ContextUsage({ usage }) {
 
   function show() {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setOpen(true), OPEN_DELAY);
+    timer.current = window.setTimeout(() => {
+      setOpen(true);
+      onOpen?.();
+    }, OPEN_DELAY);
   }
 
   function hide() {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setOpen(false), CLOSE_DELAY);
+    timer.current = window.setTimeout(() => {
+      setOpen(false);
+      onClose?.();
+    }, CLOSE_DELAY);
   }
+
+  useEffect(() => {
+    if (!closeSignal) return;
+    window.clearTimeout(timer.current);
+    setOpen(false);
+  }, [closeSignal]);
 
   return (
     <div className="context-hover" onPointerEnter={show} onPointerLeave={hide} onFocus={show} onBlur={hide}>

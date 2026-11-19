@@ -46,7 +46,7 @@ import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
 import { readSharedLinks } from '../lib/connectors.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
-import { AGENT_SKILLS } from '@ubc2026/agent-tools';
+import { AGENT_SKILLS, AVAILABLE_SKILLS } from '@ubc2026/agent-tools';
 import { isLiveKitDisconnect, startVoiceConversation } from '../lib/voice-session.mjs';
 import { classifyVoiceDisconnect, voiceErrorNote } from '../lib/voice-disconnect.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
@@ -77,9 +77,10 @@ const SUGGESTIONS = [
   'Summarize the latest activity',
   'Show the open positions',
 ];
-const PROMPT_COMMANDS = AGENT_SKILLS.map(skill => ({
+const PROMPT_COMMANDS = [...AGENT_SKILLS, ...AVAILABLE_SKILLS].map(skill => ({
   key: skill.id,
   name: skill.command,
+  group: skill.group || 'Desk',
   description: skill.description,
 }));
 const HOSTED_IMAGE_BYTES = 400_000;
