@@ -1,20 +1,30 @@
 /**
- * Spoken "allow" for a wallet or access prompt that is already waiting.
- * A longer sentence still goes to the text agent.
+ * Spoken yes or no for a wallet or access prompt that is already waiting.
+ * A sentence that contains an affirmation allows. A sentence that contains a
+ * refusal denies. Refusal wins when both are present. Other speech still goes
+ * to the text agent.
  */
 
-const FILLER = '(?:yes|yeah|yep|ok|okay|please|i)';
-const TARGET = '(?:it|that|this|them)';
+const AFFIRMATION = /\b(?:go ahead|go for it|do it|send it|sounds good|that(?:'s| is) fine|it(?:'s| is) fine|fine by me|i agree|all right|of course|please do|that works|works for me|absolutely|definitely|certainly|affirmative|approved|approve|allowed|allow|confirmed|confirm|agreed|alright|yeah|yep|yup|yes|sure|okay|ok|granted|correct|fine)\b/;
 
-export function voiceGrantsAllow(text) {
+const DENIAL = /\b(?:do not|don't|dont|cannot|can't|cant|never mind|nevermind|not now|no thanks|no thank you|hold off|rejected|reject|refused|refuse|denied|deny|cancel|stop|never|nope|nah|nothing|not|no)\b/;
+
+const SOFT_NO = /\bno (?:problem|worries|worry|issue|issues|doubt|question)\b/g;
+
+export function voiceConfirmDecision(text) {
   const spoken = String(text || '')
     .toLowerCase()
-    .replace(/[.!?,]+/g, ' ')
+    .replace(/[’']/g, "'")
+    .replace(/[.!?,;:]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!spoken || spoken.length > 40) return false;
-  if (/\b(?:don'?t|do not|not|never|no|deny|cancel)\b/.test(spoken)) return false;
-  return new RegExp(`^(?:${FILLER}\\s+)*allow(?:\\s+${TARGET})?$`).test(spoken);
+  if (!spoken || spoken.length > 400) return null;
+  SOFT_NO.lastIndex = 0;
+  const cleared = spoken.replace(SOFT_NO, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleared) return null;
+  if (DENIAL.test(cleared)) return 'deny';
+  if (AFFIRMATION.test(cleared)) return 'allow';
+  return null;
 }
 
 /** The inline Allow button on the latest unanswered agent line, if one is waiting. */

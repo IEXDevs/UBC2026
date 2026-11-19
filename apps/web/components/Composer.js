@@ -48,7 +48,7 @@ import { readSharedLinks } from '../lib/connectors.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
 import { AGENT_SKILLS, AVAILABLE_SKILLS } from '@ubc2026/agent-tools';
 import { playAgentSpeech, startVoicePipe } from '../lib/voice-pipe.mjs';
-import { voiceGrantsAllow } from '../lib/voice-allow.mjs';
+import { voiceConfirmDecision } from '../lib/voice-allow.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
@@ -135,7 +135,7 @@ export default function Composer({
   onEditLine = null,
   onPatchLine = null,
   onConfirm = null,
-  onSpokenAllow = null,
+  onSpokenConfirm = null,
   onVoiceLive = null,
   onBindAccess = null,
   onContextWindow = null,
@@ -314,8 +314,8 @@ export default function Composer({
     }
   }
   const resolveRef = useRef(null);
-  const onSpokenAllowRef = useRef(onSpokenAllow);
-  onSpokenAllowRef.current = onSpokenAllow;
+  const onSpokenConfirmRef = useRef(onSpokenConfirm);
+  onSpokenConfirmRef.current = onSpokenConfirm;
   const onVoiceLiveRef = useRef(onVoiceLive);
   onVoiceLiveRef.current = onVoiceLive;
   useEffect(() => {
@@ -576,14 +576,14 @@ export default function Composer({
     void speak(line).catch(() => {});
   }
 
-  function sayAllow(text) {
+  function sayConfirm(text) {
     const line = typeof text === 'string' ? text.trim() : '';
-    const cue = 'Say allow to confirm.';
+    const cue = 'Say yes to confirm, or no to cancel.';
     if (!line) {
       say(cue);
       return;
     }
-    say(/say allow to confirm/i.test(line) ? line : `${line} ${cue}`);
+    say(/say yes to confirm/i.test(line) ? line : `${line} ${cue}`);
   }
 
   async function settleChat(result, spoken, prior, grants, run) {
@@ -597,7 +597,7 @@ export default function Composer({
     }
     if (result.hold?.kind === 'modal') {
       if (result.reply) pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
-      sayAllow(result.reply || result.hold.prompt || result.hold.label);
+      sayConfirm(result.reply || result.hold.prompt || result.hold.label);
       const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label) : false;
       if (run !== runRef.current) return;
       if (!accepted) {
@@ -611,7 +611,7 @@ export default function Composer({
     if (result.hold?.kind === 'inline') {
       const line = result.reply || result.hold.label;
       pushLine('agent', line, botIdRef.current, result.tokens, result.activity, result.hold);
-      sayAllow(line);
+      sayConfirm(line);
       return;
     }
     pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
@@ -830,7 +830,8 @@ export default function Composer({
         },
         onCommit: (text) => {
           if (sessionRef.current !== live) return;
-          if (voiceGrantsAllow(text) && onSpokenAllowRef.current?.() === true) return;
+          const decision = voiceConfirmDecision(text);
+          if ((decision === 'allow' || decision === 'deny') && onSpokenConfirmRef.current?.(decision) === true) return;
           void sendMessage(text);
         },
         onError: (error) => {

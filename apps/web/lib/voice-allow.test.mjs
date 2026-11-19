@@ -3,30 +3,58 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { latestInlineAllow, voiceGrantsAllow } from './voice-allow.mjs';
+import { latestInlineAllow, voiceConfirmDecision } from './voice-allow.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Achieves: a spoken allow accepts a waiting prompt, and other speech does not.
- * Fails when: "allow" is ignored, or a longer sentence is treated as consent.
- * Oracle: short allow phrases are true; questions and refusals are false.
+ * Achieves: a spoken yes or a sentence that contains one allows a waiting prompt.
+ * Fails when: "yes", "go ahead", or "yeah, send it" is ignored.
+ * Oracle: those phrases are allow; a balance question is null.
  * Side effects: none.
  * Gaps: does not open a microphone.
  */
-test('voice allow is the word allow, not a longer sentence', () => {
-  for (const phrase of ['allow', 'Allow.', 'allow it', 'yes allow', 'please allow this', 'okay, allow']) {
-    assert.equal(voiceGrantsAllow(phrase), true, phrase);
-  }
+test('a sentence that affirms allows a waiting prompt', () => {
   for (const phrase of [
-    'allow me to check the wallet',
-    "don't allow",
-    'do not allow',
+    'allow',
+    'Allow.',
     'yes',
+    'yeah',
+    'sure',
+    'okay',
+    'go ahead',
     'confirm the send',
-    'what is my balance',
+    'yes, send it',
+    'yeah that sounds good',
+    'no problem, go ahead',
+    'allow me to move that',
   ]) {
-    assert.equal(voiceGrantsAllow(phrase), false, phrase);
+    assert.equal(voiceConfirmDecision(phrase), 'allow', phrase);
+  }
+  assert.equal(voiceConfirmDecision('what is my balance'), null);
+  assert.equal(voiceConfirmDecision('check the wallet'), null);
+});
+
+/**
+ * Achieves: a spoken no or a sentence that contains one denies a waiting prompt.
+ * Fails when: "no", "don't", or "yes but don't" allows the spend.
+ * Oracle: those phrases are deny, and a refusal beats an affirmation.
+ * Side effects: none.
+ */
+test('a sentence that refuses denies a waiting prompt', () => {
+  for (const phrase of [
+    'no',
+    'nope',
+    "don't",
+    'do not allow',
+    "don't allow",
+    'cancel that',
+    'not now',
+    'no thanks',
+    'yeah, but do not send it',
+    "I'm not sure",
+  ]) {
+    assert.equal(voiceConfirmDecision(phrase), 'deny', phrase);
   }
 });
 
@@ -51,23 +79,24 @@ test('latest inline allow is the waiting wallet or access prompt', () => {
 });
 
 /**
- * Achieves: the talk pipe accepts a spoken allow before it sends a chat turn.
- * Fails when: allow is queued as a message, or the desk never offers the hook.
- * Oracle: Composer checks voiceGrantsAllow then onSpokenAllow; the desk confirms slides and inline Allow.
+ * Achieves: the talk pipe accepts a spoken yes or no before it sends a chat turn.
+ * Fails when: the decision is queued as a message, or a denial cannot cancel.
+ * Oracle: Composer passes voiceConfirmDecision to the desk, which allows and denies.
  * Side effects: source files only.
  */
-test('the desk accepts a spoken allow for a waiting confirm', () => {
+test('the desk accepts a spoken yes or no for a waiting confirm', () => {
   const composer = readFileSync(join(root, 'components/Composer.js'), 'utf8');
   const page = readFileSync(join(root, 'app/page.js'), 'utf8');
   const commitAt = composer.indexOf('onCommit: (text) =>');
   const sendAt = composer.indexOf('void sendMessage(text)', commitAt);
   assert.ok(commitAt > 0 && sendAt > commitAt);
-  assert.match(composer.slice(commitAt, sendAt), /voiceGrantsAllow\(text\)/);
-  assert.match(composer.slice(commitAt, sendAt), /onSpokenAllowRef\.current\?\.\(\) === true/);
-  assert.match(page, /onSpokenAllow=\{acceptSpokenAllow\}/);
-  assert.match(page, /finishSlideConfirm\(true\)/);
+  assert.match(composer.slice(commitAt, sendAt), /voiceConfirmDecision\(text\)/);
+  assert.match(composer.slice(commitAt, sendAt), /onSpokenConfirmRef\.current\?\.\(decision\) === true/);
+  assert.match(page, /onSpokenConfirm=\{acceptSpokenConfirm\}/);
+  assert.match(page, /finishSlideConfirm\(accepted\)/);
+  assert.match(page, /The send stayed unsent/);
   assert.match(page, /latestInlineAllow\(/);
-  assert.match(page, /Say allow to confirm/);
+  assert.match(page, /Say yes to confirm, or no to cancel/);
   assert.match(page, /onVoiceLive=\{setVoiceLive\}/);
   assert.match(page, /slideConfirm && !voiceLive/);
   assert.match(page, /pendingSend && !voiceLive/);
@@ -75,5 +104,5 @@ test('the desk accepts a spoken allow for a waiting confirm', () => {
   const bubbles = readFileSync(join(root, 'components/ChatBubbles.js'), 'utf8');
   assert.match(bubbles, /hideAccessActions \? null/);
   assert.match(composer, /hideAccessActions/);
-  assert.match(composer, /function sayAllow/);
+  assert.match(composer, /function sayConfirm/);
 });
