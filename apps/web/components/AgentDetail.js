@@ -7,9 +7,7 @@ import {
   readReviewThreshold,
   readStoredPermission,
 } from '../lib/spend-permission.mjs';
-import { agentRunCall, signalOfferView } from '../lib/owner-actions.mjs';
-import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
-import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
+import { signalOfferView } from '../lib/owner-actions.mjs';
 import BotMark from './BotMark';
 import FileLibrary from './FileLibrary';
 import LiveViewPanel from './LiveViewPanel';
@@ -37,44 +35,8 @@ export default function AgentDetail({
   onComputer,
 }) {
   const [permitState, setPermitState] = useState(() => readPermitState());
-  const [runBusy, setRunBusy] = useState('');
-  const [runNote, setRunNote] = useState('');
   const permit = permissionById(permitState.permission);
   const offer = signalOfferView(bot);
-
-  async function runAgent(action) {
-    const call = agentRunCall(action, bot);
-    const url = call ? shellRuntimeUrl(call.path) : null;
-    if (!call || !url || !ownerId) {
-      setRunNote('Sign in to run this agent.');
-      return;
-    }
-    setRunBusy(action);
-    setRunNote('');
-    try {
-      const response = await fetch(url, {
-        method: call.method,
-        headers: await ownerAuthHeaders(ownerId, getAccessToken, {
-          'content-type': 'application/json',
-        }),
-        body: JSON.stringify(call.body),
-        cache: 'no-store',
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const code = typeof data.error === 'string' ? data.error : '';
-        setRunNote(code === 'login_required' || code === 'owner_required'
-          ? 'Sign in to run this agent.'
-          : 'That did not start.');
-        return;
-      }
-      setRunNote(action === 'wake' ? 'This agent is awake.' : 'The goal is running.');
-    } catch {
-      setRunNote('That did not start.');
-    } finally {
-      setRunBusy('');
-    }
-  }
 
   useEffect(() => {
     function refresh() {
@@ -126,15 +88,6 @@ export default function AgentDetail({
           screen
           onExpand={onComputer}
         />
-        <div className="agent-run">
-          <button className="live-chip" type="button" disabled={runBusy !== ''} onClick={() => runAgent('wake')}>
-            {runBusy === 'wake' ? 'Waking…' : 'Wake'}
-          </button>
-          <button className="live-chip" type="button" disabled={runBusy !== ''} onClick={() => runAgent('loop')}>
-            {runBusy === 'loop' ? 'Starting…' : 'Run the goal'}
-          </button>
-        </div>
-        {runNote ? <p className="hint" role="status">{runNote}</p> : null}
         {offer ? (
           <p className="hint">
             <a href={offer.href} target="_blank" rel="noreferrer">

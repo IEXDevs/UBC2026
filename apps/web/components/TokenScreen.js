@@ -12,6 +12,7 @@ import {
   formatCompactUsd,
   formatTokenPrice,
 } from '../lib/token-market.mjs';
+import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
 
 function linkedKey(user) {
   const accounts = Array.isArray(user?.linkedAccounts)
@@ -36,8 +37,16 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
       setLoading(false);
       return undefined;
     }
+    const cacheKey = user?.id || 'portfolio';
+    const cached = cachedPortfolio(cacheKey);
+    if (cached) {
+      setPortfolio(cached);
+      setError('');
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     let stopped = false;
-    setLoading(true);
     (async () => {
       try {
         const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
@@ -61,13 +70,18 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
           setError(portfolioErrorNote(body));
           return;
         }
+        rememberPortfolio(cacheKey, body);
         setPortfolio(body);
         setError('');
+        setLoading(false);
         const enriched = await enrichPortfolio(body, {
           userId: user?.id,
           storage: window.localStorage,
         });
-        if (!stopped) setPortfolio(enriched.portfolio);
+        if (!stopped) {
+          rememberPortfolio(cacheKey, enriched.portfolio);
+          setPortfolio(enriched.portfolio);
+        }
       } catch {
         if (!stopped) setError(portfolioErrorNote({ error: 'rpc_failed' }));
       } finally {

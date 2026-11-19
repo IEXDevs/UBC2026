@@ -75,7 +75,6 @@ export default function WalletDock({ privyLive = false, wallets = [], balanceLab
               ))}
             </ul>
           )}
-          <p className="quiet">A connected wallet is read-only. Sends use the main wallet.</p>
           {privyLive ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
           <button
             type="button"

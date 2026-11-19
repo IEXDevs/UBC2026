@@ -11,6 +11,7 @@ import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
 import TokenScreen from './TokenScreen';
 import SlideCommit from './bits/SlideCommit';
+import SpecularButton from './SpecularButton';
 import TxnLog from './TxnLog';
 import SendToField from './SendToField';
 import TxnPreview from './TxnPreview';
@@ -19,6 +20,7 @@ import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { partyFromToken } from '../lib/party-book.mjs';
 import { embeddedCreateOptions, embeddedSolanaCount } from '../lib/wallet-provision.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
+import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
 import { describeWallets, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
@@ -295,7 +297,7 @@ function ConnectedPortfolio({ open, previewPortfolio = null }) {
     if (previewPortfolio) {
       setPortfolio(previewPortfolio);
       setError('');
-      setLoading(true);
+      setLoading(false);
       let stopped = false;
       enrichPortfolio(previewPortfolio, { storage: window.localStorage })
         .then((enriched) => {
@@ -307,9 +309,17 @@ function ConnectedPortfolio({ open, previewPortfolio = null }) {
         });
       return () => { stopped = true; };
     }
+    const cacheKey = user?.id || accounts || 'portfolio';
+    const cached = cachedPortfolio(cacheKey);
+    if (cached) {
+      setPortfolio(cached);
+      setError('');
+      setLoading(false);
+    } else {
+      setLoading(true);
+      setError('');
+    }
     let stopped = false;
-    setLoading(true);
-    setError('');
     (async () => {
       try {
         const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
@@ -334,12 +344,17 @@ function ConnectedPortfolio({ open, previewPortfolio = null }) {
           setError(portfolioErrorNote(body));
           return;
         }
+        rememberPortfolio(cacheKey, body);
         setPortfolio(body);
+        setLoading(false);
         const enriched = await enrichPortfolio(body, {
           userId: user?.id,
           storage: window.localStorage,
         });
-        if (!stopped) setPortfolio(enriched.portfolio);
+        if (!stopped) {
+          rememberPortfolio(cacheKey, enriched.portfolio);
+          setPortfolio(enriched.portfolio);
+        }
       } catch {
         if (!stopped) {
           setPortfolio(null);
@@ -415,28 +430,30 @@ export function WalletAdd() {
 
   return (
     <div className="wallet-add">
-      <div className="wallet-switch" role="group" aria-label="Add a wallet">
-        <button
-          type="button"
-          className="hint-btn"
-          disabled={busy}
-          data-hint="Opens Phantom, Solflare, Backpack, or another Solana wallet and links it to this account."
-          onClick={() => {
-            setMode('');
-            setNote('');
-            if (!ready || !authenticated) {
-              setNote('Sign in again, then connect a wallet.');
-              return;
-            }
-            connecting.current = true;
-            linkWallet({
-              walletChainType: 'solana-only',
-              description: 'Connect a Solana wallet to this account.',
-            });
-          }}
-        >
-          Connect a wallet
-        </button>
+      <SpecularButton
+        className="hint-btn wallet-connect"
+        size="sm"
+        radius={999}
+        autoAnimate
+        disabled={busy}
+        data-hint="Opens Phantom, Solflare, Backpack, or another Solana wallet and links it to this account."
+        onClick={() => {
+          setMode('');
+          setNote('');
+          if (!ready || !authenticated) {
+            setNote('Sign in again, then connect a wallet.');
+            return;
+          }
+          connecting.current = true;
+          linkWallet({
+            walletChainType: 'solana-only',
+            description: 'Connect a Solana wallet to this account.',
+          });
+        }}
+      >
+        Connect a wallet
+      </SpecularButton>
+      <div className="wallet-switch wallet-add-create" role="group" aria-label="Create or import a wallet">
         <button
           type="button"
           className="hint-btn"
@@ -462,7 +479,7 @@ export function WalletAdd() {
               });
           }}
         >
-          Generate
+          Generate New Wallet
         </button>
         <button
           type="button"
@@ -485,7 +502,7 @@ export function WalletAdd() {
           Import key
         </button>
       </div>
-      <p className="quiet">The phrase and the private key are not stored here. If you do not keep your own copy, it is gone.</p>
+      <p className="quiet">The phrase and the private key are not stored here.</p>
       {mode === 'seed' ? (
         <form className="field" onSubmit={(event) => {
           event.preventDefault();
@@ -618,7 +635,7 @@ function SendPane({
   const target = picked?.kind === 'recent'
     ? parseSendTarget(picked.caption)
     : picked
-      ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, spendable: picked.spendable }
+      ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, spendable: picked.spendable, walletKind: picked.walletKind }
       : parseSendTarget(to);
   const units = asset ? displayToUnits(amount, asset.decimals) : null;
   const [snsAddress, setSnsAddress] = useState('');
@@ -675,17 +692,24 @@ function SendPane({
   const pricedSwap = asset && asset.symbol !== 'USDC'
     ? swapDraft(tokens, { from: asset.symbol, to: 'USDC', amountText: amount })
     : null;
+  const fundingMain = observing
+    && target?.kind === 'wallet'
+    && target.walletKind === 'main'
+    && asset?.symbol === 'USDC';
   const walletReady = target?.kind === 'wallet' && target.spendable && asset?.symbol === 'USDC';
   const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
   const ready = Boolean(
-    active && !frozen && !observing && target && units && asset
+    active && !frozen && target && units && asset
     && (
-      walletReady
-      || (target.kind === 'handle' && (
-        (asset.symbol === 'USDC' && handleReady)
-        || (asset.symbol !== 'USDC' && handleReady && pricedSwap?.broadcast === false && pricedSwap.url)
+      fundingMain
+      || (!observing && (
+        walletReady
+        || (target.kind === 'handle' && (
+          (asset.symbol === 'USDC' && handleReady)
+          || (asset.symbol !== 'USDC' && handleReady && pricedSwap?.broadcast === false && pricedSwap.url)
+        ))
+        || (target.kind === 'sns' && asset.symbol === 'USDC' && snsAddress)
       ))
-      || (target.kind === 'sns' && asset.symbol === 'USDC' && snsAddress)
     )
   );
   const destination = target?.kind === 'wallet'
@@ -704,7 +728,6 @@ function SendPane({
   return (
     <form className="wallet-form field" onSubmit={event => event.preventDefault()}>
       <p className="quiet">{active ? `From ${active.label}` : 'No wallet yet.'} A slide confirms the send. Nothing is signed before that.</p>
-      {observing ? <p className="quiet" role="status">This connected wallet is read-only. Platform sends use your agent wallet.</p> : null}
       {frozen ? <p className="quiet" role="status">This wallet is frozen.</p> : null}
       <label>
         To
@@ -730,9 +753,9 @@ function SendPane({
           {sendHandleHint(handleRecipient, { looking: handleLooking, handle: target.handle })}
         </p>
       ) : target?.kind === 'invalid-address' || target?.kind === 'address' ? (
-        <p className="quiet" role="status">{targetHint(target)}</p>
+        <p className="quiet" role="status">{targetHint(target, observing)}</p>
       ) : (
-        <p className="quiet">{targetHint(target)}</p>
+        <p className="quiet">{targetHint(target, observing)}</p>
       )}
       <label>
         Amount
@@ -792,10 +815,16 @@ function SendPane({
   );
 }
 
-function targetHint(target) {
+function targetHint(target, observing = false) {
+  if (observing) {
+    if (target?.kind === 'wallet' && target.walletKind === 'main') {
+      return 'This sends devnet USDC to the main wallet. The connected wallet approves it.';
+    }
+    return 'A connected wallet sends devnet USDC to the main wallet.';
+  }
   if (!target) return 'Type a @handle or a .sol name, or pick a wallet.';
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
-  if (target.kind === 'wallet' && target.spendable === false) return 'That wallet is read only.';
+  if (target.kind === 'wallet' && target.spendable === false) return 'Pick the main wallet to move funds there.';
   if (target.kind === 'wallet') return `Sends USDC on Solana devnet to ${target.caption}.`;
   if (target.kind === 'invalid-address') return 'That address is not a valid Solana pubkey.';
   return 'Raw addresses are not on the platform ledger yet.';

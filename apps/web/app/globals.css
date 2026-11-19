@@ -1723,6 +1723,18 @@ button.add-agent:not(:disabled):hover {
   .address-copy:hover { background: #2a2a2a; }
 }
 .wallet-add { display: grid; gap: 8px; margin: 0 0 14px; }
+.wallet-add .specular-button { width: 100%; }
+.wallet-add-create {
+  width: 100%;
+  flex-wrap: nowrap;
+}
+.wallet-add-create button {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
 .wallet-roster { display: grid; gap: 8px; margin: 0 0 16px; }
 .wallet-roster-row {
   display: grid;
@@ -6629,7 +6641,8 @@ legend {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0;
-  margin-bottom: 8px;
+  width: min(100%, 240px);
+  margin: 0 auto 8px;
   padding: 3px;
   border-radius: 10px;
   background: #1c1c1c;

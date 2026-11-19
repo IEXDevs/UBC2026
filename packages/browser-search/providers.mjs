@@ -144,9 +144,31 @@ export function assertPublicHttpUrl(value) {
   return target;
 }
 
+function browserHttpError(status) {
+  if (status === 429) return new ProviderError('provider_rate_limited', 429);
+  if (status === 401 || status === 403) return new ProviderError('browser_not_configured', 503);
+  if (status === 404) return new ProviderError('browser_endpoint_missing', 502);
+  if (status >= 500 && status <= 599) return new ProviderError('provider_failed', 502);
+  return new ProviderError('provider_rejected', 502);
+}
+
+async function browserRequest(fetcher, url, options) {
+  let response;
+  try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(30000) }); }
+  catch { throw new ProviderError('provider_unavailable'); }
+  if (!response.ok) throw browserHttpError(response.status);
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
+}
+
 export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) {
-  // Browser Run REST API. The older `/browser-rendering/` prefix is not the Live View API.
-  const base = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-run/devtools/browser`;
+  // Live View is served from browser-run. Accounts that still publish the
+  // session API under browser-rendering get that path when browser-run 404s.
+  const prefixes = [
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-run/devtools/browser`,
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-rendering/devtools/browser`,
+  ];
   async function call(path, { method = 'POST', body } = {}) {
     if (!accountId || !apiToken) throw new ProviderError('browser_not_configured', 503);
     const headers = { Authorization: `Bearer ${apiToken}`, Accept: 'application/json' };
@@ -155,13 +177,22 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) 
       headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(body);
     }
-    const result = await jsonRequest(fetcher, base + path, options);
-    if (result && result.success === false) throw new ProviderError('browser_provider_failed');
-    return result?.result ?? result ?? {};
+    let last;
+    for (const base of prefixes) {
+      try {
+        const result = await browserRequest(fetcher, base + path, options);
+        if (result && result.success === false) throw new ProviderError('browser_provider_failed');
+        return result?.result ?? result ?? {};
+      } catch (error) {
+        last = error;
+        if (!(error instanceof ProviderError) || error.code !== 'browser_endpoint_missing') throw error;
+      }
+    }
+    throw last ?? new ProviderError('browser_endpoint_missing', 502);
   }
   return {
     async createSession() {
-      const result = await call('?keep_alive=600000&targets=true', { body: {} });
+      const result = await call('?keep_alive=600000&targets=true');
       if (typeof result.sessionId !== 'string' || !result.sessionId) throw new ProviderError('invalid_provider_response');
       // Do not return provider CDP URLs or privileged default viewer links to the frontend.
       // New sessions start on about:blank until openTab navigates.

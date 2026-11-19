@@ -43,4 +43,7 @@ test('browser errors map Worker codes to setup hints', () => {
   assert.match(browserErrorNote('search_not_configured'), /FIRECRAWL/);
   assert.match(browserErrorNote('not_found'), /not found/i);
   assert.match(browserErrorNote('concurrency_limit'), /Release/);
+  assert.match(browserErrorNote('provider_failed'), /Browser Run failed/);
+  assert.match(browserErrorNote('browser_not_configured'), /CLOUDFLARE_API_TOKEN/);
+  assert.doesNotMatch(browserErrorNote('provider_failed'), /Turnstile/);
 });

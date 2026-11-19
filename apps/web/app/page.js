@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
+import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
 import AgentThread from '../components/AgentThread';
@@ -365,8 +366,35 @@ function transferFailure(body, handle) {
   return 'The send did not post.';
 }
 
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length > 12000) return null;
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function DepositSigner({ signerRef }) {
+  const { signTransaction } = useSignTransaction();
+  const { wallets } = useWallets();
+  useEffect(() => {
+    signerRef.current = { signTransaction, wallets };
+  }, [signTransaction, wallets, signerRef]);
+  return null;
+}
+
 function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, onRetireWallet = null, privyLive = false }) {
   const toast = useToast();
+  const depositSignerRef = useRef(null);
   const [looks, setLooks] = useState({});
   const [roster, setRoster] = useState({ order: [], extra: [] });
   const [ready, setReady] = useState(false);
@@ -831,10 +859,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     }
   }, [ownerId, getAccessToken]);
   useEffect(() => {
-    if (!devPreview || bots.length === 0) return;
+    if (bots.length === 0) return;
     if (bots.some(item => item.id === activeBot)) return;
     setActiveBot(bots[0].id);
-  }, [devPreview, activeBot, bots]);
+  }, [activeBot, bots]);
   const listedWallets = withoutRetiredWallets(pickWalletList(assigned.wallets, remoteLists.wallets), retiredIds);
   const wallets = devPreview && listedWallets.length === 0 ? previewWallets() : listedWallets;
   const walletAddress = assignedWalletAddress(wallets);
@@ -1086,6 +1114,81 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       try {
         if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
         const token = await getAccessToken?.();
+        if (from.spendable === false) {
+          if (dest.kind !== 'main') {
+            return { ok: false, message: 'A connected wallet sends devnet USDC to the main wallet.' };
+          }
+          const headers = {
+            'content-type': 'application/json',
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+            'x-owner-id': ownerId,
+          };
+          const depositBody = {
+            fromId: from.id,
+            toId: dest.id,
+            fromAddress: from.address,
+            toAddress: dest.address,
+            amount: pending.amount,
+          };
+          const preparedResponse = await fetch('/api/wallets/deposit', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ phase: 'prepare', ...depositBody }),
+          });
+          const prepared = await preparedResponse.json().catch(() => ({}));
+          if (!preparedResponse.ok || typeof prepared.transaction !== 'string') {
+            return { ok: false, message: 'The transfer to the main wallet was not prepared.' };
+          }
+          const signer = depositSignerRef.current;
+          const wallet = (Array.isArray(signer?.wallets) ? signer.wallets : []).find(item => item?.address === from.address);
+          const unsigned = base64ToBytes(prepared.transaction);
+          if (!wallet || !unsigned || typeof signer?.signTransaction !== 'function') {
+            return { ok: false, message: 'Connect that wallet again, then send to the main wallet.' };
+          }
+          let signedBytes;
+          try {
+            const signed = await signer.signTransaction({
+              transaction: unsigned,
+              wallet,
+              chain: 'solana:devnet',
+            });
+            signedBytes = signed?.signedTransaction;
+          } catch {
+            return { ok: false, message: 'The connected wallet did not approve the transfer.' };
+          }
+          if (!(signedBytes instanceof Uint8Array) || signedBytes.length <= 64) {
+            return { ok: false, message: 'The connected wallet did not return a signed transfer.' };
+          }
+          const response = await fetch('/api/wallets/deposit', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ phase: 'broadcast', ...depositBody, signedTransaction: bytesToBase64(signedBytes) }),
+          });
+          const body = await response.json().catch(() => ({}));
+          const where = dest.label || clipAddress(dest.address);
+          if (body.error === 'wallet_frozen') return { ok: false, message: 'That wallet is frozen.' };
+          if (body.error === 'transaction_mismatch') return { ok: false, message: 'The signed transfer did not match the deposit.' };
+          if (!response.ok || !body.signature) return { ok: false, message: `The send to ${where} did not post.` };
+          const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
+          return {
+            ok: true,
+            message: `Sent ${amountLabel} to the main wallet.`,
+            signature: body.signature,
+            receipt: {
+              id: `deposit_${body.signature}`,
+              at: new Date().toISOString(),
+              title: `Send ${amountLabel}`,
+              lines: [
+                { label: 'To', value: 'Main wallet' },
+                { label: 'Amount', value: amountLabel },
+                { label: 'Signature', value: body.signature },
+                { label: 'Network', value: 'devnet execution, mainnet pricing' },
+              ],
+              signature: body.signature,
+              cluster: 'devnet',
+            },
+          };
+        }
         const response = await fetch('/api/wallets/move', {
           method: 'POST',
           headers: {
@@ -1626,6 +1729,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const noAgents = bots.length === 0;
   return (
     <>
+    {privyLive ? <DepositSigner signerRef={depositSignerRef} /> : null}
     <div
       className={`shell${noAgents ? ' is-empty' : ''}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}${setupStep === 'handle' || claimWelcome ? ' is-claim' : ''}`}
       style={{ '--side-w': `${sideWidth}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
