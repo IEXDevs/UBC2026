@@ -84,7 +84,7 @@ import SpendAcceptance from '../components/SpendAcceptance';
 import DeskLock from '../components/DeskLock';
 import { useHostedPreview } from '../components/HostedPreview';
 import { usePrivyPublic } from '../components/PrivyRoot';
-import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
+import { developerPreviewAllowed, hasRestorablePrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
 import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-preview.mjs';
 import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
@@ -142,7 +142,7 @@ function applyWalletFallback(user, body, setLiveWallets, setWalletNote, setWalle
 function SessionHold() {
   const [label, setLabel] = useState('');
   useEffect(() => {
-    if (hasStoredPrivySession(window.localStorage)) setLabel('Restoring your session');
+    if (hasRestorablePrivySession(window.localStorage, document.cookie)) setLabel('Restoring your session');
   }, []);
   return <div className="sign-in no-copy" aria-busy="true" role="status" onCopy={blockCopy} onCut={blockCopy}>{label}</div>;
 }

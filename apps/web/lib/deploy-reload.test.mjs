@@ -10,7 +10,9 @@ import {
   checkDeploy,
   cleanBuildQuery,
   clearBrowserCaches,
+  isPrivyAuthRequest,
   reloadUrl,
+  waitForStablePrivySession,
   watchDeploy,
 } from './deploy-reload.mjs';
 
@@ -153,6 +155,95 @@ test('the watcher checks immediately and when the tab is shown', () => {
   assert.deepEqual(calls, ['/']);
   visible();
   stop();
+});
+
+function keyedStorage(seed = {}) {
+  const values = new Map(Object.entries(seed));
+  return {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(String(key), String(value)); },
+    removeItem(key) { values.delete(String(key)); },
+    get length() { return values.size; },
+    key(index) { return [...values.keys()][index] ?? null; },
+  };
+}
+
+/**
+ * Achieves: verifies a deploy reload waits for the Privy write, locks wallet unlocks, and keeps the login.
+ * Fails when: settle runs after navigation, or a reload deletes privy:refresh_token or the desk password verifier.
+ * Oracle: order is settle then replace; privy:refresh_token and maelstrom.desk-lock stay; desk-open and desk-grant are removed.
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
+test('a deploy reload waits for the Privy write, locks wallet unlocks, and keeps the login', async () => {
+  const order = [];
+  const persistent = keyedStorage({
+    'privy:refresh_token': '"refresh"',
+    'maelstrom.desk-open.did:privy:abc': '{"v":1}',
+    'maelstrom.desk-grant.did:privy:abc': '{"v":1}',
+    'maelstrom.desk-lock.did:privy:abc': '{"v":1}',
+  });
+  const result = await checkDeploy({
+    localId: 'aaaaaaa',
+    href: 'https://maelstrom.example/',
+    session: memorySession(),
+    persistent,
+    settle: async () => { order.push('settle'); },
+    fetcher: async () => ({ ok: true, json: async () => ({ id: 'bbbbbbb' }) }),
+    replace: () => { order.push('replace'); },
+  });
+  assert.deepEqual(result, { reload: true, id: 'bbbbbbb' });
+  assert.deepEqual(order, ['settle', 'replace']);
+  assert.equal(persistent.getItem('privy:refresh_token'), '"refresh"');
+  assert.equal(persistent.getItem('maelstrom.desk-lock.did:privy:abc'), '{"v":1}');
+  assert.equal(persistent.getItem('maelstrom.desk-open.did:privy:abc'), null);
+  assert.equal(persistent.getItem('maelstrom.desk-grant.did:privy:abc'), null);
+
+  let replaced = '';
+  const thrown = await checkDeploy({
+    localId: 'aaaaaaa',
+    href: 'https://maelstrom.example/desk',
+    session: memorySession(),
+    settle: async () => { throw new Error('slow'); },
+    fetcher: async () => ({ ok: true, json: async () => ({ id: 'ccccccc' }) }),
+    replace: (url) => { replaced = url; },
+  });
+  assert.equal(thrown.reload, true);
+  assert.equal(replaced, `https://maelstrom.example/desk?${BUILD_QUERY}=ccccccc`);
+});
+
+/**
+ * Achieves: verifies the reload keeps waiting while Privy is writing or refreshing.
+ * Fails when: a quiet window closes during an in-flight refresh or a storage write.
+ * Oracle: wait returns true only after the refresh goes idle and the new token has been quiet.
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
+test('the reload keeps waiting while Privy is writing or refreshing', async () => {
+  assert.equal(isPrivyAuthRequest('https://auth.privy.io/api/v1/sessions'), true);
+  assert.equal(isPrivyAuthRequest('https://auth.privy.io'), true);
+  assert.equal(isPrivyAuthRequest('https://maelstrom.iexdevs.com/api/privy-auth/api/v1/sessions'), true);
+  assert.equal(isPrivyAuthRequest('https://dev.maelstrom.iexdevs.com/api/privy-auth/api/v1/sessions'), true);
+  assert.equal(isPrivyAuthRequest('https://maelstrom.example/api/build'), false);
+
+  let time = 0;
+  let idle = false;
+  const storage = keyedStorage({ 'privy:refresh_token': 'old' });
+  const ready = await waitForStablePrivySession({
+    storage,
+    idle: () => idle,
+    quietMs: 100,
+    timeoutMs: 1000,
+    now: () => time,
+    sleep: async (ms) => {
+      time += ms;
+      if (time === 80) storage.setItem('privy:refresh_token', 'new');
+      if (time === 200) idle = true;
+    },
+  });
+  assert.equal(ready, true);
+  assert.equal(storage.getItem('privy:refresh_token'), 'new');
+  assert.ok(time >= 200);
 });
 
 /**

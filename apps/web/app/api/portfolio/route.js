@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { choosePortfolioRpc, loadPortfolio, PortfolioError } from '../../../lib/portfolio.mjs';
+import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { cloudflareWorkerEnv } from '../../../lib/wallets-cloudflare.mjs';
 import { missingWalletSecrets, resolvePrivyAppId, walletsFromPrivyUser } from '../../../lib/wallet-provision.mjs';
@@ -58,8 +59,7 @@ function walletErrorCode(error) {
 }
 
 export async function GET(request) {
-  const header = request.headers.get('authorization') ?? '';
-  const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const accessToken = accessTokenFromRequest(request);
   if (!accessToken) {
     return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }

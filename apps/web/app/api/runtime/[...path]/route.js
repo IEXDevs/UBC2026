@@ -1,6 +1,7 @@
 import { readRootEnv } from '../../../../lib/root-env.mjs';
 import { localHandleLookup, localProfileResponse, useLocalProfileDirectory } from '../../../../lib/profile-directory.mjs';
 import { fetchAgentRuntime } from '../../../../lib/runtime-fetch.mjs';
+import { readPrivyTokenCookie } from '../../../../lib/privy-cookie-session.mjs';
 import { runtimeProxyTarget } from '../../../../lib/runtime-proxy.mjs';
 
 export const runtime = 'nodejs';
@@ -56,7 +57,8 @@ async function proxy(request, context) {
   if (target.error) return noStore({ error: 'not_found' }, 404);
 
   const headers = new Headers();
-  const auth = request.headers.get('authorization');
+  const cookieToken = readPrivyTokenCookie(request.headers.get('cookie'));
+  const auth = request.headers.get('authorization') || (cookieToken ? `Bearer ${cookieToken}` : '');
   const owner = request.headers.get('x-owner-id');
   const contentType = request.headers.get('content-type');
   // Privy users/me on the Worker needs a browser Origin (wallet create).

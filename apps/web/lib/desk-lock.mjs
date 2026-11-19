@@ -247,6 +247,29 @@ export function clearDeskSession(storage, ownerId) {
   }
 }
 
+const OPEN_WALLET_KEY = /^maelstrom\.desk-(?:open|grant)\./;
+
+/** Drop unlock and spend-grant windows. The password verifier stays. */
+export function lockOpenWallets(storage) {
+  if (!storage || typeof storage.removeItem !== 'function') return 0;
+  if (typeof storage.length !== 'number' || typeof storage.key !== 'function') return 0;
+  const keys = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (OPEN_WALLET_KEY.test(String(key || ''))) keys.push(String(key));
+  }
+  let removed = 0;
+  for (const key of keys) {
+    try {
+      storage.removeItem(key);
+      removed += 1;
+    } catch {
+      /* one stuck key still leaves the others locked */
+    }
+  }
+  return removed;
+}
+
 /** Shift+L locks the wallet. Shift+U opens the unlock prompt. */
 export function walletHotkey(event) {
   if (!event || event.shiftKey !== true || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return '';

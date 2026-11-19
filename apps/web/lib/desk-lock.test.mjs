@@ -4,6 +4,7 @@ import {
   DESK_LOCK_IDLE_MS,
   clearDeskGrant,
   clearDeskSession,
+  lockOpenWallets,
   createDeskLock,
   deskLockStorageKey,
   deskSessionUntil,
@@ -139,4 +140,33 @@ test('a wallet unlock lasts thirty minutes across a reload and then locks', () =
   assert.equal(clearDeskGrant(storage, 'did:privy:abc'), true);
   assert.equal(readDeskGrant(storage, 'did:privy:abc', start), null);
   assert.equal(writeDeskLock(broken, 'did:privy:abc', { v: 1, iterations: 120000, salt: 'aa', hash: 'bb' }), false);
+});
+
+/**
+ * Achieves: verifies a deploy lock drops unlock windows and keeps the password verifier.
+ * Fails when: lockOpenWallets removes maelstrom.desk-lock or leaves maelstrom.desk-open.
+ * Oracle: open and grant keys are gone; the lock verifier remains.
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
+test('a deploy lock drops unlock windows and keeps the password verifier', () => {
+  const values = new Map([
+    ['maelstrom.desk-open.did:privy:abc', '{"v":1}'],
+    ['maelstrom.desk-grant.did:privy:abc', '{"v":1}'],
+    ['maelstrom.desk-lock.did:privy:abc', '{"v":1}'],
+    ['privy:refresh_token', '"refresh"'],
+  ]);
+  const storage = {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, String(value)); },
+    removeItem(key) { values.delete(key); },
+    get length() { return values.size; },
+    key(index) { return [...values.keys()][index] ?? null; },
+  };
+  assert.equal(lockOpenWallets(storage), 2);
+  assert.equal(storage.getItem('maelstrom.desk-open.did:privy:abc'), null);
+  assert.equal(storage.getItem('maelstrom.desk-grant.did:privy:abc'), null);
+  assert.equal(storage.getItem('maelstrom.desk-lock.did:privy:abc'), '{"v":1}');
+  assert.equal(storage.getItem('privy:refresh_token'), '"refresh"');
+  assert.equal(lockOpenWallets(memoryStorage()), 0);
 });

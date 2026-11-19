@@ -13,6 +13,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { patchPrivyCookieSession } from './patch-privy-cookie-session.mjs';
 
 const SVG_PROP_REWRITES = Object.freeze([
   [/"fill-rule"\s*:/g, 'fillRule:'],
@@ -123,7 +124,7 @@ function patchTree(dir, rewrite) {
 export function patchPrivySvgProps(repoRoot) {
   const privy = patchTree(
     path.join(repoRoot, 'node_modules', '@privy-io', 'react-auth', 'dist'),
-    (source) => closeOAuthLoginModal(closePasswordlessLoginModal(rewriteSvgDomProps(source))),
+    (source) => patchPrivyCookieSession(closeOAuthLoginModal(closePasswordlessLoginModal(rewriteSvgDomProps(source)))),
   );
   const turnstile = patchTree(
     path.join(repoRoot, 'node_modules', '@marsidev', 'react-turnstile'),

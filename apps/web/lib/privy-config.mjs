@@ -85,6 +85,9 @@ export function privyProviderProps({ appId, clientId } = {}) {
         solana: { ...SOLANA_LOGIN.embeddedWallets.solana },
       },
       mfa: { ...SOLANA_LOGIN.mfa },
+      // Do not mirror the access token into a document.cookie the page can read.
+      // The refresh token is stored by /api/privy-auth, not by this page.
+      sessions: { cookieWriteBehavior: 'never' },
     },
   };
   const client = publicId(clientId);

@@ -123,3 +123,29 @@ test('getPrivyAccessToken falls back to storage if Privy throws', async () => {
   }, storage);
   assert.equal(token, PAT);
 });
+
+/**
+ * Achieves: verifies an HttpOnly session cookie may refresh without a local refresh token.
+ * Fails when: privy-session is ignored, or a readable privy-token marker is treated as that session.
+ * Oracle: getAccessToken runs for privy-session=1 and is skipped for privy-token=t.
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
+test('an HttpOnly session cookie may refresh without a local refresh token', async () => {
+  const storage = memoryStorage();
+  let called = false;
+  const token = await getPrivyAccessToken(async () => {
+    called = true;
+    return 'from-cookie';
+  }, storage, 'privy-session=1');
+  assert.equal(called, true);
+  assert.equal(token, 'from-cookie');
+
+  let markerCalled = false;
+  const kept = await getPrivyAccessToken(async () => {
+    markerCalled = true;
+    return 'nope';
+  }, storage, 'privy-token=t');
+  assert.equal(markerCalled, false);
+  assert.equal(kept, '');
+});
