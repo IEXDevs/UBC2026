@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useEffect, useMemo } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
 import { privyProviderProps } from '../lib/privy-config.mjs';
@@ -21,6 +21,11 @@ export function usePrivyPublic() {
  */
 export default function PrivyRoot({ appId = '', clientId = '', children }) {
   const props = privyProviderProps({ appId, clientId });
+  // A new connector list on each render drops an in-flight Phantom prompt.
+  const solanaConnectors = useMemo(
+    () => toSolanaWalletConnectors({ shouldAutoConnect: false }),
+    [],
+  );
   const value = {
     configured: props !== null,
     appId: props?.appId || '',
@@ -46,7 +51,7 @@ export default function PrivyRoot({ appId = '', clientId = '', children }) {
     config: {
       ...props.config,
       externalWallets: {
-        solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) },
+        solana: { connectors: solanaConnectors },
       },
     },
   };
