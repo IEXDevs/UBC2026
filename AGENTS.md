@@ -67,9 +67,11 @@ If a Notion search does not show "UBC Conference AIgent idea", ask for the board
 
 - Maelstrom's voice is casual and uses no emojis. Assets, amounts, and destinations stay exact.
 - The glass UI stays distinct from Grok Bot: the sidebar stays expanded, user-facing copy does not say "bot", and agent icons are distinct.
-- Spend permission defaults to ask every time and is enforced. Thinking controls follow the selected model's API options.
-- Do not store seed phrases or private keys. Onboarding requires a download and a re-entry, and warns that a lost phrase cannot be recovered.
-- Seed entry is a 12-word grid. Space moves to the next word.
+- Spend permission defaults to ask every time and is enforced. Thinking controls follow the selected model's API options. Permission UI must show the selected mode and let the owner edit the Review by AI USDC maximum.
+- Do not store seed phrases or private keys. Onboarding order is permissions first, then seed download and re-entry, with a lost-phrase warning. Seed confirm and other onboarding exits must soft-fade with clear success feedback rather than abrupt unmount. Seed entry is a 12-word grid; Space moves to the next word. Show the agent name on the color-picking step.
+- The agent detail pane must mirror the selected agent (icon, name, permissions, working status), keep computer mid-pane, and give the files/images strip clear hover and slide-select affordances.
+- Prefer deploying Workers via local CLI rather than Cloudflare Builds when build minutes would be burned.
+- Send recipients accept a wallet address, @username, or .sol SNS via dropdown or typed entry. Resolve before submit and flag unresolved names or invalid addresses; destination labels use first5...last5 plus agent or wallet name when known.
 
 ## Learned Workspace Facts
 
@@ -78,5 +80,6 @@ If a Notion search does not show "UBC Conference AIgent idea", ask for the board
 - Onboarding explains Ask, Review by AI, and Full permissions, and stores a Review by AI USDC maximum. A hidden server verifier must match amount, asset, cluster, and recipient before approval mode. At or under the cap the spend can continue. Above the cap the owner confirms. Ask and Full still require the confirm slide.
 - Privy Solana addresses are cluster-agnostic and are the user's mainnet address. Broadcasts require the Solana devnet genesis hash. Sends, receives, and cards are meant to use that same address on mainnet later. Laso card funding settles only on Solana mainnet or Base and cannot complete on devnet.
 - A reloadable-card load checks the merchant list and advises the owner before any transfer. The Solana payment uses the exact amount and the exact payTo from the quote. The second agent must approve before approval mode.
-- Signup requires an SNS domain claim. Wallet addresses show the first 5 and last 5 characters and copy on click.
+- Signup requires an SNS domain claim. Wallet addresses show the first 5 and last 5 characters and copy on click. Owners can add external wallets to fund the Maelstrom wallet.
 - Logs may include activity other than private keys and seed phrases. Row access stays limited to that owner.
+- ElevenLabs voice Talk sends custom LLM extra body (permission and agent context) and requires that override enabled on the agent; without it sessions fail immediately.

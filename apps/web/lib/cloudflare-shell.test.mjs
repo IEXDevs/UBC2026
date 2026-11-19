@@ -28,6 +28,8 @@ test('OpenNext wrangler config targets Cloudflare', () => {
   assert.equal(wrangler.env.dev.services[1].binding, 'AGENT_RUNTIME');
   assert.equal(wrangler.env.dev.services[1].service, 'maelstrom-agent-runtime');
   assert.equal(wrangler.vars, undefined);
+  assert.equal(wrangler.cache?.enabled, true);
+  assert.equal(wrangler.env.dev.cache?.enabled, true);
 
   const openNext = readFileSync(join(root, 'open-next.config.ts'), 'utf8');
   assert.match(openNext, /defineCloudflareConfig/);
@@ -35,11 +37,14 @@ test('OpenNext wrangler config targets Cloudflare', () => {
   const headers = readFileSync(join(root, 'public/_headers'), 'utf8');
   assert.match(headers, /\/_next\/static\/\*/);
   assert.match(headers, /Cache-Control: public,max-age=31536000,immutable/);
+  assert.match(headers, /\/api\/build/);
+  assert.doesNotMatch(headers, /Cache-Control:\s*no-cache/);
 
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   assert.match(pkg.scripts.build, /next build/);
   assert.match(pkg.scripts.preview, /opennextjs-cloudflare build && opennextjs-cloudflare preview/);
-  assert.match(pkg.scripts.deploy, /opennextjs-cloudflare build && opennextjs-cloudflare deploy/);
+  assert.match(pkg.scripts['deploy:prod'], /opennextjs-cloudflare build && opennextjs-cloudflare deploy/);
+  assert.match(pkg.scripts.deploy, /deploy:prod/);
   assert.match(pkg.scripts['deploy:dev'], /--env=dev/);
   assert.equal(wrangler.env.dev.name, 'maelstrom-web-dev');
   assert.equal(wrangler.env.dev.routes[0].pattern, 'dev.maelstrom.iexdevs.com');

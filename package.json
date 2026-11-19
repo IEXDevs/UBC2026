@@ -2,7 +2,13 @@
   "name": "ubc2026",
   "private": true,
   "workspaces": ["packages/*", "apps/*"],
-  "scripts": { "dev": "npm run dev -w @ubc2026/web", "test": "npm test --workspaces --if-present && node --test supabase/*.test.mjs scripts/*.test.mjs", "postinstall": "node scripts/patch-privy-svg-props.mjs" },
+  "scripts": {
+    "dev": "npm run dev -w @ubc2026/web",
+    "test": "npm test --workspaces --if-present && node --test supabase/*.test.mjs scripts/*.test.mjs",
+    "postinstall": "node scripts/patch-privy-svg-props.mjs",
+    "deploy:web:dev": "npm run deploy:dev -w @ubc2026/web",
+    "deploy:web:prod": "npm run deploy:prod -w @ubc2026/web"
+  },
   "engines": { "node": ">=20" },
   "devDependencies": { "@electric-sql/pglite": "^0.5.16" }
 }

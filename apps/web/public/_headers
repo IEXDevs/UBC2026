@@ -1,6 +1,3 @@
-/*
-  Cache-Control: no-cache
-
 /api/build
   Cache-Control: no-store
 

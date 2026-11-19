@@ -28,17 +28,29 @@ Set `NEXT_PUBLIC_AGENT_RUNTIME_URL` to the deployed agent-runtime origin (for ex
 
 The Main pane leads with Live View plus chat and the voice composer. Overview and Security stay available in the dock. Shopping bots get a prepare panel for sandbox/Laso. Talk uses `@elevenlabs/client` when `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` (and the Worker `ELEVENLABS_*` secrets) are set.
 
-Hosting is OpenNext on Cloudflare Workers (`wrangler.jsonc`, `open-next.config.ts`). This package does not deploy by itself.
+Hosting is OpenNext on Cloudflare Workers (`wrangler.jsonc`, `open-next.config.ts`). Deploy from your machine (local OpenNext build + `wrangler deploy`) — that does **not** spend Cloudflare Builds minutes.
 
 - Production worker `maelstrom-web` → `maelstrom.iexdevs.com`
-- Dev worker `maelstrom-web-dev` → `dev.maelstrom.iexdevs.com` (`npm run deploy:dev -w @ubc2026/web`)
+- Dev worker `maelstrom-web-dev` → `dev.maelstrom.iexdevs.com`
 - Both bind `AGENT_RUNTIME` → `maelstrom-agent-runtime` (`runtime.maelstrom.iexdevs.com`)
 - Put secrets on the **matching** worker (`wrangler secret put NAME` vs `wrangler secret put NAME --env=dev`). `NEXT_PUBLIC_PRIVY_APP_ID` must match `PRIVY_APP_ID`.
+
+From the repo root:
+
+```bash
+npm run deploy:web:dev    # → maelstrom-web-dev / https://dev.maelstrom.iexdevs.com
+npm run deploy:web:prod   # → maelstrom-web / https://maelstrom.iexdevs.com
+```
+
+Same thing from this package:
+
+```bash
+npm run deploy:dev
+npm run deploy:prod
+```
 
 ```bash
 npm run dev -w @ubc2026/web
 npm test -w @ubc2026/web
 npm run preview -w @ubc2026/web
-npm run deploy -w @ubc2026/web
-npm run deploy:dev -w @ubc2026/web
 ```

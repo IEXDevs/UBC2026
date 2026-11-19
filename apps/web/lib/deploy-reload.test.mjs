@@ -158,7 +158,7 @@ test('the watcher checks immediately and when the tab is shown', () => {
 /**
  * Achieves: verifies the app publishes the build id and mounts the reload watcher.
  * Fails when: resolveBuildId / NEXT_PUBLIC_BUILD_ID / DeployReload / no-store / _headers cache rules drift.
- * Oracle: next.config resolves build id; layout mounts DeployReload; /api/build is no-store; _headers cover /api/build and /_next/static.
+ * Oracle: next.config resolves build id; layout mounts DeployReload; /api/build is no-store; _headers keep /api/build no-store and hashed static immutable (no blanket /* no-cache).
  * Side effects / state checked: source-text / config snapshot.
  * Gaps: source snapshot only — runtime UI/HTTP not executed.
  */
@@ -173,8 +173,9 @@ test('the app publishes the build id and mounts the reload watcher', () => {
   assert.match(layout, /<DeployReload \/>/);
   assert.match(route, /no-store/);
   assert.match(headers, /\/api\/build/);
+  assert.match(headers, /no-store/);
   assert.match(headers, /\/_next\/static\/\*/);
-  const staticAt = headers.indexOf('/_next/static/*');
-  const broadAt = headers.indexOf('/*');
-  assert.ok(broadAt >= 0 && staticAt > broadAt);
+  assert.match(headers, /public,max-age=31536000,immutable/);
+  assert.doesNotMatch(headers, /^\/\*\s*$/m);
+  assert.doesNotMatch(headers, /Cache-Control:\s*no-cache/);
 });

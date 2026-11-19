@@ -24,6 +24,9 @@
   "observability": {
     "enabled": true
   },
+  "cache": {
+    "enabled": true
+  },
   "routes": [
     {
       "pattern": "maelstrom.iexdevs.com",
@@ -34,6 +37,9 @@
     "dev": {
       "name": "maelstrom-web-dev",
       "workers_dev": false,
+      "cache": {
+        "enabled": true
+      },
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",

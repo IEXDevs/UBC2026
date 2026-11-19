@@ -198,6 +198,13 @@ Devnet SOL: [faucet.solana.com](https://faucet.solana.com/). Devnet USDC: [Circl
 
 Worker config: `apps/agent-runtime/wrangler.jsonc`. UI config: `apps/web/wrangler.jsonc`.
 
+Local web deploys (build on your machine, upload with Wrangler — no Cloudflare Builds minutes):
+
+```bash
+npm run deploy:web:dev    # maelstrom-web-dev → https://dev.maelstrom.iexdevs.com
+npm run deploy:web:prod   # maelstrom-web → https://maelstrom.iexdevs.com
+```
+
 ```bash
 npm run dev -w @ubc2026/web
 npm test -w @ubc2026/agent-runtime
