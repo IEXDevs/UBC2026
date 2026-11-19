@@ -63,6 +63,7 @@ test('refresh keeps a stored session off the login page and the unlock field is 
   const desk = readFileSync(join(root, 'components/DeskLock.js'), 'utf8');
   const config = readFileSync(join(root, 'lib/privy-config.mjs'), 'utf8');
   assert.match(page, /showSessionHold/);
+  assert.match(page, /providerReady/);
   assert.match(page, /hasStoredPrivySession/);
   assert.match(page, /onDeveloperPreview=\{devAllowed \? enterDevPreview : null\}/);
   assert.match(page, /const hostedPreview = useHostedPreview\(\)/);

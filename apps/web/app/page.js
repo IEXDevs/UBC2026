@@ -75,7 +75,7 @@ function readAccessToken(getAccessToken) {
 const CONNECTORS = shellConnectors();
 
 export default function HomePage() {
-  const { configured } = usePrivyPublic();
+  const { configured, providerReady } = usePrivyPublic();
   if (!configured) {
     return (
       <Shell
@@ -86,6 +86,7 @@ export default function HomePage() {
       />
     );
   }
+  if (!providerReady) return <SessionHold />;
   return <AuthedShell />;
 }
 

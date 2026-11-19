@@ -101,7 +101,12 @@ test('owner id comes from an authenticated Privy user', () => {
 test('PrivyRoot pins apiUrl and does not mount a same-origin auth proxy', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const source = readFileSync(join(root, 'components/PrivyRoot.js'), 'utf8');
+  const page = readFileSync(join(root, 'app/page.js'), 'utf8');
   assert.match(source, /apiUrl: props\.apiUrl/);
   assert.match(source, /toSolanaWalletConnectors/);
+  assert.match(source, /if \(!props \|\| !browser\)/);
+  assert.match(source, /providerReady: props !== null && browser/);
+  assert.match(page, /providerReady/);
+  assert.match(page, /if \(!providerReady\) return <SessionHold \/>/);
   assert.doesNotMatch(source, /['"`]\/api\/privy-auth/);
 });
