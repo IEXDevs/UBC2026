@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { shoppingComparisonView } from '../lib/shopping-comparison.mjs';
+import { sandboxSettleBody, shoppingComparisonView } from '../lib/shopping-comparison.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
+import SlideCommit from './bits/SlideCommit';
 
 /**
  * Shopping bot controls (Isaac / 6B): prepare sandbox or Laso challenge via the Worker.
@@ -13,14 +14,18 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [armed, setArmed] = useState(false);
+  const [settled, setSettled] = useState(false);
 
   if (bot?.type !== 'shopping') return null;
 
   async function prepare(provider) {
     setBusy(true);
     setError(null);
-    setResult(null);
-    try {
+      setResult(null);
+      setArmed(false);
+      setSettled(false);
+      try {
       const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/shopping/prepare`);
       if (!ownerId || !url) {
         setError(ownerId ? 'This agent cannot prepare a purchase.' : 'Sign in to prepare a purchase');
@@ -93,6 +98,46 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
     }
   }
 
+  async function settle(prepared) {
+    const body = sandboxSettleBody(prepared, bot);
+    const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/shopping/settle`);
+    if (!body || !url || !ownerId) {
+      setError(ownerId ? 'This proposal cannot be bought from here.' : 'Sign in to approve a purchase');
+      setArmed(false);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: await ownerAuthHeaders(ownerId, getAccessToken, {
+          'content-type': 'application/json',
+        }),
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data.error === 'signer_not_configured'
+          ? 'Buying needs the signer on the server.'
+          : 'The sandbox buy did not go through.');
+        setArmed(false);
+        return;
+      }
+      setSettled(true);
+      setArmed(false);
+      onEvent?.({
+        kind: 'tool.call',
+        summary: `Sandbox order ${data.order?.orderId || 'placed'}`,
+      });
+    } catch {
+      setError('The sandbox buy did not go through.');
+      setArmed(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="panel" aria-label="Shopping">
       <h2>Shopping</h2>
@@ -109,12 +154,24 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
         </button>
       </div>
       {error ? <p className="hint" role="alert">{error}</p> : null}
-      {result ? <ShoppingProposal result={result} /> : null}
+      {result ? (
+        <ShoppingProposal
+          result={result}
+          bot={bot}
+          busy={busy}
+          armed={armed}
+          settled={settled}
+          onArm={() => { setError(null); setArmed(true); }}
+          onCancel={() => setArmed(false)}
+          onSettle={() => settle(result)}
+        />
+      ) : null}
     </section>
   );
 }
 
-function ShoppingProposal({ result }) {
+function ShoppingProposal({ result, bot, busy, armed, settled, onArm, onCancel, onSettle }) {
+  const settleBody = sandboxSettleBody(result, bot);
   const comparison = shoppingComparisonView(result);
   return (
     <>
@@ -158,6 +215,26 @@ function ShoppingProposal({ result }) {
           </div>
         ) : null}
       </dl>
+      {settled ? <p className="hint" role="status">Sandbox order is in.</p> : null}
+      {!settled && settleBody ? (
+        armed ? (
+          <div className="security-confirm">
+            <p>Slide to buy this sandbox item.</p>
+            <SlideCommit
+              label="Slide to confirm"
+              doneLabel="Buying"
+              disabled={busy}
+              resetKey={settleBody.itemId}
+              onCommit={onSettle}
+            />
+            <button type="button" className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+          </div>
+        ) : (
+          <div className="live-actions">
+            <button className="ghost" type="button" disabled={busy} onClick={onArm}>Approve sandbox buy</button>
+          </div>
+        )
+      ) : null}
     </>
   );
 }

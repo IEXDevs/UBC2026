@@ -20,7 +20,7 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-export default function TokenScreen({ open, address = '', onSend, onReceive, onSwap }) {
+export default function TokenScreen({ open, address = '', onSend, onReceive, onSwap, previewPortfolio = null }) {
   const { user, getAccessToken } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
@@ -30,6 +30,12 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
 
   useEffect(() => {
     if (!open) return undefined;
+    if (previewPortfolio) {
+      setPortfolio(previewPortfolio);
+      setError('');
+      setLoading(false);
+      return undefined;
+    }
     let stopped = false;
     setLoading(true);
     (async () => {
@@ -69,7 +75,7 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
       }
     })();
     return () => { stopped = true; };
-  }, [open, accounts, getAccessToken, user?.id]);
+  }, [open, accounts, getAccessToken, user?.id, previewPortfolio]);
 
   const scoped = address && Array.isArray(portfolio?.wallets)
     ? { ...portfolio, wallets: portfolio.wallets.filter(row => row?.address === address) }

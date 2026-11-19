@@ -133,6 +133,52 @@ export function positionsFromStatus(botId, body) {
   return out;
 }
 
+/**
+ * Saved paper-position rows are the book. A status mark for the same mint
+ * supplies the latest PnL and quote. Rows that are not base-unit amounts are dropped.
+ */
+export function positionsFromBook(items, marks = []) {
+  const markByKey = new Map();
+  for (const mark of Array.isArray(marks) ? marks : []) {
+    if (mark && typeof mark.botId === 'string' && typeof mark.mint === 'string' && mark.mint) {
+      markByKey.set(`${mark.botId}:${mark.mint}`, mark);
+    }
+  }
+  const out = [];
+  for (const row of Array.isArray(items) ? items : []) {
+    const amount = typeof row?.quantity === 'string' && AMOUNT.test(row.quantity) && row.quantity !== '0'
+      ? row.quantity
+      : null;
+    if (!amount || typeof row.id !== 'string' || !BOT_ID.test(row.botId)) continue;
+    const mint = typeof row.mint === 'string' ? row.mint : '';
+    const mark = markByKey.get(`${row.botId}:${mint}`) || null;
+    const symbol = typeof row.symbol === 'string' && row.symbol.trim() ? row.symbol.trim().slice(0, 16) : '';
+    const entry = typeof row.entryMicroUsdc === 'string' && AMOUNT.test(row.entryMicroUsdc) && row.entryMicroUsdc !== '0'
+      ? row.entryMicroUsdc
+      : null;
+    const realized = typeof row.realizedMicroUsdc === 'string' && SIGNED.test(row.realizedMicroUsdc)
+      ? row.realizedMicroUsdc
+      : '0';
+    out.push({
+      id: row.id,
+      botId: row.botId,
+      asset: symbol || mark?.asset || shortMint(mint),
+      mint: mint || null,
+      amount,
+      decimals: Number.isInteger(mark?.decimals) ? mark.decimals : 6,
+      pnlMicroUsdc: mark && SIGNED.test(mark.pnlMicroUsdc) ? mark.pnlMicroUsdc : realized,
+      quoteSource: mark?.quoteSource || 'paper book',
+      ...(mark?.venue ? { venue: mark.venue } : {}),
+      market: mark?.market || (row.cluster === 'mainnet' ? 'mainnet price' : 'devnet book'),
+      side: mark?.side || (typeof row.mode === 'string' && row.mode.trim() ? row.mode.trim().slice(0, 16) : 'supply'),
+      ...(mark?.mark ? { mark: mark.mark } : {}),
+      notionalMicroUsdc: entry || mark?.notionalMicroUsdc || null,
+      walletId: mark?.walletId || null,
+    });
+  }
+  return out;
+}
+
 function livePayment(row) {
   return Boolean(row
     && typeof row.id === 'string'
@@ -164,16 +210,18 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
   const botsUrl = ownerApiUrl('/api/bots', runtimeBase);
   const walletsUrl = ownerApiUrl('/api/wallets', runtimeBase);
   const paymentsUrl = ownerApiUrl('/api/payments', runtimeBase);
+  const positionsUrl = ownerApiUrl('/api/positions', runtimeBase);
   if (!botsUrl || !walletsUrl || !paymentsUrl) {
     return { bots: [], wallets: [], payments: [], positions: [], paymentCrossCheck: [], source: 'unsigned' };
   }
-  const [botsRes, walletsRes, paymentsRes] = await Promise.all([
+  const [botsRes, walletsRes, paymentsRes, positionsRes] = await Promise.all([
     getJson(botsUrl, headers, fetcher),
     getJson(walletsUrl, headers, fetcher),
     getJson(paymentsUrl, headers, fetcher),
+    positionsUrl ? getJson(positionsUrl, headers, fetcher) : Promise.resolve({ ok: false, body: {} }),
   ]);
   const bots = botsRes.ok && Array.isArray(botsRes.body?.items) ? botsRes.body.items : [];
-  const positions = [];
+  const marks = [];
   await Promise.all(bots.slice(0, 30).map(async (bot) => {
     if (!bot || !BOT_ID.test(bot.id)) return;
     const url = ownerApiUrl(`/bots/${encodeURIComponent(bot.id)}/status`, runtimeBase);
@@ -182,8 +230,12 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
     if (!status.ok) return;
     const loop = publicCardLoop(status.body?.cardLoop);
     if (loop) bot.loop = loop;
-    positions.push(...positionsFromStatus(bot.id, status.body));
+    marks.push(...positionsFromStatus(bot.id, status.body));
   }));
+  const book = positionsRes.ok && Array.isArray(positionsRes.body?.items)
+    ? positionsFromBook(positionsRes.body.items, marks)
+    : [];
+  const positions = book.length > 0 ? book : marks;
   const source = botsRes.body?.source || walletsRes.body?.source || paymentsRes.body?.source || 'unknown';
   return {
     source,

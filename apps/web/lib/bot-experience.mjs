@@ -188,6 +188,33 @@ function memoMatches(decision) {
  * Public explanation from the decision record and tool timeline.
  * Hidden reasoning fields are dropped.
  */
+const DECISION_STATUS = new Set(['pending', 'approved', 'executed', 'rejected', 'mismatch']);
+
+/**
+ * Why-view model from GET /api/decisions. The list row has digests and a status.
+ * It does not include a decision digest, so a row that fails those checks stays hidden.
+ */
+export function whyFromListedDecision(row) {
+  if (!row || typeof row !== 'object') return null;
+  if (!HEX64.test(row.factsDigest || '') || !HEX64.test(row.proposalDigest || '')) return null;
+  if (!DECISION_STATUS.has(row.status)) return null;
+  if (row.cluster !== 'devnet' && row.cluster !== 'testnet') return null;
+  const lines = [
+    row.status === 'mismatch'
+      ? 'Verification did not settle. The spend stays unsigned.'
+      : `Status is ${row.status} on ${row.cluster}.`,
+    `Facts digest ${shortDigest(row.factsDigest)}. Proposal digest ${shortDigest(row.proposalDigest)}.`,
+  ];
+  return {
+    title: 'Why did it do this?',
+    showsChainOfThought: false,
+    lines,
+    digests: null,
+    memo: null,
+    focus: null,
+  };
+}
+
 export function whyExplanation(decision, events = []) {
   const empty = {
     title: 'Why did it do this?',

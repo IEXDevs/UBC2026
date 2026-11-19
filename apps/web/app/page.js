@@ -85,7 +85,7 @@ import { useHostedPreview } from '../components/HostedPreview';
 import { usePrivyPublic } from '../components/PrivyRoot';
 import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
-import { DEV_PREVIEW_OWNER, previewBot } from '../lib/dev-preview.mjs';
+import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-preview.mjs';
 import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 
@@ -835,7 +835,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (bots.some(item => item.id === activeBot)) return;
     setActiveBot(bots[0].id);
   }, [devPreview, activeBot, bots]);
-  const wallets = withoutRetiredWallets(pickWalletList(assigned.wallets, remoteLists.wallets), retiredIds);
+  const listedWallets = withoutRetiredWallets(pickWalletList(assigned.wallets, remoteLists.wallets), retiredIds);
+  const wallets = devPreview && listedWallets.length === 0 ? previewWallets() : listedWallets;
   const walletAddress = assignedWalletAddress(wallets);
   useEffect(() => {
     if (devPreview || !signedIn || !walletAddress) {

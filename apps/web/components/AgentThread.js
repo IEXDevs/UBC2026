@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { normalizeLiveEvent, timelineEntries } from '../lib/bot-experience.mjs';
+import { normalizeLiveEvent, timelineEntries, whyFromListedDecision } from '../lib/bot-experience.mjs';
 import { browserTrace, traceModel } from '../lib/agent-trace.mjs';
 import { browserSessionUrl } from '../lib/live-view.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
@@ -9,10 +9,16 @@ import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { ChainOfThought, TerminalBlock, ToolCall } from './ai/elements';
 import ChatBubbles from './ChatBubbles';
 import ShoppingPanel from './ShoppingPanel';
+import WhyView from './WhyView';
 
 function liveEventsUrl(botId) {
   if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) return null;
   return shellRuntimeUrl(`/api/events?botId=${encodeURIComponent(botId)}`);
+}
+
+function liveDecisionsUrl(botId) {
+  if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) return null;
+  return shellRuntimeUrl(`/api/decisions?botId=${encodeURIComponent(botId)}`);
 }
 
 export default function AgentThread({
@@ -27,6 +33,7 @@ export default function AgentThread({
   focusLine = null,
 }) {
   const [remoteEvents, setRemoteEvents] = useState(null);
+  const [why, setWhy] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [focus, setFocus] = useState(null);
 
@@ -55,6 +62,28 @@ export default function AgentThread({
       stop = true;
       clearInterval(timer);
     };
+  }, [bot.id, ownerId, getAccessToken]);
+
+  useEffect(() => {
+    setWhy(null);
+    const url = liveDecisionsUrl(bot.id);
+    if (!url || !ownerId) return undefined;
+    let stop = false;
+    async function load() {
+      try {
+        const response = await fetch(url, {
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
+          cache: 'no-store',
+        });
+        const data = await response.json();
+        if (stop || !response.ok || !Array.isArray(data.items) || data.items.length === 0) return;
+        setWhy(whyFromListedDecision(data.items[0]));
+      } catch {
+        // The thread stays on the conversation when decisions cannot be read.
+      }
+    }
+    load();
+    return () => { stop = true; };
   }, [bot.id, ownerId, getAccessToken]);
 
   useEffect(() => {
@@ -107,6 +136,7 @@ export default function AgentThread({
       <ChainOfThought sections={sections} onSelect={setFocus} />
       {focused ? <p className="agent-focus">{focused.summary}</p> : null}
       <ShoppingPanel bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
+      {why ? <WhyView why={why} /> : null}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shoppingComparisonView } from './shopping-comparison.mjs';
+import { sandboxSettleBody, shoppingComparisonView } from './shopping-comparison.mjs';
 
 /**
  * Achieves: verifies quality-ranked shopping view marks the proposal row and keeps the ask/next/outflow.
@@ -57,4 +57,24 @@ test('a price-only catalog still lists the cheapest proposal', () => {
  */
 test('Laso challenges are not a catalog comparison', () => {
   assert.equal(shoppingComparisonView({ provider: 'laso', next: 'await-owner-mainnet-approval' }), null);
+});
+
+test('sandbox settle keeps the accepted devnet terms and drops Laso and mainnet', () => {
+  const accepted = { scheme: 'exact', network: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', amount: '4000', payTo: 'pay' };
+  const body = sandboxSettleBody({
+    provider: 'sandbox',
+    next: 'await-owner-approval',
+    pick: { item: { id: 'solid' } },
+    challenge: { body: { accepts: [accepted] } },
+  }, { id: 'bot_shop', walletId: 'w1', name: 'Shop' });
+  assert.equal(body.itemId, 'solid');
+  assert.equal(body.accepted, accepted);
+  assert.equal(body.wallet.id, 'w1');
+  assert.equal(sandboxSettleBody({ provider: 'laso', pick: { item: { id: 'x' } }, challenge: { body: { accepts: [accepted] } } }, { id: 'bot_shop' }), null);
+  assert.equal(sandboxSettleBody({
+    provider: 'sandbox',
+    pick: { item: { id: 'solid' } },
+    challenge: { body: { accepts: [{ ...accepted, network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' }] } },
+  }, { id: 'bot_shop' }), null);
+  assert.equal(sandboxSettleBody({ provider: 'sandbox', next: 'blocked', pick: { item: { id: 'solid' } }, challenge: { body: { accepts: [accepted] } } }, { id: 'bot_shop' }), null);
 });
