@@ -133,7 +133,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
     {
       q: {
         type: 'string',
-        description: 'A sentence, a weird @handle, or name.sol. The handle lookup keeps letters and numbers, lowercased.',
+        description: 'A sentence or a spoken name. @Mommy Milkers is the handle mommymilkers. Letters and numbers only, lowercased. Or name.sol.',
       },
     },
     [call('GET', '/api/profiles/lookup', { query: ['q'] })],
