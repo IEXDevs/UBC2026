@@ -19,8 +19,12 @@ function clientLabel(client) {
 
 export default function LinkedLogins() {
   const { user, ready, authenticated } = usePrivy();
-  const { linkEmail, linkGoogle, linkGithub, linkDiscord, linkWallet } = useLinkAccount();
   const [note, setNote] = useState('');
+  const { linkEmail, linkGoogle, linkGithub, linkDiscord, linkWallet } = useLinkAccount({
+    onError: () => {
+      setNote('That sign-in method could not be linked. If it already belongs to another account, sign in with it instead.');
+    },
+  });
   const described = describeLoginMethods(user);
   const actions = {
     email: linkEmail,

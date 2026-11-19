@@ -155,7 +155,10 @@ export function portfolioErrorNote(body = {}) {
   }
   if (code === 'invalid_rpc') return 'The QuickNode portfolio URL must be https.';
   if (code === 'wrong_cluster') return 'QuickNode returned a cluster this portfolio does not read.';
-  if (code === 'login_required') return 'Sign in again to read the portfolio.';
+  if (code === 'login_required' || code === 'worker_origin_forbidden') {
+    return 'Sign in again to read the portfolio.';
+  }
+  if (code === 'privy_failed') return 'Privy did not return this account. Sign out and sign in again.';
   if (code === 'rpc_failed' || code === 'rpc_timeout' || code === 'rpc_rate_limited') {
     return 'QuickNode did not return balances. Try again in a moment.';
   }
@@ -272,7 +275,7 @@ async function rpcBatch(fetcher, rpcUrl, calls) {
         method: call.method,
         params: call.params,
       }))),
-      redirect: 'manual',
+      redirect: 'follow',
       signal: abortAfter(20000),
     });
   } catch (error) {

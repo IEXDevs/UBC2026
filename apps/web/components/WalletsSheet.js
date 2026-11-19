@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useImportSeedPhrase, usePrivy } from '@privy-io/react-auth';
+import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
 import { X } from 'lucide-react';
 import BotHistory from './BotHistory';
@@ -241,7 +241,10 @@ function linkedKey(user) {
 }
 
 function ConnectedPortfolio({ open, preview = false }) {
-  const { user, getAccessToken, linkWallet, unlinkWallet, ready, authenticated } = usePrivy();
+  const { user, getAccessToken, unlinkWallet, ready, authenticated } = usePrivy();
+  const { linkWallet } = useLinkAccount({
+    onError: () => setError('That wallet could not be linked. If it already belongs to another account, sign in with it instead.'),
+  });
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);

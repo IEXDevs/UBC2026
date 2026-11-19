@@ -781,8 +781,38 @@ export function createPrivyWalletClient({
       };
     },
 
+    /**
+     * Read the signed-in Privy user without creating a wallet.
+     * Hosted OpenNext cannot call `/users/me` (outbound Origin is forbidden, and
+     * a customer access token is rejected there). Use the JWT `sub` or owner id
+     * with the app secret, and fall back to `/users/me` only on local Node.
+     */
     async readLoginUser({ accessToken, ownerId, origin } = {}) {
-      const session = await this.readSession({ accessToken, ownerId, origin });
+      const token = assertHeaderSafe(accessToken, 'Privy access token');
+      const fromJwt = jwtSub(token);
+      const headerOwner = typeof ownerId === 'string' && ownerIdPattern.test(ownerId.trim())
+        ? ownerId.trim()
+        : '';
+      // Prefer JWT `sub`. A stale x-owner-id must not select a different user.
+      const serverUserId = fromJwt || headerOwner;
+      const canUseUsersMe = usersMeFallback && Boolean(sanitizeOrigin(origin));
+      if (serverUserId) {
+        try {
+          const user = await loadUser(serverUserId);
+          if (user && typeof user === 'object' && !user.id) user.id = serverUserId;
+          return user;
+        } catch (error) {
+          if (!canUseUsersMe || !(error instanceof WalletError)) throw error;
+        }
+      } else if (!canUseUsersMe) {
+        fail(
+          'Privy login needs a JWT sub or owner id on Cloudflare Workers (users/me unavailable)',
+          'worker_origin_forbidden',
+        );
+      } else if (!sanitizeOrigin(origin)) {
+        fail('Privy users/me requires Origin (e.g. http://localhost:3000)', 'missing_origin');
+      }
+      const session = await this.readSession({ accessToken: token, ownerId, origin });
       return session.user;
     },
 

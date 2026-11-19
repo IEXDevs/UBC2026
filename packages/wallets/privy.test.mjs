@@ -137,7 +137,7 @@ test('readLoginUser returns linked wallets and does not create one', async () =>
   const phantom = 'So11111111111111111111111111111111111111112';
   const { fetcher, calls } = mockFetch([
     {
-      match: url => url.endsWith('/api/v1/users/me'),
+      match: url => url.includes(`/v1/users/${encodeURIComponent(privyUserId)}`),
       body: {
         id: privyUserId,
         linked_accounts: [
@@ -162,6 +162,59 @@ test('readLoginUser returns linked wallets and does not create one', async () =>
   assert.equal(user.linked_accounts[1].address, phantom);
   assert.equal(calls.some(call => call.init?.method === 'POST'), false);
   assert.equal(calls.some(call => String(call.url).includes('/v1/wallets')), false);
+  assert.equal(calls.some(call => String(call.url).includes('/users/me')), false);
+  assert.match(calls[0].init.headers.Authorization, /^Basic /);
+});
+
+/**
+ * Rigor audit — readLoginUser falls back to users/me only for an opaque local token
+ * Achieves: no JWT sub and no owner id still reads /users/me when Origin is allowed.
+ * Fails when: the local fallback is removed, or a Worker-style client calls /users/me.
+ * Oracle: acceptLogin's users/me rule — Origin only off Cloudflare.
+ * Side effects: mocked fetch call list.
+ * Gaps: does not exercise a live Privy session.
+ */
+test('readLoginUser uses users/me only when the token has no user id', async () => {
+  const { fetcher, calls } = mockFetch([
+    { match: url => url.endsWith('/api/v1/users/me'), body: { id: privyUserId, linked_accounts: [] } },
+  ]);
+  const user = await client({ fetcher }).readLoginUser({
+    accessToken,
+    origin: 'http://localhost:3000',
+  });
+  assert.equal(user.id, privyUserId);
+  assert.equal(calls.some(call => String(call.url).includes('/users/me')), true);
+  assert.equal(calls.some(call => call.init?.method === 'POST'), false);
+});
+
+/**
+ * Rigor audit — hosted portfolio read does not call users/me
+ * Achieves: a JWT sub loads GET /v1/users/:id and never sets Origin or creates a wallet.
+ * Fails when: Workers fall through to /users/me (the portfolio 502).
+ * Oracle: same identity path as acceptLogin, without syncWallets.
+ * Side effects: mocked fetch call list.
+ * Gaps: signature of the JWT is not verified, matching acceptLogin.
+ */
+test('readLoginUser on Workers loads by JWT sub and does not call users/me', async () => {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url');
+  const token = `${header}.${body}.sig`;
+  const { fetcher, calls } = mockFetch([
+    {
+      match: url => url.includes(`/v1/users/${encodeURIComponent(privyUserId)}`),
+      body: { id: privyUserId, linked_accounts: [embedded(walletId, 0)] },
+    },
+  ]);
+  const user = await client({ fetcher, allowUsersMeFallback: false }).readLoginUser({
+    accessToken: token,
+  });
+  assert.equal(user.id, privyUserId);
+  assert.equal(user.linked_accounts[0].id, walletId);
+  assert.equal(calls.length, 1);
+  assert.equal(calls.some(call => String(call.url).includes('/users/me')), false);
+  assert.equal(calls.some(call => call.init?.method === 'POST'), false);
+  assert.equal(calls[0].init.headers.Origin, undefined);
+  assert.match(calls[0].init.headers.Authorization, /^Basic /);
 });
 
 /**
