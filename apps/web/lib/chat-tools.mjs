@@ -214,6 +214,12 @@ function publicTokens(tokens) {
   })).filter((token) => token.label);
 }
 
+function walletAlreadyOnchainOk(wallet) {
+  return wallet?.balanceStatus === 'ok'
+    || (typeof wallet?.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports))
+    || (Array.isArray(wallet?.holdings) && wallet.holdings.some((row) => row?.label));
+}
+
 /** Read whatever non-zero SOL/SPL balances exist on Solana-devnet + Solana-testnet. */
 async function enrichWalletsOnchain(wallets, { env = {}, fetcher = fetch } = {}) {
   const list = Array.isArray(wallets) ? wallets : [];
@@ -229,6 +235,11 @@ async function enrichWalletsOnchain(wallets, { env = {}, fetcher = fetch } = {})
       };
     }
     const bal = await readWalletBalancesAcrossClusters({ address, env, fetcher });
+    // Never clobber a successful runtime/onchain read with a later RPC miss
+    // (e.g. QuickNode URL sent through the AGENT_RUNTIME service binding).
+    if (!bal.ok && walletAlreadyOnchainOk(wallet)) {
+      return wallet;
+    }
     const holdings = Array.isArray(bal.holdings) ? bal.holdings.filter((row) => row?.label) : [];
     const tokens = publicTokens(bal.tokens);
     const usdc = bal.usdcAmount;
@@ -421,6 +432,8 @@ export function createChatToolInvoker({
   ownerMessage = '',
   priceFetch = null,
   searchFetch = fetch,
+  /** Solana JSON-RPC must use global fetch — never AGENT_RUNTIME.bind. */
+  rpcFetch = null,
   deskGrant = '',
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
@@ -429,6 +442,9 @@ export function createChatToolInvoker({
   const identity = { ownerId, botId };
   // Firecrawl must not ride the runtime fetcher. A Worker 404 is not an outage.
   const researchFetch = typeof searchFetch === 'function' ? searchFetch : null;
+  // Prefer dedicated rpcFetch (global fetch in production). Fall back to
+  // fetcher so unit tests that mock Solana on the same double still work.
+  const solanaFetch = typeof rpcFetch === 'function' ? rpcFetch : fetcher;
   const local = localBrowserService(env, fetcher, researchFetch);
   const root = runtimeBaseUrl(runtimeBase);
   const localBots = shellBotItems(shellBots);
@@ -711,7 +727,7 @@ export function createChatToolInvoker({
         const source = remoteItems.length > 0
           ? (remote?.source || 'supabase')
           : (localWallets.length > 0 ? 'shell' : (remote?.source || 'empty'));
-        const enriched = await enrichWalletsOnchain(baseItems, { env, fetcher });
+        const enriched = await enrichWalletsOnchain(baseItems, { env, fetcher: solanaFetch });
         return withDisplayBalances(
           {
             ok: true,

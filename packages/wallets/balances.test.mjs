@@ -318,7 +318,7 @@ test('readDevnetUsdcBalance returns USDC amount without RPC URL leakage', async 
  * Side effects: injected fetcher only.
  * Gaps: does not assert real workerd AbortSignal.timeout absence.
  */
-test('rpcCall uses redirect manual, retries once, and maps abort to rpc_timeout', async () => {
+test('rpcCall uses redirect follow, retries once, and maps abort to rpc_timeout', async () => {
   let calls = 0;
   const ok = await readClusterWalletBalances({
     cluster: 'devnet',
@@ -326,7 +326,7 @@ test('rpcCall uses redirect manual, retries once, and maps abort to rpc_timeout'
     address,
     fetcher: async (_url, init) => {
       calls += 1;
-      assert.equal(init.redirect, 'manual');
+      assert.equal(init.redirect, 'follow');
       assert.ok(init.signal === undefined || typeof init.signal?.aborted === 'boolean');
       if (calls === 1) throw new Error('network_blip');
       const body = JSON.parse(init.body);
