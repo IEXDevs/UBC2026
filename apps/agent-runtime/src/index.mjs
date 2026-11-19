@@ -188,7 +188,7 @@ function botStub(env, botId) {
  * Routes wake/pause/resume/status, the checkpointed bot loop, and owner-bound browser sessions to a per-bot Durable Object.
  * QuickNode Streams wake bots through /wake. Hourly cron records a paper
  * position check. A second cron re-checks devnet USDC when the stream is stale.
- * ElevenLabs webhook tools and the Grok custom LLM live under /voice and call these same routes.
+ * ElevenLabs speech hits /voice. The desk text agent decides. Webhook tools do not.
  */
 const routed = {
   async fetch(request, rawEnv) {

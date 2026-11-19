@@ -6,21 +6,17 @@ const SECRET = 'test-elevenlabs-webhook-secret';
 const ORIGIN = 'https://runtime.example';
 
 /**
- * Achieves: a voice turn with handoff speaks the agent reply and does not give the voice model tools.
- * Fails when: the voice model is called with tools, or the agent sentence is missing from the audio stream.
- * Oracle: custom LLM request with handoff true and a fake completion that allows the verifier.
- * Side effects: none beyond the fake fetcher.
+ * Achieves: a leftover ConvAI handoff does not call a model or speak a tool turn.
+ * Fails when: the custom LLM fetches a model or returns tool_calls.
+ * Oracle: spoken SSE is the desk pipe line; fetcher is not called.
+ * Side effects: none.
+ * Gaps: the desk speaks the text agent through sendBotChat, not this route.
  */
-test('voice hands the utterance to the agent and speaks the reply', async () => {
-  const calls = [];
-  const fetcher = async (_url, init) => {
-    const body = JSON.parse(init.body);
-    calls.push(body);
-    const blob = JSON.stringify(body.messages || []);
-    const content = blob.includes('Role: turn-verify')
-      ? '{"allow":true}'
-      : 'I looked that up with the connected apps.';
-    return Response.json({ choices: [{ message: { content } }] });
+test('a voice handoff does not call a model', async () => {
+  let called = false;
+  const fetcher = async () => {
+    called = true;
+    return Response.json({ choices: [{ message: { content: 'nope' } }] });
   };
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',
@@ -46,9 +42,7 @@ test('voice hands the utterance to the agent and speaks the reply', async () => 
   });
   assert.equal(response.status, 200);
   const sse = await response.text();
-  assert.match(sse, /I looked that up with the connected apps/);
-  assert.equal(calls.some(body => body.stream === true), false);
-  assert.equal(calls.some(body => Array.isArray(body.tools) && body.tools.length > 0), true);
-  assert.equal(calls.some(body => body.tools?.some(tool => tool.function?.name === 'web_search')), true);
-  assert.equal(calls.some(body => body.tools?.some(tool => tool.function?.name === 'delegate_task')), true);
+  assert.match(sse, /desk text agent writes the reply/);
+  assert.equal(sse.includes('tool_calls'), false);
+  assert.equal(called, false);
 });

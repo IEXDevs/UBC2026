@@ -142,7 +142,7 @@ test('a mainnet quote never authorizes a signature', async () => {
  * Side effects / state checked: route/session mocks.
  * Gaps: none
  */
-test('voice request_spend keeps the session permission and posts the shared route', async () => {
+test('voice request_spend does not call the spend route', async () => {
   let seen = null;
   const response = await handleVoiceRequest(new Request('https://runtime.example/voice/tools/request_spend', {
     method: 'POST',
@@ -173,13 +173,9 @@ test('voice request_spend keeps the session permission and posts the shared rout
       return Response.json({ ok: false, state: 'quote-not-authorization', signed: false, steps: [] });
     },
   });
-  assert.equal(response.status, 200);
-  assert.equal(seen.url, 'https://runtime.internal/api/spend');
-  assert.equal(seen.body.permission, 'full');
-  assert.equal(seen.body.confirmed, false);
-  assert.equal(seen.body.action, 'sell');
-  assert.equal(seen.body.quote.pricingCluster, 'mainnet');
-  assert.equal(seen.body.quote.authorizesTransaction, false);
+  assert.equal(response.status, 410);
+  assert.equal((await response.json()).error, 'voice_tools_retired');
+  assert.equal(seen, null);
 });
 
 /**
