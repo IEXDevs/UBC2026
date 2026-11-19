@@ -1,30 +1,130 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connectSolanaWallet, linkAccountNote, releaseInjectedSolanaWallets } from './solana-wallet-login.mjs';
+import {
+  bindSolanaConnectRetry,
+  connectSolanaWallet,
+  linkAccountNote,
+  retryEmptySolanaConnect,
+} from './solana-wallet-login.mjs';
 import { walletLoginFailureNote } from './siws-login-diagnostic.mjs';
 
+function walletWith(connect, accounts = []) {
+  let current = accounts;
+  const wallet = {
+    features: {
+      'standard:connect': { connect },
+    },
+  };
+  Object.defineProperty(wallet, 'accounts', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return current;
+    },
+    set(value) {
+      current = value;
+    },
+  });
+  return wallet;
+}
+
 /**
- * Achieves: verifies a stale injected session is disconnected once before login.
- * Fails when: a stale injected session is disconnected once before login breaks (e.g. expected 1, 1, 0).
- * Oracle: assert.equal(phantom.calls, 1); assert.equal(legacy.calls, 1); assert.equal(shared.calls, 1)
- * Side effects / state checked: in-memory provider disconnect calls.
+ * Achieves: verifies a prompted connect that returns no accounts is retried once, silently.
+ * Fails when: the second call is not silent, or a successful first call is retried.
+ * Oracle: assert.deepEqual(calls, [{}, { silent: true }]); assert.equal(wallet.accounts[0].address, 'Ready')
+ * Side effects / state checked: the fake connect function's arguments.
  * Gaps: does not open Phantom.
  */
-test('a stale injected session is disconnected once before login', async () => {
-  const phantom = { calls: 0, disconnect() { this.calls += 1; } };
-  const legacy = { calls: 0, async disconnect() { this.calls += 1; } };
-  const shared = { calls: 0, disconnect() { this.calls += 1; throw new Error('not connected'); } };
-  await releaseInjectedSolanaWallets({
-    phantom: { solana: phantom },
-    solflare: shared,
-    backpack: shared,
-    solana: legacy,
+test('an empty Phantom connect is retried once in silence', async () => {
+  const calls = [];
+  const account = { address: 'Ready' };
+  const wallet = walletWith(async (input) => {
+    calls.push(input);
+    return calls.length === 1 ? { accounts: [] } : { accounts: [account] };
   });
-  assert.equal(phantom.calls, 1);
-  assert.equal(legacy.calls, 1);
-  assert.equal(shared.calls, 1);
-  await releaseInjectedSolanaWallets({ solana: { connect() {} } });
-  await releaseInjectedSolanaWallets(null);
+  assert.equal(retryEmptySolanaConnect(wallet), true);
+  const result = await wallet.features['standard:connect'].connect();
+  assert.deepEqual(calls, [undefined, { silent: true }]);
+  assert.equal(result.accounts[0], account);
+  assert.equal(wallet.accounts[0].address, 'Ready');
+  assert.equal(retryEmptySolanaConnect(wallet), true);
+});
+
+/**
+ * Achieves: verifies a connect that already returned accounts is not called again.
+ * Fails when: a second connect runs, or the returned account is dropped.
+ * Oracle: assert.deepEqual(calls, [{}]); assert.equal(wallet.accounts.length, 1)
+ * Side effects / state checked: the fake connect function's arguments.
+ * Gaps: does not open Phantom.
+ */
+test('a connect that returns accounts is not retried', async () => {
+  const calls = [];
+  const account = { address: 'Once' };
+  const wallet = walletWith(async (input) => {
+    calls.push(input);
+    return { accounts: [account] };
+  }, []);
+  retryEmptySolanaConnect(wallet);
+  await wallet.features['standard:connect'].connect({});
+  assert.deepEqual(calls, [{}]);
+  assert.equal(wallet.accounts[0], account);
+});
+
+/**
+ * Achieves: verifies a rejected connect is not retried.
+ * Fails when: a second connect runs after the user rejects the first.
+ * Oracle: assert.equal(calls, 1)
+ * Side effects / state checked: the fake connect function's call count.
+ * Gaps: does not open Phantom.
+ */
+test('a rejected connect is not retried', async () => {
+  let calls = 0;
+  const wallet = walletWith(async () => {
+    calls += 1;
+    throw new Error('User rejected the request');
+  });
+  retryEmptySolanaConnect(wallet);
+  await assert.rejects(
+    () => wallet.features['standard:connect'].connect(),
+    /User rejected/,
+  );
+  assert.equal(calls, 1);
+  assert.equal(retryEmptySolanaConnect(null), false);
+  assert.equal(retryEmptySolanaConnect({ features: {} }), false);
+});
+
+/**
+ * Achieves: verifies a silent connect is left alone, and later wallets are patched once.
+ * Fails when: silent auto-connect is retried, or register subscribes twice.
+ * Oracle: assert.deepEqual(calls, [{ silent: true }]); assert.equal(listeners.length, 1)
+ * Side effects / state checked: the fake wallet registry.
+ * Gaps: does not load the real wallet-standard registry.
+ */
+test('silent connect is not retried and later wallets are patched once', async () => {
+  const calls = [];
+  const existing = walletWith(async (input) => {
+    calls.push(input);
+    return { accounts: [] };
+  });
+  const registered = [];
+  const listeners = [];
+  const api = {
+    get: () => [existing],
+    on: (_event, listener) => {
+      listeners.push(listener);
+    },
+  };
+  bindSolanaConnectRetry(() => api);
+  await existing.features['standard:connect'].connect({ silent: true });
+  assert.deepEqual(calls, [{ silent: true }]);
+  const later = walletWith(async () => ({ accounts: [{ address: 'Later' }] }));
+  listeners[0](later);
+  registered.push(later);
+  await later.features['standard:connect'].connect();
+  assert.equal(later.accounts[0].address, 'Later');
+  bindSolanaConnectRetry(() => api);
+  assert.equal(listeners.length, 1);
+  bindSolanaConnectRetry(null);
 });
 
 /**
@@ -56,21 +156,21 @@ test('the sign-in card names the SIWS code and drops secrets', () => {
 });
 
 /**
- * Achieves: verifies linking a Solana wallet clears the injected session first.
- * Fails when: linking a Solana wallet clears the injected session first breaks (e.g. expected ['solana-only'], 1).
- * Oracle: assert.deepEqual(calls, [{ walletChainType: 'solana-only' }]); assert.equal(disconnects, 1)
- * Side effects / state checked: one disconnect and one linkWallet call.
+ * Achieves: verifies linking a Solana wallet does not disconnect the extension.
+ * Fails when: linkWallet is called without solana-only, or a disconnect runs.
+ * Oracle: assert.deepEqual(calls, [{ walletChainType: 'solana-only' }]); assert.equal(disconnects, 0)
+ * Side effects / state checked: one linkWallet call and no disconnect.
  * Gaps: does not open the Privy modal.
  */
-test('linking a Solana wallet clears the injected session first', async () => {
+test('linking a Solana wallet does not disconnect the extension', async () => {
   let disconnects = 0;
   const calls = [];
-  await connectSolanaWallet(
-    (options) => { calls.push(options); },
-    { solana: { disconnect() { disconnects += 1; } } },
-  );
-  assert.equal(disconnects, 1);
+  const provider = { disconnect() { disconnects += 1; } };
+  await connectSolanaWallet((options) => { calls.push(options); });
+  assert.equal(disconnects, 0);
+  assert.equal(typeof provider.disconnect, 'function');
   assert.deepEqual(calls, [{ walletChainType: 'solana-only' }]);
+  assert.equal(await connectSolanaWallet(null), undefined);
   assert.equal(linkAccountNote({ privyErrorCode: 'exited_link_flow' }), '');
   assert.match(linkAccountNote({ privyErrorCode: 'linked_to_another_user' }), /another account/);
   assert.match(linkAccountNote({ privyErrorCode: 'failed_to_link_account' }), /could not be linked/);
