@@ -829,7 +829,7 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
   const fetcher = async (url) => {
     const href = String(url);
-    if (href.includes('handle.eq.alex')) {
+    if (new URL(href).searchParams.get('handle') === 'eq.alex') {
       return Response.json([{ owner_id: 'user_2', handle: 'alex', display_name: 'Alex', avatar_url: null }]);
     }
     if (href.includes('wallets?')) return Response.json([{ address }]);
@@ -858,6 +858,39 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   assert.equal(snsBody.recipient.kind, 'sns');
   assert.equal(snsBody.recipient.domain, 'richclub.sol');
   assert.equal(snsBody.recipient.address, address);
+});
+
+test('handle lookup chooses the exact stored handle and refuses ambiguous spoken matches', async () => {
+  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const env = fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url) => {
+      const target = new URL(url);
+      const filter = target.searchParams.get('handle');
+      if (filter === 'eq.wallet_1') return Response.json([{ owner_id: 'did:privy:bob', handle: 'wallet_1' }]);
+      if (filter === 'eq.janedoe') return Response.json([]);
+      if (target.searchParams.has('or')) {
+        return Response.json([{ handle: 'jane_doe' }, { handle: 'jan_edoe' }]);
+      }
+      assert.equal(target.pathname, '/rest/v1/wallets');
+      assert.equal(target.searchParams.get('owner_id'), 'eq.did:privy:bob');
+      assert.equal(target.searchParams.get('kind'), 'eq.main');
+      return Response.json([{ address }]);
+    },
+  });
+  const lookup = (q) => worker.fetch(new Request(`https://runtime/api/profiles/lookup?q=${encodeURIComponent(q)}`, {
+    headers: { 'x-owner-id': 'did:privy:alice' },
+  }), env);
+  const exact = await lookup('@Wallet_1');
+  assert.equal(exact.status, 200);
+  const { recipient } = await exact.json();
+  assert.equal(recipient.handle, 'wallet_1');
+  assert.equal(recipient.address, address);
+  assert.equal(recipient.self, false);
+  const ambiguous = await lookup('find Jane Doe');
+  assert.equal(ambiguous.status, 409);
+  assert.deepEqual(await ambiguous.json(), { error: 'ambiguous_handle' });
 });
 
 /**

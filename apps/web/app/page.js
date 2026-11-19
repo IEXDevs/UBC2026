@@ -752,7 +752,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (profileUrl && ownerId) {
       const response = await fetch(profileUrl, {
         method: 'PUT',
-        headers: { 'content-type': 'application/json', 'x-owner-id': ownerId },
+        headers: await ownerAuthHeaders(ownerId, getAccessToken, { 'content-type': 'application/json' }),
         body: JSON.stringify(stored),
       });
       const body = await response.json().catch(() => ({}));
@@ -776,7 +776,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     setProfile(stored);
     if (key) localStorage.setItem(key, JSON.stringify(stored));
     return { ok: true, source: 'local' };
-  }, [ownerId, user]);
+  }, [ownerId, user, getAccessToken]);
 
   const resolveMention = useCallback(async (token) => {
     const parsed = parseLookupQuery(token);
@@ -785,7 +785,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (lookupPath && ownerId) {
       try {
         const url = lookupPath;
-        const response = await fetch(url, { headers: { 'x-owner-id': ownerId }, cache: 'no-store' });
+        const response = await fetch(url, { headers: await ownerAuthHeaders(ownerId, getAccessToken), cache: 'no-store' });
         const body = await response.json().catch(() => ({}));
         if (body.recipient?.kind === 'handle' && body.recipient.missing === false) return body.recipient;
         if (body.recipient?.address) return body.recipient;
@@ -799,7 +799,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     }
     if (parsed.kind === 'sns') return resolveSnsProxy(parsed.domain);
     return { kind: 'handle', handle: parsed.handle, missing: true };
-  }, [ownerId, profile]);
+  }, [ownerId, profile, getAccessToken]);
 
   const remoteBots = useMemo(
     () => (remoteLists.bots || [])
@@ -2142,6 +2142,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       <ClaimHandle
         accountLabel={profile?.displayName || accountLabel}
         ownerId={ownerId}
+        getAccessToken={getAccessToken}
         onSave={async (next) => {
           const saved = await saveProfile(next);
           if (saved?.ok) setClaimWelcome(true);

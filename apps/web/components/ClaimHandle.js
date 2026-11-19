@@ -6,6 +6,7 @@ import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
 import { claimLookupVerdict, claimSaveNote, handleAlreadyClaimed } from '../lib/profile.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 
 const BURST = [
   { c: '#7c5cff', w: 8, h: 14, dx: '-120px', dy: '-86px', spin: '-40deg' },
@@ -22,7 +23,7 @@ const BURST = [
   { c: '#f5f5f5', w: 8, h: 5, dx: '-20px', dy: '-150px', spin: '8deg' },
 ];
 
-export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, onContinue }) {
+export default function ClaimHandle({ accountLabel = '', ownerId = '', getAccessToken = null, onSave, onContinue }) {
   const [displayName, setDisplayName] = useState(accountLabel || '');
   const [handle, setHandle] = useState('');
   const [note, setNote] = useState('');
@@ -47,7 +48,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
     const timer = setTimeout(async () => {
       try {
         const response = await fetch(shellRuntimeUrl(`/api/profiles/lookup?q=${encodeURIComponent(`@${typed}`)}`), {
-          headers: ownerId ? { 'x-owner-id': ownerId } : {},
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -65,7 +66,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
       controller.abort();
       clearTimeout(timer);
     };
-  }, [typed, ownerId]);
+  }, [typed, ownerId, getAccessToken]);
 
   async function submit(event) {
     event.preventDefault();
