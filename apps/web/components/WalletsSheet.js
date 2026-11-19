@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
-import { X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
 import GlideSelect from './GlideSelect';
@@ -485,7 +485,8 @@ export function WalletAdd() {
               });
           }}
         >
-          Generate New Wallet
+          <Plus size={14} strokeWidth={1.75} aria-hidden="true" />
+          New Wallet
         </button>
         <button
           type="button"

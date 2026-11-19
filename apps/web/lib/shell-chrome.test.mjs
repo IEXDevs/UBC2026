@@ -156,7 +156,8 @@ test('wallets are collapsed in settings and the stage has no wallet badge', () =
   assert.equal(sheet.includes('SpecularButton'), false);
   assert.equal(sheet.includes('data-hint'), false);
   assert.match(sheet, /wallet-add-hint/);
-  assert.match(sheet, /Generate New Wallet/);
+  assert.match(sheet, /<Plus[\s\S]*New Wallet/);
+  assert.equal(sheet.includes('Generate New Wallet'), false);
   assert.match(sheet, /wallet-add-create/);
   assert.match(css, /\.wallet-add-create \{[^}]*flex-wrap:\s*nowrap/);
   assert.match(css, /\.wallet-add-connect/);

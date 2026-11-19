@@ -1622,6 +1622,10 @@ button.add-agent:not(:disabled):hover {
   flex-wrap: nowrap;
 }
 .wallet-add-create button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   flex: 1 1 auto;
   min-width: 0;
   padding: 8px 8px;
