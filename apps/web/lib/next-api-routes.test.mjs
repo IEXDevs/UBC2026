@@ -14,6 +14,38 @@ import { GET as getToken } from '../app/api/token/route.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+test('profile claims and handle lookup share the configured runtime directory', async (t) => {
+  const settings = {
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://runtime.test.example',
+    SUPABASE_URL: 'https://local-directory.test.example',
+    SUPABASE_SERVICE_ROLE_KEY: 'local-test-key',
+  };
+  const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settings);
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const forwarded = t.mock.method(globalThis, 'fetch', async (url, init) => {
+    assert.equal(new URL(url).origin, settings.NEXT_PUBLIC_AGENT_RUNTIME_URL);
+    assert.equal(init.headers.get('authorization'), 'Bearer signed-in-test-token');
+    return Response.json({ ok: true });
+  });
+  const { GET, PUT } = await import('../app/api/runtime/[...path]/route.js');
+  const base = 'https://desk.example/api/runtime/api/profiles';
+  const headers = { authorization: 'Bearer signed-in-test-token', 'x-owner-id': 'did:privy:alice' };
+  const saved = await PUT(new Request(`${base}/me`, { method: 'PUT', headers, body: '{}' }), { params: { path: ['api', 'profiles', 'me'] } });
+  const found = await GET(new Request(`${base}/lookup?q=%40bob`, { headers }), { params: { path: ['api', 'profiles', 'lookup'] } });
+  assert.equal(saved.status, 200);
+  assert.equal(found.status, 200);
+  assert.deepEqual(forwarded.mock.calls.map(({ arguments: [url, init] }) => [new URL(url).pathname, init.method]), [
+    ['/api/profiles/me', 'PUT'],
+    ['/api/profiles/lookup', 'GET'],
+  ]);
+});
+
 /**
  * Rigor audit — GET /api/build happy path
  * Achieves: returns JSON { id } with no-store when NEXT_PUBLIC_BUILD_ID is set.

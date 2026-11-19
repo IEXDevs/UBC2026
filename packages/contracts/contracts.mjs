@@ -392,6 +392,8 @@ export function parseLookupQuery(value) {
   if (typeof value !== 'string') return null;
   const raw = value.trim();
   if (!raw || raw.length > 240) return null;
+  const bareHandle = normalizeHandle(raw);
+  if (bareHandle) return { kind: 'handle', handle: lookupHandleKey(bareHandle) };
   const lower = raw.toLowerCase().replace(/[’']s\b/g, '').replace(/[’']/g, '');
   const sns = lower.match(/\b([a-z0-9][a-z0-9-]{0,62}\.sol)\b/);
   if (sns && SNS_NAME.test(sns[1])) return { kind: 'sns', domain: sns[1] };

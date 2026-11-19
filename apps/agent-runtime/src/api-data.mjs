@@ -9,6 +9,7 @@ import {
   normalizeDisplayName,
   normalizeHandle,
   lookupHandleFilter,
+  lookupHandleKey,
   parseLookupQuery,
   postgrestEq,
 } from '@ubc2026/contracts';
@@ -1332,23 +1333,35 @@ export async function handleApiData(request, env, matched) {
       }
     }
     if (!supabaseConfig(env)) {
-      return json({ ok: true, source: 'unconfigured', recipient: { kind: 'handle', handle: parsed.handle, missing: true } });
+      return json({ error: 'directory_unconfigured' }, 503);
     }
-    const found = await supabaseGet(
-      env,
-      `profiles?${lookupHandleFilter(parsed.handle)}&select=owner_id,handle,display_name,avatar_url`,
-      fetcher,
-    );
-    if (found.status !== 200) {
-      return json({ error: found.code || 'profile_read_failed' }, 502);
+    const columns = 'owner_id,handle,display_name,avatar_url';
+    const exactHandle = normalizeHandle(query) || parsed.handle;
+    const exact = await supabaseGet(env, `profiles?${postgrestEq('handle', exactHandle)}&select=${columns}&limit=1`, fetcher);
+    if (exact.status !== 200 || !Array.isArray(exact.rows)) {
+      return json({ error: exact.code || 'profile_read_failed' }, 502);
     }
-    const row = found.rows?.[0];
+    let row = exact.rows[0];
+    if (!row && !exactHandle.includes('_')) {
+      const found = await supabaseGet(env, `profiles?${lookupHandleFilter(parsed.handle)}&select=${columns}&limit=2`, fetcher);
+      if (found.status !== 200 || !Array.isArray(found.rows)) {
+        return json({ error: found.code || 'profile_read_failed' }, 502);
+      }
+      if (found.rows.length > 1) return json({ error: 'ambiguous_handle' }, 409);
+      row = found.rows[0];
+    }
     if (!row) return json({ ok: true, source: 'supabase', recipient: { kind: 'handle', handle: parsed.handle, missing: true } });
+    if (!/^[a-zA-Z0-9:_-]{1,128}$/.test(row.owner_id || '') || lookupHandleKey(row.handle) !== parsed.handle) {
+      return json({ error: 'profile_read_failed' }, 502);
+    }
     const wallet = await supabaseGet(
       env,
       `wallets?owner_id=eq.${encodeURIComponent(row.owner_id)}&kind=eq.main&select=address&limit=1`,
       fetcher,
     );
+    if (wallet.status !== 200 || !Array.isArray(wallet.rows)) {
+      return json({ error: 'recipient_wallet_lookup_failed' }, 502);
+    }
     return json({
       ok: true,
       source: 'supabase',
@@ -1359,7 +1372,7 @@ export async function handleApiData(request, env, matched) {
         avatarUrl: row.avatar_url || null,
         self: row.owner_id === ownerId,
         missing: false,
-        address: wallet.rows?.[0]?.address || null,
+        address: WALLET_ADDRESS.test(wallet.rows[0]?.address || '') ? wallet.rows[0].address : null,
       },
     });
   }
