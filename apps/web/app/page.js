@@ -1328,14 +1328,20 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     setSlideConfirm(null);
     if (resolve) resolve(accepted === true);
   }, []);
-  function acceptSpokenAllow() {
+  function acceptSpokenConfirm(decision) {
+    const accepted = decision === 'allow';
+    if (!accepted && decision !== 'deny') return false;
     if (confirmResolve.current) {
-      finishSlideConfirm(true);
+      finishSlideConfirm(accepted);
       return true;
     }
     if (pendingSend) {
       const pending = pendingSend;
       setPendingSend(null);
+      if (!accepted) {
+        appendTalk(pending.botId, { id: `${pending.lineId}-send`, role: 'assistant', text: 'The send stayed unsent.' });
+        return true;
+      }
       if (deskLockOnRef.current && !unlockedRef.current) {
         lockIntentRef.current = { type: 'spend', pending };
         setLockOpen(true);
@@ -1346,7 +1352,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     }
     const line = latestInlineAllow(talks[activeBot] ?? []);
     if (!line || typeof accessRef.current !== 'function') return false;
-    return accessRef.current(line, true) === true;
+    return accessRef.current(line, accepted) === true;
   }
   const lockWallet = useCallback(() => {
     unlockUntilRef.current = 0;
@@ -1921,7 +1927,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               }));
             }}
             onConfirm={askSlideConfirm}
-            onSpokenAllow={acceptSpokenAllow}
+            onSpokenConfirm={acceptSpokenConfirm}
             onVoiceLive={setVoiceLive}
             onBindAccess={(handler) => { accessRef.current = handler; }}
             onAttach={items => {
@@ -2055,7 +2061,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Confirm" onMouseDown={event => event.stopPropagation()}>
             <h2>Confirm</h2>
             <p className="quiet">{slideConfirm}</p>
-            <p className="quiet">Say allow to confirm.</p>
+            <p className="quiet">Say yes to confirm, or no to cancel.</p>
             <div className="spend-actions">
               <button type="button" className="ghost" onClick={() => finishSlideConfirm(false)}>Cancel</button>
             </div>
@@ -2080,7 +2086,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               ))}
             </ul>
             <p className="spend-net"><span>Net</span><span>{pendingSend.summary.net}</span></p>
-            <p className="quiet">Nothing is signed until you confirm. Say allow to confirm.</p>
+            <p className="quiet">Nothing is signed until you confirm. Say yes to confirm, or no to cancel.</p>
             <div className="spend-actions">
               <button type="button" className="ghost" onClick={() => {
                 appendTalk(pendingSend.botId, { id: `${pendingSend.lineId}-send`, role: 'assistant', text: 'The send stayed unsent.' });
