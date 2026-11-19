@@ -24,6 +24,8 @@
   bottom: calc(100% + 8px);
   left: 0;
   z-index: 2;
+  max-height: 320px;
+  overflow: auto;
   padding: 4px;
   border-radius: 12px;
   background: var(--pb-menu);
@@ -93,6 +95,18 @@
   width: 16px;
   height: 16px;
   color: color-mix(in srgb, var(--pb-ink) 70%, transparent);
+}
+
+.prompt-bar__group-label {
+  padding: 8px 8px 2px;
+  color: var(--pb-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.prompt-bar__menu[data-kind='slash'] .prompt-bar__row-name,
+.prompt-bar__slash {
+  color: #f0c36a;
 }
 
 .prompt-bar__row-name {
@@ -243,8 +257,26 @@
   opacity: 1;
 }
 
+.prompt-bar__entry {
+  position: relative;
+}
+
+.prompt-bar__mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  pointer-events: none;
+}
+
 .prompt-bar__input {
   display: block;
+  position: relative;
   width: 100%;
   padding: 0;
   border: 0;
@@ -255,7 +287,12 @@
   line-height: 22px;
   resize: none;
   outline: none;
-  overflow-wrap: normal;
+  overflow-wrap: break-word;
+}
+
+.prompt-bar__input[data-paint] {
+  color: transparent;
+  caret-color: var(--pb-ink);
 }
 
 .prompt-bar__input::placeholder {
@@ -263,7 +300,8 @@
 }
 
 @media (pointer: coarse) {
-  .prompt-bar__input {
+  .prompt-bar__input,
+  .prompt-bar__mirror {
     font-size: 16px;
   }
 }

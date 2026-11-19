@@ -431,6 +431,7 @@ export const VOICE_RESEARCH_WEBHOOKS = Object.freeze([
 
 export {
   AGENT_SKILLS,
+  AVAILABLE_SKILLS,
   parseSkillCommand,
   skillById,
   skillInstruction,

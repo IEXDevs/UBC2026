@@ -2268,6 +2268,8 @@ button.wallet-export:not(:disabled):hover {
 
 .party-link:hover { color: #fff; }
 
+.slash-token { color: #f0c36a; }
+
 .party-sheet { width: min(560px, calc(100vw - 32px)); }
 .party-sheet h2 { margin: 0; font-size: 1.4rem; }
 .party-sheet .quiet { margin: 4px 0 0; }

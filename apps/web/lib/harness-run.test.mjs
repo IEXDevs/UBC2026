@@ -78,7 +78,13 @@ test('skills and subagents use the connected apps and stop at one handoff', asyn
   const ready = prepareOwnerTurn('/goal ship the header', ['vercel']);
   assert.equal(ready.skillId, 'goal');
   assert.equal(ready.message, 'ship the header');
-  assert.equal(prepareOwnerTurn('just chat', []).skillId, '');
+  const idle = prepareOwnerTurn('just chat', []);
+  assert.equal(idle.skillId, '');
+  assert.doesNotMatch(idle.instruction, /Skill \/domain-modeling/);
+  const called = prepareOwnerTurn('/domain-modeling name the wallet', []);
+  assert.equal(called.skillId, 'domain-modeling');
+  assert.equal(called.message, 'name the wallet');
+  assert.match(called.instruction, /Skill \/domain-modeling/);
 
   const seen = [];
   const used = await dispatchHarness('use_connector', { connectorId: 'github', query: 'issues' }, {

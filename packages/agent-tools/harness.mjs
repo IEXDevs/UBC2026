@@ -40,7 +40,7 @@ export const HARNESS_TOOLS = Object.freeze([
     ['task'],
     {
       task: { type: 'string', description: 'What the subagent should do' },
-      skill: { type: 'string', description: 'Optional skill id: goal, aihero, vercel, github, or search' },
+      skill: { type: 'string', description: 'Optional skill id when the owner called that skill on this turn' },
     },
   ),
   tool(
