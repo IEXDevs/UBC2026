@@ -21,7 +21,8 @@ export const PRIVACY = Object.freeze({
     Object.freeze({
       heading: 'Seeds and keys',
       paragraphs: Object.freeze([
-        'Maelstrom does not store seed phrases or private keys. A new wallet asks you to download a recovery file and enter it again. That file is the copy you keep. A lost phrase cannot be recovered from Maelstrom.',
+        'Maelstrom does not keep your seed phrase or private keys after you confirm them. Each account gets one seed phrase. Until you confirm it, your account holds an encrypted copy that only your onboarding password opens, so a new browser shows the same phrase and never a new one. Confirming deletes that copy and keeps only a check value that cannot reveal the phrase. The recovery file you download is the copy you keep. A lost phrase or password cannot be recovered from Maelstrom.',
+        'Your desk follows your account. The roster, chats, spend permission and Review by AI maximum, token choices, and voice settings are stored with your account so a new browser opens the same desk. Rows for your account stay limited to that owner.',
         'Logs may include other activity. They do not include private keys or seed phrases. Rows for your account stay limited to that owner.',
       ]),
     }),
@@ -105,7 +106,7 @@ export const TERMS = Object.freeze({
     Object.freeze({
       heading: 'Your wallet',
       paragraphs: Object.freeze([
-        'You keep the seed phrase and any private key. Maelstrom does not store them. A lost phrase cannot be recovered. You are responsible for the amount, the asset, and the destination you confirm, and for the permission mode you leave on.',
+        'You keep the seed phrase and any private key. Maelstrom does not keep them after you confirm them. A lost phrase cannot be recovered. You are responsible for the amount, the asset, and the destination you confirm, and for the permission mode you leave on.',
       ]),
     }),
     Object.freeze({

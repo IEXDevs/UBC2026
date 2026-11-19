@@ -45,6 +45,9 @@ import {
   sha256Hex,
 } from './desk-grant.mjs';
 import { spendLedgerCrossCheck, streamConfirmedPayments } from '@ubc2026/quicknode-streams';
+import { handleAccountRoute } from './account-state.mjs';
+
+const ACCOUNT_ROUTES = new Set(['state.list', 'state.write', 'recovery.status', 'recovery.issue', 'recovery.verify']);
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -1590,6 +1593,13 @@ export async function handleApiData(request, env, matched) {
     });
     if (saved?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
     return json({ ok: true, grant, until: untilMs });
+  }
+
+  if (ACCOUNT_ROUTES.has(routeId)) {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error && !ownerId) return json({ error }, 401);
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    return handleAccountRoute(routeId, request, env, ownerId, fetcher);
   }
 
   return null;

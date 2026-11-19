@@ -70,6 +70,7 @@ import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { catalogAddition, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
 import { STORAGE_FILE_TOO_BIG } from '../lib/file-quota.mjs';
 import { ensureAccountCode } from '../lib/account-code.mjs';
+import { accountStorage, bindAccountState, hydrateAccountState } from '../lib/account-state.mjs';
 import { applyStoredFile, dropCatalogFile, storeAttachedFile, uploadNotice } from '../lib/store-file.mjs';
 import { searchRecall } from '../lib/recall-search.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
@@ -393,6 +394,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [profileReady, setProfileReady] = useState(false);
   const [recoveryAck, setRecoveryAck] = useState(null);
   const [acceptanceAck, setAcceptanceAck] = useState(null);
+  // Account state (roster, chats, permissions, account id) loads before the desk reads it.
+  const [hydratedOwner, setHydratedOwner] = useState(null);
+  const stateReady = !ownerId || hydratedOwner === ownerId;
+  const accessTokenRef = useRef(getAccessToken);
+  accessTokenRef.current = getAccessToken;
   const [hideWalletError, setHideWalletError] = useState(false);
   const [claimWelcome, setClaimWelcome] = useState(false);
   const [transfers, setTransfers] = useState([]);
@@ -422,7 +428,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const addVoice = useCallback((delta) => {
     setVoiceMs((current) => {
       const next = addVoiceMs(current, delta);
-      try { localStorage.setItem(voiceTimeKey(ownerId), String(next)); } catch { /* keep the session total in memory */ }
+      try { accountStorage.setItem(voiceTimeKey(ownerId), String(next)); } catch { /* keep the session total in memory */ }
       return next;
     });
   }, [ownerId]);
@@ -449,6 +455,17 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   }, []);
 
   useEffect(() => {
+    if (!ownerId) {
+      bindAccountState({});
+      return undefined;
+    }
+    let stop = false;
+    bindAccountState({ ownerId, getAccessToken: () => accessTokenRef.current?.() });
+    hydrateAccountState().finally(() => { if (!stop) setHydratedOwner(ownerId); });
+    return () => { stop = true; };
+  }, [ownerId]);
+
+  useEffect(() => {
     if (!ready) return undefined;
     setRosterReady(false);
     if (!ownerId) {
@@ -458,6 +475,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       setRosterReady(true);
       return undefined;
     }
+    if (!stateReady) return undefined;
     const adopted = adoptLegacyRoster(localStorage, ownerId);
     const savedRoster = withoutPlaceholderBots(adopted.adopted ? adopted.roster : readRoster(localStorage, ownerId));
     const savedLooks = adopted.adopted ? adopted.looks : readLooks(localStorage, ownerId);
@@ -469,12 +487,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     ));
     setRosterReady(true);
     return undefined;
-  }, [ownerId, ready]);
+  }, [ownerId, ready, stateReady]);
 
   useEffect(() => {
     if (!ready || !rosterReady || !ownerId) return;
-    writeLooks(localStorage, ownerId, looks);
-    writeRoster(localStorage, ownerId, roster);
+    writeLooks(accountStorage, ownerId, looks);
+    writeRoster(accountStorage, ownerId, roster);
   }, [looks, roster, ready, rosterReady, ownerId]);
 
   useEffect(() => {
@@ -484,17 +502,18 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       setTalksReady(true);
       return;
     }
+    if (!stateReady) return;
     try {
       setTalks(readTalks(localStorage, ownerId));
     } catch {
       setTalks({});
     }
     setTalksReady(true);
-  }, [ownerId]);
+  }, [ownerId, stateReady]);
 
   useEffect(() => {
     if (!talksReady || !ownerId) return;
-    writeTalks(localStorage, ownerId, talks);
+    writeTalks(accountStorage, ownerId, talks);
   }, [talks, talksReady, ownerId]);
 
   useEffect(() => {
@@ -519,22 +538,26 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   }, [library, catalogReady, ownerId]);
 
   useEffect(() => {
+    if (!stateReady) return;
     try {
       setVoiceMs(readVoiceMs(localStorage.getItem(voiceTimeKey(ownerId))));
     } catch {
       setVoiceMs(0);
     }
-  }, [ownerId]);
+  }, [ownerId, stateReady]);
 
   useEffect(() => {
+    if (!stateReady) return;
     try {
+      // Acceptance follows the account. The seed flag stays per device: a new
+      // browser has to restore the seed it already saved before the desk opens.
       setRecoveryAck(ownerId ? readRecoveryAck(localStorage, ownerId) : false);
       setAcceptanceAck(ownerId ? readAcceptanceAck(localStorage, ownerId) : false);
     } catch {
       setRecoveryAck(false);
       setAcceptanceAck(false);
     }
-  }, [ownerId]);
+  }, [ownerId, stateReady]);
 
   useEffect(() => {
     const key = profileKey(ownerId);
@@ -891,6 +914,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     walletCount: Array.isArray(liveWallets) ? liveWallets.length : 0,
     acceptanceConfirmed: acceptanceAck === true,
     recoveryConfirmed: recoveryAck === true,
+    stateReady,
   });
   useEffect(() => {
     setHideWalletError(false);
@@ -1752,7 +1776,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                 if (!item.blob || !ownerId) continue;
                 void (async () => {
                   const token = await getAccessToken?.();
-                  const accountCode = ensureAccountCode(localStorage, ownerId);
+                  const accountCode = ensureAccountCode(accountStorage, ownerId);
                   const saved = await storeAttachedFile({ ownerId, accountCode, token, item });
                   const notice = uploadNotice(saved);
                   if (notice) {
@@ -1800,7 +1824,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <SpendAcceptance
           onContinue={({ permission, reviewCap }) => {
             try {
-              writeAcceptance(localStorage, ownerId, { permission, reviewCap });
+              writeAcceptance(accountStorage, ownerId, { permission, reviewCap });
               setAcceptanceAck(true);
             } catch {
               /* the sheet stays until the threshold is stored */
@@ -1813,6 +1837,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           wallets={liveWallets || []}
           handle={profile?.handle || ''}
           ownerId={ownerId || ''}
+          getAccessToken={getAccessToken}
           onDone={() => {
             try { writeRecoveryAck(localStorage, ownerId); } catch { /* the phrase stays in the download only */ }
             setRecoveryAck(true);

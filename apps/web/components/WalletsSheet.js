@@ -34,6 +34,7 @@ import {
   tradeableTokens,
 } from '../lib/wallet-desk.mjs';
 import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
+import { accountStorage } from '../lib/account-state.mjs';
 import { sendPreview, swapPreview } from '../lib/txn-preview.mjs';
 
 const PANES = [
@@ -107,7 +108,7 @@ export default function WalletsSheet({
     const clean = normalizeTokenPrefs(next);
     setPrefs(clean);
     const key = tokenStorageKey(ownerId);
-    if (key) localStorage.setItem(key, JSON.stringify(clean));
+    if (key) accountStorage.setItem(key, JSON.stringify(clean));
   }
 
   if (!mounted) return null;
