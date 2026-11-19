@@ -313,6 +313,29 @@ test('web_search calls Firecrawl directly and does not label a missing key provi
   assert.equal(JSON.stringify(result).includes('fc-test'), false);
   assert.equal(runtimeCalls, 0);
 
+  let grounded = '';
+  const local = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_1',
+    env: { FIRECRAWL_API_KEY: 'fc-test' },
+    fetcher: async () => Response.json({ error: 'not_found' }, { status: 404 }),
+    situation: {
+      at: '2026-11-19T16:33:00.000Z',
+      timeZone: 'America/Chicago',
+      place: 'Austin, Texas',
+      locale: 'en-US',
+    },
+    searchFetch: async (_url, options) => {
+      grounded = JSON.parse(options.body).query;
+      return Response.json({ success: true, data: [] });
+    },
+  });
+  const near = await local('web_search', { query: 'coffee near me' });
+  assert.equal(near.results.length, 0);
+  assert.equal(grounded, 'coffee in Austin, Texas');
+  await local('web_search', { query: 'SOL price' });
+  assert.equal(grounded, 'SOL price');
+
   const down = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
     botId: 'bot_1',

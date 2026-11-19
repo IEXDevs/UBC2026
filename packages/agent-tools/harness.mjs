@@ -59,5 +59,6 @@ export function harnessInstruction() {
     'Connected apps are shared. A voice handoff uses this same set.',
     'delegate_task is one level deep. A subagent cannot delegate again.',
     'When a subagent returns, say what it returned. Do not invent a second result.',
+    'An owner situation may follow this note. Use its local time and place in search queries and browser pages when the ask depends on where or when they are.',
   ].join('\n');
 }

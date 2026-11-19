@@ -266,6 +266,16 @@ test('sendBotChat forwards Bearer access token', async () => {
     });
     assert.equal(calls[1].headers['x-desk-grant'], grant);
     assert.equal(JSON.stringify(calls[1].body).includes(grant), false);
+    await sendBotChat({
+      ownerId: 'did:privy:abc',
+      botId: 'bot_1',
+      message: 'weather',
+      situation: { timeZone: 'America/Chicago', place: 'Austin, Texas', locale: 'en-US', extra: 'nope' },
+    });
+    assert.equal(calls[2].body.situation.timeZone, 'America/Chicago');
+    assert.equal(calls[2].body.situation.place, 'Austin, Texas');
+    assert.equal(calls[2].body.situation.locale, 'en-US');
+    assert.equal(calls[2].body.situation.extra, undefined);
   } finally {
     globalThis.fetch = prior;
   }

@@ -14,8 +14,11 @@ import {
   PRICE_TOOLS,
   VOICE_BROWSER_ALIASES,
   VOICE_RESEARCH_WEBHOOKS,
+  applySituation,
   parseAwaySince,
   sharedToolsInstruction,
+  situationFromEdge,
+  situationInstruction,
   spokenAwayBriefing,
 } from '@ubc2026/agent-tools';
 import { buildTextChatMessages } from '../../web/lib/text-chat.mjs';
@@ -39,6 +42,8 @@ const MODEL_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const voiceOwners = new Map();
 /** conversation_id → latest owner utterance seen by the custom LLM. Not tool parameters. */
 const voiceUtterances = new Map();
+/** conversation_id → owner situation for later tool webhooks. Clock and place only. */
+const voiceSituations = new Map();
 
 export function ownerPermissionNote(value) {
   if (value === 'full') {
@@ -539,6 +544,20 @@ function recallUtterance(conversationId) {
   return voiceUtterances.get(conversationId);
 }
 
+function rememberSituation(conversationId, situation) {
+  if (!ID.test(conversationId) || !situation || typeof situation.at !== 'string') return;
+  voiceSituations.set(conversationId, situation);
+  if (voiceSituations.size > 200) {
+    const oldest = voiceSituations.keys().next().value;
+    voiceSituations.delete(oldest);
+  }
+}
+
+function recallSituation(conversationId) {
+  if (!ID.test(conversationId) || !voiceSituations.has(conversationId)) return null;
+  return voiceSituations.get(conversationId);
+}
+
 function parameterBag(body, name) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'invalid_body' };
   if (typeof body.tool_name === 'string' && body.tool_name !== name) return { error: 'tool_name_mismatch' };
@@ -950,13 +969,15 @@ async function handleTool(name, request, env, fetchApi) {
   const owner = await resolveToolOwner(request, body);
   if (!owner) return json({ error: 'owner_required' }, 400);
   if (parsed.conversationId) await rememberVoiceOwner(parsed.conversationId, owner);
+  const parameters = applySituation(name, parsed.parameters, recallSituation(parsed.conversationId));
+  if (!validateParameters(toolDef, parameters)) return json({ error: 'invalid_parameters' }, 400);
   const models = env.openRouter
     || (resolveModelProvider(env).provider !== 'none' ? createOpenRouterFromEnv(env, env.fetch ?? fetch) : null);
   if (models && typeof models.complete === 'function') {
     try {
       const verdict = await models.complete({
         role: 'verify',
-        task: turnVerifyTask('tool', JSON.stringify({ name, parameters: parsed.parameters })),
+        task: turnVerifyTask('tool', JSON.stringify({ name, parameters })),
       });
       if (!parseTurnVerdict(verdict.text).allow) return json({ error: 'verifier_blocked' }, 409);
     } catch {
@@ -966,12 +987,12 @@ async function handleTool(name, request, env, fetchApi) {
   let result;
   try {
     if (toolDef.handler === 'research') {
-      result = await runResearchTool(name, parsed.parameters, env);
+      result = await runResearchTool(name, parameters, env);
     } else if (toolDef.handler === 'price') {
       result = await runPriceTool(parsed.parameters, env);
     } else {
       if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
-      result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env, {
+      result = await runCalls(toolDef, parameters, owner, fetchApi, env, {
         spendPermission: request.headers.get('x-spend-permission'),
         reviewCap: request.headers.get('x-review-cap'),
         ownerUtterance: ownerUtterance(body) || recallUtterance(parsed.conversationId),
@@ -1078,6 +1099,7 @@ export function voiceDecisionMessages({
   transcript = [],
   secrets = [],
   provider = 'meta',
+  situation = null,
 } = {}) {
   const prefix = buildTextChatMessages({
     botName,
@@ -1090,6 +1112,7 @@ export function voiceDecisionMessages({
     toolsInstruction: [
       sharedToolsInstruction(),
       'When this call is handed to the agent, that agent uses search, the browser, /goal, /aihero, /vercel, /github, and /search, plus the connected apps. Speak its reply, including what a subagent returned. Do not start a second voice call.',
+      situationInstruction(situation),
     ].join('\n'),
     permission: permissionInstruction(ownerPermission),
   });
@@ -1155,6 +1178,8 @@ async function handleCustomLlm(request, env, fetcher) {
   }
   const conversationId = typeof incoming.conversation_id === 'string' ? incoming.conversation_id.trim().slice(0, 128) : '';
   rememberUtterance(conversationId, messages);
+  const situation = situationFromEdge(incoming.situation, null);
+  rememberSituation(conversationId, situation);
   const provider = resolved.provider === 'openrouter' ? 'openrouter' : 'meta';
   let adapted = voiceDecisionMessages({
     botName: incoming.botName,
@@ -1164,6 +1189,7 @@ async function handleCustomLlm(request, env, fetcher) {
     transcript: messages,
     secrets,
     provider,
+    situation,
   });
   // ElevenLabs often probes the custom LLM before any owner utterance (first
   // message / greeting). Meta Muse rejects developer-only prompts with HTTP 400,
@@ -1207,6 +1233,7 @@ async function handleCustomLlm(request, env, fetcher) {
       permissionMode: incoming.ownerPermission,
       reviewCap: incoming.reviewCap,
       connectors: incoming.connectors,
+      situation,
       env,
       fetcher,
       metaModelApiKey: typeof env.META_MODEL_API_KEY === 'string' ? env.META_MODEL_API_KEY : '',

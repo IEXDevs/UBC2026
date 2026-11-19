@@ -16,6 +16,7 @@ import { createBrowserProvider, createScrape, createSearch } from '@ubc2026/brow
 import {
   DASHBOARD_TOOLS,
   SHARED_AGENT_TOOLS,
+  applySituation,
   parseAwaySince,
   sharedToolsInstruction,
   spokenAwayBriefing,
@@ -435,6 +436,7 @@ export function createChatToolInvoker({
   /** Solana JSON-RPC must use global fetch — never AGENT_RUNTIME.bind. */
   rpcFetch = null,
   deskGrant = '',
+  situation = null,
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
@@ -635,6 +637,7 @@ export function createChatToolInvoker({
   }
 
   return async function invokeTool(name, args = {}) {
+    args = applySituation(name, args, situation);
     if (name === 'create_loop' || name === 'set_loop_cooldown' || name === 'break_loop') {
       args = { ...args, botId };
       delete args.ownerAsked;

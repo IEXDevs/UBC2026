@@ -8,6 +8,7 @@ import { publicCardLoop } from '@ubc2026/contracts/card-loop';
 import { sanitizeActivity } from './chat-activity.mjs';
 import { catalogPayload } from './file-catalog.mjs';
 import { clipOwnerMessage, MESSAGE_CHAR_CAP } from './context-usage.mjs';
+import { situationBody } from './owner-situation.mjs';
 import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
 
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -389,6 +390,7 @@ export async function sendBotChat({
   fileCatalog = null,
   connectors = null,
   reviewCap = null,
+  situation = null,
   accessToken = '',
   deskGrant = '',
   runtimeBase = runtimeBaseUrl(),
@@ -414,6 +416,7 @@ export async function sendBotChat({
       .slice(-400)
     : [];
   const grant = typeof deskGrant === 'string' && /^[0-9a-f]{64}$/.test(deskGrant) ? deskGrant : '';
+  const clock = situationBody(situation);
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -442,6 +445,7 @@ export async function sendBotChat({
           : {}),
         ...(Array.isArray(connectors) ? { connectors: connectors.slice(0, 40) } : {}),
         ...(typeof reviewCap === 'string' && reviewCap ? { reviewCap } : {}),
+        ...(clock ? { situation: clock } : {}),
         ...(catalog.length > 0 ? { fileCatalog: catalog } : {}),
       }),
       cache: 'no-store',
