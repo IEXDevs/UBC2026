@@ -83,8 +83,7 @@ jobs:
         run: npm ci
 
       - name: Deploy the dev Worker
-        working-directory: apps/web
-        run: npx opennextjs-cloudflare build && npx opennextjs-cloudflare deploy --env dev
+        run: npm run deploy:web:dev
 
       - name: Comment on the pull request
         if: steps.target.outputs.pr != ''

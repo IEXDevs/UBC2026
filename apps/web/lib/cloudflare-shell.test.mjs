@@ -42,10 +42,12 @@ test('OpenNext wrangler config targets Cloudflare', () => {
 
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   assert.match(pkg.scripts.build, /next build/);
-  assert.match(pkg.scripts.preview, /opennextjs-cloudflare build && opennextjs-cloudflare preview/);
-  assert.match(pkg.scripts['deploy:prod'], /opennextjs-cloudflare build && opennextjs-cloudflare deploy/);
+  assert.equal(pkg.scripts['build:worker'], 'opennextjs-cloudflare build');
+  assert.match(pkg.scripts.preview, /npm run build:worker && opennextjs-cloudflare preview/);
+  assert.equal(pkg.scripts['deploy:prod'], 'npm run build:worker && npm run deploy:worker');
   assert.match(pkg.scripts.deploy, /deploy:prod/);
-  assert.match(pkg.scripts['deploy:dev'], /--env=dev/);
+  assert.equal(pkg.scripts['deploy:dev'], 'npm run build:worker && npm run deploy:worker:dev');
+  assert.match(pkg.scripts['deploy:worker:dev'], /--env=dev/);
   assert.equal(wrangler.env.dev.name, 'maelstrom-web-dev');
   assert.equal(wrangler.env.dev.routes[0].pattern, 'dev.maelstrom.iexdevs.com');
   assert.equal(wrangler.env.dev.routes[0].custom_domain, true);

@@ -58,6 +58,12 @@
       ]
     }
   }
+  // Workers Builds for maelstrom-web (main) and maelstrom-web-dev (dev):
+  // root directory apps/web, build cache on, SKIP_DEPENDENCY_INSTALL=true.
+  // Build: npm --prefix ../.. run cf:web:build
+  //   (one npm ci, then build:worker). Deploy: cf:web:deploy or cf:web:deploy:dev.
+  // Those deploy scripts do not install or build again. Cloudflare caches
+  // apps/web/.next/cache only when this directory is the build root.
   // Public Next build names live in .env.example: NEXT_PUBLIC_PRIVY_APP_ID,
   // NEXT_PUBLIC_PRIVY_CLIENT_ID, NEXT_PUBLIC_AGENT_RUNTIME_URL.
   // Secret names for this Worker, set with wrangler secret bulk on the top-level
