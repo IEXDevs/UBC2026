@@ -5,7 +5,13 @@
  * Ethereum wallet login and Ethereum embedded wallets stay off.
  * Signup creates a Solana embedded wallet for every user.
  * Dashboard MFA (authenticator app and passkey) stays enabled; prompts use Privy's UI.
+ *
+ * Sessions go to auth.privy.io (never a same-origin /api/privy-auth proxy).
+ * Cookie write is off so HttpOnly cookie mode cannot rewrite that API base.
+ * Client captcha is off so wallet connect does not depend on Turnstile.
  */
+
+export const PRIVY_AUTH_API_URL = 'https://auth.privy.io';
 
 const SOLANA_WALLETS = Object.freeze([
   'detected_solana_wallets',
@@ -30,6 +36,10 @@ const SOLANA_LOGIN = Object.freeze({
     solana: Object.freeze({ createOnLogin: 'off' }),
   }),
   mfa: Object.freeze({ noPromptOnMfaRequired: false }),
+  captchaEnabled: false,
+  sessions: Object.freeze({
+    cookieWriteBehavior: 'never',
+  }),
 });
 
 function publicId(value) {
@@ -74,6 +84,7 @@ export function privyProviderProps({ appId, clientId } = {}) {
   if (!id) return null;
   const props = {
     appId: id,
+    apiUrl: PRIVY_AUTH_API_URL,
     config: {
       appearance: {
         ...SOLANA_LOGIN.appearance,
@@ -85,6 +96,8 @@ export function privyProviderProps({ appId, clientId } = {}) {
         solana: { ...SOLANA_LOGIN.embeddedWallets.solana },
       },
       mfa: { ...SOLANA_LOGIN.mfa },
+      captchaEnabled: SOLANA_LOGIN.captchaEnabled,
+      sessions: { ...SOLANA_LOGIN.sessions },
     },
   };
   const client = publicId(clientId);

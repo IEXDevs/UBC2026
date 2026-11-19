@@ -35,12 +35,20 @@ export default function PrivyRoot({ appId = '', clientId = '', children }) {
 
   // Omit clientId unless set — a wrong App Client id makes login show
   // "Something went wrong" (often invalid_origin against that client's allowlist).
+  // Pin apiUrl so cookie-mode dashboards cannot rewrite sessions to /api/privy-auth.
+  let solanaConnectors = [];
+  try {
+    solanaConnectors = toSolanaWalletConnectors({ shouldAutoConnect: false }) || [];
+  } catch {
+    solanaConnectors = [];
+  }
   const providerProps = {
     appId: props.appId,
+    apiUrl: props.apiUrl,
     config: {
       ...props.config,
       externalWallets: {
-        solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) },
+        solana: { connectors: solanaConnectors },
       },
     },
   };

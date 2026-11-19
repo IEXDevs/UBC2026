@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
+  PRIVY_AUTH_API_URL,
   describeLoginMethods,
   ownerIdFromPrivyUser,
   privyAccountLabel,
@@ -18,6 +22,11 @@ test('Privy provider props stay public and Solana-only', () => {
   });
   assert.equal(props.appId, 'cl-app');
   assert.equal(props.clientId, 'client-1');
+  assert.equal(props.apiUrl, PRIVY_AUTH_API_URL);
+  assert.equal(props.apiUrl, 'https://auth.privy.io');
+  assert.doesNotMatch(props.apiUrl, /privy-auth/);
+  assert.equal(props.config.captchaEnabled, false);
+  assert.equal(props.config.sessions.cookieWriteBehavior, 'never');
   assert.equal(props.config.appearance.walletChainType, 'solana-only');
   assert.deepEqual(props.config.appearance.walletList, [
     'detected_solana_wallets',
@@ -29,7 +38,6 @@ test('Privy provider props stay public and Solana-only', () => {
   assert.equal(props.config.embeddedWallets.ethereum.createOnLogin, 'off');
   assert.equal(props.config.embeddedWallets.solana.createOnLogin, 'off');
   assert.equal(props.config.mfa.noPromptOnMfaRequired, false);
-  assert.equal(props.config.sessions, undefined);
   assert.deepEqual(props.config.loginMethods, ['email', 'google', 'github', 'discord', 'wallet']);
 
   const withoutClient = privyProviderProps({ appId: 'cl-app' });
@@ -38,7 +46,7 @@ test('Privy provider props stay public and Solana-only', () => {
   const serialized = JSON.stringify(props);
   assert.equal(serialized.includes('PRIVY_APP_SECRET'), false);
   assert.equal(serialized.includes('QUICKNODE'), false);
-  assert.equal(serialized.includes('http'), false);
+  assert.equal(serialized.includes('/api/privy-auth'), false);
 });
 
 test('linked wallets and login methods stay on one user', () => {
@@ -87,4 +95,12 @@ test('owner id comes from an authenticated Privy user', () => {
     '@linked-gh',
   );
   assert.equal(privyAccountLabel({ wallet: { address: 'So11111111111111111111111111111111111111112' } }), 'So111...11112');
+});
+
+test('PrivyRoot pins apiUrl and does not mount a same-origin auth proxy', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const source = readFileSync(join(root, 'components/PrivyRoot.js'), 'utf8');
+  assert.match(source, /apiUrl: props\.apiUrl/);
+  assert.match(source, /toSolanaWalletConnectors/);
+  assert.doesNotMatch(source, /['"`]\/api\/privy-auth/);
 });
