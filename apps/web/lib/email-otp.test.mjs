@@ -74,3 +74,14 @@ test('sign-in wires CodeSlots one-time-code semantics for email OTP', () => {
   assert.match(slots, /name="one-time-code"/);
   assert.match(slots, /code-slots__message/);
 });
+
+test('sign-in drops the slogan, uses a blur card, and holds the accepted state', () => {
+  const signIn = readFileSync(join(root, '../components/SignInPage.js'), 'utf8');
+  const css = readFileSync(join(root, '../components/SignInPage.css'), 'utf8');
+  const emailSignIn = readFileSync(join(root, '../components/EmailSignIn.js'), 'utf8');
+  assert.doesNotMatch(signIn, /Your agent\. Your call\./);
+  assert.match(signIn, /sign-in-card/);
+  assert.match(css, /\.sign-in-card[\s\S]*backdrop-filter: blur/);
+  assert.match(emailSignIn, /EMAIL_ACCEPTED_HOLD_MS/);
+  assert.match(emailSignIn, /aria-label="Dismiss"/);
+});

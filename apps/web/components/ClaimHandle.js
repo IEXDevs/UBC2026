@@ -147,7 +147,6 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
             value={handle}
             onChange={event => {
               setHandle(event.target.value.replace(/^@+/, ''));
-              setNote('');
             }}
             placeholder="@handle"
             autoComplete="off"
@@ -164,7 +163,14 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
             <span>{status.text}</span>
           </p>
         ) : null}
-        {note ? <p className="claim-status is-error" role="alert">{note}</p> : null}
+        {note ? (
+          <p className="claim-status is-error" role="alert">
+            <span>{note}</span>
+            <button type="button" className="gate-note-dismiss" aria-label="Dismiss" onClick={() => setNote('')}>
+              ×
+            </button>
+          </p>
+        ) : null}
         <button className="solid" type="submit" disabled={!ready}>{pending ? 'Claiming…' : 'Claim handle'}</button>
       </form>
     </div>

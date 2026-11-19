@@ -12,9 +12,9 @@ import {
   recoveryStorageKey,
   writeRecoveryStep,
 } from '../lib/wallet-desk.mjs';
+import { SEED_CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
 
 const EMPTY_SLOTS = () => Array.from({ length: 12 }, () => '');
-const EXIT_MS = 720;
 
 function PhraseEntry({ slots, onChange, disabled = false }) {
   const refs = useRef([]);
@@ -154,7 +154,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
     setLeaving(true);
     finishTimer.current = window.setTimeout(() => {
       onDone?.();
-    }, EXIT_MS);
+    }, SEED_CONFIRM_HOLD_MS);
   }
 
   if (!step) return null;
@@ -229,7 +229,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         {step === 'confirm' ? (
           <form className="field" onSubmit={finishConfirm}>
             <p className="quiet">Type the 12 words</p>
-            <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); setNote(''); }} disabled={leaving} />
+            <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); }} disabled={leaving} />
             <button type="submit" className="solid" disabled={leaving}>Confirm seed</button>
           </form>
         ) : null}
@@ -239,7 +239,14 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
             <p className="quiet">Opening your desk…</p>
           </div>
         ) : null}
-        {note && step !== 'success' ? <p className="quiet" role="status">{note}</p> : null}
+        {note && step !== 'success' ? (
+          <p className={`gate-note ${note.startsWith('Downloaded') ? 'is-ok' : 'is-error'}`} role={note.startsWith('Downloaded') ? 'status' : 'alert'}>
+            <span>{note}</span>
+            <button type="button" className="gate-note-dismiss" aria-label="Dismiss" onClick={() => setNote('')}>
+              ×
+            </button>
+          </p>
+        ) : null}
       </section>
     </div>
   );

@@ -53,6 +53,7 @@ export default function CodeSlots({
   cascade = 20,
   ariaLabel = 'One-time code',
   message = '',
+  onDismissError = null,
   className = ''
 }) {
   const uid = useId();
@@ -439,11 +440,16 @@ export default function CodeSlots({
       {message ? (
         <p
           id={`${uid}-message`}
-          className={`code-slots__message${status === 'error' ? ' is-error' : ''}`}
+          className={`code-slots__message${status === 'error' ? ' is-error' : ''}${status === 'success' ? ' is-ok' : ''}`}
           role={status === 'error' ? 'alert' : 'status'}
           aria-live="polite"
         >
-          {message}
+          <span>{message}</span>
+          {status === 'error' && onDismissError ? (
+            <button type="button" className="code-slots__dismiss" aria-label="Dismiss" onClick={onDismissError}>
+              ×
+            </button>
+          ) : null}
         </p>
       ) : null}
     </div>
