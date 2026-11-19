@@ -33,7 +33,7 @@ export default function SignInPage({ disabled = false, onLogin, onDeveloperPrevi
               tintOpacity={0.94}
               textColor="#120f17"
               disabled={disabled || !onLogin}
-              onClick={onLogin}
+              onClick={() => onLogin?.()}
             >
               Continue
             </SpecularButton>

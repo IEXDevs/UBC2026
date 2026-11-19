@@ -64,7 +64,7 @@ import SignInPage from '../components/SignInPage';
 import DeskLock from '../components/DeskLock';
 import { useHostedPreview } from '../components/HostedPreview';
 import { usePrivyPublic } from '../components/PrivyRoot';
-import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
+import { developerPreviewAllowed, hasStoredPrivySession, privyLoginClick, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
 import { clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 
@@ -142,6 +142,7 @@ function AuthedShell() {
   const onLogout = useCallback(async () => {
     await logout?.();
   }, [logout]);
+  const openLogin = useCallback(privyLoginClick(login), [login]);
 
   useEffect(() => {
     if (!devAllowed) return undefined;
@@ -273,7 +274,7 @@ function AuthedShell() {
         accountLabel="Developer"
         signedIn
         loginDisabled={false}
-        onLogin={login}
+        onLogin={openLogin}
         onLogout={leaveDevPreview}
         liveWallets={[]}
         walletNote="Developer preview. Sample balances. Live prices come from DexScreener."
@@ -287,7 +288,7 @@ function AuthedShell() {
   }
 
   if (showSignInGate({ privyConfigured: true, ready, authenticated })) {
-    return <SignInPage onLogin={login} onDeveloperPreview={devAllowed ? enterDevPreview : null} />;
+    return <SignInPage onLogin={openLogin} onDeveloperPreview={devAllowed ? enterDevPreview : null} />;
   }
 
   return (
@@ -297,7 +298,7 @@ function AuthedShell() {
       accountLabel={signedIn ? privyAccountLabel(user) : 'You'}
       signedIn={signedIn}
       loginDisabled={!ready}
-      onLogin={login}
+      onLogin={openLogin}
       onLogout={onLogout}
       liveWallets={liveWallets}
       walletNote={walletNote}

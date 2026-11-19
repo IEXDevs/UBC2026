@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { developerPreviewAllowed, hasStoredPrivySession, hostedDevPreview, publicDevPreviewValue, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
+import { developerPreviewAllowed, hasStoredPrivySession, hostedDevPreview, privyLoginClick, publicDevPreviewValue, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
 
 function storage(entries) {
   const keys = Object.keys(entries);
@@ -73,4 +73,23 @@ test('refresh keeps a stored session off the login page and the unlock field is 
   assert.match(desk, /autoComplete="off"/);
   assert.doesNotMatch(desk, /current-password/);
   assert.match(desk, /name="maelstrom-desk-unlock"/);
+});
+
+test('Continue does not pass the click event into Privy login', () => {
+  const calls = [];
+  const open = privyLoginClick((options) => { calls.push(options); });
+  open({ type: 'click', preventDefault() {} });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], undefined);
+  assert.doesNotThrow(() => privyLoginClick(null)({ type: 'click' }));
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const page = readFileSync(join(root, 'app/page.js'), 'utf8');
+  const signIn = readFileSync(join(root, 'components/SignInPage.js'), 'utf8');
+  const menu = readFileSync(join(root, 'components/AccountMenu.js'), 'utf8');
+  const profile = readFileSync(join(root, 'components/ProfileSheet.js'), 'utf8');
+  assert.match(page, /privyLoginClick\(login\)/);
+  assert.doesNotMatch(page, /onLogin=\{login\}/);
+  assert.match(signIn, /onClick=\{\(\) => onLogin\?\.\(\)\}/);
+  assert.match(menu, /onClick=\{\(\) => onLogin\?\.\(\)\}/);
+  assert.match(profile, /onClick=\{\(\) => onLogin\?\.\(\)\}/);
 });

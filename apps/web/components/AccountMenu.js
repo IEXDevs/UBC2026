@@ -43,7 +43,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
   if (!signedIn) {
     return (
       <div className="sign-up-slot">
-        <SpecularButton size="sm" radius={999} disabled={loginDisabled} onClick={onLogin}>
+        <SpecularButton size="sm" radius={999} disabled={loginDisabled} onClick={() => onLogin?.()}>
           Continue
         </SpecularButton>
       </div>
