@@ -6,7 +6,9 @@ import {
   HARNESS_TOOLS,
   SHARED_AGENT_TOOLS,
   harnessInstruction,
+  normalizeSituation,
   parseSkillCommand,
+  situationInstruction,
   skillById,
   skillsCatalogInstruction,
   toOpenAiTools,
@@ -27,10 +29,14 @@ export function agentToolSchemas() {
   return toOpenAiTools([...SHARED_AGENT_TOOLS, ...HARNESS_TOOLS]);
 }
 
-export function harnessPrompt(connectors, skillId = '') {
+export function harnessPrompt(connectors, skillId = '', situation = null, now = new Date()) {
   const skill = skillById(skillId);
+  const clock = situation && typeof situation.at === 'string'
+    ? situation
+    : normalizeSituation(situation, now);
   return [
     harnessInstruction(),
+    situationInstruction(clock),
     connectorInstruction(connectors),
     skillsCatalogInstruction(),
     skill ? skill.instruction : '',
@@ -74,12 +80,13 @@ export function linkedConnectorIds(value) {
  * Turn `/vercel check the preview` into a task, or a reply when the app is off.
  * A normal message is returned unchanged.
  */
-export function prepareOwnerTurn(message, connectors) {
+export function prepareOwnerTurn(message, connectors, situation = null, now = new Date()) {
+  const clock = normalizeSituation(situation, now);
   const parsed = parseSkillCommand(message);
   if (!parsed) {
     const task = typeof message === 'string' ? message.trim() : '';
     return task
-      ? { message: task, skillId: '', instruction: harnessPrompt(connectors) }
+      ? { message: task, skillId: '', instruction: harnessPrompt(connectors, '', clock) }
       : { error: 'message_required' };
   }
   if (!parsed.task) {
@@ -98,7 +105,7 @@ export function prepareOwnerTurn(message, connectors) {
   return {
     message: parsed.task,
     skillId: parsed.id,
-    instruction: harnessPrompt(connectors, parsed.id),
+    instruction: harnessPrompt(connectors, parsed.id, clock),
   };
 }
 
@@ -155,7 +162,7 @@ export async function runDelegatedAgent(ctx, args = {}) {
       message: task,
       tools: agentToolSchemas(),
       toolsInstruction: [
-        harnessPrompt(ctx.connectors, skill?.id || ''),
+        harnessPrompt(ctx.connectors, skill?.id || '', ctx.situation),
         'You are a subagent. Use the tools. Do not delegate. Reply with what you found.',
       ].join('\n'),
       maxToolRounds: 3,
@@ -201,6 +208,7 @@ export async function runVoiceAgentTurn({
   permissionMode = 'ask',
   reviewCap = null,
   connectors = [],
+  situation = null,
   env = {},
   fetcher = fetch,
   metaModelApiKey = '',
@@ -208,7 +216,8 @@ export async function runVoiceAgentTurn({
   model = '',
 } = {}) {
   const desk = linkedConnectorIds(connectors);
-  const prepared = prepareOwnerTurn(message, desk);
+  const clock = normalizeSituation(situation);
+  const prepared = prepareOwnerTurn(message, desk, clock, new Date(clock.at));
   if (prepared.reply) return { reply: prepared.reply, subagents: [] };
   if (!prepared.message) return { reply: 'Say what you want done.', subagents: [] };
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
@@ -224,11 +233,13 @@ export async function runVoiceAgentTurn({
     searchFetch: fetcher,
     priceFetch: fetcher,
     rpcFetch: fetcher,
+    situation: clock,
   });
   const ctx = {
     ownerId,
     botId,
     connectors: desk,
+    situation: clock,
     permissionMode,
     depth: 0,
     invokeRaw: (name, args) => invokeRaw(name, stampSpendPermission(name, args, spend)),

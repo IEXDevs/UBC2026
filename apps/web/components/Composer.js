@@ -44,6 +44,7 @@ import {
 } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
+import { browserSituation, mergeOwnerSituation } from '../lib/owner-situation.mjs';
 import { readSharedLinks } from '../lib/connectors.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
 import { AGENT_SKILLS, AVAILABLE_SKILLS } from '@ubc2026/agent-tools';
@@ -625,6 +626,7 @@ export default function Composer({
         fileCatalog: catalogRef.current,
         connectors: readSharedLinks(),
         reviewCap: reviewCapRef.current || '',
+        situation: browserSituation(),
         accessToken,
         deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
         signal: controller.signal,
@@ -809,6 +811,7 @@ export default function Composer({
           botName: botNameRef.current,
           botGoal: botGoalRef.current,
           botType: botTypeRef.current,
+          situation: mergeOwnerSituation(browserSituation(), payload.situation),
         },
         ...(tools && typeof tools === 'object' ? { clientTools: tools } : {}),
         onMessage: ({ message, role }) => {

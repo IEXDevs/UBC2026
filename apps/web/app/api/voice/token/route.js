@@ -2,6 +2,8 @@ import { readRootEnv } from '../../../../lib/root-env.mjs';
 import { requestVoiceSignedUrl, requestVoiceToken, VoiceTokenError } from '../../../../lib/voice-token.mjs';
 import { voiceOverrides, voiceSession } from '../../../../lib/voice-settings.mjs';
 import { fetchAgentRuntime } from '../../../../lib/runtime-fetch.mjs'; // apps/web/lib
+import { situationFromEdge } from '@ubc2026/agent-tools';
+import { visitorGeo } from '../../../../lib/visitor-geo.mjs';
 
 async function bestEffortSyncAgent() {
   const runtime = readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL')
@@ -65,6 +67,11 @@ export async function POST(request) {
     } catch {
       signedUrl = '';
     }
+    const cf = await visitorGeo(request);
+    const clock = situationFromEdge({}, cf);
+    const situation = {};
+    if (clock.place) situation.place = clock.place;
+    if (typeof cf.timezone === 'string' && cf.timezone.trim()) situation.timeZone = clock.timeZone;
     return Response.json(
       {
         token,
@@ -73,6 +80,7 @@ export async function POST(request) {
         speed: session.speed,
         language: session.language,
         overrides: voiceOverrides(session),
+        ...(Object.keys(situation).length > 0 ? { situation } : {}),
         syncOk: sync.ok === true,
         syncError: sync.ok ? undefined : sync.error,
       },

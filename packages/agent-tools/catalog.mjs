@@ -206,6 +206,7 @@ export function sharedToolsInstruction() {
     'When the owner names a .sol SNS domain, an @handle, or a wallet address, call lookup_recipient with q set to that token. It hits GET /api/profiles/lookup (SNS resolve or handle directory). Never web_search for .sol names or handles. Speak the resolved address as first5...last5.',
     'When the owner asks you to open or use a specific website: browser_open, then browser_navigate to that https URL. Prefer a direct URL over searching. The owner watches Live View for form entry.',
     'When the owner asks for open-web research (not a .sol, handle, or wallet): call web_search first, pick a real https result url, then web_scrape. search_not_configured and client_missing mean FIRECRAWL_API_KEY or the research client is not configured. provider_failed means Firecrawl returned a server error. Do not invent search results.',
+    'When the prompt lists an owner situation, fold that place and local date into web_search queries and into search or map pages you open. Do that for weather, hours, events, local news, and "near me", "today", "tonight", or "this weekend". Leave the place off other searches. Do not invent a city when place is not set.',
     'Do not invent balances, positions, or decisions — call get_wallets and read balances.balanceStatus / balances.ok / balances.displayBalanceLabel / holdings. If balanceStatus is failed or balances.ok is false, say balances could not be read (use the unavailable label). Never claim "no open positions" or "0 SOL" from a failed or partial read. Empty success means holdings is empty and balanceStatus is empty or ok with zero amounts.',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
@@ -438,3 +439,11 @@ export {
   skillsCatalogInstruction,
 } from './skills.mjs';
 export { HARNESS_TOOLS, HARNESS_TOOL_NAMES, harnessInstruction } from './harness.mjs';
+export {
+  applySituation,
+  groundBrowseUrl,
+  groundSearchQuery,
+  normalizeSituation,
+  situationFromEdge,
+  situationInstruction,
+} from './situation.mjs';

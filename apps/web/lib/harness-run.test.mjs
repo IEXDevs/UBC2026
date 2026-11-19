@@ -85,6 +85,16 @@ test('skills and subagents use the connected apps and stop at one handoff', asyn
   assert.equal(called.skillId, 'domain-modeling');
   assert.equal(called.message, 'name the wallet');
   assert.match(called.instruction, /Skill \/domain-modeling/);
+  assert.match(called.instruction, /Local time:/);
+  assert.match(called.instruction, /Place is not set/);
+  const placed = prepareOwnerTurn('weather near me', [], {
+    timeZone: 'America/Chicago',
+    place: 'Austin, Texas',
+    locale: 'en-US',
+  }, new Date('2026-11-19T16:33:00.000Z'));
+  assert.match(placed.instruction, /Place: Austin, Texas/);
+  assert.match(placed.instruction, /November 19, 2026/);
+  assert.match(placed.instruction, /Language: en-US/);
 
   const seen = [];
   const used = await dispatchHarness('use_connector', { connectorId: 'github', query: 'issues' }, {

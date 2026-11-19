@@ -15,6 +15,8 @@ import {
   prepareOwnerTurn,
   stampSpendPermission,
 } from '../../../../../lib/harness-run.mjs';
+import { situationFromEdge } from '@ubc2026/agent-tools';
+import { visitorGeo } from '../../../../../lib/visitor-geo.mjs';
 import { readSubagentResults } from '../../../../../lib/subagent-board.mjs';
 import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
 import { ensureOwnerTradeLoop } from '../../../../../lib/owner-trade.mjs';
@@ -77,7 +79,8 @@ export async function POST(request, context) {
   const permissionMode = parsePermission(body.permission);
   const reviewCap = ownerReviewCap(body.reviewCap);
   const connectors = linkedConnectorIds(body.connectors);
-  const prepared = prepareOwnerTurn(message, connectors);
+  const situation = situationFromEdge(body.situation, await visitorGeo(request));
+  const prepared = prepareOwnerTurn(message, connectors, situation, new Date(situation.at));
   if (prepared.reply) {
     return Response.json(
       { ok: true, botId, reply: prepared.reply, provider: 'desk', toolRounds: 0 },
@@ -121,6 +124,7 @@ export async function POST(request, context) {
     // Solana JSON-RPC must not ride AGENT_RUNTIME either — binding.fetch(RPC)
     // returns a Worker 404 and collapses into rpc_failed.
     rpcFetch: fetch,
+    situation,
   });
   const spend = { permissionMode, reviewCap, confirmSpend: true };
   const chatModel = (typeof body.model === 'string' && /^[A-Za-z0-9_.:/-]{1,80}$/.test(body.model.trim()))
@@ -144,6 +148,7 @@ export async function POST(request, context) {
     connectors,
     permissionMode,
     depth: 0,
+    situation,
     invokeRaw: (name, args) => invokeRaw(name, stampSpendPermission(name, args, spend)),
     complete: (opts) => completeTextChat({
       ...chatKeys,

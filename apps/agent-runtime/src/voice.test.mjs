@@ -527,6 +527,8 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
   assert.equal(voice[0].content, text[0].content);
   assert.equal(voice[1].content.startsWith(text[1].content), true);
   assert.match(voice[1].content, /When this call is handed to the agent/);
+  assert.match(voice[1].content, /Local time:/);
+  assert.match(voice[1].content, /Place is not set/);
   assert.match(voice[1].content, /\/goal/);
   assert.match(voice[0].content, /You do not sign, broadcast, reserve budget, or approve spends/);
   assert.match(voice[1].content, /Nova/);
@@ -630,6 +632,8 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.match(calls[0].body.messages[0].content, /platform rules are locked/);
   assert.match(calls[0].body.messages[0].content, /You do not sign, broadcast, reserve budget, or approve spends/);
   assert.match(calls[0].body.messages[1].content, /Permission is ask every time/);
+  assert.match(calls[0].body.messages[1].content, /Local time:/);
+  assert.match(calls[0].body.messages[1].content, /Place is not set/);
   assert.match(calls[0].body.messages[1].content, /trust, verify, wallet freeze, bot policy, approval, then sign/);
   assert.equal(calls[0].body.messages.some(item => /voice remote/.test(String(item.content))), false);
   assert.equal(calls[0].body.model, 'muse-spark-1.3');
