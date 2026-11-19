@@ -36,6 +36,16 @@ export function showSignInGate({ privyConfigured, ready, authenticated }) {
 }
 
 /**
+ * Privy `login(options)` treats its argument as modal options.
+ * A click handler must not forward the DOM event.
+ */
+export function privyLoginClick(login) {
+  return () => {
+    if (typeof login === 'function') login();
+  };
+}
+
+/**
  * Desk preview without Privy. Requires DEV_PREVIEW=1 and a non-production build.
  * Production inlines the flag off, so the bypass button cannot render there.
  * `next dev` keeps the flag when the shell already exported NODE_ENV=production.
