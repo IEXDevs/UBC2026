@@ -110,6 +110,7 @@ test('quicknode read prices balances and never sends a transaction', async () =>
   const calls = [];
   const fetcher = async (url, init) => {
     assert.equal(url, RPC);
+    assert.equal(init.redirect, 'follow');
     const body = JSON.parse(init.body);
     calls.push(...body.map(row => row.method));
     assert.equal(body.some(row => row.method === 'sendTransaction'), false);

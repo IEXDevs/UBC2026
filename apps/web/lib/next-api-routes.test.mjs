@@ -385,6 +385,93 @@ test('GET /api/portfolio without bearer returns login_required', async () => {
  * Side effects: none.
  * Gaps: remaining loadPortfolio happy path needs RPC + Privy.
  */
+/**
+ * Rigor audit — GET /api/portfolio hosted identity
+ * Achieves: a JWT sub loads the Privy user by id and reads balances without /users/me.
+ * Fails when: the route calls /users/me (hosted 502 privy_failed) or posts a wallet create.
+ * Oracle: readLoginUser Worker path + read-only portfolio RPC.
+ * Side effects: global fetch stubbed and restored.
+ * Gaps: does not call live Privy or QuickNode.
+ */
+test('GET /api/portfolio reads linked wallets from the JWT user id', async () => {
+  const ownerId = 'did:privy:portfolio-user';
+  const address = 'So11111111111111111111111111111111111111112';
+  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ sub: ownerId })).toString('base64url');
+  const token = `${header}.${payload}.sig`;
+  const rpcUrl = 'https://example.invalid/portfolio-rpc';
+  const previous = {
+    PRIVY_APP_ID: process.env.PRIVY_APP_ID,
+    PRIVY_APP_SECRET: process.env.PRIVY_APP_SECRET,
+    QUICKNODE_DEVNET_RPC_URL: process.env.QUICKNODE_DEVNET_RPC_URL,
+  };
+  process.env.PRIVY_APP_ID = 'app_portfolio_test';
+  process.env.PRIVY_APP_SECRET = 'portfolio-app-secret';
+  process.env.QUICKNODE_DEVNET_RPC_URL = rpcUrl;
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    calls.push({ url: target, method: init?.method, redirect: init?.redirect });
+    if (target.includes('/users/me')) {
+      return new Response(JSON.stringify({ error: 'users_me_forbidden' }), { status: 403 });
+    }
+    if (target.includes(`/v1/users/${encodeURIComponent(ownerId)}`)) {
+      return new Response(JSON.stringify({
+        id: ownerId,
+        linked_accounts: [{
+          type: 'wallet',
+          address,
+          chain_type: 'solana',
+          wallet_client_type: 'phantom',
+        }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (target === rpcUrl) {
+      const body = JSON.parse(init.body);
+      const results = body.map(row => {
+        if (row.method === 'getGenesisHash') {
+          return { jsonrpc: '2.0', id: row.id, result: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG' };
+        }
+        if (row.method === 'getBalance') {
+          return { jsonrpc: '2.0', id: row.id, result: { value: 1000 } };
+        }
+        return { jsonrpc: '2.0', id: row.id, result: { value: [] } };
+      });
+      return new Response(JSON.stringify(results), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ error: 'unmocked' }), { status: 500 });
+  };
+  try {
+    const { GET } = await import('../app/api/portfolio/route.js');
+    const res = await GET(new Request('http://localhost/api/portfolio', {
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-owner-id': ownerId,
+        origin: 'https://dev.maelstrom.iexdevs.com',
+      },
+    }));
+    const body = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(body));
+    assert.equal(body.cluster, 'devnet');
+    assert.equal(body.authorizesTransaction, false);
+    assert.equal(body.wallets[0].address, address);
+    assert.equal(calls.some(call => call.url.includes('/users/me')), false);
+    assert.equal(calls.some(call => call.method === 'POST' && call.url.includes('privy')), false);
+    assert.equal(calls.some(call => call.url === rpcUrl && call.redirect === 'follow'), true);
+    const raw = JSON.stringify(body);
+    assert.equal(raw.includes(token), false);
+    assert.equal(raw.includes('portfolio-app-secret'), false);
+    assert.equal(raw.includes(rpcUrl), false);
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 test('GET /api/portfolio with bearer but missing Privy secrets returns missing_config', async () => {
   const { GET } = await import('../app/api/portfolio/route.js');
   const res = await GET(new Request('http://localhost/api/portfolio', {
