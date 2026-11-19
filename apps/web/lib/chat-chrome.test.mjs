@@ -36,26 +36,20 @@ test('the edit button stays hidden until the message is hovered or focused', () 
 });
 
 /**
- * Achieves: verifies chat message lists reuse the agent rail scrollbar.
- * Fails when: chat message lists reuse the agent rail scrollbar no longer holds.
- * Oracle: assert.match(rail, /scrollbar-width: thin;/); assert.match(rail, /scrollbar-color: var\(--al-thumb\); assert.match(rail, /::-webkit-scrollbar \{\s*width: 6px;/); assert.match(rail, /::-webkit-scrollbar-track \{\s*background: transparent;/); assert.match(rail, /::-webkit-scrollbar-thumb \{\s*border-radius: 3px;\s*background: var\(--al-thumb\); assert.match(chat, /\.voice-script \{/)
+ * Achieves: chat and the agent rail still scroll, and the scrollbar itself is not painted.
+ * Fails when: overflow is removed or a thumb width comes back.
  * Side effects / state checked: N/A.
- * Gaps: none.
+ * Gaps: native select popups are OS-drawn and are not in this stylesheet.
  */
-test('chat message lists reuse the agent rail scrollbar', () => {
-  assert.match(rail, /scrollbar-width: thin;/);
-  assert.match(rail, /scrollbar-color: var\(--al-thumb\) transparent;/);
-  assert.match(rail, /::-webkit-scrollbar \{\s*width: 6px;/);
-  assert.match(rail, /::-webkit-scrollbar-track \{\s*background: transparent;/);
-  assert.match(rail, /::-webkit-scrollbar-thumb \{\s*border-radius: 3px;\s*background: var\(--al-thumb\);/);
+test('chat message lists scroll without a visible scrollbar', () => {
+  assert.match(rail, /overflow-y: auto;/);
+  assert.match(rail, /scrollbar-width: none;/);
+  assert.match(rail, /\.animated-list__viewport::-webkit-scrollbar \{\s*display: none;/);
   const chat = css.slice(css.indexOf('.thread.is-chat,'), css.indexOf('.thread.is-book'));
   assert.match(chat, /\.voice-script \{/);
-  assert.match(chat, /--al-thumb: rgba\(255, 255, 255, 0\.16\);/);
-  assert.match(chat, /scrollbar-width: thin;/);
-  assert.match(chat, /scrollbar-color: var\(--al-thumb\) transparent;/);
-  assert.match(chat, /\.thread\.is-chat::-webkit-scrollbar,\s*\.voice-script::-webkit-scrollbar \{\s*width: 6px;/);
-  assert.match(chat, /background: transparent;/);
-  assert.match(chat, /border-radius: 3px;\s*background: var\(--al-thumb\);/);
+  assert.match(chat, /scrollbar-width: none;/);
+  assert.match(chat, /\.thread\.is-chat::-webkit-scrollbar,\s*\.voice-script::-webkit-scrollbar \{\s*display: none;/);
+  assert.match(css, /\.thread \{\s*flex: 1;[\s\S]*overflow: auto;/);
   assert.match(page, /pane === 'Main' \? ' is-chat'/);
   assert.doesNotMatch(css, /\.voice-script,\s*\.voice-script \.chat-log/);
 });

@@ -1278,13 +1278,22 @@ button.add-agent:not(:disabled):hover {
 }
 
 .sheet.wallets-sheet {
+  --ws-brass: #e4c27a;
+  --ws-sea: #6ec8c3;
+  --ws-ink: #101614;
+  --ws-panel: #16211e;
   width: min(980px, calc(100vw - 48px));
   height: min(720px, calc(100vh - 48px));
   display: grid;
   grid-template-columns: 168px minmax(0, 1fr);
   padding: 0;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 16px;
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(110, 200, 195, 0.16), transparent 42%),
+    radial-gradient(90% 70% at 100% 100%, rgba(228, 194, 122, 0.12), transparent 46%),
+    #101614;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(228, 194, 122, 0.18);
 }
 .wallet-nav {
   display: flex;
@@ -1292,18 +1301,19 @@ button.add-agent:not(:disabled):hover {
   align-items: stretch;
   gap: 4px;
   padding: 18px 12px;
-  border-right: 1px solid #2e2e2e;
-  background: #141414;
+  border-right: 1px solid rgba(228, 194, 122, 0.16);
+  background: rgba(12, 20, 18, 0.72);
 }
 .wallet-nav strong {
   margin: 0 8px 12px;
   font-size: 15px;
+  color: var(--ws-brass);
 }
 .wallet-nav button {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #d4d4d4;
+  color: #d5e4df;
   text-align: left;
   padding: 10px 12px;
   font: inherit;
@@ -1313,22 +1323,29 @@ button.add-agent:not(:disabled):hover {
 }
 @media (hover: hover) and (pointer: fine) {
   .wallet-nav button:hover {
-    background: #2a2a2a;
-    color: #f5f5f5;
+    background: rgba(110, 200, 195, 0.12);
+    color: #f6f3ea;
   }
 }
-.wallet-nav button.is-on { background: #2a2a2a; color: #f5f5f5; }
+.wallet-nav button.is-on {
+  background: rgba(228, 194, 122, 0.16);
+  color: var(--ws-brass);
+  box-shadow: inset 3px 0 0 var(--ws-brass);
+}
 .wallet-body {
   min-width: 0;
   overflow: auto;
   padding: 18px 22px 22px;
+  scrollbar-width: none;
 }
+.wallet-body::-webkit-scrollbar { display: none; }
 .wallet-figure {
   margin: 8px 0 0;
   font-size: 40px;
   letter-spacing: -0.03em;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  color: var(--ws-brass);
 }
 .wallet-figure-sm { font-size: 28px; }
 .portfolio { display: grid; gap: 16px; }
@@ -1586,28 +1603,78 @@ button.add-agent:not(:disabled):hover {
   .address-copy:hover { background: #2a2a2a; }
 }
 .wallet-add { display: grid; gap: 8px; margin: 0 0 14px; }
-.wallet-switcher { display: grid; gap: 6px; margin: 0 0 12px; }
-.wallet-switcher-row {
-  display: flex;
+.wallet-roster { display: grid; gap: 8px; margin: 0 0 16px; }
+.wallet-roster-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  padding: 8px 8px 8px 12px;
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px #2a2a2a;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(22, 33, 30, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(110, 200, 195, 0.18);
 }
-.wallet-switcher-row.is-on { background: #1c1c1c; }
-@media (hover: hover) and (pointer: fine) {
-  .wallet-switcher-row:hover { background: #1c1c1c; }
+.wallet-roster-row.is-on {
+  background: rgba(228, 194, 122, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(228, 194, 122, 0.45);
 }
-.wallet-switcher-pick {
+.wallet-roster-pick {
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 14px;
+  text-align: left;
   cursor: pointer;
   padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.wallet-roster-pick small { color: var(--ws-sea, #6ec8c3); font-size: 12px; }
+.wallet-retire {
+  border: 0;
+  background: transparent;
+  color: #e7b2a8;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .wallet-retire:hover { background: rgba(224, 122, 106, 0.16); color: #ffd0c8; }
+}
+.wallet-pick-label { display: grid; gap: 6px; }
+.wallets-sheet .wallet-pick {
+  display: block;
+  width: 100%;
+}
+.wallets-sheet .wallet-pick .glide-select__trigger,
+.wallets-sheet .wallet-pick .glide-select__menu {
+  width: 100%;
+}
+.hint-btn { position: relative; }
+.hint-btn::after {
+  content: attr(data-hint);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: 5;
+  width: max-content;
+  max-width: 240px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #14211e;
+  color: #f6f3ea;
+  box-shadow: inset 0 0 0 1px rgba(228, 194, 122, 0.35);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .hint-btn:hover::after,
+  .hint-btn:focus-visible::after { opacity: 1; }
 }
 .swap-form select {
   width: 100%;
@@ -2643,9 +2710,7 @@ button.wallet-export:not(:disabled):hover {
 /* Rail dark thumb from .animated-list__viewport / listLook theme dark. */
 .thread.is-chat,
 .voice-script {
-  --al-thumb: rgba(255, 255, 255, 0.16);
-  scrollbar-width: thin;
-  scrollbar-color: var(--al-thumb) transparent;
+  scrollbar-width: none;
 }
 
 .thread.is-chat {
@@ -2660,18 +2725,7 @@ button.wallet-export:not(:disabled):hover {
 
 .thread.is-chat::-webkit-scrollbar,
 .voice-script::-webkit-scrollbar {
-  width: 6px;
-}
-
-.thread.is-chat::-webkit-scrollbar-track,
-.voice-script::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.thread.is-chat::-webkit-scrollbar-thumb,
-.voice-script::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background: var(--al-thumb);
+  display: none;
 }
 
 .thread.is-book { padding: 0; overflow: hidden; }
@@ -2753,7 +2807,7 @@ button.wallet-export:not(:disabled):hover {
   box-sizing: border-box;
   border-radius: 16px;
   background: #141414;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(228, 194, 122, 0.28);
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.4);
 }
 
@@ -3928,21 +3982,11 @@ button.chat-edit:disabled:focus-visible {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  scrollbar-width: none;
 }
 
 .message-queue::-webkit-scrollbar {
-  width: 6px;
-}
-
-.message-queue::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.message-queue::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.16);
+  display: none;
 }
 
 .message-queue-row {
@@ -7112,4 +7156,13 @@ body.maelstrom-terms-gate [id^="headlessui-dialog"] {
   color: #d6d6d6;
   font-size: 16px;
   line-height: 1.6;
+}
+
+html, body, * {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }

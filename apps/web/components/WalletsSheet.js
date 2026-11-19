@@ -6,20 +6,19 @@ import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
 import { X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
+import GlideSelect from './GlideSelect';
 import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
 import TokenScreen from './TokenScreen';
 import SlideCommit from './bits/SlideCommit';
-import Spotlight from './bits/Spotlight';
 import TxnLog from './TxnLog';
 import SendToField from './SendToField';
 import TxnPreview from './TxnPreview';
 import { usePresence } from './usePresence';
-import { DEV_PREVIEW_OWNER, samplePortfolio } from '../lib/dev-preview.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { partyFromToken } from '../lib/party-book.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
-import { describeWallets, formatBaseUnits, sendDestinations, walletGlance } from '../lib/money-views.mjs';
+import { describeWallets, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
   displayToUnits,
@@ -35,7 +34,7 @@ import {
 } from '../lib/wallet-desk.mjs';
 import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
-import { sendPreview, swapPreview } from '../lib/txn-preview.mjs';
+import { sendPreview } from '../lib/txn-preview.mjs';
 
 const PANES = [
   { id: 'assets', label: 'Assets' },
@@ -52,12 +51,10 @@ export default function WalletsSheet({
   open,
   onClose,
   state,
-  note = '',
   transfers = [],
   bot = null,
   onParty,
   signedIn = false,
-  devPreview = false,
   ownerId = '',
   handle = '',
   sns = '',
@@ -67,11 +64,14 @@ export default function WalletsSheet({
   getAccessToken,
   resolveRecipient = null,
   devnetBalance = null,
+  onRetire = null,
 }) {
   const { mounted, leaving } = usePresence(open);
   const [pane, setPane] = useState('assets');
   const [walletId, setWalletId] = useState('');
   const [prefs, setPrefs] = useState(emptyTokenPrefs);
+  const [retiring, setRetiring] = useState('');
+  const [retireNote, setRetireNote] = useState('');
 
   useEffect(() => {
     if (!open) return undefined;
@@ -113,7 +113,7 @@ export default function WalletsSheet({
 
   if (!mounted) return null;
 
-  const wallets = state?.wallets || [];
+  const wallets = (state?.wallets || []).filter(wallet => wallet && !wallet.deletedAt && !wallet.deleted_at);
   const bots = state?.bots || [];
   const positions = state?.positions || [];
   const glance = walletGlance(wallets, positions, transfers);
@@ -121,6 +121,14 @@ export default function WalletsSheet({
   const active = rows.find(row => row.id === walletId) || rows[0] || null;
   const activeRaw = wallets.find(wallet => wallet.id === active?.id) || null;
   const observing = activeRaw?.spendable === false;
+  const ownDestinations = sendDestinations(wallets, bots, active?.id || '');
+  const destinations = [
+    ...ownDestinations,
+    ...recentCounterparties(transfers, state?.payments || []).filter(row => (
+      !ownDestinations.some(item => item.caption.toLowerCase() === row.caption.toLowerCase())
+    )),
+  ];
+  const needsWallet = pane === 'send' || pane === 'receive' || pane === 'swap';
   const tokens = deskTokens({
     positions,
     transfers,
@@ -158,29 +166,49 @@ export default function WalletsSheet({
               <X size={18} strokeWidth={1.75} />
             </button>
           </div>
-          <WalletSwitcher rows={rows} activeId={active?.id || ''} onSelect={setWalletId} />
-          {signedIn ? <WalletAdd /> : null}
+          {needsWallet ? <WalletPick rows={rows} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
           {pane === 'assets' ? (
             <>
-              {note ? <p className="quiet">{note}</p> : null}
-              {signedIn ? (
+              <WalletRoster
+                rows={rows}
+                activeId={active?.id || ''}
+                onSelect={setWalletId}
+                retiring={retiring}
+                onRetire={async (row) => {
+                  setRetiring(row.id);
+                  setRetireNote('');
+                  try {
+                    const result = await onRetire?.(row);
+                    setRetireNote(result?.ok
+                      ? `${row.label} is no longer on this account.`
+                      : (result?.message || 'That wallet is still on the account.'));
+                  } catch {
+                    setRetireNote('That wallet is still on the account.');
+                  } finally {
+                    setRetiring('');
+                  }
+                }}
+              />
+              {retireNote ? <p className="quiet" role="status">{retireNote}</p> : null}
+              {signedIn && active?.address ? (
                 <TokenScreen
                   open={open}
-                  preview={devPreview}
+                  address={active.address}
                   onSend={() => setPane('send')}
                   onReceive={() => setPane('receive')}
                   onSwap={() => setPane('swap')}
                 />
-              ) : <p className="quiet">Sign in to see tokens, the chart, and send or receive.</p>}
+              ) : null}
+              {!signedIn ? <p className="quiet">Sign in to read the assets in your wallets.</p> : null}
             </>
           ) : null}
           {pane === 'portfolio' ? (
-            signedIn ? <ConnectedPortfolio open={open} preview={devPreview} /> : <p className="quiet">Sign in to connect wallets and read balances.</p>
+            signedIn ? <ConnectedPortfolio open={open} /> : <p className="quiet">Sign in to read balances.</p>
           ) : null}
           {pane === 'send' ? (
             <SendPane
               active={active}
-              destinations={sendDestinations(wallets, bots, active?.id || '')}
+              destinations={destinations}
               tokens={tradeableTokens(tokens)}
               frozen={Boolean(active?.frozen)}
               observing={observing}
@@ -192,7 +220,7 @@ export default function WalletsSheet({
           {pane === 'receive' ? (
             <ReceivePane active={active} handle={handle} sns={prefs.sns} onSns={value => savePrefs({ ...prefs, sns: value })} />
           ) : null}
-          {pane === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} onReceipt={onReceipt} /> : null}
+          {pane === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} /> : null}
           {pane === 'tokens' ? <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} /> : null}
           {pane === 'history' ? (
             bot ? (
@@ -218,7 +246,7 @@ export default function WalletsSheet({
           ) : null}
           {pane === 'keys' ? (
             <div className="wallet-keys">
-              <p>The key stays encrypted until this browser decrypts the download. Maelstrom does not store it.</p>
+              {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to create or import a wallet.</p>}
               <PrivyKeyButton
                 signedIn={signedIn}
                 address={active?.address || glance.address}
@@ -241,7 +269,7 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-function ConnectedPortfolio({ open, preview = false }) {
+function ConnectedPortfolio({ open }) {
   const { user, getAccessToken, unlinkWallet, ready, authenticated } = usePrivy();
   const { linkWallet } = useLinkAccount({
     onError: () => setError('That wallet could not be linked. If it already belongs to another account, sign in with it instead.'),
@@ -257,22 +285,6 @@ function ConnectedPortfolio({ open, preview = false }) {
     let stopped = false;
     setLoading(true);
     setError('');
-    if (preview) {
-      (async () => {
-        try {
-          const enriched = await enrichPortfolio(samplePortfolio(), {
-            userId: DEV_PREVIEW_OWNER,
-            storage: window.localStorage,
-          });
-          if (!stopped) setPortfolio({ ...enriched.portfolio, note: samplePortfolio().note });
-        } catch {
-          if (!stopped) setError('DexScreener did not price the preview.');
-        } finally {
-          if (!stopped) setLoading(false);
-        }
-      })();
-      return () => { stopped = true; };
-    }
     (async () => {
       try {
         const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
@@ -313,7 +325,7 @@ function ConnectedPortfolio({ open, preview = false }) {
       }
     })();
     return () => { stopped = true; };
-  }, [open, preview, accounts, getAccessToken, user?.id]);
+  }, [open, accounts, getAccessToken, user?.id]);
 
   async function remove(address) {
     setRemoving(address);
@@ -352,6 +364,7 @@ function WalletAdd() {
   const [note, setNote] = useState('');
 
   function finish(message) {
+    setMode('');
     setSeed('');
     setPrivkey('');
     setBusy(false);
@@ -361,21 +374,50 @@ function WalletAdd() {
   return (
     <div className="wallet-add">
       <div className="wallet-switch" role="group" aria-label="Add a wallet">
-        <button type="button" disabled={busy} onClick={() => {
-          setBusy(true);
-          setNote('');
-          createWallet()
-            .then(() => finish('New wallet created. Maelstrom does not store its key.'))
-            .catch(() => finish('That wallet was not created. Import a seed or a private key, or connect another wallet.'));
-        }}>Generate</button>
-        <button type="button" disabled={busy} aria-pressed={mode === 'seed'} onClick={() => { setMode('seed'); setPrivkey(''); setNote(''); }}>Import seed</button>
-        <button type="button" disabled={busy} aria-pressed={mode === 'key'} onClick={() => { setMode('key'); setSeed(''); setNote(''); }}>Import key</button>
+        <button
+          type="button"
+          className="hint-btn"
+          disabled={busy}
+          data-hint="Creates a new Solana wallet on this account. The key stays in Privy. Maelstrom does not store it."
+          onClick={() => {
+            setMode('');
+            setBusy(true);
+            setNote('');
+            createWallet()
+              .then(() => finish('New wallet created. Maelstrom does not store its key.'))
+              .catch(() => finish('That wallet was not created.'));
+          }}
+        >
+          Generate
+        </button>
+        <button
+          type="button"
+          className="hint-btn"
+          disabled={busy}
+          aria-pressed={mode === 'seed'}
+          data-hint="Bring in a wallet from a 12-word phrase. The phrase is not saved here."
+          onClick={() => { setMode(current => current === 'seed' ? '' : 'seed'); setPrivkey(''); setSeed(''); setNote(''); }}
+        >
+          Import seed
+        </button>
+        <button
+          type="button"
+          className="hint-btn"
+          disabled={busy}
+          aria-pressed={mode === 'key'}
+          data-hint="Bring in a wallet from a base58 private key. The key is not saved here."
+          onClick={() => { setMode(current => current === 'key' ? '' : 'key'); setSeed(''); setPrivkey(''); setNote(''); }}
+        >
+          Import key
+        </button>
       </div>
       <p className="quiet">The phrase and the private key are not stored here. If you do not keep your own copy, it is gone.</p>
       {mode === 'seed' ? (
         <form className="field" onSubmit={(event) => {
           event.preventDefault();
-          const words = seed.trim().toLowerCase().split(/\s+/);
+          const words = seed.trim().toLowerCase().split(/\s+/).filter(Boolean);
+          setMode('');
+          setSeed('');
           setBusy(true);
           verifyRecoveryPhrase(words).then(valid => {
             if (!valid) {
@@ -384,7 +426,7 @@ function WalletAdd() {
               return null;
             }
             return importSeedPhrase({ mnemonic: words.join(' '), chainType: 'solana' })
-              .then(() => finish('Seed imported. The field is cleared. Maelstrom does not keep the phrase.'));
+              .then(() => finish('Seed imported. Maelstrom does not keep the phrase.'));
           }).catch(() => finish('That seed was not imported.'));
         }}>
           <label>
@@ -398,6 +440,8 @@ function WalletAdd() {
         <form className="field" onSubmit={(event) => {
           event.preventDefault();
           const key = parseImportKey(privkey);
+          setMode('');
+          setPrivkey('');
           if (!key) {
             setNote('Paste a base58 private key.');
             return;
@@ -420,25 +464,61 @@ function WalletAdd() {
   );
 }
 
-function WalletSwitcher({ rows, activeId, onSelect }) {
-  if (!rows.length) return <p className="quiet">No wallet yet.</p>;
+function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
+  if (!rows.length) return <p className="quiet">No wallet on this account yet. Open Keys to create one.</p>;
   return (
-    <div className="wallet-switcher" role="tablist" aria-label="Wallets">
+    <div className="wallet-roster" role="list" aria-label="Wallets">
       {rows.map(row => (
-        <Spotlight key={row.id} className={`wallet-switcher-row${activeId === row.id ? ' is-on' : ''}`}>
+        <div key={row.id} className={`wallet-roster-row${activeId === row.id ? ' is-on' : ''}`}>
           <button
             type="button"
-            role="tab"
-            aria-selected={activeId === row.id}
-            className="wallet-switcher-pick"
+            className="wallet-roster-pick"
+            aria-pressed={activeId === row.id}
             onClick={() => onSelect(row.id)}
           >
-            {row.label}
+            <strong>{row.label}</strong>
+            <small>{row.kind === 'main' ? 'Main' : 'Additional'}{row.frozen ? ' · Frozen' : ''}</small>
           </button>
           <AddressCopy address={row.address} compact />
-        </Spotlight>
+          {row.kind === 'additional' ? (
+            <button
+              type="button"
+              className="wallet-retire"
+              disabled={retiring === row.id}
+              onClick={() => onRetire?.(row)}
+            >
+              {retiring === row.id ? 'Removing' : 'Remove'}
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
+  );
+}
+
+function WalletPick({ rows, activeId, onSelect }) {
+  if (!rows.length) return <p className="quiet">No wallet on this account yet. Open Keys to create one.</p>;
+  return (
+    <label className="wallet-pick-label">
+      Wallet
+      <GlideSelect
+        className="wallet-pick"
+        ariaLabel="Wallet"
+        size="md"
+        menuWidth={420}
+        accentColor="#e4c27a"
+        surfaceColor="#1a2422"
+        highlightColor="#243833"
+        textColor="#f6f3ea"
+        value={activeId}
+        options={rows.map(row => ({
+          value: row.id,
+          label: `${row.label} · ${shortAddress(row.address)}`,
+          tag: row.kind === 'main' ? 'Main' : 'Added',
+        }))}
+        onChange={onSelect}
+      />
+    </label>
   );
 }
 
@@ -461,9 +541,11 @@ function SendPane({
   const [folded, setFolded] = useState(false);
   const asset = tokens.find(token => token.symbol === symbol) || tokens[0] || null;
   const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
-  const target = picked
-    ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, spendable: picked.spendable }
-    : parseSendTarget(to);
+  const target = picked?.kind === 'recent'
+    ? parseSendTarget(picked.caption)
+    : picked
+      ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, spendable: picked.spendable }
+      : parseSendTarget(to);
   const units = asset ? displayToUnits(amount, asset.decimals) : null;
   const [snsAddress, setSnsAddress] = useState('');
   const [snsFailed, setSnsFailed] = useState(false);
@@ -686,81 +768,98 @@ function ReceivePane({ active, handle, sns, onSns }) {
   );
 }
 
-function SwapPane({ tokens, onReceipt }) {
+function SwapPane({ tokens }) {
   const [from, setFrom] = useState(tokens[0]?.symbol || 'USDC');
   const [to, setTo] = useState(tokens[1]?.symbol || 'SOL');
   const [amount, setAmount] = useState('');
   const [status, setStatus] = useState('');
   const [quote, setQuote] = useState('');
   const draft = swapDraft(tokens, { from, to, amountText: amount });
-  const output = draft.output || null;
+  const decimals = draft.output?.decimals;
+  const symbol = draft.output?.symbol || '';
+  const quoteUrl = draft.url || '';
+  const options = tokens.map(token => ({ value: token.symbol, label: token.symbol }));
 
-  async function loadQuote() {
-    setQuote('');
-    if (!draft.url) {
-      setStatus(draft.error === 'not_tradeable'
-        ? 'That token is restricted.'
-        : draft.error === 'invalid_amount'
-          ? 'Enter an amount.'
-          : 'Choose two different tradeable tokens.');
-      return;
-    }
-    setStatus('Quoting…');
-    try {
-      const response = await fetch(draft.url);
-      const body = await response.json().catch(() => ({}));
-      const out = readQuoteOut(body);
-      if (!response.ok || !out || !output) {
-        setStatus('No quote. Nothing was signed.');
-        return;
+  useEffect(() => {
+    if (!quoteUrl || !Number.isInteger(decimals)) {
+      setQuote('');
+      if (amount.trim() && draft.error) {
+        setStatus(draft.error === 'not_tradeable'
+          ? 'That token is restricted.'
+          : draft.error === 'invalid_amount'
+            ? 'Enter an amount.'
+            : 'Choose two different tokens.');
+      } else {
+        setStatus('');
       }
-      const shown = formatBaseUnits(out, output.decimals);
-      const next = swapPreview({
-        pay: amount.trim(),
-        receive: shown,
-        from: draft.input.symbol,
-        to: output.symbol,
-      });
-      setQuote(`${shown} ${output.symbol}`);
-      onReceipt?.({
-        id: `quote_${draft.input.symbol}_${output.symbol}_${draft.amount}_${shown}`,
-        at: new Date().toISOString(),
-        title: next.title,
-        lines: next.lines,
-        cluster: 'devnet',
-      });
-      setStatus('Jupiter quote. devnet execution, mainnet pricing. Nothing was signed.');
-    } catch {
-      setStatus('The quote did not load. Nothing was signed.');
+      return undefined;
     }
-  }
+    let stop = false;
+    setStatus('Quoting…');
+    const timer = setTimeout(() => {
+      fetch(quoteUrl)
+        .then(response => response.json().then(body => ({ ok: response.ok, body })))
+        .then(({ ok, body }) => {
+          if (stop) return;
+          const out = readQuoteOut(body);
+          if (!ok || !out) {
+            setQuote('');
+            setStatus('No quote. Nothing was signed.');
+            return;
+          }
+          setQuote(`${formatBaseUnits(out, decimals)} ${symbol}`);
+          setStatus('Quote ready. Nothing was signed.');
+        })
+        .catch(() => {
+          if (!stop) {
+            setQuote('');
+            setStatus('The quote did not load. Nothing was signed.');
+          }
+        });
+    }, 350);
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [quoteUrl, decimals, symbol, amount, draft.error]);
 
   return (
-    <form
-      className="wallet-form field swap-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        loadQuote();
-      }}
-    >
-      <p className="quiet">A quote only. Nothing is signed from this screen.</p>
-      <label>
+    <form className="wallet-form field swap-form" onSubmit={event => event.preventDefault()}>
+      <p className="quiet">A quote fills in as you type. Nothing is signed from this screen.</p>
+      <label className="wallet-pick-label">
         From
-        <select value={from} onChange={event => { setFrom(event.target.value); setQuote(''); }}>
-          {tokens.map(token => <option key={token.symbol} value={token.symbol}>{token.symbol}</option>)}
-        </select>
+        <GlideSelect
+          className="wallet-pick"
+          ariaLabel="From"
+          menuWidth={420}
+          accentColor="#e4c27a"
+          surfaceColor="#1a2422"
+          highlightColor="#243833"
+          textColor="#f6f3ea"
+          value={from}
+          options={options}
+          onChange={(next) => { setFrom(next); setQuote(''); }}
+        />
       </label>
-      <label>
+      <label className="wallet-pick-label">
         To
-        <select value={to} onChange={event => { setTo(event.target.value); setQuote(''); }}>
-          {tokens.map(token => <option key={`to-${token.symbol}`} value={token.symbol}>{token.symbol}</option>)}
-        </select>
+        <GlideSelect
+          className="wallet-pick"
+          ariaLabel="To"
+          menuWidth={420}
+          accentColor="#e4c27a"
+          surfaceColor="#1a2422"
+          highlightColor="#243833"
+          textColor="#f6f3ea"
+          value={to}
+          options={options}
+          onChange={(next) => { setTo(next); setQuote(''); }}
+        />
       </label>
       <label>
         Amount
         <input value={amount} inputMode="decimal" placeholder="0.00" onChange={event => { setAmount(event.target.value); setQuote(''); }} />
       </label>
-      <button type="submit" className="solid" disabled={!draft.url}>Get quote</button>
       {quote ? <p className="wallet-figure wallet-figure-sm">{quote}</p> : null}
       {status ? <p className="quiet" role="status">{status}</p> : null}
     </form>

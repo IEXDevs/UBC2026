@@ -116,6 +116,7 @@ export function amountText(value) {
 
 export function mapWalletRow(row) {
   if (!row || typeof row.id !== 'string') return null;
+  if (row.deleted_at) return null;
   return {
     id: row.id,
     ownerId: row.owner_id,

@@ -13,6 +13,7 @@ import {
   registeredHoldingsLabel,
   solanaExplorerTxUrl,
   solscanTxUrl,
+  recentCounterparties,
   sendDestinations,
   shortAddress,
   walletBalanceLabel,
@@ -180,6 +181,12 @@ test('send captions use the bot name, then the wallet name', () => {
   const menu = sendDestinations(state.wallets, state.bots, rows[0].id);
   assert.equal(menu.some(row => row.id === rows[0].id), false);
   assert.equal(menu[0].caption, walletSendCaption(rows.find(row => row.id === menu[0].id)));
+  const recent = recentCounterparties(
+    [{ handle: 'ada' }, { handle: '@ada' }, { handle: 'bob' }],
+    [{ counterparty: 'ada.sol' }, { counterparty: 'not a name' }],
+  );
+  assert.deepEqual(recent.map(row => row.caption), ['@ada', '@bob', 'ada.sol']);
+  assert.equal(recent[0].kind, 'recent');
 });
 
 /**

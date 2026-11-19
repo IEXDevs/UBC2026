@@ -80,6 +80,14 @@ test('supabaseHeaders and amountText stay strict', () => {
 test('mapWalletRow / mapBotRow / mapLedgerRow normalize rows', () => {
   assert.equal(mapWalletRow(null), null);
   assert.equal(mapWalletRow({ address: 'x' }), null);
+  assert.equal(mapWalletRow({
+    id: 'w_shop',
+    owner_id: 'u1',
+    kind: 'additional',
+    label: 'Shop',
+    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    deleted_at: '2026-11-19T00:00:00.000Z',
+  }), null);
   const linked = mapWalletRow({
     id: 'linked_abc',
     owner_id: 'u1',

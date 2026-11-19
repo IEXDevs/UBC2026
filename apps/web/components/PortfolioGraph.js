@@ -63,8 +63,8 @@ export default function PortfolioGraph({
   return (
     <div className="portfolio">
       <div className="portfolio-actions">
-        <button type="button" className="ghost" onClick={onConnect}>Connect a wallet</button>
-        <p className="quiet">Link as many Solana wallets as you have. They are read for this graph and are not agent spend wallets.</p>
+        <button type="button" className="ghost" onClick={onConnect}>Link a wallet</button>
+        <p className="quiet">Linked wallets are read for this graph. Agents do not spend from them.</p>
       </div>
       {loading ? <p className="quiet">Reading wallets from QuickNode…</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
@@ -73,9 +73,8 @@ export default function PortfolioGraph({
           <div className="portfolio-layout">
             <Ring slices={slices} />
             <div>
-              <p className="wallet-figure">{formatUsdMicro(total)}</p>
-              <p className="quiet">{portfolio.note}</p>
-              {slices.length === 0 ? <p className="quiet">No priced tokens on this cluster yet.</p> : (
+              {slices.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
+              {slices.length === 0 ? <p className="quiet">No assets in the linked wallets yet.</p> : (
                 <ul className="portfolio-legend">
                   {slices.map((slice, index) => (
                     <li key={slice.mint}>
