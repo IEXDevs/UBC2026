@@ -100,6 +100,23 @@ test('GET /bots/:id/status requires owner and hides foreign bots', async () => {
   assert.equal(body.meta.ownerId, 'alice');
 });
 
+test('browser sessions distinguish directory failures from an unowned bot', async () => {
+  const request = new Request('https://runtime/bots/bot_alice/browser/sessions', {
+    headers: { 'x-owner-id': 'alice' },
+  });
+  const directoryDown = envWithBots([], {
+    fetch: async () => Response.json({ code: 'PGRST002' }, { status: 503 }),
+    BOT: { idFromName: () => assert.fail('unverified owner reached the browser') },
+  });
+  const unavailable = await worker.fetch(request.clone(), directoryDown);
+  assert.equal(unavailable.status, 503);
+  assert.equal((await unavailable.json()).error, 'bot_directory_unavailable');
+
+  const missing = await worker.fetch(request, envWithBots([{ id: 'bot_alice', owner_id: 'bob' }]));
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).error, 'bot_not_found');
+});
+
 test('GET /api/positions scopes by verified owner even when botId is attacker-controlled', async () => {
   const env = envWithBots(
     [{ id: 'bot_alice', owner_id: 'alice' }, { id: 'bot_bob', owner_id: 'bob' }],

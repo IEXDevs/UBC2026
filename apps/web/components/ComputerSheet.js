@@ -12,6 +12,7 @@ import { usePresence } from './usePresence';
 
 export default function ComputerSheet({ open, onClose, bot, ownerId = null, getAccessToken = null }) {
   const { mounted, leaving } = usePresence(open, 180);
+  const syncedBotId = bot?.record ? bot.id : null;
   const [shown, setShown] = useState(false);
   const [steps, setSteps] = useState(() => loopStepsFromRun(null));
   const [loopNote, setLoopNote] = useState('');
@@ -34,8 +35,8 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null, getA
   }, [mounted, onClose]);
 
   useEffect(() => {
-    if (!mounted || !bot?.id) return undefined;
-    const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/status`);
+    if (!mounted || !syncedBotId) return undefined;
+    const url = shellRuntimeUrl(`/bots/${encodeURIComponent(syncedBotId)}/status`);
     if (!ownerId || !url) {
       setSteps(loopStepsFromRun(null));
       setLoopNote(ownerId ? 'This agent cannot be loaded from the runtime.' : 'Sign in to load this agent’s loop.');
@@ -68,7 +69,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null, getA
       stop = true;
       clearInterval(timer);
     };
-  }, [mounted, bot?.id, ownerId, getAccessToken]);
+  }, [mounted, syncedBotId, ownerId, getAccessToken]);
 
   if (!mounted || !bot || typeof document === 'undefined') return null;
 
@@ -84,8 +85,14 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null, getA
         <X size={18} strokeWidth={1.75} />
       </button>
       <div className="browser-preview-stage" onMouseDown={event => event.stopPropagation()}>
-        {hasRun ? <LoopSteps steps={steps} note={loopNote} /> : null}
-        <LiveViewPanel key={`${ownerId}:${bot.id}`} botId={bot.id} ownerId={ownerId} getAccessToken={getAccessToken} fill autoStart />
+        {syncedBotId ? (
+          <>
+            {hasRun ? <LoopSteps steps={steps} note={loopNote} /> : null}
+            <LiveViewPanel key={`${ownerId}:${syncedBotId}`} botId={syncedBotId} ownerId={ownerId} getAccessToken={getAccessToken} fill autoStart />
+          </>
+        ) : (
+          <p className="preview-note" role="status">The browser will be available when this agent syncs to your account.</p>
+        )}
       </div>
     </div>,
     document.body,

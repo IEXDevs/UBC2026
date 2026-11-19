@@ -81,8 +81,12 @@ export default function LiveViewPanel({
       try {
         if (stopped) return;
         id = await syncSessions();
-      } catch {
-        /* Listing is best-effort until the owner opens or views. */
+      } catch (caught) {
+        if (!stopped && autoStart) {
+          const code = caught instanceof Error ? caught.message : 'browser_request_failed';
+          setError(browserErrorNote(code));
+        }
+        return;
       }
       if (stopped || !autoStart || id || started.current) return;
       started.current = true;
@@ -108,7 +112,7 @@ export default function LiveViewPanel({
     setBusy(true);
     try {
       if (action === 'open') {
-        const existing = await syncSessions().catch(() => sessionRecordId);
+        const existing = await syncSessions();
         if (existing) return;
         try {
           const url = browserSessionUrl(runtimeBase, botId);

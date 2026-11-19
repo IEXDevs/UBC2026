@@ -39,6 +39,8 @@ export function browserErrorNote(code) {
   if (key === 'owner_required' || key === 'forbidden') {
     return 'This browser session is not available for your account.';
   }
+  if (key === 'bot_not_found') return 'This agent is unavailable in your account. Refresh the agent list and try again.';
+  if (key === 'bot_directory_unavailable') return 'The agent directory is temporarily unavailable. Try again shortly.';
   if (key === 'not_found' || key === 'session_not_found') {
     return 'That browser session was not found. Refresh or open a new one.';
   }

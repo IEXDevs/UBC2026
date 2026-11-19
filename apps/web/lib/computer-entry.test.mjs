@@ -35,6 +35,7 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(detail, /BotMark/);
   assert.match(detail, /FileLibrary/);
   assert.match(detail, /LiveViewPanel/);
+  assert.match(detail, /bot\.record && ownerId \? \(\s*<LiveViewPanel/);
   assert.match(detail, /screen/);
   assert.doesNotMatch(detail, /side-option/);
   assert.doesNotMatch(detail, /'s computer/);
@@ -47,6 +48,9 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(sheet, /autoStart/);
   assert.match(sheet, /LiveViewPanel/);
   assert.match(sheet, /LoopSteps/);
+  assert.match(sheet, /const syncedBotId = bot\?\.record \? bot\.id : null/);
+  assert.match(sheet, /if \(!mounted \|\| !syncedBotId\) return/);
+  assert.match(sheet, /syncedBotId \? \([\s\S]*?botId=\{syncedBotId\}/);
   assert.match(panel, /computer-screen/);
   assert.match(panel, /if \(screen\) \{\s*if \(!sessionRecordId\) return null;\s*return \(\s*<section className="side-computer"/);
   assert.match(panel, /is-off/);
