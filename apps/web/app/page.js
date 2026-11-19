@@ -69,6 +69,7 @@ import {
 } from '../lib/wallet-provision.mjs';
 import { SETUP_CARD_MS, accountSetupStep, clipAddress, readQuoteOut, readRecoveryAck, swapSendSettlement, writeRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
+import { latestInlineAllow } from '../lib/voice-allow.mjs';
 import { catalogAddition, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
 import { STORAGE_FILE_TOO_BIG } from '../lib/file-quota.mjs';
 import { ensureAccountCode } from '../lib/account-code.mjs';
@@ -454,6 +455,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [focusLine, setFocusLine] = useState(null);
   const [viewFile, setViewFile] = useState(null);
   const [voiceMs, setVoiceMs] = useState(0);
+  const [voiceLive, setVoiceLive] = useState(false);
   const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
   const [walletsFold, setWalletsFold] = useState(false);
@@ -1326,6 +1328,26 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     setSlideConfirm(null);
     if (resolve) resolve(accepted === true);
   }, []);
+  function acceptSpokenAllow() {
+    if (confirmResolve.current) {
+      finishSlideConfirm(true);
+      return true;
+    }
+    if (pendingSend) {
+      const pending = pendingSend;
+      setPendingSend(null);
+      if (deskLockOnRef.current && !unlockedRef.current) {
+        lockIntentRef.current = { type: 'spend', pending };
+        setLockOpen(true);
+        return true;
+      }
+      void settleSpend(pending, true);
+      return true;
+    }
+    const line = latestInlineAllow(talks[activeBot] ?? []);
+    if (!line || typeof accessRef.current !== 'function') return false;
+    return accessRef.current(line, true) === true;
+  }
   const lockWallet = useCallback(() => {
     unlockUntilRef.current = 0;
     try { clearDeskSession(localStorage, ownerId); } catch { /* the in-memory lock still applies */ }
@@ -1810,6 +1832,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                   onParty={setParty}
                   onEdit={onEditLine}
                   onAccess={(line, accepted) => accessRef.current?.(line, accepted)}
+                  hideAccessActions={voiceLive}
                   focusLine={focusLine?.botId === bot.id ? focusLine.lineId : null}
                 />
             ) : null}
@@ -1898,6 +1921,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               }));
             }}
             onConfirm={askSlideConfirm}
+            onSpokenAllow={acceptSpokenAllow}
+            onVoiceLive={setVoiceLive}
             onBindAccess={(handler) => { accessRef.current = handler; }}
             onAttach={items => {
               setLibrary(current => {
@@ -2025,11 +2050,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         payments={payments}
         transfers={transfers}
       />
-      {slideConfirm ? (
+      {slideConfirm && !voiceLive ? (
         <div className="backdrop is-center" onMouseDown={() => finishSlideConfirm(false)}>
           <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Confirm" onMouseDown={event => event.stopPropagation()}>
             <h2>Confirm</h2>
             <p className="quiet">{slideConfirm}</p>
+            <p className="quiet">Say allow to confirm.</p>
             <div className="spend-actions">
               <button type="button" className="ghost" onClick={() => finishSlideConfirm(false)}>Cancel</button>
             </div>
@@ -2041,7 +2067,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           </section>
         </div>
       ) : null}
-      {pendingSend ? (
+      {pendingSend && !voiceLive ? (
         <div className="backdrop is-center" onMouseDown={() => setPendingSend(null)}>
           <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Transaction summary" onMouseDown={event => event.stopPropagation()}>
             <h2>{pendingSend.summary.title}</h2>
@@ -2054,7 +2080,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               ))}
             </ul>
             <p className="spend-net"><span>Net</span><span>{pendingSend.summary.net}</span></p>
-            <p className="quiet">Nothing is signed until you confirm.</p>
+            <p className="quiet">Nothing is signed until you confirm. Say allow to confirm.</p>
             <div className="spend-actions">
               <button type="button" className="ghost" onClick={() => {
                 appendTalk(pendingSend.botId, { id: `${pendingSend.lineId}-send`, role: 'assistant', text: 'The send stayed unsent.' });

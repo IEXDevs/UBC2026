@@ -48,6 +48,7 @@ import { readSharedLinks } from '../lib/connectors.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
 import { AGENT_SKILLS, AVAILABLE_SKILLS } from '@ubc2026/agent-tools';
 import { playAgentSpeech, startVoicePipe } from '../lib/voice-pipe.mjs';
+import { voiceGrantsAllow } from '../lib/voice-allow.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
@@ -134,6 +135,8 @@ export default function Composer({
   onEditLine = null,
   onPatchLine = null,
   onConfirm = null,
+  onSpokenAllow = null,
+  onVoiceLive = null,
   onBindAccess = null,
   onContextWindow = null,
 }) {
@@ -218,6 +221,10 @@ export default function Composer({
     presenceRef.current = next;
     setPresence(next);
   }
+
+  useEffect(() => {
+    onVoiceLiveRef.current?.(presence !== 'off');
+  }, [presence]);
 
   function commitVoice() {
     const started = voiceStarted.current;
@@ -307,6 +314,10 @@ export default function Composer({
     }
   }
   const resolveRef = useRef(null);
+  const onSpokenAllowRef = useRef(onSpokenAllow);
+  onSpokenAllowRef.current = onSpokenAllow;
+  const onVoiceLiveRef = useRef(onVoiceLive);
+  onVoiceLiveRef.current = onVoiceLive;
   useEffect(() => {
     onBindAccess?.((line, accepted) => resolveRef.current?.(line, accepted));
   }, [onBindAccess]);
@@ -370,6 +381,7 @@ export default function Composer({
     const live = sessionRef.current;
     sessionRef.current = null;
     sayRef.current = null;
+    onVoiceLiveRef.current?.(false);
     releaseVoiceLock(localStorage, callBotRef.current);
     Promise.resolve(live?.endSession?.())
       .catch(() => {})
@@ -564,6 +576,16 @@ export default function Composer({
     void speak(line).catch(() => {});
   }
 
+  function sayAllow(text) {
+    const line = typeof text === 'string' ? text.trim() : '';
+    const cue = 'Say allow to confirm.';
+    if (!line) {
+      say(cue);
+      return;
+    }
+    say(/say allow to confirm/i.test(line) ? line : `${line} ${cue}`);
+  }
+
   async function settleChat(result, spoken, prior, grants, run) {
     if (run !== runRef.current) return;
     if (!result?.ok) {
@@ -575,7 +597,7 @@ export default function Composer({
     }
     if (result.hold?.kind === 'modal') {
       if (result.reply) pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
-      say(result.reply || result.hold.prompt || result.hold.label);
+      sayAllow(result.reply || result.hold.prompt || result.hold.label);
       const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label) : false;
       if (run !== runRef.current) return;
       if (!accepted) {
@@ -589,7 +611,7 @@ export default function Composer({
     if (result.hold?.kind === 'inline') {
       const line = result.reply || result.hold.label;
       pushLine('agent', line, botIdRef.current, result.tokens, result.activity, result.hold);
-      say(line);
+      sayAllow(line);
       return;
     }
     pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
@@ -672,12 +694,12 @@ export default function Composer({
     }
   }
 
-  resolveRef.current = async (line, accepted) => {
-    if (!line?.access || sendingRef.current) return;
+  resolveRef.current = (line, accepted) => {
+    if (!line?.access || sendingRef.current) return false;
     onPatchLine?.(line.id, { access: null }, botIdRef.current);
     if (accepted !== true) {
       pushLine('note', 'Access stayed off.');
-      return;
+      return true;
     }
     const thread = linesRef.current;
     const index = thread.findIndex(item => item.id === line.id);
@@ -689,8 +711,9 @@ export default function Composer({
         break;
       }
     }
-    if (userIndex < 0) return;
-    await continueChat(before[userIndex].text, before.slice(0, userIndex), [line.access]);
+    if (userIndex < 0) return true;
+    void continueChat(before[userIndex].text, before.slice(0, userIndex), [line.access]);
+    return true;
   };
 
   function sealMic(live = sessionRef.current) {
@@ -807,6 +830,7 @@ export default function Composer({
         },
         onCommit: (text) => {
           if (sessionRef.current !== live) return;
+          if (voiceGrantsAllow(text) && onSpokenAllowRef.current?.() === true) return;
           void sendMessage(text);
         },
         onError: (error) => {
@@ -887,7 +911,7 @@ export default function Composer({
       </div>
       <div className="voice-script" aria-live="polite">
         {callBotId && callBotId === botId ? (
-          <ChatBubbles lines={lines} botName={callName || botName} thinking={thinking} onEdit={onEditLine} />
+          <ChatBubbles lines={lines} botName={callName || botName} thinking={thinking} onEdit={onEditLine} hideAccessActions />
         ) : (
           <p className="voice-note">Talking with {callName}. Minimize to keep chatting.</p>
         )}

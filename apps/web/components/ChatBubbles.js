@@ -14,7 +14,16 @@ function urlsIn(text) {
   return [...String(text || '').matchAll(/https?:\/\/[^\s)]+/g)].map((match) => match[0]);
 }
 
-export default function ChatBubbles({ lines, className = '', thinking = false, onParty, onEdit, onAccess, focusId = null }) {
+export default function ChatBubbles({
+  lines,
+  className = '',
+  thinking = false,
+  onParty,
+  onEdit,
+  onAccess,
+  focusId = null,
+  hideAccessActions = false,
+}) {
   const tailRef = useRef(null);
   const known = useRef(new Set());
   const fresh = useRef(new Set());
@@ -142,8 +151,12 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
               {line.access?.kind === 'inline' ? (
                 <div className="access-request" role="group" aria-label={line.access.label}>
                   <p>{line.access.label}</p>
-                  <button type="button" onClick={() => onAccess?.(line, true)}>Allow</button>
-                  <button type="button" onClick={() => onAccess?.(line, false)}>Not now</button>
+                  {hideAccessActions ? null : (
+                    <>
+                      <button type="button" onClick={() => onAccess?.(line, true)}>Allow</button>
+                      <button type="button" onClick={() => onAccess?.(line, false)}>Not now</button>
+                    </>
+                  )}
                 </div>
               ) : null}
             </MessageContent>
