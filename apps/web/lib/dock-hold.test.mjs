@@ -6,8 +6,8 @@ import { DOCK_EXPAND_MS, DOCK_SWITCH_MS, dockCollapseDelay, dockHoldDelay, dockS
 /**
  * Achieves: verifies dock expand CSS variable matches DOCK_EXPAND_MS and labels ease width instead of snapping.
  * Fails when: --dock-expand drifts from the constant, the 220ms/80ms opacity rule returns, or closed items snap with max-width 0.
- * Oracle: globals.css must declare --dock-expand: ${DOCK_EXPAND_MS}ms, animate grid-template-columns, and collapse inactive items with minmax(0, 0fr).
- * Side effects / state checked: stylesheet text.
+ * Oracle: globals.css must declare --dock-expand: ${DOCK_EXPAND_MS}ms, animate grid-template-columns, collapse inactive items with minmax(0, 0fr), and the pane dock must shift without blob particles.
+ * Side effects / state checked: stylesheet and PaneDock source text.
  * Gaps: source snapshot only for CSS; runtime animation not timed.
  */
 test('dock expand duration matches the navbar stylesheet', () => {
@@ -17,6 +17,8 @@ test('dock expand duration matches the navbar stylesheet', () => {
   assert.match(css, /grid-template-columns:\s*minmax\(0,\s*0fr\)/);
   assert.doesNotMatch(css, /opacity 220ms ease 80ms/);
   assert.doesNotMatch(css, /\.gooey-nav__item:not\(\[data-active\]\)\s*\{[^}]*max-width:\s*0/);
+  const dock = readFileSync(new URL('../components/PaneDock.js', import.meta.url), 'utf8');
+  assert.match(dock, /particleCount=\{0\}/);
 });
 
 /**
@@ -66,4 +68,16 @@ test('every pane uses the main stage center as the pill anchor', () => {
   assert.equal(pillAnchor(1400, 88, 280), 604);
   assert.equal(pillAnchor(1400, 300, 0), 850);
   assert.equal(pillAnchor(500, 300, 280), 300);
+});
+
+/**
+ * Achieves: verifies the open dock pads the active label so a wider neighbor cannot shove it off center.
+ * Fails when: PaneDock turns balanceActive off and Main slides left under History/Positions.
+ * Oracle: PaneDock.js must not pass balanceActive={false}.
+ * Side effects / state checked: source snapshot.
+ * Gaps: runtime hover not measured here.
+ */
+test('the pane dock keeps the active label centered while open', () => {
+  const dock = readFileSync(new URL('../components/PaneDock.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(dock, /balanceActive=\{false\}/);
 });

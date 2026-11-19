@@ -5,6 +5,7 @@ import { Check, X } from 'lucide-react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
 import { claimLookupVerdict, claimSaveNote, handleAlreadyClaimed } from '../lib/profile.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
+import { blockCopy } from '../lib/block-copy.mjs';
 
 const BURST = [
   { c: '#7c5cff', w: 8, h: 14, dx: '-120px', dy: '-86px', spin: '-40deg' },
@@ -99,7 +100,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
 
   if (welcome) {
     return (
-      <div className="backdrop is-center is-claim">
+      <div className="backdrop is-center is-claim no-copy" onCopy={blockCopy} onCut={blockCopy}>
         <div className="claim-welcome" role="dialog" aria-modal="true" aria-labelledby="claim-welcome-title">
           <div className="claim-confetti" aria-hidden="true">
             {BURST.map((piece, index) => (
@@ -134,7 +135,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
     : claimStatus(verdict, typed, checked);
 
   return (
-    <div className="backdrop is-center is-claim">
+    <div className="backdrop is-center is-claim no-copy" onCopy={blockCopy} onCut={blockCopy}>
       <form className="sheet wallet-gate claim-form" onSubmit={submit} aria-labelledby="claim-title">
         <h2 id="claim-title">Claim your handle to get paid{typed ? ` @${typed}` : ''}</h2>
         <label className="field">

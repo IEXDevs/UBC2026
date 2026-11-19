@@ -80,6 +80,14 @@ export function contextTone(percent) {
   return '#a3a3a3';
 }
 
+/** Keep a sliver on screen when tokens are used but round to 0% of a large window. */
+export function meterWidth(percent, used) {
+  const value = Number(percent) || 0;
+  if (value > 0) return `max(${value}%, 8px)`;
+  if (Number(used) > 0) return '8px';
+  return '0%';
+}
+
 export function estimateTokens(text) {
   const chars = typeof text === 'string' ? text.length : 0;
   if (chars === 0) return 0;

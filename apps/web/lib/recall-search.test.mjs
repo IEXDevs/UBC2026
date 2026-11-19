@@ -39,7 +39,7 @@ test('recall search matches chats, messages, and file names', () => {
 /**
  * Achieves: verifies the left pane mounts the recall search and passes the catalog into chat.
  * Fails when: page.js drops RecallSearch, the search label, or fileCatalog.
- * Oracle: page mounts RecallSearch and fileCatalog; the search placeholder is "Search chats and files".
+ * Oracle: page mounts RecallSearch and fileCatalog; the search placeholder covers agents, chats, and files.
  * Side effects / state checked: N/A.
  * Gaps: does not render the pane.
  */
@@ -48,7 +48,8 @@ test('the left pane wires the recall search', () => {
   const search = readFileSync(new URL('../components/RecallSearch.jsx', import.meta.url), 'utf8');
   assert.match(page, /<RecallSearch/);
   assert.match(page, /fileCatalog/);
-  assert.match(search, /Search chats and files/);
+  assert.doesNotMatch(page, /placeholder="Search agents"/);
+  assert.match(search, /Search agents, chats, files/);
   assert.match(search, /glide-select/);
   const library = readFileSync(new URL('../components/FileLibrary.js', import.meta.url), 'utf8');
   assert.match(library, /FileStage/);

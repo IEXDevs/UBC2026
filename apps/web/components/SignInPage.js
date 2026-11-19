@@ -2,6 +2,7 @@
 
 import Topography from './Topography';
 import SpecularButton from './SpecularButton';
+import { blockCopy } from '../lib/block-copy.mjs';
 import EmailSignIn from './EmailSignIn';
 import { usePrivyPublic } from './PrivyRoot';
 import './SignInPage.css';
@@ -15,7 +16,7 @@ export default function SignInPage({
   const { configured } = usePrivyPublic();
 
   return (
-    <div className="sign-in">
+    <div className="sign-in no-copy" onCopy={blockCopy} onCut={blockCopy}>
       <div className="sign-in-field" aria-hidden="true">
         <Topography
           color="#ff7a62"

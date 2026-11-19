@@ -95,7 +95,7 @@ export default function ConnectorsPane({ connectors = [] }) {
       <header className="app-head">
         <div>
           <h2 id="plugins-title">Connect apps</h2>
-          <p className="app-lead">These apps connect through Composio. Solana, Privy, and the rest stay on.</p>
+          <p className="app-lead">Connect an app once. Every agent, and any agent a voice call hands work to, can use it.</p>
         </div>
         <button
           type="button"

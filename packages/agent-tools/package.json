@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./catalog.mjs",
   "exports": "./catalog.mjs",
-  "scripts": { "test": "node --test catalog.test.mjs" },
+  "scripts": { "test": "node --test *.test.mjs" },
   "dependencies": {
     "@ubc2026/browser-session": "0.1.0",
     "@ubc2026/contracts": "0.1.0"

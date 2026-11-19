@@ -11,14 +11,6 @@ import BotMark from './BotMark';
 import FileLibrary from './FileLibrary';
 import LiveViewPanel from './LiveViewPanel';
 
-function statusLabel(status) {
-  if (status === 'watching') return 'Working';
-  if (status === 'paused') return 'Paused';
-  if (status === 'draft') return 'Draft';
-  if (typeof status === 'string' && status.trim()) return status;
-  return 'Idle';
-}
-
 function readPermitState() {
   if (typeof localStorage === 'undefined') {
     return { permission: 'ask', reviewCapLabel: '' };
@@ -43,7 +35,6 @@ export default function AgentDetail({
 }) {
   const [permitState, setPermitState] = useState(() => readPermitState());
   const permit = permissionById(permitState.permission);
-  const work = statusLabel(bot?.status);
 
   useEffect(() => {
     function refresh() {
@@ -74,14 +65,13 @@ export default function AgentDetail({
         <div className="agent-detail-copy">
           <strong>{bot.name}</strong>
           <span className="agent-detail-meta">
-            <span className={`agent-detail-perm is-${permit.id}`} style={{ '--perm-color': permit.color }}>
-              {permit.label}
-            </span>
-            {permit.id === 'review' && permitState.reviewCapLabel ? (
-              <span className="agent-detail-cap">≤ {permitState.reviewCapLabel} USDC</span>
-            ) : null}
-            <span className={`agent-detail-work is-${(bot.status || 'idle').replace(/\s+/g, '-')}`}>
-              {work}
+            <span className="agent-detail-perm-line">
+              <span className={`agent-detail-perm is-${permit.id}`} style={{ '--perm-color': permit.color }}>
+                {permit.label}
+              </span>
+              {permit.id === 'review' && permitState.reviewCapLabel ? (
+                <span className="agent-detail-cap">≤ {permitState.reviewCapLabel} USDC</span>
+              ) : null}
             </span>
           </span>
         </div>

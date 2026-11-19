@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { PERMISSIONS, dollarsToBaseUnits } from '../lib/spend-permission.mjs';
 import { CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
+import { blockCopy } from '../lib/block-copy.mjs';
 
 const COPY = Object.freeze({
   ask: 'You approve every spend. Nothing moves until you confirm it.',
@@ -37,7 +38,7 @@ export default function SpendAcceptance({ onContinue }) {
   }
 
   return (
-    <div className={`backdrop is-center${leaving ? ' is-leaving' : ''}`}>
+    <div className={`backdrop is-center no-copy${leaving ? ' is-leaving' : ''}`} onCopy={blockCopy} onCut={blockCopy}>
       <form className="sheet wallet-gate acceptance" onSubmit={submit} aria-labelledby="acceptance-title">
         <p className="acceptance-kicker">Welcome to onboarding</p>
         <h2 id="acceptance-title">How spends are approved</h2>

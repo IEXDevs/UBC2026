@@ -157,6 +157,7 @@ export default function PromptBar({
   const reduce = useReducedMotion();
   const rootRef = useRef(null);
   const inputRef = useRef(null);
+  const effortAnchor = useRef(null);
   const sparkRef = useRef(null);
   const typing = useRef({ energy: 0, strokes: 0 });
   const boost = useRef(sparkBoost);
@@ -204,11 +205,24 @@ export default function PromptBar({
   const [capDraft, setCapDraft] = useState(reviewCapDollars || '');
   const [capNote, setCapNote] = useState('');
   const permitRef = useRef(null);
+  const capRef = useRef(null);
+  const [effortLeft, setEffortLeft] = useState(0);
   const permit = permission ? permissionById(permission) : null;
+  function saveCap() {
+    const next = dollarsToBaseUnits(capDraft);
+    if (!next) {
+      setCapNote('Enter a maximum above zero.');
+      return;
+    }
+    onReviewCapChange?.(next);
+    setCapNote('Saved.');
+  }
   useEffect(() => {
     setCapDraft(reviewCapDollars || '');
+  }, [reviewCapDollars]);
+  useEffect(() => {
     setCapNote('');
-  }, [reviewCapDollars, permission]);
+  }, [permission]);
 
   const model = models.find((m) => m.key === modelKey) ?? models[0];
   const token = dismissed ? null : parseToken(draft);
@@ -517,6 +531,7 @@ export default function PromptBar({
           role={open === 'effort' ? 'dialog' : 'listbox'}
           aria-label={open === 'at' ? 'Sources' : open === 'slash' ? 'Commands' : open === 'model' ? 'Models' : 'Effort'}
           data-kind={open}
+          style={open === 'effort' ? { left: effortLeft } : undefined}
         >
           {open === 'effort' ? (
             <>
@@ -671,7 +686,7 @@ export default function PromptBar({
                   setModelKey(key);
                   onModelChange?.(key);
                 }}
-                showTags
+                showTags={false}
                 size="sm"
                 menuWidth={210}
                 placement="top"
@@ -684,6 +699,7 @@ export default function PromptBar({
           ) : null}
           {efforts.length > 0 ? (
             <button
+              ref={effortAnchor}
               type="button"
               className="prompt-bar__pick"
               aria-label="Choose effort"
@@ -692,6 +708,15 @@ export default function PromptBar({
               data-max={maxed ? '' : undefined}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
+                const root = rootRef.current;
+                const button = effortAnchor.current;
+                if (root && button) {
+                  const bar = root.getBoundingClientRect();
+                  const btn = button.getBoundingClientRect();
+                  const width = 248;
+                  const left = btn.left - bar.left + btn.width / 2 - width / 2;
+                  setEffortLeft(Math.max(8, Math.min(left, bar.width - width - 8)));
+                }
                 setPlusOpen(false);
                 setEffortOpen((v) => !v);
                 focusInput();
@@ -717,60 +742,69 @@ export default function PromptBar({
               {permitOpen ? (
                 <div className="permit-menu" role="listbox" aria-label="Permissions">
                   {PERMISSIONS.map(item => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="option"
-                      className={`${item.id === 'full' ? 'is-full' : ''}${item.id === permit.id ? ' is-on' : ''}`}
-                      aria-selected={item.id === permit.id}
-                      style={{ '--permit-color': item.color }}
-                      onClick={() => {
-                        onPermissionChange?.(item.id);
-                        if (item.id !== 'review') setPermitOpen(false);
-                      }}
-                    >
-                      <i className="permit-dot" aria-hidden="true" />
-                      <span>{item.label}</span>
-                      {item.id === permit.id ? <span className="permit-check" aria-hidden="true">✓</span> : null}
-                    </button>
+                    <div key={item.id} className={`permit-choice${item.id === permit.id ? ' is-on' : ''}`}>
+                      <button
+                        type="button"
+                        role="option"
+                        className={`${item.id === 'full' ? 'is-full' : ''}${item.id === permit.id ? ' is-on' : ''}`}
+                        aria-selected={item.id === permit.id}
+                        style={{ '--permit-color': item.color }}
+                        onClick={() => {
+                          onPermissionChange?.(item.id);
+                          if (item.id !== 'review') setPermitOpen(false);
+                        }}
+                      >
+                        <i className="permit-dot" aria-hidden="true" />
+                        <span>{item.label}</span>
+                        {item.id === 'review' && reviewCapDollars ? (
+                          <span className="permit-cap-value">{reviewCapDollars} USDC</span>
+                        ) : null}
+                        {item.id === permit.id ? <span className="permit-check" aria-hidden="true">✓</span> : null}
+                      </button>
+                      {item.id === 'review' ? (
+                        <button
+                          type="button"
+                          className="permit-edit"
+                          aria-label="Edit Review by AI threshold"
+                          onClick={() => {
+                            onPermissionChange?.('review');
+                            capRef.current?.focus();
+                          }}
+                        >
+                          Edit
+                        </button>
+                      ) : null}
+                    </div>
                   ))}
                   <label className="permit-cap">
-                    <span>Review by AI max (USDC)</span>
-                    <input
-                      inputMode="decimal"
-                      autoComplete="off"
-                      value={capDraft}
-                      placeholder="25"
-                      aria-label="Review by AI maximum in USDC"
-                      onChange={(event) => {
-                        setCapDraft(event.target.value);
-                        setCapNote('');
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter') return;
-                        event.preventDefault();
-                        const next = dollarsToBaseUnits(capDraft);
-                        if (!next) {
-                          setCapNote('Enter a maximum above zero.');
-                          return;
-                        }
-                        onReviewCapChange?.(next);
-                        setCapNote('Saved.');
-                        if (permit.id === 'review') setPermitOpen(false);
-                      }}
-                      onBlur={() => {
-                        if (!capDraft.trim()) return;
-                        const next = dollarsToBaseUnits(capDraft);
-                        if (!next) {
-                          setCapNote('Enter a maximum above zero.');
-                          return;
-                        }
-                        onReviewCapChange?.(next);
-                        setCapNote('Saved.');
-                      }}
-                    />
+                    <span className="permit-cap-label">
+                      Review by AI threshold (USDC)
+                      {capNote === 'Saved.' ? <b className="permit-saved">Saved</b> : null}
+                    </span>
+                    <span className="permit-cap-row">
+                      <input
+                        ref={capRef}
+                        inputMode="decimal"
+                        autoComplete="off"
+                        value={capDraft}
+                        placeholder="25"
+                        aria-label="Review by AI threshold in USDC"
+                        onChange={(event) => {
+                          setCapDraft(event.target.value);
+                          setCapNote('');
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter') return;
+                          event.preventDefault();
+                          saveCap();
+                        }}
+                      />
+                      <button type="button" className="permit-edit" onClick={saveCap}>
+                        Save
+                      </button>
+                    </span>
                   </label>
-                  {capNote ? <p className="permit-cap-note" role="status">{capNote}</p> : null}
+                  {capNote && capNote !== 'Saved.' ? <p className="permit-cap-note" role="status">{capNote}</p> : null}
                 </div>
               ) : null}
             </span>
