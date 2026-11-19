@@ -200,6 +200,14 @@
   transform: translateY(-2px);
 }
 
+.sign-in-wallet-note {
+  margin: 14px 0 0;
+  max-width: 36ch;
+  color: #ffb4a8;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
 .sign-in-legal {
   display: flex;
   justify-content: center;

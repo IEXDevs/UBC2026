@@ -85,6 +85,7 @@ import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSi
 import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-preview.mjs';
 import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
+import { releaseInjectedSolanaWallets } from '../lib/solana-wallet-login.mjs';
 
 function readAccessToken(getAccessToken) {
   return getPrivyAccessToken(getAccessToken, window.localStorage);
@@ -159,7 +160,13 @@ function AuthedShell() {
 
   const onLogout = useCallback(async () => {
     await logout?.();
+    await releaseInjectedSolanaWallets();
   }, [logout]);
+
+  const onLogin = useCallback(async () => {
+    await releaseInjectedSolanaWallets();
+    return login?.();
+  }, [login]);
 
   useEffect(() => {
     if (!devAllowed) return undefined;
@@ -290,7 +297,7 @@ function AuthedShell() {
         accountLabel="Developer"
         signedIn
         loginDisabled={false}
-        onLogin={login}
+        onLogin={onLogin}
         onLogout={leaveDevPreview}
         liveWallets={previewWallets()}
         walletNote="Developer preview. Sample balances. Live prices come from DexScreener."
@@ -306,7 +313,7 @@ function AuthedShell() {
   if (signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
     return (
       <SignInPage
-        onLogin={login}
+        onLogin={onLogin}
         onDeveloperPreview={devAllowed ? enterDevPreview : null}
         onHoldChange={setSignInHold}
       />
@@ -320,7 +327,7 @@ function AuthedShell() {
       accountLabel={signedIn ? privyAccountLabel(user) : 'You'}
       signedIn={signedIn}
       loginDisabled={!ready}
-      onLogin={login}
+      onLogin={onLogin}
       onLogout={onLogout}
       liveWallets={liveWallets}
       walletNote={walletNote}
