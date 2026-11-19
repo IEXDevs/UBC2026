@@ -155,7 +155,7 @@ test('the main stage has a top-right wallet control and the detail pane does not
   assert.match(sheet, /wallet-add-create/);
   assert.match(css, /\.wallet-add-create \{[^}]*flex-wrap:\s*nowrap/);
   assert.equal(dock.includes('A connected wallet is read-only'), false);
-  assert.equal(sheet.includes('The phrase and the private key are not stored here'), false);
+  assert.equal(sheet.includes('The phrase and the private key are not stored here'), true);
   assert.match(page, /if \(bots\.length === 0\) return;/);
   assert.equal(page.includes('if (!devPreview || bots.length === 0) return;'), false);
 });

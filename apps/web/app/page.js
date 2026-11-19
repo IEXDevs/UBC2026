@@ -1123,10 +1123,17 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             ...(token ? { authorization: `Bearer ${token}` } : {}),
             'x-owner-id': ownerId,
           };
+          const depositBody = {
+            fromId: from.id,
+            toId: dest.id,
+            fromAddress: from.address,
+            toAddress: dest.address,
+            amount: pending.amount,
+          };
           const preparedResponse = await fetch('/api/wallets/deposit', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ phase: 'prepare', from, to: dest, amount: pending.amount }),
+            body: JSON.stringify({ phase: 'prepare', ...depositBody }),
           });
           const prepared = await preparedResponse.json().catch(() => ({}));
           if (!preparedResponse.ok || typeof prepared.transaction !== 'string') {
@@ -1155,10 +1162,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           const response = await fetch('/api/wallets/deposit', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ phase: 'broadcast', signedTransaction: bytesToBase64(signedBytes) }),
+            body: JSON.stringify({ phase: 'broadcast', ...depositBody, signedTransaction: bytesToBase64(signedBytes) }),
           });
           const body = await response.json().catch(() => ({}));
           const where = dest.label || clipAddress(dest.address);
+          if (body.error === 'wallet_frozen') return { ok: false, message: 'That wallet is frozen.' };
+          if (body.error === 'transaction_mismatch') return { ok: false, message: 'The signed transfer did not match the deposit.' };
           if (!response.ok || !body.signature) return { ok: false, message: `The send to ${where} did not post.` };
           const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
           return {

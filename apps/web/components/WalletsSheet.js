@@ -502,6 +502,7 @@ export function WalletAdd() {
           Import key
         </button>
       </div>
+      <p className="quiet">The phrase and the private key are not stored here.</p>
       {mode === 'seed' ? (
         <form className="field" onSubmit={(event) => {
           event.preventDefault();
