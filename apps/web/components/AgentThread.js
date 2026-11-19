@@ -31,6 +31,7 @@ export default function AgentThread({
   onEdit = null,
   onAccess = null,
   focusLine = null,
+  hideAccessActions = false,
 }) {
   const [remoteEvents, setRemoteEvents] = useState(null);
   const [why, setWhy] = useState(null);
@@ -121,7 +122,7 @@ export default function AgentThread({
 
   return (
     <div className="agent-thread">
-      <ChatBubbles lines={lines} thinking={thinking} onParty={onParty} onEdit={onEdit} onAccess={onAccess} focusId={focusLine} />
+      <ChatBubbles lines={lines} thinking={thinking} onParty={onParty} onEdit={onEdit} onAccess={onAccess} focusId={focusLine} hideAccessActions={hideAccessActions} />
       {chips.length > 0 ? (
         <div className="agent-chips">
           {chips.map(chip => (
