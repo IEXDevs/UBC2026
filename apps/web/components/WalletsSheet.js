@@ -11,7 +11,6 @@ import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
 import TokenScreen from './TokenScreen';
 import SlideCommit from './bits/SlideCommit';
-import SpecularButton from './SpecularButton';
 import TxnLog from './TxnLog';
 import SendToField from './SendToField';
 import TxnPreview from './TxnPreview';
@@ -408,6 +407,7 @@ export function WalletAdd() {
   const [privkey, setPrivkey] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  const [hint, setHint] = useState('');
   const { linkWallet } = useLinkAccount({
     onSuccess: () => {
       if (!connecting.current) return;
@@ -428,15 +428,22 @@ export function WalletAdd() {
     setNote(message);
   }
 
+  function showHint(text) {
+    return {
+      onMouseEnter: () => setHint(text),
+      onFocus: () => setHint(text),
+      onMouseLeave: () => setHint(''),
+      onBlur: () => setHint(''),
+    };
+  }
+
   return (
     <div className="wallet-add">
-      <SpecularButton
-        className="hint-btn wallet-connect"
-        size="sm"
-        radius={999}
-        autoAnimate
+      <button
+        type="button"
+        className="wallet-add-connect"
         disabled={busy}
-        data-hint="Opens Phantom, Solflare, Backpack, or another Solana wallet and links it to this account."
+        {...showHint('Opens Phantom, Solflare, Backpack, or another Solana wallet and links it to this account.')}
         onClick={() => {
           setMode('');
           setNote('');
@@ -452,13 +459,12 @@ export function WalletAdd() {
         }}
       >
         Connect a wallet
-      </SpecularButton>
+      </button>
       <div className="wallet-switch wallet-add-create" role="group" aria-label="Create or import a wallet">
         <button
           type="button"
-          className="hint-btn"
           disabled={busy}
-          data-hint="Creates another Solana wallet on this account. The key stays in Privy. Maelstrom does not store it."
+          {...showHint('Creates another Solana wallet on this account. The key stays in Privy. Maelstrom does not store it.')}
           onClick={() => {
             setMode('');
             setBusy(true);
@@ -483,25 +489,24 @@ export function WalletAdd() {
         </button>
         <button
           type="button"
-          className="hint-btn"
           disabled={busy}
           aria-pressed={mode === 'seed'}
-          data-hint="Bring in a wallet from a 12-word phrase. The phrase is not saved here."
+          {...showHint('Bring in a wallet from a 12-word phrase. The phrase is not saved here.')}
           onClick={() => { setMode(current => current === 'seed' ? '' : 'seed'); setPrivkey(''); setSeed(''); setNote(''); }}
         >
           Import seed
         </button>
         <button
           type="button"
-          className="hint-btn"
           disabled={busy}
           aria-pressed={mode === 'key'}
-          data-hint="Bring in a wallet from a base58 private key. The key is not saved here."
+          {...showHint('Bring in a wallet from a base58 private key. The key is not saved here.')}
           onClick={() => { setMode(current => current === 'key' ? '' : 'key'); setSeed(''); setPrivkey(''); setNote(''); }}
         >
           Import key
         </button>
       </div>
+      {hint ? <p className="quiet wallet-add-hint">{hint}</p> : null}
       <p className="quiet">The phrase and the private key are not stored here.</p>
       {mode === 'seed' ? (
         <form className="field" onSubmit={(event) => {
@@ -588,7 +593,7 @@ function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
 }
 
 function WalletPick({ rows, activeId, onSelect }) {
-  if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one from the wallet button, or generate a new one.</p>;
+  if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one in settings, or generate a new one.</p>;
   return (
     <label className="wallet-pick-label">
       Wallet

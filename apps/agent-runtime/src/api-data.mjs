@@ -1510,6 +1510,25 @@ export async function handleApiData(request, env, matched) {
     }
     if (existing.rows[0]) {
       if (body.replace !== true) return json({ error: 'desk_lock_exists' }, 409);
+      const proof = typeof body.proof === 'string' ? body.proof.trim().toLowerCase() : '';
+      if (!/^[0-9a-f]{64}$/.test(proof)) return json({ error: 'recovery_required' }, 401);
+      const recovery = await supabaseGet(
+        env,
+        `owner_recovery?owner_id=eq.${encodeURIComponent(ownerId)}&select=verifier_hash`,
+        fetcher,
+      );
+      if (recovery.status !== 200 || !Array.isArray(recovery.rows)) {
+        return json({ error: 'desk_lock_unavailable' }, 503);
+      }
+      const stored = recovery.rows[0]?.verifier_hash;
+      if (typeof stored !== 'string' || !/^[0-9a-f]{64}$/.test(stored)) {
+        return json({ error: 'recovery_missing' }, 404);
+      }
+      let diff = 0;
+      for (let index = 0; index < proof.length; index += 1) {
+        diff |= proof.charCodeAt(index) ^ stored.charCodeAt(index);
+      }
+      if (diff !== 0) return json({ error: 'recovery_mismatch' }, 401);
       const replaced = await supabaseWrite(env, {
         path: `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}`,
         method: 'PATCH',

@@ -51,6 +51,10 @@ test('each create screen keeps one generator beside the field and a copy icon in
   const desk = readFileSync(new URL('../components/DeskLock.js', import.meta.url), 'utf8');
   const recovery = readFileSync(new URL('../components/RecoveryCeremony.js', import.meta.url), 'utf8');
   assert.match(desk, /kind="password"/);
+  assert.match(desk, /Reset with seed/);
+  assert.match(desk, /verifyRecovery/);
+  assert.match(desk, /PhraseEntry/);
+  assert.equal(desk.includes('Reset password'), false);
   assert.equal(desk.includes('Generate passphrase'), false);
   assert.equal(desk.includes('acknowledged'), false);
   assert.match(recovery, /Password/);

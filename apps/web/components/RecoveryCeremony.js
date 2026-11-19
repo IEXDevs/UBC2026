@@ -19,7 +19,7 @@ import { blockCopy } from '../lib/block-copy.mjs';
 
 const EMPTY_SLOTS = () => Array.from({ length: 12 }, () => '');
 
-function PhraseEntry({ slots, onChange, disabled = false }) {
+export function PhraseEntry({ slots, onChange, disabled = false }) {
   const refs = useRef([]);
 
   function focus(index) {

@@ -15,7 +15,6 @@ import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
 import ProfileSheet from '../components/ProfileSheet';
 import WalletsSheet from '../components/WalletsSheet';
-import WalletDock from '../components/WalletDock';
 import ClaimHandle from '../components/ClaimHandle';
 import RecoveryCeremony from '../components/RecoveryCeremony';
 import SlideCommit from '../components/bits/SlideCommit';
@@ -458,7 +457,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [voiceMs, setVoiceMs] = useState(0);
   const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
-  const closeProfile = useCallback(() => setProfileOpen(false), []);
+  const [walletsFold, setWalletsFold] = useState(false);
+  const closeProfile = useCallback(() => {
+    setProfileOpen(false);
+    setWalletsFold(false);
+  }, []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
   const closePlugins = useCallback(() => setPluginsOpen(false), []);
   const closeStats = useCallback(() => setStatsOpen(false), []);
@@ -1548,7 +1551,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       return;
     }
     if (id === 'wallet') {
-      openWallet();
+      setPluginsOpen(false);
+      setStatsOpen(false);
+      setWalletsOpen(false);
+      setWalletsFold(true);
+      setProfileOpen(true);
       return;
     }
     if (id === 'lock-wallet') {
@@ -1778,12 +1785,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       </aside>
 
       <section className={`stage${pane === 'Positions' ? ' is-book' : ''}`}>
-        <WalletDock
-          privyLive={privyLive}
-          wallets={wallets}
-          balanceLabel={glance.balanceLabel}
-          onOpen={openWallet}
-        />
         {noAgents ? null : (
         <header className="topbar">
           <span className="topbar-side" />
@@ -2112,7 +2113,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         onLogin={onLogin}
         onLogout={onLogout}
         onSave={saveProfile}
-        onWallet={() => { setProfileOpen(false); openWallet(); }}
+        onWallet={() => { setProfileOpen(false); setWalletsFold(false); openWallet(); }}
+        privyLive={privyLive}
+        expandWallets={walletsFold}
       />
     </div>
     {/* Claim stays outside the shell. .shell.is-claim sets opacity 0. */}

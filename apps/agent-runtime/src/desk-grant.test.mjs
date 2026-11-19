@@ -146,15 +146,16 @@ test('desk unlock stores a grant hash and spend rejects a bare owner', async () 
 });
 
 /**
- * Achieves: a later password replaces the account verifier and that same password gets a grant.
- * Fails when: the follow-up grant rejects the saved password, the old password still unlocks, or another account is stuck on this verifier.
- * Oracle: grant after replace; iteration count read back as text; other owner is desk_lock_missing.
+ * Achieves: a later password replaces the account verifier only with the seed proof, then that password gets a grant.
+ * Fails when: replace works with no proof, the follow-up grant rejects the saved password, the old password still unlocks, or another account is stuck on this verifier.
+ * Oracle: 401 without the seed proof; grant after a matching proof; other owner is desk_lock_missing.
  * Side effects: in-memory desk row. The passwords stay in the request fixtures.
  * Gaps: live Supabase is not called.
  */
-test('a later desk password replaces the stored verifier and can unlock', async () => {
+test('a later desk password replaces the stored verifier only with the seed proof', async () => {
   const first = await createDeskLock('correct horse');
   const second = await createDeskLock('later horse');
+  const proof = 'ab'.repeat(32);
   let row = null;
   const env = {
     PRODUCT: 'Maelstrom',
@@ -187,6 +188,9 @@ test('a later desk password replaces the stored verifier and can unlock', async 
           iterations: String(row.iterations),
         }] : []);
       }
+      if (href.includes('/rest/v1/owner_recovery')) {
+        return Response.json([{ verifier_hash: proof }]);
+      }
       if (href.includes('/rest/v1/desk_locks') && href.includes('grant_hash')) {
         return Response.json(row?.grant_hash ? [{ grant_hash: row.grant_hash, grant_until: row.grant_until }] : [{ grant_hash: null, grant_until: null }]);
       }
@@ -208,10 +212,28 @@ test('a later desk password replaces the stored verifier and can unlock', async 
   assert.equal((await blocked.json()).error, 'desk_lock_exists');
   assert.equal(row.hash, first.hash);
 
-  const replaced = await worker.fetch(new Request('https://runtime/api/desk/lock', {
+  const bareReplace = await worker.fetch(new Request('https://runtime/api/desk/lock', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
     body: JSON.stringify({ salt: second.salt, hash: second.hash, iterations: second.iterations, replace: true }),
+  }), env);
+  assert.equal(bareReplace.status, 401);
+  assert.equal((await bareReplace.json()).error, 'recovery_required');
+  assert.equal(row.hash, first.hash);
+
+  const wrongProof = await worker.fetch(new Request('https://runtime/api/desk/lock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ salt: second.salt, hash: second.hash, iterations: second.iterations, replace: true, proof: 'cd'.repeat(32) }),
+  }), env);
+  assert.equal(wrongProof.status, 401);
+  assert.equal((await wrongProof.json()).error, 'recovery_mismatch');
+  assert.equal(row.hash, first.hash);
+
+  const replaced = await worker.fetch(new Request('https://runtime/api/desk/lock', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ salt: second.salt, hash: second.hash, iterations: second.iterations, replace: true, proof }),
   }), env);
   assert.equal(replaced.status, 200);
   assert.equal((await replaced.json()).replaced, true);

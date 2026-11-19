@@ -3,10 +3,8 @@
  * The password is sent once on unlock and is not written to storage.
  */
 import {
-  createDeskLock,
   unlockDesk,
   writeDeskGrant,
-  writeDeskLock,
 } from './desk-lock.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
 
@@ -27,9 +25,10 @@ export async function readDeskLockState(fetchImpl, { ownerId, token } = {}) {
   return { ok: true, locked: body.locked === true };
 }
 
-export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier, replace = false } = {}) {
+export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier, replace = false, proof = '' } = {}) {
   const url = shellRuntimeUrl('/api/desk/lock');
   if (!url || !ownerId || !verifier) return { ok: false, error: 'runtime' };
+  if (replace === true && !/^[0-9a-f]{64}$/i.test(proof)) return { ok: false, error: 'recovery_required' };
   const response = await fetchImpl(url, {
     method: 'POST',
     headers: headers(ownerId, token),
@@ -37,7 +36,7 @@ export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier
       salt: verifier.salt,
       hash: verifier.hash,
       iterations: verifier.iterations,
-      ...(replace === true ? { replace: true } : {}),
+      ...(replace === true ? { replace: true, proof: proof.toLowerCase() } : {}),
     }),
   });
   if (response.status === 409) return { ok: true, exists: true };
@@ -61,10 +60,9 @@ export async function openDeskGrant(fetchImpl, { ownerId, token, password } = {}
 }
 
 /**
- * Enter Password. The browser copy is checked first. When that copy matches
- * and the account verifier does not, the submitted password replaces the
- * account verifier and a grant is issued. A mismatch stays "wrong password"
- * and does not replace anything.
+ * Enter Password. The browser copy is checked first. A mismatch stays
+ * "wrong password". A different account verifier is not replaced here.
+ * Replacing the wallet password requires the seed proof on the lock route.
  */
 export async function acceptEnteredPassword({
   fetchImpl,
@@ -79,20 +77,7 @@ export async function acceptEnteredPassword({
     const matches = await unlockDesk(password, record);
     if (!matches) return { ok: false, error: 'wrong_password' };
   }
-  let opened = await openDeskGrant(fetchImpl, { ownerId, token, password });
-  if (!opened.ok && record) {
-    const created = await createDeskLock(password);
-    const registered = await registerDeskVerifier(fetchImpl, {
-      ownerId,
-      token,
-      verifier: created,
-      replace: true,
-    });
-    if (!registered.ok || registered.exists || !writeDeskLock(localStorage, ownerId, created)) {
-      return { ok: false, error: 'desk_lock_failed' };
-    }
-    opened = await openDeskGrant(fetchImpl, { ownerId, token, password });
-  }
+  const opened = await openDeskGrant(fetchImpl, { ownerId, token, password });
   if (!opened.ok || !writeDeskGrant(sessionStorage, ownerId, opened.grant, opened.until)) {
     return { ok: false, error: opened.error || 'desk_locked' };
   }

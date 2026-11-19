@@ -38,6 +38,9 @@ test('Privy provider props stay public and Solana-only', () => {
   assert.equal(props.config.mfa.noPromptOnMfaRequired, false);
   assert.equal(props.config.sessions.cookieWriteBehavior, 'never');
   assert.deepEqual(props.config.loginMethods, ['email', 'google', 'github', 'discord', 'wallet']);
+  assert.equal(props.config.loginMethods.includes('sms'), false);
+  assert.equal(props.config.loginMethods.includes('passkey'), false);
+  assert.equal(JSON.stringify(props.config).includes('"password"'), false);
 
   const withoutClient = privyProviderProps({ appId: 'cl-app' });
   assert.equal(withoutClient.clientId, undefined);

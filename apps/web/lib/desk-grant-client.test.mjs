@@ -99,6 +99,14 @@ test('registerDeskVerifier treats 409 as exists and never sends the password', a
   });
   assert.deepEqual(ok, { ok: true });
 
+  const proof = 'ab'.repeat(32);
+  const missingProof = await registerDeskVerifier(async () => new Response('', { status: 200 }), {
+    ownerId: 'did:privy:u1',
+    verifier: { salt: 's', hash: 'h', iterations: 1 },
+    replace: true,
+  });
+  assert.deepEqual(missingProof, { ok: false, error: 'recovery_required' });
+
   let replaced;
   const again = await registerDeskVerifier(async (_url, init) => {
     replaced = JSON.parse(init.body);
@@ -107,9 +115,11 @@ test('registerDeskVerifier treats 409 as exists and never sends the password', a
     ownerId: 'did:privy:u1',
     verifier: { salt: 's', hash: 'h', iterations: 1 },
     replace: true,
+    proof,
   });
   assert.deepEqual(again, { ok: true });
   assert.equal(replaced.replace, true);
+  assert.equal(replaced.proof, proof);
   assert.equal(Object.prototype.hasOwnProperty.call(replaced, 'password'), false);
 });
 
@@ -155,13 +165,13 @@ function memoryStorage() {
 }
 
 /**
- * Achieves: Enter Password replaces a different account verifier and stores a grant.
- * Fails when: a local match leaves the old verifier, a wrong password replaces it, or the grant is missing.
- * Oracle: replace:true lock body has no password; session grant is readable for the next spend.
+ * Achieves: Enter Password does not replace a different account verifier.
+ * Fails when: a wrong password is accepted, or a local match overwrites the account verifier.
+ * Oracle: wrong password makes no request; a local match that the account rejects does not call lock.
  * Side effects: in-memory storage and stub fetch. PBKDF2 only.
- * Gaps: the React dialog is not mounted.
+ * Gaps: the React dialog is not mounted. Seed reset is the lock route with a proof.
  */
-test('Enter Password replaces the stored account verifier and issues a grant', async () => {
+test('Enter Password does not replace the account verifier without the seed', async () => {
   const ownerId = 'did:privy:u1';
   const local = memoryStorage();
   const session = memoryStorage();
@@ -205,15 +215,9 @@ test('Enter Password replaces the stored account verifier and issues a grant', a
     localStorage: local,
     sessionStorage: session,
   });
-  assert.equal(accepted.ok, true);
-  const lockCall = calls.find(call => String(call.url).includes('/desk/lock'));
-  assert.equal(lockCall.body.replace, true);
-  assert.equal(Object.prototype.hasOwnProperty.call(lockCall.body, 'password'), false);
-  assert.equal(await unlockDesk('fresh horse', account), true);
-  assert.equal(await unlockDesk('older horse', account), false);
-  const stored = readDeskLock(local, ownerId);
-  assert.equal(await unlockDesk('fresh horse', stored), true);
-  const grant = readDeskGrant(session, ownerId, Date.now());
-  assert.equal(grant.grant, 'cd'.repeat(32));
-  assert.equal(JSON.stringify(calls).includes('cd'.repeat(32)), false);
+  assert.equal(accepted.ok, false);
+  assert.equal(calls.some(call => String(call.url).includes('/desk/lock')), false);
+  assert.equal(await unlockDesk('older horse', account), true);
+  assert.equal(await unlockDesk('fresh horse', account), false);
+  assert.equal(readDeskGrant(session, ownerId, Date.now()), null);
 });

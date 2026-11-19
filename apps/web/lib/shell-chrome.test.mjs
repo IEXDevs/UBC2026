@@ -128,33 +128,39 @@ test('claim handle stays outside the shell that fades on first login', () => {
 });
 
 /**
- * Achieves: the main stage has a wallet control at the top of the stage, and the agent detail pane does not.
- * Fails when: WalletDock leaves the stage, or the detail pane grows a wallet chip again.
- * Oracle: page stage markup includes WalletDock; AgentDetail has neither WalletDock nor wallet-chip; the dock offers connect and details.
- * Side effects / state checked: page.js, AgentDetail.js, WalletDock.js, WalletsSheet.js source.
+ * Achieves: wallets live in the settings sheet, collapsed, and the stage has no wallet badge.
+ * Fails when: WalletDock returns to the stage, the settings fold is missing, or connect uses the specular button.
+ * Oracle: stage has no WalletDock; ProfileSheet has a closed-capable Wallets details; connect is a plain button with a single hint line.
+ * Side effects / state checked: page.js, AgentDetail.js, ProfileSheet.js, WalletsSheet.js, globals.css source.
  * Gaps: source snapshot only — no browser layout.
  */
-test('the main stage has a top-right wallet control and the detail pane does not', () => {
+test('wallets are collapsed in settings and the stage has no wallet badge', () => {
   const root = dirname(fileURLToPath(import.meta.url));
   const page = readFileSync(join(root, '../app/page.js'), 'utf8');
   const detail = readFileSync(join(root, '../components/AgentDetail.js'), 'utf8');
-  const dock = readFileSync(join(root, '../components/WalletDock.js'), 'utf8');
+  const profile = readFileSync(join(root, '../components/ProfileSheet.js'), 'utf8');
   const sheet = readFileSync(join(root, '../components/WalletsSheet.js'), 'utf8');
   const css = readFileSync(join(root, '../app/globals.css'), 'utf8');
   const stageStart = page.indexOf('<section className={`stage');
   const stage = page.slice(stageStart, page.indexOf('{bot ? (', stageStart));
-  assert.match(stage, /<WalletDock/);
+  assert.equal(stage.includes('WalletDock'), false);
+  assert.equal(page.includes('WalletDock'), false);
   assert.equal(detail.includes('WalletDock'), false);
   assert.equal(detail.includes('wallet-chip'), false);
-  assert.match(dock, /aria-label="Wallets"/);
-  assert.match(dock, /<WalletAdd/);
-  assert.match(dock, /Open wallet details/);
+  assert.match(profile, /className="settings-fold"/);
+  assert.match(profile, /<summary>Wallets<\/summary>/);
+  assert.match(profile, /<WalletAdd/);
+  assert.match(page, /expandWallets=\{walletsFold\}/);
+  assert.match(page, /setWalletsFold\(true\)/);
   assert.match(sheet, /Connect a wallet/);
-  assert.match(sheet, /SpecularButton/);
+  assert.equal(sheet.includes('SpecularButton'), false);
+  assert.equal(sheet.includes('data-hint'), false);
+  assert.match(sheet, /wallet-add-hint/);
   assert.match(sheet, /Generate New Wallet/);
   assert.match(sheet, /wallet-add-create/);
   assert.match(css, /\.wallet-add-create \{[^}]*flex-wrap:\s*nowrap/);
-  assert.equal(dock.includes('A connected wallet is read-only'), false);
+  assert.match(css, /\.wallet-add-connect/);
+  assert.equal(css.includes('.wallet-mark'), false);
   assert.equal(sheet.includes('The phrase and the private key are not stored here'), true);
   assert.match(page, /if \(bots\.length === 0\) return;/);
   assert.equal(page.includes('if (!devPreview || bots.length === 0) return;'), false);
