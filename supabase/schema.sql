@@ -63,7 +63,6 @@ create table if not exists wallets (
   provider text not null default 'privy' check (provider = 'privy'),
   frozen boolean not null default false,
   created_at timestamptz not null default now(),
-  deleted_at timestamptz,
   unique (owner_id, address)
 );
 
@@ -1528,3 +1527,5 @@ begin
     end;
   end if;
 end $$;
+-- Soft-delete additional wallets. The row stays so history can still point at it.
+alter table wallets add column if not exists deleted_at timestamptz;

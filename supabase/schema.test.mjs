@@ -2,24 +2,29 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
-const foundations = readFileSync(new URL('./migrations/20261114000000_foundations.sql', import.meta.url), 'utf8');
-const policy = readFileSync(new URL('./migrations/20261114020000_policy_ledger.sql', import.meta.url), 'utf8');
-const templates = readFileSync(new URL('./migrations/20261114040000_bot_templates.sql', import.meta.url), 'utf8');
+function readSql(path) {
+  return readFileSync(new URL(path, import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+}
+
+const schema = readSql('./schema.sql');
+const foundations = readSql('./migrations/20261114000000_foundations.sql');
+const policy = readSql('./migrations/20261114020000_policy_ledger.sql');
+const templates = readSql('./migrations/20261114040000_bot_templates.sql');
+const walletSoftDelete = readSql('./migrations/20261119000000_wallet_soft_delete.sql');
 
 function concat(parts) {
   return parts.reduce((sql, part) => (sql.endsWith('\n') ? sql + part : `${sql}\n${part}`));
 }
 
 /**
- * Achieves: Committed schema.sql equals concatenation of the three phase-1 migrations.
+ * Achieves: schema.sql matches the migrations it bundles in their listed order.
  * Fails when: schema.sql drifts from migrations.
- * Oracle: Byte equality of concat(foundations, policy, templates).
+ * Oracle: Text equality after line-ending normalization.
  * Side effects: Reads SQL files.
- * Gaps: Later migrations are intentionally outside schema.sql.
+ * Gaps: This check covers only the bundled migrations.
  */
-test('schema.sql is foundations, the policy ledger, and bot templates', () => {
-  assert.equal(schema, concat([foundations, policy, templates]));
+test('schema.sql matches the three phase-1 migrations and wallet soft delete', () => {
+  assert.equal(schema, concat([foundations, policy, templates, walletSoftDelete]));
 });
 
 /**

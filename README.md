@@ -158,7 +158,7 @@ Grok Bot on X watches Maelstrom's notable Solana devnet activity: confirmed tran
 | `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object described above |
 | `apps/web` | Next.js glass UI (OpenNext on Cloudflare). Payments, wallets, and positions panes are not built |
-| `supabase/schema.sql` | Foundations, policy ledger, and bot templates. Later migrations: `supabase/migrations/20261114050000_stream_events.sql` and `supabase/migrations/20261114180000_activity_logs.sql` (owner activity log, RLS, secret redaction). Neither is folded into `schema.sql` |
+| `supabase/schema.sql` | Foundations, policy ledger, bot templates, and wallet soft delete. Later migrations: `supabase/migrations/20261114050000_stream_events.sql` and `supabase/migrations/20261114180000_activity_logs.sql` (owner activity log, RLS, secret redaction). Neither is folded into `schema.sql` |
 
 `/api/*` data routes and wallet create/sign are live against Supabase + Privy when those secrets are set; otherwise they return empty `source: unconfigured`. Persist sessions, approvals, and budgets in the Durable Object or in Supabase. Do not treat a queue as the source of truth.
 
