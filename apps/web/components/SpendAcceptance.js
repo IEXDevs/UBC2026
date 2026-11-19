@@ -2,14 +2,13 @@
 
 import { useState } from 'react';
 import { PERMISSIONS, dollarsToBaseUnits } from '../lib/spend-permission.mjs';
+import { CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
 
 const COPY = Object.freeze({
   ask: 'You approve every spend. Nothing moves until you confirm it.',
   review: 'You set a maximum. At or under that amount the spend can continue after the server check. Above it, you approve.',
   full: 'The agent can manage funds. You still slide to confirm, and a mainnet price quote never authorizes a transaction.',
 });
-
-const EXIT_MS = 480;
 
 export default function SpendAcceptance({ onContinue }) {
   const [permission, setPermission] = useState('ask');
@@ -34,7 +33,7 @@ export default function SpendAcceptance({ onContinue }) {
     setLeaving(true);
     window.setTimeout(() => {
       onContinue?.({ permission, reviewCap: cap });
-    }, EXIT_MS);
+    }, CONFIRM_HOLD_MS);
   }
 
   return (
@@ -73,11 +72,17 @@ export default function SpendAcceptance({ onContinue }) {
             disabled={leaving}
             onChange={(event) => {
               setDollars(event.target.value);
-              setNote('');
             }}
           />
         </label>
-        {note ? <p className="quiet" role="status">{note}</p> : null}
+        {note ? (
+          <p className="gate-note is-error" role="alert">
+            <span>{note}</span>
+            <button type="button" className="gate-note-dismiss" aria-label="Dismiss" onClick={() => setNote('')}>
+              ×
+            </button>
+          </p>
+        ) : null}
         {saved ? <p className="acceptance-ok" role="status">Saved. Opening seed backup…</p> : null}
         <button type="submit" className="solid" disabled={!cap || leaving}>Continue</button>
       </form>

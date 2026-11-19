@@ -148,6 +148,7 @@ function AuthedShell() {
   const hostedPreview = useHostedPreview();
   const devAllowed = developerPreviewAllowed() || hostedPreview;
   const [devPreview, setDevPreview] = useState(false);
+  const [signInHold, setSignInHold] = useState(false);
   const [liveWallets, setLiveWallets] = useState(null);
   const [walletNote, setWalletNote] = useState('');
   const [walletError, setWalletError] = useState('');
@@ -301,8 +302,14 @@ function AuthedShell() {
     return <SessionHold />;
   }
 
-  if (showSignInGate({ privyConfigured: true, ready, authenticated })) {
-    return <SignInPage onLogin={login} onDeveloperPreview={devAllowed ? enterDevPreview : null} />;
+  if (signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
+    return (
+      <SignInPage
+        onLogin={login}
+        onDeveloperPreview={devAllowed ? enterDevPreview : null}
+        onHoldChange={setSignInHold}
+      />
+    );
   }
 
   return (
@@ -1734,10 +1741,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               setLibrary(current => {
                 const result = catalogAddition(current, bot.id, items);
                 if (result.rejected.length > 0) {
-                  toast?.({ id: 'storage-file-too-big', title: STORAGE_FILE_TOO_BIG, duration: 7000, closeButton: true });
+                  toast?.({ id: 'storage-file-too-big', title: STORAGE_FILE_TOO_BIG, duration: 7000, closeButton: true, error: true });
                 }
                 if (result.warning) {
-                  toast?.({ id: 'storage-cap', title: result.warning, duration: 7000, closeButton: true });
+                  toast?.({ id: 'storage-cap', title: result.warning, duration: 7000, closeButton: true, error: true });
                 }
                 return result.library;
               });
@@ -1754,6 +1761,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
                       title: notice,
                       duration: 7000,
                       closeButton: true,
+                      error: true,
                     });
                   }
                   if (saved?.ok) setLibrary(current => applyStoredFile(current, item.id, saved));

@@ -1668,6 +1668,37 @@ button.add-agent:not(:disabled):hover {
   font-size: 14px;
   font-weight: 600;
 }
+.gate-note {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.gate-note.is-error {
+  color: #ff8f8f;
+}
+.gate-note.is-ok {
+  color: #3dbe6a;
+}
+.gate-note-dismiss {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.gate-note-dismiss:hover {
+  opacity: 1;
+}
 .acceptance-tiers {
   display: grid;
   gap: 8px;

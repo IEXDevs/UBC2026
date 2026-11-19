@@ -164,6 +164,10 @@
 }
 
 .code-slots__message {
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
   margin: 12px 0 0;
   max-width: 28rem;
   color: #ddd4f2;
@@ -177,6 +181,27 @@
 
 .code-slots__message.is-error {
   color: #ffb4a8;
+}
+
+.code-slots__message.is-ok {
+  color: #b8f0c8;
+}
+
+.code-slots__dismiss {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.code-slots__dismiss:hover {
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

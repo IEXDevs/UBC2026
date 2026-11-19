@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { rateLimitCopy, requestUrl } from '../../lib/dex-token.mjs';
+import { looksLikeError, toastDurationMs } from '../../lib/confirm-hold.mjs';
 import './SwipeToast.css';
 
 const ToastContext = createContext(null);
@@ -10,7 +11,7 @@ export function useToast() {
   return useContext(ToastContext);
 }
 
-function SwipeCard({ title, description, duration = 4000, closeButton = false, fuseColor = '#f5a524', onClose }) {
+function SwipeCard({ title, description, duration = 4000, sticky = false, closeButton = false, fuseColor = '#f5a524', onClose }) {
   const [leaving, setLeaving] = useState(false);
   const [paused, setPaused] = useState(false);
   const drag = useRef(null);
@@ -32,12 +33,13 @@ function SwipeCard({ title, description, duration = 4000, closeButton = false, f
   useEffect(() => {
     started.current = Date.now();
     remain.current = duration;
+    if (sticky) return undefined;
     timer.current = window.setTimeout(finish, duration);
     return () => clearTimeout(timer.current);
-  }, [duration, finish]);
+  }, [duration, finish, sticky]);
 
   function pause() {
-    if (paused || closed.current) return;
+    if (sticky || paused || closed.current) return;
     setPaused(true);
     clearTimeout(timer.current);
     remain.current = Math.max(0, remain.current - (Date.now() - started.current));
@@ -75,9 +77,9 @@ function SwipeCard({ title, description, duration = 4000, closeButton = false, f
 
   return (
     <div
-      className={`swipe-toast${leaving ? ' is-leaving' : ''}${paused ? ' is-paused' : ''}`}
+      className={`swipe-toast${leaving ? ' is-leaving' : ''}${paused ? ' is-paused' : ''}${sticky ? ' is-sticky' : ''}`}
       style={{ '--st-duration': `${duration}ms`, '--st-fuse': fuseColor }}
-      role="status"
+      role={sticky ? 'alert' : 'status'}
     >
       <div className="swipe-toast__lift">
         <div
@@ -97,7 +99,7 @@ function SwipeCard({ title, description, duration = 4000, closeButton = false, f
             <span className="swipe-toast__title">{title}</span>
             {description ? <span className="swipe-toast__desc">{description}</span> : null}
           </span>
-          {closeButton ? (
+          {closeButton || sticky ? (
             <button type="button" className="swipe-toast__close" aria-label="Dismiss" onClick={finish}>
               ×
             </button>
@@ -119,12 +121,13 @@ export function ToastProvider({ children }) {
 
   const push = useCallback((message) => {
     const item = typeof message === 'string'
-      ? { title: message, description: '' }
+      ? { title: message, description: '', error: looksLikeError(message) }
       : {
         id: message?.id,
         title: message?.title || 'Notice',
         description: message?.description || '',
         duration: message?.duration,
+        error: message?.error === true,
         closeButton: message?.closeButton === true,
         fuseColor: message?.fuseColor,
       };
@@ -141,7 +144,7 @@ export function ToastProvider({ children }) {
     const original = window.fetch.bind(window);
     window.fetch = async (...args) => {
       const response = await original(...args);
-      if (response?.status === 429) pushRef.current?.(rateLimitCopy(requestUrl(args[0])));
+      if (response?.status === 429) pushRef.current?.({ ...rateLimitCopy(requestUrl(args[0])), error: true });
       return response;
     };
     return () => {
@@ -158,7 +161,8 @@ export function ToastProvider({ children }) {
             key={item.id}
             title={item.title}
             description={item.description}
-            duration={item.duration || 4000}
+            duration={toastDurationMs(item.duration)}
+            sticky={item.error === true}
             closeButton={item.closeButton}
             fuseColor={item.fuseColor}
             onClose={() => remove(item.id)}
