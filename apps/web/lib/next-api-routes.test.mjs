@@ -494,6 +494,26 @@ test('GET /api/portfolio with bearer but missing Privy secrets returns missing_c
  * Side effects: none.
  * Gaps: remaining live ElevenLabs mint needs ELEVENLABS_API_KEY.
  */
+test('POST /api/voice/speak fails closed when ElevenLabs is unconfigured', async () => {
+  const prev = process.env.ELEVENLABS_API_KEY;
+  delete process.env.ELEVENLABS_API_KEY;
+  try {
+    const { POST } = await import('../app/api/voice/speak/route.js');
+    const res = await POST(new Request('http://localhost/api/voice/speak', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'hello', voiceId: '21m00Tcm4TlvDq8ikWAM' }),
+    }));
+    const body = await res.json();
+    assert.equal(typeof body.error, 'string');
+    assert.equal(JSON.stringify(body).includes('sk_'), false);
+    if (res.status === 503) assert.equal(body.error, 'voice_unconfigured');
+    else assert.equal(res.status, 502);
+  } finally {
+    if (prev !== undefined) process.env.ELEVENLABS_API_KEY = prev;
+  }
+});
+
 test('POST /api/voice/scribe-token fails closed when ElevenLabs is unconfigured', async () => {
   const prev = process.env.ELEVENLABS_API_KEY;
   delete process.env.ELEVENLABS_API_KEY;

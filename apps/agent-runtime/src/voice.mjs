@@ -1,8 +1,7 @@
 /**
- * ElevenLabs voice agent.
- * Custom LLM is Meta Muse Spark 1.3 Contributor via Meta Model API (or OpenRouter
- * fallback). ElevenLabs calls this Worker; the Worker streams chat completions.
- * Webhook tools call the same bot, event, wallet, and browser routes as the UI.
+ * ElevenLabs is speech in and speech out.
+ * The desk text agent writes the reply. This Worker does not run a second
+ * model, and webhook tools no longer call bot, wallet, or browser routes.
  * No secret values are written into the agent payload.
  */
 import { timingSafeEqual } from 'node:crypto';
@@ -58,7 +57,7 @@ export function ownerPermissionNote(value) {
  * Never hang up from silence or a greeting — the owner ends the call.
  */
 export const VOICE_SPEAK_PROMPT = [
-  'Transcribe the owner and speak the custom LLM reply. Do not add a policy.',
+  'Transcribe the owner and speak the desk text agent reply. Do not add a policy, do not call tools, and do not decide.',
   'Never end the call, hang up, or call end_call unless the owner clearly says goodbye.',
 ].join(' ');
 
@@ -129,28 +128,7 @@ function voiceAgentConversationConfig({ origin, modelId, webhookSecretRef }) {
               request_headers: { [WEBHOOK_HEADER]: SECRET_PLACEHOLDER },
             }),
         },
-        tools: VOICE_TOOLS.map(item => ({
-          type: 'webhook',
-          name: item.name,
-          description: item.description,
-          response_timeout_secs: 20,
-          api_schema: {
-            url: `${base}/voice/tools/${item.name}`,
-            method: 'POST',
-            request_headers: webhookSecretRef
-              ? {
-                [WEBHOOK_HEADER]: webhookSecretRef,
-                'x-owner-id': '{{owner_id}}',
-                'x-spend-permission': '{{spend_permission}}',
-              }
-              : { ...webhookHeaders() },
-            request_body_schema: {
-              type: 'object',
-              properties: { ...item.properties },
-              required: [...item.required],
-            },
-          },
-        })),
+        tools: [],
       },
     },
     turn: {
@@ -242,10 +220,7 @@ export function voiceAgentSpec(request, env = {}) {
       streaming: true,
       apiKeyIncluded: false,
     },
-    tools: VOICE_TOOLS.map(item => ({
-      name: item.name,
-      calls: item.calls.map(entry => ({ method: entry.method, path: entry.path })),
-    })),
+    tools: [],
     elevenlabs: voiceAgentCreateBody({ origin, modelId }),
   };
 }
@@ -931,58 +906,11 @@ async function resolveToolOwner(request, body) {
   return null;
 }
 
-async function handleTool(name, request, env, fetchApi) {
+async function handleTool(name, request, env) {
   const denied = authorize(request, env);
   if (denied) return denied;
-  const toolDef = VOICE_TOOLS.find(item => item.name === name);
-  if (!toolDef) return json({ error: 'unknown_tool' }, 404);
-  const body = await request.json().catch(() => null);
-  const parsed = parameterBag(body, name);
-  if (parsed.error) return json({ error: parsed.error }, 400);
-  if (!validateParameters(toolDef, parsed.parameters)) return json({ error: 'invalid_parameters' }, 400);
-  const owner = await resolveToolOwner(request, body);
-  if (!owner) return json({ error: 'owner_required' }, 400);
-  if (parsed.conversationId) await rememberVoiceOwner(parsed.conversationId, owner);
-  const models = env.openRouter
-    || (resolveModelProvider(env).provider !== 'none' ? createOpenRouterFromEnv(env, env.fetch ?? fetch) : null);
-  if (models && typeof models.complete === 'function') {
-    try {
-      const verdict = await models.complete({
-        role: 'verify',
-        task: turnVerifyTask('tool', JSON.stringify({ name, parameters: parsed.parameters })),
-      });
-      if (!parseTurnVerdict(verdict.text).allow) return json({ error: 'verifier_blocked' }, 409);
-    } catch {
-      return json({ error: 'verifier_blocked' }, 409);
-    }
-  }
-  let result;
-  try {
-    if (toolDef.handler === 'research') {
-      result = await runResearchTool(name, parsed.parameters, env);
-    } else if (toolDef.handler === 'price') {
-      result = await runPriceTool(parsed.parameters, env);
-    } else {
-      if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
-      result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env, {
-        spendPermission: request.headers.get('x-spend-permission'),
-        ownerUtterance: ownerUtterance(body) || recallUtterance(parsed.conversationId),
-      });
-    }
-  } catch {
-    return json({ error: 'voice_api_failed' }, 502);
-  }
-  if (result.error) {
-    const status = result.error === 'session_not_found' ? 404 : result.error === 'owner_must_ask' ? 403 : 400;
-    return json({ error: result.error }, status);
-  }
-  return json({
-    result: {
-      tool: name,
-      ...(parsed.conversationId ? { conversationId: parsed.conversationId } : {}),
-      ...result,
-    },
-  });
+  if (!VOICE_TOOLS.some(item => item.name === name)) return json({ error: 'unknown_tool' }, 404);
+  return json({ error: 'voice_tools_retired' }, 410);
 }
 
 function clip(value, max) {
@@ -1123,137 +1051,15 @@ export function spokenVoiceSse(text) {
   });
 }
 
-async function handleCustomLlm(request, env, fetcher) {
+/** Spoken when an old ConvAI agent still calls this Worker. The desk speaks the text agent. */
+export const VOICE_PIPE_LINE = 'Voice is speech in and speech out. The desk text agent writes the reply.';
+
+async function handleCustomLlm(request, env) {
   const denied = authorize(request, env);
   if (denied) return denied;
-  const resolved = resolveModelProvider(env);
-  const apiKey = modelApiKey(env);
-  if (!apiKey) {
-    // Auth is fine; model secrets are not. Speak instead of 503 so WebRTC stays up.
-    return spokenVoiceSse('Voice reasoning is not configured yet. Please try again after setup.');
-  }
-  const secrets = knownSecrets(env);
   const incoming = await request.json().catch(() => null);
   if (!incoming || typeof incoming !== 'object') {
     return spokenVoiceSse('I could not read that turn. Please try again.');
   }
-  const messages = sanitizeMessages(incoming.messages, secrets);
-  if (!messages) {
-    return spokenVoiceSse('I could not read that turn. Please try again.');
-  }
-  const conversationId = typeof incoming.conversation_id === 'string' ? incoming.conversation_id.trim().slice(0, 128) : '';
-  rememberUtterance(conversationId, messages);
-  const provider = resolved.provider === 'openrouter' ? 'openrouter' : 'meta';
-  let adapted = voiceDecisionMessages({
-    botName: incoming.botName,
-    botGoal: incoming.botGoal,
-    botType: incoming.botType,
-    ownerPermission: incoming.ownerPermission,
-    transcript: messages,
-    secrets,
-    provider,
-  });
-  // ElevenLabs often probes the custom LLM before any owner utterance (first
-  // message / greeting). Meta Muse rejects developer-only prompts with HTTP 400,
-  // which made live voice look dead after connect. Seed a short user turn.
-  const seededGreeting = !adapted.some(item => item.role === 'user' && item.content);
-  if (seededGreeting) {
-    adapted = [
-      ...adapted,
-      {
-        role: 'user',
-        content: 'The owner just joined the voice call. Greet them briefly and wait. Do not end the call.',
-      },
-    ];
-  }
-  let model = grokVoiceModel(env);
-  if (resolved.provider === 'openrouter') {
-    const selected = selectFreeOpenRouterModel(model);
-    if (!selected) {
-      return spokenVoiceSse('That voice model is not available right now. Please try again.');
-    }
-    model = selected;
-  }
-  // Prefer tool schemas ElevenLabs already attached. Forcing our full catalog
-  // into Meta Muse often yields tool_call streams with no spoken content, so
-  // the call connects and then stays silent. Never forward end_call on greetings.
-  const elTools = seededGreeting ? null : filterVoiceLlmTools(incoming.tools);
-  if (elTools) {
-    adapted = [
-      ...adapted,
-      { role: 'system', content: VOICE_SPEAK_BEFORE_TOOLS },
-    ];
-  }
-  const payload = {
-    model,
-    messages: adapted,
-    stream: true,
-  };
-  if (provider !== 'meta') payload.temperature = 0.5;
-  else payload.reasoning_effort = 'minimal';
-  if (elTools) {
-    payload.tools = elTools;
-    payload.tool_choice = 'auto';
-  }
-  async function callModel(body) {
-    return fetcher(voiceChatCompletionsUrl(env), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        accept: 'text/event-stream',
-        'content-type': 'application/json',
-        'x-title': 'Maelstrom',
-      },
-      body: JSON.stringify(body),
-    });
-  }
-  let response;
-  try {
-    response = await callModel(payload);
-    if (!response?.ok && payload.tools) {
-      const spokenOnly = { ...payload };
-      delete spokenOnly.tools;
-      delete spokenOnly.tool_choice;
-      response = await callModel(spokenOnly);
-    }
-  } catch {
-    return spokenVoiceSse('I could not reach the model. Please try speaking again in a moment.');
-  }
-  if (!response?.ok) {
-    return spokenVoiceSse(
-      response?.status === 401
-        ? 'The voice model rejected the request. Please try again after credentials are refreshed.'
-        : 'The voice model failed this turn. Please try again.',
-    );
-  }
-  const type = response.headers?.get?.('content-type') ?? '';
-  if (type.includes('text/event-stream') && response.body) {
-    // Buffer tool turns so we can inject spoken text when Meta returns tools only.
-    if (elTools) {
-      const raw = await response.text().catch(() => '');
-      const sse = ensureSpokenToolSse(raw);
-      return new Response(sse, {
-        status: 200,
-        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
-      });
-    }
-    return new Response(response.body, {
-      status: 200,
-      headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
-    });
-  }
-  const data = await response.json().catch(() => null);
-  const drafted = redactString(typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : '', secrets);
-  let text = drafted;
-  try {
-    const models = createOpenRouterFromEnv(env, fetcher);
-    const verdict = await models.complete({
-      role: 'verify',
-      task: turnVerifyTask('reply', drafted),
-    });
-    if (!parseTurnVerdict(verdict.text).allow) text = BLOCKED_TURN;
-  } catch {
-    text = BLOCKED_TURN;
-  }
-  return spokenVoiceSse(text || 'I am here. What should we look at?');
+  return spokenVoiceSse(VOICE_PIPE_LINE);
 }

@@ -75,7 +75,6 @@ import { applyStoredFile, dropCatalogFile, storeAttachedFile, uploadNotice } fro
 import { searchRecall } from '../lib/recall-search.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
-import { createVoiceClientTools } from '../lib/voice-client-tools.mjs';
 import SignInPage from '../components/SignInPage';
 import SpendAcceptance from '../components/SpendAcceptance';
 import DeskLock from '../components/DeskLock';
@@ -1232,20 +1231,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       window.removeEventListener('focus', tick);
     };
   }, [unlocked, ownerId, lockWallet]);
-  const clientTools = useMemo(() => createVoiceClientTools({
-    bots,
-    wallets,
-    activeBotId: activeBot,
-    pane,
-    setActiveBotId: setActiveBot,
-    setPane,
-    focusLiveView: () => {
-      setPane('Main');
-      setComputerOpen(true);
-    },
-    confirm: askSlideConfirm,
-  }), [bots, wallets, activeBot, pane, askSlideConfirm]);
-
   function choosePane(next, direction) {
     if (next === pane) return;
     setPluginsOpen(false);
@@ -1722,7 +1707,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             shellBalanceLabel={glance.balanceLabel}
             fileCatalog={fileCatalog}
             getAccessToken={getAccessToken}
-            clientTools={clientTools}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {
               const id = forBot || bot.id;

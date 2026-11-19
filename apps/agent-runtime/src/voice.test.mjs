@@ -8,6 +8,7 @@ import {
   GROK_VOICE_MODEL,
   OPENROUTER_CHAT_COMPLETIONS,
   VOICE_FIRST_MESSAGE,
+  VOICE_PIPE_LINE,
   VOICE_SPEAK_BEFORE_TOOLS,
   VOICE_SPEAK_PROMPT,
   VOICE_TOOL_FILLER,
@@ -135,256 +136,53 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.equal(prompt.custom_llm.api_type, 'chat_completions');
   assert.equal(prompt.custom_llm.url, voiceCustomLlmBase(ORIGIN));
   assert.equal(prompt.custom_llm.api_key, undefined);
-  assert.equal(prompt.tools.some(item => item.name === 'browser_live_view'), true);
-  assert.equal(prompt.tools.some(item => item.name === 'web_search'), true);
-  assert.equal(prompt.tools.some(item => item.name === 'get_price'), true);
+  assert.deepEqual(prompt.tools, []);
+  assert.deepEqual(spec.tools, []);
   assert.equal(prompt.prompt, VOICE_SPEAK_PROMPT);
   assert.match(prompt.prompt, /Never end the call/);
+  assert.match(prompt.prompt, /do not call tools/);
   assert.doesNotMatch(prompt.prompt, /platform rules are locked/);
   assert.doesNotMatch(prompt.prompt, /request_spend/);
-  assert.equal(prompt.tools.some(item => item.name === 'browser_navigate'), true);
   const text = JSON.stringify(spec);
   assert.equal(text.includes(SECRET), false);
   assert.equal(text.includes(OPENROUTER), false);
   assert.equal(text.includes(ELEVEN), false);
-  assert.match(text, /Stopping every agent now/);
+  assert.equal(text.includes('/voice/tools/'), false);
 });
 
 /**
- * Achieves: get_price uses DexScreener then Jupiter and never authorizes transfer.
- * Fails when: transfer authorized or quote sources skipped.
- * Oracle: quote path; no sign/transfer.
- * Side effects / state checked: price fetch mocks.
- * Gaps: none
+ * Achieves: webhook tools no longer call wallet, browser, or spend routes.
+ * Fails when: a tool posts to the worker or returns a tool result.
+ * Oracle: 410 voice_tools_retired; fetchApi is not called. Missing secret stays 503.
+ * Side effects: none.
+ * Gaps: the desk text agent covers those tools.
  */
-test('get_price quotes DexScreener then Jupiter and does not authorize a transfer', async () => {
-  const mint = 'So11111111111111111111111111111111111111112';
-  const seen = [];
-  const response = await handleVoiceRequest(toolRequest('get_price', {
-    body: { tool_name: 'get_price', parameters: { mint } },
-  }), env({
-    JUPITER_API_KEY: 'jupiter-test-key',
-    fetch: async (url, options) => {
-      seen.push(String(url));
-      if (String(url).includes('jup.ag')) assert.equal(options.headers['x-api-key'], 'jupiter-test-key');
-      else assert.equal(options.headers['x-api-key'], undefined);
-      if (String(url).includes('dexscreener')) return Response.json([]);
-      return Response.json({ [mint]: { usdPrice: 2.25, liquidity: 3, blockId: 8 } });
-    },
-  }), { fetchApi: async () => { throw new Error('price tool must not call bot routes'); } });
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  assert.equal(body.result.tool, 'get_price');
-  assert.equal(body.result.quote.quoteSource, 'jupiter-price-v3');
-  assert.equal(body.result.quote.fallbackFrom, 'dexscreener');
-  assert.equal(body.result.quote.label, 'devnet execution, mainnet pricing');
-  assert.equal(body.result.quote.authorizesTransaction, false);
-  assert.equal(body.result.quote.executionCluster, 'devnet');
-  assert.equal(JSON.stringify(body).includes('jupiter-test-key'), false);
-  assert.equal(seen.length, 2);
-});
-
-/**
- * Achieves: voice webhook tools hit the same worker routes as UI panels.
- * Fails when: divergent routes/paths.
- * Oracle: requested paths match UI routes.
- * Side effects / state checked: fetch path log.
- * Gaps: none
- */
-test('webhook tools call the same routes as the bot page and Live View panel', async () => {
-  const seen = [];
-  const fetchApi = async request => {
-    seen.push({
-      method: request.method,
-      url: request.url,
-      owner: request.headers.get('x-owner-id'),
-      body: await request.text(),
-    });
-    return Response.json({
-      ok: true,
-      items: [],
-      viewerUrl: 'https://live.browser.run/ui/view?token=abc',
-      note: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.aaa.bbb',
-    });
+test('voice webhook tools are retired and do not call worker routes', async () => {
+  let called = false;
+  const fetchApi = async () => {
+    called = true;
+    return Response.json({ ok: true });
   };
-  const activity = await handleVoiceRequest(toolRequest('get_activity', {
-    body: { tool_name: 'get_activity', parameters: { botId: 'bot_1' }, conversation_id: 'conv_1' },
-  }), env(), { fetchApi });
-  const activityBody = await activity.json();
-  const activityUrl = new URL(seen[0].url);
-  const expectedActivity = new URL(eventsUrl(ORIGIN, 'bot_1'));
-  assert.equal(activityUrl.pathname, expectedActivity.pathname);
-  assert.equal(activityUrl.searchParams.get('botId'), expectedActivity.searchParams.get('botId'));
-  assert.equal(seen[0].owner, 'user_1');
-  assert.equal(activityBody.result.conversationId, 'conv_1');
-  assert.equal(JSON.stringify(activityBody).includes('live.browser.run'), false);
-  assert.equal(JSON.stringify(activityBody).includes('eyJhbGci'), false);
+  const names = ['get_price', 'web_search', 'browser_live_view', 'request_spend', 'break_loop', 'list_bots'];
+  for (const name of names) {
+    const response = await handleVoiceRequest(toolRequest(name, {
+      body: { parameters: { mint: 'So11111111111111111111111111111111111111112', q: 'richclub.sol' } },
+    }), env(), { fetchApi });
+    assert.equal(response.status, 410);
+    assert.equal((await response.json()).error, 'voice_tools_retired');
+  }
+  assert.equal(called, false);
 
-  seen.length = 0;
-  await handleVoiceRequest(toolRequest('open_browser_session', {
-    body: { parameters: { botId: 'bot_1' } },
-  }), env(), { fetchApi });
-  const opened = new URL(seen[0].url);
-  assert.equal(opened.pathname, new URL(browserSessionUrl(ORIGIN, 'bot_1')).pathname);
-  assert.deepEqual(JSON.parse(seen[0].body), { purpose: 'browse' });
+  const missing = await handleVoiceRequest(toolRequest('list_bots', {
+    headers: { 'x-elevenlabs-webhook-secret': '' },
+  }), env({ ELEVENLABS_WEBHOOK_SECRET: '' }), { fetchApi });
+  assert.equal(missing.status, 503);
+  assert.equal((await missing.json()).error, 'elevenlabs_webhook_not_configured');
 
-  seen.length = 0;
-  await handleVoiceRequest(toolRequest('release_browser_session', {
-    body: { parameters: { botId: 'bot_1', sessionRecordId: 'rec_1' } },
-  }), env(), { fetchApi });
-  const released = new URL(seen[0].url);
-  const expectedRelease = new URL(browserSessionUrl(ORIGIN, 'bot_1', { sessionRecordId: 'rec_1', action: 'release' }));
-  assert.equal(released.pathname, expectedRelease.pathname);
-  assert.equal(expectedRelease.pathname.includes('live-view'), false);
-});
+  const unknown = await handleVoiceRequest(toolRequest('not_a_tool'), env(), { fetchApi });
+  assert.equal(unknown.status, 404);
+  assert.equal(called, false);
 
-/**
- * Achieves: away summary speaks timeline events without spending.
- * Fails when: spend invoked or events ignored.
- * Oracle: spoken events; spend count 0.
- * Side effects / state checked: timeline + spend mocks.
- * Gaps: none
- */
-test('what happened while away speaks stored timeline events and does not spend', async () => {
-  const seen = [];
-  const fetchApi = async request => {
-    seen.push({ method: request.method, url: request.url, owner: request.headers.get('x-owner-id') });
-    return Response.json({
-      ok: true,
-      source: 'supabase',
-      items: [
-        {
-          id: 'stream:sig1',
-          botId: 'bot_1',
-          ownerId: 'user_1',
-          kind: 'tx.confirmed',
-          summary: 'Stream deposit · AbCdEf12… https://live.browser.run/ui/view?token=abc',
-          at: '2026-11-15T12:00:00.000Z',
-        },
-        {
-          id: 'evt_old',
-          botId: 'bot_1',
-          kind: 'bot.paused',
-          summary: 'Paused earlier',
-          at: '2026-11-01T00:00:00.000Z',
-        },
-      ],
-    });
-  };
-  const response = await handleVoiceRequest(toolRequest('what_happened_while_away', {
-    body: {
-      parameters: { since: '2026-11-15T00:00:00.000Z' },
-      conversation_id: 'conv_away',
-    },
-  }), env(), { fetchApi });
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  const url = new URL(seen[0].url);
-  assert.equal(seen[0].method, 'GET');
-  assert.equal(url.pathname, '/api/events');
-  assert.equal(url.search, '');
-  assert.equal(seen[0].owner, 'user_1');
-  assert.equal(seen.length, 1);
-  assert.match(body.result.briefing.spoken, /from Streams/);
-  assert.match(body.result.briefing.spoken, /1 timeline event was stored/);
-  assert.equal(body.result.briefing.spends, false);
-  assert.equal(body.result.briefing.signs, false);
-  assert.equal(JSON.stringify(body).includes('live.browser.run'), false);
-  assert.equal(JSON.stringify(body).includes('/api/spend'), false);
-
-  const bad = await handleVoiceRequest(toolRequest('what_happened_while_away', {
-    body: { parameters: { since: 'yesterday' } },
-  }), env(), { fetchApi });
-  assert.equal(bad.status, 400);
-  assert.equal(seen.length, 1);
-});
-
-/**
- * Achieves: pause/loop/stop_all tools call worker routes.
- * Fails when: local-only no-ops without route posts.
- * Oracle: route paths posted.
- * Side effects / state checked: fetch log.
- * Gaps: none
- */
-test('pause, loop, and stop_all go through the worker routes', async () => {
-  const paused = await worker.fetch(toolRequest('pause_bot', {
-    body: { tool_name: 'pause_bot', parameters: { botId: 'bot_1' } },
-  }), env());
-  const pauseBody = await paused.json();
-  assert.equal(paused.status, 200);
-  assert.equal(pauseBody.result.calls[0].path, '/bots/:botId/pause');
-  assert.equal(pauseBody.result.calls[0].body.forwarded, '/pause');
-  assert.equal(pauseBody.result.calls[0].body.owner, 'user_1');
-
-  const loop = await worker.fetch(toolRequest('start_task', {
-    body: { parameters: { botId: 'bot_1', goal: 'compare prices' } },
-  }), env());
-  const loopBody = await loop.json();
-  assert.equal(loopBody.result.calls[0].body.forwarded, '/loop');
-
-  let stamped = null;
-  const full = await worker.fetch(toolRequest('start_task', {
-    headers: { 'x-spend-permission': 'full' },
-    body: { parameters: { botId: 'bot_1', goal: 'beat usd inflation in the long run with long term trading', ownerPermission: 'ask' } },
-  }), env({
-    BOT: {
-      idFromName: name => name,
-      get: () => ({
-        fetch: async request => {
-          stamped = JSON.parse(await request.text());
-          return Response.json({
-            forwarded: new URL(request.url).pathname,
-            owner: request.headers.get('x-owner-id'),
-          });
-        },
-      }),
-    },
-  }));
-  assert.equal(full.status, 200);
-  assert.equal(stamped.goal, 'beat usd inflation in the long run with long term trading');
-  assert.equal(stamped.ownerPermission, 'full');
-  assert.equal(stamped.botId, 'bot_1');
-
-  const activity = await worker.fetch(toolRequest('get_activity', {
-    body: { parameters: { botId: 'bot_meteora' } },
-  }), env());
-  const activityBody = await activity.json();
-  assert.equal(activityBody.result.calls[0].body.source, 'unconfigured');
-  assert.deepEqual(activityBody.result.calls[0].body.items, []);
-
-  const stopped = await handleVoiceRequest(toolRequest('stop_all', { body: { parameters: {} } }), env(), {
-    fetchApi: async request => {
-      const url = new URL(request.url);
-      if (url.pathname === '/api/bots') {
-        return Response.json({
-          items: [{ id: 'bot_1' }, { id: 'bot_2' }, { id: '../etc' }],
-          viewerUrl: 'https://live.browser.run/ui/inspector',
-        });
-      }
-      return Response.json({ forwarded: url.pathname });
-    },
-  });
-  const stopBody = await stopped.json();
-  assert.deepEqual(stopBody.result.paused, [
-    { botId: 'bot_1', status: 200 },
-    { botId: 'bot_2', status: 200 },
-  ]);
-  assert.equal(JSON.stringify(stopBody).includes('live.browser.run'), false);
-});
-
-/**
- * Achieves: bound session owner is used when x-owner-id absent.
- * Fails when: tools fail for missing header despite bind.
- * Oracle: tool success with session owner.
- * Side effects / state checked: session bind state.
- * Gaps: none
- */
-test('voice session-owner bind lets tools resolve owner without x-owner-id header', async () => {
-  const seen = [];
-  const fetchApi = async (request) => {
-    seen.push(request.headers.get('x-owner-id'));
-    return Response.json({ ok: true, source: 'supabase', items: [{ id: 'bot_1' }] });
-  };
   const bind = await handleVoiceRequest(new Request(`${ORIGIN}/voice/session-owner`, {
     method: 'POST',
     headers: {
@@ -394,102 +192,7 @@ test('voice session-owner bind lets tools resolve owner without x-owner-id heade
     body: JSON.stringify({ conversationId: 'conv_abc', ownerId: 'did:privy:owner1' }),
   }), env());
   assert.equal(bind.status, 200);
-
-  const listed = await handleVoiceRequest(toolRequest('list_bots', {
-    headers: { 'x-owner-id': '{{owner_id}}' },
-    body: { conversation_id: 'conv_abc', parameters: {} },
-  }), env(), { fetchApi });
-  assert.equal(listed.status, 200);
-  assert.equal(seen[0], 'did:privy:owner1');
-  const body = await listed.json();
-  assert.equal(body.result.calls[0].body.items[0].id, 'bot_1');
-});
-
-/**
- * Achieves: tools reject missing webhook secret, missing owner, or unknown tool names.
- * Fails when: any of those succeed.
- * Oracle: failure statuses/errors for each case.
- * Side effects / state checked: N/A.
- * Gaps: none
- */
-test('tool calls fail closed without a webhook secret, owner, or known tool', async () => {
-  let called = false;
-  const fetchApi = async () => {
-    called = true;
-    return Response.json({ ok: true });
-  };
-  const missing = await handleVoiceRequest(toolRequest('list_bots', {
-    headers: { 'x-elevenlabs-webhook-secret': '' },
-  }), env({ ELEVENLABS_WEBHOOK_SECRET: '' }), { fetchApi });
-  assert.equal(missing.status, 503);
-  assert.equal((await missing.json()).error, 'elevenlabs_webhook_not_configured');
-
-  const wrong = await worker.fetch(toolRequest('list_bots', {
-    headers: { authorization: 'Bearer wrong-secret-value', 'x-elevenlabs-webhook-secret': '' },
-  }), env());
-  assert.equal(wrong.status, 401);
-
-  const bearer = await worker.fetch(toolRequest('get_wallets', {
-    headers: { 'x-elevenlabs-webhook-secret': '', authorization: `Bearer ${SECRET}` },
-  }), env());
-  assert.equal(bearer.status, 200);
-  const walletsBody = await bearer.json();
-  assert.equal(walletsBody.result.calls[0].body.source, 'unconfigured');
-  assert.deepEqual(walletsBody.result.calls[0].body.items, []);
-
-  const owner = await worker.fetch(toolRequest('list_bots', { headers: { 'x-owner-id': '' } }), env());
-  assert.equal(owner.status, 400);
-  const mismatch = await worker.fetch(toolRequest('list_bots', {
-    body: { tool_name: 'pause_bot', parameters: {} },
-  }), env());
-  assert.equal(mismatch.status, 400);
-  const missingLive = await worker.fetch(toolRequest('browser_live_view', { body: { parameters: {} } }), env());
-  assert.equal(missingLive.status, 400);
-  assert.equal(called, false);
-  assert.equal(VOICE_TOOLS.some(item => item.calls.some(call => call.path.includes('live-view'))), true);
-  assert.equal(VOICE_TOOLS.some(item => item.name === 'web_search'), true);
-  assert.equal(VOICE_TOOLS.some(item => item.name === 'lookup_recipient'), true);
-});
-
-/**
- * Achieves: lookup_recipient resolves .sol via profiles lookup, not web_search.
- * Fails when: path/query wrong, empty q accepted, or owner missing.
- * Oracle: GET /api/profiles/lookup?q=richclub.sol with owner header.
- * Side effects / state checked: fetchApi seen request.
- * Gaps: does not call live SNS.
- */
-test('lookup_recipient hits profiles lookup for a .sol name', async () => {
-  const seen = [];
-  const fetchApi = async (request) => {
-    const url = new URL(request.url);
-    seen.push({
-      method: request.method,
-      path: url.pathname,
-      q: url.searchParams.get('q'),
-      owner: request.headers.get('x-owner-id'),
-    });
-    return Response.json({
-      ok: true,
-      recipient: { kind: 'sns', domain: 'richclub.sol', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' },
-    });
-  };
-  const ok = await handleVoiceRequest(toolRequest('lookup_recipient', {
-    body: { parameters: { q: 'richclub.sol' } },
-  }), env(), { fetchApi });
-  assert.equal(ok.status, 200);
-  assert.deepEqual(seen[0], {
-    method: 'GET',
-    path: '/api/profiles/lookup',
-    q: 'richclub.sol',
-    owner: 'user_1',
-  });
-  const body = await ok.json();
-  assert.equal(body.result.calls[0].body.recipient.domain, 'richclub.sol');
-
-  const bad = await handleVoiceRequest(toolRequest('lookup_recipient', {
-    body: { parameters: { q: '' } },
-  }), env(), { fetchApi });
-  assert.equal(bad.status, 400);
+  assert.equal((await bind.json()).ownerId, 'did:privy:owner1');
 });
 
 /**
@@ -539,22 +242,17 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
 });
 
 /**
- * Achieves: custom LLM streams via OpenRouter when keyed; without key does not call out.
- * Fails when: network without key, or stream wrong.
- * Oracle: stream chunks with key; no fetch without key.
- * Side effects / state checked: OpenRouter mock / fetch guard.
- * Gaps: none
+ * Achieves: the custom LLM speaks the pipe line and does not call a model or forward tools.
+ * Fails when: a model URL is fetched, or the SSE contains tool_calls.
+ * Oracle: spoken SSE is VOICE_PIPE_LINE; fetcher is not called. Doubled completions path still answers.
+ * Side effects: none.
+ * Gaps: does not open a live ElevenLabs session.
  */
-test('the custom LLM streams Grok through OpenRouter and does not call out without a key', async () => {
-  const calls = [];
-  const fetcher = async (url, init) => {
-    const body = JSON.parse(init.body);
-    calls.push({ url, init, body });
-    const blob = JSON.stringify(body.messages || []);
-    const content = blob.includes('Role: turn-verify') ? '{"allow":true}' : `hello ${OPENROUTER}`;
-    return Response.json({
-      choices: [{ message: { content } }],
-    });
+test('the custom LLM only speaks and does not call a model', async () => {
+  let called = false;
+  const fetcher = async () => {
+    called = true;
+    return Response.json({ choices: [{ message: { content: 'nope' } }] });
   };
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',
@@ -564,153 +262,31 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     },
     body: JSON.stringify({
       model: 'gpt-4o',
-      messages: [{ role: 'user', content: `key ${OPENROUTER}` }, { role: 'assistant', content: 'ok' }],
+      messages: [{ role: 'user', content: 'what is the SOL price' }],
+      tools: [{ type: 'function', function: { name: 'get_price' } }],
     }),
-  }), env({ OPENROUTER_API_KEY: OPENROUTER, voiceFetcher: fetcher }));
+  }), env({
+    OPENROUTER_API_KEY: OPENROUTER,
+    META_MODEL_API_KEY: 'LLM_test_secret_value_here',
+    voiceFetcher: fetcher,
+  }));
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type'), /text\/event-stream/);
   const sse = await response.text();
   assert.match(sse, /data: \[DONE\]/);
+  assert.match(sse, new RegExp(VOICE_PIPE_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(sse.includes('tool_calls'), false);
   assert.equal(sse.includes(OPENROUTER), false);
-  assert.match(sse, /hello \[hidden\]/);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
-  assert.equal(calls[0].init.headers.Authorization, `Bearer ${OPENROUTER}`);
-  assert.equal(calls[0].body.model.endsWith(':free'), true);
-  assert.notEqual(calls[0].body.model, 'gpt-4o');
-  assert.notEqual(calls[0].body.model, 'meta/muse-spark-1.3-contributor');
-  assert.equal(calls[0].body.stream, true);
-  assert.equal(calls[0].body.messages[0].content.includes(OPENROUTER), false);
-  assert.match(calls[0].body.messages[0].content, /platform rules are locked/);
-  assert.match(calls[0].body.messages[1].content, /You have the following tools/);
-  assert.equal(calls[0].body.messages.some(item => /voice remote/.test(String(item.content))), false);
-  // Speak-only by default when ElevenLabs did not attach tools on the request.
-  assert.equal(calls[0].body.tools, undefined);
+  assert.equal(called, false);
 
-  calls.length = 0;
-  const withTools = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${SECRET}`,
-    },
-    body: JSON.stringify({
-      messages: [{ role: 'user', content: 'hi' }],
-      tools: [{ type: 'function', function: { name: 'web_search', parameters: { type: 'object' } } }],
-    }),
-  }), env({ OPENROUTER_API_KEY: OPENROUTER }), { fetcher });
-  assert.equal(withTools.status, 200);
-  assert.equal(calls[0].body.tools[0].function.name, 'web_search');
-  assert.equal(
-    calls[0].body.messages.some((item) => item.role === 'system' && /speak one short sentence/i.test(item.content)),
-    true,
-  );
-
-  calls.length = 0;
-  const stream = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
-    body: JSON.stringify({
-      ownerPermission: 'ask',
-      messages: [{ role: 'user', content: 'hi' }],
-    }),
-  }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here', OPENROUTER_MODEL_VOICE: 'muse-spark-1.3' }), {
-    fetcher: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) });
-      return new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
-        headers: { 'content-type': 'text/event-stream' },
-      });
-    },
-  });
-  assert.equal(await stream.text(), 'data: {"ok":true}\n\ndata: [DONE]\n\n');
-  assert.equal(calls[0].url, 'https://api.meta.ai/v1/chat/completions');
-  assert.equal(calls[0].body.messages[0].role, 'developer');
-  assert.match(calls[0].body.messages[0].content, /platform rules are locked/);
-  assert.match(calls[0].body.messages[0].content, /You do not sign, broadcast, reserve budget, or approve spends/);
-  assert.match(calls[0].body.messages[1].content, /Permission is ask every time/);
-  assert.match(calls[0].body.messages[1].content, /trust, verify, wallet freeze, bot policy, approval, then sign/);
-  assert.equal(calls[0].body.messages.some(item => /voice remote/.test(String(item.content))), false);
-  assert.equal(calls[0].body.model, 'muse-spark-1.3');
-
-  calls.length = 0;
-  const greeting = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
-    body: JSON.stringify({
-      // First ElevenLabs probe often has no owner utterance yet.
-      messages: [{ role: 'system', content: 'Speak the custom LLM reply.' }],
-      tools: [
-        { type: 'function', function: { name: 'end_call' } },
-        { type: 'function', function: { name: 'web_search' } },
-      ],
-    }),
-  }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here' }), {
-    fetcher: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) });
-      return new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
-        headers: { 'content-type': 'text/event-stream' },
-      });
-    },
-  });
-  assert.equal(greeting.status, 200);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].body.messages.some(item => item.role === 'user'), true);
-  assert.match(
-    calls[0].body.messages.find(item => item.role === 'user').content,
-    /just joined the voice call/,
-  );
-  assert.match(
-    calls[0].body.messages.find(item => item.role === 'user').content,
-    /Do not end the call/,
-  );
-  // Greeting probe must not forward end_call (or any tools) to the model.
-  assert.equal(calls[0].body.tools, undefined);
-
-  calls.length = 0;
-  const toolOnlyStream = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
-    body: JSON.stringify({
-      messages: [{ role: 'user', content: 'check my wallets' }],
-      tools: [{ type: 'function', function: { name: 'get_wallets', parameters: { type: 'object' } } }],
-    }),
-  }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here' }), {
-    fetcher: async (_url, init) => {
-      calls.push({ body: JSON.parse(init.body) });
-      const sse = [
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_wallets","arguments":"{}"}}],"role":"assistant"},"finish_reason":null}]}',
-        'data: [DONE]',
-        '',
-      ].join('\n');
-      return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
-    },
-  });
-  assert.equal(toolOnlyStream.status, 200);
-  const toolSse = await toolOnlyStream.text();
-  assert.match(toolSse, new RegExp(VOICE_TOOL_FILLER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(toolSse, /get_wallets/);
-  assert.equal(calls[0].body.tools[0].function.name, 'get_wallets');
-
-  const blocked = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
-    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
-  }), env());
-  // Soft-fail as speakable SSE so LiveKit does not tear down on missing model secrets.
-  assert.equal(blocked.status, 200);
-  assert.match(blocked.headers.get('content-type') || '', /text\/event-stream/);
-  assert.match(await blocked.text(), /not configured|try again/i);
-  assert.equal(calls.length, 1);
-
-  // ElevenLabs appends /chat/completions to a URL that already had that suffix.
-  const appended = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions/chat/completions`, {
+  const appended = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
     body: JSON.stringify({ messages: [{ role: 'user', content: 'check my wallets' }] }),
-  }), env());
+  }), env(), { fetcher });
   assert.equal(appended.status, 200);
-  assert.match(appended.headers.get('content-type') || '', /text\/event-stream/);
-  assert.doesNotMatch(await appended.text(), /not_found/);
+  assert.match(await appended.text(), new RegExp(VOICE_PIPE_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(called, false);
 });
 
 /**
@@ -830,52 +406,3 @@ test('provisioning the ElevenLabs agent does nothing without a key', async () =>
   assert.equal(outbound.body.conversation_config.agent.prompt.llm, 'custom-llm');
 });
 
-/**
- * Achieves: break_loop reaches the card-loop route only after the owner asks.
- * Fails when: a model flag in parameters breaks the loop, or the owner header is missing.
- * Oracle: 403 owner_must_ask with no DO fetch; 200 with x-loop-break after the utterance.
- * Side effects: in-memory voice tool dispatch.
- * Gaps: text chat coverage is in chat-tools.test.mjs.
- */
-test('break_loop does not run unless the owner asked', async () => {
-  const seen = [];
-  const runtime = env({
-    BOT: {
-      idFromName: name => name,
-      get: () => ({
-        fetch: async request => {
-          seen.push({
-            path: new URL(request.url).pathname,
-            breakHeader: request.headers.get('x-loop-break'),
-            body: await request.json(),
-          });
-          return Response.json({ ok: true, loop: null });
-        },
-      }),
-    },
-  });
-  const refused = await worker.fetch(toolRequest('break_loop', {
-    body: {
-      tool_name: 'break_loop',
-      parameters: { botId: 'bot_1', ownerAsked: true, user_message: 'break the loop' },
-    },
-  }), runtime);
-  assert.equal(refused.status, 403);
-  assert.equal((await refused.json()).error, 'owner_must_ask');
-  assert.equal(seen.length, 0);
-
-  const allowed = await worker.fetch(toolRequest('break_loop', {
-    body: {
-      tool_name: 'break_loop',
-      parameters: { botId: 'bot_1' },
-      user_message: 'Please break the loop',
-    },
-  }), runtime);
-  assert.equal(allowed.status, 200);
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0].path, '/card-loop/break');
-  assert.equal(seen[0].breakHeader, 'owner-asked');
-  assert.equal(seen[0].body.botId, 'bot_1');
-  assert.equal(seen[0].body.ownerAsked, undefined);
-  assert.equal(seen[0].body.user_message, undefined);
-});

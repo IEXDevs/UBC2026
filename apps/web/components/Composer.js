@@ -32,7 +32,6 @@ import {
   LANGUAGES,
   VOICES,
   parseVoiceSettings,
-  voiceOverrides,
 } from '../lib/voice-settings.mjs';
 import {
   SPEND_PERMISSION_KEY,
@@ -44,8 +43,7 @@ import {
 } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
-import { isLiveKitDisconnect, startVoiceConversation } from '../lib/voice-session.mjs';
-import { classifyVoiceDisconnect, voiceErrorNote } from '../lib/voice-disconnect.mjs';
+import { playAgentSpeech, startVoicePipe } from '../lib/voice-pipe.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
@@ -127,7 +125,6 @@ export default function Composer({
   onPatchLine = null,
   onConfirm = null,
   onBindAccess = null,
-  clientTools = null,
   onContextWindow = null,
 }) {
   const [presence, setPresence] = useState('off');
@@ -173,6 +170,7 @@ export default function Composer({
   const callBotRef = useRef(null);
   const presenceRef = useRef('off');
   const sessionRef = useRef(null);
+  const sayRef = useRef(null);
   const micGate = useRef(null);
   if (!micGate.current) micGate.current = createMicGate();
   const dictationRef = useRef(null);
@@ -192,9 +190,7 @@ export default function Composer({
   const thinkTimer = useRef(0);
   const voiceStarted = useRef(0);
   const onVoiceSpanRef = useRef(onVoiceSpan);
-  const clientToolsRef = useRef(clientTools);
   onVoiceSpanRef.current = onVoiceSpan;
-  clientToolsRef.current = clientTools;
   settingsRef.current = settings;
   permissionRef.current = permission;
   modelsRef.current = models;
@@ -351,6 +347,7 @@ export default function Composer({
     const generation = gate.generation;
     const live = sessionRef.current;
     sessionRef.current = null;
+    sayRef.current = null;
     Promise.resolve(live?.endSession?.())
       .catch(() => {})
       .finally(() => {
@@ -512,7 +509,7 @@ export default function Composer({
       return;
     }
     sendingRef.current = true;
-    const prior = lines;
+    const prior = linesRef.current;
     const hint = mention;
     parkDraft();
     pushLine('user', spoken);
@@ -537,29 +534,43 @@ export default function Composer({
     onLine?.(line, targetId);
   }
 
+  function say(text) {
+    const line = typeof text === 'string' ? text.trim() : '';
+    const speak = sayRef.current;
+    if (!line || typeof speak !== 'function') return;
+    void speak(line).catch(() => {});
+  }
+
   async function settleChat(result, spoken, prior, grants, run) {
     if (run !== runRef.current) return;
     if (!result?.ok) {
       if (result?.error === 'aborted') return;
-      pushLine('agent', chatFailureNote(result?.error));
+      const note = chatFailureNote(result?.error);
+      pushLine('agent', note);
+      say(note);
       return;
     }
     if (result.hold?.kind === 'modal') {
       if (result.reply) pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
+      say(result.reply || result.hold.prompt || result.hold.label);
       const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label) : false;
       if (run !== runRef.current) return;
       if (!accepted) {
         pushLine('note', 'That stayed unconfirmed.');
+        say('That stayed unconfirmed.');
         return;
       }
       await continueChat(spoken, prior, [result.hold]);
       return;
     }
     if (result.hold?.kind === 'inline') {
-      pushLine('agent', result.reply || result.hold.label, botIdRef.current, result.tokens, result.activity, result.hold);
+      const line = result.reply || result.hold.label;
+      pushLine('agent', line, botIdRef.current, result.tokens, result.activity, result.hold);
+      say(line);
       return;
     }
     pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
+    say(result.reply);
   }
 
   async function continueChat(spoken, prior, grants) {
@@ -577,9 +588,11 @@ export default function Composer({
     try {
       if (!ownerId || !botIdRef.current) {
         if (run === runRef.current) {
-          pushLine('agent', ownerId
+          const note = ownerId
             ? 'Pick an agent before chatting.'
-            : 'Sign in to chat with this agent.');
+            : 'Sign in to chat with this agent.';
+          pushLine('agent', note);
+          say(note);
         }
         return;
       }
@@ -608,7 +621,11 @@ export default function Composer({
       if (run !== runRef.current || result?.error === 'aborted') return;
       await settleChat(result, spoken, prior, grants, run);
     } catch {
-      if (run === runRef.current && stopHold.current !== run) pushLine('agent', chatFailureNote('network'));
+      if (run === runRef.current && stopHold.current !== run) {
+        const note = chatFailureNote('network');
+        pushLine('agent', note);
+        say(note);
+      }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       if (run !== runRef.current) return;
@@ -666,6 +683,7 @@ export default function Composer({
     const generation = gate.generation;
     const live = sessionRef.current;
     sessionRef.current = null;
+    sayRef.current = null;
     connectingRef.current = false;
     setMuted(false);
     setWarm(false);
@@ -747,95 +765,44 @@ export default function Composer({
     micGate.current.setMuted(false);
     setMuted(false);
     try {
-      const response = await fetch('/api/voice/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settingsRef.current),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'voice_failed');
-      const { Conversation } = await import('@elevenlabs/client');
-      const tools = clientToolsRef.current;
-      const owner = typeof ownerId === 'string' ? ownerId.trim() : '';
       let live = null;
-      const sessionOptions = {
-        conversationToken: payload.token,
-        signedUrl: typeof payload.signedUrl === 'string' ? payload.signedUrl : '',
-        // Prefer websocket when signedUrl is present — LiveKit/WebRTC was dropping
-        // rooms shortly after connect on Chrome.
-        preferWebsocket: true,
-        overrides: payload.overrides ?? voiceOverrides(payload),
-        // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
-        ...(owner ? { dynamicVariables: { owner_id: owner, spend_permission: permissionRef.current } } : {}),
-        customLlmExtraBody: {
-          ownerPermission: permissionRef.current,
-          botName: botNameRef.current,
-          botGoal: botGoalRef.current,
-          botType: botTypeRef.current,
-        },
-        ...(tools && typeof tools === 'object' ? { clientTools: tools } : {}),
-        onMessage: ({ message, role }) => {
+      const pipe = startVoicePipe({
+        onPartial: (text) => {
           if (sessionRef.current !== live) return;
-          pushLine(role === 'user' ? 'user' : 'agent', message, callBotRef.current);
+          vadRef.current = text ? 0.45 : 0;
         },
-        onModeChange: ({ mode }) => {
-          if (sessionRef.current === live) modeRef.current = mode;
+        onCommit: (text) => {
+          if (sessionRef.current !== live) return;
+          void sendMessage(text);
         },
-        onVadScore: ({ vadScore }) => {
-          if (sessionRef.current === live) vadRef.current = vadScore;
+        onError: (error) => {
+          if (sessionRef.current !== live) return;
+          setNote(voiceFailureNote(error));
         },
-        onError: (message, context) => {
-          if (sessionRef.current !== live && live != null) return;
-          const text = typeof message === 'string'
-            ? message
-            : (typeof message?.message === 'string' ? message.message : '');
-          const detail = {
-            ...(context && typeof context === 'object' ? context : {}),
-            ...(message && typeof message === 'object' ? message : {}),
-          };
-          setNote(voiceErrorNote(text, detail));
-        },
-        onDisconnect: (details) => {
-          if (sessionRef.current !== live && live != null) return;
-          const outcome = classifyVoiceDisconnect(details, { userEnded: userEndedRef.current });
-          sessionRef.current = null;
-          modeRef.current = 'listening';
-          vadRef.current = 0;
-          let note = outcome.note;
-          if (note && isLiveKitDisconnect(details)) {
-            note = `${note} If this keeps happening, tap Talk again — the next try uses a safer connection when available.`;
-          }
-          if (note) setNote(note);
-          closeStage(Boolean(note));
-        },
+      });
+      live = {
+        endSession: () => pipe.endSession(),
+        setMicMuted: (next) => pipe.setMicMuted(next),
+        getInputVolume: () => pipe.getInputVolume(),
+        getOutputVolume: () => pipe.getOutputVolume(),
+        speak: (text) => playAgentSpeech({
+          text,
+          settings: settingsRef.current,
+          pipe,
+        }),
       };
-      // Retry without TTS overrides when the portal agent rejects voiceId/speed.
-      live = await startVoiceConversation(Conversation, sessionOptions);
+      await pipe.ready;
       if (!connectingRef.current) {
         micGate.current.setMuted(true);
         micGate.current.stop();
-        await live.endSession?.().catch(() => {});
+        pipe.endSession();
         return;
       }
       sessionRef.current = live;
-      live.setVolume?.({ volume: 1 });
+      sayRef.current = (text) => live.speak(text);
+      modeRef.current = 'listening';
       sealMic(live);
       voiceStarted.current = performance.now();
-      // Bind conversation → Privy owner so Worker tool webhooks can resolve owner_id
-      // even when ElevenLabs does not substitute {{owner_id}} in headers.
-      try {
-        const conversationId = typeof live.getId === 'function' ? live.getId() : '';
-        if (owner && conversationId) {
-          void fetch('/api/voice/bind', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversationId, ownerId: owner }),
-            cache: 'no-store',
-          }).catch(() => {});
-        }
-      } catch {
-        /* tools may still work via dynamicVariables */
-      }
     } catch (error) {
       micGate.current.disarm();
       setNote(voiceFailureNote(error));
@@ -1192,13 +1159,11 @@ function voiceFailureNote(error) {
   if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError' || error?.name === 'OverconstrainedError') {
     return 'No microphone was found, so the session stayed closed.';
   }
-  if (error?.message === 'voice_unconfigured') return 'Voice is not configured on the server.';
-  if (error?.message === 'voice_rejected') return 'The voice service refused the session. Publish the agent and turn on Voice ID and Speed overrides.';
-  if (error?.message === 'voice_unreachable') return 'The voice service did not respond.';
-  const detail = typeof error?.message === 'string' ? error.message.trim() : '';
-  if (/override|voice_id|not allowed|not enabled/i.test(detail)) {
-    return 'The voice agent rejected session overrides. Publish it and enable Voice ID and Speed, or try again.';
-  }
+  const code = error?.code || error?.message;
+  if (code === 'voice_unconfigured') return 'Voice is not configured on the server.';
+  if (code === 'unsupported') return 'Speech recognition is not available in this browser.';
+  if (code === 'dictation_rejected' || code === 'voice_rejected') return 'Speech recognition did not start.';
+  if (code === 'dictation_unreachable' || code === 'voice_unreachable') return 'The voice service did not respond.';
   return 'The voice session did not start.';
 }
 
