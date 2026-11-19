@@ -540,30 +540,6 @@
     transform 90ms cubic-bezier(0.4, 0, 1, 1);
 }
 
-.prompt-bar__tool[data-pop]::after,
-.prompt-bar__pick[data-pop]::after,
-.prompt-bar__row[data-pop]::after,
-.prompt-bar__send[data-pop]::after,
-.permit-chip[data-pop]::after,
-.permit-menu button[data-pop]::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(105deg, transparent 32%, rgba(255, 255, 255, 0.42) 50%, transparent 68%);
-  transform: translateX(-120%);
-  animation: prompt-sheen 520ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.prompt-bar__send[data-armed][data-pop]::after {
-  background: linear-gradient(105deg, transparent 30%, rgba(0, 0, 0, 0.14) 50%, transparent 70%);
-}
-
-@keyframes prompt-sheen {
-  to { transform: translateX(120%); }
-}
-
 .prompt-bar__glyph {
   display: block;
   width: 16px;
@@ -736,15 +712,5 @@
   .permit-chip:active,
   .permit-menu button:active {
     transform: none;
-  }
-
-  .prompt-bar__tool[data-pop]::after,
-  .prompt-bar__pick[data-pop]::after,
-  .prompt-bar__row[data-pop]::after,
-  .prompt-bar__send[data-pop]::after,
-  .permit-chip[data-pop]::after,
-  .permit-menu button[data-pop]::after {
-    animation: none;
-    content: none;
   }
 }

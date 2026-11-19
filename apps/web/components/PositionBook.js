@@ -920,14 +920,14 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       <EarningsChart series={earnings} />
       <p className="book-caption">
         {book.summary.count === 0 ? (
-          <span>No positions yet.</span>
+          <span>No Positions Yet.</span>
         ) : (
           <>
             <strong>{book.summary.notionalLabel}</strong>
             <span>{book.summary.count} positions · {book.summary.venues} venues · PnL {book.summary.pnlLabel}</span>
+            <span>devnet execution, mainnet pricing</span>
           </>
         )}
-        <span>devnet execution, mainnet pricing</span>
       </p>
       <div className="book-tools">
         <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.86)}>

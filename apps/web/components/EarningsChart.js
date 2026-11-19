@@ -24,7 +24,6 @@ export default function EarningsChart({ series }) {
           <path d={line.d} fill="none" stroke={line.up ? '#3dbe6a' : '#e10600'} strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
         </svg>
       ) : null}
-      <p>{series.caption}</p>
     </figure>
   );
 }

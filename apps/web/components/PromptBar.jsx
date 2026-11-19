@@ -395,7 +395,7 @@ export default function PromptBar({
     el.setAttribute(flag, '');
     const done = (event) => {
       if (event.target !== el) return;
-      if (event.animationName !== 'prompt-sheen' && event.animationName !== 'field-release') return;
+      if (event.animationName !== 'field-release') return;
       el.removeAttribute(flag);
       el.removeEventListener('animationend', done);
     };
@@ -485,7 +485,6 @@ export default function PromptBar({
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      if (!reduce) replay(rootRef.current?.querySelector('.prompt-bar__send'), 'data-pop');
       send();
     }
   };
@@ -502,12 +501,6 @@ export default function PromptBar({
       className={`prompt-bar${className ? ` ${className}` : ''}`}
       data-busy={busy ? '' : undefined}
       data-max={maxed ? '' : undefined}
-      onPointerUp={(event) => {
-        if (reduce) return;
-        const button = event.target instanceof Element ? event.target.closest('button') : null;
-        if (!button || button.disabled || !rootRef.current?.contains(button)) return;
-        replay(button, 'data-pop');
-      }}
       style={{
         '--pb-bg': background,
         '--pb-ink': color,

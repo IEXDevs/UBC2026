@@ -47,40 +47,10 @@ button[data-press]:where(:not(:disabled)) {
   transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
 }
 
-button[data-pop-shift] {
-  position: relative;
-}
-
-button[data-pop]::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(
-    105deg,
-    transparent 32%,
-    color-mix(in srgb, currentColor 28%, transparent) 50%,
-    transparent 68%
-  );
-  transform: translateX(-120%);
-  animation: soft-sheen 520ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes soft-sheen {
-  to { transform: translateX(120%); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   button:where(:not(:disabled)):active,
   button[data-press] {
     transform: none;
     transition: none;
-  }
-
-  button[data-pop]::after {
-    content: none;
-    animation: none;
   }
 }

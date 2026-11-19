@@ -145,18 +145,22 @@ test('the prompt bar exposes both dictation and live voice mode', () => {
   assert.equal(privySession.includes('removeItem'), false);
 });
 
-test('a new message springs in and presses leave a sheen', () => {
+test('a new message springs in and presses stay smooth without a sheen', () => {
   assert.match(bubbles, /is-fresh/);
   assert.match(bubbles, /ids\.length > 1 && !known\.current\.has\(ids\[0\]\)/);
   assert.match(css, /@keyframes bubble-send/);
   assert.match(css, /transform-origin: bottom right;/);
   assert.match(css, /@keyframes bubble-arrive/);
   assert.match(promptBar, /data-sent/);
-  assert.match(promptBar, /prompt-sheen|data-pop/);
+  assert.equal(promptBar.includes('data-pop'), false);
+  assert.equal(promptBar.includes('prompt-sheen'), false);
   const promptCss = readFileSync(join(root, 'components/PromptBar.css'), 'utf8');
-  assert.match(promptCss, /@keyframes prompt-sheen/);
+  assert.equal(promptCss.includes('prompt-sheen'), false);
   assert.match(promptCss, /@keyframes field-release/);
   assert.match(promptCss, /cubic-bezier\(0\.34, 1\.56, 0\.64, 1\)/);
+  const soft = readFileSync(join(root, 'components/SoftTouch.css'), 'utf8');
+  assert.equal(soft.includes('soft-sheen'), false);
+  assert.match(soft, /scale\(0\.96\)/);
   const layout = readFileSync(join(root, 'app/layout.js'), 'utf8');
   assert.match(layout, /<SoftTouch \/>/);
 });
