@@ -16,9 +16,34 @@ function urlsIn(text) {
 
 export default function ChatBubbles({ lines, className = '', thinking = false, onParty, onEdit, onAccess, focusId = null }) {
   const tailRef = useRef(null);
+  const known = useRef(new Set());
+  const fresh = useRef(new Set());
+  const booted = useRef(false);
   const rows = withHeads(lines);
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState('');
+  const ids = [];
+  for (const line of rows) if (line?.id) ids.push(line.id);
+
+  if (!booted.current) {
+    if (ids.length > 1) {
+      known.current = new Set(ids);
+      booted.current = true;
+    } else if (ids.length === 1) {
+      fresh.current.add(ids[0]);
+      known.current.add(ids[0]);
+      booted.current = true;
+    }
+  } else if (ids.length > 1 && !known.current.has(ids[0])) {
+    known.current = new Set(ids);
+    fresh.current = new Set();
+  } else {
+    for (const id of ids) {
+      if (known.current.has(id)) continue;
+      fresh.current.add(id);
+      known.current.add(id);
+    }
+  }
 
   useEffect(() => {
     if (focusId) {
@@ -39,7 +64,7 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
         if (line.role === 'user') {
           const editing = editingId === line.id;
           return (
-            <Message key={line.id} id={`chat-line-${line.id}`} align="end" data-hit={focusId === line.id ? '' : undefined} tabIndex={onEdit && !editing ? 0 : undefined}>
+            <Message key={line.id} id={`chat-line-${line.id}`} align="end" className={fresh.current.has(line.id) ? 'is-fresh' : undefined} data-hit={focusId === line.id ? '' : undefined} tabIndex={onEdit && !editing ? 0 : undefined}>
               <MessageContent>
                 {editing ? (
                   <form
@@ -105,7 +130,7 @@ export default function ChatBubbles({ lines, className = '', thinking = false, o
         const urls = urlsIn(line.text);
         const steps = sanitizeActivity(line.activity);
         return (
-          <Message key={line.id} id={`chat-line-${line.id}`} data-hit={focusId === line.id ? '' : undefined}>
+          <Message key={line.id} id={`chat-line-${line.id}`} className={fresh.current.has(line.id) ? 'is-fresh' : undefined} data-hit={focusId === line.id ? '' : undefined}>
             <MessageContent>
               <AgentTrace steps={steps} />
               <Bubble align="start" variant="secondary">

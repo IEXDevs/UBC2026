@@ -47,7 +47,7 @@
   touch-action: manipulation;
   transition:
     background-color 100ms ease,
-    transform 160ms var(--gs-ease-out);
+    transform 440ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .glide-select__trigger:disabled {
@@ -65,7 +65,9 @@
 }
 
 .glide-select__trigger:not(:disabled):active {
-  transform: scale(0.97);
+  transform: scale(0.96);
+  transition-duration: 90ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
 }
 
 .glide-select__label {
@@ -121,6 +123,8 @@
 .glide-select__menu[data-state='open'] {
   opacity: 1;
   transform: none;
+  transition-duration: 320ms;
+  transition-timing-function: cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
 .glide-select__menu[data-state='closed'] {

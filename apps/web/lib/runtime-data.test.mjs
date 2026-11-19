@@ -247,6 +247,36 @@ test('sendBotChat forwards Bearer access token', async () => {
 });
 
 /**
+ * Achieves: an aborted chat fetch stays quiet instead of looking like a network failure.
+ * Fails when: AbortError is reported as network, or the signal is dropped.
+ * Oracle: result.error === 'aborted' and fetch received the signal.
+ * Side effects / state checked: global fetch double.
+ * Gaps: none.
+ */
+test('sendBotChat maps an aborted fetch to aborted', async () => {
+  const prior = globalThis.fetch;
+  const controller = new AbortController();
+  globalThis.fetch = async (_url, init) => {
+    assert.equal(init.signal, controller.signal);
+    const error = new Error('The operation was aborted');
+    error.name = 'AbortError';
+    throw error;
+  };
+  try {
+    const result = await sendBotChat({
+      ownerId: 'did:privy:abc',
+      botId: 'bot_1',
+      message: 'wait',
+      signal: controller.signal,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'aborted');
+  } finally {
+    globalThis.fetch = prior;
+  }
+});
+
+/**
  * Achieves: verifies firstAssignableWalletId skips frozen wallets.
  * Fails when: firstAssignableWalletId skips frozen wallets breaks (e.g. expected '', frozen: true }, { id: 'w_ok' }]).
  * Oracle: assert.equal(firstAssignableWalletId([]), ''); assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }])

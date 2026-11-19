@@ -52,6 +52,8 @@ import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
+import { appendQueued, releaseQueued, takeQueued } from '../lib/message-queue.mjs';
+import MessageQueue from './MessageQueue';
 
 const LEAVE_MS = 760;
 const PROMPT_SOURCES = [
@@ -151,6 +153,8 @@ export default function Composer({
   const [mention, setMention] = useState('');
   const [mentionCopy, setMentionCopy] = useState(null);
   const [thinking, setThinking] = useState(false);
+  const [queue, setQueue] = useState([]);
+  const [draftSeed, setDraftSeed] = useState(null);
   const [settingsReady, setSettingsReady] = useState(false);
   const [stage, setStage] = useState(null);
   const [body, setBody] = useState(null);
@@ -177,6 +181,11 @@ export default function Composer({
   const connectingRef = useRef(false);
   const userEndedRef = useRef(false);
   const sendingRef = useRef(false);
+  const queueRef = useRef([]);
+  const runRef = useRef(0);
+  const abortRef = useRef(null);
+  const stopHold = useRef(false);
+  const threadRef = useRef(lines);
   const placeRef = useRef(place);
   const leaveTimer = useRef(0);
   const warmTimer = useRef(0);
@@ -270,6 +279,15 @@ export default function Composer({
   const editToken = editTokenIn(lines);
   const linesRef = useRef(lines);
   linesRef.current = lines;
+  threadRef.current = lines;
+  const queueBot = useRef(botId);
+  if (queueBot.current !== botId) {
+    queueBot.current = botId;
+    if (queueRef.current.length > 0) {
+      queueRef.current = [];
+      setQueue([]);
+    }
+  }
   const resolveRef = useRef(null);
   useEffect(() => {
     onBindAccess?.((line, accepted) => resolveRef.current?.(line, accepted));
@@ -437,101 +455,75 @@ export default function Composer({
       || '';
   }
 
-  async function sendMessage(text) {
+  function spokenFrom(text) {
     const spokenText = typeof text === 'string' ? text.trim() : draft.trim();
     const attached = files.map(file => file.name).join(', ');
-    const spoken = clipOwnerMessage(attached ? `${spokenText}${spokenText ? '\n' : ''}${attached}` : spokenText);
-    if (!spoken || sendingRef.current) return;
-    const prior = lines;
-    pushLine('user', spoken);
-    if (mention) pushLine('assistant', mention);
+    return clipOwnerMessage(attached ? `${spokenText}${spokenText ? '\n' : ''}${attached}` : spokenText);
+  }
+
+  function parkDraft() {
     setDraft('');
     setFiles([]);
     setMention('');
-    setThinking(true);
-    onThinking?.(true);
-    window.clearTimeout(thinkTimer.current);
-    sendingRef.current = true;
-    try {
-      if (!ownerId || !botId) {
-        pushLine('agent', ownerId
-          ? 'Pick an agent before chatting.'
-          : 'Sign in to chat with this agent.');
-        return;
-      }
-      let accessToken = '';
-      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
-      const result = await sendBotChat({
-        ownerId,
-        botId,
-        message: spoken,
-        history: prior,
-        name: botName,
-        goal: botGoal,
-        type: botType,
-        permission,
-        model: modelRef.current,
-        effort: currentEffortId(),
-        shellBots,
-        shellWallets,
-        shellBalanceLabel,
-        fileCatalog: catalogRef.current,
-        accessToken,
-        deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
-      });
-      await settleChat(result, spoken, prior);
-    } catch {
-      pushLine('agent', chatFailureNote('network'));
-    } finally {
-      sendingRef.current = false;
-      setThinking(false);
-      onThinking?.(false);
+    setMentionCopy(null);
+  }
+
+  function rememberQueue(next) {
+    queueRef.current = next;
+    setQueue(next);
+  }
+
+  function editQueued(id) {
+    const taken = takeQueued(queueRef.current, id);
+    if (!taken.item) return;
+    rememberQueue(taken.queue);
+    setDraftSeed({ id: `${taken.item.id}-edit`, text: taken.item.text });
+  }
+
+  function sendQueuedNow(id) {
+    const taken = takeQueued(queueRef.current, id);
+    if (!taken.item) return;
+    rememberQueue(taken.queue);
+    stopHold.current = 0;
+    abortRef.current?.abort();
+    runRef.current += 1;
+    const history = threadRef.current.slice();
+    pushLine('user', taken.item.text);
+    if (taken.item.mention) pushLine('assistant', taken.item.mention);
+    void runChat(taken.item.text, history);
+  }
+
+  function stopChat() {
+    if (!sendingRef.current) return;
+    stopHold.current = runRef.current;
+    abortRef.current?.abort();
+  }
+
+  async function sendMessage(text) {
+    const spoken = spokenFrom(text);
+    if (!spoken) return;
+    if (sendingRef.current) {
+      rememberQueue(appendQueued(queueRef.current, {
+        id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        text: spoken,
+        mention: mention || '',
+      }));
+      parkDraft();
+      return;
     }
+    sendingRef.current = true;
+    const prior = lines;
+    const hint = mention;
+    parkDraft();
+    pushLine('user', spoken);
+    if (hint) pushLine('assistant', hint);
+    await runChat(spoken, prior);
   }
 
   async function regenerate(text, prior) {
     const spoken = clipOwnerMessage(text);
     if (!spoken || sendingRef.current) return;
-    setThinking(true);
-    onThinking?.(true);
-    window.clearTimeout(thinkTimer.current);
-    sendingRef.current = true;
-    try {
-      if (!ownerId || !botId) {
-        pushLine('agent', ownerId
-          ? 'Pick an agent before chatting.'
-          : 'Sign in to chat with this agent.');
-        return;
-      }
-      let accessToken = '';
-      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
-      const result = await sendBotChat({
-        ownerId,
-        botId,
-        message: spoken,
-        history: prior,
-        name: botName,
-        goal: botGoal,
-        type: botType,
-        permission,
-        model: modelRef.current,
-        effort: currentEffortId(),
-        shellBots,
-        shellWallets,
-        shellBalanceLabel,
-        fileCatalog: catalogRef.current,
-        accessToken,
-        deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
-      });
-      if (!result.ok) pushLine('agent', chatFailureNote(result.error));
-      else await settleChat(result, spoken, prior);
-    } catch {
-      pushLine('agent', chatFailureNote('network'));
-    } finally {
-      sendingRef.current = false;
-      setThinking(false);
-      onThinking?.(false);
-    }
+    await runChat(spoken, prior);
   }
 
   function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = [], access = null) {
@@ -541,17 +533,21 @@ export default function Composer({
     if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
     if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
     if (access && access.kind === 'inline' && typeof access.name === 'string') line.access = access;
+    if (targetId === botIdRef.current) threadRef.current = [...threadRef.current, line];
     onLine?.(line, targetId);
   }
 
-  async function settleChat(result, spoken, prior, grants) {
+  async function settleChat(result, spoken, prior, grants, run) {
+    if (run !== runRef.current) return;
     if (!result?.ok) {
+      if (result?.error === 'aborted') return;
       pushLine('agent', chatFailureNote(result?.error));
       return;
     }
     if (result.hold?.kind === 'modal') {
       if (result.reply) pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
       const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label) : false;
+      if (run !== runRef.current) return;
       if (!accepted) {
         pushLine('note', 'That stayed unconfirmed.');
         return;
@@ -567,10 +563,26 @@ export default function Composer({
   }
 
   async function continueChat(spoken, prior, grants) {
+    await runChat(spoken, prior, grants);
+  }
+
+  async function runChat(spoken, prior, grants) {
+    const run = ++runRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    sendingRef.current = true;
     setThinking(true);
     onThinking?.(true);
-    sendingRef.current = true;
+    window.clearTimeout(thinkTimer.current);
     try {
+      if (!ownerId || !botIdRef.current) {
+        if (run === runRef.current) {
+          pushLine('agent', ownerId
+            ? 'Pick an agent before chatting.'
+            : 'Sign in to chat with this agent.');
+        }
+        return;
+      }
       let accessToken = '';
       try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
       const result = await sendBotChat({
@@ -591,11 +603,26 @@ export default function Composer({
         fileCatalog: catalogRef.current,
         accessToken,
         deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
+        signal: controller.signal,
       });
-      await settleChat(result, spoken, prior, grants);
+      if (run !== runRef.current || result?.error === 'aborted') return;
+      await settleChat(result, spoken, prior, grants, run);
     } catch {
-      pushLine('agent', chatFailureNote('network'));
+      if (run === runRef.current && stopHold.current !== run) pushLine('agent', chatFailureNote('network'));
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      if (run !== runRef.current) return;
+      const stopped = stopHold.current === run;
+      if (stopped) stopHold.current = 0;
+      const released = releaseQueued(queueRef.current, { stopped });
+      if (!stopped && released.next) {
+        rememberQueue(released.queue);
+        const history = threadRef.current.slice();
+        pushLine('user', released.next.text);
+        if (released.next.mention) pushLine('assistant', released.next.mention);
+        void runChat(released.next.text, history);
+        return;
+      }
       sendingRef.current = false;
       setThinking(false);
       onThinking?.(false);
@@ -962,6 +989,7 @@ export default function Composer({
       ) : null}
       <div className="composer" aria-label="Message the agent">
         <input ref={fileRef} className="sr-only" type="file" multiple aria-label="Attach files" />
+        <MessageQueue items={queue} onEdit={editQueued} onSendNow={sendQueuedNow} />
         <PromptBar
           placeholder={`Message ${botName}`}
           label={`Message ${botName}`}
@@ -978,10 +1006,12 @@ export default function Composer({
           width={1200}
           radius={20}
           onDraftChange={setDraft}
+          draftSeed={draftSeed}
           onAttach={pickFiles}
           extraReady={files.length > 0}
           chips={files.length > 0 ? <Attachments files={files} onRemove={dropFile} /> : null}
           onSend={(text) => sendMessage(text)}
+          onStop={stopChat}
           onDictate={live ? undefined : runDictation}
           permission={permission}
           reviewCapDollars={reviewCapToDollars(reviewCap)}

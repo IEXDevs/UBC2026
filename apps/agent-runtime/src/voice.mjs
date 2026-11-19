@@ -71,6 +71,20 @@ export const VOICE_FIRST_MESSAGE = "Hey — I'm here. What should we look at?";
 /** Fallback line when the model emits tool_calls with no spoken text. */
 export const VOICE_TOOL_FILLER = 'On it.';
 
+/**
+ * ElevenLabs treats custom_llm.url as an OpenAI base and POSTs
+ * `{url}/chat/completions`. Storing the full completions path makes that
+ * request 404 (`custom_llm generation failed`).
+ */
+export function voiceCustomLlmBase(origin) {
+  return `${String(origin ?? '').replace(/\/$/, '')}/voice/llm`;
+}
+
+/** Full path, OpenAI `/v1` path, and the doubled path from an old full URL. */
+function isVoiceChatCompletionsPath(pathname) {
+  return /^\/voice\/llm(?:\/v1)?\/chat\/completions(?:\/chat\/completions)?$/.test(pathname);
+}
+
 /** System tools ElevenLabs may inject; keep them out of the custom LLM. */
 const VOICE_BLOCKED_TOOL = /^(end_call|end call|hang_up|hangup|leave_call)$/i;
 
@@ -103,7 +117,7 @@ function voiceAgentConversationConfig({ origin, modelId, webhookSecretRef }) {
         // null removes dashboard-default end_call (empty {} does not clear it).
         built_in_tools: { end_call: null },
         custom_llm: {
-          url: `${base}/voice/llm/chat/completions`,
+          url: voiceCustomLlmBase(base),
           model_id: modelId,
           api_type: 'chat_completions',
           ...(webhookSecretRef
@@ -385,7 +399,7 @@ export async function syncVoiceAgent({ env = {}, origin, fetcher = fetch } = {})
     ok: true,
     agentId,
     secretId,
-    customLlmUrl: `${base}/voice/llm/chat/completions`,
+    customLlmUrl: voiceCustomLlmBase(base),
     network: true,
   };
 }
@@ -882,7 +896,7 @@ export async function handleVoiceRequest(request, env = {}, { fetchApi, fetcher 
     const status = result.ok ? 200 : (result.status || (result.network ? 502 : 503));
     return json(result, status);
   }
-  if (url.pathname === '/voice/llm/chat/completions' && request.method === 'POST') {
+  if (request.method === 'POST' && isVoiceChatCompletionsPath(url.pathname)) {
     return handleCustomLlm(request, env, fetcher);
   }
   if (url.pathname === '/voice/session-owner' && request.method === 'POST') {

@@ -18,6 +18,7 @@ import {
   ownerPermissionNote,
   provisionVoiceAgent,
   syncVoiceAgent,
+  voiceCustomLlmBase,
   voiceDecisionMessages,
 } from './voice.mjs';
 import { eventsUrl } from '../../web/lib/bot-experience.mjs';
@@ -132,7 +133,7 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.equal(prompt.llm, 'custom-llm');
   assert.equal(prompt.custom_llm.model_id, GROK_VOICE_MODEL);
   assert.equal(prompt.custom_llm.api_type, 'chat_completions');
-  assert.equal(prompt.custom_llm.url, `${ORIGIN}/voice/llm/chat/completions`);
+  assert.equal(prompt.custom_llm.url, voiceCustomLlmBase(ORIGIN));
   assert.equal(prompt.custom_llm.api_key, undefined);
   assert.equal(prompt.tools.some(item => item.name === 'browser_live_view'), true);
   assert.equal(prompt.tools.some(item => item.name === 'web_search'), true);
@@ -700,6 +701,16 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
   assert.match(blocked.headers.get('content-type') || '', /text\/event-stream/);
   assert.match(await blocked.text(), /not configured|try again/i);
   assert.equal(calls.length, 1);
+
+  // ElevenLabs appends /chat/completions to a URL that already had that suffix.
+  const appended = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'check my wallets' }] }),
+  }), env());
+  assert.equal(appended.status, 200);
+  assert.match(appended.headers.get('content-type') || '', /text\/event-stream/);
+  assert.doesNotMatch(await appended.text(), /not_found/);
 });
 
 /**
@@ -735,13 +746,13 @@ test('syncVoiceAgent writes custom LLM URL and webhook secret into the agent', a
   assert.equal(result.ok, true);
   assert.equal(result.agentId, 'agent_live');
   assert.equal(result.secretId, 'sec_1');
-  assert.equal(result.customLlmUrl, `${ORIGIN}/voice/llm/chat/completions`);
+  assert.equal(result.customLlmUrl, voiceCustomLlmBase(ORIGIN));
   const patch = calls.find((call) => call.method === 'PATCH' && String(call.url).includes('/agents/'));
   assert.equal(patch.body.platform_settings.overrides.custom_llm_extra_body, true);
   assert.equal(patch.body.conversation_config.agent.first_message, VOICE_FIRST_MESSAGE);
   assert.equal(patch.body.conversation_config.turn.silence_end_call_timeout, -1);
   assert.deepEqual(patch.body.conversation_config.agent.prompt.built_in_tools, { end_call: null });
-  assert.equal(patch.body.conversation_config.agent.prompt.custom_llm.url, `${ORIGIN}/voice/llm/chat/completions`);
+  assert.equal(patch.body.conversation_config.agent.prompt.custom_llm.url, voiceCustomLlmBase(ORIGIN));
   assert.deepEqual(patch.body.conversation_config.agent.prompt.custom_llm.api_key, { secret_id: 'sec_1' });
   assert.deepEqual(
     patch.body.conversation_config.agent.prompt.custom_llm.request_headers['x-elevenlabs-webhook-secret'],

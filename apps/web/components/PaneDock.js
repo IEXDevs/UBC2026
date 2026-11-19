@@ -17,7 +17,6 @@ export default function PaneDock({ panes, pane, onChange }) {
   const [order, setOrder] = useState(() => centered(panes, pane));
   const [open, setOpen] = useState(false);
   const [pill, setPill] = useState(mid);
-  const [box, setBox] = useState({ width: 148, height: 48 });
   const wait = useRef(null);
   const settle = useRef(null);
   const hold = useRef(false);
@@ -28,7 +27,6 @@ export default function PaneDock({ panes, pane, onChange }) {
   const wasOpen = useRef(false);
   const openState = useRef(false);
   const rootRef = useRef(null);
-  const measureRef = useRef(null);
   const pointer = useRef({ x: -1, y: -1, forced: false });
   const syncRef = useRef(() => {});
   const paneRef = useRef(pane);
@@ -67,21 +65,6 @@ export default function PaneDock({ panes, pane, onChange }) {
       observer.disconnect();
       mo.disconnect();
     };
-  }, []);
-
-  useLayoutEffect(() => {
-    const node = measureRef.current;
-    if (!node) return undefined;
-    const read = () => {
-      const rect = node.getBoundingClientRect();
-      const width = Math.max(1, Math.ceil(rect.width));
-      const height = Math.max(1, Math.ceil(rect.height));
-      setBox(prev => (prev.width === width && prev.height === height ? prev : { width, height }));
-    };
-    read();
-    const observer = new ResizeObserver(read);
-    observer.observe(node);
-    return () => observer.disconnect();
   }, []);
 
   useEffect(() => () => {
@@ -213,8 +196,8 @@ export default function PaneDock({ panes, pane, onChange }) {
       }}
     >
       <GlassSurface
-        width={box.width}
-        height={box.height}
+        width="max-content"
+        height="max-content"
         borderRadius={999}
         borderWidth={0.08}
         brightness={62}
@@ -228,7 +211,7 @@ export default function PaneDock({ panes, pane, onChange }) {
         blueOffset={16}
         className="pane-glass"
       >
-        <div ref={measureRef} className="dock-measure">
+        <div className="dock-measure">
           <GooeyNav
             key={order.join('|')}
             className="pane-nav"
@@ -237,12 +220,12 @@ export default function PaneDock({ panes, pane, onChange }) {
             activeIndex={pill}
             theme="dark"
             size="md"
-            particleCount={15}
-            spread={56}
-            animationTime={280}
-            timeVariance={60}
-            gooeyness={0.5}
-            wobble={0.5}
+            particleCount={11}
+            spread={22}
+            animationTime={780}
+            timeVariance={110}
+            gooeyness={0.82}
+            wobble={0.14}
             hoverEffect
             balanceActive={false}
             onChange={pick}

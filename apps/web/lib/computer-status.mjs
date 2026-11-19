@@ -1,5 +1,5 @@
 /**
- * Sidebar "Bot's computer" label from open browser sessions, not bot loop status.
+ * Awake / Asleep / Paused from open browser sessions, not the bot loop status.
  * Opening a session (chat/voice tools or Live View) means Awake.
  */
 
