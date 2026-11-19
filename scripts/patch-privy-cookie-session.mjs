@@ -86,20 +86,40 @@ const REPLACEMENTS = Object.freeze([
     'this.client?.useServerCookies===!0?s.s.del(i.REFRESH_TOKEN_STORAGE_KEY):s.s.put(i.REFRESH_TOKEN_STORAGE_KEY,e)',
   ],
   [
-    'get refreshToken(){try{if(this.client?.useServerCookies===!0)return null;let e=B.get(f);return"string"==typeof e?e:null}',
     'get refreshToken(){try{let e=B.get(f);return"string"==typeof e?e:null}',
+    'get refreshToken(){try{if(this.client?.useServerCookies===!0)return null;let e=B.get(f);return"string"==typeof e?e:null}',
   ],
   [
-    'get refreshToken(){try{if(this.client?.useServerCookies===!0)return null;let e=s.s.get(i.REFRESH_TOKEN_STORAGE_KEY);return"string"==typeof e?e:null}',
     'get refreshToken(){try{let e=s.s.get(i.REFRESH_TOKEN_STORAGE_KEY);return"string"==typeof e?e:null}',
+    'get refreshToken(){try{if(this.client?.useServerCookies===!0)return null;let e=s.s.get(i.REFRESH_TOKEN_STORAGE_KEY);return"string"==typeof e?e:null}',
+  ],
+  [
+    'class zn{get token()',
+    'function maelstromTakeRefresh(){try{let e=B.get(f);return B.del(f),"string"==typeof e?e:null}catch{return null}}let maelstromRefreshHold=null;class zn{get token()',
+  ],
+  [
+    'class be{get token()',
+    'function maelstromTakeRefresh(){try{let e=s.s.get(i.REFRESH_TOKEN_STORAGE_KEY);return s.s.del(i.REFRESH_TOKEN_STORAGE_KEY),"string"==typeof e?e:null}catch{return null}}let maelstromRefreshHold=null;class be{get token()',
+  ],
+  [
+    'let e=this.token,t=this.refreshToken;if(this.client.useServerCookies',
+    'let e=this.token,t=this.client?.useServerCookies===!0&&typeof maelstromRefreshHold=="string"?maelstromRefreshHold:this.refreshToken;this.client?.useServerCookies===!0&&(maelstromRefreshHold=null);if(this.client.useServerCookies',
   ],
   [
     'this.apiUrl=e,this.fallbackApiUrl=this.apiUrl,this.useServerCookies=e!==P&&e.startsWith("https://privy.")',
     'this.apiUrl=e===P&&typeof location<"u"?location.origin+"/api/privy-auth":e,this.fallbackApiUrl=this.apiUrl,this.useServerCookies=String(this.apiUrl).endsWith("/api/privy-auth")||e!==P&&e.startsWith("https://privy.")',
   ],
   [
+    'this.useServerCookies=String(this.apiUrl).endsWith("/api/privy-auth")||e!==P&&e.startsWith("https://privy."),this.cookieWriteBehavior=s',
+    'this.useServerCookies=String(this.apiUrl).endsWith("/api/privy-auth")||e!==P&&e.startsWith("https://privy."),this.useServerCookies&&(maelstromRefreshHold=maelstromTakeRefresh()),this.cookieWriteBehavior=s',
+  ],
+  [
     'this.apiUrl=e,this.fallbackApiUrl=this.apiUrl,this.useServerCookies=e!==i.DEFAULT_PRIVY_API_URL&&e.startsWith("https://privy.")',
     'this.apiUrl=e===i.DEFAULT_PRIVY_API_URL&&typeof location<"u"?location.origin+"/api/privy-auth":e,this.fallbackApiUrl=this.apiUrl,this.useServerCookies=String(this.apiUrl).endsWith("/api/privy-auth")||e!==i.DEFAULT_PRIVY_API_URL&&e.startsWith("https://privy.")',
+  ],
+  [
+    'this.useServerCookies=String(this.apiUrl).endsWith("/api/privy-auth")||e!==i.DEFAULT_PRIVY_API_URL&&e.startsWith("https://privy."),this.cookieWriteBehavior=s',
+    'this.useServerCookies=String(this.apiUrl).endsWith("/api/privy-auth")||e!==i.DEFAULT_PRIVY_API_URL&&e.startsWith("https://privy."),this.useServerCookies&&(maelstromRefreshHold=maelstromTakeRefresh()),this.cookieWriteBehavior=s',
   ],
   [
     'if(hn.setState({identityToken:e}),this.client?.useServerCookies)return;B.put(I,e);',
@@ -123,11 +143,23 @@ const REPLACEMENTS = Object.freeze([
   ],
 ]);
 
+/**
+ * API calls use /api/privy-auth so the refresh cookie stays HttpOnly.
+ * The embedded-wallet iframe must stay on auth.privy.io. Pointing it at the
+ * proxy makes the document 404 and the iframe never finishes loading.
+ */
+function rewriteIframeOrigin(source) {
+  return source.replace(/origin:([A-Za-z_$][\w$]*)\.apiUrl/g, (full, id) => (
+    `origin:String(${id}.apiUrl).endsWith("/api/privy-auth")?"https://auth.privy.io":${id}.apiUrl`
+  ));
+}
+
 export function patchPrivyCookieSession(source) {
   let next = String(source);
   for (const [from, to] of REPLACEMENTS) {
     if (next.includes(to)) continue;
     next = next.replaceAll(from, to);
   }
+  if (!next.includes('?"https://auth.privy.io":')) next = rewriteIframeOrigin(next);
   return next;
 }

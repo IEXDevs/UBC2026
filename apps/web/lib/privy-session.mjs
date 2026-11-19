@@ -7,6 +7,8 @@
  * The only app-side rule: never call Privy getAccessToken() when an access
  * token is present without refresh_token or a privy-session cookie — that
  * path calls destroyLocalState() and deletes the local session.
+ * An empty store is different. The open tab keeps the access token in memory
+ * and the refresh token in the HttpOnly cookie, so Privy is the only copy.
  */
 
 import { hasServerSessionCookie } from './privy-cookie-session.mjs';
@@ -92,7 +94,11 @@ export async function getPrivyAccessToken(getAccessToken, storage = globalThis.l
     refresh = readStoredRefreshToken(storage);
   }
 
-  if (!refresh && !serverSession) {
+  // A stored access token with no refresh credential must be left alone.
+  // An empty store still asks Privy: the token may be in memory, or the
+  // HttpOnly cookie can refresh it. cookieWriteBehavior "never" does not
+  // write privy-session itself; the auth proxy sets that marker.
+  if (!refresh && !serverSession && stored) {
     return stored;
   }
 

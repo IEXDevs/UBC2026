@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   PRIVY_REFRESH_COOKIE,
+  PRIVY_SESSION_MARKER,
   bodyWithStoredRefresh,
   privyUpstreamUrl,
   proxyPrivyAuth,
@@ -65,9 +66,11 @@ test('a later refresh uses the HttpOnly cookie and not page storage', async () =
       });
     },
   );
-  const setCookie = login.headers.get('set-cookie') || '';
-  assert.match(setCookie, /HttpOnly/);
-  assert.match(setCookie, new RegExp(`${PRIVY_REFRESH_COOKIE}=`));
+  const setCookies = login.headers.getSetCookie();
+  const setCookie = setCookies.join('; ');
+  assert.equal(setCookies.some((cookie) => cookie.includes('HttpOnly')), true);
+  assert.equal(setCookies.some((cookie) => cookie.startsWith(`${PRIVY_REFRESH_COOKIE}=`)), true);
+  assert.equal(setCookies.some((cookie) => cookie.startsWith(`${PRIVY_SESSION_MARKER}=1`) && !cookie.includes('HttpOnly')), true);
   assert.equal(setCookie.includes(REFRESH), true);
   const loginBody = await login.json();
   assert.equal(loginBody.token, ACCESS);
@@ -93,7 +96,8 @@ test('a later refresh uses the HttpOnly cookie and not page storage', async () =
   const again = await refresh.json();
   assert.equal(again.token, ACCESS);
   assert.equal(Object.hasOwn(again, 'refresh_token'), false);
-  assert.equal(readRefreshCookie(refresh.headers.get('set-cookie')), NEXT);
+  assert.equal(readRefreshCookie(refresh.headers.getSetCookie().join('; ')), NEXT);
+  assert.equal(refresh.headers.getSetCookie().some((cookie) => cookie.startsWith(`${PRIVY_SESSION_MARKER}=1`)), true);
   assert.equal(bodyWithStoredRefresh('/api/v1/sessions', 'POST', '{"refresh_token":"stale"}', setCookie).includes(REFRESH), true);
   assert.equal(bodyWithStoredRefresh('/api/v1/sessions', 'POST', '{"refresh_token":"stale"}', setCookie).includes('stale'), false);
 });
@@ -114,5 +118,31 @@ test('logout clears the refresh cookie', async () => {
     '/api/v1/sessions/logout',
     async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
   );
-  assert.match(response.headers.get('set-cookie') || '', /Max-Age=0/);
+  const cleared = response.headers.getSetCookie();
+  assert.equal(cleared.filter((cookie) => /Max-Age=0/.test(cookie)).length, 2);
+  assert.equal(cleared.some((cookie) => cookie.startsWith(`${PRIVY_REFRESH_COOKIE}=`)), true);
+  assert.equal(cleared.some((cookie) => cookie.startsWith(`${PRIVY_SESSION_MARKER}=`)), true);
+});
+
+/**
+ * Achieves: verifies a rejected refresh drops the stored token instead of replaying it.
+ * Fails when: a 401 from /sessions leaves the old refresh cookie in place.
+ * Oracle: both the refresh cookie and the page marker are cleared.
+ * Side effects / state checked: fake fetch only.
+ * Gaps: does not call auth.privy.io.
+ */
+test('a rejected refresh clears the stored token', async () => {
+  const response = await proxyPrivyAuth(
+    requestFor('https://dev.maelstrom.iexdevs.com/api/privy-auth/api/v1/sessions', {
+      cookie: `${PRIVY_REFRESH_COOKIE}=${encodeURIComponent(REFRESH)}; ${PRIVY_SESSION_MARKER}=1`,
+      body: '{}',
+    }),
+    '/api/v1/sessions',
+    async () => new Response(JSON.stringify({ error: 'Missing or invalid token' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+  const cleared = response.headers.getSetCookie();
+  assert.equal(cleared.filter((cookie) => /Max-Age=0/.test(cookie)).length, 2);
 });

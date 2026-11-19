@@ -9,6 +9,8 @@
 export const PRIVY_AUTH_ORIGIN = 'https://auth.privy.io';
 export const PRIVY_AUTH_PROXY_PREFIX = '/api/privy-auth';
 export const PRIVY_REFRESH_COOKIE = 'maelstrom_privy_refresh';
+// Page-readable flag that the HttpOnly refresh cookie exists. Not a credential.
+export const PRIVY_SESSION_MARKER = 'privy-session';
 
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 30;
 const PATH_OK = /^\/api\/v1\/[A-Za-z0-9._~/-]{1,200}$/;
@@ -48,6 +50,13 @@ export function refreshCookieHeader(token, { secure = true, clear = false } = {}
   if (clear) return `${PRIVY_REFRESH_COOKIE}=; ${flags}; Max-Age=0`;
   if (typeof token !== 'string' || !token || token.length > 4096 || /[\r\n;]/.test(token)) return '';
   return `${PRIVY_REFRESH_COOKIE}=${encodeURIComponent(token)}; ${flags}; Max-Age=${REFRESH_MAX_AGE}`;
+}
+
+/** Readable companion to the HttpOnly refresh cookie. Path=/ so the page can see it. */
+export function sessionMarkerCookie({ secure = true, clear = false } = {}) {
+  const flags = `Path=/; SameSite=Lax${secure ? '; Secure' : ''}`;
+  if (clear) return `${PRIVY_SESSION_MARKER}=; ${flags}; Max-Age=0`;
+  return `${PRIVY_SESSION_MARKER}=1; ${flags}; Max-Age=${REFRESH_MAX_AGE}`;
 }
 
 /** Prefer the HttpOnly cookie over a refresh token the page still has stored. */
@@ -117,9 +126,18 @@ export async function proxyPrivyAuth(request, path, fetchImpl = globalThis.fetch
   if (type && type.length < 200 && !/[\r\n]/.test(type)) responseHeaders.set('content-type', type);
   responseHeaders.set('cache-control', 'no-store');
   const logout = path === '/api/v1/sessions/logout';
-  const cookie = logout
-    ? refreshCookieHeader('', { secure, clear: true })
-    : refreshCookieHeader(sealed.refreshToken, { secure });
-  if (cookie) responseHeaders.append('set-cookie', cookie);
+  // A refresh Privy rejected must not keep replaying the same dead token.
+  const refreshRejected = path === '/api/v1/sessions' && upstream.status === 401 && !sealed.refreshToken;
+  const clear = logout || refreshRejected;
+  if (clear) {
+    responseHeaders.append('set-cookie', refreshCookieHeader('', { secure, clear: true }));
+    responseHeaders.append('set-cookie', sessionMarkerCookie({ secure, clear: true }));
+  } else {
+    const cookie = refreshCookieHeader(sealed.refreshToken, { secure });
+    if (cookie) {
+      responseHeaders.append('set-cookie', cookie);
+      responseHeaders.append('set-cookie', sessionMarkerCookie({ secure }));
+    }
+  }
   return new Response(sealed.bodyText, { status: upstream.status, headers: responseHeaders });
 }

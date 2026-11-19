@@ -1992,6 +1992,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           handle={profile?.handle || ''}
           ownerId={ownerId || ''}
           getAccessToken={getAccessToken}
+          onSessionExpired={devPreview ? null : onLogout}
           onDone={() => {
             try { writeRecoveryAck(localStorage, ownerId); } catch { /* the phrase stays in the download only */ }
             setRecoveryAck(true);

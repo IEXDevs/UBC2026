@@ -78,7 +78,7 @@ export function PhraseEntry({ slots, onChange, disabled = false }) {
   );
 }
 
-export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = '', getAccessToken = null, onDone }) {
+export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = '', getAccessToken = null, onDone, onSessionExpired = null }) {
   const [words, setWords] = useState(null);
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
@@ -133,6 +133,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       if (!state.ok) {
         setNote(recoveryFailureNote(state.error));
         setStep('error');
+        if (state.error === 'login_required' || state.error === 'owner_required') onSessionExpired?.();
         return;
       }
       if (state.local) {
@@ -156,7 +157,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       stop = true;
       window.clearTimeout(timer);
     };
-  }, [ownerId, retry]);
+  }, [ownerId, retry, onSessionExpired]);
 
   useEffect(() => {
     if (mode !== 'local' || !step || step === 'done' || step === 'success') return;

@@ -135,7 +135,7 @@ export function shouldRetryRecovery(error, attempt) {
 
 export function recoveryFailureNote(error) {
   if (error === 'login_required' || error === 'owner_required') {
-    return 'Sign in is still settling. Try again in a moment.';
+    return 'Your sign-in expired. Sign in again to save the seed.';
   }
   return 'Could not reach your account to check your seed. Check the connection and try again.';
 }

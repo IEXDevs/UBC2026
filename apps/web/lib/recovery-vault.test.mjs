@@ -86,7 +86,7 @@ test('seed state reads none, issued, confirmed, local, and unreachable', async (
   assert.equal(shouldRetryRecovery('login_required', 0), true);
   assert.equal(shouldRetryRecovery('login_required', 3), false);
   assert.equal(shouldRetryRecovery('account_state_unavailable', 0), false);
-  assert.match(recoveryFailureNote('login_required'), /settling/);
+  assert.match(recoveryFailureNote('login_required'), /Sign in again/);
   assert.match(recoveryFailureNote('recovery_unavailable'), /check your seed/);
   assert.equal((await readRecoveryState(fetcher(new Error('offline')), { ownerId: 'alice' })).ok, false);
   assert.equal((await readRecoveryState(fetcher({}), {})).ok, false);

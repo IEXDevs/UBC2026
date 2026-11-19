@@ -127,10 +127,27 @@ test('getPrivyAccessToken falls back to storage if Privy throws', async () => {
 /**
  * Achieves: verifies an HttpOnly session cookie may refresh without a local refresh token.
  * Fails when: privy-session is ignored, or a readable privy-token marker is treated as that session.
- * Oracle: getAccessToken runs for privy-session=1 and is skipped for privy-token=t.
+ * Oracle: getAccessToken runs for privy-session=1. privy-token=t does not refresh a stored access token.
  * Side effects / state checked: in-memory storage double writes/reads.
  * Gaps: none.
  */
+/**
+ * Achieves: verifies an empty store still asks Privy for the in-memory token.
+ * Fails when: a missing localStorage refresh skips getAccessToken and the call goes out with no bearer.
+ * Oracle: getAccessToken runs and its token is returned. A stored access token without refresh is still left alone.
+ * Side effects / state checked: in-memory storage only.
+ * Gaps: does not call Privy.
+ */
+test('an empty store asks Privy instead of sending no bearer', async () => {
+  let called = false;
+  const token = await getPrivyAccessToken(async () => {
+    called = true;
+    return 'from-memory';
+  }, memoryStorage());
+  assert.equal(called, true);
+  assert.equal(token, 'from-memory');
+});
+
 test('an HttpOnly session cookie may refresh without a local refresh token', async () => {
   const storage = memoryStorage();
   let called = false;
@@ -141,11 +158,12 @@ test('an HttpOnly session cookie may refresh without a local refresh token', asy
   assert.equal(called, true);
   assert.equal(token, 'from-cookie');
 
+  const stored = memoryStorage({ [PRIVY_TOKEN_KEY]: JSON.stringify(PAT) });
   let markerCalled = false;
   const kept = await getPrivyAccessToken(async () => {
     markerCalled = true;
     return 'nope';
-  }, storage, 'privy-token=t');
+  }, stored, 'privy-token=t');
   assert.equal(markerCalled, false);
-  assert.equal(kept, '');
+  assert.equal(kept, PAT);
 });
