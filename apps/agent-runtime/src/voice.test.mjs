@@ -447,6 +447,48 @@ test('tool calls fail closed without a webhook secret, owner, or known tool', as
   assert.equal(called, false);
   assert.equal(VOICE_TOOLS.some(item => item.calls.some(call => call.path.includes('live-view'))), true);
   assert.equal(VOICE_TOOLS.some(item => item.name === 'web_search'), true);
+  assert.equal(VOICE_TOOLS.some(item => item.name === 'lookup_recipient'), true);
+});
+
+/**
+ * Achieves: lookup_recipient resolves .sol via profiles lookup, not web_search.
+ * Fails when: path/query wrong, empty q accepted, or owner missing.
+ * Oracle: GET /api/profiles/lookup?q=richclub.sol with owner header.
+ * Side effects / state checked: fetchApi seen request.
+ * Gaps: does not call live SNS.
+ */
+test('lookup_recipient hits profiles lookup for a .sol name', async () => {
+  const seen = [];
+  const fetchApi = async (request) => {
+    const url = new URL(request.url);
+    seen.push({
+      method: request.method,
+      path: url.pathname,
+      q: url.searchParams.get('q'),
+      owner: request.headers.get('x-owner-id'),
+    });
+    return Response.json({
+      ok: true,
+      recipient: { kind: 'sns', domain: 'richclub.sol', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' },
+    });
+  };
+  const ok = await handleVoiceRequest(toolRequest('lookup_recipient', {
+    body: { parameters: { q: 'richclub.sol' } },
+  }), env(), { fetchApi });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(seen[0], {
+    method: 'GET',
+    path: '/api/profiles/lookup',
+    q: 'richclub.sol',
+    owner: 'user_1',
+  });
+  const body = await ok.json();
+  assert.equal(body.result.calls[0].body.recipient.domain, 'richclub.sol');
+
+  const bad = await handleVoiceRequest(toolRequest('lookup_recipient', {
+    body: { parameters: { q: '' } },
+  }), env(), { fetchApi });
+  assert.equal(bad.status, 400);
 });
 
 /**

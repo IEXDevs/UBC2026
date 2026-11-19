@@ -808,6 +808,10 @@ function validateParameters(toolDef, parameters) {
       if (typeof parameters.query !== 'string' || !parameters.query.trim() || parameters.query.length > 1000) return false;
       continue;
     }
+    if (key === 'q') {
+      if (typeof parameters.q !== 'string' || !parameters.q.trim() || parameters.q.length > 128) return false;
+      continue;
+    }
     if (key === 'url') {
       if (typeof parameters.url !== 'string' || !parameters.url.trim() || parameters.url.length > 2000) return false;
       continue;
@@ -816,6 +820,9 @@ function validateParameters(toolDef, parameters) {
   }
   if (toolDef.properties.query && parameters.query != null) {
     if (typeof parameters.query !== 'string' || !parameters.query.trim() || parameters.query.length > 1000) return false;
+  }
+  if (toolDef.properties.q && parameters.q != null) {
+    if (typeof parameters.q !== 'string' || !parameters.q.trim() || parameters.q.length > 128) return false;
   }
   if (toolDef.properties.url && parameters.url != null) {
     if (typeof parameters.url !== 'string' || !parameters.url.trim() || parameters.url.length > 2000) return false;

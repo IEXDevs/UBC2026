@@ -71,7 +71,7 @@ If a Notion search does not show "UBC Conference AIgent idea", ask for the board
 - Do not store seed phrases or private keys. Onboarding order is permissions first, then seed download and re-entry, with a lost-phrase warning. Seed confirm and other onboarding exits must soft-fade with clear success feedback rather than abrupt unmount. Seed entry is a 12-word grid; Space moves to the next word. Show the agent name on the color-picking step.
 - The agent detail pane must mirror the selected agent (icon, name, permissions, working status), keep computer mid-pane, and give the files/images strip clear hover and slide-select affordances.
 - Prefer deploying Workers via local CLI rather than Cloudflare Builds when build minutes would be burned.
-- Send recipients accept a wallet address, @username, or .sol SNS via dropdown or typed entry. Resolve before submit and flag unresolved names or invalid addresses; destination labels use first5...last5 plus agent or wallet name when known.
+- Send recipients accept a wallet address, @username, or .sol SNS via dropdown or typed entry. Resolve before submit and flag unresolved names or invalid addresses; destination labels use first5...last5 plus agent or wallet name when known. Chat and voice must resolve .sol / @handle / address with lookup_recipient (profiles lookup / SNS), never web_search; open a known site with browser_navigate, and reserve web_search for open-web research.
 
 ## Learned Workspace Facts
 

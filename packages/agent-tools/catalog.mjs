@@ -126,7 +126,19 @@ export const DASHBOARD_TOOLS = Object.freeze([
     },
     [call('POST', '/api/spend', { body: ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'quoteCluster'] })],
   ),
-  dashboard('sns_send', 'Resolve a .sol name and build a send intent. Does not sign unless an executor is injected.', ['botId'], {
+  dashboard(
+    'lookup_recipient',
+    'Resolve a wallet address, @handle, or .sol SNS name to a pubkey via the profiles lookup API. Use this for richclub.sol, @alex, or a base58 address. Never web_search for .sol names or handles. Read-only. Does not sign or spend.',
+    ['q'],
+    {
+      q: {
+        type: 'string',
+        description: 'Wallet address, @handle, or name.sol (for example richclub.sol)',
+      },
+    },
+    [call('GET', '/api/profiles/lookup', { query: ['q'] })],
+  ),
+  dashboard('sns_send', 'Build a send intent to a .sol name after lookup_recipient (or with a known domain). Does not sign unless an executor is injected.', ['botId'], {
     botId,
     domain: { type: 'string', description: 'SNS domain like alex.sol' },
     amount: { type: 'string', description: 'Base-unit amount string' },
@@ -184,14 +196,16 @@ export function toOpenAiTools(tools = SHARED_AGENT_TOOLS) {
 export function sharedToolsInstruction() {
   return [
     'Speak to the owner in simple English. These tool notes are for you. Do not read them back, and do not quote error codes, unless the owner asks how a tool works.',
-    'You have the following tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, create_loop, set_loop_cooldown, break_loop, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
+    'You have the following tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, create_loop, set_loop_cooldown, break_loop, list_browser_sessions, stop_all, prepare_shopping, request_spend, lookup_recipient, sns_send).',
     'create_loop stores a purpose and a cooldown of at least 15 minutes, then starts this bot again after that cooldown. set_loop_cooldown changes that cooldown. A shorter cooldown is rejected. A loop wake still goes through the decision gate before any spend.',
     'Call break_loop only when the owner explicitly asks to break, stop, or cancel the loop. Do not break a loop on your own.',
     'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
     'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
     'When the owner asks you to find and do one trade, call get_price for the mint, then start_task. get_price does not place the trade. start_task runs the existing loop. provider_failed means the price provider is down. client_missing means the price client is not configured. invalid_mint means the mint is not a Solana address.',
     'request_spend posts the shared spend route. A locked desk is not an approval hold and does not replace trust, verify, reserve, or the permission gate. Fully-automatic still runs those gates. 1000000 is 1 USDC in base units. A USDC buy of wrapped SOL does not need a destination. Do not describe a desk lock as ask-mode.',
-    'When the owner asks you to look something up: call web_search first, pick a real https result url, then web_scrape. search_not_configured and client_missing mean FIRECRAWL_API_KEY or the research client is not configured. provider_failed means Firecrawl returned a server error. Do not invent search results.',
+    'When the owner names a .sol SNS domain, an @handle, or a wallet address, call lookup_recipient with q set to that token. It hits GET /api/profiles/lookup (SNS resolve or handle directory). Never web_search for .sol names or handles. Speak the resolved address as first5...last5.',
+    'When the owner asks you to open or use a specific website: browser_open, then browser_navigate to that https URL. Prefer a direct URL over searching. The owner watches Live View for form entry.',
+    'When the owner asks for open-web research (not a .sol, handle, or wallet): call web_search first, pick a real https result url, then web_scrape. search_not_configured and client_missing mean FIRECRAWL_API_KEY or the research client is not configured. provider_failed means Firecrawl returned a server error. Do not invent search results.',
     'Do not invent balances, positions, or decisions — call get_wallets and read balances.balanceStatus / balances.ok / balances.displayBalanceLabel / holdings. If balanceStatus is failed or balances.ok is false, say balances could not be read (use the unavailable label). Never claim "no open positions" or "0 SOL" from a failed or partial read. Empty success means holdings is empty and balanceStatus is empty or ok with zero amounts.',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',

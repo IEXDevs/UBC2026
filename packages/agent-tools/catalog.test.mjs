@@ -156,6 +156,15 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.match(sharedToolsInstruction(), /at least 15 minutes/);
   assert.match(sharedToolsInstruction(), /decision gate before any spend/);
   assert.match(sharedToolsInstruction(), /Do not break a loop on your own/);
+  assert.match(sharedToolsInstruction(), /lookup_recipient/);
+  assert.match(sharedToolsInstruction(), /Never web_search for \.sol/);
+  assert.match(sharedToolsInstruction(), /Prefer a direct URL over searching/);
+  const lookup = DASHBOARD_TOOLS.find((tool) => tool.name === 'lookup_recipient');
+  assert.deepEqual(lookup.parameters.required, ['q']);
+  assert.equal(lookup.voiceCalls[0].method, 'GET');
+  assert.equal(lookup.voiceCalls[0].path, '/api/profiles/lookup');
+  assert.deepEqual(lookup.voiceCalls[0].query, ['q']);
+  assert.match(lookup.description, /Never web_search/);
   const created = DASHBOARD_TOOLS.find((tool) => tool.name === 'create_loop');
   assert.deepEqual(created.parameters.required, ['botId', 'purpose', 'cooldownMinutes']);
   assert.equal(created.voiceCalls[0].path, '/bots/:botId/card-loop');
