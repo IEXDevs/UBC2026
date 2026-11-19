@@ -47,6 +47,7 @@ import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
+import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
   deleteOwnerBot,
   emptyMoneyState,
@@ -425,6 +426,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [rosterReady, setRosterReady] = useState(false);
   const [thinkingBot, setThinkingBot] = useState(null);
   const [botRecords, setBotRecords] = useState([]);
+  const [removedAgents, setRemovedAgents] = useState(() => new Map());
+  const [agentRemoval] = useState(() => createAgentRemoval(setRemovedAgents));
+  const currentOwner = useRef(ownerId);
+  currentOwner.current = ownerId;
   const [loopOverrides, setLoopOverrides] = useState({});
   const [listsTick, setListsTick] = useState(0);
   const [remoteLists, setRemoteLists] = useState(() => emptyMoneyState());
@@ -731,7 +736,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       let wrote = 0;
       for (const bot of missing.slice(0, 20)) {
         if (stop) return;
-        const saved = await upsertOwnerBot(ownerId, bot, { walletId, accessToken });
+        const saved = await agentRemoval.save(ownerId, bot.id, () => upsertOwnerBot(ownerId, bot, { walletId, accessToken }));
         if (saved.ok) wrote += 1;
         // Stop hammering when the wallet is not in Supabase yet.
         if (!saved.ok && (saved.error === 'wallet_not_found' || saved.status === 404)) break;
@@ -743,7 +748,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       } catch { /* keep local */ }
     })();
     return () => { stop = true; };
-  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, getAccessToken]);
+  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, getAccessToken, agentRemoval]);
 
   const saveProfile = useCallback(async (next) => {
     const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
@@ -807,6 +812,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       .filter((bot) => bot && !isPlaceholderBotId(bot.id)),
     [remoteLists.bots, looks],
   );
+  const removedIds = removedAgents.get(ownerId);
   const localRoster = useMemo(() => mergeRoster([], withoutPlaceholderBots(roster)), [roster]);
   const seedBots = useMemo(() => {
     const overlay = new Map(botRecords.map((bot) => [bot.id, bot]));
@@ -821,14 +827,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     const order = [];
     for (const id of localRoster.order) if (byId.has(id)) order.push(id);
     for (const bot of remoteBots) if (!order.includes(bot.id)) order.push(bot.id);
-    return order.map((id) => ({ ...byId.get(id), ...(overlay.get(id) || {}) }));
-  }, [botRecords, localRoster, remoteBots]);
+    return order.filter(id => !removedIds?.has(id)).map((id) => ({ ...byId.get(id), ...(overlay.get(id) || {}) }));
+  }, [botRecords, localRoster, remoteBots, removedIds]);
   const styled = useMemo(() => {
     const looked = applyLooks(seedBots, looks);
     if (!devPreview || looked.length > 0) return looked;
     const sample = previewBot();
-    return sample ? [sample] : looked;
-  }, [seedBots, looks, devPreview]);
+    return sample && !removedIds?.has(sample.id) ? [sample] : looked;
+  }, [seedBots, looks, devPreview, removedIds]);
   const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
   const bots = assigned.bots.map((bot) => (
     Object.prototype.hasOwnProperty.call(loopOverrides, bot.id)
@@ -1472,7 +1478,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       void (async () => {
         let accessToken = '';
         try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
-        const saved = await upsertOwnerBot(ownerId, created, { walletId, accessToken });
+        const saved = await agentRemoval.save(ownerId, created.id, () => upsertOwnerBot(ownerId, created, { walletId, accessToken }));
         if (!saved.ok) return;
         try {
           const lists = await fetchOwnerLists(ownerId, { accessToken });
@@ -1507,15 +1513,26 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     setRoster(current => ({ ...current, order: reorderIds(current.order, fromId, toId) }));
   }
 
-  function onDelete(id) {
+  async function onDelete(id) {
+    if (!ownerId) return;
     const name = bots.find(item => item.id === id)?.name ?? 'Agent';
-    if (ownerId) {
-      const tokenPromise = sessionReadyForWallets(signedIn, user)
-        ? Promise.resolve(getAccessToken?.()).catch(() => '')
-        : Promise.resolve('');
-      void tokenPromise.then((accessToken) => deleteOwnerBot(ownerId, id, { accessToken: accessToken || '' }));
+    const removal = agentRemoval.remove(ownerId, id, async () => {
+      if (devPreview) return { ok: true };
+      const accessToken = sessionReadyForWallets(signedIn, user) ? await getAccessToken?.() : '';
+      return deleteOwnerBot(ownerId, id, { accessToken: accessToken || '' });
+    });
+    setThinkingBot(current => (current === id ? null : current));
+    setActiveBot(current => current === id ? bots.find(item => item.id !== id)?.id ?? null : current);
+
+    const result = await removal;
+    if (!result || currentOwner.current !== ownerId) return;
+    if (!result.ok) {
+      toast?.(`Could not remove ${name}. Try again.`);
+      return;
     }
     toast?.(`${name} removed`);
+    setRemoteLists(current => ({ ...current, bots: current.bots.filter(item => item.id !== id) }));
+    setBotRecords(current => current.filter(item => item.id !== id));
     setRoster(current => ({
       order: withoutId(current.order, id),
       extra: current.extra.filter(item => item.id !== id),
@@ -1531,11 +1548,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       const next = { ...current };
       delete next[id];
       return next;
-    });
-    setThinkingBot(current => (current === id ? null : current));
-    setActiveBot(current => {
-      if (current !== id) return current;
-      return bots.find(item => item.id !== id)?.id ?? null;
     });
   }
 

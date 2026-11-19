@@ -798,6 +798,27 @@ test('supabase mappers turn rows into bot/wallet/ledger records', () => {
   });
 });
 
+test('deleting a missing agent is idempotent and a failed ownership lookup is not success', async () => {
+  const remove = (body, status) => worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers: { 'x-owner-id': 'user_1' },
+  }), fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url, init) => {
+      assert.equal(init.method, 'GET');
+      assert.equal(new URL(url).searchParams.get('owner_id'), 'eq.user_1');
+      return Response.json(body, { status });
+    },
+  }));
+  const absent = await remove([], 200);
+  assert.equal(absent.status, 200);
+  assert.deepEqual(await absent.json(), { ok: true, deleted: 'bot_1' });
+  const failure = await remove({ code: 'PGRST002' }, 503);
+  assert.equal(failure.status, 502);
+  assert.deepEqual(await failure.json(), { error: 'delete_failed' });
+});
+
 /**
  * Achieves: logs route requires owner and returns empty unconfigured without Supabase.
  * Fails when: ownerless 200 or invented log rows.
