@@ -126,3 +126,27 @@ test('claim handle stays outside the shell that fades on first login', () => {
   assert.match(css, /\.shell\.is-claim\s*\{[^}]*opacity:\s*0/);
   assert.match(css, /\.shell\.is-claim\s*\{[^}]*pointer-events:\s*none/);
 });
+
+/**
+ * Achieves: the main stage has a wallet control at the top of the stage, and the agent detail pane does not.
+ * Fails when: WalletDock leaves the stage, or the detail pane grows a wallet chip again.
+ * Oracle: page stage markup includes WalletDock; AgentDetail has neither WalletDock nor wallet-chip; the dock offers connect and details.
+ * Side effects / state checked: page.js, AgentDetail.js, WalletDock.js, WalletsSheet.js source.
+ * Gaps: source snapshot only — no browser layout.
+ */
+test('the main stage has a top-right wallet control and the detail pane does not', () => {
+  const root = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(root, '../app/page.js'), 'utf8');
+  const detail = readFileSync(join(root, '../components/AgentDetail.js'), 'utf8');
+  const dock = readFileSync(join(root, '../components/WalletDock.js'), 'utf8');
+  const sheet = readFileSync(join(root, '../components/WalletsSheet.js'), 'utf8');
+  const stageStart = page.indexOf('<section className={`stage');
+  const stage = page.slice(stageStart, page.indexOf('{bot ? (', stageStart));
+  assert.match(stage, /<WalletDock/);
+  assert.equal(detail.includes('WalletDock'), false);
+  assert.equal(detail.includes('wallet-chip'), false);
+  assert.match(dock, /aria-label="Wallets"/);
+  assert.match(dock, /<WalletAdd/);
+  assert.match(dock, /Open wallet details/);
+  assert.match(sheet, /Connect a wallet/);
+});

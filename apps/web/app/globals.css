@@ -1178,7 +1178,127 @@ button.add-agent:not(:disabled):hover {
 }
 
 .stage.is-book .dock-slot,
+.wallet-dock,
 .topbar .wallet-chip { pointer-events: auto; }
+
+.wallet-dock {
+  position: absolute;
+  z-index: 14;
+  top: 16px;
+  right: 20px;
+}
+
+.wallet-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  border-radius: 999px;
+  border: 1px solid rgba(228, 194, 122, 0.55);
+  background:
+    radial-gradient(circle at 32% 28%, rgba(110, 200, 195, 0.42), transparent 58%),
+    #101614;
+  color: #e4c27a;
+  cursor: pointer;
+}
+
+.wallet-mark:hover { border-color: #e4c27a; }
+
+.wallet-mark:focus-visible {
+  outline: 1px solid #e4c27a;
+  outline-offset: 3px;
+}
+
+.wallet-mark-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #e4c27a;
+  color: #101614;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 16px;
+  text-align: center;
+}
+
+.wallet-pop {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(340px, calc(100vw - 40px));
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #101614;
+  color: #f6f3ea;
+  text-align: left;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(228, 194, 122, 0.22);
+}
+
+.wallet-pop-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wallet-pop-head strong {
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.wallet-pop-head span,
+.wallet-pop-list span,
+.wallet-pop-list em {
+  color: #b7c7c2;
+  font-style: normal;
+  font-size: 13px;
+}
+
+.wallet-pop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.wallet-pop-list button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.wallet-pop-list em { grid-column: 1 / -1; }
+
+.wallet-pop-list button:hover,
+.wallet-pop-list button:focus-visible {
+  background: rgba(110, 200, 195, 0.12);
+}
+
+.wallet-pop .wallet-add { margin: 0; }
+
+.wallet-pop-details { width: 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wallet-mark { transition: none; }
+}
 
 .topbar .wallet-chip {
   position: relative;

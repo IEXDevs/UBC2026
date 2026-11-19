@@ -6,7 +6,9 @@ import {
   openRecovery,
   phraseProof,
   readRecoveryState,
+  recoveryFailureNote,
   sealRecovery,
+  shouldRetryRecovery,
   verifyRecovery,
 } from './recovery-vault.mjs';
 import { createRecoveryPhrase } from './wallet-desk.mjs';
@@ -77,7 +79,15 @@ test('seed state reads none, issued, confirmed, local, and unreachable', async (
   assert.equal((await readRecoveryState(fetcher({ ok: true, state: 'none' }), { ownerId: 'alice' })).state, 'none');
   const local = await readRecoveryState(fetcher({ ok: true, source: 'unconfigured', state: 'none' }), { ownerId: 'alice' });
   assert.equal(local.local, true);
+  const local503 = await readRecoveryState(fetcher({ ok: false, error: 'runtime_unconfigured', source: 'unconfigured' }, 503), { ownerId: 'alice' });
+  assert.equal(local503.ok, true);
+  assert.equal(local503.local, true);
   assert.equal((await readRecoveryState(fetcher({ error: 'account_state_unavailable' }, 503), { ownerId: 'alice' })).ok, false);
+  assert.equal(shouldRetryRecovery('login_required', 0), true);
+  assert.equal(shouldRetryRecovery('login_required', 3), false);
+  assert.equal(shouldRetryRecovery('account_state_unavailable', 0), false);
+  assert.match(recoveryFailureNote('login_required'), /settling/);
+  assert.match(recoveryFailureNote('recovery_unavailable'), /check your seed/);
   assert.equal((await readRecoveryState(fetcher(new Error('offline')), { ownerId: 'alice' })).ok, false);
   assert.equal((await readRecoveryState(fetcher({}), {})).ok, false);
 });

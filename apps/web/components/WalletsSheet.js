@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
 import { X } from 'lucide-react';
@@ -17,6 +17,7 @@ import TxnPreview from './TxnPreview';
 import { usePresence } from './usePresence';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { partyFromToken } from '../lib/party-book.mjs';
+import { embeddedCreateOptions, embeddedSolanaCount } from '../lib/wallet-provision.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
 import { describeWallets, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
@@ -169,6 +170,7 @@ export default function WalletsSheet({
           {needsWallet ? <WalletPick rows={rows} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
           {pane === 'assets' ? (
             <>
+              {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
               <WalletRoster
                 rows={rows}
                 activeId={active?.id || ''}
@@ -271,11 +273,11 @@ function linkedKey(user) {
 
 function ConnectedPortfolio({ open }) {
   const { user, getAccessToken, unlinkWallet, ready, authenticated } = usePrivy();
+  const [portfolio, setPortfolio] = useState(null);
+  const [error, setError] = useState('');
   const { linkWallet } = useLinkAccount({
     onError: () => setError('That wallet could not be linked. If it already belongs to another account, sign in with it instead.'),
   });
-  const [portfolio, setPortfolio] = useState(null);
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [removing, setRemoving] = useState('');
   const accounts = linkedKey(user);
@@ -346,22 +348,39 @@ function ConnectedPortfolio({ open }) {
       loading={loading}
       removing={removing}
       onConnect={() => {
-        if (ready && authenticated) linkWallet({ walletChainType: 'solana-only' });
+        if (!ready || !authenticated) {
+          setError('Sign in again, then connect a wallet.');
+          return;
+        }
+        linkWallet({ walletChainType: 'solana-only' });
       }}
       onRemove={remove}
     />
   );
 }
 
-function WalletAdd() {
+export function WalletAdd() {
   const { createWallet } = useCreateWallet();
   const { importWallet } = useImportWallet();
   const { importSeedPhrase } = useImportSeedPhrase();
+  const { user, ready, authenticated } = usePrivy();
+  const connecting = useRef(false);
   const [mode, setMode] = useState('');
   const [seed, setSeed] = useState('');
   const [privkey, setPrivkey] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  const { linkWallet } = useLinkAccount({
+    onSuccess: () => {
+      if (!connecting.current) return;
+      connecting.current = false;
+      setNote('Wallet connected.');
+    },
+    onError: () => {
+      connecting.current = false;
+      setNote('That wallet could not be linked. If it already belongs to another account, sign in with it instead.');
+    },
+  });
 
   function finish(message) {
     setMode('');
@@ -378,14 +397,46 @@ function WalletAdd() {
           type="button"
           className="hint-btn"
           disabled={busy}
-          data-hint="Creates a new Solana wallet on this account. The key stays in Privy. Maelstrom does not store it."
+          data-hint="Opens Phantom, Solflare, Backpack, or another Solana wallet and links it to this account."
+          onClick={() => {
+            setMode('');
+            setNote('');
+            if (!ready || !authenticated) {
+              setNote('Sign in again, then connect a wallet.');
+              return;
+            }
+            connecting.current = true;
+            linkWallet({
+              walletChainType: 'solana-only',
+              description: 'Connect a Solana wallet to this account.',
+            });
+          }}
+        >
+          Connect a wallet
+        </button>
+        <button
+          type="button"
+          className="hint-btn"
+          disabled={busy}
+          data-hint="Creates another Solana wallet on this account. The key stays in Privy. Maelstrom does not store it."
           onClick={() => {
             setMode('');
             setBusy(true);
             setNote('');
-            createWallet()
+            const count = embeddedSolanaCount(user);
+            const options = embeddedCreateOptions(count);
+            const run = (next) => (next ? createWallet(next) : createWallet());
+            run(options)
               .then(() => finish('New wallet created. Maelstrom does not store its key.'))
-              .catch(() => finish('That wallet was not created.'));
+              .catch(() => {
+                if (count > 0) {
+                  finish('That wallet was not created.');
+                  return null;
+                }
+                return run({ walletIndex: 1 })
+                  .then(() => finish('New wallet created. Maelstrom does not store its key.'))
+                  .catch(() => finish('That wallet was not created.'));
+              });
           }}
         >
           Generate
@@ -465,7 +516,7 @@ function WalletAdd() {
 }
 
 function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
-  if (!rows.length) return <p className="quiet">No wallet on this account yet. Open Keys to create one.</p>;
+  if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one above, or generate a new one.</p>;
   return (
     <div className="wallet-roster" role="list" aria-label="Wallets">
       {rows.map(row => (
@@ -497,7 +548,7 @@ function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
 }
 
 function WalletPick({ rows, activeId, onSelect }) {
-  if (!rows.length) return <p className="quiet">No wallet on this account yet. Open Keys to create one.</p>;
+  if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one from the wallet button, or generate a new one.</p>;
   return (
     <label className="wallet-pick-label">
       Wallet

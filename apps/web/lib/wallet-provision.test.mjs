@@ -8,6 +8,8 @@ import {
   walletProvisionNote,
   walletProvisionPaths,
   walletProvisionSucceeded,
+  embeddedCreateOptions,
+  embeddedSolanaCount,
   linkedWalletKey,
   walletsFromPrivyUser,
 } from './wallet-provision.mjs';
@@ -279,6 +281,34 @@ test('wallet provision notes stay actionable and secret-free', () => {
   assert.match(walletConfigNote({ missing: ['PRIVY_APP_SECRET'] }), /PRIVY_APP_SECRET/);
   assert.match(walletConfigNote({ hasAppSecret: true, hasAuthorizationKey: false }), /PRIVY_AUTHORIZATION_KEY/);
   assert.equal(walletConfigNote({ hasAppId: true, hasAppSecret: true, hasAuthorizationKey: true }), '');
+});
+
+/**
+ * Achieves: a second embedded Solana wallet asks Privy for the next HD index, and external wallets do not count.
+ * Fails when: the first wallet passes an index, or a Phantom address increments the count.
+ * Oracle: count 0 → undefined options; one privy wallet → walletIndex 1; phantom-only count is 0.
+ * Side effects / state checked: none.
+ * Gaps: does not call Privy.
+ */
+test('another embedded wallet uses the next HD index', () => {
+  const embedded = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const phantom = 'So11111111111111111111111111111111111111112';
+  assert.equal(embeddedSolanaCount(null), 0);
+  assert.equal(embeddedCreateOptions(0), undefined);
+  assert.equal(embeddedSolanaCount({
+    linkedAccounts: [
+      { type: 'wallet', address: phantom, chainType: 'solana', walletClientType: 'phantom' },
+    ],
+  }), 0);
+  assert.equal(embeddedSolanaCount({
+    linkedAccounts: [
+      { type: 'wallet', address: embedded, chainType: 'solana', walletClientType: 'privy' },
+      { type: 'wallet', address: phantom, chainType: 'solana', walletClientType: 'phantom' },
+      { type: 'wallet', address: '0xabc', chainType: 'ethereum', walletClientType: 'privy' },
+    ],
+  }), 1);
+  assert.deepEqual(embeddedCreateOptions(1), { walletIndex: 1 });
+  assert.deepEqual(embeddedCreateOptions(40), { walletIndex: 20 });
 });
 
 test('walletConfigFlags reports alignment without leaking app ids', async () => {

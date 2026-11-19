@@ -14,6 +14,7 @@ import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
 import ProfileSheet from '../components/ProfileSheet';
 import WalletsSheet from '../components/WalletsSheet';
+import WalletDock from '../components/WalletDock';
 import ClaimHandle from '../components/ClaimHandle';
 import RecoveryCeremony from '../components/RecoveryCeremony';
 import SlideCommit from '../components/bits/SlideCommit';
@@ -294,6 +295,7 @@ function AuthedShell() {
         loginDisabled={false}
         onLogin={login}
         onLogout={leaveDevPreview}
+        privyLive
         liveWallets={null}
         onRetireWallet={(id) => {
           setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id) : current));
@@ -326,6 +328,7 @@ function AuthedShell() {
       loginDisabled={!ready}
       onLogin={login}
       onLogout={onLogout}
+      privyLive
       liveWallets={liveWallets}
       walletNote={walletNote}
       walletError={walletError}
@@ -362,7 +365,7 @@ function transferFailure(body, handle) {
   return 'The send did not post.';
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, onRetireWallet = null }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, onRetireWallet = null, privyLive = false }) {
   const toast = useToast();
   const [looks, setLooks] = useState({});
   const [roster, setRoster] = useState({ order: [], extra: [] });
@@ -1670,6 +1673,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       </aside>
 
       <section className={`stage${pane === 'Positions' ? ' is-book' : ''}`}>
+        <WalletDock
+          privyLive={privyLive}
+          wallets={wallets}
+          balanceLabel={glance.balanceLabel}
+          onOpen={openWallet}
+        />
         {noAgents ? null : (
         <header className="topbar">
           <span className="topbar-side" />

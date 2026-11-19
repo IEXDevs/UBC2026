@@ -95,6 +95,32 @@ function clientLabel(client) {
  * Include every Solana linked wallet (embedded Privy + connected external).
  * createOnLogin often has an address before a server wallet id exists.
  */
+/** Privy embedded Solana wallets already on this login. External wallets do not count. */
+export function embeddedSolanaCount(user) {
+  if (!user || typeof user !== 'object') return 0;
+  const accounts = Array.isArray(user.linkedAccounts)
+    ? user.linkedAccounts
+    : (Array.isArray(user.linked_accounts) ? user.linked_accounts : []);
+  return accounts.filter((account) => {
+    if (!account || account.type !== 'wallet') return false;
+    const chain = account.chainType ?? account.chain_type;
+    if (typeof chain === 'string' && chain && chain !== 'solana') return false;
+    const client = account.walletClientType ?? account.wallet_client_type ?? '';
+    const connector = account.connectorType ?? account.connector_type ?? '';
+    return client === 'privy' || connector === 'embedded';
+  }).length;
+}
+
+/**
+ * First embedded wallet uses Privy's default (HD index 0).
+ * The next call must name the following index or Privy refuses a second wallet.
+ */
+export function embeddedCreateOptions(count) {
+  const n = Number.isInteger(count) && count > 0 ? count : 0;
+  if (n <= 0) return undefined;
+  return { walletIndex: Math.min(n, 20) };
+}
+
 /** Changes when the user links or unlinks a wallet. The positions book refetches on this. */
 export function linkedWalletKey(user) {
   const accounts = Array.isArray(user?.linkedAccounts)

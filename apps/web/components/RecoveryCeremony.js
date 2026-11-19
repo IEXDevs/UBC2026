@@ -13,7 +13,7 @@ import {
   recoveryWords,
   writeRecoveryStep,
 } from '../lib/wallet-desk.mjs';
-import { issueRecovery, openRecovery, readRecoveryState, sealRecovery, verifyRecovery } from '../lib/recovery-vault.mjs';
+import { issueRecovery, openRecovery, readRecoveryState, recoveryFailureNote, sealRecovery, shouldRetryRecovery, verifyRecovery } from '../lib/recovery-vault.mjs';
 import { SEED_CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
 
@@ -115,12 +115,23 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
 
   useEffect(() => {
     let stop = false;
+    let timer = 0;
     setStep(null);
     (async () => {
-      const state = await readRecoveryState((...args) => fetch(...args), { ownerId, token: await authToken() });
+      let attempt = 0;
+      let state = { ok: false, error: 'recovery_unavailable' };
+      while (!stop) {
+        state = await readRecoveryState((...args) => fetch(...args), { ownerId, token: await authToken() });
+        if (stop) return;
+        if (state.ok || !shouldRetryRecovery(state.error, attempt)) break;
+        attempt += 1;
+        await new Promise((resolve) => {
+          timer = window.setTimeout(resolve, 400);
+        });
+      }
       if (stop) return;
       if (!state.ok) {
-        setNote('Could not reach your account to check your seed. Check the connection and try again.');
+        setNote(recoveryFailureNote(state.error));
         setStep('error');
         return;
       }
@@ -141,7 +152,10 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       setMode('account');
       routeFromAccount(state);
     })();
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
   }, [ownerId, retry]);
 
   useEffect(() => {
