@@ -214,15 +214,21 @@ async function rpcCallOnce(fetcher, rpcUrl, method, params) {
   try {
     response = await fetcher(rpcUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      // Cloudflare Workers only allow redirect "follow" | "manual".
-      redirect: 'manual',
+      // Prefer follow so QuickNode/CDN 3xx still yields a JSON body. Workers
+      // reject redirect:"error"; "manual" left 302 as !ok → rpc_failed.
+      redirect: 'follow',
       signal: abortAfter(15_000),
     });
   } catch (error) {
     const failed = new Error(rpcFailureCode(error));
     failed.code = rpcFailureCode(error);
+    throw failed;
+  }
+  if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+    const failed = new Error('rpc_failed');
+    failed.code = 'rpc_failed';
     throw failed;
   }
   let payload = null;
@@ -240,11 +246,18 @@ async function rpcCallOnce(fetcher, rpcUrl, method, params) {
   return payload.result;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function rpcCall(fetcher, rpcUrl, method, params) {
   try {
     return await rpcCallOnce(fetcher, rpcUrl, method, params);
   } catch (first) {
-    // One retry covers transient public-RPC 429 / cold starts on Workers.
+    // Brief backoff before retry — public Solana RPC rate-limits CF egress.
+    await sleep(first?.code === 'rpc_rate_limited' ? 400 : 120);
     try {
       return await rpcCallOnce(fetcher, rpcUrl, method, params);
     } catch (second) {
@@ -453,14 +466,14 @@ export async function readWalletBalancesAcrossClusters({
   fetcher = fetch,
 } = {}) {
   const urls = rpcUrls || resolveClusterRpcUrls(env);
-  const [devnet, testnet] = await Promise.all([
-    urls.devnet
-      ? readClusterWalletBalances({ cluster: 'devnet', rpcUrl: urls.devnet, address, fetcher })
-      : rejectBalance('rpc_not_configured', address, 'devnet'),
-    urls.testnet
-      ? readClusterWalletBalances({ cluster: 'testnet', rpcUrl: urls.testnet, address, fetcher })
-      : rejectBalance('rpc_not_configured', address, 'testnet'),
-  ]);
+  // Sequential clusters cut public-RPC burst rate from Workers (parallel was
+  // ~8 methods at once per wallet and often 429'd into rpc_failed).
+  const devnet = urls.devnet
+    ? await readClusterWalletBalances({ cluster: 'devnet', rpcUrl: urls.devnet, address, fetcher })
+    : rejectBalance('rpc_not_configured', address, 'devnet');
+  const testnet = urls.testnet
+    ? await readClusterWalletBalances({ cluster: 'testnet', rpcUrl: urls.testnet, address, fetcher })
+    : rejectBalance('rpc_not_configured', address, 'testnet');
   const holdings = [
     ...holdingsFromClusterResult(devnet),
     ...holdingsFromClusterResult(testnet),

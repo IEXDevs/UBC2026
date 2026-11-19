@@ -10,30 +10,32 @@ import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mj
 import { parsePermission, permissionInstruction, toolAccessKind } from '../../../../../lib/spend-permission.mjs';
 import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
 import { ensureOwnerTradeLoop } from '../../../../../lib/owner-trade.mjs';
+import { cloudflareWorkerEnv } from '../../../../../lib/wallets-cloudflare.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
 
-function chatToolEnv() {
+function secretFrom(cfEnv, name) {
+  const fromCf = typeof cfEnv?.[name] === 'string' ? cfEnv[name].trim() : '';
+  if (fromCf) return fromCf;
+  const fromRoot = readRootEnv(name);
+  if (fromRoot) return fromRoot;
+  return typeof process.env[name] === 'string' ? process.env[name].trim() : '';
+}
+
+async function chatToolEnv() {
+  const cfEnv = await cloudflareWorkerEnv();
   return {
-    FIRECRAWL_API_KEY: readRootEnv('FIRECRAWL_API_KEY'),
-    CLOUDFLARE_ACCOUNT_ID: readRootEnv('CLOUDFLARE_ACCOUNT_ID'),
-    CLOUDFLARE_API_TOKEN: readRootEnv('CLOUDFLARE_API_TOKEN'),
+    FIRECRAWL_API_KEY: secretFrom(cfEnv, 'FIRECRAWL_API_KEY'),
+    CLOUDFLARE_ACCOUNT_ID: secretFrom(cfEnv, 'CLOUDFLARE_ACCOUNT_ID'),
+    CLOUDFLARE_API_TOKEN: secretFrom(cfEnv, 'CLOUDFLARE_API_TOKEN'),
     // Text-chat get_wallets enriches shell wallet addresses via QuickNode when
-    // Supabase rows are missing — same secret the Worker uses.
-    QUICKNODE_DEVNET_RPC_URL: readRootEnv('QUICKNODE_DEVNET_RPC_URL')
-      || (typeof process.env.QUICKNODE_DEVNET_RPC_URL === 'string'
-        ? process.env.QUICKNODE_DEVNET_RPC_URL.trim()
-        : ''),
-    QUICKNODE_TESTNET_RPC_URL: readRootEnv('QUICKNODE_TESTNET_RPC_URL')
-      || (typeof process.env.QUICKNODE_TESTNET_RPC_URL === 'string'
-        ? process.env.QUICKNODE_TESTNET_RPC_URL.trim()
-        : ''),
-    JUPITER_API_KEY: readRootEnv('JUPITER_API_KEY'),
-    NEXT_PUBLIC_AGENT_RUNTIME_URL: readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL')
-      || (typeof process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL === 'string'
-        ? process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL.trim()
-        : ''),
+    // Supabase rows are missing — same secret the Worker uses. Prefer the
+    // Cloudflare binding over root .env so hosted OpenNext sees the secret.
+    QUICKNODE_DEVNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_DEVNET_RPC_URL'),
+    QUICKNODE_TESTNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_TESTNET_RPC_URL'),
+    JUPITER_API_KEY: secretFrom(cfEnv, 'JUPITER_API_KEY'),
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: secretFrom(cfEnv, 'NEXT_PUBLIC_AGENT_RUNTIME_URL'),
   };
 }
 
@@ -72,7 +74,7 @@ export async function POST(request, context) {
   const accessToken = authHeader.startsWith('Bearer ')
     ? authHeader.slice('Bearer '.length).trim()
     : (typeof body.accessToken === 'string' ? body.accessToken.trim() : '');
-  const env = chatToolEnv();
+  const env = await chatToolEnv();
   const invokeRaw = createChatToolInvoker({
     ownerId,
     botId,
@@ -99,6 +101,9 @@ export async function POST(request, context) {
     // Firecrawl must not ride the runtime service binding. A Worker 404 is
     // not a research outage.
     searchFetch: fetch,
+    // Solana JSON-RPC must not ride AGENT_RUNTIME either — binding.fetch(RPC)
+    // returns a Worker 404 and collapses into rpc_failed.
+    rpcFetch: fetch,
   });
 
   try {

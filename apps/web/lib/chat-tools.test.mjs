@@ -522,6 +522,97 @@ test('createChatToolInvoker falls back to shell bots and wallets when Worker is 
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
+/**
+ * Achieves: Solana enrich uses rpcFetch, not the AGENT_RUNTIME binding fetcher.
+ * Fails when: QuickNode URLs ride fetcher and a Worker 404 becomes rpc_failed,
+ *   or a prior runtime-ok balance is overwritten by a failed enrich.
+ * Oracle: rpcFetch hits example.invalid; binding fetcher never sees RPC hosts;
+ *   runtime-ok wallet stays ok when rpcFetch fails.
+ * Side effects: injected doubles only.
+ * Gaps: none for binding bypass.
+ */
+test('createChatToolInvoker get_wallets uses rpcFetch and keeps runtime-ok balances', async () => {
+  const { DEVNET_GENESIS_HASH } = await import('@ubc2026/wallets/privy');
+  const { TESTNET_GENESIS_HASH } = await import('@ubc2026/wallets/balances');
+  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const rpcHosts = [];
+  const bindingHosts = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_local',
+    runtimeBase: 'https://runtime.example',
+    env: {
+      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
+    },
+    shellWallets: [{ id: 'w_main', label: 'Main', address, kind: 'main' }],
+    fetcher: async (url) => {
+      bindingHosts.push(String(url));
+      if (String(url).includes('/api/wallets') || String(url).includes('/api/transfers')) {
+        return Response.json({ ok: true, source: 'supabase', items: [] });
+      }
+      // Simulate AGENT_RUNTIME.bind returning Worker 404 for Solana hosts.
+      return new Response('not found', { status: 404 });
+    },
+    rpcFetch: async (url, init = {}) => {
+      const href = String(url);
+      rpcHosts.push(href);
+      const body = JSON.parse(init.body || '{}');
+      const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : DEVNET_GENESIS_HASH;
+      if (body.method === 'getGenesisHash') {
+        return Response.json({ jsonrpc: '2.0', id: 1, result: genesis });
+      }
+      if (body.method === 'getBalance') {
+        return Response.json({ jsonrpc: '2.0', id: 1, result: { value: href.includes('testnet') ? 0 : 1_000_000_000 } });
+      }
+      return Response.json({ jsonrpc: '2.0', id: 1, result: { value: [] } });
+    },
+  });
+  const wallets = await invoke('get_wallets', {});
+  assert.equal(wallets.items[0].solLamports, '1000000000');
+  assert.equal(wallets.items[0].balanceStatus, 'ok');
+  assert.ok(rpcHosts.some((href) => href.includes('example.invalid')));
+  assert.equal(bindingHosts.some((href) => href.includes('example.invalid')), false);
+
+  const keepOk = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: 'bot_local',
+    runtimeBase: 'https://runtime.example',
+    env: {
+      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
+    },
+    fetcher: async (url) => {
+      if (String(url).includes('/api/wallets')) {
+        return Response.json({
+          ok: true,
+          source: 'supabase',
+          items: [{
+            id: 'w_main',
+            label: 'Main',
+            address,
+            kind: 'main',
+            solLamports: '5000000000',
+            solBalanceLabel: '5 SOL',
+            holdings: [{ label: '5 SOL (devnet)', cluster: 'devnet' }],
+            displayBalanceLabel: '5 SOL (devnet)',
+            balanceStatus: 'ok',
+          }],
+        });
+      }
+      if (String(url).includes('/api/transfers')) {
+        return Response.json({ ok: true, items: [] });
+      }
+      return new Response('nope', { status: 404 });
+    },
+    rpcFetch: async () => new Response('boom', { status: 500 }),
+  });
+  const preserved = await keepOk('get_wallets', {});
+  assert.equal(preserved.items[0].balanceStatus, 'ok');
+  assert.equal(preserved.items[0].solLamports, '5000000000');
+  assert.match(preserved.balances.displayBalanceLabel, /5 SOL/);
+});
+
 test('createChatToolInvoker enriches shell wallet addresses via QuickNode', async () => {
   const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
   const { TESTNET_GENESIS_HASH } = await import('@ubc2026/wallets/balances');
