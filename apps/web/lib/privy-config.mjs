@@ -106,6 +106,32 @@ export function privyProviderProps({ appId, clientId } = {}) {
   return props;
 }
 
+/** Empty arrays wipe Privy's built-in adapters ("No available adapters"). */
+export function usableSolanaConnectors(value) {
+  if (Array.isArray(value)) return value.length > 0 ? value : null;
+  if (value && typeof value === 'object') return value;
+  return null;
+}
+
+export function readSolanaConnectors(load) {
+  if (typeof load !== 'function') return null;
+  try {
+    return usableSolanaConnectors(load());
+  } catch {
+    return null;
+  }
+}
+
+export function withSolanaExternalWallets(config, connectors) {
+  const base = config && typeof config === 'object' ? { ...config } : {};
+  const usable = usableSolanaConnectors(connectors);
+  if (!usable) return base;
+  return {
+    ...base,
+    externalWallets: { solana: { connectors: usable } },
+  };
+}
+
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 const ACCOUNT_METHODS = Object.freeze([

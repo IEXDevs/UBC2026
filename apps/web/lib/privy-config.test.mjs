@@ -9,7 +9,10 @@ import {
   ownerIdFromPrivyUser,
   privyAccountLabel,
   privyProviderProps,
+  readSolanaConnectors,
   sessionReadyForWallets,
+  usableSolanaConnectors,
+  withSolanaExternalWallets,
 } from './privy-config.mjs';
 
 test('Privy provider props stay public and Solana-only', () => {
@@ -98,6 +101,22 @@ test('owner id comes from an authenticated Privy user', () => {
   assert.equal(privyAccountLabel({ wallet: { address: 'So11111111111111111111111111111111111111112' } }), 'So111...11112');
 });
 
+test('empty Solana connector lists are omitted so Privy keeps its defaults', () => {
+  assert.equal(usableSolanaConnectors([]), null);
+  assert.equal(usableSolanaConnectors(null), null);
+  assert.deepEqual(usableSolanaConnectors([{ id: 'phantom' }]), [{ id: 'phantom' }]);
+  assert.equal(readSolanaConnectors(() => { throw new Error('ssr'); }), null);
+  assert.equal(readSolanaConnectors(() => []), null);
+  assert.deepEqual(readSolanaConnectors(() => [{ id: 'solflare' }]), [{ id: 'solflare' }]);
+  const config = { loginMethods: ['wallet'], captchaEnabled: false };
+  assert.deepEqual(withSolanaExternalWallets(config, []), config);
+  assert.equal(withSolanaExternalWallets(config, []).externalWallets, undefined);
+  assert.deepEqual(
+    withSolanaExternalWallets(config, [{ id: 'backpack' }]).externalWallets,
+    { solana: { connectors: [{ id: 'backpack' }] } },
+  );
+});
+
 test('PrivyRoot pins apiUrl and does not mount a same-origin auth proxy', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const source = readFileSync(join(root, 'components/PrivyRoot.js'), 'utf8');
@@ -106,6 +125,9 @@ test('PrivyRoot pins apiUrl and does not mount a same-origin auth proxy', () => 
   assert.match(source, /toSolanaWalletConnectors/);
   assert.match(source, /if \(!props \|\| !browser\)/);
   assert.match(source, /providerReady: props !== null && browser/);
+  assert.match(source, /withSolanaExternalWallets/);
+  assert.match(source, /readSolanaConnectors/);
+  assert.doesNotMatch(source, /solanaConnectors = \[\]/);
   assert.match(page, /providerReady/);
   assert.match(page, /if \(!providerReady\) return <SessionHold \/>/);
   assert.doesNotMatch(source, /['"`]\/api\/privy-auth/);
