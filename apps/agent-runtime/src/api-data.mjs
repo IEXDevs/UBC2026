@@ -870,9 +870,8 @@ export async function handleApiData(request, env, matched) {
       `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
       fetcher,
     );
-    if (!Array.isArray(existing.rows) || existing.rows.length < 1) {
-      return json({ error: 'not_found' }, 404);
-    }
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) return json({ error: 'delete_failed' }, 502);
+    if (existing.rows.length === 0) return json({ ok: true, deleted: botId });
 
     // Child tables reference bots(id) without ON DELETE CASCADE — clear dependents first.
     const dependents = [
