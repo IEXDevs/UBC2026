@@ -40,3 +40,19 @@ export function secretAcceptAllowed({ generated = false, copied = false } = {}) 
   if (!generated) return true;
   return copied === true;
 }
+
+/**
+ * Recovery passphrase step. Copy is preferred; matching confirm still
+ * proves they have the value when the clipboard is denied.
+ */
+export function recoveryPassStepReady({
+  generated = false,
+  copied = false,
+  passphrase = '',
+  again = '',
+} = {}) {
+  if (secretAcceptAllowed({ generated, copied })) return true;
+  const left = normalizePassphrase(passphrase);
+  const right = normalizePassphrase(again);
+  return Boolean(generated && left && left === right);
+}

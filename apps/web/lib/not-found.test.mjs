@@ -34,6 +34,7 @@ test('missing routes and crashes render the same 404 screen', () => {
   assert.match(rootError, /globals\.css/);
   assert.match(guard, /getDerivedStateFromError/);
   assert.match(guard, /unhandledrejection/);
+  assert.match(guard, /shouldCrashOnRejection/);
   assert.match(guard, /NotFoundScreen/);
   assert.match(layout, /<CrashGuard>/);
 });

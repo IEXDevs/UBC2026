@@ -2,6 +2,7 @@
 
 import { Component, useEffect, useState } from 'react';
 import NotFoundScreen from './NotFoundScreen';
+import { shouldCrashOnError, shouldCrashOnRejection } from '../lib/crash-guard.mjs';
 
 class RenderBoundary extends Component {
   constructor(props) {
@@ -19,33 +20,25 @@ class RenderBoundary extends Component {
   }
 }
 
-function fromThisApp(file) {
-  if (typeof file !== 'string' || file === '') return false;
-  try {
-    return new URL(file).origin === window.location.origin;
-  } catch {
-    return false;
-  }
-}
-
-/** Render crashes, uncaught exceptions, and unhandled rejections show the 404 instead of a blank page. */
+/** Render crashes show the 404. Privy / wallet-connect rejections stay on the desk. */
 export default function CrashGuard({ children }) {
   const [crashed, setCrashed] = useState(false);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') return undefined;
+    const origin = window.location.origin;
 
     const onError = (event) => {
-      const message = String(event?.message || '');
-      if (message.includes('ResizeObserver loop')) return;
-      if (!fromThisApp(event?.filename)) return;
+      if (!shouldCrashOnError({
+        message: event?.message,
+        filename: event?.filename,
+        origin,
+      })) return;
       setCrashed(true);
     };
 
     const onReject = (event) => {
-      const stack = typeof event?.reason?.stack === 'string' ? event.reason.stack : '';
-      if (stack.includes('chrome-extension://') || stack.includes('moz-extension://')) return;
-      if (stack === '' && typeof event?.reason !== 'object') return;
+      if (!shouldCrashOnRejection(event?.reason, { origin })) return;
       setCrashed(true);
     };
 

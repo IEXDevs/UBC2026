@@ -128,7 +128,7 @@ export default function ProfileSheet({
               <button type="submit" className="solid">Save profile</button>
             </form>
           ) : (
-            <button type="button" className="solid" disabled={loginDisabled} onClick={onLogin}>Connect</button>
+            <button type="button" className="solid" disabled={loginDisabled} onClick={() => onLogin?.()}>Connect</button>
           )}
         </div>
         <div className="profile-settings">

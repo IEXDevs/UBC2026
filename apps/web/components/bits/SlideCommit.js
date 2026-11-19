@@ -29,6 +29,24 @@ export default function SlideCommit({
     committed.current = false;
   }, [resetKey]);
 
+  useEffect(() => {
+    if (!dragging) return undefined;
+    function onMove(event) {
+      pointerMove(event);
+    }
+    function onUp() {
+      pointerUp();
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [dragging]);
+
   function maxTravel() {
     const track = trackRef.current;
     if (!track) return 0;
@@ -47,7 +65,11 @@ export default function SlideCommit({
 
   function pointerDown(event) {
     if (disabled || done) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Capture is optional; window listeners still see the gesture.
+    }
     dragRef.current = {
       x: event.clientX,
       origin: offsetRef.current,
@@ -68,7 +90,8 @@ export default function SlideCommit({
     if (!drag) return;
     dragRef.current = null;
     setDragging(false);
-    if (drag.max > 0 && offsetRef.current >= drag.max * 0.92) {
+    const max = drag.max > 0 ? drag.max : maxTravel();
+    if (max <= 0 || offsetRef.current >= max * 0.92) {
       commit();
       return;
     }

@@ -17,6 +17,7 @@ import {
   swapSendSettlement,
   phraseFromEntropy,
   quoteUrl,
+  persistRecoveryAck,
   readQuoteOut,
   readRecoveryAck,
   recoveryAcknowledged,
@@ -32,6 +33,7 @@ import {
   verifyRecoveryPhrase,
   writeRecoveryAck,
 } from './wallet-desk.mjs';
+import { BIP39_ENGLISH } from './bip39-english.mjs';
 
 const ADDRESS = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const PHRASE = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima'];
@@ -296,6 +298,40 @@ test('a recovery phrase is a real 12-word BIP39 mnemonic and the ack stores no w
   writeRecoveryAck(memory, 'did:privy:abc');
   assert.equal([...storage.values()][0].includes('abandon'), false);
   assert.equal(readRecoveryAck(memory, 'did:privy:abc'), true);
+  assert.equal(persistRecoveryAck(memory, 'did:privy:abc'), true);
+  assert.equal(accountSetupStep({
+    signedIn: true,
+    profileReady: true,
+    handle: 'alex',
+    walletsReady: true,
+    walletCount: 1,
+    recoveryConfirmed: readRecoveryAck(memory, 'did:privy:abc'),
+  }), null);
+  assert.equal(persistRecoveryAck(memory, ''), false);
+  assert.equal(persistRecoveryAck({
+    getItem: () => null,
+    setItem: () => { throw new Error('quota'); },
+  }, 'did:privy:abc'), false);
+});
+
+test('every BIP39 word is a valid recovery word and SHA-256 still works if subtle digest throws', async () => {
+  for (const word of BIP39_ENGLISH) {
+    assert.match(word, /^[a-z]{3,8}$/);
+  }
+  const subtle = globalThis.crypto?.subtle;
+  const original = subtle?.digest;
+  if (subtle && original) {
+    subtle.digest = async () => { throw new Error('subtle'); };
+  }
+  try {
+    const known = await phraseFromEntropy(new Uint8Array(16));
+    assert.deepEqual(known, [...Array(11).fill('abandon'), 'about']);
+    assert.equal(await verifyRecoveryPhrase(known), true);
+    const phrase = await createRecoveryPhrase(bytes => { bytes.fill(9); });
+    assert.equal(await verifyRecoveryPhrase(phrase), true);
+  } finally {
+    if (subtle && original) subtle.digest = original;
+  }
 });
 
 /**

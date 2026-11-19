@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { copyText } from '../lib/copy-text.mjs';
 import { shortAddress } from '../lib/money-views.mjs';
 
 export default function AddressCopy({ address, prefix = '', className = '', compact = false }) {
@@ -11,8 +12,8 @@ export default function AddressCopy({ address, prefix = '', className = '', comp
   async function copy() {
     if (!address) return;
     try {
-      await navigator.clipboard.writeText(address);
-      setNote('Copied');
+      const ok = await copyText(address);
+      setNote(ok ? 'Copied' : 'Copy failed');
     } catch {
       setNote('Copy failed');
     }

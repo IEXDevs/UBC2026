@@ -29,7 +29,8 @@ import RecallSearch from '../components/RecallSearch';
 import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletGlance } from '../lib/money-views.mjs';
 import { assignedWalletAddress, devnetSpendableLabel } from '../lib/devnet-balance.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
-import { netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
+import { clearAcceptanceDraft, netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
+import { CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
 import { compactLines, contextUsage, contextWindowFor } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
 import {
@@ -73,7 +74,7 @@ import { latestInlineAllow } from '../lib/voice-allow.mjs';
 import { catalogAddition, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
 import { STORAGE_FILE_TOO_BIG } from '../lib/file-quota.mjs';
 import { ensureAccountCode } from '../lib/account-code.mjs';
-import { accountStorage, bindAccountState, hydrateAccountState } from '../lib/account-state.mjs';
+import { accountStorage, bindAccountState, flushAccountState, hydrateAccountState } from '../lib/account-state.mjs';
 import { applyStoredFile, dropCatalogFile, storeAttachedFile, uploadNotice } from '../lib/store-file.mjs';
 import { searchRecall } from '../lib/recall-search.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
@@ -431,6 +432,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [profileReady, setProfileReady] = useState(false);
   const [recoveryAck, setRecoveryAck] = useState(null);
   const [acceptanceAck, setAcceptanceAck] = useState(null);
+  const [acceptanceClosing, setAcceptanceClosing] = useState(false);
+  const acceptanceTimer = useRef(0);
   // Account state (roster, chats, permissions, account id) loads before the desk reads it.
   const [hydratedOwner, setHydratedOwner] = useState(null);
   const stateReady = !ownerId || hydratedOwner === ownerId;
@@ -601,23 +604,30 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     }
   }, [ownerId, stateReady]);
 
+  const profileOwnerRef = useRef('');
   useEffect(() => {
     const key = profileKey(ownerId);
     if (!key) {
+      profileOwnerRef.current = '';
       setProfile(null);
       setProfileReady(false);
       return undefined;
     }
-    setProfileReady(false);
+    // A new access token must not tear down onboarding. That was dropping the amount mid-entry.
+    const sameOwner = profileOwnerRef.current === ownerId;
+    if (!sameOwner) {
+      profileOwnerRef.current = ownerId;
+      setProfileReady(false);
+    }
     let local = null;
     try {
       const raw = localStorage.getItem(key);
       local = raw ? JSON.parse(raw) : null;
       if (local?.handle && local?.displayName) setProfile(local);
-      else setProfile(null);
+      else if (!sameOwner) setProfile(null);
     } catch {
       local = null;
-      setProfile(null);
+      if (!sameOwner) setProfile(null);
     }
     const profileUrl = shellRuntimeUrl('/api/profiles/me');
     const accountUrl = shellRuntimeUrl('/api/me');
@@ -628,7 +638,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     let stop = false;
     (async () => {
       try {
-        const headers = await ownerAuthHeaders(ownerId, getAccessToken);
+        const headers = await ownerAuthHeaders(ownerId, accessTokenRef.current);
         const [response] = await Promise.all([
           fetch(profileUrl, { headers, cache: 'no-store', signal: AbortSignal.timeout(SETUP_CARD_MS) }),
           accountUrl ? fetch(accountUrl, { headers, cache: 'no-store', signal: AbortSignal.timeout(SETUP_CARD_MS) }).catch(() => null) : null,
@@ -652,7 +662,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       }
     })();
     return () => { stop = true; };
-  }, [ownerId, getAccessToken]);
+  }, [ownerId]);
 
   useEffect(() => {
     if (!ownerId) {
@@ -1989,14 +1999,24 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           </section>
         </div>
       ) : null}
-      {setupStep === 'acceptance' && !claimWelcome ? (
+      {(setupStep === 'acceptance' || acceptanceClosing) && !claimWelcome ? (
         <SpendAcceptance
+          ownerId={ownerId || ''}
           onContinue={({ permission, reviewCap }) => {
             try {
               writeAcceptance(accountStorage, ownerId, { permission, reviewCap });
-              setAcceptanceAck(true);
+              if (readAcceptanceAck(localStorage, ownerId) !== true) return false;
+              setAcceptanceClosing(true);
+              window.clearTimeout(acceptanceTimer.current);
+              acceptanceTimer.current = window.setTimeout(() => {
+                try { clearAcceptanceDraft(sessionStorage, ownerId); } catch { /* the account copy is already stored */ }
+                setAcceptanceAck(true);
+                setAcceptanceClosing(false);
+              }, CONFIRM_HOLD_MS);
+              void flushAccountState();
+              return true;
             } catch {
-              /* the sheet stays until the threshold is stored */
+              return false;
             }
           }}
         />
