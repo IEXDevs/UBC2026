@@ -355,7 +355,9 @@ function tokensLabel(tokens) {
 /** Attach whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet. */
 async function withOnchainBalances(env, wallets) {
   const list = Array.isArray(wallets) ? wallets : [];
-  const fetcher = env.fetch ?? fetch;
+  // Always hit Solana over public HTTPS (or the injected test double). Never
+  // reuse a service-binding fetcher if one is later stuffed onto env.fetch.
+  const fetcher = typeof env.fetch === 'function' ? env.fetch : globalThis.fetch;
   const head = list.slice(0, BALANCE_CAP);
   const enriched = await Promise.all(head.map(async (wallet) => {
     const bal = await readWalletBalancesAcrossClusters({

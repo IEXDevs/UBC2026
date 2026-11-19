@@ -56,6 +56,7 @@
   // NEXT_PUBLIC_PRIVY_CLIENT_ID, NEXT_PUBLIC_AGENT_RUNTIME_URL.
   // Secret names for this Worker, set with wrangler secret bulk on the top-level
   // worker and again with --env dev: GOOGLE_DRIVE_CLIENT_ID,
-  // GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN.
+  // GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN,
+  // QUICKNODE_DEVNET_RPC_URL, QUICKNODE_TESTNET_RPC_URL (chat get_wallets enrich).
   // Do not put PRIVY_APP_SECRET or any other secret value in this file.
 }
