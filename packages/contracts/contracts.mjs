@@ -351,6 +351,33 @@ const LOOKUP_SKIP = new Set([
   'maelstrom', 'account',
 ]);
 
+/** Words that end a spoken name. "the" can still sit inside the name. */
+const HANDLE_CLOSERS = new Set([
+  'please', 'thanks', 'thank', 'wallet', 'address', 'handle', 'account', 'for',
+  'to', 'send', 'me', 'my', 'now', 'today', 'ok', 'okay', 'and', 'then', 'so',
+  'their', 'his', 'her', 'its', 'on', 'in', 'with', 'from', 'about', 'of',
+  'show', 'check', 'what', 'whats', 'is', 'can', 'you', 'who', 'just',
+  'pay', 'money', 'usdc',
+]);
+
+function lookupWords(text) {
+  return text.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+/** Keep the spoken name, then stop when the sentence turns back into a request. */
+function takeSpokenName(words) {
+  const kept = [];
+  for (const word of words) {
+    if (HANDLE_CLOSERS.has(word)) break;
+    kept.push(word);
+    if (kept.length === 5) break;
+  }
+  const meaningful = kept.filter(word => word !== 'the' && word !== 'a' && word !== 'an');
+  if (meaningful.length === 0) return '';
+  const handle = kept.join('');
+  return /^[a-z0-9]{2,32}$/.test(handle) ? handle : '';
+}
+
 /** Letters and numbers only, for a lookup. Underscores and other marks drop out. */
 export function lookupHandleKey(value) {
   if (typeof value !== 'string') return '';
@@ -365,22 +392,26 @@ export function parseLookupQuery(value) {
   if (typeof value !== 'string') return null;
   const raw = value.trim();
   if (!raw || raw.length > 240) return null;
+  const bareHandle = normalizeHandle(raw);
+  if (bareHandle) return { kind: 'handle', handle: lookupHandleKey(bareHandle) };
   const lower = raw.toLowerCase().replace(/[’']s\b/g, '').replace(/[’']/g, '');
   const sns = lower.match(/\b([a-z0-9][a-z0-9-]{0,62}\.sol)\b/);
   if (sns && SNS_NAME.test(sns[1])) return { kind: 'sns', domain: sns[1] };
-  const mention = lower.match(/@([a-z0-9][a-z0-9._-]{0,64})/);
-  if (mention) {
-    const handle = lookupHandleKey(mention[1]);
-    if (/^[a-z0-9]{2,32}$/.test(handle)) return { kind: 'handle', handle };
+  const at = lower.match(/@([\s\S]+)$/);
+  if (at) {
+    const handle = takeSpokenName(lookupWords(at[1]));
+    if (handle) return { kind: 'handle', handle };
   }
-  const handle = lookupHandleKey(
-    lower
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(word => word && !LOOKUP_SKIP.has(word))
-      .join(''),
-  );
-  if (/^[a-z0-9]{2,32}$/.test(handle)) return { kind: 'handle', handle };
+  const spokenAt = lower.match(/(?:^|\s)at\s+([a-z0-9][\s\S]*)$/);
+  if (spokenAt) {
+    const handle = takeSpokenName(lookupWords(spokenAt[1]));
+    if (handle) return { kind: 'handle', handle };
+  }
+  const words = lookupWords(lower);
+  let start = 0;
+  while (start < words.length && LOOKUP_SKIP.has(words[start])) start += 1;
+  const handle = takeSpokenName(words.slice(start));
+  if (handle) return { kind: 'handle', handle };
   return null;
 }
 

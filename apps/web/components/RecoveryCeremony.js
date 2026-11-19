@@ -78,7 +78,7 @@ export function PhraseEntry({ slots, onChange, disabled = false }) {
   );
 }
 
-export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = '', getAccessToken = null, onDone, onSessionExpired = null }) {
+export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = '', getAccessToken = null, allowLocal = false, onDone, onSessionExpired = null }) {
   const [words, setWords] = useState(null);
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
@@ -121,7 +121,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       let attempt = 0;
       let state = { ok: false, error: 'recovery_unavailable' };
       while (!stop) {
-        state = await readRecoveryState((...args) => fetch(...args), { ownerId, token: await authToken() });
+        state = await readRecoveryState((...args) => fetch(...args), { ownerId, token: await authToken(), allowLocal });
         if (stop) return;
         if (state.ok || !shouldRetryRecovery(state.error, attempt)) break;
         attempt += 1;
@@ -157,7 +157,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       stop = true;
       window.clearTimeout(timer);
     };
-  }, [ownerId, retry, onSessionExpired]);
+  }, [ownerId, retry, allowLocal, onSessionExpired]);
 
   useEffect(() => {
     if (mode !== 'local' || !step || step === 'done' || step === 'success') return;
@@ -194,10 +194,15 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         }
         if (saved.exists) {
           const state = await readRecoveryState((...args) => fetch(...args), { ownerId, token: await authToken() });
-          if (mounted.current && state.ok) routeFromAccount(state);
+          if (!mounted.current) return;
+          if (state.ok) routeFromAccount(state);
+          else {
+            setNote(recoveryFailureNote(state.error));
+            setStep('error');
+          }
           return;
         }
-        setNote('Your account could not keep this seed yet. Check the connection and try again.');
+        setNote(recoveryFailureNote(saved.error));
         setStep('pass');
       } catch {
         if (mounted.current) {
@@ -251,7 +256,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       return;
     }
     if (!checked.ok) {
-      setNote('Could not check the seed. Check the connection and try again.');
+      setNote(recoveryFailureNote(checked.error));
       return;
     }
     exitCeremony();
@@ -313,7 +318,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       });
       setBusy(false);
       if (!confirmed.ok) {
-        setNote('Your account could not record the confirmed seed. Check the connection and try again.');
+        setNote(recoveryFailureNote(confirmed.error));
         return;
       }
     }

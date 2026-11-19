@@ -335,6 +335,12 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.equal(parseRecipient('not a handle'), null);
   assert.deepEqual(parseLookupQuery('can you look up @Alex_Smith please'), { kind: 'handle', handle: 'alexsmith' });
   assert.deepEqual(parseLookupQuery("what's @BOB's wallet"), { kind: 'handle', handle: 'bob' });
+  assert.deepEqual(parseLookupQuery('@Mommy Milkers'), { kind: 'handle', handle: 'mommymilkers' });
+  assert.deepEqual(parseLookupQuery('look up @Mommy Milkers for me'), { kind: 'handle', handle: 'mommymilkers' });
+  assert.deepEqual(parseLookupQuery('at Mommy Milkers'), { kind: 'handle', handle: 'mommymilkers' });
+  assert.deepEqual(parseLookupQuery('can you find mommy milkers'), { kind: 'handle', handle: 'mommymilkers' });
+  assert.deepEqual(parseLookupQuery('@the rock'), { kind: 'handle', handle: 'therock' });
+  assert.deepEqual(parseLookupQuery('@Wallet'), { kind: 'handle', handle: 'wallet' });
   assert.deepEqual(parseLookupQuery('find richclub.sol for me'), { kind: 'sns', domain: 'richclub.sol' });
   assert.equal(parseLookupQuery('look up the wallet'), null);
   assert.equal(lookupHandleKey('Alex_Smith'), 'alexsmith');

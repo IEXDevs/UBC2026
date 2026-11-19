@@ -6,6 +6,42 @@ import {
   openAiAgentTools,
   serializeToolResult,
 } from './chat-tools.mjs';
+import worker from '../../agent-runtime/src/index.mjs';
+
+test('the agent tool resolves another signed-in user’s handle to their main wallet', async () => {
+  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const env = {
+    PRIVY_APP_ID: 'test-app',
+    PRIVY_APP_SECRET: 'test-secret',
+    SUPABASE_URL: 'https://directory.example',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-role-key',
+    transferClient: { acceptLogin: async ({ accessToken }) => {
+      assert.equal(accessToken, 'alice-test-token');
+      return { userId: 'did:privy:alice' };
+    } },
+    fetch: async (url, init) => {
+      assert.equal(init.method, 'GET');
+      const target = new URL(url);
+      if (target.pathname === '/rest/v1/profiles') {
+        assert.equal(target.searchParams.get('handle'), 'eq.wallet');
+        return Response.json([{ owner_id: 'did:privy:bob', handle: 'wallet', display_name: 'Bob' }]);
+      }
+      assert.equal(target.pathname, '/rest/v1/wallets');
+      assert.equal(target.searchParams.get('owner_id'), 'eq.did:privy:bob');
+      return Response.json([{ address }]);
+    },
+  };
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:alice',
+    botId: 'bot_alice',
+    accessToken: 'alice-test-token',
+    runtimeBase: 'https://runtime.example',
+    fetcher: (url, init) => worker.fetch(new Request(url, init), env),
+  });
+  const result = await invoke('lookup_recipient', { q: '@Wallet' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.recipient, { kind: 'handle', handle: 'wallet', displayName: 'Bob', avatarUrl: null, self: false, missing: false, address });
+});
 
 /**
  * Achieves: verifies openAiAgentTools maps shared research and dashboard schemas.

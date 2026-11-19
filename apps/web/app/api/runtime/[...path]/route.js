@@ -39,17 +39,15 @@ async function proxy(request, context) {
     SUPABASE_URL: readRootEnv('SUPABASE_URL'),
     SUPABASE_SERVICE_ROLE_KEY: readRootEnv('SUPABASE_SERVICE_ROLE_KEY'),
   };
-  // Claims are stored in this app's Supabase project. A configured Worker
-  // origin must not skip that write.
-  if (pathname === '/api/profiles/me' && useLocalProfileDirectory(directoryEnv)) {
-    return localProfileResponse(request, { env: directoryEnv });
-  }
-  if (pathname === '/api/profiles/lookup' && request.method === 'GET' && useLocalProfileDirectory(directoryEnv)) {
-    return localHandleLookup(request, { env: directoryEnv });
-  }
+  // Claims and agent sends use the runtime's directory. The local directory
+  // is for development without a runtime.
   const target = runtimeProxyTarget(await runtimeOrigin(), pathname, new URL(request.url).search);
   if (target.error === 'runtime_unconfigured' && pathname === '/api/profiles/me') {
     return localProfileResponse(request, { env: directoryEnv });
+  }
+  if (target.error === 'runtime_unconfigured' && pathname === '/api/profiles/lookup'
+    && request.method === 'GET' && useLocalProfileDirectory(directoryEnv)) {
+    return localHandleLookup(request, { env: directoryEnv });
   }
   if (target.error === 'runtime_unconfigured') {
     return noStore({ ok: false, error: 'runtime_unconfigured', source: 'unconfigured' }, 503);

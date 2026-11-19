@@ -11,6 +11,31 @@ import {
 const VAULT = Object.freeze({ v: 1, iterations: 100000, salt: 'aa'.repeat(16), iv: 'bb'.repeat(12), ct: 'cc'.repeat(40) });
 const VERIFIER = Object.freeze({ salt: 'dd'.repeat(16), iterations: 100000, hash: 'ee'.repeat(32) });
 
+test('account reads and seed issuance fail closed when the database schema or access is missing', async () => {
+  const failures = [
+    [404, 'PGRST205', 'account_state_schema_missing'],
+    [404, '42P01', 'account_state_schema_missing'],
+    [400, '42703', 'account_state_schema_missing'],
+    [403, '42501', 'account_state_access_failed'],
+    [503, 'PGRST002', 'account_state_unavailable'],
+  ];
+  for (const [status, code, expected] of failures) {
+    const env = envFor({ fetcher: (_url, init) => {
+      assert.equal(init.method, 'GET');
+      return Response.json({ code, message: 'private provider error' }, { status });
+    } });
+    const responses = await Promise.all([
+      call(env, '/api/state'),
+      call(env, '/api/recovery'),
+      call(env, '/api/recovery', { method: 'POST', body: { vault: VAULT, verifier: VERIFIER } }),
+    ]);
+    for (const response of responses) {
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: expected });
+    }
+  }
+});
+
 /** In-memory stand-in for the Supabase tables these routes touch. */
 function database() {
   const state = new Map();

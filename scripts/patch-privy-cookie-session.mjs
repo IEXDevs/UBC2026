@@ -8,14 +8,22 @@
  * in the cookie. Do not write either secret into localStorage.
  */
 
+// The session marker tracks the HttpOnly cookie. A legacy token can be sent once
+// while upgrading an older tab. Server-cookie mode alone does not mean either exists.
+const REFRESH_GUARD = 'if(!(e&&t||this.mightHaveServerCookies||this.client?.useServerCookies&&t))return null';
+
 const REPLACEMENTS = Object.freeze([
   [
     'return this.mightHaveServerCookies||t&&n',
     'return this.mightHaveServerCookies||t&&n||this.client?.useServerCookies===!0',
   ],
   [
-    'if(!(e&&t||this.mightHaveServerCookies))return null',
     'if(!(e&&t||this.mightHaveServerCookies||this.client?.useServerCookies))return null',
+    REFRESH_GUARD,
+  ],
+  [
+    'if(!(e&&t||this.mightHaveServerCookies))return null',
+    REFRESH_GUARD,
   ],
   [
     '"ignore"===e.session_update_action&&(e.token&&(',

@@ -66,8 +66,10 @@ async function assertBotOwner(request, env, botId) {
     `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
     env.fetch ?? fetch,
   );
-  if (!result.configured) return { ok: true, ownerId };
-  if (!result.rows?.length) return { ok: false, status: 404, error: 'bot_not_found', ownerId };
+  if (result.status !== 200 || !Array.isArray(result.rows)) {
+    return { ok: false, status: 503, error: 'bot_directory_unavailable', ownerId };
+  }
+  if (result.rows.length === 0) return { ok: false, status: 404, error: 'bot_not_found', ownerId };
   return { ok: true, ownerId };
 }
 
@@ -266,7 +268,6 @@ async function dispatch(request, env, rawEnv = env) {
     const matched = matchApiRoute(request.method, url.pathname);
     if (matched?.route.id === 'spend.create') return handleSpend(request, env);
     if (matched?.route.action && matched.params.botId) {
-      const stub = botStub(env, matched.params.botId);
       const botId = matched.params.botId;
       let ownerId = null;
       if (isOwnerBotAction(matched.route.action)) {
@@ -274,6 +275,7 @@ async function dispatch(request, env, rawEnv = env) {
         if (!gate.ok) return json({ error: gate.error }, gate.status);
         ownerId = gate.ownerId;
       }
+      const stub = botStub(env, botId);
       const prefix = `/bots/${encodeURIComponent(botId)}`;
       const rest = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : '';
       const target = rest.startsWith('/browser/')
