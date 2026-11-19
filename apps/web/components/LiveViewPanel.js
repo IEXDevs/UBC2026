@@ -211,22 +211,29 @@ export default function LiveViewPanel({
             src={frame.src}
             referrerPolicy={frame.referrerPolicy}
           />
-        ) : frame?.src ? null : (
-          <div className="live-row">
-            {busy ? <LatticeLoader label="Browser" /> : <p className="live-status">{status}</p>}
-            <div className="live-actions">
-              <button className="cta" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
-                Open browser session
-              </button>
-              {sessionRecordId ? (
-                <button className="ghost" type="button" disabled={!ready || busy} onClick={() => run('release')}>
-                  Release session
-                </button>
-              ) : null}
+        ) : null}
+        {frame?.src ? (
+          error ? <p className="preview-note" role="alert">{error}</p> : null
+        ) : (
+          <>
+            <div className="live-idle">
+              {busy ? <LatticeLoader label="Browser" /> : <p className="live-status">{status}</p>}
             </div>
-          </div>
+            <div className="live-idle-bar">
+              {error ? <p className="preview-note" role="alert">{error}</p> : null}
+              <div className="live-idle-actions">
+                <button className="live-chip" type="button" disabled={!ready || busy || Boolean(sessionRecordId)} onClick={() => run('open')}>
+                  Open browser session
+                </button>
+                {sessionRecordId ? (
+                  <button className="live-chip" type="button" disabled={!ready || busy} onClick={() => run('release')}>
+                    Release session
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </>
         )}
-        {error ? <p className="preview-note" role="alert">{error}</p> : null}
       </div>
       {frame?.src ? (
         <div className="live-dock">

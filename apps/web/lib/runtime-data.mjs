@@ -338,6 +338,7 @@ export async function sendBotChat({
   accessToken = '',
   deskGrant = '',
   runtimeBase = runtimeBaseUrl(),
+  signal,
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
   if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
@@ -388,6 +389,7 @@ export async function sendBotChat({
         ...(catalog.length > 0 ? { fileCatalog: catalog } : {}),
       }),
       cache: 'no-store',
+      ...(signal ? { signal } : {}),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
@@ -401,7 +403,8 @@ export async function sendBotChat({
     const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
     const activity = sanitizeActivity(body.activity);
     return { ok: true, reply: reply || hold.label || '', model: body.model || null, tokens, activity, hold };
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') return { ok: false, error: 'aborted' };
     return { ok: false, error: 'network' };
   }
 }

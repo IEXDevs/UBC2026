@@ -1,0 +1,86 @@
+button:where(:not(
+  :disabled,
+  .dock button,
+  .dock-item,
+  .hold-button,
+  .glide-select__trigger,
+  .specular-button,
+  .prompt-bar__tool,
+  .prompt-bar__pick,
+  .prompt-bar__row,
+  .prompt-bar__send,
+  .permit-chip,
+  .permit-menu button,
+  .stepper__button,
+  .call-chip,
+  .sling-button__pad,
+  .wake-slider__track,
+  .ledger-hit,
+  .library-panes button
+)) {
+  transition: transform 440ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+button:where(:not(
+  :disabled,
+  .dock button,
+  .dock-item,
+  .hold-button,
+  .glide-select__trigger,
+  .specular-button,
+  .prompt-bar__tool,
+  .prompt-bar__pick,
+  .prompt-bar__row,
+  .prompt-bar__send,
+  .permit-chip,
+  .permit-menu button,
+  .stepper__button,
+  .call-chip,
+  .sling-button__pad,
+  .wake-slider__track,
+  .ledger-hit,
+  .library-panes button
+)):active,
+button[data-press]:where(:not(:disabled)) {
+  transform: scale(0.96);
+  transition-duration: 90ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+
+button[data-pop-shift] {
+  position: relative;
+}
+
+button[data-pop]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 32%,
+    color-mix(in srgb, currentColor 28%, transparent) 50%,
+    transparent 68%
+  );
+  transform: translateX(-120%);
+  animation: soft-sheen 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes soft-sheen {
+  to { transform: translateX(120%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:where(:not(:disabled)):active,
+  button[data-press] {
+    transform: none;
+    transition: none;
+  }
+
+  button[data-pop]::after {
+    content: none;
+    animation: none;
+  }
+}

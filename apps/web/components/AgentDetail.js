@@ -1,10 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { computerStatus, countOpenBrowserSessions } from '../lib/computer-status.mjs';
-import { browserSessionUrl } from '../lib/live-view.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
-import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import {
   permissionById,
   readReviewThreshold,
@@ -44,11 +41,9 @@ export default function AgentDetail({
   onMissingFile,
   onComputer,
 }) {
-  const [openSessionCount, setOpenSessionCount] = useState(0);
   const [permitState, setPermitState] = useState(() => readPermitState());
   const permit = permissionById(permitState.permission);
   const work = statusLabel(bot?.status);
-  const machine = computerStatus({ openSessionCount, botStatus: bot?.status });
 
   useEffect(() => {
     function refresh() {
@@ -64,32 +59,6 @@ export default function AgentDetail({
       clearInterval(timer);
     };
   }, []);
-
-  useEffect(() => {
-    setOpenSessionCount(0);
-    const url = browserSessionUrl('shell', bot?.id);
-    if (!url || !ownerId) return undefined;
-    let stop = false;
-    async function load() {
-      try {
-        const response = await fetch(url, {
-          headers: await ownerAuthHeaders(ownerId, getAccessToken),
-          cache: 'no-store',
-        });
-        const data = await response.json().catch(() => ({}));
-        if (stop || !response.ok) return;
-        setOpenSessionCount(countOpenBrowserSessions(data));
-      } catch {
-        /* Keep the last known computer label when the runtime is unreachable. */
-      }
-    }
-    load();
-    const timer = setInterval(load, 4000);
-    return () => {
-      stop = true;
-      clearInterval(timer);
-    };
-  }, [bot?.id, ownerId, getAccessToken]);
 
   return (
     <aside className="agent-detail" aria-label={`${bot.name} details`}>
@@ -120,16 +89,6 @@ export default function AgentDetail({
 
       <section className="side-computer" aria-label="Computer">
         <h3>Computer</h3>
-        <button type="button" className="side-option" onClick={() => onComputer?.()}>
-          <span>
-            <strong>{bot.name}&apos;s computer</strong>
-            <small>{machine}</small>
-          </span>
-          <span className={`side-option-mark${machine === 'Asleep' ? ' is-asleep' : ''}`}>
-            <BotMark shape={bot.shape} color={bot.color} image={bot.image} name={bot.name} size={28} />
-            {machine === 'Asleep' ? <span className="side-option-sleep">z</span> : null}
-          </span>
-        </button>
         <LiveViewPanel
           botId={bot.id}
           ownerId={ownerId}

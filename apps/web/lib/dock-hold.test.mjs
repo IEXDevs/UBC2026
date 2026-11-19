@@ -4,16 +4,19 @@ import test from 'node:test';
 import { DOCK_EXPAND_MS, DOCK_SWITCH_MS, dockCollapseDelay, dockHoldDelay, dockShouldStayOpen, pillAnchor } from './dock-hold.mjs';
 
 /**
- * Achieves: verifies dock expand CSS variable matches DOCK_EXPAND_MS and old opacity delay is gone.
- * Fails when: --dock-expand drifts from the constant, or the 220ms/80ms opacity rule returns.
- * Oracle: globals.css must declare --dock-expand: ${DOCK_EXPAND_MS}ms; no opacity 220ms ease 80ms.
+ * Achieves: verifies dock expand CSS variable matches DOCK_EXPAND_MS and labels ease width instead of snapping.
+ * Fails when: --dock-expand drifts from the constant, the 220ms/80ms opacity rule returns, or closed items snap with max-width 0.
+ * Oracle: globals.css must declare --dock-expand: ${DOCK_EXPAND_MS}ms, animate grid-template-columns, and collapse inactive items with minmax(0, 0fr).
  * Side effects / state checked: stylesheet text.
  * Gaps: source snapshot only for CSS; runtime animation not timed.
  */
 test('dock expand duration matches the navbar stylesheet', () => {
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, new RegExp(`--dock-expand:\\s*${DOCK_EXPAND_MS}ms`));
+  assert.match(css, /grid-template-columns var\(--dock-expand\) var\(--dock-ease\)/);
+  assert.match(css, /grid-template-columns:\s*minmax\(0,\s*0fr\)/);
   assert.doesNotMatch(css, /opacity 220ms ease 80ms/);
+  assert.doesNotMatch(css, /\.gooey-nav__item:not\(\[data-active\]\)\s*\{[^}]*max-width:\s*0/);
 });
 
 /**

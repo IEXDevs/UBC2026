@@ -123,6 +123,7 @@ export default function PromptBar({
   busy = false,
   onSend,
   onStop,
+  draftSeed = null,
   onAttach,
   onDictate,
   onDraftChange,
@@ -167,6 +168,15 @@ export default function PromptBar({
   latest.current = { onSend, onStop, onAttach, onDictate, onEffortChange, onDraftChange, onChipClick, onRemoveAttachment };
 
   const [draft, setDraft] = useState('');
+  const seedId = useRef('');
+  useEffect(() => {
+    if (!draftSeed || draftSeed.id === seedId.current) return;
+    seedId.current = draftSeed.id;
+    const next = String(draftSeed.text || '').slice(0, MESSAGE_CHAR_CAP);
+    setDraft(next);
+    latest.current.onDraftChange?.(next);
+    inputRef.current?.focus({ preventScroll: true });
+  }, [draftSeed]);
   const [attachments, setAttachments] = useState([]);
   const [modelKey, setModelKey] = useState(defaultModel);
   useEffect(() => {
@@ -378,8 +388,26 @@ export default function PromptBar({
     focusInput();
   };
 
+  const replay = (el, flag) => {
+    if (!el) return;
+    el.removeAttribute(flag);
+    void el.offsetWidth;
+    el.setAttribute(flag, '');
+    const done = (event) => {
+      if (event.target !== el) return;
+      if (event.animationName !== 'prompt-sheen' && event.animationName !== 'field-release') return;
+      el.removeAttribute(flag);
+      el.removeEventListener('animationend', done);
+    };
+    el.addEventListener('animationend', done);
+    window.setTimeout(() => {
+      el.removeAttribute(flag);
+      el.removeEventListener('animationend', done);
+    }, 700);
+  };
+
   const send = () => {
-    if (!canSend || busy) return;
+    if (!canSend) return;
     latest.current.onSend?.(draft.trim(), { attachments, model, effort: level });
     setDraft('');
     latest.current.onDraftChange?.('');
@@ -387,6 +415,7 @@ export default function PromptBar({
     setDismissed(false);
     closeMenus();
     focusInput();
+    if (!reduce) replay(rootRef.current?.querySelector('.prompt-bar__field'), 'data-sent');
   };
 
   const applyDictationText = (text) => {
@@ -456,6 +485,7 @@ export default function PromptBar({
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      if (!reduce) replay(rootRef.current?.querySelector('.prompt-bar__send'), 'data-pop');
       send();
     }
   };
@@ -472,6 +502,12 @@ export default function PromptBar({
       className={`prompt-bar${className ? ` ${className}` : ''}`}
       data-busy={busy ? '' : undefined}
       data-max={maxed ? '' : undefined}
+      onPointerUp={(event) => {
+        if (reduce) return;
+        const button = event.target instanceof Element ? event.target.closest('button') : null;
+        if (!button || button.disabled || !rootRef.current?.contains(button)) return;
+        replay(button, 'data-pop');
+      }}
       style={{
         '--pb-bg': background,
         '--pb-ink': color,
@@ -774,7 +810,7 @@ export default function PromptBar({
             type="button"
             className="prompt-bar__send"
             disabled={!armed}
-            aria-label={busy ? 'Stop' : 'Send'}
+            aria-label={busy && canSend ? 'Queue message' : busy ? 'Stop' : 'Send'}
             data-armed={armed ? '' : undefined}
             data-pressed={pressed ? '' : undefined}
             onMouseDown={(e) => e.preventDefault()}
@@ -783,11 +819,11 @@ export default function PromptBar({
             onPointerCancel={up}
             onPointerLeave={up}
             onClick={() => {
-              if (busy) latest.current.onStop?.();
+              if (busy && !canSend) latest.current.onStop?.();
               else send();
             }}
           >
-            <SendGlyph busy={busy} morphDuration={morphDuration} squash={squash} tilt={tilt} />
+            <SendGlyph busy={busy && !canSend} morphDuration={morphDuration} squash={squash} tilt={tilt} />
           </button>
         </div>
       </div>

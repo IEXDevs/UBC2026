@@ -37,7 +37,13 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(detail, /FileLibrary/);
   assert.match(detail, /LiveViewPanel/);
   assert.match(detail, /screen/);
+  assert.doesNotMatch(detail, /side-option/);
+  assert.doesNotMatch(detail, /'s computer/);
   assert.match(detail, /permissionById|readStoredPermission/);
+  assert.match(library, /library-empty/);
+  const css = source('app/globals.css');
+  assert.match(css, /100cqw \/ 1280px/);
+  assert.match(css, /\.library-empty \{[^}]*place-items: center/);
   assert.match(sheet, /browser-preview/);
   assert.match(sheet, /autoStart/);
   assert.match(sheet, /LiveViewPanel/);
@@ -49,5 +55,9 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(panel, /Take control/);
   assert.match(panel, /Return control/);
   assert.match(panel, /Force stop/);
+  assert.match(panel, /live-idle-bar/);
+  assert.match(panel, /live-chip/);
+  assert.match(panel, /Open browser session/);
+  assert.doesNotMatch(panel, /live-row/);
   assert.doesNotMatch(panel, /You can interact/);
 });
