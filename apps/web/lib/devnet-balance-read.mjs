@@ -4,6 +4,7 @@
  * devnet RPC. Mainnet URLs are ignored. The result never includes an RPC URL.
  */
 import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { accessTokenFromRequest } from './privy-cookie-session.mjs';
 import { PUBLIC_DEVNET_RPC_URL, readClusterWalletBalances } from '@ubc2026/wallets/balances';
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -78,8 +79,7 @@ function devnetEnv(options) {
 
 /** HTTP shape for GET /api/devnet-balance. Does not read mainnet or the agent runtime. */
 export async function handleDevnetBalanceRequest(request, options = {}) {
-  const header = request?.headers?.get?.('authorization') ?? '';
-  const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const accessToken = accessTokenFromRequest(request);
   if (!accessToken) {
     return { status: 401, body: { error: 'login_required' } };
   }

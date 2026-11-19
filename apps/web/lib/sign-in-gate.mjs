@@ -1,11 +1,13 @@
 /**
- * Privy keeps the session in localStorage (`privy:token`, `privy:pat`,
- * `privy:refresh_token`). Its cookie mirror is for a same-origin server.
- * Privy never reads those cookies back, so a missing cookie is not a logout.
+ * Privy keeps a local session in localStorage until its server sets an HttpOnly
+ * cookie. The page cannot read that cookie. `privy-session` is only the flag
+ * that the cookie exists. A missing local copy is not a logout while Privy is
+ * still refreshing.
  *
  * The sign-in page is only for a finished check that found no session.
- * While Privy is still reading storage, a refresh must not paint the login page.
  */
+import { hasServerSessionCookie } from './privy-cookie-session.mjs';
+
 const STORED_SESSION_KEY = /^privy(?::[\w-]+)?:(?:token|pat|refresh_token|id[_-]?token)$/;
 
 export function hasStoredPrivySession(storage) {
@@ -23,6 +25,11 @@ export function hasStoredPrivySession(storage) {
   } catch {
     return false;
   }
+}
+
+/** Local secret or the HttpOnly session flag. The flag is not the token. */
+export function hasRestorablePrivySession(storage, cookieHeader = '') {
+  return hasStoredPrivySession(storage) || hasServerSessionCookie(cookieHeader);
 }
 
 export function showSessionHold({ privyConfigured, ready }) {

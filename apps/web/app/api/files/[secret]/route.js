@@ -1,3 +1,4 @@
+import { accessTokenFromRequest } from '../../../../lib/privy-cookie-session.mjs';
 import { readOwnerFile } from '../../../../lib/drive-files.mjs';
 import { readRootEnv } from '../../../../lib/root-env.mjs';
 
@@ -15,9 +16,9 @@ function driveConfig() {
 export async function GET(request, { params }) {
   const ownerId = (request.headers.get('x-owner-id') || '').trim();
   const accountCode = (request.headers.get('x-account-code') || '').trim();
-  const bearer = request.headers.get('authorization') || '';
+  const accessToken = accessTokenFromRequest(request);
   const secret = (await params)?.secret || '';
-  if (!OWNER.test(ownerId) || !bearer.startsWith('Bearer ') || bearer.length < 12) {
+  if (!OWNER.test(ownerId) || accessToken.length < 8) {
     return Response.json({ error: 'owner_required' }, { status: 401, headers: NO_STORE });
   }
   const read = await readOwnerFile({

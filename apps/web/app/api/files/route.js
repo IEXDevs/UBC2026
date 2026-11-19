@@ -1,4 +1,5 @@
 import { isAccountCode } from '../../../lib/account-code.mjs';
+import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
 import { saveOwnerFile } from '../../../lib/drive-files.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 
@@ -16,8 +17,8 @@ function driveConfig() {
 export async function POST(request) {
   const ownerId = (request.headers.get('x-owner-id') || '').trim();
   const accountCode = (request.headers.get('x-account-code') || '').trim();
-  const bearer = request.headers.get('authorization') || '';
-  if (!OWNER.test(ownerId) || !bearer.startsWith('Bearer ') || bearer.length < 12) {
+  const accessToken = accessTokenFromRequest(request);
+  if (!OWNER.test(ownerId) || accessToken.length < 8) {
     return Response.json({ error: 'owner_required' }, { status: 401, headers: NO_STORE });
   }
   if (!isAccountCode(accountCode)) {

@@ -1,3 +1,4 @@
+import { accessTokenFromRequest } from '../../../../../lib/privy-cookie-session.mjs';
 import { readRootEnv } from '../../../../../lib/root-env.mjs';
 import {
   chatToolsInstruction,
@@ -90,10 +91,8 @@ export async function POST(request, context) {
   const grants = Array.isArray(body.grants)
     ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
     : [];
-  const authHeader = request.headers.get('authorization') ?? '';
-  const accessToken = authHeader.startsWith('Bearer ')
-    ? authHeader.slice('Bearer '.length).trim()
-    : (typeof body.accessToken === 'string' ? body.accessToken.trim() : '');
+  const accessToken = accessTokenFromRequest(request)
+    || (typeof body.accessToken === 'string' ? body.accessToken.trim() : '');
   const env = await chatToolEnv();
   const invokeRaw = createChatToolInvoker({
     ownerId,

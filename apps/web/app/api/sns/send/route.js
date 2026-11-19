@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 import { resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { withdrawToWalletAdapter } from '@ubc2026/transfers';
 import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
+import { accessTokenFromRequest } from '../../../../lib/privy-cookie-session.mjs';
 import { readRootEnv } from '../../../../lib/root-env.mjs';
 import { planSnsSend } from '../../../../lib/sns-send.mjs';
 import { resolvePrivyAppId } from '../../../../lib/wallet-provision.mjs';
@@ -18,8 +19,7 @@ function env() {
 }
 
 export async function POST(request) {
-  const header = request.headers.get('authorization') ?? '';
-  const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const accessToken = accessTokenFromRequest(request);
   if (!accessToken) {
     return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }

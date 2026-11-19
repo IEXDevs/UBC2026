@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 
 import { accountWriteBodies } from '@ubc2026/wallets';
 import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
+import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { fetchAgentRuntime } from '../../../lib/runtime-fetch.mjs';
 import { missingWalletSecrets, resolvePrivyAppId, walletConfigFlags } from '../../../lib/wallet-provision.mjs';
@@ -172,8 +173,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  const header = request.headers.get('authorization') ?? '';
-  const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const accessToken = accessTokenFromRequest(request);
   if (!accessToken) {
     return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }

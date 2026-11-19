@@ -11,6 +11,7 @@ import { readRootEnv } from './root-env.mjs';
 import { planConnectedDeposit } from './wallet-move.mjs';
 import { mergeObservedWallets, resolvePrivyAppId } from './wallet-provision.mjs';
 import { verifyPrivyAccessToken } from './privy-access-token.mjs';
+import { accessTokenFromRequest } from './privy-cookie-session.mjs';
 
 const ID = /^[a-zA-Z0-9:_.-]{1,256}$/;
 
@@ -196,8 +197,7 @@ function defaultChain(secrets) {
 }
 
 export async function postConnectedDeposit(request, deps = {}) {
-  const header = request.headers.get('authorization') ?? '';
-  const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const accessToken = accessTokenFromRequest(request);
   if (!accessToken) return json({ error: 'login_required' }, 401);
   const secrets = deps.env || rootEnv();
   const appId = resolvePrivyAppId(secrets);

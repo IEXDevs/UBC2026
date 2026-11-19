@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { developerPreviewAllowed, hasStoredPrivySession, hostedDevPreview, publicDevPreviewValue, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
+import { developerPreviewAllowed, hasRestorablePrivySession, hasStoredPrivySession, hostedDevPreview, publicDevPreviewValue, showSessionHold, showSignInGate } from './sign-in-gate.mjs';
 
 function storage(entries) {
   const keys = Object.keys(entries);
@@ -90,6 +90,8 @@ test('a stored Privy session is recognized without reading the token', () => {
   assert.equal(hasStoredPrivySession(storage({ 'privy:token': 'null', 'other': '1' })), false);
   assert.equal(hasStoredPrivySession(storage({})), false);
   assert.equal(hasStoredPrivySession(null), false);
+  assert.equal(hasRestorablePrivySession(storage({}), 'privy-session=1'), true);
+  assert.equal(hasRestorablePrivySession(storage({}), 'privy-token=t'), false);
 });
 
 /**
@@ -105,12 +107,12 @@ test('refresh keeps a stored session off the login page and the unlock field is 
   const desk = readFileSync(join(root, 'components/DeskLock.js'), 'utf8');
   const config = readFileSync(join(root, 'lib/privy-config.mjs'), 'utf8');
   assert.match(page, /showSessionHold/);
-  assert.match(page, /hasStoredPrivySession/);
+  assert.match(page, /hasRestorablePrivySession/);
   assert.match(page, /onDeveloperPreview=\{devAllowed \? enterDevPreview : null\}/);
   assert.match(page, /const hostedPreview = useHostedPreview\(\)/);
   assert.match(readFileSync(join(root, 'app/layout.js'), 'utf8'), /readHostedDevPreview/);
   assert.doesNotMatch(page, /inert=\{locked/);
-  assert.doesNotMatch(config, /cookieWriteBehavior/);
+  assert.match(config, /cookieWriteBehavior: 'never'/);
   assert.match(desk, /autoComplete="off"/);
   assert.doesNotMatch(desk, /current-password/);
   assert.match(desk, /name="maelstrom-desk-unlock"/);

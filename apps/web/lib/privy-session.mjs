@@ -5,9 +5,11 @@
  * mirror, backup, restore, or wrap Storage.
  *
  * The only app-side rule: never call Privy getAccessToken() when an access
- * token is present without refresh_token — that path calls destroyLocalState()
- * and deletes privy:token / privy:pat / privy:refresh_token.
+ * token is present without refresh_token or a privy-session cookie — that
+ * path calls destroyLocalState() and deletes the local session.
  */
+
+import { hasServerSessionCookie } from './privy-cookie-session.mjs';
 
 export const PRIVY_PAT_KEY = 'privy:pat';
 export const PRIVY_TOKEN_KEY = 'privy:token';
@@ -71,22 +73,26 @@ export async function waitForPrivyRefresh(storage = globalThis.localStorage, tim
 }
 
 /**
- * Prefer Privy's getAccessToken when refresh exists (normal refresh path).
- * Otherwise return the stored JWT and do not call Privy — calling it would
- * wipe the session.
+ * Prefer Privy's getAccessToken when a refresh token or an HttpOnly session
+ * cookie is present. An access token with neither is left alone — calling
+ * Privy then deletes the local session.
  */
-export async function getPrivyAccessToken(getAccessToken, storage = globalThis.localStorage) {
+export async function getPrivyAccessToken(getAccessToken, storage = globalThis.localStorage, cookieHeader) {
+  const cookie = typeof cookieHeader === 'string'
+    ? cookieHeader
+    : (typeof document === 'undefined' ? '' : document.cookie);
   let stored = readStoredAccessToken(storage);
   let refresh = readStoredRefreshToken(storage);
+  const serverSession = hasServerSessionCookie(cookie);
 
   // Right after OAuth, access can land a tick before refresh. Wait briefly.
-  if (stored && !refresh) {
+  if (stored && !refresh && !serverSession) {
     await waitForPrivyRefresh(storage);
     stored = readStoredAccessToken(storage);
     refresh = readStoredRefreshToken(storage);
   }
 
-  if (stored && !refresh) {
+  if (!refresh && !serverSession) {
     return stored;
   }
 
