@@ -28,9 +28,26 @@ export default function FileLibrary({ files = [], ownerId = null, getAccessToken
 
   return (
     <div className="file-library">
-      <div className="library-panes" role="tablist" aria-label="Files">
-        <button type="button" role="tab" aria-selected={pane === 'files'} onClick={() => setPane('files')}>Files</button>
-        <button type="button" role="tab" aria-selected={pane === 'images'} onClick={() => setPane('images')}>Images</button>
+      <div className="library-panes" role="tablist" aria-label="Files" data-pane={pane}>
+        <span className="library-panes__pill" aria-hidden="true" />
+        <button
+          type="button"
+          role="tab"
+          aria-selected={pane === 'files'}
+          className={pane === 'files' ? 'is-on' : ''}
+          onClick={() => setPane('files')}
+        >
+          Files
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={pane === 'images'}
+          className={pane === 'images' ? 'is-on' : ''}
+          onClick={() => setPane('images')}
+        >
+          Images
+        </button>
       </div>
       {shown.length === 0 ? (
         <p className="library-empty">{pane === 'images' ? 'No images yet.' : 'No files yet.'}</p>

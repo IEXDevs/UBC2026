@@ -37,4 +37,7 @@ test('voiceErrorNote keeps recoverable detail', () => {
   assert.match(voiceErrorNote('socket failed'), /socket failed/);
   assert.match(voiceErrorNote('', { message: 'upstream' }), /upstream/);
   assert.match(voiceErrorNote(''), /Tap Talk to retry/);
+  assert.match(voiceErrorNote('Server error: Unknown error'), /server error/i);
+  assert.match(voiceErrorNote('Server error: Unknown error'), /Tap Talk to retry/);
+  assert.match(voiceErrorNote('', { errorType: 'override_error' }), /overrides/i);
 });

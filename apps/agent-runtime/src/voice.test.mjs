@@ -634,7 +634,8 @@ test('syncVoiceAgent writes custom LLM URL and webhook secret into the agent', a
   assert.equal(result.agentId, 'agent_live');
   assert.equal(result.secretId, 'sec_1');
   assert.equal(result.customLlmUrl, `${ORIGIN}/voice/llm/chat/completions`);
-  const patch = calls.find((call) => call.method === 'PATCH');
+  const patch = calls.find((call) => call.method === 'PATCH' && String(call.url).includes('/agents/'));
+  assert.equal(patch.body.platform_settings.overrides.custom_llm_extra_body, true);
   assert.equal(patch.body.conversation_config.agent.first_message, VOICE_FIRST_MESSAGE);
   assert.equal(patch.body.conversation_config.turn.silence_end_call_timeout, -1);
   assert.deepEqual(patch.body.conversation_config.agent.prompt.built_in_tools, { end_call: null });
@@ -666,10 +667,14 @@ test('syncVoiceAgent writes custom LLM URL and webhook secret into the agent', a
   }), env({
     ELEVENLABS_API_KEY: ELEVEN,
     ELEVENLABS_AGENT_ID: 'agent_live',
+    ELEVENLABS_WEBHOOK_SECRET: SECRET,
   }), {
     fetcher: async (url, init) => {
       if (String(url).endsWith('/secrets') && init.method === 'GET') {
         return Response.json({ secrets: [{ name: 'ELEVENLABS_WEBHOOK_SECRET', secret_id: 'sec_1' }] });
+      }
+      if (String(url).includes('/secrets/sec_1') && init.method === 'PATCH') {
+        return Response.json({ secret_id: 'sec_1' });
       }
       if (String(url).includes('/agents/agent_live')) return Response.json({ agent_id: 'agent_live' });
       return new Response('nope', { status: 404 });

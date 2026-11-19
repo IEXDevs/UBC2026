@@ -18,7 +18,7 @@ import {
 } from '@hugeicons/core-free-icons';
 import './PromptBar.css';
 import GlideSelect from './GlideSelect';
-import { PERMISSIONS, permissionById } from '../lib/spend-permission.mjs';
+import { PERMISSIONS, dollarsToBaseUnits, permissionById } from '../lib/spend-permission.mjs';
 import { shouldClosePermitMenu } from './permit-menu.mjs';
 
 const ARROW_UP = [12, 4.5, 18.5, 11, 14.25, 11, 14.25, 19.5, 9.75, 19.5, 9.75, 11, 5.5, 11];
@@ -131,7 +131,9 @@ export default function PromptBar({
   accessory = null,
   endSlot = null,
   permission = '',
+  reviewCapDollars = '',
   onPermissionChange,
+  onReviewCapChange,
   onModelChange,
   onAddProvider,
   chips = null,
@@ -189,8 +191,14 @@ export default function PromptBar({
   const [listening, setListening] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [permitOpen, setPermitOpen] = useState(false);
+  const [capDraft, setCapDraft] = useState(reviewCapDollars || '');
+  const [capNote, setCapNote] = useState('');
   const permitRef = useRef(null);
   const permit = permission ? permissionById(permission) : null;
+  useEffect(() => {
+    setCapDraft(reviewCapDollars || '');
+    setCapNote('');
+  }, [reviewCapDollars, permission]);
 
   const model = models.find((m) => m.key === modelKey) ?? models[0];
   const token = dismissed ? null : parseToken(draft);
@@ -668,11 +676,13 @@ export default function PromptBar({
             <span ref={permitRef} className="permit" onMouseDown={(event) => event.preventDefault()} onClick={(event) => event.stopPropagation()}>
               <button
                 type="button"
-                className={`permit-chip${permit.id === 'full' ? ' is-full' : ''}`}
+                className={`permit-chip${permit.id === 'full' ? ' is-full' : ''}${permitOpen ? ' is-open' : ''}`}
                 aria-label={`Permissions, ${permit.label}`}
                 aria-expanded={permitOpen}
+                style={{ '--permit-color': permit.color }}
                 onClick={() => setPermitOpen(value => !value)}
               >
+                <i className="permit-dot" aria-hidden="true" />
                 <span>{permit.label}</span>
               </button>
               {permitOpen ? (
@@ -682,16 +692,56 @@ export default function PromptBar({
                       key={item.id}
                       type="button"
                       role="option"
-                      className={item.id === 'full' ? 'is-full' : ''}
+                      className={`${item.id === 'full' ? 'is-full' : ''}${item.id === permit.id ? ' is-on' : ''}`}
                       aria-selected={item.id === permit.id}
+                      style={{ '--permit-color': item.color }}
                       onClick={() => {
                         onPermissionChange?.(item.id);
-                        setPermitOpen(false);
+                        if (item.id !== 'review') setPermitOpen(false);
                       }}
                     >
+                      <i className="permit-dot" aria-hidden="true" />
                       <span>{item.label}</span>
+                      {item.id === permit.id ? <span className="permit-check" aria-hidden="true">✓</span> : null}
                     </button>
                   ))}
+                  <label className="permit-cap">
+                    <span>Review by AI max (USDC)</span>
+                    <input
+                      inputMode="decimal"
+                      autoComplete="off"
+                      value={capDraft}
+                      placeholder="25"
+                      aria-label="Review by AI maximum in USDC"
+                      onChange={(event) => {
+                        setCapDraft(event.target.value);
+                        setCapNote('');
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        const next = dollarsToBaseUnits(capDraft);
+                        if (!next) {
+                          setCapNote('Enter a maximum above zero.');
+                          return;
+                        }
+                        onReviewCapChange?.(next);
+                        setCapNote('Saved.');
+                        if (permit.id === 'review') setPermitOpen(false);
+                      }}
+                      onBlur={() => {
+                        if (!capDraft.trim()) return;
+                        const next = dollarsToBaseUnits(capDraft);
+                        if (!next) {
+                          setCapNote('Enter a maximum above zero.');
+                          return;
+                        }
+                        onReviewCapChange?.(next);
+                        setCapNote('Saved.');
+                      }}
+                    />
+                  </label>
+                  {capNote ? <p className="permit-cap-note" role="status">{capNote}</p> : null}
                 </div>
               ) : null}
             </span>

@@ -296,7 +296,29 @@ export async function syncVoiceAgent({ env = {}, origin, fetcher = fetch } = {})
     /* create below */
   }
 
-  if (!secretId) {
+  if (secretId) {
+    try {
+      const updated = await fetcher(`https://api.elevenlabs.io/v1/convai/secrets/${encodeURIComponent(secretId)}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          type: 'update',
+          name: 'ELEVENLABS_WEBHOOK_SECRET',
+          value: webhookSecret,
+        }),
+      });
+      if (!updated?.ok) {
+        return {
+          ok: false,
+          error: 'elevenlabs_secret_failed',
+          status: updated?.status ?? 502,
+          network: true,
+        };
+      }
+    } catch {
+      return { ok: false, error: 'elevenlabs_unavailable', network: true };
+    }
+  } else {
     try {
       const created = await fetcher('https://api.elevenlabs.io/v1/convai/secrets', {
         method: 'POST',
@@ -326,6 +348,13 @@ export async function syncVoiceAgent({ env = {}, origin, fetcher = fetch } = {})
   const modelId = grokVoiceModel(env);
   const secretRef = { secret_id: secretId };
   const patchBody = {
+    // Composer sends customLlmExtraBody (bot name/goal/type + spend permission).
+    // Without this Security override, ElevenLabs fails the call before the LLM.
+    platform_settings: {
+      overrides: {
+        custom_llm_extra_body: true,
+      },
+    },
     conversation_config: voiceAgentConversationConfig({
       origin: base,
       modelId,
