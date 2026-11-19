@@ -1,11 +1,9 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo } from 'react';
+import { createContext, useContext, useEffect } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
-import { getWallets } from '@wallet-standard/app';
 import { privyProviderProps } from '../lib/privy-config.mjs';
-import { bindSolanaConnectRetry } from '../lib/solana-wallet-login.mjs';
 import { installSiwsLoginDiagnostic } from '../lib/siws-login-diagnostic.mjs';
 import { ToastProvider } from './bits/SwipeToast';
 
@@ -23,13 +21,6 @@ export function usePrivyPublic() {
  */
 export default function PrivyRoot({ appId = '', clientId = '', children }) {
   const props = privyProviderProps({ appId, clientId });
-  // A new connector list on each render drops an in-flight Phantom prompt.
-  // Patch connect before Privy builds connectors. Privy reads wallet.accounts
-  // after the prompt and misses the account Phantom returns from its page.
-  const solanaConnectors = useMemo(() => {
-    if (typeof window !== 'undefined') bindSolanaConnectRetry(getWallets);
-    return toSolanaWalletConnectors({ shouldAutoConnect: false });
-  }, []);
   const value = {
     configured: props !== null,
     appId: props?.appId || '',
@@ -55,7 +46,7 @@ export default function PrivyRoot({ appId = '', clientId = '', children }) {
     config: {
       ...props.config,
       externalWallets: {
-        solana: { connectors: solanaConnectors },
+        solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) },
       },
     },
   };

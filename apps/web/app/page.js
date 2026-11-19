@@ -161,8 +161,6 @@ function AuthedShell() {
     await logout?.();
   }, [logout]);
 
-  const onLogin = useCallback(() => login?.(), [login]);
-
   useEffect(() => {
     if (!devAllowed) return undefined;
     const params = new URLSearchParams(window.location.search);
@@ -292,7 +290,7 @@ function AuthedShell() {
         accountLabel="Developer"
         signedIn
         loginDisabled={false}
-        onLogin={onLogin}
+        onLogin={login}
         onLogout={leaveDevPreview}
         liveWallets={previewWallets()}
         walletNote="Developer preview. Sample balances. Live prices come from DexScreener."
@@ -308,7 +306,7 @@ function AuthedShell() {
   if (signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
     return (
       <SignInPage
-        onLogin={onLogin}
+        onLogin={login}
         onDeveloperPreview={devAllowed ? enterDevPreview : null}
         onHoldChange={setSignInHold}
       />
@@ -322,7 +320,7 @@ function AuthedShell() {
       accountLabel={signedIn ? privyAccountLabel(user) : 'You'}
       signedIn={signedIn}
       loginDisabled={!ready}
-      onLogin={onLogin}
+      onLogin={login}
       onLogout={onLogout}
       liveWallets={liveWallets}
       walletNote={walletNote}

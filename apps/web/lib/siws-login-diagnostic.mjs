@@ -11,9 +11,6 @@ const SIWS_POSTS = Object.freeze({
 const SAFE_CODE = /^[a-z0-9_]{1,64}$/;
 const FAILURE = 'siws_failed';
 
-/** Fired on `target` when a SIWS post fails. `detail` is the safe log line. */
-export const WALLET_LOGIN_EVENT = 'maelstrom:wallet-login-failure';
-
 function requestUrl(input) {
   if (typeof input === 'string') return input;
   if (input instanceof URL) return input.href;
@@ -70,40 +67,12 @@ async function lineFromResponse(name, response) {
   return walletLoginFailureLine(name, response?.status, code);
 }
 
-function report(target, log, line) {
+function report(log, line) {
   try {
     log(line);
   } catch {
     /* a diagnostic must not block login */
   }
-  const EventCtor = target?.CustomEvent;
-  if (typeof target?.dispatchEvent !== 'function' || typeof EventCtor !== 'function') return;
-  try {
-    target.dispatchEvent(new EventCtor(WALLET_LOGIN_EVENT, { detail: line }));
-  } catch {
-    /* a diagnostic must not block login */
-  }
-}
-
-/**
- * One sentence for the sign-in card. Unknown lines return ''.
- * The line is the diagnostic's safe form, never a response body.
- */
-export function walletLoginFailureNote(line) {
-  if (typeof line !== 'string') return '';
-  const match = line.match(/^\[wallet-login\] \S+ (\S+) (\S+)$/);
-  if (!match) return '';
-  const status = match[1];
-  const code = match[2];
-  if (code === 'invalid_data') {
-    return 'That signature did not match this site. Disconnect the site in your wallet, then try again.';
-  }
-  if (code === 'disallowed_login_method') return 'Wallet sign-in is turned off for this Privy app.';
-  if (code === 'linked_to_another_user') return 'That wallet is already on another account.';
-  if (code === 'captcha_timeout' || code === 'captcha_failed') return 'The sign-in check did not finish. Try again.';
-  if (status === 'network') return 'The wallet sign-in request did not reach Privy.';
-  if (code === FAILURE) return 'Wallet sign-in did not complete. Try connecting again.';
-  return `Wallet sign-in failed (${code}).`;
 }
 
 /**
@@ -123,11 +92,11 @@ export function installSiwsLoginDiagnostic(target = globalThis, log = console.wa
     try {
       response = await original(input, init);
     } catch (error) {
-      report(target, write, walletLoginFailureLine(name, 'network', FAILURE));
+      report(write, walletLoginFailureLine(name, 'network', FAILURE));
       throw error;
     }
     if (response && response.ok === false) {
-      report(target, write, await lineFromResponse(name, response));
+      report(write, await lineFromResponse(name, response));
     }
     return response;
   };
