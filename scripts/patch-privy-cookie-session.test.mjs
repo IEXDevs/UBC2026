@@ -6,6 +6,21 @@ import { patchPrivyCookieSession } from './patch-privy-cookie-session.mjs';
 const ESM = 'node_modules/@privy-io/react-auth/dist/esm/use-sign-transaction-internal-Cx-lKGKG.mjs';
 const CJS = 'node_modules/@privy-io/react-auth/dist/cjs/use-sign-transaction-internal-DbS_YZ_u.js';
 
+test('the refresh request needs a session marker or an actual refresh token', () => {
+  for (const file of [ESM, CJS]) {
+    const patched = patchPrivyCookieSession(readFileSync(file, 'utf8'));
+    const guard = patched.match(/if\(!\(e&&t\|\|this\.mightHaveServerCookies[^)]*\)\)return null/)?.[0];
+    assert.ok(guard);
+    const shouldRefresh = new Function('e', 't', `${guard};return true;`);
+    const client = { useServerCookies: true };
+    assert.equal(shouldRefresh.call({ client }, null, null), null);
+    assert.equal(shouldRefresh.call({ client }, 'access', null), null);
+    assert.equal(shouldRefresh.call({ client }, null, 'legacy'), true);
+    assert.equal(shouldRefresh.call({ client, mightHaveServerCookies: true }, null, null), true);
+    assert.equal(shouldRefresh.call({ client: {} }, 'access', 'refresh'), true);
+  }
+});
+
 /**
  * Achieves: verifies cookie mode does not persist the session secrets in localStorage.
  * Fails when: the refresh token is still written with B.put or s.s.put while useServerCookies is on.

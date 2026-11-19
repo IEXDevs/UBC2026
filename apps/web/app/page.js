@@ -312,6 +312,7 @@ function AuthedShell() {
   if (signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
     return (
       <SignInPage
+        disabled={signInHold || authenticated}
         onLogin={login}
         onDeveloperPreview={devAllowed ? enterDevPreview : null}
         onHoldChange={setSignInHold}
