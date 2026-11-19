@@ -428,3 +428,12 @@ export const VOICE_RESEARCH_WEBHOOKS = Object.freeze([
     [call('POST', '/bots/:botId/browser/sessions/:sessionRecordId/release')],
   ),
 ]);
+
+export {
+  AGENT_SKILLS,
+  parseSkillCommand,
+  skillById,
+  skillInstruction,
+  skillsCatalogInstruction,
+} from './skills.mjs';
+export { HARNESS_TOOLS, HARNESS_TOOL_NAMES, harnessInstruction } from './harness.mjs';

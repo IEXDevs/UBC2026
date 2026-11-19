@@ -12,6 +12,7 @@ import {
 } from '../lib/desk-lock.mjs';
 import { acceptEnteredPassword, openDeskGrant, readDeskLockState, registerDeskVerifier } from '../lib/desk-grant-client.mjs';
 import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
+import { blockCopy } from '../lib/block-copy.mjs';
 
 function controlValue(form, name) {
   const node = form?.elements?.namedItem?.(name);
@@ -145,7 +146,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
   }
 
   return (
-    <div className="backdrop is-center desk-lock" onMouseDown={() => onClose?.()}>
+    <div className="backdrop is-center desk-lock no-copy" onMouseDown={() => onClose?.()} onCopy={blockCopy} onCut={blockCopy}>
       <section
         className="sheet wallet-gate"
         role="dialog"

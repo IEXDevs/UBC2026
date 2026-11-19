@@ -44,6 +44,9 @@ import {
 } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { sendBotChat } from '../lib/runtime-data.mjs';
+import { readSharedLinks } from '../lib/connectors.mjs';
+import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
+import { AGENT_SKILLS } from '@ubc2026/agent-tools';
 import { isLiveKitDisconnect, startVoiceConversation } from '../lib/voice-session.mjs';
 import { classifyVoiceDisconnect, voiceErrorNote } from '../lib/voice-disconnect.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
@@ -74,6 +77,11 @@ const SUGGESTIONS = [
   'Summarize the latest activity',
   'Show the open positions',
 ];
+const PROMPT_COMMANDS = AGENT_SKILLS.map(skill => ({
+  key: skill.id,
+  name: skill.command,
+  description: skill.description,
+}));
 const HOSTED_IMAGE_BYTES = 400_000;
 
 function previewUrl(file) {
@@ -163,6 +171,8 @@ export default function Composer({
   const dockRef = useRef(null);
   const settingsRef = useRef(settings);
   const permissionRef = useRef(permission);
+  const reviewCapRef = useRef(reviewCap);
+  const callNameRef = useRef('');
   const modelRef = useRef(models[0]?.key || '');
   const effortRef = useRef(models[0]?.levels?.find(level => level.default)?.label || '');
   const modelsRef = useRef(models);
@@ -197,6 +207,8 @@ export default function Composer({
   clientToolsRef.current = clientTools;
   settingsRef.current = settings;
   permissionRef.current = permission;
+  reviewCapRef.current = reviewCap;
+  callNameRef.current = callName;
   modelsRef.current = models;
   botIdRef.current = botId;
   botNameRef.current = botName;
@@ -238,6 +250,14 @@ export default function Composer({
       cancelAnimationFrame(second);
     };
   }, [presence]);
+
+  useEffect(() => {
+    if (presence !== 'on' || !callBotId) return undefined;
+    const beat = () => refreshVoiceLock(localStorage, callBotId, Date.now());
+    beat();
+    const timer = window.setInterval(beat, 5000);
+    return () => window.clearInterval(timer);
+  }, [presence, callBotId]);
 
   useEffect(() => {
     try {
@@ -351,6 +371,7 @@ export default function Composer({
     const generation = gate.generation;
     const live = sessionRef.current;
     sessionRef.current = null;
+    releaseVoiceLock(localStorage, callBotRef.current);
     Promise.resolve(live?.endSession?.())
       .catch(() => {})
       .finally(() => {
@@ -601,6 +622,8 @@ export default function Composer({
         shellWallets,
         shellBalanceLabel,
         fileCatalog: catalogRef.current,
+        connectors: readSharedLinks(),
+        reviewCap: reviewCapRef.current || '',
         accessToken,
         deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
         signal: controller.signal,
@@ -672,6 +695,7 @@ export default function Composer({
     setMode('full');
     setCallName('');
     setCallBotId(null);
+    releaseVoiceLock(localStorage, callBotRef.current);
     callBotRef.current = null;
     if (!keepNote) setNote('');
     setPhase('off');
@@ -737,6 +761,13 @@ export default function Composer({
     dictationRef.current = null;
     connectingRef.current = true;
     const id = botIdRef.current;
+    const claimed = claimVoiceLock(localStorage, { botId: id, name: botNameRef.current, now: Date.now() });
+    if (!claimed.ok) {
+      connectingRef.current = false;
+      const who = claimed.holder?.name || 'Another agent';
+      setNote(`${who} is already on a call. End that call before starting another.`);
+      return;
+    }
     callBotRef.current = id;
     setCallBotId(id);
     setCallName(botName);
@@ -766,9 +797,14 @@ export default function Composer({
         preferWebsocket: true,
         overrides: payload.overrides ?? voiceOverrides(payload),
         // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
-        ...(owner ? { dynamicVariables: { owner_id: owner, spend_permission: permissionRef.current } } : {}),
+        ...(owner ? { dynamicVariables: { owner_id: owner, spend_permission: permissionRef.current, review_cap: reviewCapRef.current || '' } } : {}),
         customLlmExtraBody: {
+          handoff: true,
+          ownerId: owner,
+          botId: id,
           ownerPermission: permissionRef.current,
+          reviewCap: reviewCapRef.current || '',
+          connectors: readSharedLinks(),
           botName: botNameRef.current,
           botGoal: botGoalRef.current,
           botType: botTypeRef.current,
@@ -814,6 +850,7 @@ export default function Composer({
       if (!connectingRef.current) {
         micGate.current.setMuted(true);
         micGate.current.stop();
+        releaseVoiceLock(localStorage, id);
         await live.endSession?.().catch(() => {});
         return;
       }
@@ -994,6 +1031,7 @@ export default function Composer({
           placeholder={`Message ${botName}`}
           label={`Message ${botName}`}
           sources={PROMPT_SOURCES}
+          commands={PROMPT_COMMANDS}
           models={models}
           defaultModel={chatModel}
           efforts={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.map(level => level.label) ?? []}
@@ -1053,7 +1091,15 @@ export default function Composer({
               aria-pressed={live}
               title={live ? 'Stop voice mode' : 'Talk live with the agent'}
               onMouseDown={event => event.preventDefault()}
-              onClick={() => { if (live) closeStage(false, { userEnded: true }); else startSession(); }}
+              onClick={() => {
+                if (live && callBotRef.current && callBotRef.current !== botIdRef.current) {
+                  setNote(`${callNameRef.current || 'Another agent'} is already on a call. End that call before starting another.`);
+                  setMode('mini');
+                  return;
+                }
+                if (live) closeStage(false, { userEnded: true });
+                else startSession();
+              }}
             >
               <span className="voice-mode-bars" aria-hidden="true">
                 <i />

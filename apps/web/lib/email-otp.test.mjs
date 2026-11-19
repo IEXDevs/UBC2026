@@ -81,7 +81,12 @@ test('sign-in drops the slogan, uses a blur card, and holds the accepted state',
   const emailSignIn = readFileSync(join(root, '../components/EmailSignIn.js'), 'utf8');
   assert.doesNotMatch(signIn, /Your agent\. Your call\./);
   assert.match(signIn, /sign-in-card/);
-  assert.match(css, /\.sign-in-card[\s\S]*backdrop-filter: blur/);
+  assert.match(css, /\.sign-in-card \{[\s\S]*background: transparent;/);
+  assert.match(signIn, /<h1 className="sign-in-mark">Maelstrom<\/h1>/);
+  assert.doesNotMatch(signIn, /WarpWordmark|TechWordmark/);
+  assert.match(signIn, /no-copy/);
+  assert.match(signIn, /onCopy=\{blockCopy\}/);
+  assert.match(css, /\.sign-in-card::before \{[\s\S]*background: rgba\(8, 8, 10, 0\.94\);[\s\S]*backdrop-filter: blur/);
   assert.match(emailSignIn, /EMAIL_ACCEPTED_HOLD_MS/);
   assert.match(emailSignIn, /aria-label="Dismiss"/);
 });

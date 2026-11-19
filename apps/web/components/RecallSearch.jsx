@@ -77,8 +77,8 @@ export default function RecallSearch({ query, hits = [], onQuery, onSelect }) {
           aria-controls={`${id}-list`}
           aria-autocomplete="list"
           aria-activedescendant={shown ? `${id}-${active}` : undefined}
-          aria-label="Search chats, messages, and file names"
-          placeholder="Search chats and files"
+          aria-label="Search agents, chats, messages, and files"
+          placeholder="Search agents, chats, files"
           value={query}
           onChange={(event) => {
             onQuery(event.target.value);

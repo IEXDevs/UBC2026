@@ -220,14 +220,13 @@ export default function PaneDock({ panes, pane, onChange }) {
             activeIndex={pill}
             theme="dark"
             size="md"
-            particleCount={11}
+            particleCount={0}
             spread={22}
-            animationTime={780}
-            timeVariance={110}
-            gooeyness={0.82}
-            wobble={0.14}
+            animationTime={420}
+            timeVariance={0}
+            gooeyness={0}
+            wobble={0}
             hoverEffect
-            balanceActive={false}
             onChange={pick}
           />
         </div>

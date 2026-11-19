@@ -4,6 +4,7 @@ import {
   clipOwnerMessage,
   compactLines,
   contextTone,
+  meterWidth,
   contextUsage,
   contextWindowFor,
   estimateTokens,
@@ -55,6 +56,9 @@ test('user lines count as messages and input tokens', () => {
   assert.equal(contextTone(60), '#eab308');
   assert.equal(contextTone(80), '#f59e0b');
   assert.equal(contextTone(95), '#ef4444');
+  assert.equal(meterWidth(0, 0), '0%');
+  assert.equal(meterWidth(0, 10), '8px');
+  assert.equal(meterWidth(42, 1000), 'max(42%, 8px)');
 });
 
 /**

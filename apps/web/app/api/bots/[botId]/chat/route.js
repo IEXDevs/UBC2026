@@ -2,12 +2,20 @@ import { readRootEnv } from '../../../../../lib/root-env.mjs';
 import {
   chatToolsInstruction,
   createChatToolInvoker,
-  openAiAgentTools,
   serializeToolResult,
 } from '../../../../../lib/chat-tools.mjs';
 import { fetchAgentRuntime } from '../../../../../lib/runtime-fetch.mjs';
 import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mjs';
-import { parsePermission, permissionInstruction, toolAccessKind } from '../../../../../lib/spend-permission.mjs';
+import { parsePermission, permissionInstruction } from '../../../../../lib/spend-permission.mjs';
+import {
+  agentToolSchemas,
+  dispatchHarness,
+  linkedConnectorIds,
+  ownerReviewCap,
+  prepareOwnerTurn,
+  stampSpendPermission,
+} from '../../../../../lib/harness-run.mjs';
+import { readSubagentResults } from '../../../../../lib/subagent-board.mjs';
 import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
 import { ensureOwnerTradeLoop } from '../../../../../lib/owner-trade.mjs';
 import { cloudflareWorkerEnv } from '../../../../../lib/wallets-cloudflare.mjs';
@@ -67,6 +75,15 @@ export async function POST(request, context) {
   }
 
   const permissionMode = parsePermission(body.permission);
+  const reviewCap = ownerReviewCap(body.reviewCap);
+  const connectors = linkedConnectorIds(body.connectors);
+  const prepared = prepareOwnerTurn(message, connectors);
+  if (prepared.reply) {
+    return Response.json(
+      { ok: true, botId, reply: prepared.reply, provider: 'desk', toolRounds: 0 },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
   const grants = Array.isArray(body.grants)
     ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
     : [];
@@ -105,6 +122,36 @@ export async function POST(request, context) {
     // returns a Worker 404 and collapses into rpc_failed.
     rpcFetch: fetch,
   });
+  const spend = { permissionMode, reviewCap, confirmSpend: true };
+  const chatModel = (typeof body.model === 'string' && /^[A-Za-z0-9_.:/-]{1,80}$/.test(body.model.trim()))
+    ? body.model.trim()
+    : (readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined);
+  const chatKeys = {
+    metaModelApiKey: readRootEnv('META_MODEL_API_KEY'),
+    openrouterApiKey: readRootEnv('OPENROUTER_API_KEY'),
+    botName: typeof body.name === 'string' ? body.name : 'Agent',
+    botGoal: typeof body.goal === 'string' ? body.goal : '',
+    botType: typeof body.type === 'string' ? body.type : 'trading',
+    permission: permissionInstruction(permissionMode),
+    permissionMode,
+    grants,
+    model: chatModel,
+    reasoningEffort: typeof body.effort === 'string' ? body.effort : '',
+  };
+  const harnessCtx = {
+    ownerId,
+    botId,
+    connectors,
+    permissionMode,
+    depth: 0,
+    invokeRaw: (name, args) => invokeRaw(name, stampSpendPermission(name, args, spend)),
+    complete: (opts) => completeTextChat({
+      ...chatKeys,
+      history: [],
+      fetcher: fetch,
+      ...opts,
+    }),
+  };
 
   try {
     const reply = await completeTextChat({
@@ -114,28 +161,19 @@ export async function POST(request, context) {
       botGoal: typeof body.goal === 'string' ? body.goal : '',
       botType: typeof body.type === 'string' ? body.type : 'trading',
       history: Array.isArray(body.history) ? body.history.slice(-400) : [],
-      message,
-      model: (typeof body.model === 'string' && /^[A-Za-z0-9_.:/-]{1,80}$/.test(body.model.trim()))
-        ? body.model.trim()
-        : (readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined),
-      reasoningEffort: typeof body.effort === 'string' ? body.effort : '',
-      tools: openAiAgentTools(),
-      toolsInstruction: chatToolsInstruction(),
-      permission: permissionInstruction(permissionMode),
+      message: prepared.message,
+      model: chatModel,
+      reasoningEffort: chatKeys.reasoningEffort,
+      tools: agentToolSchemas(),
+      toolsInstruction: [chatToolsInstruction(), prepared.instruction].join('\n'),
+      permission: chatKeys.permission,
       fileCatalog: Array.isArray(body.fileCatalog) ? body.fileCatalog.slice(0, 40) : [],
       permissionMode,
       grants,
       invokeTool: async (name, args) => {
-        const next = args && typeof args === 'object' ? { ...args } : {};
-        if (name === 'start_task') {
-          if (permissionMode === 'full') next.ownerPermission = 'full';
-          else delete next.ownerPermission;
-        }
-        if (name === 'request_spend' || name === 'sns_send' || name === 'prepare_shopping') {
-          next.permission = permissionMode;
-          if (permissionMode !== 'full' && toolAccessKind(permissionMode, name)) next.confirmed = true;
-        }
-        return serializeToolResult(await invokeRaw(name, next));
+        const hit = await dispatchHarness(name, args, harnessCtx);
+        if (hit) return serializeToolResult(hit);
+        return serializeToolResult(await invokeRaw(name, stampSpendPermission(name, args, spend)));
       },
     });
     const trade = await ensureOwnerTradeLoop({
@@ -155,6 +193,9 @@ export async function POST(request, context) {
         model: reply.model,
         provider: reply.provider,
         toolRounds: reply.toolRounds ?? 0,
+        ...(readSubagentResults(ownerId, botId).length > 0
+          ? { subagents: readSubagentResults(ownerId, botId) }
+          : {}),
         ...(Array.isArray(reply.activity) && reply.activity.length > 0 ? { activity: reply.activity } : {}),
         ...(reply.usage ? { usage: reply.usage } : {}),
         ...(tradeLoop ? {

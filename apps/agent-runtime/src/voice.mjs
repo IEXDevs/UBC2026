@@ -20,6 +20,7 @@ import {
 } from '@ubc2026/agent-tools';
 import { buildTextChatMessages } from '../../web/lib/text-chat.mjs';
 import { permissionInstruction } from '../../web/lib/spend-permission.mjs';
+import { runVoiceAgentTurn } from '../../web/lib/harness-run.mjs';
 import { readAgentPriceQuote } from '@ubc2026/prices';
 import { META_SPARK_MODEL, createOpenRouterFromEnv, resolveModelProvider } from './openrouter.mjs';
 import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
@@ -142,6 +143,7 @@ function voiceAgentConversationConfig({ origin, modelId, webhookSecretRef }) {
                 [WEBHOOK_HEADER]: webhookSecretRef,
                 'x-owner-id': '{{owner_id}}',
                 'x-spend-permission': '{{spend_permission}}',
+                'x-review-cap': '{{review_cap}}',
               }
               : { ...webhookHeaders() },
             request_body_schema: {
@@ -220,6 +222,7 @@ function webhookHeaders() {
     [WEBHOOK_HEADER]: SECRET_PLACEHOLDER,
     'x-owner-id': '{{owner_id}}',
     'x-spend-permission': '{{spend_permission}}',
+    'x-review-cap': '{{review_cap}}',
   });
 }
 
@@ -775,6 +778,10 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
     if (typeof params.handle === 'string') body.handle = params.handle;
     if (typeof params.asset === 'string') body.asset = params.asset;
     if (params.quoteCluster === 'devnet' || params.quoteCluster === 'mainnet') body.quoteCluster = params.quoteCluster;
+    const reviewCap = typeof options.reviewCap === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(options.reviewCap) && options.reviewCap !== '0'
+      ? options.reviewCap
+      : '';
+    if (body.permission === 'review' && reviewCap) body.reviewCap = reviewCap;
     if (params.quoteCluster === 'mainnet') {
       body.quote = { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false };
     }
@@ -966,6 +973,7 @@ async function handleTool(name, request, env, fetchApi) {
       if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
       result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env, {
         spendPermission: request.headers.get('x-spend-permission'),
+        reviewCap: request.headers.get('x-review-cap'),
         ownerUtterance: ownerUtterance(body) || recallUtterance(parsed.conversationId),
       });
     }
@@ -1079,7 +1087,10 @@ export function voiceDecisionMessages({
     message: '',
     secrets,
     provider: provider === 'openrouter' ? 'openrouter' : 'meta',
-    toolsInstruction: sharedToolsInstruction(),
+    toolsInstruction: [
+      sharedToolsInstruction(),
+      'When this call is handed to the agent, that agent uses search, the browser, /goal, /aihero, /vercel, /github, and /search, plus the connected apps. Speak its reply, including what a subagent returned. Do not start a second voice call.',
+    ].join('\n'),
     permission: permissionInstruction(ownerPermission),
   });
   const turns = [];
@@ -1106,9 +1117,10 @@ export function voiceDecisionMessages({
 }
 
 /** Keep the LiveKit room up when the upstream model fails — JSON 5xx drops the call. */
-export function spokenVoiceSse(text) {
+export function spokenVoiceSse(text, max = 500) {
+  const limit = Number.isInteger(max) && max > 40 ? Math.min(max, 1500) : 500;
   const content = typeof text === 'string' && text.trim()
-    ? text.trim().slice(0, 500)
+    ? text.trim().slice(0, limit)
     : 'I hit a model error. Please try again in a moment.';
   const chunk = {
     id: 'chatcmpl-voice',
@@ -1165,6 +1177,42 @@ async function handleCustomLlm(request, env, fetcher) {
         content: 'The owner just joined the voice call. Greet them briefly and wait. Do not end the call.',
       },
     ];
+  }
+  if ((incoming.handoff === true || incoming.handoff === 'true') && !seededGreeting) {
+    const utterance = [...adapted].reverse().find(item => (
+      item.role === 'user'
+      && typeof item.content === 'string'
+      && !item.content.includes('just joined the voice call')
+    ));
+    const owner = readOwnerCandidate(incoming.ownerId)
+      || (conversationId ? await recallVoiceOwner(conversationId) : null);
+    const handoffBot = typeof incoming.botId === 'string' && ID.test(incoming.botId.trim())
+      ? incoming.botId.trim()
+      : '';
+    const prior = adapted.filter(item => (
+      item !== utterance
+      && (item.role === 'user' || item.role === 'assistant')
+      && typeof item.content === 'string'
+      && item.content
+      && !item.content.includes('just joined the voice call')
+    ));
+    const outcome = await runVoiceAgentTurn({
+      message: utterance?.content || '',
+      history: prior.slice(-8),
+      ownerId: owner || '',
+      botId: handoffBot,
+      botName: typeof incoming.botName === 'string' ? incoming.botName : 'Agent',
+      botGoal: typeof incoming.botGoal === 'string' ? incoming.botGoal : '',
+      botType: typeof incoming.botType === 'string' ? incoming.botType : 'trading',
+      permissionMode: incoming.ownerPermission,
+      reviewCap: incoming.reviewCap,
+      connectors: incoming.connectors,
+      env,
+      fetcher,
+      metaModelApiKey: typeof env.META_MODEL_API_KEY === 'string' ? env.META_MODEL_API_KEY : '',
+      openrouterApiKey: typeof env.OPENROUTER_API_KEY === 'string' ? env.OPENROUTER_API_KEY : '',
+    });
+    return spokenVoiceSse(outcome.reply, 1500);
   }
   let model = grokVoiceModel(env);
   if (resolved.provider === 'openrouter') {

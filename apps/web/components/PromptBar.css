@@ -621,6 +621,44 @@
   justify-content: flex-start;
 }
 
+.permit-choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.permit-choice > button[role="option"] {
+  flex: 1;
+  width: auto;
+}
+
+.permit-menu .permit-edit {
+  width: auto;
+  flex: none;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: #f5f5f5;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.permit-cap-value {
+  margin-left: auto;
+  color: #a3a3a3;
+  font-size: 12px;
+}
+
+.permit-cap-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.permit-cap-row input {
+  flex: 1;
+  min-width: 0;
+}
+
 .permit-menu button.is-on {
   background: color-mix(in srgb, var(--permit-color, #f5f5f5) 16%, transparent);
   border-color: color-mix(in srgb, var(--permit-color, #f5f5f5) 45%, transparent);
@@ -652,6 +690,20 @@
   color: #f5f5f5;
   font: inherit;
   font-size: 13px;
+}
+
+.permit-cap-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.permit-saved {
+  color: #3dbe6a;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
 }
 
 .permit-cap-note {

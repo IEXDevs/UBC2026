@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
@@ -82,6 +82,7 @@ import DeskLock from '../components/DeskLock';
 import { useHostedPreview } from '../components/HostedPreview';
 import { usePrivyPublic } from '../components/PrivyRoot';
 import { developerPreviewAllowed, hasStoredPrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
+import { blockCopy } from '../lib/block-copy.mjs';
 import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-preview.mjs';
 import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
@@ -140,7 +141,7 @@ function SessionHold() {
   useEffect(() => {
     if (hasStoredPrivySession(window.localStorage)) setLabel('Restoring your session');
   }, []);
-  return <div className="sign-in" aria-busy="true" role="status">{label}</div>;
+  return <div className="sign-in no-copy" aria-busy="true" role="status" onCopy={blockCopy} onCut={blockCopy}>{label}</div>;
 }
 
 function AuthedShell() {
@@ -360,7 +361,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [looks, setLooks] = useState({});
   const [roster, setRoster] = useState({ order: [], extra: [] });
   const [ready, setReady] = useState(false);
-  const [query, setQuery] = useState('');
   const [sideWidth, setSideWidth] = useState(300);
   const [detailWidth, setDetailWidth] = useState(280);
   const [paneDrag, setPaneDrag] = useState(false);
@@ -896,12 +896,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const payments = remoteLists.payments || [];
   const paymentCrossCheck = remoteLists.paymentCrossCheck || [];
   const positions = remoteLists.positions || [];
-  const visible = bots.filter(bot => bot.name.toLowerCase().includes(query.trim().toLowerCase()));
   const fileCatalog = useMemo(() => catalogForChat(library, bots), [library, bots]);
   const recallHits = useMemo(
     () => searchRecall({ query: recall, bots, talks, files: library }),
     [recall, bots, talks, library],
   );
+  const recallNeedle = recall.trim().toLowerCase();
+  const matchedBots = new Set(recallHits.map(hit => hit.botId).filter(Boolean));
+  const visible = !recallNeedle
+    ? bots
+    : bots.filter(bot => bot.name.toLowerCase().includes(recallNeedle) || matchedBots.has(bot.id));
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
   const chainLabel = devnetSpendableLabel(devnetBalance);
@@ -1290,7 +1294,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       [created.id]: { name: created.name, shape: created.shape, color: created.color, image: created.image || '' },
     }));
     setActiveBot(created.id);
-    setQuery('');
+    setRecall('');
     setSlide('right');
     setPane('Main');
     setCreateOpen(false);
@@ -1587,24 +1591,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           onPointerDown={event => dragPane(event, 'left')}
         />
         <div className="side-tools">
-          <label className="search">
-            <Search size={16} strokeWidth={1.75} />
-            <input
-              value={query}
-              placeholder="Search agents"
-              aria-label="Search agents"
-              onChange={event => setQuery(event.target.value)}
-            />
-          </label>
+          <RecallSearch query={recall} hits={recallHits} onQuery={setRecall} onSelect={onRecall} />
           <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setPluginsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
         </div>
-        <RecallSearch query={recall} hits={recallHits} onQuery={setRecall} onSelect={onRecall} />
         <BotRail
           bots={visible}
           activeId={bot?.id}
-          canDrag={!query.trim()}
+          canDrag={!recall.trim()}
           onSelect={openChat}
           onReorder={onReorder}
           onDelete={onDelete}

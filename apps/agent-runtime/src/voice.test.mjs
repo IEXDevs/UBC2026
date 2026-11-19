@@ -525,7 +525,9 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
   });
   assert.equal(voice[0].role, text[0].role);
   assert.equal(voice[0].content, text[0].content);
-  assert.equal(voice[1].content, text[1].content);
+  assert.equal(voice[1].content.startsWith(text[1].content), true);
+  assert.match(voice[1].content, /When this call is handed to the agent/);
+  assert.match(voice[1].content, /\/goal/);
   assert.match(voice[0].content, /You do not sign, broadcast, reserve budget, or approve spends/);
   assert.match(voice[1].content, /Nova/);
   assert.match(voice[1].content, /trading/);

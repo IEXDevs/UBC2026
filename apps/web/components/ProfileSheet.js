@@ -135,13 +135,11 @@ export default function ProfileSheet({
           {signedIn ? (
             <>
               <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>
-              <p className="quiet">{wallets?.length ? glance.label : 'Sign-in provisions the main Privy wallet'}</p>
-              <AddressCopy address={glance.address} />
               <p className="quiet">Devnet SOL and USDC on this wallet. devnet execution, mainnet pricing.</p>
               <ul className="profile-wallets">
                 {(wallets || []).map(wallet => (
                   <li key={wallet.id}>
-                    <strong>{wallet.label}</strong>
+                    <span className="profile-wallet-name">{wallet.label}</span>
                     <AddressCopy address={wallet.address} />
                   </li>
                 ))}

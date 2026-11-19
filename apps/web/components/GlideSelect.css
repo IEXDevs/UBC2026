@@ -109,6 +109,7 @@
   width: var(--gs-menu-w);
   min-width: 100%;
   padding: 4px;
+  overflow: hidden;
   border-radius: var(--gs-radius);
   background: var(--gs-surface);
   box-shadow: 0 4px 16px color-mix(in srgb, #000 22%, transparent);
@@ -151,6 +152,7 @@
 .glide-select__list {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1px;
   touch-action: none;
 }
@@ -241,11 +243,7 @@
 }
 
 .glide-select__option[aria-selected='true'] {
-  background: color-mix(in srgb, var(--gs-highlight) 60%, transparent);
-}
-
-.glide-select__list[data-live] .glide-select__option[aria-selected='true'] {
-  background: transparent;
+  background: color-mix(in srgb, var(--gs-highlight) 72%, transparent);
 }
 
 .glide-select__name {
@@ -264,10 +262,19 @@
 }
 
 .glide-select__check {
-  display: inline-flex;
-  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
   color: var(--gs-accent);
+  line-height: 0;
   visibility: hidden;
+}
+
+.glide-select__check svg {
+  display: block;
 }
 
 .glide-select__check[data-on] {

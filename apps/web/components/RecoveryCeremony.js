@@ -15,6 +15,7 @@ import {
 } from '../lib/wallet-desk.mjs';
 import { issueRecovery, openRecovery, readRecoveryState, sealRecovery, verifyRecovery } from '../lib/recovery-vault.mjs';
 import { SEED_CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
+import { blockCopy } from '../lib/block-copy.mjs';
 
 const EMPTY_SLOTS = () => Array.from({ length: 12 }, () => '');
 
@@ -307,7 +308,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   if (!step) return null;
 
   return (
-    <div className={`backdrop is-center${leaving ? ' is-leaving' : ''}`}>
+    <div className={`backdrop is-center no-copy${leaving ? ' is-leaving' : ''}`} onCopy={blockCopy} onCut={blockCopy}>
       <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
         <h2 id="recovery-title">{step === 'success' ? 'Seed confirmed' : 'Save your seed'}</h2>
         {step === 'tell' ? (
