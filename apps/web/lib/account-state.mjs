@@ -271,3 +271,8 @@ export function bindAccountState({ ownerId = '', getAccessToken = null, fetchImp
 export function hydrateAccountState() {
   return current ? current.hydrate() : Promise.resolve({ ok: false, error: 'not_ready' });
 }
+
+/** Push queued desk state now. A missing mirror is a no-op. */
+export function flushAccountState() {
+  return current ? current.flush() : Promise.resolve(false);
+}

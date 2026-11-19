@@ -7,8 +7,11 @@ import {
   managesFunds,
   parsePermission,
   permissionInstruction,
+  clearAcceptanceDraft,
   readAcceptanceAck,
+  readAcceptanceDraft,
   reviewCapToDollars,
+  writeAcceptanceDraft,
   toolAccessKind,
   toolAccessRequest,
   transactionNeedsPerson,
@@ -71,6 +74,7 @@ test('onboarding stores the review maximum in base units', () => {
   const memory = {
     getItem: (key) => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, value),
+    removeItem: (key) => storage.delete(key),
   };
   writeAcceptance(memory, 'user_1', { permission: 'ask', reviewCap: '25000000' });
   assert.equal(readAcceptanceAck(memory, 'user_1'), true);
@@ -82,6 +86,11 @@ test('onboarding stores the review maximum in base units', () => {
   assert.equal(memory.getItem('maelstrom.reviewThreshold'), '10000000');
   assert.throws(() => writeAcceptance(memory, 'user_1', { permission: 'review', reviewCap: '0' }));
   assert.throws(() => writeReviewCap(memory, '0'));
+  assert.equal(writeAcceptanceDraft(memory, 'user_1', { permission: 'full', dollars: '30' }), true);
+  assert.deepEqual(readAcceptanceDraft(memory, 'user_1'), { permission: 'full', dollars: '30', touched: true });
+  clearAcceptanceDraft(memory, 'user_1');
+  assert.deepEqual(readAcceptanceDraft(memory, 'user_1'), { permission: 'ask', dollars: '', touched: false });
+  assert.equal(writeAcceptanceDraft(memory, '', { permission: 'full', dollars: '30' }), false);
 });
 
 test('a send summary shows the outflow and the net', () => {

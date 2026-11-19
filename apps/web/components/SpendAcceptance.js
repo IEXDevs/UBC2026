@@ -1,8 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import { PERMISSIONS, dollarsToBaseUnits } from '../lib/spend-permission.mjs';
-import { CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
+import { useEffect, useRef, useState } from 'react';
+import {
+  PERMISSIONS,
+  dollarsToBaseUnits,
+  readAcceptanceDraft,
+  readReviewThreshold,
+  readStoredPermission,
+  reviewCapToDollars,
+  writeAcceptanceDraft,
+} from '../lib/spend-permission.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
 
 const COPY = Object.freeze({
@@ -11,14 +18,43 @@ const COPY = Object.freeze({
   full: 'The agent can manage funds. You still slide to confirm, and a mainnet price quote never authorizes a transaction.',
 });
 
-export default function SpendAcceptance({ onContinue }) {
+function storedDraft(ownerId) {
+  const empty = { permission: 'ask', dollars: '' };
+  if (typeof sessionStorage === 'undefined') return empty;
+  try {
+    const draft = readAcceptanceDraft(sessionStorage, ownerId);
+    if (draft.touched) return { permission: draft.permission, dollars: draft.dollars };
+    const cap = readReviewThreshold(localStorage);
+    return {
+      permission: readStoredPermission(localStorage),
+      dollars: reviewCapToDollars(cap || ''),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export default function SpendAcceptance({ ownerId = '', onContinue }) {
   const [permission, setPermission] = useState('ask');
   const [dollars, setDollars] = useState('');
   const [note, setNote] = useState('');
   const [leaving, setLeaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const dirty = useRef(false);
   const cap = dollarsToBaseUnits(dollars);
   const reviewNeeded = permission === 'review';
+
+  useEffect(() => {
+    if (dirty.current) return;
+    const next = storedDraft(ownerId);
+    setPermission(next.permission);
+    setDollars(next.dollars);
+  }, [ownerId]);
+
+  function remember(nextPermission, nextDollars) {
+    dirty.current = true;
+    try { writeAcceptanceDraft(sessionStorage, ownerId, { permission: nextPermission, dollars: nextDollars }); } catch { /* the field still holds it */ }
+  }
 
   function submit(event) {
     event.preventDefault();
@@ -29,12 +65,14 @@ export default function SpendAcceptance({ onContinue }) {
         : 'Enter a Review by AI maximum above zero. It is stored for when you switch modes.');
       return;
     }
+    const savedNow = onContinue?.({ permission, reviewCap: cap }) === true;
+    if (!savedNow) {
+      setNote('That maximum did not save. Try Continue again.');
+      return;
+    }
     setNote('');
     setSaved(true);
     setLeaving(true);
-    window.setTimeout(() => {
-      onContinue?.({ permission, reviewCap: cap });
-    }, CONFIRM_HOLD_MS);
   }
 
   return (
@@ -56,7 +94,10 @@ export default function SpendAcceptance({ onContinue }) {
                 value={item.id}
                 checked={permission === item.id}
                 disabled={leaving}
-                onChange={() => setPermission(item.id)}
+                onChange={() => {
+                  setPermission(item.id);
+                  remember(item.id, dollars);
+                }}
               />
               <span>{item.label}</span>
               <small>{COPY[item.id]}</small>
@@ -72,7 +113,9 @@ export default function SpendAcceptance({ onContinue }) {
             placeholder="25"
             disabled={leaving}
             onChange={(event) => {
-              setDollars(event.target.value);
+              const next = event.target.value;
+              setDollars(next);
+              remember(permission, next);
             }}
           />
         </label>

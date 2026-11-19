@@ -12,6 +12,43 @@ export function acceptanceStorageKey(ownerId) {
   return typeof ownerId === 'string' && ownerId.trim() ? `maelstrom.acceptance.${ownerId.trim()}` : '';
 }
 
+/** Session draft for the onboarding sheet. Not account state: it holds an in-progress amount. */
+export function acceptanceDraftKey(ownerId) {
+  const id = typeof ownerId === 'string' ? ownerId.trim() : '';
+  return id ? `maelstrom.acceptanceDraft.${id}` : '';
+}
+
+export function readAcceptanceDraft(storage, ownerId) {
+  const empty = { permission: 'ask', dollars: '', touched: false };
+  const key = acceptanceDraftKey(ownerId);
+  if (!storage || !key) return empty;
+  try {
+    const parsed = JSON.parse(storage.getItem(key) || 'null');
+    if (!parsed || parsed.touched !== true) return empty;
+    const dollars = typeof parsed.dollars === 'string' ? parsed.dollars.slice(0, 20) : '';
+    return { permission: parsePermission(parsed.permission), dollars, touched: true };
+  } catch {
+    return empty;
+  }
+}
+
+export function writeAcceptanceDraft(storage, ownerId, { permission, dollars } = {}) {
+  const key = acceptanceDraftKey(ownerId);
+  if (!storage || !key) return false;
+  storage.setItem(key, JSON.stringify({
+    permission: parsePermission(permission),
+    dollars: typeof dollars === 'string' ? dollars.slice(0, 20) : '',
+    touched: true,
+  }));
+  return true;
+}
+
+export function clearAcceptanceDraft(storage, ownerId) {
+  const key = acceptanceDraftKey(ownerId);
+  if (!storage || !key) return;
+  try { storage.removeItem(key); } catch { /* the saved acceptance still stands */ }
+}
+
 export const PERMISSIONS = Object.freeze([
   Object.freeze({ id: 'ask', label: 'Ask every time', color: '#3dbe6a' }),
   Object.freeze({ id: 'review', label: 'Review by AI', color: '#e6b325' }),

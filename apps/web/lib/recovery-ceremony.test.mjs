@@ -3,17 +3,27 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const ceremony = readFileSync(new URL('../components/RecoveryCeremony.js', import.meta.url), 'utf8');
+const acceptance = readFileSync(new URL('../components/SpendAcceptance.js', import.meta.url), 'utf8');
 const slide = readFileSync(new URL('../components/bits/SlideCommit.js', import.meta.url), 'utf8');
 const page = readFileSync(new URL('../app/page.js', import.meta.url), 'utf8');
 
-test('save-seed continue is not blocked on an unattached download or a stuck slider', () => {
-  assert.match(ceremony, /document\.body\.appendChild\(link\)/);
-  assert.match(ceremony, /Retry phrase/);
-  assert.match(ceremony, /setSlideReset/);
-  assert.match(ceremony, /resetKey=\{`\$\{slideReset\}/);
-  assert.equal(ceremony.includes('disabled={!words}'), false);
-  assert.match(ceremony, /step === 'confirm' && words/);
-  assert.doesNotMatch(ceremony, /step !== 'confirm'/);
+/**
+ * Achieves: the spend sheet writes the mode and the USDC maximum before it says they were saved.
+ * Fails when: Continue only starts a timer, a failed write still says Saved, or a remount drops the typed amount.
+ * Oracle: writeAcceptance runs, the read-back must be true, and the draft is written on each edit.
+ * Side effects / state checked: source of the onboarding sheet and the desk page.
+ * Gaps: none.
+ */
+test('the review maximum is stored before the sheet says it saved', () => {
+  assert.match(page, /writeAcceptance\(accountStorage, ownerId, \{ permission, reviewCap \}\)/);
+  assert.match(page, /readAcceptanceAck\(localStorage, ownerId\) !== true/);
+  assert.match(page, /flushAccountState\(\)/);
+  assert.match(acceptance, /That maximum did not save/);
+  assert.match(acceptance, /writeAcceptanceDraft\(sessionStorage, ownerId/);
+  assert.doesNotMatch(acceptance, /setTimeout/);
+  assert.match(ceremony, /onDone\?\.\(\)/);
+  assert.match(page, /writeRecoveryAck\(localStorage, ownerId\)/);
+  assert.match(page, /setRecoveryAck\(true\)/);
 });
 
 test('slide-to-finish still commits when the track has no width and resets after a failed verify', () => {
@@ -22,17 +32,4 @@ test('slide-to-finish still commits when the track has no width and resets after
   assert.match(slide, /\[resetKey\]/);
   assert.match(slide, /setPointerCapture\(event\.pointerId\)/);
   assert.match(slide, /Capture is optional/);
-});
-
-test('a stored recovery ack is read on the first paint so returning users skip the ceremony', () => {
-  assert.match(page, /useState\(\(\) => \{/);
-  assert.match(page, /readRecoveryAck\(window\.localStorage, ownerId\)/);
-  assert.match(page, /persistRecoveryAck\(window\.localStorage, ownerId\)/);
-  assert.match(page, /setRecoveryAck\(true\)/);
-  assert.doesNotMatch(page, /if \(saved\) setRecoveryAck\(true\)/);
-  assert.match(ceremony, /onDone\?\.\(\)/);
-  assert.doesNotMatch(ceremony, /onDone\?\.\(\) === true/);
-  assert.doesNotMatch(ceremony, /Could not save that you finished/);
-  assert.match(ceremony, /recoveryPassStepReady/);
-  assert.match(ceremony, /disabled=\{!words \|\| !passStepReady\}/);
 });

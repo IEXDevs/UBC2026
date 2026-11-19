@@ -305,6 +305,7 @@ test('a recovery phrase is a real 12-word BIP39 mnemonic and the ack stores no w
     handle: 'alex',
     walletsReady: true,
     walletCount: 1,
+    acceptanceConfirmed: true,
     recoveryConfirmed: readRecoveryAck(memory, 'did:privy:abc'),
   }), null);
   assert.equal(persistRecoveryAck(memory, ''), false);
