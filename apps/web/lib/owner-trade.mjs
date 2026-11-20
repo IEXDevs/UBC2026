@@ -1,3 +1,6 @@
+import { parsePermissionedSpendBody } from '@ubc2026/contracts';
+import { toolAccessRequest } from './spend-permission.mjs';
+
 /**
  * An owner sentence that asks for one trade.
  * A price question does not match. The platform then runs the existing loop.
@@ -28,7 +31,8 @@ export async function ensureOwnerTradeLoop({
       .filter(Boolean),
   );
   if (names.has('start_task') || names.has('request_spend')) return null;
-  const text = typeof goal === 'string' && goal.trim() ? goal.trim() : String(message || '').trim();
+  const request = String(message || '').trim();
+  const text = typeof goal === 'string' && goal.trim() ? `${request}\nAgent goal: ${goal.trim()}` : request;
   const args = { goal: text.slice(0, 2000) };
   if (permission === 'full') args.ownerPermission = 'full';
   let wake = null;
@@ -44,4 +48,13 @@ export async function ensureOwnerTradeLoop({
     loop = { error: typeof error?.code === 'string' ? error.code : 'loop_failed' };
   }
   return { wake, loop };
+}
+export function pendingSwapHold(botId, intent) {
+  const parsed = parsePermissionedSpendBody({
+    botId, action: 'swap', permission: 'ask', asset: intent?.asset,
+    outputAsset: intent?.outputAsset, amount: intent?.amount, idempotencyKey: intent?.idempotencyKey,
+  });
+  if (intent?.botId !== botId || !parsed?.idempotencyKey?.startsWith('loop_swap_')) return null;
+  const args = { botId, action: 'swap', asset: parsed.asset, outputAsset: parsed.outputAsset, amount: parsed.amount };
+  return { ...toolAccessRequest('ask', 'request_spend', args), idempotencyKey: parsed.idempotencyKey };
 }

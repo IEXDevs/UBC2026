@@ -79,7 +79,7 @@ Amounts are unsigned integer strings in one accounting asset's base units. The d
 | Cluster | Proposals, facts and x402 must match `SOLANA_CLUSTER` (default `mainnet-beta`, optional `devnet`). Broadcast checks the full configured genesis hash. |
 | Quote | An expired quote, a disabled bot, or an accounting-asset mismatch blocks. |
 | Voice | The agent prompt refuses sends, approvals, limit raises, and wallet freezes. Those stay on the approval screen. |
-| Paper trading | Fills use the configured execution label but do not broadcast a swap. The priced set is SOL, mainnet USDC, and USDT. A close before one hour returns `hold_period`. |
+| Live swaps | A trading run queues a swap for owner review. The desk prices the debit in USD and shows the minimum output. Privy signs the approved Jupiter transaction and submits it to Solana mainnet. |
 
 Funding and top-ups from the main wallet are specified as always needing the owner. Grab-back to main is built in `packages/transfers` and is still an intent on the security page until the wallet route signs.
 
@@ -97,7 +97,7 @@ Solana USDC mint (Circle, 6 decimals, not a program): `EPjFWdd5AufqSSqeM2qN1xzyb
 
 x402 v2 (`packages/x402`, `apps/x402-service`) uses the exact scheme on CAIP-2 `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` and that mint. Challenges on the inactive network are rejected. The unbound payment confirmer fails closed. The price/trust Worker returns HTTP 402 and settles only when `confirmSolanaPayment` accepts a mainnet-beta transfer. It does not broadcast by itself.
 
-Paper-book token identities remain mainnet price identities, not authorization to trade. `packages/paper-positions` prices SOL `So11111111111111111111111111111111111111112`, USDC `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, and USDT `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`. DexScreener and the Jupiter Price and Tokens HTTP APIs are not on-chain programs. `packages/sns` resolves a `.sol` name through an injected function and builds an unsigned intent. It does not call a name-service program (that send path is still open).
+Live swaps use Jupiter's router with the exact Solana mint addresses. The wallet holdings view reads actual SOL and token balances. DexScreener and the Jupiter Price and Tokens HTTP APIs are not on-chain programs. `packages/sns` resolves a `.sol` name through an injected function and builds an unsigned intent. It does not call a name-service program (that send path is still open).
 
 ## QuickNode Streams
 
@@ -115,7 +115,8 @@ Helpers live in `packages/quicknode-streams`. The Worker wires verify → dedupe
 
 ### Schedules
 
-- **Hourly position check:** Cloudflare Cron `0 * * * *` records a paper mark for each enabled trading or position-management bot. It does not wake the spend loop.
+- **Hourly position check:** Cloudflare Cron `0 * * * *` records on-chain balances and available USD marks for enabled trading and position-management agents.
+- **Scheduled trades:** The agent's loop prepares an intent. The owner selects **Review pending swap** to fetch a current quote and approve the real transaction.
 - **Stream-drop fallback:** Cron `5,20,35,50 * * * *` (and the hourly run, when the same condition holds) re-reads mainnet-beta USDC over `SOLANA_RPC_URL` if the newest `stream_events` row is older than one hour, or if that table cannot be read. A non-mainnet-beta genesis hash is refused. The RPC URL is not stored on the check.
 
 ## ElevenLabs
@@ -151,7 +152,7 @@ Grok Bot on X watches Maelstrom's notable Solana mainnet-beta activity: confirme
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
 | `packages/prices` | DexScreener mainnet price reads, Jupiter Price API fallback |
 | `packages/grok-bot` | Offline Grok Bot post drafts for notable mainnet-beta events, plus chat export |
-| `packages/paper-positions` | Trading-bot paper lots and position-bot mark-to-market. Mainnet prices, mainnet-beta execution, no live trades |
+| `packages/paper-positions` | Historical paper position helpers |
 | `packages/x402` | x402 v2 Solana mainnet-beta helpers |
 | `packages/quicknode-streams` | Streams HMAC verify, dedupe, wallet KV sync / backfill plans |
 | `packages/shopping` | x402 sandbox catalog → proposal → policy → 402 buy (scaffold; not an end-to-end checkout) |

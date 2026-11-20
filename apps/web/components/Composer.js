@@ -48,7 +48,7 @@ import {
   writeReviewCap,
 } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
-import { sendBotChat } from '../lib/runtime-data.mjs';
+import { fetchPendingSwap, sendBotChat } from '../lib/runtime-data.mjs';
 import { browserSituation } from '../lib/owner-situation.mjs';
 import { readSharedLinks } from '../lib/connectors.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
@@ -160,6 +160,36 @@ export default function Composer({
   const [settings, setSettings] = useState(DEFAULT_VOICE_SETTINGS);
   const [permission, setPermission] = useState('ask');
   const [reviewCap, setReviewCap] = useState('');
+  const [pendingSwap, setPendingSwap] = useState(null);
+
+  useEffect(() => {
+    setPendingSwap(null);
+    if (hidden || !ownerId || !botId) return undefined;
+    const controller = new AbortController();
+    let reading = false;
+    async function refresh() {
+      if (reading || document.visibilityState === 'hidden') return;
+      reading = true;
+      try {
+        const accessToken = await getAccessToken?.();
+        if (controller.signal.aborted) return;
+        const pending = await fetchPendingSwap(ownerId, botId, accessToken, controller.signal);
+        if (!controller.signal.aborted) setPendingSwap(pending);
+      } catch {
+        // Keep the last owner-scoped result until the connection returns.
+      } finally {
+        reading = false;
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [botId, getAccessToken, hidden, ownerId]);
   const [models, setModels] = useState(() => promptModels());
   const [chatModel, setChatModel] = useState(() => promptModels()[0]?.key || '');
   const [aiProvidersOpen, setAIProvidersOpen] = useState(false);
@@ -757,6 +787,8 @@ export default function Composer({
         ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal, authorize: authorizeSpend })
         : await send();
       if (run !== runRef.current || result?.error === 'aborted') return;
+      if (grants?.some(hold => hold.idempotencyKey === pendingSwap?.idempotencyKey)
+          && result?.reply?.startsWith('Swap submitted.')) setPendingSwap(null);
       await settleChat(result, spoken, prior, grants, run, shown, firstLineId);
     } catch {
       if (run === runRef.current && stopHold.current !== run) {
@@ -1103,6 +1135,11 @@ export default function Composer({
       {mentionCopy ? (
         <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} dotted /></p>
       ) : mention ? <p className="mention-hint" role="status">{mention}</p> : null}
+      {pendingSwap?.botId === botId ? (
+        <div className="entry-suggestions">
+          <Suggestion onClick={() => { void sendMessage('Review pending swap'); }}>Review pending swap</Suggestion>
+        </div>
+      ) : null}
       {lines.length === 0 ? (
         <div className="entry-suggestions">
           {SUGGESTIONS.map((text) => (

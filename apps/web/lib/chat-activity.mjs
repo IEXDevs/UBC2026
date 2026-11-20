@@ -220,6 +220,9 @@ function privyDiagnosticMessage(privy, reason) {
 
 export function spendFailureMessage(result) {
   const parsed = parseResult(result);
+  if (parsed?.error === 'swap_intent_unavailable' || parsed?.reason === 'swap_intent_unavailable') {
+    return 'This swap is no longer pending. Ask the agent to find another trade.';
+  }
   switch (parsed?.error || parsed?.state) {
     case 'invalid_spend_approval':
       return 'The payment approval expired or the payment details changed. Ask for the payment again.';

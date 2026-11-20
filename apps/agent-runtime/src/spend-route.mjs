@@ -20,6 +20,7 @@ import { ownerAuthStatus, resolveSpendOwner } from './owner-auth.mjs';
 import { verifierFacts } from './spend-verifier.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
 import { mintForAsset, prepareApprovedSwap, previewLiveSwap, readSwapTicket } from './live-swap.mjs';
+import { isLoopSwapKey, matchesLoopSwap, useLoopSwap } from './loop-swap.mjs';
 import { valueUsdSpend } from './usd-budget.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
@@ -181,6 +182,14 @@ export async function handleSpend(request, env = {}) {
 
   const now = Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now();
   const usdBudget = context.bot.cap?.asset === 'USD';
+  const loopSwap = isLoopSwapKey(parsed.idempotencyKey);
+  const activeLoopSwap = async () => {
+    const pending = await useLoopSwap(env, ownerId, parsed);
+    return matchesLoopSwap(pending?.intent, parsed, context, Number.isSafeInteger(env.spendNow) ? now : Date.now());
+  };
+  if (loopSwap && (!swap || !await activeLoopSwap())) {
+    return json({ error: 'swap_intent_unavailable', signed: false }, 409);
+  }
   if (swap) {
     if (SOLANA_CLUSTER !== 'mainnet-beta') return json({ error: 'wrong_cluster', signed: false }, 409);
     if (!usdBudget) return json({ error: 'swap_requires_usd_budget', signed: false }, 409);
@@ -325,6 +334,7 @@ export async function handleSpend(request, env = {}) {
           return { state: 'blocked', reason: 'spend_authorization_changed' };
         }
       }
+      if (loopSwap && !await activeLoopSwap()) return { state: 'blocked', reason: 'swap_intent_unavailable' };
       return reserveAssetTransfer(env, {
         ownerId, bot, proposal, policy, now, idempotencyKey: id, budgetApproval: approvedOnce ? budgetApproval : null,
       });
@@ -401,7 +411,10 @@ export async function handleSpend(request, env = {}) {
   if (state === 'desk_locked') body.error = 'desk_locked';
   if (usdBudget && result.policy?.debit) body.usdMicros = result.policy.debit;
   if (typeof result.trust?.prompt === 'string') body.prompt = result.trust.prompt;
-  if (result.signed === true && grantOk) body.signature = result.signature;
+  if (result.signed === true && grantOk) {
+    body.signature = result.signature;
+    if (loopSwap) await useLoopSwap(env, ownerId, parsed, result.signature);
+  }
   const alert = alertFromSpend(result, parsed);
   if (alert) {
     await publishBotAlert(env, {

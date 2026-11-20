@@ -227,7 +227,7 @@ async function wakeAndMaybeLoop(env, botStub, wake) {
       'Content-Type': 'application/json',
       'x-owner-id': wake.ownerId,
     },
-    body: JSON.stringify(context),
+    body: JSON.stringify({ ...context, scheduled: true }),
   }));
   const text = await loopRes.text();
   let body;

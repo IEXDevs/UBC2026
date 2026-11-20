@@ -69,7 +69,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
     botId,
     goal: { type: 'string', description: 'Optional goal text' },
   }, [call('POST', '/bots/:botId/wake', { body: ['goal'] })]),
-  dashboard('start_task', 'Start the research / decide / approval loop for one bot. Creates a run when the bot has none, then pursues the goal through the checkpointed loop.', ['botId'], {
+  dashboard('start_task', 'Start the checkpointed research and decision loop. A trade proposal waits for the owner to review and approve it in the desk.', ['botId'], {
     botId,
     goal: { type: 'string', description: 'Optional goal text' },
   }, [call('POST', '/bots/:botId/loop', { body: ['goal'] })]),
@@ -203,7 +203,7 @@ export function sharedToolsInstruction() {
     'Call break_loop only when the owner explicitly asks to break, stop, or cancel the loop. Do not break a loop on your own.',
     'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
     `For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled ${EXECUTION_LABEL}. It does not sign, broadcast, or authorize a transaction. Execution stays on the configured Solana network.`,
-    'Use get_price to research an exact mint. For a live trade call request_spend with action swap, the input amount in base units, and both asset identifiers. The desk provides the quote and owner confirmation. Use start_task for research or a simulated trade.',
+    'Use get_price to research an exact mint. For a specific live trade call request_spend with action swap, the input amount in base units, and both asset identifiers. Use start_task when the owner asks you to find a trade. The desk quotes and confirms those real swaps with the owner. Report a swap as submitted only if the spend API returned a transaction signature.',
     'request_spend posts the shared spend route. A locked desk is not an approval hold and does not replace trust, verify, reserve, or the permission gate. Fully-automatic still runs those gates. 1000000 is 1 USDC in base units. For swaps the output goes to the assigned wallet. Do not pass a destination, handle, or price quote for a swap.',
     'When the owner names a .sol SNS domain, an @handle, or a wallet address, call lookup_recipient with q set to that token. It hits GET /api/profiles/lookup (SNS resolve or handle directory). Never web_search for .sol names or handles. Speak the resolved address as first5...last5.',
     'When the owner asks you to open or use a specific website: browser_open, then browser_navigate to that https URL. Prefer a direct URL over searching. The owner watches Live View for form entry.',

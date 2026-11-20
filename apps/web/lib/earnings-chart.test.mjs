@@ -1,162 +1,51 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SOL_MINT } from './portfolio.mjs';
-import { describePositions } from './money-views.mjs';
 import { layoutPositionBook } from './position-book.mjs';
-import { chartLine } from './wallet-desk.mjs';
-import {
-  PAPER_PNL_LABEL,
-  buildEarningsSeries,
-  mergeConnectedPositions,
-} from './earnings-chart.mjs';
+import { buildEarningsSeries, mergeWalletPositions } from './earnings-chart.mjs';
 
-const PHANTOM = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-const SOLFLARE = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
+const PHANTOM = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
+const EMBEDDED = '11111111111111111111111111111111';
+const RUNTIME_WALLET = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const SOL = { mint: SOL_MINT, symbol: 'SOL', amount: '2000000000', decimals: 9, usdMicro: '200000000' };
 
-const paper = {
-  id: 'pos_sol',
-  botId: 'bot_positions',
-  asset: 'SOL',
-  amount: '1000000000',
-  decimals: 9,
-  pnlMicroUsdc: '-1500000',
-  quoteSource: 'jupiter',
-  venue: 'Jupiter',
-  market: 'SOL',
-  side: 'long',
-};
-
-function portfolio() {
-  return {
-    cluster: 'mainnet',
-    authorizesTransaction: false,
-    broadcast: false,
-    priceLabel: PAPER_PNL_LABEL,
-    wallets: [
-      {
-        address: PHANTOM,
-        label: 'Phantom',
-        client: 'phantom',
-        spendable: false,
-        holdings: [
-          { mint: SOL_MINT, symbol: 'SOL', amount: '2000000000', decimals: 9, usdMicro: '200000000' },
-        ],
-      },
-      {
-        address: SOLFLARE,
-        label: 'Solflare',
-        client: 'solflare',
-        spendable: false,
-        holdings: [
-          { mint: SOL_MINT, symbol: 'SOL', amount: '500000000', decimals: 9, usdMicro: '50000000' },
-        ],
-      },
-      {
-        address: 'So11111111111111111111111111111111111111112',
-        label: 'Main',
-        client: 'privy',
-        spendable: true,
-        holdings: [
-          { mint: SOL_MINT, symbol: 'SOL', amount: '9000000000', decimals: 9, usdMicro: '900000000' },
-        ],
-      },
-    ],
-  };
-}
-
-/**
- * Achieves: verifies earnings chart is paper PnL and does not authorize a transaction.
- * Fails when: earnings chart is paper PnL and does not authorize a transaction breaks (e.g. expected false, false, true).
- * Oracle: assert.equal(series.broadcast, false); assert.equal(series.authorizesTransaction, false); assert.equal(series.paperPnl, true); assert.equal(series.label, PAPER_PNL_LABEL); assert.equal(series.totalMicro, '-250000'); assert.equal(line.up, false)
- * Side effects / state checked: N/A.
- * Gaps: none.
- */
-test('earnings chart is paper PnL and does not authorize a transaction', () => {
-  const series = buildEarningsSeries({
-    positions: [paper, { id: 'balance', source: 'connected-balance', readOnly: true, pnlMicroUsdc: '9000000' }],
-    payments: [
-      { direction: 'earned', amount: '1000000', asset: 'USDC', createdAt: 20 },
-      { direction: 'paid', amount: '250000', asset: 'USDC', createdAt: 10 },
-    ],
-    transfers: [{ direction: 'in', amount: '500000', asset: 'USDC', createdAt: 30 }],
-  });
-  assert.equal(series.broadcast, false);
-  assert.equal(series.authorizesTransaction, false);
-  assert.equal(series.paperPnl, true);
-  assert.equal(series.label, PAPER_PNL_LABEL);
-  assert.equal(series.caption, 'Paper PnL. A price quote does not authorize a transaction.');
-  assert.match(series.caption, /does not authorize a transaction/);
-  assert.deepEqual(series.points.map(point => point.micro), ['0', '-250000', '750000', '1250000', '-250000']);
-  assert.equal(series.totalMicro, '-250000');
-  const line = chartLine(series.values);
-  assert.ok(line);
-  assert.equal(line.up, false);
+test('the earnings line only includes confirmed USDC movements on the active network', () => {
+  const confirmed = { streamConfirmed: true, cluster: 'mainnet-beta', asset: 'USDC' };
+  const outgoing = { ...confirmed, direction: 'paid', amount: '1250000', txSignature: '5'.repeat(64), createdAt: 10 };
+  const incoming = { ...confirmed, direction: 'earned', amount: '1000000', txSignature: '6'.repeat(64), createdAt: 20 };
+  const series = buildEarningsSeries({ payments: [
+    incoming, outgoing, outgoing,
+    { ...incoming, txSignature: '7'.repeat(64), cluster: 'devnet' },
+    { ...incoming, txSignature: '8'.repeat(64), streamConfirmed: false },
+  ], transfers: [{ direction: 'in', amount: '100000000' }] });
+  assert.deepEqual(series.points.map(point => point.micro), ['0', '-1250000', '-250000']);
+  assert.equal(series.label, 'Net USDC flow');
+  assert.equal(buildEarningsSeries({ payments: [{ ...incoming, txSignature: '' }] }), null);
 });
 
-/**
- * Achieves: verifies connected wallets add read-only mainnet balances and keep paper lots.
- * Fails when: connected wallets add read-only mainnet balances and keep paper lots breaks (e.g. expected false, false, PAPER_PNL_LABEL).
- * Oracle: assert.equal(merged.broadcast, false); assert.equal(merged.authorizesTransaction, false); assert.equal(merged.label, PAPER_PNL_LABEL); assert.equal(merged.positions[0].id, 'pos_sol'); assert.equal(merged.positions.length, 3); assert.equal(phantom.quoteSource, 'Wallet balance')
- * Side effects / state checked: N/A.
- * Gaps: none.
- */
-test('connected wallets add read-only mainnet balances and keep paper lots', () => {
-  const merged = mergeConnectedPositions({
-    positions: [paper],
-    wallets: [{ id: 'wallet_main', label: 'Main', address: 'So11111111111111111111111111111111111111112', kind: 'main' }],
-    portfolio: portfolio(),
+test('the positions book shows chain balances for linked and runtime wallets without inventing PnL', () => {
+  const wallets = [
+    { id: 'embedded', address: EMBEDDED, label: 'Main' },
+    { id: 'agent', address: RUNTIME_WALLET, label: 'Agent wallet', holdings: [
+      { ...SOL, asset: 'SOL', mint: null, amount: '1000000000', cluster: 'mainnet-beta' },
+      { ...SOL, cluster: 'testnet', amount: '5000000000' },
+    ] },
+  ];
+  const portfolio = { cluster: 'mainnet', authorizesTransaction: false, wallets: [
+    { address: EMBEDDED, client: 'privy', holdings: [SOL] },
+    { address: PHANTOM, label: 'Phantom', client: 'phantom', holdings: [SOL] },
+  ] };
+  const { positions, wallets: merged } = mergeWalletPositions({
+    wallets, portfolio, positions: [{ id: 'old-paper-lot', amount: '99' }],
   });
-  assert.equal(merged.broadcast, false);
-  assert.equal(merged.authorizesTransaction, false);
-  assert.equal(merged.label, PAPER_PNL_LABEL);
-  assert.equal(merged.positions[0].id, 'pos_sol');
-  assert.equal(merged.positions.length, 3);
-  const phantom = merged.positions.find(row => row.holder === 'Phantom');
-  const solflare = merged.positions.find(row => row.holder === 'Solflare');
-  assert.equal(phantom.quoteSource, 'Wallet balance');
-  assert.equal(phantom.broadcast, false);
-  assert.equal(phantom.readOnly, true);
-  assert.equal(phantom.pnlMicroUsdc, '0');
-  assert.equal(phantom.amount, '2000000000');
-  assert.equal(solflare.walletId.startsWith('connected_'), true);
-  assert.equal(merged.positions.some(row => row.holder === 'Main' && row.source === 'connected-balance'), false);
-  assert.equal(merged.wallets.find(wallet => wallet.label === 'Phantom').readOnly, true);
-  assert.equal(merged.wallets.find(wallet => wallet.label === 'Phantom').spendable, false);
-
-  const again = mergeConnectedPositions({
-    positions: merged.positions,
-    wallets: merged.wallets,
-    portfolio: portfolio(),
-  });
-  assert.equal(again.positions.length, 3);
-
-  const described = describePositions(merged.positions, [{ id: 'bot_positions', name: 'Position guard' }]);
-  assert.equal(described[0].botName, 'Position guard');
-  assert.equal(described.find(row => row.asset === 'SOL' && row.botName === 'Phantom').market, 'SOL');
-  assert.equal(described.find(row => row.botName === 'Phantom').note, 'Wallet balance');
-
-  const book = layoutPositionBook(merged.positions, [], merged.wallets);
-  const node = book.wallets.find(wallet => wallet.label === 'Phantom');
-  assert.equal(node.readOnly, true);
-  assert.equal(book.cards.filter(card => card.walletId === node.id).length, 1);
-  assert.equal(book.cards.find(card => card.holder === 'Phantom' || card.botName === 'Phantom').market, 'SOL');
-});
-
-/**
- * Achieves: verifies a quote that authorizes a transaction does not add balances.
- * Fails when: a quote that authorizes a transaction does not add balances breaks (e.g. expected 1, 'pos_sol', false).
- * Oracle: assert.equal(merged.positions.length, 1); assert.equal(merged.positions[0].id, 'pos_sol'); assert.equal(merged.authorizesTransaction, false); assert.equal(merged.broadcast, false)
- * Side effects / state checked: N/A.
- * Gaps: none.
- */
-test('a quote that authorizes a transaction does not add balances', () => {
-  const merged = mergeConnectedPositions({
-    positions: [paper],
-    wallets: [],
-    portfolio: { ...portfolio(), authorizesTransaction: true },
-  });
-  assert.equal(merged.positions.length, 1);
-  assert.equal(merged.positions[0].id, 'pos_sol');
-  assert.equal(merged.authorizesTransaction, false);
-  assert.equal(merged.broadcast, false);
+  assert.equal(positions.length, 3);
+  assert.equal(positions.find(position => position.walletId === 'embedded').amount, SOL.amount);
+  assert.equal(positions.find(position => position.walletId === 'agent').amount, '1000000000');
+  assert.equal(positions.find(position => position.holder === 'Phantom').readOnly, true);
+  assert.equal(merged.find(wallet => wallet.address === EMBEDDED).readOnly, undefined);
+  const book = layoutPositionBook(positions, [], merged);
+  assert.equal(book.summary.pnlLabel, null);
+  assert.ok(book.cards.every(card => card.pnlLabel === null));
+  assert.equal(mergeWalletPositions({ wallets, portfolio: { ...portfolio, cluster: 'testnet' } }).positions.length, 1);
+  assert.equal(mergeWalletPositions({ portfolio: { ...portfolio, authorizesTransaction: true } }).positions.length, 0);
 });

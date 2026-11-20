@@ -1,6 +1,5 @@
-import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
- * Persist paper position checks through the Supabase service role.
+ * Persist on-chain position checks through the Supabase service role.
  * Caller must pass a verified ownerId (from the bot row / cron plan), never a
  * client-supplied claim alone. Service role bypasses RLS — every write filters
  * and stamps owner_id from that verified value, and re-checks bots.owner_id.
@@ -11,7 +10,6 @@ import { supabaseConfig, supabaseGet, supabaseWrite } from './supabase-rest.mjs'
 const OWNER = /^[a-zA-Z0-9:_-]{1,128}$/;
 const BOT = /^[a-zA-Z0-9:_-]{1,128}$/;
 const AMOUNT = /^(0|[1-9][0-9]{0,39})$/;
-const MINT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 function slimCheckDetail(check) {
   const positions = Array.isArray(check?.positions)
@@ -25,7 +23,8 @@ function slimCheckDetail(check) {
     }))
     : [];
   return redactForLog({
-    paper: true,
+    paper: false,
+    lossKnown: typeof check?.unrealizedLossMicroUsd === 'string',
     label: typeof check?.label === 'string' ? check.label.slice(0, 80) : null,
     flag: typeof check?.flag === 'string' ? check.flag.slice(0, 64) : null,
     status: typeof check?.status === 'string' ? check.status.slice(0, 64) : null,
@@ -36,11 +35,9 @@ function slimCheckDetail(check) {
   });
 }
 
-/**
- * Upsert open paper lots for an owner-scoped bot. Replaces open rows for that bot.
- */
-export async function persistPositionCheck(env, { ownerId, botId, check, positions } = {}) {
+export async function persistPositionCheck(env, { ownerId, botId, check } = {}) {
   if (!OWNER.test(ownerId) || !BOT.test(botId)) return { wrote: false, reason: 'invalid_ids' };
+  if (check?.paper !== false) return { wrote: false, reason: 'invalid_source' };
   if (!supabaseConfig(env)) return { wrote: false, reason: 'unconfigured' };
   const fetcher = env.fetch ?? fetch;
   const owned = await supabaseGet(
@@ -67,7 +64,7 @@ export async function persistPositionCheck(env, { ownerId, botId, check, positio
     max_loss: typeof check?.maxLoss === 'string' && AMOUNT.test(check.maxLoss) ? check.maxLoss : null,
     detail,
   };
-  await supabaseWrite(env, {
+  const written = await supabaseWrite(env, {
     path: 'position_checks',
     method: 'POST',
     body: checkRow,
@@ -75,42 +72,5 @@ export async function persistPositionCheck(env, { ownerId, botId, check, positio
     fetcher,
   });
 
-  const listed = Array.isArray(positions) ? positions.slice(0, 30) : [];
-  for (const row of listed) {
-    const mint = typeof row?.mint === 'string' && MINT.test(row.mint) ? row.mint : null;
-    const amount = typeof row?.amount === 'string' && AMOUNT.test(row.amount) ? row.amount : null;
-    if (!mint || !amount) continue;
-    const id = `pos:${botId}:${mint}`;
-    const decimals = Number.isSafeInteger(row?.decimals) && row.decimals >= 0 && row.decimals <= 18
-      ? row.decimals
-      : 6;
-    const entry = typeof row?.entryMicroUsd === 'string' && AMOUNT.test(row.entryMicroUsd)
-      ? row.entryMicroUsd
-      : '0';
-    await supabaseWrite(env, {
-      path: 'paper_positions?on_conflict=id',
-      method: 'POST',
-      body: {
-        id,
-        owner_id: ownerId,
-        bot_id: botId,
-        mint,
-        symbol: typeof row?.symbol === 'string' ? row.symbol.slice(0, 16) : null,
-        kind: typeof row?.kind === 'string' ? row.kind.slice(0, 32) : null,
-        decimals,
-        quantity: amount,
-        entry_micro_usdc: entry,
-        realized_micro_usdc: '0',
-        status: 'open',
-        mode: 'paper',
-        cluster: SOLANA_CLUSTER,
-        opened_at: at,
-        updated_at: at,
-        label: EXECUTION_LABEL,
-      },
-      prefer: 'resolution=merge-duplicates,return=minimal',
-      fetcher,
-    });
-  }
-  return { wrote: true };
+  return { wrote: written.ok === true };
 }

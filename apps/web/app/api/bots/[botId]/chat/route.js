@@ -26,7 +26,8 @@ import { situationFromEdge } from '@ubc2026/agent-tools';
 import { visitorGeo } from '../../../../../lib/visitor-geo.mjs';
 import { readSubagentResults } from '../../../../../lib/subagent-board.mjs';
 import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
-import { ensureOwnerTradeLoop } from '../../../../../lib/owner-trade.mjs';
+import { ensureOwnerTradeLoop, ownerAsksForOneTrade, pendingSwapHold } from '../../../../../lib/owner-trade.mjs';
+import { modelFreeCommand } from '../../../../../lib/model-free-command.mjs';
 import { cloudflareWorkerEnv } from '../../../../../lib/wallets-cloudflare.mjs';
 import { parseSolHandleSend, runSolHandleSend } from '../../../../../lib/sol-handle-send.mjs';
 import {
@@ -116,7 +117,8 @@ export async function POST(request, context) {
     return Response.json({ error: 'invalid_spend_authorization' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
   }
   const solSend = assetConfirmation ? null : parseSolHandleSend(message);
-  const noModel = solSend || assetConfirmation;
+  const reviewSwap = !assetConfirmation && modelFreeCommand(message) === 'review-swap';
+  const noModel = solSend || assetConfirmation || reviewSwap;
   const connectors = noModel ? [] : linkedConnectorIds(body.connectors);
   const situation = noModel ? null : situationFromEdge(body.situation, await visitorGeo(request));
   const prepared = situation ? prepareOwnerTurn(message, connectors, situation, new Date(situation.at)) : null;
@@ -280,10 +282,37 @@ export async function POST(request, context) {
       });
       return (gate && approvalContext.attestBudgetApproval && budgetApprovalReply(assetConfirmation, gate)) || reply;
     }
-    return completeTextChat({ ...turnArgs, onMessage });
+    if (reviewSwap) {
+      const hold = await loadPendingSwapHold();
+      return { provider: 'desk', text: hold ? '' : 'This agent has no swap waiting for review.', hold };
+    }
+    return completeTextChat({ ...turnArgs, onMessage: ownerAsksForOneTrade(message) ? null : onMessage });
+  }
+
+  async function loadPendingSwapHold() {
+    const status = await invokeRaw('get_bot_status', { botId });
+    return pendingSwapHold(botId, status?.pendingSwap);
   }
 
   async function finishTurn(reply) {
+    const startedTrade = ownerAsksForOneTrade(message) && reply.activity?.some(step => step.name === 'start_task');
+    const trade = assetConfirmation || reviewSwap || reply.hold ? null : await ensureOwnerTradeLoop({
+      message,
+      goal: typeof body.goal === 'string' ? body.goal : '',
+      permission: permissionMode,
+      activity: reply.activity,
+      invoke: invokeRaw,
+    });
+    const tradeLoop = trade?.loop && typeof trade.loop === 'object' ? trade.loop : null;
+    if (!reply.hold && (tradeLoop || startedTrade)) {
+      const pending = await loadPendingSwapHold();
+      if (pending) reply = { ...reply, hold: pending, messages: [] };
+      else if (tradeLoop?.run?.pauseReason === 'swap_requires_usd_budget') {
+        reply = { ...reply, text: 'Live swaps need an agent with USD spending limits.', messages: [] };
+      } else if (tradeLoop?.waiting || startedTrade) {
+        reply = { ...reply, text: 'This run has no swap ready to approve.', messages: [] };
+      }
+    }
     const requestedSwap = reply.hold?.args?.action === 'swap';
     if (requestedSwap) {
       const preview = approvalContext.secret && await invokeRaw('request_spend', {
@@ -300,14 +329,6 @@ export async function POST(request, context) {
     const hold = assetHold
       ? sealAssetSpendHold(reply.hold, approvalContext)
       : reply.hold;
-    const trade = assetConfirmation || assetHold || requestedSwap ? null : await ensureOwnerTradeLoop({
-      message,
-      goal: typeof body.goal === 'string' ? body.goal : '',
-      permission: permissionMode,
-      activity: reply.activity,
-      invoke: invokeRaw,
-    });
-    const tradeLoop = trade?.loop && typeof trade.loop === 'object' ? trade.loop : null;
     const replies = Array.isArray(reply.messages)
       ? reply.messages.filter(item => typeof item === 'string' && item.trim())
       : [];

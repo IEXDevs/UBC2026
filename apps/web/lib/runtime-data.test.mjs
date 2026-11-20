@@ -6,8 +6,6 @@ import {
   emptyMoneyState,
   fetchOwnerLists,
   firstAssignableWalletId,
-  positionsFromBook,
-  positionsFromStatus,
   runtimeBaseUrl,
   sendBotChat,
   shellBotFromRemote,
@@ -127,13 +125,13 @@ function jsonResponse(body, ok = true) {
 }
 
 /**
- * Achieves: verifies owner lists load bots, wallets, payments, and paper positions from the proxy.
- * Fails when: owner lists load bots, wallets, payments, and paper positions from the proxy breaks (e.g. expected 'supabase', 1, 1).
+ * Achieves: verifies owner lists load live records and ignore historical paper positions.
+ * Fails when: owner lists load live records and ignore historical paper positions breaks (e.g. expected 'supabase', 1, 1).
  * Oracle: assert.equal(lists.source, 'supabase'); assert.equal(lists.bots.length, 1); assert.equal(lists.wallets.length, 1); assert.equal(lists.payments.length, 1); assert.equal(lists.paymentCrossCheck.length, 1); assert.equal(lists.paymentCrossCheck[0].walletId, 'w1')
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
-test('owner lists load bots, wallets, payments, and paper positions from the proxy', async () => {
+test('owner lists load live records and ignore historical paper positions', async () => {
   const calls = [];
   const fetcher = async (url) => {
     calls.push(url);
@@ -200,16 +198,8 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
   assert.equal(lists.payments.length, 1);
   assert.equal(lists.paymentCrossCheck.length, 1);
   assert.equal(lists.paymentCrossCheck[0].walletId, 'w1');
-  assert.ok(calls.some(url => url.endsWith('/api/positions')));
-  assert.equal(lists.positions.length, 1);
-  assert.equal(lists.positions[0].id, 'pos_1');
-  assert.equal(lists.positions[0].amount, '25000000');
-  assert.equal(lists.positions[0].asset, 'SOL');
-  assert.equal(lists.positions[0].pnlMicroUsdc, '-500');
-  assert.equal(lists.positions[0].botId, 'bot_live');
-  assert.equal(lists.positions[0].market, undefined);
-  assert.deepEqual(positionsFromBook([{ id: 'x', botId: 'bot_live', quantity: 'nope' }], []), []);
-  assert.deepEqual(positionsFromStatus('bot_live', { positionCheck: { positions: [{ amount: 'nope' }] } }), []);
+  assert.equal(calls.some(url => url.endsWith('/api/positions')), false);
+  assert.deepEqual(lists.positions, []);
   const unsigned = await fetchOwnerLists('');
   assert.equal(unsigned.source, 'unsigned');
   assert.deepEqual(unsigned.positions, []);

@@ -234,7 +234,7 @@ export function matchingToolGrant(grants, name, args) {
   const needsSpendId = needsBoundSpend(name, args);
   return grants.find(grant => grant?.name === name
     && (!needsSpendId || (typeof grant.idempotencyKey === 'string'
-      && /^spend_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(grant.idempotencyKey)))
+      && /^(?:spend|loop_swap)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(grant.idempotencyKey)))
     && JSON.stringify(stable(plainArgs(grant.args))) === want);
 }
 
