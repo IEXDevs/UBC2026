@@ -60,9 +60,10 @@ export default function SecretDraft({
             spellCheck={false}
             value={value}
             disabled={disabled}
-            onCopy={() => {
-              onCopied(true);
-              setCopyFailed(false);
+            onCopy={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void copy();
             }}
             onChange={(event) => {
               onGenerated(false);

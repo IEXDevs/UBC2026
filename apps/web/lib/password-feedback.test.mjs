@@ -72,5 +72,7 @@ test('both setup forms wire accessible feedback without gating seed verification
   assert.match(recovery, /disabled=\{!feedback.ready\}/);
   assert.match(draft, /aria-describedby=\{describedBy\}/);
   assert.match(draft, /Copied\. Keep it somewhere safe/);
+  assert.match(draft, /onCopy=\{\(event\) => \{\s*event.preventDefault\(\);\s*event.stopPropagation\(\);\s*void copy\(\);/);
+  assert.doesNotMatch(draft, /onCopied\(true\)/);
   assert.match(hint, /role="status" aria-live="polite" aria-atomic="true"/);
 });
