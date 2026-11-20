@@ -265,6 +265,8 @@ test('recovery phrases are confirmed in order and never stored in the ack', () =
   const plain = recoveryCard({ wallets: [{ label: 'Main', address: ADDRESS }] });
   assert.match(plain, /Not a seed phrase/);
   assert.match(card, /This file is the only copy/);
+  assert.match(card, /not a wallet seed or private key/);
+  assert.doesNotMatch(card, /Seed phrase:|execution, mainnet pricing/);
   assert.equal(recoveryAcknowledged(recoveryAckRecord()), true);
   assert.equal(recoveryAcknowledged(JSON.stringify({ downloaded: true, confirmed: true, words: PHRASE })), false);
   assert.deepEqual(recoveryResume(recoveryStepRecord('pass')), { step: 'pass', lost: false });
