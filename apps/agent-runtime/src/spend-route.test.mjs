@@ -111,6 +111,7 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
       },
       signPreparedDevnetTransfer: async input => {
         assert.equal(input.prepared, prepared);
+        assert.equal(input.accessToken, 'test-owner-session');
         assert.equal(reserves, 1);
         signs++;
         return { cluster: 'devnet', signature: 'mock_signature' };
@@ -118,7 +119,10 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
     },
   });
   const spend = { action: 'pay', permission: 'full', botId: 'bot_1', handle: '@hi', asset: 'SOL', amount: '1000000000', idempotencyKey: 'test_sol_send' };
-  const call = body => worker.fetch(spendRequest(body, { 'x-desk-grant': grant }), env);
+  const call = body => worker.fetch(spendRequest(body, {
+    'x-desk-grant': grant,
+    authorization: 'Bearer test-owner-session',
+  }), env);
 
   const held = await (await call(spend)).json();
   assert.equal(held.state, 'approval-needed');

@@ -3,8 +3,7 @@
  * Login provisioning (main wallet at sign-up, additional wallets) and
  * server signing. Bot spends, owner sweeps, and wallet-adapter deposits
  * broadcast on Solana devnet through QUICKNODE_DEVNET_RPC_URL.
- * Key material stays in Privy and in
- * environment variables; this module never returns a private key.
+ * Wallet keys stay in Privy. Signing credentials stay server-side.
  */
 import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
 import { SECRET_GROUPS, requireConfig, validateWallet, ContractError } from '@ubc2026/contracts';
@@ -36,6 +35,12 @@ const CLASSIC_TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const privyWalletIdPattern = /^[A-Za-z0-9_-]{10,128}$/;
 const ownerIdPattern = /^[a-zA-Z0-9:_.-]{1,256}$/;
+const USER_WALLET_AUTH_ERRORS = new Set([
+  'missing_or_empty_authorization_header',
+  'zero_correct_authorization_signatures',
+  'no_valid_user_session_keys',
+  'user_session_keys_expired',
+]);
 
 const fail = (message, code = 'wallet_error') => {
   throw new WalletError(message, code);
@@ -507,7 +512,7 @@ export function createPrivyWalletClient({
     return controller.signal;
   }
 
-  async function fetchJson(url, { method, headers, body }, code) {
+  async function fetchJson(url, { method, headers, body, walletRpc = false }, code) {
     let response;
     try {
       // Cloudflare Workers only allow redirect "follow" | "manual".
@@ -542,6 +547,15 @@ export function createPrivyWalletClient({
       try { payload = JSON.parse(text); } catch { payload = null; }
     }
     if (!response.ok) {
+      if (walletRpc) {
+        const codes = [payload?.code, payload?.error_code, payload?.error];
+        if (codes.includes('policy_violation')) {
+          fail('Privy wallet policy rejected the transaction', 'wallet_policy_rejected');
+        }
+        if (codes.some(value => USER_WALLET_AUTH_ERRORS.has(value))) {
+          fail('Privy requires wallet authorization', 'wallet_authorization_required');
+        }
+      }
       const detail = safePrivyCode(payload);
       if (code === 'rpc_failed') {
         fail(`QuickNode devnet RPC request failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
@@ -713,7 +727,7 @@ export function createPrivyWalletClient({
     return { cluster: 'devnet' };
   }
 
-  async function signWithPrivy(walletId, transaction) {
+  async function signWithPrivy(walletId, transaction, userAuthorization) {
     const unsigned = decodeBase64(transaction, 'Transaction');
     if (unsigned.length > MAX_TX_BYTES) fail('Transaction exceeds the Solana packet limit', 'invalid_transaction');
     const url = `${privyApi}/v1/wallets/${encodeURIComponent(walletId)}/rpc`;
@@ -721,12 +735,50 @@ export function createPrivyWalletClient({
       method: 'signTransaction',
       params: { transaction, encoding: 'base64' },
     };
-    const signedBody = await fetchJson(url, {
-      method: 'POST',
-      headers: privyHeaders({ method: 'POST', url, body }),
-      body,
-    }, 'privy_failed');
-    return signedBody?.data?.signed_transaction;
+    try {
+      const signedBody = await fetchJson(url, {
+        method: 'POST',
+        headers: privyHeaders({ method: 'POST', url, body }),
+        body,
+        walletRpc: Boolean(userAuthorization),
+      }, 'privy_failed');
+      return signedBody?.data?.signed_transaction;
+    } catch (error) {
+      if (error?.code !== 'wallet_authorization_required') throw error;
+      const { ownerId, accessToken } = userAuthorization;
+      // The local sub check scopes the request. Privy verifies the JWT and
+      // enforces wallet ownership and policy during the exchange and signature.
+      if (!accessToken || jwtSub(accessToken) !== ownerId) {
+        fail('The wallet owner must sign in again', 'wallet_owner_session_required');
+      }
+      try {
+        const { PrivyClient } = await import('@privy-io/node');
+        const client = new PrivyClient({
+          appId: id, appSecret: secret, apiUrl: privyApi,
+          fetch: async (url, init) => {
+            const response = await fetcher(url, { ...init, redirect: 'manual' });
+            if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+              fail('Privy redirected the authorization request', 'wallet_authorization_failed');
+            }
+            return response;
+          },
+          timeout: 15000,
+          maxRetries: 0,
+          logLevel: 'off',
+          requestExpiry: { defaultMs: REQUEST_TTL_MS },
+        });
+        const result = await client.wallets().solana().signTransaction(walletId, {
+          transaction,
+          authorization_context: { user_jwts: [accessToken] },
+        });
+        return result.signed_transaction;
+      } catch (error) {
+        if (error?.error?.code === 'policy_violation') {
+          fail('Privy wallet policy rejected the transaction', 'wallet_policy_rejected');
+        }
+        fail('Privy could not authorize signing with the owner session', 'wallet_authorization_failed');
+      }
+    }
   }
 
   async function sendSigned(signedTransaction, { privy = false } = {}) {
@@ -929,12 +981,12 @@ export function createPrivyWalletClient({
       return prepared;
     },
 
-    async signPreparedDevnetTransfer({ bot, wallet, prepared } = {}) {
+    async signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken } = {}) {
       assertSpendAllowed({ bot, wallet });
       if (!simulatedTransfers.delete(prepared)) fail('Transfer simulation is required', 'simulation_required');
       await assertDevnet();
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
-      const signed = await signWithPrivy(walletId, prepared.transaction);
+      const signed = await signWithPrivy(walletId, prepared.transaction, { ownerId: wallet.ownerId, accessToken });
       if (!singleSignerMessage(signed).equals(singleSignerMessage(prepared.transaction))) {
         fail('Signed transfer differs from the simulation', 'transaction_mismatch');
       }

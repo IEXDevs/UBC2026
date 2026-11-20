@@ -468,7 +468,18 @@ test('permissioned spend rejects missing, throwing, or invalid signers', async (
   });
   assert.equal(threw.state, 'sign-rejected');
   assert.equal(threw.signed, false);
+  assert.equal(threw.reason, undefined);
   assert.ok(threw.steps.includes('sign'));
+
+  const policyDenied = await runPermissionedSpend({
+    ...base,
+    signDevnet: async () => {
+      throw Object.assign(new Error('private provider diagnostics'), { code: 'wallet_policy_rejected' });
+    },
+  });
+  assert.equal(policyDenied.state, 'sign-rejected');
+  assert.equal(policyDenied.reason, 'wallet_policy_rejected');
+  assert.doesNotMatch(JSON.stringify(policyDenied), /private provider diagnostics/);
 
   const badCluster = await runPermissionedSpend({
     ...base,

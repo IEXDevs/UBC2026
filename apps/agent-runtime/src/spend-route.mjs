@@ -182,7 +182,8 @@ export async function handleSpend(request, env = {}) {
   let signDevnet;
   let beforeSign;
   if (prepared) {
-    signDevnet = ({ bot, wallet }) => env.transferClient.signPreparedDevnetTransfer({ bot, wallet, prepared });
+    const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
+    signDevnet = ({ bot, wallet }) => env.transferClient.signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken });
     beforeSign = ({ bot, proposal, policy }) => reserveAssetTransfer(env, { ownerId, bot, proposal, policy, now, idempotencyKey: id });
   } else if (!assetTransfer && grantOk) {
     if (parsed.destination && env.transferClient) signDevnet = async ({ bot, wallet, memo }) => {

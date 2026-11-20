@@ -26,6 +26,11 @@ function needsHumanApproval(bot, policyDecision) {
 }
 
 const OWNER_PERMISSIONS = new Set(['ask', 'review', 'full']);
+const SIGN_FAILURE_REASONS = new Set([
+  'invalid_wallet', 'privy_failed', 'rpc_failed', 'rpc_rejected', 'simulation_required',
+  'transaction_mismatch', 'wallet_authorization_failed', 'wallet_owner_session_required',
+  'wallet_policy_rejected', 'wrong_cluster',
+]);
 
 const REVIEW_CAP = /^(?:[1-9][0-9]{0,39})$/;
 /** 30 USDC. Applies when Review by AI is off and the owner has no stored maximum. */
@@ -293,8 +298,9 @@ export async function runPermissionedSpend({
   let signed;
   try {
     signed = await signDevnet({ bot, wallet, proposal, memo, cluster: 'devnet' });
-  } catch {
-    return { state: 'sign-rejected', steps, signed: false };
+  } catch (error) {
+    const reason = SIGN_FAILURE_REASONS.has(error?.code) ? error.code : null;
+    return { state: 'sign-rejected', steps, signed: false, ...(reason ? { reason } : {}) };
   }
   if (!signed || signed.cluster !== 'devnet' || typeof signed.signature !== 'string' || signed.signature.length < 1) {
     return { state: 'sign-rejected', steps, signed: false };

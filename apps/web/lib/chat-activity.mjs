@@ -46,6 +46,18 @@ const SPEND_BLOCK_MESSAGES = new Map([
   ['wallet-owner-mismatch', 'The wallet belongs to a different account.'],
   ['wrong-owner', 'The agent belongs to a different account.'],
 ]);
+const SPEND_SIGN_MESSAGES = new Map([
+  ['invalid_wallet', "The agent's wallet is missing a valid Privy signing ID."],
+  ['privy_failed', 'Privy rejected the signing request.'],
+  ['rpc_failed', 'The devnet RPC did not return a receipt. Check the wallet before trying again.'],
+  ['rpc_rejected', 'The devnet RPC did not return a receipt. Check the wallet before trying again.'],
+  ['simulation_required', 'The signing service could not verify the transaction simulation.'],
+  ['transaction_mismatch', 'The signed transaction differed from the simulated payment.'],
+  ['wallet_authorization_failed', 'Privy could not authorize signing with this session.'],
+  ['wallet_owner_session_required', 'Sign in again as the wallet owner to authorize the payment.'],
+  ['wallet_policy_rejected', 'The Privy wallet policy rejected this payment.'],
+  ['wrong_cluster', 'The signing service could not verify the Solana devnet connection.'],
+]);
 const SECRET_KEY = /key|token|secret|password|authorization|cookie|seed|phrase/i;
 const SECRET_VALUE = /eyJ[A-Za-z0-9_-]{8,}|live\.browser\.run/i;
 
@@ -125,6 +137,8 @@ export function spendFailureMessage(result) {
         || (!parsed.reason ? 'The spend request reached the server without an accepted confirmation.' : '');
     case 'blocked':
       return SPEND_BLOCK_MESSAGES.get(parsed.reason) || 'The spend service blocked this payment without a recognized reason.';
+    case 'sign-rejected':
+      return SPEND_SIGN_MESSAGES.get(parsed.reason) || 'The signing step returned no receipt. Check the wallet before trying again.';
     default:
       return '';
   }
