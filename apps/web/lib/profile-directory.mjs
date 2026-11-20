@@ -141,25 +141,35 @@ export async function localProfileResponse(request, { env = {}, fetcher = fetch 
 
   if (request.method !== 'PUT') return json({ error: 'method_not_allowed' }, 405);
   const body = await request.json().catch(() => ({}));
-  const handle = normalizeHandle(body.handle);
+  let handle = normalizeHandle(body.handle);
+  const editOnly = body.editOnly === true;
   const displayName = normalizeDisplayName(body.displayName);
   const avatarUrl = body.avatarUrl == null || body.avatarUrl === '' ? null : httpsAvatarUrl(body.avatarUrl);
   if (!handle || !displayName) return json({ error: 'invalid_profile' }, 400);
   if (body.avatarUrl && !avatarUrl) return json({ error: 'invalid_avatar' }, 400);
 
   try {
+    if (editOnly) {
+      const existing = await rest(fetcher, origin, key, `profiles?${postgrestEq('owner_id', ownerId)}&select=handle`);
+      if (!existing.ok) return json({ error: (await failureCode(existing)) || 'profile_read_failed' }, 502);
+      const rows = await existing.json().catch(() => []);
+      const canonical = Array.isArray(rows) ? rows[0]?.handle : null;
+      if (!canonical) return json({ error: 'profile_not_registered' }, 409);
+      handle = canonical;
+    }
+    if (!editOnly) {
     const userWrite = await rest(fetcher, origin, key, 'users?on_conflict=id', {
       method: 'POST',
       prefer: 'resolution=merge-duplicates,return=minimal',
       body: { id: ownerId, privy_user_id: ownerId },
     });
     if (!userWrite.ok) return json({ error: (await failureCode(userWrite)) || 'profile_save_failed' }, 502);
-    const saved = await rest(fetcher, origin, key, 'profiles?on_conflict=owner_id', {
-      method: 'POST',
+    }
+    const saved = await rest(fetcher, origin, key, editOnly ? `profiles?${postgrestEq('owner_id', ownerId)}` : 'profiles?on_conflict=owner_id', {
+      method: editOnly ? 'PATCH' : 'POST',
       prefer: 'resolution=merge-duplicates,return=representation',
       body: {
-        owner_id: ownerId,
-        handle,
+        ...(!editOnly ? { owner_id: ownerId, handle } : {}),
         display_name: displayName,
         avatar_url: avatarUrl,
         updated_at: new Date().toISOString(),

@@ -1258,7 +1258,8 @@ export async function handleApiData(request, env, matched) {
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const body = await request.json().catch(() => ({}));
-    const handle = normalizeHandle(body.handle);
+    let handle = normalizeHandle(body.handle);
+    const editOnly = body.editOnly === true;
     const displayName = normalizeDisplayName(body.displayName);
     const avatarUrl = body.avatarUrl == null || body.avatarUrl === '' ? null : httpsAvatarUrl(body.avatarUrl);
     if (!handle || !displayName) return json({ error: 'invalid_profile' }, 400);
@@ -1266,6 +1267,13 @@ export async function handleApiData(request, env, matched) {
     if (!supabaseConfig(env)) {
       return json({ ok: true, source: 'unconfigured', profile: { handle, displayName, avatarUrl } });
     }
+    if (editOnly) {
+      const existing = await supabaseGet(env, `profiles?${postgrestEq('owner_id', ownerId)}&select=handle`, fetcher);
+      if (existing.status !== 200 || !Array.isArray(existing.rows)) return json({ error: existing.code || 'profile_read_failed' }, 502);
+      if (!existing.rows[0]?.handle) return json({ error: 'profile_not_registered' }, 409);
+      handle = existing.rows[0].handle;
+    }
+    if (!editOnly) {
     const userWrite = await supabaseWrite(env, {
       path: 'users?on_conflict=id',
       method: 'POST',
@@ -1276,13 +1284,13 @@ export async function handleApiData(request, env, matched) {
     if (userWrite?.ok !== true) {
       return json({ error: userWrite?.code || 'profile_save_failed' }, 502);
     }
+    }
     const saved = await supabaseWrite(env, {
-      path: 'profiles?on_conflict=owner_id',
-      method: 'POST',
+      path: editOnly ? `profiles?${postgrestEq('owner_id', ownerId)}` : 'profiles?on_conflict=owner_id',
+      method: editOnly ? 'PATCH' : 'POST',
       prefer: 'resolution=merge-duplicates,return=representation',
       body: {
-        owner_id: ownerId,
-        handle,
+        ...(!editOnly ? { owner_id: ownerId, handle } : {}),
         display_name: displayName,
         avatar_url: avatarUrl,
         updated_at: new Date().toISOString(),

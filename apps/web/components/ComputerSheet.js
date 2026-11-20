@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import ModalClose from './ModalClose';
 import { loopStepsFromRun } from '../lib/loop-steps.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
@@ -81,9 +81,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null, getA
       aria-label={`${bot.name} computer`}
       onMouseDown={onClose}
     >
-      <button type="button" className="browser-preview-close" aria-label="Close computer" onMouseDown={event => event.stopPropagation()} onClick={onClose}>
-        <X size={18} strokeWidth={1.75} />
-      </button>
+      <ModalClose label="Close computer" onMouseDown={event => event.stopPropagation()} onClick={onClose} />
       <div className="browser-preview-stage" onMouseDown={event => event.stopPropagation()}>
         {syncedBotId ? (
           <>

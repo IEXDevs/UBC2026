@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import ModalClose from './ModalClose';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
 import { draftBot, draftTransferCap } from '../lib/roster.mjs';
 import { AgentPhoto } from './AgentEdit';
@@ -121,6 +121,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
         onMouseDown={event => event.stopPropagation()}
         onSubmit={submit}
       >
+        <ModalClose label="Close create agent" onClick={onClose} />
         {celebrate ? (
           <>
             <div className="create-scrim" aria-hidden="true" />
@@ -145,9 +146,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
         ) : null}
         <div className="sheet-head">
           <h2 id="create-agent-title">{step === 'name' ? 'Create new agent' : 'Choose a color'}</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            <X size={18} strokeWidth={1.75} />
-          </button>
         </div>
         {step === 'name' ? (
           <>

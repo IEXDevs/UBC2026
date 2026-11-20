@@ -72,7 +72,8 @@ export async function GET(request) {
       { status: 503, headers: { 'Cache-Control': 'no-store' } },
     );
   }
-  const rpc = choosePortfolioRpc(env);
+  const requestedCluster = new URL(request.url).searchParams.get('cluster') || '';
+  const rpc = choosePortfolioRpc(env, requestedCluster);
   if (!rpc.rpcUrl) {
     return Response.json(
       { error: 'missing_config', missing: rpc.missing },
@@ -106,6 +107,7 @@ export async function GET(request) {
       // Public HTTPS only. A service-binding fetch turns QuickNode into a Worker 404.
       fetcher: globalThis.fetch.bind(globalThis),
     });
+    if (requestedCluster === 'devnet' && portfolio.cluster !== 'devnet') throw new PortfolioError('unsupported_cluster');
     return Response.json(portfolio, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = error instanceof PortfolioError ? error.code : walletErrorCode(error);

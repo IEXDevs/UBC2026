@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import ModalClose from './ModalClose';
 import SecretDraft from './SecretDraft';
 import PasswordFeedback from './PasswordFeedback';
 import { passwordFeedback } from '../lib/password-feedback.mjs';
@@ -240,9 +240,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
       >
         <div className="sheet-head">
           <h2 id="desk-lock-title">{phraseGate && !replacing ? 'Reset with your seed' : (replacing ? 'Set a new wallet password' : (setting ? 'Set a password' : 'Enter wallet password'))}</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={dismiss}>
-            <X size={18} strokeWidth={1.75} />
-          </button>
+          <ModalClose label="Close wallet password" onClick={dismiss} />
         </div>
         <form className="field" autoComplete="off" onSubmit={submit}>
           {phraseGate && !replacing ? (

@@ -70,9 +70,10 @@ export function assertPortfolioRpc(url) {
   return parsed.toString();
 }
 
-export function choosePortfolioRpc(env = {}) {
+export function choosePortfolioRpc(env = {}, cluster = '') {
   const mainnet = typeof env.QUICKNODE_MAINNET_RPC_URL === 'string' ? env.QUICKNODE_MAINNET_RPC_URL.trim() : '';
   const devnet = typeof env.QUICKNODE_DEVNET_RPC_URL === 'string' ? env.QUICKNODE_DEVNET_RPC_URL.trim() : '';
+  if (cluster === 'devnet') return { rpcUrl: devnet, missing: devnet ? [] : ['QUICKNODE_DEVNET_RPC_URL'] };
   if (mainnet) return { rpcUrl: mainnet, missing: [] };
   if (devnet) return { rpcUrl: devnet, missing: [] };
   return { rpcUrl: '', missing: ['QUICKNODE_MAINNET_RPC_URL', 'QUICKNODE_DEVNET_RPC_URL'] };
