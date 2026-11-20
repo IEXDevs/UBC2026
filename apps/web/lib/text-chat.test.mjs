@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { parsePermissionedSpendBody } from '@ubc2026/contracts';
+import { createChatToolInvoker } from './chat-tools.mjs';
+import { stampSpendPermission } from './harness-run.mjs';
+import { toolAccessRequest } from './spend-permission.mjs';
 import {
   META_SPARK_MODEL,
   OPENROUTER_FREE_MODEL,
@@ -468,7 +472,7 @@ test('an approved spend is not cancelled when the turn verifier refuses it', asy
     modelApiKey: META_KEY,
     message: 'Pay 1 SOL to @hi',
     permissionMode: 'ask',
-    grants: [{ name: toolCalls[3][0], args: toolCalls[3][1] }],
+    grants: [toolAccessRequest('ask', ...toolCalls[3])],
     tools: [...new Set(toolCalls.map(([name]) => name))].map(name => ({
       type: 'function', function: { name, parameters: { type: 'object' } },
     })),
@@ -610,6 +614,54 @@ test('ask mode requires the confirmation slide before invoking a spend', async (
   assert.equal(next.hold, undefined);
   assert.equal(next.text, 'Submitted the payment request.');
   assert.deepEqual(seen, ['request_spend']);
+});
+
+test('SOL chat asks again for an incomplete approval and forwards a complete approval intact', async () => {
+  const args = { action: 'pay', amount: '1000000000', asset: 'SOL', botId: 'bot_1', handle: 'hi' };
+  const calls = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: args.botId,
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (_url, options) => {
+      calls.push(parsePermissionedSpendBody(JSON.parse(options.body)));
+      return Response.json({ ok: true, signed: true });
+    },
+  });
+  function chat(grants) {
+    return completeTextChat({
+      modelApiKey: META_KEY,
+      message: 'Send 1 SOL to @hi',
+      permissionMode: 'full',
+      grants,
+      tools: [{ type: 'function', function: { name: 'request_spend', parameters: { type: 'object' } } }],
+      invokeTool: (name, parameters) => invoke(name, stampSpendPermission(name, parameters, {
+        permissionMode: 'full', confirmSpend: true, grants,
+      })),
+      fetcher: async (_url, options) => {
+        if (isTurnVerify(options)) return turnAllowed();
+        if (JSON.parse(options.body).messages.some(item => item.role === 'tool')) {
+          return Response.json({ choices: [{ message: { content: 'Payment submitted.' } }] });
+        }
+        return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+          id: 'c1', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify(args) },
+        }] } }] });
+      },
+    });
+  }
+
+  const held = await chat([{ name: 'request_spend', args }]);
+  assert.equal(held.hold.kind, 'modal');
+  assert.deepEqual(calls, []);
+
+  const sent = await chat([held.hold]);
+  assert.equal(sent.hold, undefined);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.confirmed, true);
+  assert.equal(calls[0].idempotencyKey, held.hold.idempotencyKey);
+  assert.equal(calls[0].amount, args.amount);
+  assert.equal(calls[0].asset, args.asset);
+  assert.equal(calls[0].handle, args.handle);
 });
 
 test('full permissions call a fund tool without asking the owner', async () => {
