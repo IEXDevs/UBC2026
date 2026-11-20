@@ -883,6 +883,7 @@ export async function handleApiData(request, env, matched) {
     }
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
 
+    const owner = encodeURIComponent(ownerId);
     if (verified) {
       const removed = await supabaseWrite(env, {
         path: 'rpc/delete_owner_agent',
@@ -894,11 +895,15 @@ export async function handleApiData(request, env, matched) {
       if (removed.status !== 404 || removed.code !== 'PGRST202') {
         return json({ error: 'delete_failed' }, 502);
       }
+    } else {
+      const deletions = await supabaseGet(env, `rpc/list_deleted_owner_agents?p_owner_id=${owner}`, fetcher);
+      if (deletions.status !== 404 || deletions.code !== 'PGRST202') {
+        return json({ error: 'agent_delete_auth_unconfigured' }, 503);
+      }
     }
 
     // An older database still supports deletion, but cannot record a tombstone.
     const bot = encodeURIComponent(botId);
-    const owner = encodeURIComponent(ownerId);
     const existing = await supabaseGet(env, `bots?id=eq.${bot}&owner_id=eq.${owner}&select=id`, fetcher);
     if (existing.status !== 200 || !Array.isArray(existing.rows)) return json({ error: 'delete_failed' }, 502);
     if (!existing.rows.length) return json({ ok: true, deleted: botId });

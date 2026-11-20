@@ -912,6 +912,26 @@ test('agents can still be deleted from an older database without the deletion RP
   ]);
 });
 
+test('deletion on a migrated database fails closed when Privy verification is unconfigured', async () => {
+  const calls = [];
+  const response = await worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers: { 'x-owner-id': 'user_1' },
+  }), fakeEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async (url, { method }) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/activity_logs')) return new Response(null, { status: 204 });
+      calls.push([method, path]);
+      return Response.json([{ ids: [] }]);
+    },
+  }));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: 'agent_delete_auth_unconfigured' });
+  assert.deepEqual(calls, [['GET', '/rest/v1/rpc/list_deleted_owner_agents']]);
+});
+
 /**
  * Achieves: logs route requires owner and returns empty unconfigured without Supabase.
  * Fails when: ownerless 200 or invented log rows.
