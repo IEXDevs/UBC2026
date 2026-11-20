@@ -230,6 +230,55 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
   assert.equal(broadcasts, 1);
 });
 
+test('an unexplained signing 401 checks wallet access with the same app credentials', async () => {
+  const bytes = Buffer.alloc(80);
+  bytes[0] = 1;
+  const transaction = bytes.toString('base64');
+  const wallet = { ...createMainWallet({ ownerId: privyUserId, address, id: walletId }), privyWalletId: walletId };
+  const bot = { ...baseBot, ownerId: wallet.ownerId, walletId };
+  const privyCalls = [];
+  let lookupStatus = 200;
+  let returnedWalletId = walletId;
+  const privy = client({ authorizationKey, fetcher: async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path.startsWith('/v1/wallets/')) {
+      assert.equal(init.headers.Authorization, `Basic ${Buffer.from(`${appId}:${appSecret}`).toString('base64')}`);
+      assert.equal(init.headers['privy-app-id'], appId);
+      privyCalls.push([init.method, path]);
+      if (init.method === 'GET') {
+        assert.equal(init.headers['privy-authorization-signature'], undefined);
+        return Response.json({ id: returnedWalletId, chain_type: 'solana', address }, { status: lookupStatus });
+      }
+      return Response.json({ error: 'undocumented detail' }, { status: 401 });
+    }
+    const { method } = JSON.parse(init.body);
+    if (method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
+    if (method === 'getFeeForMessage') return Response.json({ result: { value: 5000 } });
+    assert.equal(method, 'simulateTransaction', 'the signing rejection must never broadcast');
+    return Response.json({ result: { value: { err: null } } });
+  } });
+
+  const cases = [
+    { status: 200, id: walletId, diagnostic: { status: 401, walletLookupStatus: 200 } },
+    { status: 401, id: walletId, diagnostic: { status: 401, walletLookupStatus: 401 } },
+    { status: 404, id: walletId, diagnostic: { status: 401, walletLookupStatus: 404 } },
+    { status: 200, id: otherWalletId, diagnostic: { status: 401 } },
+  ];
+  for (const { status, id, diagnostic } of cases) {
+    lookupStatus = status;
+    returnedWalletId = id;
+    const prepared = await privy.prepareDevnetTransfer({ transaction });
+    await assert.rejects(privy.signPreparedDevnetTransfer({ bot, wallet, prepared }), {
+      code: 'privy_failed',
+      privyFailure: diagnostic,
+    });
+  }
+  assert.deepEqual(privyCalls, cases.flatMap(() => [
+    ['POST', `/v1/wallets/${walletId}/rpc`],
+    ['GET', `/v1/wallets/${walletId}`],
+  ]));
+});
+
 /**
  * Rigor audit — missing server-signing names throw before any request
  * Achieves: behavior named in the test title (see assertions).

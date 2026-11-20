@@ -46,6 +46,8 @@ test('Privy signing diagnostics allow only known codes and HTTP error statuses',
     status: 403, code: 'insufficient_app_secret_permissions', message: 'private detail',
   }), { status: 403, code: 'insufficient_app_secret_permissions' });
   assert.deepEqual(parsePrivySigningFailure({ status: 500, code: 'unknown', transport: 'unknown' }), { status: 500 });
+  assert.deepEqual(parsePrivySigningFailure({ status: 401, walletLookupStatus: 200 }), { status: 401, walletLookupStatus: 200 });
+  assert.deepEqual(parsePrivySigningFailure({ status: 403, walletLookupStatus: 200 }), { status: 403 });
   assert.equal(parsePrivySigningFailure({ status: 200, code: 'unknown' }), null);
 });
 

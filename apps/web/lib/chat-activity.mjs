@@ -65,6 +65,11 @@ const PRIVY_TRANSPORT_MESSAGES = new Map([
   ['redirect', 'Privy redirected the signing request.'],
   ['invalid-response', 'Privy did not return a readable signed transaction.'],
 ]);
+const PRIVY_WALLET_LOOKUP_MESSAGES = new Map([
+  [200, 'The same app credentials could read this wallet. Privy rejected authorization for the signing request.'],
+  [401, 'Privy also rejected the signing Worker’s app credentials on a read-only wallet lookup.'],
+  [404, 'Privy could not find the sending wallet under this app’s credentials.'],
+]);
 const SECRET_KEY = /key|token|secret|password|authorization|cookie|seed|phrase/i;
 const SECRET_VALUE = /eyJ[A-Za-z0-9_-]{8,}|live\.browser\.run/i;
 
@@ -151,7 +156,12 @@ export function spendFailureMessage(result) {
       const message = SPEND_SIGN_MESSAGES.get(parsed.reason)
         || 'The signing step returned no receipt. Check the wallet before trying again.';
       const details = [privy?.status && `HTTP ${privy.status}`, privy?.code].filter(Boolean).join(', ');
-      return details ? `${message}\nPrivy reported ${details}.` : message;
+      const lookupStatus = privy?.walletLookupStatus;
+      const lookup = lookupStatus && [
+        `The wallet lookup returned HTTP ${lookupStatus}.`,
+        PRIVY_WALLET_LOOKUP_MESSAGES.get(lookupStatus),
+      ].filter(Boolean).join(' ');
+      return [message, details && `Privy reported ${details}.`, lookup].filter(Boolean).join('\n');
     }
     default:
       return '';
