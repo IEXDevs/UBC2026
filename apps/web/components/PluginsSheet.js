@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import ConnectorsPane from './ConnectorsPane';
 import { usePresence } from './usePresence';
@@ -9,6 +10,11 @@ import ModelProviders from './ModelProviders';
 export default function PluginsSheet({ open, onClose, connectors = [] }) {
   const { mounted, leaving } = usePresence(open);
   const [tab, setTab] = useState('apps');
+  const [root, setRoot] = useState(null);
+
+  useEffect(() => {
+    setRoot(document.body);
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -19,9 +25,9 @@ export default function PluginsSheet({ open, onClose, connectors = [] }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!mounted) return null;
+  if (!mounted || !root) return null;
 
-  return (
+  return createPortal(
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section
         className="plugins-modal"
@@ -41,6 +47,7 @@ export default function PluginsSheet({ open, onClose, connectors = [] }) {
           {tab === 'apps' ? <ConnectorsPane connectors={connectors} /> : <ModelProviders />}
         </div>
       </section>
-    </div>
+    </div>,
+    root,
   );
 }
