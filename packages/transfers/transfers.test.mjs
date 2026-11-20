@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Keypair, Transaction, TransactionMessage, VersionedTransaction, ComputeBudgetInstruction } from '@solana/web3.js';
 import { decodeTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { assignBotWallet, createAdditionalWallet, createMainWallet } from '@ubc2026/wallets';
 import {
   SOLANA_GENESIS_HASH,
@@ -368,6 +369,51 @@ test('main wallet sponsors agent moves and retains both signatures', async () =>
     assert.deepEqual(signers, [tradingId, walletId]);
     assert.equal(broadcasts, 1);
   }
+});
+
+test('browser owner moves prepare and verify sponsored transactions before broadcast', async () => {
+  let broadcasts = 0;
+  const signer = {
+    async prepareSolanaTransfer({ transaction, requiredSignerAddresses }) {
+      const tx = decode(transaction);
+      assert.equal(tx.feePayer.toBase58(), mainWallet.address);
+      assert.deepEqual(requiredSignerAddresses, [tradingWallet.address, mainWallet.address]);
+    },
+    async broadcastSignedSolana() { broadcasts += 1; return { cluster: SOLANA_CLUSTER, signature: txSignature }; },
+  };
+  const args = { client: signer, ownerId: 'user_1', fromWallet: tradingWallet,
+    toWallet: mainWallet, feePayerWallet: mainWallet, amount: '1', recentBlockhash: blockhash };
+  const prepared = await moveBetweenWallets({ ...args, phase: 'prepare' });
+  assert.deepEqual(prepared.signerWallets.map(wallet => wallet.address), [tradingWallet.address, mainWallet.address]);
+  const tx = decode(prepared.transaction);
+  tx.partialSign(extra);
+  await assert.rejects(moveBetweenWallets({ ...args, phase: 'broadcast',
+    signedTransaction: tx.serialize({ requireAllSignatures: false }).toString('base64') }), { code: 'invalid_signature' });
+  tx.partialSign(source);
+  const signedTransaction = tx.serialize().toString('base64');
+  await assert.rejects(moveBetweenWallets({ ...args, amount: '2', phase: 'broadcast', signedTransaction }), { code: 'transaction_mismatch' });
+  await assert.rejects(moveBetweenWallets({ ...args, fromWallet: { ...tradingWallet, frozen: true }, phase: 'prepare' }), { code: 'wallet_frozen' });
+  await moveBetweenWallets({ ...args, phase: 'broadcast', signedTransaction });
+  assert.equal(broadcasts, 1);
+});
+
+test('Privy preparation simulates only the explicitly allowed move signers', async () => {
+  const { client: signer } = client(async (url, init) => {
+    assert.equal(url, rpcUrl);
+    const body = JSON.parse(init.body);
+    if (body.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+    if (body.method === 'getFeeForMessage') return Response.json({ result: { value: 10000 } });
+    assert.equal(body.method, 'simulateTransaction');
+    assert.equal(body.params[1].sigVerify, false);
+    return Response.json({ result: { value: { err: null } } });
+  });
+  const transaction = buildSolanaUsdcTransaction({ feePayer: mainWallet.address, sourceOwner: tradingWallet.address,
+    destinationOwner: mainWallet.address, amount: '1', memo: 'wallet.move', recentBlockhash: blockhash }).transactionBase64;
+  const prepared = await signer.prepareSolanaTransfer({ transaction,
+    requiredSignerAddresses: [tradingWallet.address, mainWallet.address] });
+  assert.equal(prepared.transaction, transaction);
+  await assert.rejects(signer.prepareSolanaTransfer({ transaction, requiredSignerAddresses: [] }), { code: 'invalid_transaction' });
+  await assert.rejects(signer.prepareSolanaTransfer({ transaction, requiredSignerAddresses: [mainWallet.address] }), { code: 'invalid_transaction' });
 });
 
 test('owner moves reject invalid fee payers before signing or broadcasting', async () => {

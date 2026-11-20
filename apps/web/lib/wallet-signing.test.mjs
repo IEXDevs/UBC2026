@@ -1,10 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
-import { serverSignsWallet, signSelectedWalletTransaction } from './wallet-signing.mjs';
+import { Keypair, Transaction, SystemProgram } from '@solana/web3.js';
+import { serverSignsWallet, signSelectedWalletTransaction, signWalletMoveTransaction } from './wallet-signing.mjs';
 
 const transaction = new Uint8Array(100);
 const from = { address: 'selected-external-account', label: 'Phantom', spendable: false };
+
+test('browser move retains both signatures even when the second signer clears the first', async () => {
+  const source = Keypair.generate();
+  const payer = Keypair.generate();
+  const wallets = [source, payer].map(key => ({ address: key.publicKey.toBase58() }));
+  const tx = new Transaction({ feePayer: payer.publicKey, recentBlockhash: Keypair.generate().publicKey.toBase58() })
+    .add(SystemProgram.transfer({ fromPubkey: source.publicKey, toPubkey: payer.publicKey, lamports: 1 }));
+  const transaction = new Uint8Array(tx.serialize({ requireAllSignatures: false }));
+  const signer = { wallets, async signTransaction({ transaction, wallet }) {
+    const signed = Transaction.from(transaction);
+    signed.signatures.forEach(entry => { entry.signature = null; });
+    signed.partialSign(wallet.address === wallets[0].address ? source : payer);
+    return { signedTransaction: new Uint8Array(signed.serialize({ requireAllSignatures: false })) };
+  } };
+  const signed = await signWalletMoveTransaction({ wallets, transaction, signer });
+  assert.equal(Transaction.from(signed).verifySignatures(), true);
+  await assert.rejects(signWalletMoveTransaction({ wallets: [], transaction, signer }), { code: 'invalid_signature' });
+  signer.signTransaction = async ({ transaction }) => ({ signedTransaction: transaction });
+  await assert.rejects(signWalletMoveTransaction({ wallets, transaction, signer }), { code: 'invalid_signature' });
+});
 
 test('Privy wallets sign on the server and linked wallets stay in the browser', () => {
   assert.equal(serverSignsWallet({ id: 'cm5sender1234567890abcd', spendable: true, frozen: false }), true);
