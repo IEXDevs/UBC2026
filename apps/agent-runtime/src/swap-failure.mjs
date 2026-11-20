@@ -1,4 +1,9 @@
 const FAILURES = {
+  client_sign_required: ['client signing', 'Approve this swap in the browser with the selected wallet.'],
+  aborted: ['client signing', 'The swap request was cancelled. Nothing further was submitted.'],
+  client_sign_rejected: ['client signing', 'The selected wallet declined or cancelled signing.'],
+  wallet_connection_required: ['client signing', 'The selected wallet is not available in this browser. Connect that exact wallet; server-only wallets cannot use browser signing.'],
+  broadcast_failed: ['broadcast', 'The server could not broadcast the signed swap. Submission status may be unknown; check activity before retrying.'],
   swap_quote_unavailable: ['quote', 'Jupiter could not prepare a swap quote.'],
   swap_route_refused: ['quote validation', 'The Jupiter route failed the transaction safety checks. Try a different amount or pair.'],
   swap_mint_invalid: ['mint metadata', 'The mint address, network, or decimals could not be verified.'],
