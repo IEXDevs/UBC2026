@@ -3,6 +3,10 @@
  * The API key stays on the server. Callers pass a fetcher in tests.
  */
 
+import { speechSpeed } from './voice-settings.mjs';
+
+export { speechSpeed };
+
 export class VoiceTokenError extends Error {
   constructor(code) {
     super(code);
@@ -60,16 +64,6 @@ export async function requestVoiceSignedUrl({ apiKey, agentId, fetcher = fetch }
     throw new VoiceTokenError('voice_rejected');
   }
   return signed;
-}
-
-const SPEECH_SPEED_MIN = 0.7;
-const SPEECH_SPEED_MAX = 1.2;
-
-/** ElevenLabs flash speech accepts speed from 0.7 to 1.2. */
-export function speechSpeed(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 1;
-  return Math.min(SPEECH_SPEED_MAX, Math.max(SPEECH_SPEED_MIN, number));
 }
 
 /**

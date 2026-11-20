@@ -5,6 +5,7 @@
 
 import { dictationUnsupportedError } from './dictation.mjs';
 import { replySpeechText } from './reply-markdown.mjs';
+import { speechPlaybackRate } from './voice-settings.mjs';
 
 export function startVoicePipe({
   tokenUrl = '/api/voice/scribe-token',
@@ -256,10 +257,17 @@ export async function playAgentSpeech({
     audio = makeAudio(src);
     const volume = Number(settings.volume);
     if (audio && Number.isFinite(volume)) audio.volume = Math.min(1, Math.max(0, volume / 100));
+    if (audio) {
+      const rate = speechPlaybackRate(settings.speed);
+      audio.preservesPitch = true;
+      audio.defaultPlaybackRate = rate;
+      audio.playbackRate = rate;
+    }
   };
   const play = async () => {
     if (typeof audio?.play !== 'function') return;
     const ended = audioEvent(audio, 'ended', signal);
+    audio.playbackRate = audio.defaultPlaybackRate ?? audio.playbackRate;
     await Promise.all([ended, Promise.resolve().then(() => audio.play())]);
   };
   pipe?.suppress?.(true);

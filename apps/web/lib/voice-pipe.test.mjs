@@ -301,7 +301,7 @@ for (const managed of [false, true]) {
     let input;
     const body = new ReadableStream({ start(controller) { input = controller; } });
     const job = playAgentSpeech({
-      text: 'A streamed reply', pipe: f.pipe, settings: { volume: 50 },
+      text: 'A streamed reply', pipe: f.pipe, settings: { volume: 50, speed: 1.8 },
       fetcher: async () => ({ ok: true, body, arrayBuffer() { assert.fail('must not buffer'); } }),
       createAudio: () => f.audio,
     });
@@ -311,6 +311,8 @@ for (const managed of [false, true]) {
     assert.deepEqual(f.suppression, [true]);
     assert.equal(f.source.readyState, 'open');
     assert.equal(f.audio.volume, 0.5);
+    assert.equal(f.audio.playbackRate, 1.5);
+    assert.equal(f.audio.preservesPitch, true);
     assert.equal(f.audio.disableRemotePlayback, true);
     input.enqueue(new Uint8Array([3]));
     input.close();

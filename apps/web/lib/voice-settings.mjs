@@ -9,6 +9,9 @@ export const VOICE_STORAGE_KEY = 'maelstrom.voiceSettings';
 export const SPEED_MIN = 0.5;
 export const SPEED_MAX = 2;
 export const SPEED_STEP = 0.05;
+/** ElevenLabs speech and Talk accept 0.7 to 1.2; the browser plays the rest of the multiplier. */
+export const SPEECH_SPEED_MIN = 0.7;
+export const SPEECH_SPEED_MAX = 1.2;
 export const VOLUME_MIN = 0;
 export const VOLUME_MAX = 100;
 
@@ -51,6 +54,18 @@ export function clampSpeed(value) {
   return Math.round((SPEED_MIN + steps * SPEED_STEP) * 100) / 100;
 }
 
+export function speechSpeed(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 1;
+  return Math.min(SPEECH_SPEED_MAX, Math.max(SPEECH_SPEED_MIN, number));
+}
+
+/** Browser playback rate that makes ElevenLabs audio match the chosen speed. */
+export function speechPlaybackRate(value) {
+  const speed = clampSpeed(value);
+  return Math.round((speed / speechSpeed(speed)) * 1000) / 1000;
+}
+
 export function clampVolume(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return DEFAULT_VOICE_SETTINGS.volume;
@@ -87,7 +102,7 @@ export function voiceSession(settings) {
 export function voiceOverrides(settings) {
   const session = voiceSession(settings);
   const overrides = {
-    tts: { voiceId: session.voiceId, speed: session.speed },
+    tts: { voiceId: session.voiceId, speed: speechSpeed(session.speed) },
   };
   if (session.language) overrides.agent = { language: session.language };
   return overrides;

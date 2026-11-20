@@ -8,6 +8,8 @@ import {
   clampSpeed,
   clampVolume,
   parseVoiceSettings,
+  speechPlaybackRate,
+  speechSpeed,
   voiceOverrides,
   voiceSession,
 } from './voice-settings.mjs';
@@ -48,6 +50,13 @@ test('voice settings keep a known voice and a stepped speed', () => {
     tts: { voiceId: adam.id, speed: 1.15 },
     agent: { language: 'es' },
   });
+
+  assert.equal(speechSpeed(0.5), 0.7);
+  assert.equal(speechSpeed(2), 1.2);
+  assert.equal(speechPlaybackRate(0.9), 1);
+  assert.equal(speechPlaybackRate(1.8), 1.5);
+  assert.equal(speechPlaybackRate(0.5), 0.714);
+  assert.deepEqual(voiceOverrides({ ...parsed, speed: 2 }), { tts: { voiceId: adam.id, speed: 1.2 } });
 
   const dropped = parseVoiceSettings({ voiceId: 'not-a-voice', speed: 0.9 });
   assert.equal(dropped.voiceId, DEFAULT_VOICE_SETTINGS.voiceId);
