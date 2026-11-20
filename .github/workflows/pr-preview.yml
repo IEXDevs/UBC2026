@@ -16,16 +16,16 @@ permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: pr-preview-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   preview:
     # Forked pull requests never get the Cloudflare secrets.
     if: >
       github.event.pull_request.head.repo.full_name == github.repository &&
       (github.event.action != 'labeled' || github.event.label.name == 'preview')
+    # Job-level, so a skipped run (another label) never cancels a build.
+    concurrency:
+      group: pr-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -62,11 +62,9 @@ jobs:
 
       - name: Build and upload the preview version
         id: upload
-        working-directory: apps/web
         run: |
           set -o pipefail
-          npx opennextjs-cloudflare build
-          npx opennextjs-cloudflare upload --env dev --preview-alias "pr-$PR" --tag "pr-$PR" 2>&1 | tee upload.log
+          npm run upload:dev -w @ubc2026/web -- --preview-alias "pr-$PR" --tag "pr-$PR" 2>&1 | tee upload.log
           url="$(grep -oE 'Version Preview Alias URL: https://[^[:space:]]+' upload.log | tail -1 | sed 's/^Version Preview Alias URL: //')"
           if [ -z "$url" ]; then
             echo "::error::No preview URL. The Cloudflare account needs a workers.dev subdomain (Workers & Pages > Overview)."
