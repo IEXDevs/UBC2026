@@ -262,6 +262,14 @@ function cardCheckout(message, history) {
   return /\blaso\b|reloadable card|\bx402\b/i.test(bits.join('\n'));
 }
 
+function activeCardCheckout(message, grants) {
+  return cardCheckout(message, []) || (Array.isArray(grants) && grants.some(hold =>
+    hold?.name === 'request_spend' && hold.kind === 'modal' && hold.args?.action === 'x402'
+    && typeof hold.args.lasoTicket === 'string' && hold.args.lasoTicket.length > 0
+    && /^[0-9a-f]{64}$/.test(hold.proof ?? '')
+    && Number.isSafeInteger(hold.expiresAt) && hold.expiresAt > Date.now()));
+}
+
 function assistantToolMessage(message) {
   const next = {
     role: 'assistant',
@@ -537,7 +545,7 @@ export async function completeTextChat({
       const args = name === 'prepare_shopping' && cardCheckout(latest, history) ? lasoPreparationArgs(rawArgs, latest) : rawArgs;
       const signature = toolSignature(name, args);
       const blocked = blockedBrowser(name, args);
-      const stayOnApi = cardCheckout(latest, history) && BROWSER_TOOLS.has(name);
+      const stayOnApi = activeCardCheckout(latest, grants) && BROWSER_TOOLS.has(name);
       const access = toolAccessRequest(permissionMode, name, args, reviewCap);
       let result;
       if (!name || seenTools.has(signature)) {

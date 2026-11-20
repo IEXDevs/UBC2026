@@ -29,6 +29,49 @@ function turnAllowed() {
   return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
 }
 
+test('Laso browser and research restrictions follow the current request or an unexpired pending hold, not past chat', async () => {
+  const pending = {
+    name: 'request_spend', kind: 'modal', args: { action: 'x402', lasoTicket: 'offline-ticket' },
+    proof: 'a'.repeat(64), expiresAt: Date.now() + 60_000,
+  };
+  const cases = [
+    { message: 'Open example.com', blocked: false },
+    { message: 'Search the web for weather', blocked: false },
+    { message: 'Get me a Laso card for 10 USDC', blocked: true },
+    { message: 'Complete this x402 purchase', blocked: true },
+    { message: 'yes', grants: [pending], blocked: true },
+    { message: 'yes', grants: [{ ...pending, expiresAt: 1 }], blocked: false },
+    { message: 'yes', grants: [{ ...pending, proof: '' }], blocked: false },
+    { message: 'yes', grants: [{ ...pending, args: { action: 'swap' } }], blocked: false },
+    { message: 'yes', blocked: false },
+  ];
+  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+    for (const scenario of cases) {
+      let modelCalls = 0;
+      const invoked = [];
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: scenario.message, grants: scenario.grants ?? [],
+        history: [{ role: 'assistant', text: 'Your Laso x402 purchase was cancelled.' }],
+        tools: [{ type: 'function', function: { name, parameters: { type: 'object' } } }],
+        invokeTool: async tool => { invoked.push(tool); return { ok: true }; },
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) return turnAllowed();
+          const body = JSON.parse(options.body);
+          if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'browse', type: 'function', function: { name, arguments: JSON.stringify({ url: 'https://example.com', query: 'weather', sessionRecordId: 'session_1' }) },
+          }] } }] });
+          const result = JSON.parse(body.messages.findLast(item => item.role === 'tool').content);
+          assert.equal(result.error, scenario.blocked ? 'use_api' : undefined, `${name}: ${scenario.message}`);
+          return Response.json({ choices: [{ message: { content: scenario.blocked ? 'The purchase stays on the API.' : 'The requested tool completed.' } }] });
+        },
+      });
+      assert.deepEqual(invoked, scenario.blocked ? [] : [name], `${name}: ${scenario.message}`);
+      assert.equal(reply.hold, undefined);
+      assert.equal(modelCalls, 2);
+    }
+  }
+});
+
 /**
  * Achieves: verifies text chat messages keep platform rules and map agent history.
  * Fails when: text chat messages keep platform rules and map agent history breaks (e.g. expected 'developer', /Maelstrom/, /Nova/); failure/null paths flip.
