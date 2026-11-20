@@ -3,6 +3,7 @@
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import AddressCopy from './AddressCopy';
 import { formatShare, formatUsdMicro } from '../lib/portfolio.mjs';
+import { portfolioEmptyMessage, unpricedHoldingLabels } from '../lib/portfolio-display.mjs';
 
 const COLORS = ['#3dd6c6', '#f5f5f5', '#7eb6ff', '#f0c36a', '#f07171', '#c4b5fd', '#a3a3a3'];
 
@@ -74,7 +75,7 @@ export default function PortfolioGraph({
             <Ring slices={slices} />
             <div>
               {slices.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
-              {slices.length === 0 ? <p className="quiet">No assets in the linked wallets yet.</p> : (
+              {slices.length === 0 ? <p className="quiet">{portfolioEmptyMessage(wallets)}</p> : (
                 <ul className="portfolio-legend">
                   {slices.map((slice, index) => (
                     <li key={slice.mint}>
@@ -125,11 +126,11 @@ export default function PortfolioGraph({
                   <small>
                     {wallet.holdings.filter(row => row.usdMicro !== '0').map(row => `${formatBaseUnits(row.amount, row.decimals)} ${row.symbol}`).join(' · ')
                       || 'No priced balance'}
-                    {wallet.holdings.some(row => row.usdMicro === '0')
-                      ? ` · ${wallet.holdings.filter(row => row.usdMicro === '0').length} unpriced`
-                      : ''}
                   </small>
                 ) : <small>{wallet.spendable ? 'Agent wallet' : 'Connected'}</small>}
+                {unpricedHoldingLabels(wallet.holdings).map((label, index) => (
+                  <small key={index}>{label}</small>
+                ))}
               </li>
             ))}
           </ul>
