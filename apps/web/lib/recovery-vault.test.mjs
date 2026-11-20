@@ -8,6 +8,8 @@ import {
   readRecoveryState,
   recoveryFailureNote,
   recoveryStartStep,
+  restoreRecovery,
+  staleRecoveryAck,
   sealRecovery,
   shouldRetryRecovery,
   verifyRecovery,
@@ -136,4 +138,38 @@ test('a seed the account already holds is typed back, never shown again', () => 
   assert.equal(recoveryStartStep('confirmed'), 'restore');
   assert.equal(recoveryStartStep('none'), 'tell');
   assert.equal(recoveryStartStep(undefined), 'tell');
+});
+
+test('a lost or browser-only seed is typed back, not replaced', () => {
+  assert.equal(recoveryStartStep('lost'), 'relink');
+  assert.equal(recoveryStartStep('none', { hadLocalSeed: true }), 'relink');
+  assert.equal(recoveryStartStep('confirmed', { hadLocalSeed: true }), 'restore');
+  assert.equal(staleRecoveryAck({ ok: true, state: 'none' }), true);
+  assert.equal(staleRecoveryAck({ ok: true, state: 'lost' }), true);
+  assert.equal(staleRecoveryAck({ ok: true, state: 'confirmed' }), false);
+  assert.equal(staleRecoveryAck({ ok: true, local: true, state: 'none' }), false);
+  assert.equal(staleRecoveryAck({ ok: false, error: 'recovery_unavailable' }), false);
+});
+
+test('restoring a seed sends only a verifier of the typed words', async () => {
+  const previous = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
+  process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = 'https://runtime.test';
+  try {
+    const words = await createRecoveryPhrase();
+    const sent = [];
+    const result = await restoreRecovery(async (url, init) => {
+      sent.push({ url: String(url), body: JSON.parse(init.body) });
+      return Response.json({ ok: true, state: 'confirmed' });
+    }, { ownerId: 'alice', token: 't', words });
+    assert.equal(result.ok, true);
+    assert.equal(sent.length, 1);
+    assert.deepEqual(Object.keys(sent[0].body).sort(), ['restore', 'verifier']);
+    assert.equal(sent[0].body.verifier.hash, await phraseProof(words, sent[0].body.verifier));
+    for (const word of words) assert.equal(JSON.stringify(sent[0].body.verifier).includes(` ${word} `), false);
+    const taken = await restoreRecovery(async () => Response.json({ error: 'recovery_exists' }, { status: 409 }), { ownerId: 'alice', words });
+    assert.equal(taken.exists, true);
+  } finally {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
+    else process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = previous;
+  }
 });

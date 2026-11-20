@@ -13,9 +13,10 @@ import {
   recoveryResume,
   recoveryStorageKey,
   recoveryWords,
+  verifyRecoveryPhrase,
   writeRecoveryStep,
 } from '../lib/wallet-desk.mjs';
-import { issueRecovery, readRecoveryState, recoveryFailureNote, recoveryStartStep, sealRecovery, shouldRetryRecovery, verifyRecovery } from '../lib/recovery-vault.mjs';
+import { issueRecovery, readRecoveryState, recoveryFailureNote, recoveryStartStep, restoreRecovery, sealRecovery, shouldRetryRecovery, verifyRecovery } from '../lib/recovery-vault.mjs';
 import { SEED_CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
 
@@ -80,7 +81,7 @@ export function PhraseEntry({ slots, onChange, disabled = false }) {
   );
 }
 
-export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = '', getAccessToken = null, allowLocal = false, onDone, onSessionExpired = null }) {
+export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = '', getAccessToken = null, allowLocal = false, hadLocalSeed = false, onDone, onSessionExpired = null }) {
   const [words, setWords] = useState(null);
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
@@ -91,6 +92,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   const [busy, setBusy] = useState(false);
   // 'account' keeps one seed per account. 'local' is only for a desk with no account store.
   const [mode, setMode] = useState('account');
+  const [lostSeed, setLostSeed] = useState(false);
   const [retry, setRetry] = useState(0);
   const verifierRef = useRef(null);
   const finishTimer = useRef(0);
@@ -104,8 +106,15 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
 
   function routeFromAccount(state) {
     verifierRef.current = state.verifier ?? null;
-    const next = recoveryStartStep(state.state);
-    setNote(next === 'finish' ? 'This account already has a seed. It is shown only once. Type the 12 words from the file you downloaded.' : '');
+    const next = recoveryStartStep(state.state, { hadLocalSeed });
+    setLostSeed(state.state === 'lost');
+    const notes = {
+      finish: 'This account already has a seed. It is shown only once. Type the 12 words from the file you downloaded.',
+      relink: state.state === 'lost'
+        ? 'This account already has a seed, but its saved record was lost. Type the 12 words from your file to restore it. A new seed is not made.'
+        : 'This browser saved a seed before seeds were tied to your account. Type those 12 words to keep it for every browser.',
+    };
+    setNote(notes[next] || '');
     setSlots(EMPTY_SLOTS());
     setStep(next);
   }
@@ -237,6 +246,29 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       return;
     }
     exitCeremony();
+  }
+
+  async function relinkSeed(event) {
+    event.preventDefault();
+    if (busy || leaving) return;
+    if (!(await verifyRecoveryPhrase(slots))) {
+      setNote('Those are not 12 valid seed words. Check the file and try again.');
+      return;
+    }
+    setBusy(true);
+    const saved = await restoreRecovery((...args) => fetch(...args), { ownerId, token: await authToken(), words: slots });
+    setBusy(false);
+    if (saved.ok) {
+      exitCeremony();
+      return;
+    }
+    if (saved.exists) {
+      const state = await readRecoveryState((...args) => fetch(...args), { ownerId, token: await authToken() });
+      if (state.ok) routeFromAccount(state);
+      else setNote(recoveryFailureNote(state.error));
+      return;
+    }
+    setNote(saved.error === 'invalid_phrase' ? 'Those are not 12 valid seed words. Check the file and try again.' : recoveryFailureNote(saved.error));
   }
 
   function exitCeremony() {
@@ -382,6 +414,15 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
             <p className="quiet">Type the 12 words</p>
             <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); }} disabled={leaving} />
             <button type="submit" className="solid" disabled={leaving || busy}>Confirm seed</button>
+          </form>
+        ) : null}
+        {step === 'relink' ? (
+          <form className="field" onSubmit={relinkSeed}>
+            <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); }} disabled={leaving || busy} />
+            <button type="submit" className="solid" disabled={leaving || busy}>Restore seed</button>
+            {!lostSeed ? (
+              <button type="button" className="ghost" disabled={leaving || busy} onClick={() => { setNote(''); setStep('tell'); }}>I no longer have it</button>
+            ) : null}
           </form>
         ) : null}
         {step === 'restore' || step === 'finish' ? (

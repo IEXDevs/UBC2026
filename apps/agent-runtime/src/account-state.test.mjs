@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './owner-auth.fixture.mjs';
 import {
+  SEED_MARK,
+  handleAccountRoute,
   parseRecoveryIssue,
+  parseRecoveryRestore,
   parseRecoveryVault,
   parseStateBatch,
   parseStateItem,
@@ -43,8 +46,19 @@ function database({ deletionListStatus = 200 } = {}) {
   const deletedAgents = new Map([['alice', ['bot_deleted']]]);
   const prefers = [];
   const calls = [];
+  const privy = new Map();
   async function fetcher(url, init = {}) {
     const target = new URL(String(url));
+    if (target.hostname === 'auth.privy.io') {
+      const [, id, tail] = target.pathname.match(/^\/api\/v1\/users\/([^/]+)(\/custom_metadata)?$/) || [];
+      const user = decodeURIComponent(id || '');
+      calls.push({ table: `privy${tail || ''}`, method: init.method || 'GET' });
+      if (tail) {
+        privy.set(user, JSON.parse(init.body).custom_metadata);
+        return Response.json({ id: user, custom_metadata: privy.get(user) });
+      }
+      return Response.json({ id: user, custom_metadata: privy.get(user) ?? {} });
+    }
     const table = target.pathname.replace('/rest/v1/', '');
     const method = init.method || 'GET';
     const body = init.body ? JSON.parse(init.body) : null;
@@ -92,7 +106,7 @@ function database({ deletionListStatus = 200 } = {}) {
     }
     return Response.json({ error: 'unexpected' }, { status: 500 });
   }
-  return { fetcher, state, recovery, prefers, calls };
+  return { fetcher, state, recovery, prefers, calls, privy };
 }
 
 function envFor(db) {
@@ -308,4 +322,61 @@ test('state and recovery routes reject bad bodies, anonymous calls, and unconfig
   assert.deepEqual(stateRead.items, []);
   assert.equal((await call(bare, '/api/state', { method: 'POST', body: { items: [{ name: 'roster', value: '{}' }] } })).status, 503);
   assert.equal((await call(bare, '/api/recovery', { method: 'POST', body: { vault: VAULT, verifier: VERIFIER } })).status, 503);
+});
+
+const PRIVY_ENV = Object.freeze({
+  SUPABASE_URL: 'https://example.supabase.co',
+  SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+  PRIVY_APP_ID: 'app-test',
+  PRIVY_APP_SECRET: 'secret-test',
+});
+
+function route(db, routeId, body, owner = 'alice') {
+  const request = new Request('https://runtime/api/recovery', body === undefined
+    ? { method: 'GET' }
+    : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return handleAccountRoute(routeId, request, PRIVY_ENV, owner, db.fetcher);
+}
+
+/**
+ * Achieves: a seed survives a lost owner_recovery row through a Privy marker.
+ * Oracle: the lost state, the 409 on a fresh seed, and a verifier-only restore.
+ */
+test('a lost seed record never lets the account take a second seed', async () => {
+  const db = database();
+  assert.equal((await (await route(db, 'recovery.status')).json()).state, 'none');
+  assert.equal((await route(db, 'recovery.issue', { vault: VAULT, verifier: VERIFIER })).status, 200);
+  assert.equal(db.privy.get('alice')[SEED_MARK], true);
+
+  db.recovery.clear();
+  assert.equal((await (await route(db, 'recovery.status')).json()).state, 'lost');
+  const fresh = await route(db, 'recovery.issue', { vault: VAULT, verifier: VERIFIER });
+  assert.equal(fresh.status, 409);
+  assert.equal((await fresh.json()).state, 'lost');
+  assert.equal(db.recovery.size, 0);
+
+  const restored = await route(db, 'recovery.issue', { restore: true, verifier: VERIFIER });
+  assert.equal(restored.status, 200);
+  assert.equal(db.recovery.get('alice').status, 'confirmed');
+  assert.equal(db.recovery.get('alice').vault, null);
+  assert.equal((await (await route(db, 'recovery.status')).json()).state, 'confirmed');
+  assert.equal((await route(db, 'recovery.issue', { restore: true, verifier: VERIFIER })).status, 409);
+});
+
+test('an existing seed row backfills the marker and keeps other metadata', async () => {
+  const db = database();
+  db.privy.set('alice', { team: 'blue' });
+  db.recovery.set('alice', { status: 'confirmed', verifier_salt: VERIFIER.salt, verifier_hash: VERIFIER.hash, verifier_iterations: VERIFIER.iterations });
+  assert.equal((await (await route(db, 'recovery.status')).json()).state, 'confirmed');
+  assert.deepEqual(db.privy.get('alice'), { team: 'blue', [SEED_MARK]: true });
+  const writes = db.calls.filter(c => c.table === 'privy/custom_metadata').length;
+  await route(db, 'recovery.status');
+  assert.equal(db.calls.filter(c => c.table === 'privy/custom_metadata').length, writes);
+});
+
+test('a restore carries a verifier only', () => {
+  assert.deepEqual(parseRecoveryRestore({ restore: true, verifier: VERIFIER }), { verifier: VERIFIER });
+  assert.equal(parseRecoveryRestore({ restore: true, verifier: VERIFIER, vault: VAULT }), null);
+  assert.equal(parseRecoveryRestore({ restore: true, verifier: VERIFIER, phrase: 'a b c' }), null);
+  assert.equal(parseRecoveryRestore({ verifier: VERIFIER }), null);
 });
