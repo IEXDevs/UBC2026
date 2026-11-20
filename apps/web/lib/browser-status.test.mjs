@@ -44,8 +44,18 @@ test('browser errors map Worker codes to setup hints', () => {
   assert.match(browserErrorNote('not_found'), /not found/i);
   assert.match(browserErrorNote('concurrency_limit'), /Release/);
   assert.match(browserErrorNote('provider_failed'), /Browser Run failed/);
-  assert.equal(browserErrorNote('browser_session_expired'), 'That browser session ended. Open a new one.');
+  assert.match(browserErrorNote('browser_session_expired'), /browser_session_expired.*That browser session ended/);
   assert.match(browserErrorNote('browser_readonly_not_configured'), /Read-only Live View requires CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN/);
   assert.match(browserErrorNote('browser_not_configured'), /CLOUDFLARE_API_TOKEN/);
   assert.doesNotMatch(browserErrorNote('provider_failed'), /Turnstile/);
+});
+
+test('browser diagnostics show codes, HTTP status and only allowlisted reasons', () => {
+  assert.match(browserErrorNote('browser_session_expired', 404, 'targets_unavailable'), /browser_session_expired \(404 Failed to fetch targets\)/);
+  assert.match(browserErrorNote('browser_not_configured', 403), /403 API token rejected/);
+  assert.match(browserErrorNote('provider_failed', undefined, 'binding_failed'), /binding unavailable or failed/);
+  for (const secret of ['https://live.browser.run/ui/view?token=secret', 'Bearer secret', 'secret-value', 'secret_value']) {
+    assert.ok(!browserErrorNote(secret, secret, secret).includes(secret));
+    assert.ok(!browserErrorNote('provider_failed', 502, secret).includes(secret));
+  }
 });
