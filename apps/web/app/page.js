@@ -4,7 +4,7 @@ import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useAuthorizationSignature, useConnectWallet, usePrivy } from '@privy-io/react-auth';
-import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
+import { useSignTransaction, useWallets, useStandardWallets } from '@privy-io/react-auth/solana';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
 import AgentThread from '../components/AgentThread';
@@ -55,7 +55,7 @@ import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
-import { signSelectedWalletTransaction, signWalletMoveTransaction } from '../lib/wallet-signing.mjs';
+import { browserSignerHasWallet, waitForBrowserSigner, withLinkedSolanaWallets, signSelectedWalletTransaction, signWalletMoveTransaction } from '../lib/wallet-signing.mjs';
 import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
   deleteOwnerBot,
@@ -464,11 +464,14 @@ function base64ToBytes(value) {
 
 function DepositSigner({ signerRef }) {
   const { signTransaction } = useSignTransaction();
-  const { wallets } = useWallets();
+  const { wallets, ready } = useWallets();
+  const { wallets: standardWallets, ready: standardReady } = useStandardWallets();
+  const { user } = usePrivy();
   const { connectWallet } = useConnectWallet();
   useEffect(() => {
-    signerRef.current = { signTransaction, wallets, connectWallet };
-  }, [signTransaction, wallets, connectWallet, signerRef]);
+    signerRef.current = { signTransaction, wallets: withLinkedSolanaWallets(wallets, standardWallets, user),
+      ready: ready || standardReady, connectWallet };
+  }, [signTransaction, wallets, ready, standardWallets, standardReady, user, connectWallet, signerRef]);
   return null;
 }
 
@@ -1208,6 +1211,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const onWalletSend = useCallback(async (pending) => {
     let failure = {};
     const failed = (message, detail = failure) => walletSendFailure(message, detail);
+    const missingBrowserWallet = () => {
+      const seen = depositSignerRef.current?.wallets || [];
+      const addresses = seen.map(wallet => String(wallet?.address || '').slice(0, 5)).join(', ') || 'none';
+      return failed(`Main isn't available to sign in this browser. Reload and sign in again. Browser sees ${seen.length} wallets: ${addresses}.`,
+        { error: 'browser_wallet_missing' });
+    };
     if (!pending?.walletAsset && pending?.target?.kind !== 'wallet' && deskLockOnRef.current && !unlockedRef.current) {
       lockIntentRef.current ??= { type: 'wallet' };
       setLockOpen(true);
@@ -1228,10 +1237,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           return { response, body: await response.json().catch(() => ({})) };
         };
         let result;
-        const signer = depositSignerRef.current;
-        const browserEmbedded = from.spendable !== false
-          && typeof signer?.signTransaction === 'function'
-          && (Array.isArray(signer.wallets) ? signer.wallets : []).some(wallet => wallet?.address === from.address);
+        const signer = await waitForBrowserSigner(() => depositSignerRef.current, [from]);
+        const requireBrowser = from.kind === 'main' || (from.spendable !== false && from.provider === 'privy');
+        const browserEmbedded = from.spendable !== false && browserSignerHasWallet(signer, from);
+        if (requireBrowser && !browserSignerHasWallet(signer, from)) return missingBrowserWallet();
         if (browserEmbedded || from.spendable === false) {
           const prepared = await post({ phase: 'prepare' });
           failure = prepared.body;
@@ -1419,20 +1428,23 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           });
           return { response, body: await response.json().catch(() => ({})) };
         };
-        const signer = depositSignerRef.current;
-        const available = wallet => typeof signer?.signTransaction === 'function'
-          && (Array.isArray(signer.wallets) ? signer.wallets : []).some(item => item?.address === wallet.address);
+        let signer = await waitForBrowserSigner(() => depositSignerRef.current, [from]);
+        const requireBrowser = from.kind === 'main' || (from.spendable !== false && from.provider === 'privy');
+        const available = wallet => browserSignerHasWallet(signer, wallet);
+        if (requireBrowser && !available(from)) return missingBrowserWallet();
         let result;
         if (available(from)) {
           const prepared = await postMove({ phase: 'prepare' });
           failure = prepared.body;
           if (!prepared.response.ok || !prepared.body.transaction || !Array.isArray(prepared.body.signerWallets)
               || !prepared.body.signerWallets.length) return failed('The transfer was not prepared. Check the balance and SOL network fees.');
+          signer = await waitForBrowserSigner(() => depositSignerRef.current, prepared.body.signerWallets);
           if (prepared.body.signerWallets.every(available)) {
             const signed = await signWalletMoveTransaction({ wallets: prepared.body.signerWallets,
               transaction: base64ToBytes(prepared.body.transaction), signer });
             result = await postMove({ phase: 'broadcast', signedTransaction: bytesToBase64(signed) });
-          } else result = await postMove();
+          } else if (requireBrowser) return missingBrowserWallet();
+          else result = await postMove();
         } else result = await postMove();
         const { response, body } = result;
         failure = body;
