@@ -77,6 +77,7 @@ import {
   walletsFromPrivyUser,
 } from '../lib/wallet-provision.mjs';
 import { SETUP_CARD_MS, accountSetupStep, clipAddress, readQuoteOut, readRecoveryAck, swapSendSettlement, writeRecoveryAck } from '../lib/wallet-desk.mjs';
+import { readRecoveryState, staleRecoveryAck } from '../lib/recovery-vault.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { latestInlineAllow } from '../lib/voice-allow.mjs';
 import { catalogAddition, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
@@ -503,6 +504,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const [profile, setProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
   const [recoveryAck, setRecoveryAck] = useState(null);
+  const [localSeed, setLocalSeed] = useState(false);
   const [acceptanceAck, setAcceptanceAck] = useState(null);
   const [acceptanceClosing, setAcceptanceClosing] = useState(false);
   const acceptanceTimer = useRef(0);
@@ -665,16 +667,27 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
 
   useEffect(() => {
     if (!stateReady) return;
+    let local = false;
     try {
       // Acceptance follows the account. The seed flag stays per device: a new
       // browser has to restore the seed it already saved before the desk opens.
-      setRecoveryAck(ownerId ? readRecoveryAck(localStorage, ownerId) : false);
+      local = ownerId ? readRecoveryAck(localStorage, ownerId) : false;
       setAcceptanceAck(ownerId ? readAcceptanceAck(localStorage, ownerId) : false);
     } catch {
-      setRecoveryAck(false);
       setAcceptanceAck(false);
     }
-  }, [ownerId, stateReady]);
+    setRecoveryAck(local);
+    setLocalSeed(local);
+    if (!local || !ownerId || devPreview) return undefined;
+    // A device flag alone does not prove the account holds the seed.
+    let stop = false;
+    (async () => {
+      const token = typeof getAccessToken === 'function' ? await Promise.resolve().then(() => getAccessToken()).catch(() => null) : null;
+      const state = await readRecoveryState((...args) => fetch(...args), { ownerId, token });
+      if (!stop && staleRecoveryAck(state)) setRecoveryAck(false);
+    })();
+    return () => { stop = true; };
+  }, [ownerId, stateReady, devPreview, getAccessToken]);
 
   const profileOwnerRef = useRef('');
   useEffect(() => {
@@ -2223,6 +2236,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           ownerId={ownerId || ''}
           getAccessToken={getAccessToken}
           allowLocal={devPreview}
+          hadLocalSeed={localSeed}
           onSessionExpired={devPreview ? null : onLogout}
           onDone={() => {
             try { writeRecoveryAck(localStorage, ownerId); } catch { /* the phrase stays in the download only */ }

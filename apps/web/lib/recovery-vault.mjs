@@ -122,7 +122,7 @@ export async function readRecoveryState(fetchImpl, { ownerId, token, allowLocal 
     if (!response.ok) return { ok: false, error: body.error || 'recovery_unavailable' };
     return {
       ok: true,
-      state: body.state === 'confirmed' || body.state === 'issued' ? body.state : 'none',
+      state: ['confirmed', 'issued', 'lost'].includes(body.state) ? body.state : 'none',
       vault: body.vault ?? null,
       verifier: body.verifier ?? null,
     };
@@ -136,10 +136,18 @@ export async function readRecoveryState(fetchImpl, { ownerId, token, allowLocal 
  * visit that issued them: a seed the account already holds is typed back from
  * the downloaded file, never shown again.
  */
-export function recoveryStartStep(state) {
+export function recoveryStartStep(state, { hadLocalSeed = false } = {}) {
   if (state === 'issued') return 'finish';
   if (state === 'confirmed') return 'restore';
+  // 'lost': the account had a seed but its record is gone. A browser that
+  // saved a seed before seeds were account-wide brings that one back too.
+  if (state === 'lost' || hadLocalSeed === true) return 'relink';
   return 'tell';
+}
+
+/** True when the browser's seed flag is not backed by a confirmed account seed. */
+export function staleRecoveryAck(state) {
+  return state?.ok === true && state.local !== true && state.state !== 'confirmed';
 }
 
 /** A missing token during signup should be asked again. A real outage should not. */
@@ -176,10 +184,36 @@ export async function issueRecovery(fetchImpl, { ownerId, token, sealed } = {}) 
     });
     const body = await response.json().catch(() => ({}));
     if (response.status === 409) {
-      return { ok: false, exists: true, state: body.state === 'confirmed' ? 'confirmed' : 'issued' };
+      return { ok: false, exists: true, state: ['confirmed', 'lost'].includes(body.state) ? body.state : 'issued' };
     }
     if (!response.ok) return { ok: false, error: body.error || 'recovery_failed' };
     return { ok: true };
+  } catch {
+    return { ok: false, error: 'recovery_failed' };
+  }
+}
+
+/** Re-registers a seed the owner already holds. Only a verifier is sent. */
+export async function restoreRecovery(fetchImpl, { ownerId, token, words, random = bytes => crypto.getRandomValues(bytes) } = {}) {
+  const url = shellRuntimeUrl('/api/recovery');
+  if (!url || !ownerId) return { ok: false, error: 'runtime' };
+  let verifier;
+  try {
+    const salt = toHex(random(new Uint8Array(16)));
+    verifier = { salt, iterations: VAULT_ITERATIONS, hash: await phraseProof(words, { salt, iterations: VAULT_ITERATIONS }) };
+  } catch {
+    return { ok: false, error: 'invalid_phrase' };
+  }
+  try {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers: headers(ownerId, token),
+      body: JSON.stringify({ restore: true, verifier }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 409) return { ok: false, exists: true };
+    if (!response.ok) return { ok: false, error: body.error || 'recovery_failed' };
+    return { ok: true, state: 'confirmed' };
   } catch {
     return { ok: false, error: 'recovery_failed' };
   }

@@ -128,6 +128,13 @@ export function parseRecoveryIssue(body) {
   return { vault, verifier };
 }
 
+export function parseRecoveryRestore(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || body.restore !== true) return null;
+  if (Object.keys(body).sort().join(',') !== 'restore,verifier') return null;
+  const verifier = parseRecoveryVerifier(body.verifier);
+  return verifier ? { verifier } : null;
+}
+
 function sameText(left, right) {
   if (typeof left !== 'string' || typeof right !== 'string' || left.length !== right.length) return false;
   let diff = 0;
@@ -162,6 +169,56 @@ async function readRecoveryRow(env, ownerId, fetcher) {
   );
   if (read.status !== 200 || !Array.isArray(read.rows)) return { error: storageError(read) };
   return { row: read.rows[0] ?? null };
+}
+
+const PRIVY_USERS = 'https://auth.privy.io/api/v1/users';
+export const SEED_MARK = 'maelstrom_seed';
+
+function privyCredentials(env) {
+  const id = typeof env?.PRIVY_APP_ID === 'string' ? env.PRIVY_APP_ID.trim() : '';
+  const secret = typeof env?.PRIVY_APP_SECRET === 'string' ? env.PRIVY_APP_SECRET.trim() : '';
+  if (!id || !secret) return null;
+  return { 'privy-app-id': id, Authorization: `Basic ${btoa(`${id}:${secret}`)}` };
+}
+
+/**
+ * The Privy user carries a marker once the account has a seed, so a lost
+ * owner_recovery row cannot hand the same account a second seed.
+ * Returns { known: false } when Privy is not configured or does not answer.
+ */
+async function readSeedMark(env, ownerId, fetcher) {
+  const auth = privyCredentials(env);
+  if (!auth) return { known: false };
+  try {
+    const response = await fetcher(`${PRIVY_USERS}/${encodeURIComponent(ownerId)}`, { headers: auth, redirect: 'manual' });
+    if (!response.ok) return { known: false };
+    const user = await response.json().catch(() => null);
+    const metadata = user?.custom_metadata && typeof user.custom_metadata === 'object' ? user.custom_metadata : {};
+    return { known: true, marked: metadata[SEED_MARK] === true, metadata };
+  } catch {
+    return { known: false };
+  }
+}
+
+async function writeSeedMark(env, ownerId, metadata, fetcher) {
+  const auth = privyCredentials(env);
+  if (!auth) return false;
+  try {
+    const response = await fetcher(`${PRIVY_USERS}/${encodeURIComponent(ownerId)}/custom_metadata`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ custom_metadata: { ...metadata, [SEED_MARK]: true } }),
+      redirect: 'manual',
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureSeedMark(env, ownerId, fetcher) {
+  const mark = await readSeedMark(env, ownerId, fetcher);
+  if (mark.known && !mark.marked) await writeSeedMark(env, ownerId, mark.metadata, fetcher);
 }
 
 function recoveryView(row) {
@@ -256,16 +313,25 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
   if (routeId === 'recovery.status') {
     const result = await readRecoveryRow(env, ownerId, fetcher);
     if (result.error) return json({ error: result.error }, 503);
-    return json({ ok: true, source: 'supabase', ...recoveryView(result.row) });
+    if (result.row) {
+      await ensureSeedMark(env, ownerId, fetcher);
+      return json({ ok: true, source: 'supabase', ...recoveryView(result.row) });
+    }
+    const mark = await readSeedMark(env, ownerId, fetcher);
+    return json({ ok: true, source: 'supabase', state: mark.marked ? 'lost' : 'none' });
   }
 
   if (routeId === 'recovery.issue') {
     const body = await request.json().catch(() => null);
-    const issue = parseRecoveryIssue(body);
+    // A restore re-registers a seed the account already had: verifier only, already confirmed.
+    const restoring = body?.restore === true;
+    const issue = restoring ? parseRecoveryRestore(body) : parseRecoveryIssue(body);
     if (!issue) return json({ error: 'invalid_recovery' }, 400);
     const existing = await readRecoveryRow(env, ownerId, fetcher);
     if (existing.error) return json({ error: existing.error }, 503);
     if (existing.row) return json({ error: 'recovery_exists', ...recoveryView(existing.row) }, 409);
+    const mark = await readSeedMark(env, ownerId, fetcher);
+    if (mark.marked && !restoring) return json({ error: 'recovery_exists', state: 'lost' }, 409);
     if (!(await ensureUser(env, ownerId, fetcher))) return json({ error: 'recovery_failed' }, 502);
     const written = await supabaseWrite(env, {
       path: 'owner_recovery',
@@ -273,11 +339,12 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
       prefer: 'return=minimal',
       body: {
         owner_id: ownerId,
-        status: 'issued',
-        vault: issue.vault,
+        status: restoring ? 'confirmed' : 'issued',
+        vault: restoring ? null : issue.vault,
         verifier_salt: issue.verifier.salt,
         verifier_hash: issue.verifier.hash,
         verifier_iterations: issue.verifier.iterations,
+        ...(restoring ? { confirmed_at: new Date().toISOString() } : {}),
       },
       fetcher,
     });
@@ -287,7 +354,8 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
       return json({ error: 'recovery_exists', ...recoveryView(raced.row) }, 409);
     }
     if (written?.ok !== true) return json({ error: 'recovery_failed' }, 502);
-    return json({ ok: true, state: 'issued' });
+    if (mark.known && !mark.marked) await writeSeedMark(env, ownerId, mark.metadata, fetcher);
+    return json({ ok: true, state: restoring ? 'confirmed' : 'issued' });
   }
 
   if (routeId === 'recovery.verify') {
