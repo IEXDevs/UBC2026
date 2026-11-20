@@ -183,6 +183,7 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
   }
   let simulation;
   let simulationError;
+  let simulatedCost = '5000';
   let routeSlippage = 50;
   let reserved = 0;
   let signed = 0;
@@ -207,7 +208,7 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
         assert.equal(input.transaction, simulation);
         assert.equal(input.amount, '1000000');
         assert.equal(input.minOutput, '9950000');
-        return { transaction: input.transaction, feeLamports: '5000', maxSolCost: '5000' };
+        return { transaction: input.transaction, feeLamports: '5000', maxSolCost: simulatedCost };
       },
       formatPreparedSpendAuthorization: () => Buffer.from('swap-owner-authorization-payload'.repeat(2)).toString('base64'),
       signPreparedSolanaTransfer: () => assert.fail('swaps must never server-sign'),
@@ -284,12 +285,23 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
     assert.equal(reserved, 0);
   }
   await assertPreflightFailure();
+  simulationError = Object.assign(new Error('simulation_failed'), { simulationReason: 'swap_output_below_minimum' });
+  const rejectedPreview = await (await request()).json();
+  assert.equal(rejectedPreview.failure.code, 'swap_output_below_minimum');
+  assert.equal(rejectedPreview.signed, false);
+  simulationError = null;
   const preview = await (await request()).json();
   assert.equal(preview.swapPreview?.usdMicros, '1000500');
   assert.equal(signed, 0);
   assert.equal(reserved, 0);
   const ticket = preview.swapPreview.ticket;
   await assertPreflightFailure({ confirmed: true, swapTicket: ticket, swapAuthorization: 'prepare' });
+  simulatedCost = '5001';
+  const higherCost = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization: 'prepare' })).json();
+  assert.equal(higherCost.failure.code, 'swap_approved_cost_exceeded');
+  assert.equal(higherCost.signed, false);
+  assert.equal(reserved, 0);
+  simulatedCost = '5000';
   const changed = await (await request({ confirmed: true, amount: '2000000', swapTicket: ticket, swapAuthorization: 'prepare' })).json();
   assert.equal(changed.error, intent ? 'swap_intent_unavailable' : 'swap_quote_expired');
   const unbound = await (await request({ confirmed: true, swapTicket: ticket })).json();

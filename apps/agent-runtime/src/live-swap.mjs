@@ -57,6 +57,18 @@ function swapSimulation(context, parsed, offer) {
   };
 }
 
+function checkedSwapPreparation(prepared, transaction, approvedSolCost = null) {
+  let reason;
+  if (prepared?.transaction !== transaction) reason = 'swap_transaction_mismatch';
+  else if (!UNITS.test(prepared.maxSolCost ?? '')) reason = 'swap_fee_unavailable';
+  else if (approvedSolCost !== null) {
+    if (!UNITS.test(approvedSolCost)) reason = 'swap_approved_cost_missing';
+    else if (BigInt(prepared.maxSolCost) > BigInt(approvedSolCost)) reason = 'swap_approved_cost_exceeded';
+  }
+  if (reason) throw Object.assign(new Error('simulation_failed'), { simulationReason: reason });
+  return prepared;
+}
+
 export async function previewLiveSwap(env, context, parsed, key, now) {
   const client = env.transferClient;
   const inputMint = mintForAsset(parsed.asset);
@@ -69,10 +81,7 @@ export async function previewLiveSwap(env, context, parsed, key, now) {
     walletAddress: context.wallet.address, inputMint, outputMint, amount: parsed.amount,
     blockhash: block.blockhash, apiKey: env.JUPITER_API_KEY, fetcher: env.fetch ?? fetch,
   });
-  const prepared = await client.prepareSolanaSwap(swapSimulation(context, parsed, offer));
-  if (prepared?.transaction !== offer.transaction || !UNITS.test(prepared.maxSolCost ?? '')) {
-    throw new Error('simulation_failed');
-  }
+  const prepared = checkedSwapPreparation(await client.prepareSolanaSwap(swapSimulation(context, parsed, offer)), offer.transaction);
   const valuation = await valueUsdSpend(env, {
     mint: inputMint, decimals: inputDecimals, amount: parsed.amount, feeLamports: prepared.maxSolCost, now,
   });
@@ -90,7 +99,5 @@ export async function previewLiveSwap(env, context, parsed, key, now) {
 
 export async function prepareApprovedSwap(env, context, parsed, offer) {
   const prepared = await env.transferClient.prepareSolanaSwap(swapSimulation(context, parsed, offer));
-  if (prepared?.transaction !== offer.transaction || !UNITS.test(prepared.maxSolCost ?? '')
-      || BigInt(prepared.maxSolCost) > BigInt(offer.maxSolCost)) throw new Error('simulation_failed');
-  return prepared;
+  return checkedSwapPreparation(prepared, offer.transaction, offer.maxSolCost ?? '');
 }

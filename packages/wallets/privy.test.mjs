@@ -36,9 +36,10 @@ test('swap simulation checks exact wallet input, minimum output and SOL fee', ()
   };
   const intent = { wallet: address, inputMint: sol, outputMint: 'output', amount: '10000000', minOutput: '950000' };
   assert.deepEqual(verifySwapSimulation(simulation, intent), { feeLamports: '5000', maxSolCost: '5000' });
-  assert.equal(verifySwapSimulation(simulation, { ...intent, minOutput: '1000001' }), null);
-  assert.equal(verifySwapSimulation(simulation, { ...intent, amount: '10000001' }), null);
-  assert.equal(verifySwapSimulation({ ...simulation, postTokenBalances: [token('output', '1000000')] }, intent), null);
+  assert.equal(verifySwapSimulation(simulation, { ...intent, minOutput: '1000001' }).reason, 'swap_output_below_minimum');
+  assert.equal(verifySwapSimulation(simulation, { ...intent, amount: '10000001' }).reason, 'swap_sol_debit_below_fee');
+  assert.equal(verifySwapSimulation({ ...simulation, postTokenBalances: [token('output', '1000000')] }, intent).reason, 'swap_other_token_changed');
+  assert.equal(verifySwapSimulation({ ...simulation, fee: null }, intent).reason, 'swap_fee_unavailable');
 });
 const appId = 'app_test';
 const appSecret = 'app-secret-value';
@@ -201,6 +202,9 @@ test('swap preparation derives balances from requested RPC account snapshots, no
     return true;
   });
   simulationError = null;
+  await assert.rejects(privy.prepareSolanaSwap({ ...intent, minOutput: '1000001' }), {
+    code: 'simulation_failed', simulationReason: 'swap_output_below_minimum',
+  });
   missing = true;
   await assert.rejects(privy.prepareSolanaSwap(intent), { code: 'swap_simulation_unavailable' });
   assert.equal(swapAccountSnapshot(null, signer.toBase58()), null);

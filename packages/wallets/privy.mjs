@@ -33,9 +33,9 @@ export function simulationFailureReason(value) {
   return 'simulation_unavailable';
 }
 
-function failSimulation(value, details) {
+function failSimulation(value, { details, reason = simulationFailureReason(value) } = {}) {
   const error = new WalletError('Solana transfer simulation failed', 'simulation_failed');
-  error.simulationReason = simulationFailureReason(value);
+  error.simulationReason = reason;
   if (details) error.simulationDetails = details;
   throw error;
 }
@@ -1372,7 +1372,7 @@ export function createPrivyWalletClient({
       const tables = await Promise.all(parsed.message.addressTableLookups.map(async ({ accountKey }) => {
         const read = await rpc('getAccountInfo', [accountKey.toBase58(), { encoding: 'base64', commitment: 'confirmed' }]);
         const data = read.result?.value?.data;
-        if (data?.[1] !== 'base64') fail('Swap lookup table is unavailable', 'simulation_failed');
+        if (data?.[1] !== 'base64') failSimulation(null, { reason: 'swap_lookup_table_unavailable' });
         return new AddressLookupTableAccount({ key: accountKey, state: AddressLookupTableAccount.deserialize(Buffer.from(data[0], 'base64')) });
       }));
       const addresses = parsed.message.getAccountKeys({ addressLookupTableAccounts: tables }).keySegments().flat().map(key => key.toBase58());
@@ -1392,7 +1392,8 @@ export function createPrivyWalletClient({
         const index = value?.err?.InstructionError?.[0];
         const instruction = Number.isInteger(index) ? parsed.message.compiledInstructions[index] : null;
         const details = swapSimulationDetails({ instructionProgram: addresses[instruction?.programIdIndex], logs: value?.logs });
-        failSimulation(value, details);
+        const reason = value?.err === 'BlockhashNotFound' ? 'swap_blockhash_not_found' : undefined;
+        failSimulation(value, { details, reason });
       }
       const after = swapAccountSnapshot(value.accounts, walletAddress);
       if (!after) fail('Swap simulated accounts are unavailable', 'swap_simulation_unavailable');
@@ -1400,7 +1401,7 @@ export function createPrivyWalletClient({
         err: value.err, fee: fee.result?.value, preBalances: [before.lamports], postBalances: [after.lamports],
         preTokenBalances: before.tokens, postTokenBalances: after.tokens,
       }, { wallet: walletAddress, inputMint, outputMint, amount, minOutput });
-      if (!effects || String(fee.result?.value) !== effects.feeLamports) fail('Swap simulation did not match the quote', 'simulation_failed');
+      if (effects.reason) failSimulation(value, { reason: effects.reason });
       const prepared = Object.freeze({ transaction, ...effects });
       simulatedTransfers.add(prepared);
       return prepared;

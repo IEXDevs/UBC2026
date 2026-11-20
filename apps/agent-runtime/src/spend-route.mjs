@@ -328,7 +328,7 @@ async function handleSpendRequest(request, env = {}) {
         if (usdBudget) valuation = await valueUsdSpend(env, { mint, decimals: 6, amount: parsed.amount, feeLamports: '0', now });
       } else if (swap) {
         blockhash = swapOffer.blockhash;
-        if (ownerAuthorization && ownerAuthorization.blockhash !== blockhash) throw new Error('simulation_failed');
+        if (ownerAuthorization && ownerAuthorization.blockhash !== blockhash) throw new Error('spend_authorization_changed');
         prepared = await prepareApprovedSwap(env, context, parsed, swapOffer);
       } else {
         let decimals;
@@ -340,7 +340,8 @@ async function handleSpendRequest(request, env = {}) {
         }
       }
     } catch (error) {
-      const known = ['unsupported_mint', 'simulation_failed', 'invalid_destination', 'usd_price_unavailable', ...(swap ? ['swap_simulation_unavailable'] : [])];
+      const known = ['unsupported_mint', 'simulation_failed', 'invalid_destination', 'usd_price_unavailable',
+        ...(swap ? ['swap_simulation_unavailable', 'spend_authorization_changed'] : [])];
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
       const simulationReason = typeof error?.simulationReason === 'string'
         && /^[a-zA-Z0-9_]{1,100}$/.test(error.simulationReason) ? error.simulationReason : null;
