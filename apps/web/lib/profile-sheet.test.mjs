@@ -18,6 +18,18 @@ test('profile shows the wallet name and address once', () => {
   assert.match(sheet, /Import seed/);
   assert.match(sheet, /Import key/);
   assert.match(sheet, /New Wallet/);
+  assert.match(sheet, /<WalletRoster[\s\S]*handle=\{handle\}/);
+  assert.match(sheet, /<WalletPick rows=\{rows\} handle=\{handle\}/);
+  assert.match(sheet, /className="wallet-roster-handle">@\{name\}/);
+  const logins = readFileSync(new URL('../components/LinkedLogins.js', import.meta.url), 'utf8');
+  assert.equal(logins.includes('Add a wallet'), false);
+  assert.equal(logins.includes('linkWallet'), false);
+  assert.equal(logins.includes('described.wallets'), false);
+  const dialog = readFileSync(new URL('../components/CreateBotDialog.js', import.meta.url), 'utf8');
+  assert.match(dialog, /ariaLabel="Spending asset"/);
+  assert.match(dialog, /value: 'USDC'/);
+  assert.match(dialog, /value: 'SOL'/);
+  assert.equal(dialog.includes('Asset (USDC, SOL, or token mint address)'), false);
   for (const pane of ['assets', 'portfolio', 'send', 'receive', 'swap', 'tokens', 'history', 'keys']) {
     assert.match(sheet, new RegExp(`id: '${pane}'`));
   }
