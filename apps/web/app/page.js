@@ -1976,7 +1976,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             ) : null}
             {!noAgents && pane === 'Logs' ? (
               <LogsPanel
-                bots={bots}
+                key={ownerId}
                 ownerId={ownerId}
                 getAccessToken={getAccessToken}
                 onParty={setParty}
