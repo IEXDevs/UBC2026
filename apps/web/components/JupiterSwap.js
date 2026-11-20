@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
 import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
+import { swapFailure } from '../lib/swap-failure.mjs';
 import {
   JUPITER_STATUS_NOTE,
   jupiterSwapStatus,
@@ -25,13 +26,23 @@ export default function JupiterSwap({ address = '', label = '', frozen = false, 
   const targetId = `jupiter-swap-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
   const [phase, setPhase] = useState('loading');
   const [result, setResult] = useState('');
+  const signingFailure = useRef('');
   const context = useMemo(() => passthroughWallet({
     address,
     name: label || 'Maelstrom wallet',
     signBytes: status === 'ready'
       ? async (transaction) => {
-        const signed = await signTransaction({ transaction, wallet: signer, chain: SOLANA_PRIVY_CHAIN });
-        return signed?.signedTransaction;
+        signingFailure.current = '';
+        setResult('');
+        try {
+          const signed = await signTransaction({ transaction, wallet: signer, chain: SOLANA_PRIVY_CHAIN });
+          if (!signed?.signedTransaction) throw new Error('empty_signature');
+          return signed.signedTransaction;
+        } catch (error) {
+          signingFailure.current = swapFailure({ code: error?.code === 4001 ? 'wallet_rejected' : 'privy_failed' }).message;
+          setResult(signingFailure.current);
+          throw error;
+        }
       }
       : null,
   }), [address, label, status, signer, signTransaction]);
@@ -61,12 +72,19 @@ export default function JupiterSwap({ address = '', label = '', frozen = false, 
             setResult('Swap confirmed.');
             swappedRef.current?.(txid);
           },
-          onSwapError: () => setResult('The swap did not go through.'),
+          onSwapError: (error) => {
+            const failure = swapFailure({ code: error?.code || error?.error?.code });
+            setResult(signingFailure.current || (failure.code === 'swap_failed'
+              ? swapFailure({ code: 'plugin_swap_failed' }).message : failure.message));
+          },
         });
         setPhase('ready');
       })
       .catch(() => {
-        if (!stop) setPhase('failed');
+        if (!stop) {
+          setPhase('failed');
+          setResult(swapFailure({ code: 'plugin_load_failed' }).message);
+        }
       });
     return () => {
       stop = true;
@@ -80,12 +98,12 @@ export default function JupiterSwap({ address = '', label = '', frozen = false, 
 
   return (
     <div className="jupiter-swap">
-      <p className="quiet">{JUPITER_STATUS_NOTE[status]}</p>
+      <p className="quiet">{status === 'ready' ? JUPITER_STATUS_NOTE[status] : `Swap — wallet: ${JUPITER_STATUS_NOTE[status]} [${status}]`}</p>
       {embed ? (
         <div className="jupiter-swap-frame" aria-busy={phase === 'loading'}>
           <div id={targetId} className="jupiter-swap-target" />
           {phase === 'loading' ? <p className="quiet jupiter-swap-hold">Loading Jupiter…</p> : null}
-          {phase === 'failed' ? <p className="quiet jupiter-swap-hold">Jupiter did not load. Try again later.</p> : null}
+          {phase === 'failed' ? <p className="quiet jupiter-swap-hold">{swapFailure({ code: 'plugin_load_failed' }).message}</p> : null}
         </div>
       ) : null}
       {result ? <p className="quiet" role="status">{result}</p> : null}

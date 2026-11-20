@@ -23,6 +23,7 @@ import { mintForAsset, prepareApprovedSwap, previewLiveSwap, readSwapTicket } fr
 import { isLoopSwapKey, matchesLoopSwap, useLoopSwap } from './loop-swap.mjs';
 import { valueUsdSpend } from './usd-budget.mjs';
 import { prepareLasoPayment, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
+import { swapFailure } from './swap-failure.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
 const WALLET_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -130,6 +131,22 @@ function json(body, status = 200) {
 }
 
 export async function handleSpend(request, env = {}) {
+  const swap = (await request.clone().json().catch(() => null))?.action === 'swap';
+  if (!swap) return handleSpendRequest(request, env);
+  let response;
+  try {
+    response = await handleSpendRequest(request, env);
+  } catch {
+    response = json({ error: 'swap_failed', signed: false }, 502);
+  }
+  const body = await response.json();
+  if (body.signed !== true && !body.swapPreview && !body.spendAuthorization) {
+    body.failure = swapFailure(body);
+  }
+  return json(body, response.status);
+}
+
+async function handleSpendRequest(request, env = {}) {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
   const { ownerId, error } = await resolveSpendOwner(request, env);
   if (error) return json({ error, signed: false }, ownerAuthStatus(error));
@@ -218,8 +235,9 @@ export async function handleSpend(request, env = {}) {
       try {
         const preview = await previewLiveSwap(env, context, parsed, approvalKey, now);
         return json({ state: 'approval-needed', signed: false, swapPreview: preview });
-      } catch {
-        return json({ error: 'swap_quote_unavailable', signed: false }, 409);
+      } catch (error) {
+        const failure = swapFailure({ error: error?.code || error?.message, simulationReason: error?.simulationReason });
+        return json({ error: failure.code === 'swap_failed' ? 'swap_quote_unavailable' : failure.code, signed: false }, 409);
       }
     }
     if (!autoSwap && desk.ok && (desk.via !== 'grant' || (!prepareAuthorization && !ownerAuthorization))) {
@@ -280,7 +298,7 @@ export async function handleSpend(request, env = {}) {
         }
       }
     } catch (error) {
-      const known = ['unsupported_mint', 'simulation_failed', 'invalid_destination', 'usd_price_unavailable'];
+      const known = ['unsupported_mint', 'simulation_failed', 'invalid_destination', 'usd_price_unavailable', ...(swap ? ['swap_simulation_unavailable'] : [])];
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
       const simulationReason = typeof error?.simulationReason === 'string'
         && /^[a-zA-Z0-9_]{1,100}$/.test(error.simulationReason) ? error.simulationReason : null;
@@ -397,6 +415,7 @@ export async function handleSpend(request, env = {}) {
       proposal,
       trustScore,
       trustUnavailable,
+      ...(swap ? { trustConfirmed: !autoSwap && parsed.confirmed === true } : {}),
       mainFn: async () => facts,
       verifyFn: typeof env.spendVerifyFn === 'function'
         ? env.spendVerifyFn

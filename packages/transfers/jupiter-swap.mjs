@@ -89,7 +89,11 @@ export async function buildJupiterSwap({
     redirect: 'error',
     signal: AbortSignal.timeout(12_000),
   });
-  if (!response.ok) refused();
+  if (!response.ok) {
+    const error = new Error('Jupiter quote request failed');
+    error.code = `jupiter_http_${response.status}`;
+    throw error;
+  }
   const result = await response.json();
   if (result.inputMint !== inputMint || result.outputMint !== outputMint || result.inAmount !== amount
       || result.swapMode !== 'ExactIn' || result.slippageBps !== SLIPPAGE_BPS || !positiveU64(result.outAmount)

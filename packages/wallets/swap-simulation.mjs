@@ -1,6 +1,26 @@
+import { PublicKey } from '@solana/web3.js';
+
 const NATIVE_MINT = 'So11111111111111111111111111111111111111112';
 const UNITS = /^(0|[1-9][0-9]{0,19})$/;
 const MAX_EXTRA_LAMPORTS = 5_000_000n;
+const TOKEN_PROGRAMS = new Set(['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb']);
+
+export function swapAccountSnapshot(accounts, wallet) {
+  if (!Array.isArray(accounts) || !accounts[0] || !Number.isSafeInteger(accounts[0].lamports)) return null;
+  const tokens = [];
+  for (const account of accounts) {
+    if (!account || !TOKEN_PROGRAMS.has(account.owner)) continue;
+    if (account.data?.[1] !== 'base64') return null;
+    const bytes = Buffer.from(account.data[0], 'base64');
+    if (bytes.length === 82) continue;
+    if (bytes.length < 165) return null;
+    if (account.owner === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' && bytes.length !== 165) continue;
+    if (bytes.length > 165 && bytes[165] !== 2) continue;
+    const owner = new PublicKey(bytes.subarray(32, 64)).toBase58();
+    if (owner === wallet) tokens.push({ owner, mint: new PublicKey(bytes.subarray(0, 32)).toBase58(), uiTokenAmount: { amount: bytes.readBigUInt64LE(64).toString() } });
+  }
+  return { lamports: accounts[0].lamports, tokens };
+}
 
 function sumWalletTokens(entries, wallet) {
   const totals = new Map();

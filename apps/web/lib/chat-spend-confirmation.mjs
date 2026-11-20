@@ -5,6 +5,7 @@ import { matchingToolGrant, needsBoundSpend } from './spend-permission.mjs';
 import { formatBaseUnits } from './money-views.mjs';
 import { TextChatError } from './text-chat.mjs';
 import { txReceiptFromResult } from './tx-receipt.mjs';
+import { swapFailure } from './swap-failure.mjs';
 
 const HOLD_LIFETIME_MS = 5 * 60 * 1000;
 
@@ -55,7 +56,7 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
     return {
       provider: 'desk',
       text: hold?.args?.action === 'swap'
-        ? 'This confirmation is invalid or expired. Ask for a fresh swap quote.'
+        ? 'Swap — approval: This confirmation is invalid or expired. Ask for a fresh swap quote. [swap_quote_expired]'
         : 'This confirmation is invalid or expired. Ask for the payment again.',
     };
   }
@@ -71,7 +72,7 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
   const receipt = txReceiptFromResult(result);
   const step = toolStep(hold.name, hold.args, result);
   const receiptText = receipt && (hold.args.action === 'swap' ? `Swap submitted. ${receipt.url}` : receipt.text);
-  const text = receiptText || spendFailureMessage(result)
+  const text = receiptText || (hold.args.action === 'swap' ? swapFailure(result).message : spendFailureMessage(result))
     || (hold.args.action === 'swap'
       ? 'The swap returned no receipt. Check the trade details before trying again.'
       : 'The send returned no receipt. Check the spend details before trying again.');

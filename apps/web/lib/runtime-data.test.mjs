@@ -343,6 +343,44 @@ test('sendBotChat delivers a streamed Solscan line before the turn finishes', as
   }
 });
 
+test('sendBotChat forwards reply deltas and retractions without turning them into final replies', async t => {
+  const frames = [
+    { type: 'reply_delta', text: 'Provisional sentence.' },
+    { type: 'reply_retract' },
+    { message: 'That step did not pass the check.' },
+    { done: true, reply: 'That step did not pass the check.' },
+  ];
+  t.mock.method(globalThis, 'fetch', async () => new Response(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(''), {
+    headers: { 'content-type': 'text/event-stream' },
+  }));
+  const events = [];
+  const replies = [];
+  const result = await sendBotChat({
+    ownerId: 'did:privy:abc', botId: 'bot_1', message: 'hello',
+    onReply: text => replies.push(text), onReplyEvent: event => events.push(event),
+  });
+  assert.deepEqual(events, frames.slice(0, 2));
+  assert.deepEqual(replies, ['That step did not pass the check.']);
+  assert.equal(result.reply, replies[0]);
+});
+
+test('sendBotChat retracts a partial reply when the stream fails or ends without a final reply', async t => {
+  for (const error of [false, true]) {
+    const events = [];
+    t.mock.method(globalThis, 'fetch', async () => {
+      let reads = 0;
+      return new Response(new ReadableStream({ pull(controller) {
+        if (++reads === 1) controller.enqueue(new TextEncoder().encode('data: {"type":"reply_delta","text":"Partial."}\n\n'));
+        else if (error) controller.error(new Error('offline'));
+        else controller.close();
+      } }), { headers: { 'content-type': 'text/event-stream' } });
+    });
+    const result = await sendBotChat({ ownerId: 'did:privy:abc', botId: 'bot_1', message: 'hello', onReplyEvent: event => events.push(event) });
+    assert.equal(result.ok, false);
+    assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract']);
+  }
+});
+
 /**
  * Achieves: verifies firstAssignableWalletId skips frozen wallets.
  * Fails when: firstAssignableWalletId skips frozen wallets breaks (e.g. expected '', frozen: true }, { id: 'w_ok' }]).

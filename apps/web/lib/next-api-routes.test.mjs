@@ -1139,6 +1139,42 @@ test('POST /api/voice/bind returns ok when runtime bind succeeds', async () => {
  * Side effects: clears LLM env for assertion window.
  * Gaps: remaining tool-loop happy path needs live model keys.
  */
+test('chat SSE forwards reply deltas and retracts them when verification rejects', async t => {
+  const previous = process.env.META_MODEL_API_KEY;
+  process.env.META_MODEL_API_KEY = 'LLM_offline_streaming_test';
+  t.after(() => {
+    if (previous === undefined) delete process.env.META_MODEL_API_KEY;
+    else process.env.META_MODEL_API_KEY = previous;
+  });
+  for (const allow of [true, false]) {
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      assert.equal(String(url), 'https://api.meta.ai/v1/chat/completions');
+      const body = JSON.parse(init.body);
+      assert.equal(body.stream, true);
+      if (JSON.stringify(body.messages).includes('Role: turn-verify')) {
+        return Response.json({ choices: [{ message: { content: JSON.stringify({ allow }) } }] });
+      }
+      return new Response([
+        'data: {"choices":[{"delta":{"content":"Hello from the streaming agent."}}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+        'data: [DONE]',
+      ].join('\n\n') + '\n\n', { headers: { 'content-type': 'text/event-stream' } });
+    });
+    const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
+    const response = await POST(new Request('http://localhost/api/bots/bot_1/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream', 'x-owner-id': 'did:privy:stream-test' },
+      body: JSON.stringify({ message: 'Hello, explain what you can do.' }),
+    }), { params: Promise.resolve({ botId: 'bot_1' }) });
+    assert.equal(response.status, 200);
+    const events = (await response.text()).trim().split('\n\n').map(frame => JSON.parse(frame.slice(6)));
+    assert.deepEqual(events[0], { type: 'reply_delta', text: 'Hello from the streaming agent.' });
+    if (!allow) assert.equal(events[1].type, 'reply_retract');
+    assert.equal(events.find(event => event.message)?.message, allow ? 'Hello from the streaming agent.' : 'That step did not pass the check.');
+    assert.equal(events.at(-1).done, true);
+  }
+});
+
 test('POST /api/bots/:botId/chat fails closed when LLM keys are unset', async () => {
   const prevMeta = process.env.META_MODEL_API_KEY;
   const prevOr = process.env.OPENROUTER_API_KEY;

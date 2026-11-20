@@ -55,6 +55,8 @@ test('USDC swaps display confirmed minimum output and bind the quote ticket to t
   const confirmed = stampSpendPermission('request_spend', args, { permissionMode: 'full', confirmSpend: true, grants: [sealed] });
   assert.equal(confirmed.confirmed, true);
   assert.equal(confirmed.idempotencyKey, sealed.idempotencyKey);
+  const failed = await resumeAssetSpend(sealed, context, async () => ({ error: 'simulation_failed', simulationReason: 'insufficient_funds' }), 2000);
+  assert.match(failed.text, /Swap — simulation:.*\[insufficient_funds\]/);
 });
 
 test('a slide submits the original SOL payment directly and returns its Solscan receipt', async () => {

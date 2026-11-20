@@ -53,7 +53,7 @@ import { fetchPendingSwap, sendBotChat } from '../lib/runtime-data.mjs';
 import { browserSituation } from '../lib/owner-situation.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
 import { AGENT_SKILLS, AVAILABLE_SKILLS } from '@ubc2026/agent-tools';
-import { playAgentSpeech, startVoicePipe } from '../lib/voice-pipe.mjs';
+import { createReplySpeech, createSpeechQueue, startVoicePipe } from '../lib/voice-pipe.mjs';
 import { voiceConfirmDecision } from '../lib/voice-allow.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
@@ -591,6 +591,7 @@ export default function Composer({
   }
 
   function stopChat() {
+    sessionRef.current?.speechQueue?.clear();
     if (!sendingRef.current) return;
     stopHold.current = runRef.current;
     abortRef.current?.abort();
@@ -726,6 +727,7 @@ export default function Composer({
   }
 
   async function runChat(spoken, prior, grants) {
+    sessionRef.current?.speechQueue?.clear();
     const selection = selectedModelRequest(modelStorage, modelRef.current);
     const run = ++runRef.current;
     const targetId = botIdRef.current;
@@ -762,6 +764,7 @@ export default function Composer({
         return;
       }
       const shown = [];
+      const voiceReply = createReplySpeech(sessionRef.current?.speechQueue);
       let firstLineId = null;
       const send = async (spendAuthorization) => {
         let accessToken = '';
@@ -789,13 +792,16 @@ export default function Composer({
           accessToken,
           deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
           signal: controller.signal,
+          onReplyEvent: event => {
+            if (run === runRef.current && !controller.signal.aborted) voiceReply.event(event);
+          },
           onReply: (text) => {
             if (run !== runRef.current) return;
             const line = pushLine('agent', text, targetId);
             if (line && !firstLineId) firstLineId = line.id;
             shown.push(text);
             const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
-            say(aloud || 'Sent.');
+            if (!voiceReply.complete()) say(aloud || 'Sent.');
             if (/solscan\.io\/tx\//.test(text)) {
               setThinking(false);
               onThinking?.(false);
@@ -988,16 +994,14 @@ export default function Composer({
           setNote(voiceFailureNote(error));
         },
       });
+      const speechQueue = createSpeechQueue({ settings: () => settingsRef.current, pipe });
       live = {
-        endSession: () => pipe.endSession(),
+        speechQueue,
+        endSession: () => { speechQueue.stop(); pipe.endSession(); },
         setMicMuted: (next) => pipe.setMicMuted(next),
         getInputVolume: () => pipe.getInputVolume(),
         getOutputVolume: () => pipe.getOutputVolume(),
-        speak: (text) => playAgentSpeech({
-          text,
-          settings: settingsRef.current,
-          pipe,
-        }),
+        speak: async (text) => speechQueue.enqueue(text),
       };
       await pipe.ready;
       if (!connectingRef.current) {

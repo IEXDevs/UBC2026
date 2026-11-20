@@ -1,4 +1,5 @@
 import { accessTokenFromRequest } from '../../../../../lib/privy-cookie-session.mjs';
+import { swapFailure } from '../../../../../lib/swap-failure.mjs';
 import { createHmac } from 'node:crypto';
 import {
   parsePermissionedSpendBody, parseSpendApprovalTerms, parseSpendAuthorizationSignature, spendApprovalMessage,
@@ -223,6 +224,7 @@ export async function POST(request, context) {
     model: chatModel,
     reasoningEffort: typeof body.effort === 'string' ? body.effort : '',
   };
+  const turnState = { fundProposed: false };
   const harnessCtx = {
     ownerId,
     botId,
@@ -235,11 +237,13 @@ export async function POST(request, context) {
       ...chatKeys,
       history: [],
       fetcher: fetch,
+      turnState,
       ...opts,
     }),
   };
 
   const turnArgs = {
+    turnState,
     metaModelApiKey: chatKeys.metaModelApiKey,
     openrouterApiKey: chatKeys.openrouterApiKey,
     ...(chatKeys.modelProvider != null ? { modelProvider: chatKeys.modelProvider } : {}),
@@ -264,7 +268,7 @@ export async function POST(request, context) {
     },
   };
 
-  async function runTurn(onMessage) {
+  async function runTurn(onMessage, onReplyEvent) {
     if (assetConfirmation) {
       let gate;
       const reply = await resumeAssetSpend(assetConfirmation, approvalContext, async (name, args) => {
@@ -285,13 +289,21 @@ export async function POST(request, context) {
       const hold = await loadPendingSwapHold();
       return { provider: 'desk', text: hold ? '' : 'This agent has no swap waiting for review.', hold };
     }
-    return completeTextChat({ ...turnArgs, onMessage: ownerAsksForOneTrade(message) ? null : onMessage });
+    const trading = ownerAsksForOneTrade(message);
+    return completeTextChat({ ...turnArgs, onMessage: trading ? null : onMessage, onReplyEvent: trading ? null : onReplyEvent });
   }
 
   /** A queued agent swap runs on the terms an agent send would: Full or Review, within the review cap. The runtime re-checks trust, policy and the desk. */
   async function autoLoopSwap(hold, swapHold, swapPreview) {
-    if ((permissionMode !== 'full' && permissionMode !== 'review') || !hold.idempotencyKey?.startsWith('loop_swap_')
-        || amountOverReviewCap(swapPreview.usdMicros, reviewCap)) return null;
+    const approvalReason = (permissionMode !== 'full' && permissionMode !== 'review') ? 'owner_approval_required'
+      : amountOverReviewCap(swapPreview.usdMicros, reviewCap) ? 'approval-needed' : null;
+    if (approvalReason) {
+      const message = swapFailure({ error: approvalReason }).message;
+      swapHold.prompt = `${message} ${swapHold.prompt}`;
+      swapHold.label = `${message} ${swapHold.label}`;
+      return null;
+    }
+    if (!hold.idempotencyKey?.startsWith('loop_swap_')) return null;
     const sent = await invokeRaw('request_spend', {
       ...hold.args, botId, permission: permissionMode, reviewCap: effectiveReviewCap(reviewCap),
       idempotencyKey: hold.idempotencyKey, autoSwap: true,
@@ -302,7 +314,11 @@ export async function POST(request, context) {
     // Only a swap stopped before its reservation can still go to the slide under the same key.
     const beforeReserve = sent?.state === 'approval-needed' || sent?.state === 'trust-confirmation-required'
       || sent?.error === 'desk_locked';
-    return beforeReserve ? null : 'The automatic swap did not complete. Check activity before trying again.';
+    if (beforeReserve) {
+      swapHold.prompt = `${swapFailure(sent).message} ${swapHold.prompt}`;
+      swapHold.label = `${swapFailure(sent).message} ${swapHold.label}`;
+    }
+    return beforeReserve ? null : swapFailure(sent).message;
   }
 
   async function loadPendingSwapHold() {
@@ -341,8 +357,8 @@ export async function POST(request, context) {
         : swapHold
         ? { ...reply, text: swapHold.label, hold: swapHold }
         : { ...reply, text: preview?.error === 'swap_requires_usd_budget'
-          ? 'Live swaps need an agent with USD spending limits.'
-          : 'I could not prepare a live swap quote. No funds moved.', hold: null };
+          ? swapFailure({ error: 'swap_requires_usd_budget' }).message
+          : swapFailure(preview).message, hold: null };
     }
     const assetHold = isAssetSpendHold(reply.hold);
     const hold = assetHold
@@ -385,14 +401,23 @@ export async function POST(request, context) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        let provisional = false;
         const send = (payload) => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         };
+        const replyEvent = event => {
+          provisional = event.type === 'reply_delta';
+          send(event);
+        };
         try {
-          const reply = await runTurn(text => send({ message: text }));
+          const reply = await runTurn(text => {
+            provisional = false;
+            send({ message: text });
+          }, replyEvent);
           send({ done: true, ...(await finishTurn(reply)) });
         } catch (error) {
           const code = error instanceof TextChatError ? error.code : 'chat_failed';
+          if (provisional) send({ type: 'reply_retract' });
           send({ error: code });
         } finally {
           controller.close();
