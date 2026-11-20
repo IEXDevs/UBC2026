@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
 import { Plus, X } from 'lucide-react';
@@ -55,6 +56,7 @@ const TRANSFER = [
   { id: 'swap', label: 'Swap' },
   { id: 'tokens', label: 'Tokens' },
 ];
+const TRANSFER_EASE = [0.22, 1, 0.36, 1];
 
 export default function WalletsSheet({
   open,
@@ -79,6 +81,8 @@ export default function WalletsSheet({
   const { mounted, leaving } = usePresence(open);
   const [pane, setPane] = useState('assets');
   const [transfer, setTransfer] = useState('send');
+  const [transferDir, setTransferDir] = useState(1);
+  const reduceMotion = useReducedMotion();
   const [walletId, setWalletId] = useState('');
   const [prefs, setPrefs] = useState(emptyTokenPrefs);
   const [retiring, setRetiring] = useState('');
@@ -122,8 +126,15 @@ export default function WalletsSheet({
     if (key) accountStorage.setItem(key, JSON.stringify(clean));
   }
 
-  function openTransfer(section) {
+  function chooseTransfer(section) {
+    const next = TRANSFER.findIndex(item => item.id === section);
+    const current = TRANSFER.findIndex(item => item.id === transfer);
+    if (next >= 0 && current >= 0 && next !== current) setTransferDir(next > current ? 1 : -1);
     setTransfer(section);
+  }
+
+  function openTransfer(section) {
+    chooseTransfer(section);
     setPane('transfer');
   }
 
@@ -185,7 +196,22 @@ export default function WalletsSheet({
         </nav>
         <div className="wallet-body">
           <div className="sheet-head">
-            <h2>{heading}</h2>
+            <h2>
+              {pane === 'transfer' ? (
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={transfer}
+                    className="transfer-title"
+                    initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: reduceMotion ? 0 : -6 }}
+                    transition={{ duration: reduceMotion ? 0 : 0.32, ease: TRANSFER_EASE }}
+                  >
+                    {heading}
+                  </motion.span>
+                </AnimatePresence>
+              ) : heading}
+            </h2>
             <button type="button" className="icon-btn" aria-label="Close wallets" onClick={onClose}>
               <X size={18} strokeWidth={1.75} />
             </button>
@@ -244,28 +270,39 @@ export default function WalletsSheet({
                     role="tab"
                     aria-selected={transfer === item.id}
                     className={transfer === item.id ? 'is-on' : ''}
-                    onClick={() => setTransfer(item.id)}
+                    onClick={() => chooseTransfer(item.id)}
                   >
                     {item.label}
                   </button>
                 ))}
               </div>
-              {needsWallet ? <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
-              {transfer === 'send' ? (
-                <SendPane
-                  active={active}
-                  destinations={destinations}
-                  tokens={tradeableTokens(tokens)}
-                  frozen={Boolean(active?.frozen)}
-                  observing={observing}
-                  onSend={onSend}
-                  onReceipt={onReceipt}
-                  resolveRecipient={resolveRecipient}
-                />
-              ) : null}
-              {transfer === 'receive' ? <ReceivePane active={active} handle={handle} /> : null}
-              {transfer === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} /> : null}
-              {transfer === 'tokens' ? <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} /> : null}
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={transfer}
+                  className="transfer-stage"
+                  initial={{ opacity: 0, x: reduceMotion ? 0 : transferDir * 18 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: reduceMotion ? 0 : transferDir * -14 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.38, ease: TRANSFER_EASE }}
+                >
+                  {needsWallet ? <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
+                  {transfer === 'send' ? (
+                    <SendPane
+                      active={active}
+                      destinations={destinations}
+                      tokens={tradeableTokens(tokens)}
+                      frozen={Boolean(active?.frozen)}
+                      observing={observing}
+                      onSend={onSend}
+                      onReceipt={onReceipt}
+                      resolveRecipient={resolveRecipient}
+                    />
+                  ) : null}
+                  {transfer === 'receive' ? <ReceivePane active={active} handle={handle} /> : null}
+                  {transfer === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} /> : null}
+                  {transfer === 'tokens' ? <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} /> : null}
+                </motion.div>
+              </AnimatePresence>
             </>
           ) : null}
           {pane === 'history' ? (

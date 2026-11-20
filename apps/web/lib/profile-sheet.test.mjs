@@ -38,6 +38,12 @@ test('profile shows the wallet name and address once', () => {
   assert.match(sheet, /function ReceivePane\(\{ active, handle \}\)/);
   assert.equal(sheet.includes('SNS name'), false);
   assert.match(sheet, /aria-label="Transfer"/);
+  assert.match(sheet, /chooseTransfer\(item\.id\)/);
+  assert.match(sheet, /<AnimatePresence mode="wait" initial=\{false\}>/);
+  assert.match(sheet, /key=\{transfer\}/);
+  assert.match(sheet, /ease: TRANSFER_EASE/);
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.wallet-switch button \{[^}]*transition:/);
 });
 
 test('agent creation shows asset and limits on their own steps after color', () => {

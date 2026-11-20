@@ -1591,12 +1591,21 @@ button.add-agent:not(:disabled):hover {
   font: inherit;
   font-size: 13px;
   cursor: pointer;
+  transition:
+    background 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+.transfer-title { display: inline-block; }
+.transfer-stage { min-width: 0; }
 @media (hover: hover) and (pointer: fine) {
   .wallet-switch button:hover { background: #2a2a2a; }
 }
 .wallet-switch button.is-on,
 .wallet-switch button[aria-pressed='true'] { background: #f5f5f5; color: #141414; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  .wallet-switch button { transition: none; }
+}
 .token-rows {
   list-style: none;
   margin: 18px 0 0;
