@@ -61,7 +61,7 @@ export default function SpendAcceptance({ ownerId = '', onContinue }) {
     if (leaving) return;
     if (!cap) {
       setNote(reviewNeeded
-        ? 'Enter a Review by AI maximum above zero, in USDC.'
+        ? 'Enter a Review by AI maximum above zero, in USD.'
         : 'Enter a Review by AI maximum above zero. It is stored for when you switch modes.');
       return;
     }
@@ -105,7 +105,7 @@ export default function SpendAcceptance({ ownerId = '', onContinue }) {
           ))}
         </div>
         <label className={`field${reviewNeeded ? ' is-emphasis' : ''}`}>
-          <span>Review by AI maximum (USDC)</span>
+          <span>Review by AI maximum (USD)</span>
           <input
             inputMode="decimal"
             autoComplete="off"

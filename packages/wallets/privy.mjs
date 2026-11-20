@@ -1,4 +1,6 @@
 import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
+import { VersionedTransaction } from '@solana/web3.js';
+import { verifySwapSimulation } from './swap-simulation.mjs';
 /**
  * Privy Solana wallet path for Maelstrom.
  * Login provisioning (main wallet at sign-up, additional wallets) and
@@ -29,6 +31,7 @@ const REQUEST_TTL_MS = 60_000;
 const MAX_TX_BYTES = 1232;
 const SINGLE_SIGNATURE_MESSAGE_OFFSET = 65;
 const CLASSIC_TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const privyWalletIdPattern = /^[A-Za-z0-9_-]{10,128}$/;
 const ownerIdPattern = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -1168,20 +1171,21 @@ export function createPrivyWalletClient({
       };
     },
 
-    async readSolanaMint({ mint } = {}) {
+    async readSolanaMint({ mint, allowToken2022 = false } = {}) {
       if (typeof mint !== 'string' || !base58.test(mint)) fail('Mint address is required', 'invalid_mint');
       await assertSolana();
       const result = await rpc('getAccountInfo', [mint, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
       const account = result.result?.value;
       const decimals = account?.data?.parsed?.info?.decimals;
-      if (account?.owner !== CLASSIC_TOKEN_PROGRAM || account?.data?.parsed?.type !== 'mint'
+      const supported = account?.owner === CLASSIC_TOKEN_PROGRAM || (allowToken2022 && account?.owner === TOKEN_2022_PROGRAM);
+      if (!supported || account?.data?.parsed?.type !== 'mint'
         || account.data.parsed.info?.isInitialized !== true || !Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
         fail('Unsupported or missing mainnet-beta mint', 'unsupported_mint');
       }
       return { cluster: SOLANA_CLUSTER, mint, decimals };
     },
 
-    async prepareSolanaTransfer({ transaction } = {}) {
+    async prepareSolanaTransfer({ transaction, accountCreationPayer } = {}) {
       const message = singleSignerMessage(transaction);
       await assertSolana();
       const [fee, simulation] = await Promise.all([
@@ -1191,7 +1195,41 @@ export function createPrivyWalletClient({
       if (simulation.result?.value?.err !== null) fail('Solana transfer simulation failed', 'simulation_failed');
       const lamports = fee.result?.value;
       if (!Number.isSafeInteger(lamports) || lamports < 0) fail('Solana transaction fee unavailable', 'rpc_rejected');
-      const prepared = Object.freeze({ transaction, feeLamports: String(lamports) });
+      let maxSolCost;
+      if (accountCreationPayer) {
+        const parsed = VersionedTransaction.deserialize(Buffer.from(transaction, 'base64'));
+        const pre = simulation.result.value.preBalances?.[0];
+        const post = simulation.result.value.postBalances?.[0];
+        if (parsed.message.staticAccountKeys[0]?.toBase58() !== accountCreationPayer
+            || !Number.isSafeInteger(pre) || !Number.isSafeInteger(post) || post < 0
+            || pre - post < lamports || pre - post > 5_000_000) fail('Could not verify account creation costs', 'simulation_failed');
+        maxSolCost = String(pre - post);
+      }
+      const prepared = Object.freeze({ transaction, feeLamports: String(lamports), ...(maxSolCost ? { maxSolCost } : {}) });
+      simulatedTransfers.add(prepared);
+      return prepared;
+    },
+
+    async prepareSolanaSwap({ transaction, walletAddress, inputMint, outputMint, amount, minOutput } = {}) {
+      if (SOLANA_CLUSTER !== 'mainnet-beta') fail('Swap requires Solana mainnet', 'wrong_cluster');
+      const message = singleSignerMessage(transaction);
+      let parsed;
+      try {
+        parsed = VersionedTransaction.deserialize(Buffer.from(transaction, 'base64'));
+      } catch {
+        fail('Invalid swap transaction', 'invalid_transaction');
+      }
+      if (parsed.version !== 0 || parsed.message.header.numRequiredSignatures !== 1
+          || parsed.message.staticAccountKeys[0]?.toBase58() !== walletAddress
+          || parsed.signatures[0].some(byte => byte !== 0)) fail('Unexpected swap signer', 'invalid_transaction');
+      await assertSolana();
+      const [fee, simulation] = await Promise.all([
+        rpc('getFeeForMessage', [message.toString('base64'), { commitment: 'confirmed' }]),
+        rpc('simulateTransaction', [transaction, { encoding: 'base64', commitment: 'confirmed', sigVerify: false, replaceRecentBlockhash: false }]),
+      ]);
+      const effects = verifySwapSimulation(simulation.result?.value, { wallet: walletAddress, inputMint, outputMint, amount, minOutput });
+      if (!effects || String(fee.result?.value) !== effects.feeLamports) fail('Swap simulation did not match the quote', 'simulation_failed');
+      const prepared = Object.freeze({ transaction, ...effects });
       simulatedTransfers.add(prepared);
       return prepared;
     },

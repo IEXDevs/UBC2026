@@ -70,7 +70,7 @@ test('full permissions manages funds and the other modes still wait', () => {
   const over = toolAccessRequest('full', 'request_spend', { amount: '40000000', handle: 'bob' });
   assert.equal(over.kind, 'modal');
   assert.match(over.prompt, /Slide to confirm/);
-  assert.match(over.label, /30 USDC/);
+  assert.match(over.label, /30 USD/);
   const sol = { amount: '1000000000', asset: 'SOL', handle: 'bob' };
   const solHold = toolAccessRequest('review', 'request_spend', sol);
   assert.equal(solHold.kind, 'modal');

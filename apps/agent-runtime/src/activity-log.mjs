@@ -21,7 +21,8 @@ const BYTE_ARRAY = /\[(?:\s*(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\s*,){63}\s*(?:25
 const OWNER_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 
 function secretKey(key) {
-  return SECRET_KEY.test(String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase());
+  const normalized = String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+  return normalized === 'swapticket' || normalized === 'spendauthorization' || SECRET_KEY.test(normalized);
 }
 
 function redactSeeds(text) {

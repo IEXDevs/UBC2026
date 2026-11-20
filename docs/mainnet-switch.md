@@ -65,7 +65,7 @@ Every checkbox requires the **owner/operator with dashboard, secret or productio
 5. **Owner:** fund controlled main/agent/merchant/fee-payer wallets with a **small amount of real SOL for fees/rent** and **canonical real USDC**. Faucets/airdrops cannot fund mainnet. Verify recipient, mint, token-account ownership and amount out of band; use an owner-approved minimal transfer before larger funding.
 6. **Owner:** enable fresh mainnet stream delivery, verify the persisted event and reconciliation, then unfreeze one reviewed bot at a time. Monitor RPC failures, duplicate settlement, budget reservations and real balances before enabling the rest.
 
-Trust → verify-consensus → wallet freeze → bot-policy caps/max-loss → approval → sign remains mandatory and unchanged in order. Broadcasts require the **full** configured genesis hash; prepared-transfer simulation/signing and balance reads also retain their existing genesis guards. Mainnet price quotes remain paper-only and never authorize a transfer. Paper swaps remain non-broadcast; this change does not introduce live trading.
+Trust → verify-consensus → wallet freeze → bot-policy caps/max-loss → approval → sign remains mandatory. Broadcasts require the **full** configured genesis hash. New agents store limits in microdollars. For a live chat swap, the runtime needs `JUPITER_API_KEY`, the mainnet RPC, and Privy browser wallet authorization. The desk shows the exact input, minimum output, and USD debit before approval. The runtime re-simulates the same transaction, reserves the USD debit, and broadcasts only after wallet authorization. Scheduled paper swaps continue to use the simulation path.
 
 ### Deliberately retained devnet references / unsafe demo assumptions
 

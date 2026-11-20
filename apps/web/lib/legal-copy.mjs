@@ -15,7 +15,7 @@ export const PRIVACY = Object.freeze({
       heading: 'The account',
       paragraphs: Object.freeze([
         'Sign-in creates a session for you. Maelstrom keeps the handle you choose, a .sol name when you claim one, and the wallet address tied to that account. The address is shown as the first 5 and last 5 characters in the desk and copies when you click it.',
-        'Spend settings stay with the account: Ask every time, Review by AI, or Full permissions, and the Review by AI maximum in USDC when you set one.',
+        'Spend settings stay with the account: Ask every time, Review by AI, or Full permissions, and the Review by AI maximum in USD when you set one.',
       ]),
     }),
     Object.freeze({

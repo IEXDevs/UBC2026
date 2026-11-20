@@ -533,7 +533,7 @@ test('a full-permission send over the review maximum asks for the confirm slide'
     },
   });
   assert.equal(result.hold.kind, 'modal');
-  assert.match(result.hold.label, /30 USDC/);
+  assert.match(result.hold.label, /30 USD/);
   assert.deepEqual(seen, []);
 });
 

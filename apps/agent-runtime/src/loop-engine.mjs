@@ -742,6 +742,9 @@ async function performExecute(run, ctx) {
       paper: traded.paper,
     }, ctx.now);
   }
+  if (ctx.bot.cap?.asset === 'USD') {
+    return waitStep(run, 'execute', 'use-permissioned-spend', { idempotencyKey }, ctx.now);
+  }
   if (!ctx.deps.transferClient && typeof ctx.deps.execute !== 'function') {
     return waitStep(run, 'execute', 'signer-not-configured', { idempotencyKey }, ctx.now);
   }

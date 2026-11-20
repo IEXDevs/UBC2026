@@ -34,7 +34,7 @@ const SIGN_FAILURE_REASONS = new Set([
 ]);
 
 const REVIEW_CAP = /^(?:[1-9][0-9]{0,39})$/;
-/** 30 USDC. Applies when Review by AI is off and the owner has no stored maximum. */
+/** 30 USD. Applies when Review by AI is off and the owner has no stored maximum. */
 const DEFAULT_REVIEW_CAP = '30000000';
 
 function reviewCapOf(value) {

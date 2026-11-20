@@ -33,6 +33,7 @@ import {
   isAssetSpendHold,
   resumeAssetSpend,
   sealAssetSpendHold,
+  swapHoldFromPreview,
 } from '../../../../../lib/chat-spend-confirmation.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
@@ -272,7 +273,9 @@ export async function POST(request, context) {
           if (!terms || !approvalContext.attestBudgetApproval) return { error: 'invalid_spend_approval' };
           approveOnce = await approvalContext.attestBudgetApproval(assetConfirmation, terms);
         }
-        gate = await invokeRaw(name, stampSpendPermission(name, args, spend), { approveOnce, spendAuthorization });
+        gate = await invokeRaw(name, stampSpendPermission(name, args, spend), {
+          approveOnce, spendAuthorization, swapTicket: assetConfirmation.swapTicket,
+        });
         return gate;
       });
       return (gate && approvalContext.attestBudgetApproval && budgetApprovalReply(assetConfirmation, gate)) || reply;
@@ -281,11 +284,23 @@ export async function POST(request, context) {
   }
 
   async function finishTurn(reply) {
+    const requestedSwap = reply.hold?.args?.action === 'swap';
+    if (requestedSwap) {
+      const preview = approvalContext.secret && await invokeRaw('request_spend', {
+        ...reply.hold.args, botId, permission: 'ask', idempotencyKey: reply.hold.idempotencyKey,
+      });
+      const swapHold = swapHoldFromPreview(reply.hold, preview?.swapPreview);
+      reply = swapHold
+        ? { ...reply, text: swapHold.label, hold: swapHold }
+        : { ...reply, text: preview?.error === 'swap_requires_usd_budget'
+          ? 'Live swaps need an agent with USD spending limits.'
+          : 'I could not prepare a live swap quote. No funds moved.', hold: null };
+    }
     const assetHold = isAssetSpendHold(reply.hold);
     const hold = assetHold
       ? sealAssetSpendHold(reply.hold, approvalContext)
       : reply.hold;
-    const trade = assetConfirmation || assetHold ? null : await ensureOwnerTradeLoop({
+    const trade = assetConfirmation || assetHold || requestedSwap ? null : await ensureOwnerTradeLoop({
       message,
       goal: typeof body.goal === 'string' ? body.goal : '',
       permission: permissionMode,

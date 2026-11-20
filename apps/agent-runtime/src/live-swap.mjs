@@ -1,0 +1,96 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { SOLANA_CLUSTER, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
+import { buildJupiterSwap } from '@ubc2026/transfers';
+import { SOL_MINT, valueUsdSpend } from './usd-budget.mjs';
+
+const TTL = 55_000;
+const UNITS = /^(0|[1-9][0-9]{0,39})$/;
+
+export function mintForAsset(asset) {
+  if (asset === 'SOL') return SOL_MINT;
+  return asset === 'USDC' ? SOLANA_USDC_MINT : asset;
+}
+
+async function mintDecimals(client, mint) {
+  if (mint === SOL_MINT) return 9;
+  const metadata = await client.readSolanaMint({ mint, allowToken2022: true });
+  if (metadata?.cluster !== SOLANA_CLUSTER || metadata.mint !== mint
+      || !Number.isInteger(metadata.decimals) || metadata.decimals < 0 || metadata.decimals > 255) throw new Error('swap_mint_invalid');
+  return metadata.decimals;
+}
+
+function identity({ bot, wallet }, parsed) {
+  return [
+    'maelstrom:swap:v1', bot.ownerId, bot.id, bot.policyVersion, wallet.id, wallet.address,
+    parsed.idempotencyKey, parsed.asset, parsed.outputAsset, parsed.amount, SOLANA_CLUSTER,
+  ];
+}
+
+function ticketMac(key, data) {
+  return createHmac('sha256', key).update(data).digest();
+}
+
+export function bindSwapTicket(state, context, parsed, key) {
+  const payload = Buffer.from(JSON.stringify([identity(context, parsed), state])).toString('base64url');
+  return `${payload}.${ticketMac(key, payload).toString('hex')}`;
+}
+
+export function readSwapTicket(ticket, context, parsed, key, now) {
+  if (typeof ticket !== 'string' || ticket.length > 5000) return null;
+  const match = /^([A-Za-z0-9_-]+)\.([0-9a-f]{64})$/.exec(ticket);
+  if (!match || !timingSafeEqual(ticketMac(key, match[1]), Buffer.from(match[2], 'hex'))) return null;
+  try {
+    const [bound, state] = JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8'));
+    if (JSON.stringify(bound) !== JSON.stringify(identity(context, parsed))
+        || !Number.isSafeInteger(state?.expiresAt) || state.expiresAt <= now || state.expiresAt > now + TTL) return null;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+function swapSimulation(context, parsed, offer) {
+  return {
+    transaction: offer.transaction, walletAddress: context.wallet.address,
+    inputMint: mintForAsset(parsed.asset), outputMint: mintForAsset(parsed.outputAsset),
+    amount: parsed.amount, minOutput: offer.minOutput,
+  };
+}
+
+export async function previewLiveSwap(env, context, parsed, key, now) {
+  const client = env.transferClient;
+  const inputMint = mintForAsset(parsed.asset);
+  const outputMint = mintForAsset(parsed.outputAsset);
+  const [block, inputDecimals, outputDecimals] = await Promise.all([
+    client.getSolanaBlockhash(), mintDecimals(client, inputMint), mintDecimals(client, outputMint),
+  ]);
+  if (block?.cluster !== SOLANA_CLUSTER) throw new Error('wrong_cluster');
+  const offer = await buildJupiterSwap({
+    walletAddress: context.wallet.address, inputMint, outputMint, amount: parsed.amount,
+    blockhash: block.blockhash, apiKey: env.JUPITER_API_KEY, fetcher: env.fetch ?? fetch,
+  });
+  const prepared = await client.prepareSolanaSwap(swapSimulation(context, parsed, offer));
+  if (prepared?.transaction !== offer.transaction || !UNITS.test(prepared.maxSolCost ?? '')) {
+    throw new Error('simulation_failed');
+  }
+  const valuation = await valueUsdSpend(env, {
+    mint: inputMint, decimals: inputDecimals, amount: parsed.amount, feeLamports: prepared.maxSolCost, now,
+  });
+  const expiresAt = now + TTL;
+  const terms = {
+    transaction: offer.transaction, blockhash: block.blockhash, minOutput: offer.minOutput,
+    expiresAt, maxSolCost: prepared.maxSolCost, ...valuation,
+  };
+  return {
+    expiresAt, inputDecimals, outputDecimals, minOutput: offer.minOutput,
+    usdMicros: (BigInt(valuation.outflow) + BigInt(valuation.maxFee)).toString(),
+    ticket: bindSwapTicket(terms, context, parsed, key),
+  };
+}
+
+export async function prepareApprovedSwap(env, context, parsed, offer) {
+  const prepared = await env.transferClient.prepareSolanaSwap(swapSimulation(context, parsed, offer));
+  if (prepared?.transaction !== offer.transaction || !UNITS.test(prepared.maxSolCost ?? '')
+      || BigInt(prepared.maxSolCost) > BigInt(offer.maxSolCost)) throw new Error('simulation_failed');
+  return prepared;
+}
