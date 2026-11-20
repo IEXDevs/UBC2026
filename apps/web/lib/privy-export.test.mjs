@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   exportAddressForSheet,
   exportFailureNote,
+  keyExportAction,
   privyEmbeddedSolanaWallet,
 } from './privy-export.mjs';
 
@@ -72,6 +73,36 @@ test('exportAddressForSheet only returns when sheet matches embedded', () => {
  * Side effects / state checked: N/A.
  * Gaps: does not assert full sentence copy — regex fragments only.
  */
+/**
+ * Achieves: a server wallet id copies through our API, and a client-only wallet still opens Privy.
+ * Fails when: a Privy wallet id opens the iframe, or a client wallet is treated as a server export.
+ * Oracle: keyExportAction mode server vs client vs none.
+ * Side effects / state checked: N/A.
+ * Gaps: does not call the export API.
+ */
+test('keyExportAction skips Privy for server wallets', () => {
+  const embedded = privyEmbeddedSolanaWallet({
+    linkedAccounts: [{
+      type: 'wallet',
+      walletClientType: 'privy',
+      chainType: 'solana',
+      address: ADDRESS,
+      id: 'fmfdj6yqly31huorjqzq38zc',
+    }],
+  });
+  assert.deepEqual(embedded, { address: ADDRESS, id: 'fmfdj6yqly31huorjqzq38zc' });
+  assert.deepEqual(keyExportAction({ walletId: '', embedded }), {
+    mode: 'server',
+    walletId: 'fmfdj6yqly31huorjqzq38zc',
+  });
+  assert.deepEqual(keyExportAction({ walletId: 'sheetwalletid1', embedded: { address: ADDRESS } }), {
+    mode: 'server',
+    walletId: 'sheetwalletid1',
+  });
+  assert.deepEqual(keyExportAction({ walletId: '', embedded: { address: ADDRESS } }), { mode: 'client' });
+  assert.deepEqual(keyExportAction({ walletId: 'short', embedded: null }), { mode: 'none' });
+});
+
 test('exportFailureNote explains server vs embedded wallets', () => {
   assert.match(exportFailureNote(null, { hasEmbedded: false }), /server-side/);
   assert.match(exportFailureNote(null, { hasEmbedded: true, addressMatch: false }), /agent wallet/);
