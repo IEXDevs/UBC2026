@@ -50,7 +50,8 @@ test('generated passwords match immediately but still require copying before acc
 test('recovery feedback preserves recovery-specific normalization and limits', () => {
   for (const value of ['short', 'a'.repeat(65), 'password\n']) {
     const normalized = normalizePassphrase(value);
-    const feedback = passwordFeedback(value, value, normalized ? '' : 'Use 8 to 64 characters.', normalized);
+    const feedback = passwordFeedback(value, value, normalized ? '' : 'Use 8 to 64 characters.', normalized ?? value);
+    assert.equal(feedback.confirmation, 'Passwords match.');
     assert.equal(feedback.ready, false);
   }
   const value = 'ｐassword';
@@ -72,6 +73,7 @@ test('both setup forms wire accessible feedback without gating seed verification
   assert.match(recovery, /disabled=\{!feedback.ready\}/);
   assert.match(recovery, /Password must contain 8 to 64 characters and no line breaks\./);
   assert.match(recovery, /Password meets the requirements\./);
+  assert.match(recovery, /normalizedPassword \?\? password\)/);
   assert.match(draft, /aria-describedby=\{describedBy\}/);
   assert.match(draft, /Copied\. Keep it somewhere safe/);
   assert.match(draft, /onCopy=\{\(event\) => \{\s*event.preventDefault\(\);\s*event.stopPropagation\(\);\s*void copy\(\);/);
