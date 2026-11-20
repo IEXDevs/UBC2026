@@ -146,7 +146,7 @@ export function assertPublicHttpUrl(value) {
 
 // Browser Run egress location is not configurable, so Google may geo-localize
 // (e.g. Hong Kong, Chinese UI). Pin English / US unless the URL already says otherwise.
-const GOOGLE_HOST = /^(?:www\.|maps\.|news\.|shopping\.)?google\.(?:com|[a-z]{2}|com?\.[a-z]{2})$/;
+const GOOGLE_HOST = /^(?:[a-z0-9-]+\.)*google\.(?:com|[a-z]{2}|com?\.[a-z]{2})$/;
 export function withEnglishGoogle(target) {
   if (!GOOGLE_HOST.test(target.hostname)) return target;
   const next = new URL(target.href);

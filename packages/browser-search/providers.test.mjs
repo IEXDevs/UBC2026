@@ -361,6 +361,8 @@ test('Google pages open in English / US unless the url already sets hl or gl', (
   assert.equal(pin('https://www.google.com/search?q=sf+weather'), 'https://www.google.com/search?q=sf+weather&hl=en&gl=us');
   assert.equal(pin('https://www.google.com.hk/'), 'https://www.google.com.hk/?hl=en&gl=us');
   assert.equal(pin('https://maps.google.com/?q=cafe'), 'https://maps.google.com/?q=cafe&hl=en&gl=us');
+  assert.equal(pin('https://scholar.google.com/scholar?q=x'), 'https://scholar.google.com/scholar?q=x&hl=en&gl=us');
+  assert.equal(pin('https://books.google.co.uk/'), 'https://books.google.co.uk/?hl=en&gl=us');
   assert.equal(pin('https://www.google.com/search?q=x&hl=fr&gl=ca'), 'https://www.google.com/search?q=x&hl=fr&gl=ca');
   assert.equal(pin('https://example.com/?q=google.com'), 'https://example.com/?q=google.com');
   assert.equal(pin('https://google.com.evil.example/'), 'https://google.com.evil.example/');
