@@ -15,6 +15,7 @@ import { GET as getToken } from '../app/api/token/route.js';
 import { sealAssetSpendHold } from './chat-spend-confirmation.mjs';
 import { toolAccessRequest } from './spend-permission.mjs';
 import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
+import { privySessionFixture } from '../../agent-runtime/src/owner-auth.fixture.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -658,16 +659,15 @@ test('GET /api/portfolio without bearer returns login_required', async () => {
 test('GET /api/portfolio reads linked wallets from the JWT user id', async () => {
   const ownerId = 'did:privy:portfolio-user';
   const address = 'So11111111111111111111111111111111111111112';
-  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
-  const payload = Buffer.from(JSON.stringify({ sub: ownerId })).toString('base64url');
-  const token = `${header}.${payload}.sig`;
+  const session = privySessionFixture(ownerId);
+  const { token } = session;
   const rpcUrl = 'https://example.invalid/portfolio-rpc';
   const previous = {
     PRIVY_APP_ID: process.env.PRIVY_APP_ID,
     PRIVY_APP_SECRET: process.env.PRIVY_APP_SECRET,
     QUICKNODE_DEVNET_RPC_URL: process.env.QUICKNODE_DEVNET_RPC_URL,
   };
-  process.env.PRIVY_APP_ID = 'app_portfolio_test';
+  process.env.PRIVY_APP_ID = session.appId;
   process.env.PRIVY_APP_SECRET = 'portfolio-app-secret';
   process.env.QUICKNODE_DEVNET_RPC_URL = rpcUrl;
   const previousFetch = globalThis.fetch;
@@ -675,6 +675,7 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
   globalThis.fetch = async (url, init) => {
     const target = String(url);
     calls.push({ url: target, method: init?.method, redirect: init?.redirect });
+    if (target === session.jwksUrl) return session.jwks();
     if (target.includes('/users/me')) {
       return new Response(JSON.stringify({ error: 'users_me_forbidden' }), { status: 403 });
     }
@@ -967,21 +968,36 @@ test('POST /api/bots/:botId/chat fails closed when LLM keys are unset', async ()
  * Side effects: may touch SNS network for invalid domains; status still asserted.
  * Gaps: owner_mismatch / withdraw success need Privy + funded wallet.
  */
-test('POST /api/sns/send with bearer still 404s when domain cannot resolve', async () => {
+test('POST /api/sns/send verifies the session before attempting domain resolution', async t => {
+  const ownerId = 'did:privy:u1';
+  const session = privySessionFixture(ownerId);
+  const previousAppId = process.env.PRIVY_APP_ID;
+  process.env.PRIVY_APP_ID = session.appId;
+  t.after(() => {
+    if (previousAppId === undefined) delete process.env.PRIVY_APP_ID;
+    else process.env.PRIVY_APP_ID = previousAppId;
+  });
+  const keyFetch = t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(String(url), session.jwksUrl);
+    return session.jwks();
+  });
   const { POST } = await import('../app/api/sns/send/route.js');
-  const res = await POST(new Request('http://localhost/api/sns/send', {
+  const send = token => POST(new Request('http://localhost/api/sns/send', {
     method: 'POST',
     headers: {
-      authorization: 'Bearer sns-token',
+      authorization: `Bearer ${token}`,
       'content-type': 'application/json',
-      'x-owner-id': 'did:privy:u1',
+      'x-owner-id': ownerId,
     },
     body: JSON.stringify({ domain: '', amount: '1' }),
   }));
+  assert.equal((await send('invalid-token')).status, 401);
+  assert.equal(keyFetch.mock.calls.length, 0);
+  const res = await send(session.token);
   assert.equal(res.status, 404);
   const body = await res.json();
   assert.equal(body.error, 'sns_not_found');
-  assert.equal(JSON.stringify(body).includes('sns-token'), false);
+  assert.equal(JSON.stringify(body).includes(session.token), false);
 });
 
 /**

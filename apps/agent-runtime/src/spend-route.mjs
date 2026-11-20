@@ -14,7 +14,8 @@ import { buildDevnetAssetTransaction, transferDevnetUsdc } from '@ubc2026/transf
 import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
 import { loadOwnerLoopContext, supabaseConfig, supabaseGet, supabaseWrite } from './supabase-rest.mjs';
 import { alertFromSpend, publishBotAlert } from './bot-alerts.mjs';
-import { deskSpendAllowed, sha256Hex } from './desk-grant.mjs';
+import { deskSpendAllowed, sha256Hex, voiceWebhookMatches } from './desk-grant.mjs';
+import { ownerAuthStatus, resolveOwner } from './owner-auth.mjs';
 import { verifierFacts } from './spend-verifier.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
 
@@ -127,7 +128,11 @@ function ownerIdFrom(request) {
 
 export async function handleSpend(request, env = {}) {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
-  const ownerId = ownerIdFrom(request);
+  const auth = !request.headers.has('authorization') && voiceWebhookMatches(request, env)
+    ? { ownerId: ownerIdFrom(request) }
+    : await resolveOwner(request, env);
+  const { ownerId, error } = auth;
+  if (error) return json({ error, signed: false }, ownerAuthStatus(error));
   if (!ownerId) return json({ error: 'owner_required', signed: false }, 401);
   const desk = await deskSpendAllowed(env, request, ownerId, env.fetch ?? fetch, Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now());
   // A locked desk (missing or expired grant) is not a substitute for the gates

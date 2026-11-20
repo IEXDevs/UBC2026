@@ -7,6 +7,8 @@ import { createPublicKey, createVerify } from 'node:crypto';
 const ISSUER = 'privy.io';
 const APP_ID = /^[a-z0-9]{8,64}$/;
 const OWNER = /^did:privy:[a-zA-Z0-9_-]{1,80}$/;
+const JWKS_TTL_MS = 60_000;
+const keyCache = new WeakMap();
 
 export function privyJwksUrl(appId) {
   const id = typeof appId === 'string' ? appId.trim() : '';
@@ -39,24 +41,28 @@ async function loadJwks(appId, fetcher) {
     error.code = 'missing_config';
     throw error;
   }
-  const response = await fetcher(url, { method: 'GET', redirect: 'manual' });
+  const cached = keyCache.get(fetcher);
+  if (cached?.url === url && cached.expires > Date.now()) return cached.keys;
+  const response = await fetcher(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(5000) });
   if (!response || response.ok !== true) {
     const error = new Error('Privy JWKS was not available');
     error.code = 'login_required';
     throw error;
   }
   const body = await response.json();
-  const keys = Array.isArray(body?.keys) ? body.keys : [];
-  return keys.filter(key => key && key.kty === 'EC' && key.crv === 'P-256' && key.use !== 'enc');
+  const keys = (Array.isArray(body?.keys) ? body.keys : [])
+    .filter(key => key && key.kty === 'EC' && key.crv === 'P-256' && key.use !== 'enc');
+  if (keys.length) keyCache.set(fetcher, { url, keys, expires: Date.now() + JWKS_TTL_MS });
+  return keys;
 }
 
 /**
  * @returns {Promise<{ sub: string }>}
  */
-export async function verifyPrivyAccessToken(accessToken, { appId, fetcher, now = Date.now } = {}) {
+export async function verifyPrivyAccessToken(accessToken, { appId, fetcher = fetch, now = Date.now } = {}) {
   const token = typeof accessToken === 'string' ? accessToken.trim() : '';
   const parts = token.split('.');
-  if (parts.length !== 3 || parts.some(part => !part)) {
+  if (token.length > 8192 || parts.length !== 3 || parts.some(part => !/^[A-Za-z0-9_-]+$/.test(part))) {
     const error = new Error('Privy access token is required');
     error.code = 'login_required';
     throw error;

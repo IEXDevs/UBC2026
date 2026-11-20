@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EVENT_KINDS } from '@ubc2026/contracts';
 import { BotStateMachine } from './bot-do.mjs';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import {
   alertFromSpend,
   botAlertEvent,
