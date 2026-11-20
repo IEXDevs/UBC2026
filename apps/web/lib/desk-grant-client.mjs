@@ -2,6 +2,7 @@
  * Browser calls for the desk verifier and the spend grant.
  * The password is sent once on unlock and is not written to storage.
  */
+import { parseSpendAuthorizationSignature } from '@ubc2026/contracts';
 import {
   unlockDesk,
   writeDeskGrant,
@@ -9,12 +10,33 @@ import {
 } from './desk-lock.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
 
-export async function submitChatSpend({ send, unlock, signal }) {
-  const result = await send();
-  if (result?.error !== 'desk_locked' || !unlock || signal.aborted) return result;
-  const unlocked = await unlock(signal);
+export async function submitChatSpend({ send, unlock, signal, authorize }) {
+  async function sendWithDeskGrant(spendAuthorization) {
+    const result = await send(spendAuthorization);
+    if (result?.error !== 'desk_locked' || !unlock || signal.aborted) return result;
+    const unlocked = await unlock(signal);
+    if (signal.aborted) return { ok: false, error: 'aborted' };
+    return unlocked ? send(spendAuthorization) : { ok: false, error: 'unlock_cancelled' };
+  }
+
+  const result = await sendWithDeskGrant(authorize ? 'prepare' : undefined);
+  if (!result?.spendAuthorization || !authorize) return result;
+  const { payload, ...binding } = result.spendAuthorization;
   if (signal.aborted) return { ok: false, error: 'aborted' };
-  return unlocked ? send() : { ok: false, error: 'unlock_cancelled' };
+  if (binding.expiresAt <= Date.now()) return { ok: false, error: 'spend_authorization_expired' };
+  let signature;
+  try {
+    const bytes = Uint8Array.from(atob(payload), char => char.charCodeAt(0));
+    ({ signature } = await authorize(bytes));
+  } catch {
+    return { ok: false, error: signal.aborted ? 'aborted' : 'browser_wallet_authorization_failed' };
+  }
+  if (signal.aborted) return { ok: false, error: 'aborted' };
+  if (binding.expiresAt <= Date.now()) return { ok: false, error: 'spend_authorization_expired' };
+  const authorization = parseSpendAuthorizationSignature({ ...binding, signature });
+  return authorization
+    ? sendWithDeskGrant(authorization)
+    : { ok: false, error: 'browser_wallet_authorization_failed' };
 }
 
 function headers(ownerId, token) {

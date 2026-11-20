@@ -4,7 +4,10 @@
  * Signing goes through the Privy devnet client from @ubc2026/wallets.
  * Responses carry a signature and a state, never a key or a signed payload.
  */
-import { parsePermissionedSpendBody, parsePrivySigningFailure, spendApprovalMessage } from '@ubc2026/contracts';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import {
+  parsePermissionedSpendBody, parsePrivySigningFailure, parseSpendAuthorizationSignature, spendApprovalMessage,
+} from '@ubc2026/contracts';
 import { mainnetQuoteBlocksSpend, runPermissionedSpend } from '@ubc2026/agent-loop';
 import { proposalDigest } from '@ubc2026/bot-policy';
 import { buildDevnetAssetTransaction, transferDevnetUsdc } from '@ubc2026/transfers';
@@ -17,6 +20,7 @@ import { resolveTrustLookup } from './trust-lookup.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
 const WALLET_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const SPEND_AUTHORIZATION_TTL_MS = 60_000;
 
 function readLookupScore(looked) {
   if (typeof looked === 'string' || typeof looked === 'number') return String(looked);
@@ -50,10 +54,13 @@ async function transferDestination(env, parsed) {
   return WALLET_ADDRESS.test(address || '') && (!parsed.destination || parsed.destination === address) ? address : null;
 }
 
-async function prepareAssetTransfer(env, parsed, wallet, destination, id) {
+async function prepareAssetTransfer(env, parsed, wallet, destination, id, blockhash) {
   const client = env.transferClient;
-  const block = await client.getDevnetBlockhash();
-  if (block?.cluster !== 'devnet') throw new Error('wrong_cluster');
+  if (!blockhash) {
+    const block = await client.getDevnetBlockhash();
+    if (block?.cluster !== 'devnet') throw new Error('wrong_cluster');
+    blockhash = block.blockhash;
+  }
   let decimals;
   if (parsed.asset !== 'SOL') {
     const mint = await client.readDevnetMint({ mint: parsed.asset });
@@ -62,11 +69,11 @@ async function prepareAssetTransfer(env, parsed, wallet, destination, id) {
   }
   const transaction = buildDevnetAssetTransaction({
     asset: parsed.asset, decimals, sourceOwner: wallet.address, destinationOwner: destination,
-    amount: parsed.amount, memo: `maelstrom:spend:${id}`, recentBlockhash: block.blockhash,
+    amount: parsed.amount, memo: `maelstrom:spend:${id}`, recentBlockhash: blockhash,
   });
   const prepared = await client.prepareDevnetTransfer({ transaction });
   if (prepared?.transaction !== transaction || !/^(0|[1-9]\d{0,19})$/.test(prepared.feeLamports || '')) throw new Error('invalid_simulation');
-  return prepared;
+  return { prepared, blockhash };
 }
 
 async function reserveAssetTransfer(env, { ownerId, bot, proposal, policy, now, idempotencyKey, budgetApproval }) {
@@ -136,6 +143,19 @@ export async function handleSpend(request, env = {}) {
   const assetTransfer = parsed.asset !== 'USDC';
   const overrideToken = request.headers.get('x-spend-approve-once');
   const approvalKey = supabaseConfig(env)?.key;
+  const prepareAuthorization = raw.spendAuthorization === 'prepare';
+  const ownerAuthorization = parseSpendAuthorizationSignature(raw.spendAuthorization);
+  if (raw.spendAuthorization !== undefined
+    && (!assetTransfer || !parsed.confirmed || (!prepareAuthorization && !ownerAuthorization))) {
+    return json({ error: 'invalid_spend_authorization', signed: false }, 400);
+  }
+  if ((prepareAuthorization || ownerAuthorization)
+    && (!approvalKey || typeof env.transferClient?.formatPreparedSpendAuthorization !== 'function')) {
+    return json({ error: 'wallet_authorization_unavailable', signed: false }, 503);
+  }
+  if ((prepareAuthorization || ownerAuthorization) && desk.ok && desk.via !== 'grant') {
+    return json({ error: 'invalid_spend_authorization', signed: false }, 403);
+  }
   const solHandleApproval = approvalKey && parsed.asset === 'SOL' && parsed.action === 'spend'
     && parsed.confirmed && parsed.handle && parsed.destination && parsed.idempotencyKey;
   if (overrideToken !== null && (!solHandleApproval || (desk.ok && desk.via !== 'grant'))) {
@@ -157,6 +177,10 @@ export async function handleSpend(request, env = {}) {
   }
 
   const now = Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now();
+  if (ownerAuthorization && (ownerAuthorization.expiresAt <= now
+    || ownerAuthorization.expiresAt > now + SPEND_AUTHORIZATION_TTL_MS)) {
+    return json({ error: 'spend_authorization_expired', signed: false }, 409);
+  }
   const mint = parsed.asset === 'USDC' ? DEVNET_USDC_MINT : (parsed.asset === 'SOL' ? SOL_TRUST_MINT : parsed.asset);
   const lookedUp = await spendTrustScore(env, mint);
   const trustUnavailable = lookedUp.unavailable === true;
@@ -169,6 +193,7 @@ export async function handleSpend(request, env = {}) {
   }
   const id = parsed.idempotencyKey || (assetTransfer ? `spend_${crypto.randomUUID()}` : `spend_${parsed.botId}`);
   let prepared = null;
+  let blockhash;
   // A proposal may run the gates without an unlock or confirmation, but it cannot sign.
   if (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset && !context.wallet.frozen && !context.bot.frozen) {
     if (!parsed.idempotencyKey) return json({ error: 'idempotency_key_required', signed: false }, 400);
@@ -176,7 +201,7 @@ export async function handleSpend(request, env = {}) {
       return json({ error: 'asset_transfer_unavailable', signed: false }, 503);
     }
     try {
-      prepared = await prepareAssetTransfer(env, parsed, context.wallet, recipient, id);
+      ({ prepared, blockhash } = await prepareAssetTransfer(env, parsed, context.wallet, recipient, id, ownerAuthorization?.blockhash));
     } catch (error) {
       const code = ['unsupported_mint', 'simulation_failed', 'invalid_destination'].includes(error?.code) ? error.code : 'transfer_preparation_failed';
       return json({ error: code, signed: false }, 409);
@@ -217,19 +242,40 @@ export async function handleSpend(request, env = {}) {
   let signDevnet;
   let beforeSign;
   let privyFailure;
+  let authorizationChallenge;
   if (prepared) {
     const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
     signDevnet = async ({ bot, wallet }) => {
       try {
-        return await env.transferClient.signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken });
+        return await env.transferClient.signPreparedDevnetTransfer({
+          bot, wallet, prepared, ...(ownerAuthorization ? { ownerAuthorization } : { accessToken }),
+        });
       } catch (error) {
         privyFailure = parsePrivySigningFailure(error?.privyFailure);
         throw error;
       }
     };
-    beforeSign = ({ bot, proposal, policy, approvedOnce }) => reserveAssetTransfer(env, {
-      ownerId, bot, proposal, policy, now, idempotencyKey: id, budgetApproval: approvedOnce ? budgetApproval : null,
-    });
+    beforeSign = async ({ bot, wallet, proposal, policy, approvedOnce }) => {
+      if (prepareAuthorization || ownerAuthorization) {
+        const expiresAt = ownerAuthorization?.expiresAt ?? now + SPEND_AUTHORIZATION_TTL_MS;
+        const payload = env.transferClient.formatPreparedSpendAuthorization({ bot, wallet, prepared, expiresAt });
+        const binding = JSON.stringify([
+          'maelstrom:spend-authorization:v1', ownerId, bot.id, id, wallet.id, bot.policyVersion,
+          prepared.feeLamports, blockhash, payload, overrideToken,
+        ]);
+        const mac = createHmac('sha256', approvalKey).update(binding).digest();
+        if (prepareAuthorization) {
+          authorizationChallenge = { payload, blockhash, expiresAt, proof: mac.toString('hex') };
+          return { state: 'awaiting-wallet-authorization' };
+        }
+        if (!timingSafeEqual(mac, Buffer.from(ownerAuthorization.proof, 'hex'))) {
+          return { state: 'blocked', reason: 'spend_authorization_changed' };
+        }
+      }
+      return reserveAssetTransfer(env, {
+        ownerId, bot, proposal, policy, now, idempotencyKey: id, budgetApproval: approvedOnce ? budgetApproval : null,
+      });
+    };
   } else if (!assetTransfer && grantOk) {
     if (parsed.destination && env.transferClient) signDevnet = async ({ bot, wallet, memo }) => {
       const sent = await transferDevnetUsdc({
@@ -278,6 +324,10 @@ export async function handleSpend(request, env = {}) {
     });
   } catch {
     return json({ error: 'spend_failed', signed: false }, 400);
+  }
+
+  if (authorizationChallenge && result.reason === 'awaiting-wallet-authorization') {
+    return json({ signed: false, spendAuthorization: authorizationChallenge });
   }
 
   let state = result.state;

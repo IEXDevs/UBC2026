@@ -440,6 +440,31 @@ export const OWNER_SPEND_PERMISSIONS = Object.freeze(['ask', 'review', 'full']);
 export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay']);
 export const PERMISSIONED_SPEND_PATH = '/api/spend';
 
+export function parseSpendAuthorization(value) {
+  if (!value || typeof value !== 'object') return null;
+  const { blockhash, expiresAt, proof } = value;
+  if (typeof blockhash !== 'string' || !base58.test(blockhash)
+    || !Number.isSafeInteger(expiresAt) || expiresAt <= 0
+    || typeof proof !== 'string' || !/^[a-f0-9]{64}$/.test(proof)) return null;
+  return { blockhash, expiresAt, proof };
+}
+
+export function parseSpendAuthorizationChallenge(value) {
+  const binding = parseSpendAuthorization(value);
+  const payload = value?.payload;
+  if (!binding || typeof payload !== 'string' || !/^[A-Za-z0-9+/]{64,4096}={0,2}$/.test(payload)
+    || payload.length % 4 !== 0) return null;
+  return { ...binding, payload };
+}
+
+export function parseSpendAuthorizationSignature(value) {
+  const binding = parseSpendAuthorization(value);
+  const signature = value?.signature;
+  if (!binding || typeof signature !== 'string' || !/^[A-Za-z0-9+/]{80,128}={0,2}$/.test(signature)
+    || signature.length % 4 !== 0) return null;
+  return { ...binding, signature };
+}
+
 const PRIVY_SIGN_CODES = new Set([
   'policy_violation',
   'insufficient_funds',
@@ -454,7 +479,7 @@ const PRIVY_SIGN_CODES = new Set([
   'insufficient_app_secret_permissions',
 ]);
 const PRIVY_SIGN_TRANSPORT = new Set(['network', 'timeout', 'redirect', 'invalid-response']);
-const PRIVY_SIGN_STAGES = new Set(['app-sign', 'wallet-lookup', 'session-exchange', 'owner-sign']);
+const PRIVY_SIGN_STAGES = new Set(['app-sign', 'wallet-lookup', 'session-exchange', 'owner-sign', 'browser-owner-sign']);
 const PRIVY_REQUEST_CODES = new Set([
   ...PRIVY_SIGN_CODES, 'invalid_data', 'invalid_auth_token', 'mfa_required', 'missing_mfa_enrollment',
 ]);

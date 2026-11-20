@@ -4,10 +4,11 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, verify } from 'node:crypto';
+import { generateKeyPairSync, sign, verify } from 'node:crypto';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
 import { CipherSuite, DhkemP256HkdfSha256, HkdfSha256 } from '@hpke/core';
 import { ConfigError } from '@ubc2026/contracts';
+import { formatRequestForAuthorizationSignature } from '@privy-io/node';
 import { assignBotWallet, createMainWallet } from './wallets.mjs';
 import { accountWriteBodies } from './wallets.mjs';
 import {
@@ -109,10 +110,11 @@ test('a prepared transfer binds the exact simulated message to its signature', a
   const signed = Buffer.from(unsigned);
   signed.fill(4, 1, 65);
   let swapMessage = false;
+  let verifyBrowserAuthorization = false;
   let broadcasts = 0;
   const wallet = { id: walletId, privyWalletId: walletId, ownerId: 'user_1', kind: 'main', label: 'Main', address, provider: 'privy', frozen: false };
   const bot = { ...baseBot, walletId };
-  const privy = client({ fetcher: async (_url, init) => {
+  const privy = client({ fetcher: async (url, init) => {
     const req = JSON.parse(init.body);
     if (req.method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
     if (req.method === 'getFeeForMessage') {
@@ -126,6 +128,18 @@ test('a prepared transfer binds the exact simulated message to its signature', a
     }
     if (req.method === 'signTransaction') {
       assert.equal(req.params.transaction, transaction);
+      if (verifyBrowserAuthorization) {
+        const headers = new Headers(init.headers);
+        const decoded = formatRequestForAuthorizationSignature({
+          version: 1, url, method: 'POST', body: req,
+          headers: {
+            'privy-app-id': appId,
+            'privy-request-expiry': headers.get('privy-request-expiry'),
+          },
+        });
+        assert.equal(req.chain_type, 'solana');
+        assert.equal(verify('sha256', decoded, publicKey, Buffer.from(headers.get('privy-authorization-signature'), 'base64')), true);
+      }
       const bytes = Buffer.from(signed);
       if (swapMessage) bytes[79] ^= 1;
       return Response.json({ data: { signed_transaction: bytes.toString('base64') } });
@@ -145,6 +159,18 @@ test('a prepared transfer binds the exact simulated message to its signature', a
   const again = await privy.prepareDevnetTransfer({ transaction });
   await assert.rejects(privy.signPreparedDevnetTransfer({ ...input, prepared: again }), { code: 'transaction_mismatch' });
   assert.equal(broadcasts, 1);
+
+  const browserPrepared = await privy.prepareDevnetTransfer({ transaction });
+  const expiresAt = 1_700_000_050_000;
+  const challenge = privy.formatPreparedSpendAuthorization({ bot, wallet, prepared: browserPrepared, expiresAt });
+  assertNoSecrets(Buffer.from(challenge, 'base64').toString());
+  const signature = sign('sha256', Buffer.from(challenge, 'base64'), privateKey).toString('base64');
+  const browserInput = { bot, wallet, prepared: browserPrepared, ownerAuthorization: { expiresAt, signature } };
+  swapMessage = false;
+  verifyBrowserAuthorization = true;
+  assert.equal((await privy.signPreparedDevnetTransfer(browserInput)).signature, txSignature);
+  await assert.rejects(privy.signPreparedDevnetTransfer(browserInput), { code: 'simulation_required' });
+  assert.equal(broadcasts, 2);
 });
 
 test('a prepared send uses the wallet owner session only when Privy requires it', async () => {
