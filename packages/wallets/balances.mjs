@@ -1,4 +1,4 @@
-import { SOLANA_CLUSTER, SOLANA_RPC_URL } from '@ubc2026/contracts/solana';
+import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_RPC_URL } from '@ubc2026/contracts/solana';
 /**
  * Solana wallet balance reads across hackathon clusters (mainnet-beta + testnet).
  * Native SOL + every non-zero SPL / Token-2022 account. Never returns RPC URLs.
@@ -442,7 +442,7 @@ export async function readClusterWalletBalances({
  */
 export function resolveClusterRpcUrls(env = {}) {
   const solana = assertHttpsRpc(
-    env.SOLANA_RPC_URL
+    configuredSolanaRpc(env)
     || env.solanaRpcUrl
     || PUBLIC_SOLANA_RPC_URL,
   );

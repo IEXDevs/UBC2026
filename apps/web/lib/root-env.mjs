@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { configuredSolanaRpc } from '@ubc2026/contracts/solana';
 
 export function parseEnvFile(text) {
   const env = {};
@@ -75,6 +76,7 @@ function runtimeEnv() {
 }
 
 export function readRootEnv(name, env = runtimeEnv()) {
+  if (name === 'SOLANA_RPC_URL') return configuredSolanaRpc(env);
   const value = env?.[name];
   return typeof value === 'string' ? value.trim() : '';
 }

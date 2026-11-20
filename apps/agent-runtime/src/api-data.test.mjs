@@ -1302,6 +1302,22 @@ test('health reports signing and supabase readiness flags', async () => {
   assert.equal(voiceBody.secrets.ELEVENLABS_WEBHOOK_SECRET.set, true);
 });
 
+test('health reports RPC and signing configured with only the existing mainnet RPC secret', async () => {
+  const rpc = 'https://example.invalid/private-rpc';
+  const response = await worker.fetch(new Request('https://runtime/health'), fakeEnv({
+    PRIVY_APP_ID: 'app',
+    PRIVY_APP_SECRET: 'secret',
+    QUICKNODE_MAINNET_RPC_URL: rpc,
+    fetch: () => assert.fail('health must not make an RPC call'),
+  }));
+  const body = await response.json();
+  assert.equal(body.rpcConfigured, true);
+  assert.equal(body.signing, true);
+  assert.equal(body.secrets.SOLANA_RPC_URL.set, false);
+  assert.equal(body.secrets.QUICKNODE_MAINNET_RPC_URL.set, true);
+  assert.equal(JSON.stringify(body).includes(rpc), false);
+});
+
 /**
  * Achieves: payments without Supabase returns empty unconfigured and never calls fetch.
  * Fails when: fetch invoked or stub/items invented.
