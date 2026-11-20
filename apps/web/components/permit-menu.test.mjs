@@ -1,10 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { shouldClosePermitMenu } from './permit-menu.mjs';
 
 function menuContaining(...nodes) {
   return { contains: (target) => nodes.includes(target) };
 }
+
+test('composer setting buttons share the model selector height and use neutral permissions', () => {
+  const css = readFileSync(new URL('./PromptBar.css', import.meta.url), 'utf8');
+  const bar = readFileSync(new URL('./PromptBar.jsx', import.meta.url), 'utf8');
+  assert.match(css, /\.prompt-bar__glide \.glide-select__trigger,\s*\.prompt-bar__pick\s*\{\s*height: var\(--pb-control-height\)/);
+  assert.match(bar, /surfaceColor="var\(--pb-control-bg\)"/);
+  assert.match(bar, /className="prompt-bar__pick"\s+aria-label=\{`Permissions,/);
+  assert.match(css, /\.permit-menu button\[aria-selected='true'\][^}]*var\(--pb-control-highlight\)/);
+  assert.doesNotMatch(css + bar, /permit-dot|--permit-color|\.is-full/);
+});
 
 /**
  * Achieves: verifies an outside pointer closes an open permissions menu, while a

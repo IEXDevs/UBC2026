@@ -61,7 +61,8 @@ export async function checkProviderModels({ baseUrl, apiKey, provider, fetcher =
   try {
     const response = await fetcher(`${endpoint.baseUrl}/models`, {
       headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-      redirect: 'error',
+      // Workers rejects redirect 'error'; a 3xx is !ok and fails below.
+      redirect: 'manual',
       cache: 'no-store',
       signal: AbortSignal.timeout(12000),
     });

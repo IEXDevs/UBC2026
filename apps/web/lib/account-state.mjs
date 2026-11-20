@@ -31,6 +31,11 @@ const RETRY_MS = 8000;
 const RETRY_MAX = 5;
 const KEEPALIVE_MAX = 60_000;
 const HYDRATE_MS = 8000;
+const DESK_DEFAULTS = new Map([
+  ['roster', '{"order":[],"extra":[]}'],
+  ['looks', '{}'],
+  ['talks', '{}'],
+]);
 
 /** Every mirrored entry for one owner: account name, local key, and whether the key is shared by the browser. */
 export function mirrorEntries(ownerId) {
@@ -85,6 +90,8 @@ export function createAccountMirror({
   const entries = mirrorEntries(ownerId);
   const byKey = new Map(entries.map(entry => [entry.key, entry]));
   const pending = new Map();
+  // The desk saves snapshots on mount. Its unchanged startup state is not an account edit.
+  const lastDeskValue = new Map(DESK_DEFAULTS);
   let timer = null;
   let retries = 0;
   let live = Boolean(storage) && entries.length > 0;
@@ -145,6 +152,10 @@ export function createAccountMirror({
 
   function queue(name, value) {
     if (!live || !open || !pushable(value)) return;
+    if (lastDeskValue.has(name)) {
+      if (lastDeskValue.get(name) === value) return;
+      lastDeskValue.set(name, value);
+    }
     pending.set(name, value);
     schedule();
   }
@@ -194,6 +205,7 @@ export function createAccountMirror({
     for (const entry of entries) {
       const remote = server.get(entry.name);
       if (typeof remote === 'string') {
+        if (DESK_DEFAULTS.has(entry.name)) lastDeskValue.set(entry.name, remote);
         safeSet(storage, entry.key, remote);
         continue;
       }
@@ -203,11 +215,18 @@ export function createAccountMirror({
         continue;
       }
       const local = safeGet(storage, entry.key);
-      if (typeof local === 'string' && pushable(local)) upload.push({ name: entry.name, value: local });
+      if (typeof local === 'string' && pushable(local) && local !== DESK_DEFAULTS.get(entry.name)) {
+        upload.push({ name: entry.name, value: local });
+      }
     }
     if (upload.length > 0) {
       for (let index = 0; index < upload.length; index += 12) {
-        await send(upload.slice(index, index + 12));
+        const batch = upload.slice(index, index + 12);
+        if (await send(batch)) {
+          for (const { name, value } of batch) {
+            if (DESK_DEFAULTS.has(name)) lastDeskValue.set(name, value);
+          }
+        }
       }
     }
     open = true;

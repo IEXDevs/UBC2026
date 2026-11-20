@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { createAccountMirror, mirrorEntries } from './account-state.mjs';
 import { catalogStorageKey } from './file-catalog.mjs';
 import { acceptanceStorageKey, REVIEW_THRESHOLD_KEY, SPEND_PERMISSION_KEY } from './spend-permission.mjs';
-import { rosterStorageKey } from './roster.mjs';
-import { talkStorageKey } from './talk-store.mjs';
+import { looksStorageKey, rosterStorageKey, writeLooks, writeRoster } from './roster.mjs';
+import { talkStorageKey, writeTalks } from './talk-store.mjs';
 import { accountStorageKey } from './account-code.mjs';
 
 function memory(seed = {}) {
@@ -26,7 +26,13 @@ function harness({ server = [], listStatus = 200, source = 'supabase', ownerId =
       if (listStatus !== 200) return Response.json({ error: 'x' }, { status: listStatus });
       return Response.json({ ok: true, source, items: server });
     }
-    posts.push(JSON.parse(init.body));
+    const body = JSON.parse(init.body);
+    posts.push(body);
+    for (const item of body.items) {
+      const index = server.findIndex(row => row.name === item.name);
+      if (index >= 0) server.splice(index, 1);
+      if (item.value !== null) server.push(item);
+    }
     return Response.json({ ok: true });
   };
   const mirror = createAccountMirror({
@@ -38,6 +44,60 @@ function harness({ server = [], listStatus = 200, source = 'supabase', ownerId =
   });
   return { storage, posts, timers, mirror };
 }
+
+test('starting an empty desk does not overwrite another browser’s first save', async () => {
+  const server = [];
+  const original = harness({ server });
+  const fresh = harness({ server });
+  await original.mirror.hydrate();
+  await fresh.mirror.hydrate();
+
+  const roster = { order: ['bot_1'], extra: [] };
+  const looks = { bot_1: { name: 'Agent' } };
+  const talks = { bot_1: [{ id: 'l1', role: 'user', text: 'hi' }] };
+  writeRoster(original.mirror.storage, 'alice', roster);
+  writeLooks(original.mirror.storage, 'alice', looks);
+  writeTalks(original.mirror.storage, 'alice', talks);
+  await original.mirror.flush();
+
+  writeRoster(fresh.mirror.storage, 'alice', { order: [], extra: [] });
+  writeLooks(fresh.mirror.storage, 'alice', {});
+  writeTalks(fresh.mirror.storage, 'alice', {});
+  await fresh.mirror.flush();
+  assert.deepEqual(fresh.posts, []);
+
+  const later = harness({ server });
+  await later.mirror.hydrate();
+  assert.deepEqual(JSON.parse(later.storage.getItem(rosterStorageKey('alice'))), roster);
+  assert.deepEqual(JSON.parse(later.storage.getItem(looksStorageKey('alice'))), looks);
+  assert.deepEqual(JSON.parse(later.storage.getItem(talkStorageKey('alice'))), talks);
+});
+
+test('starting with an unchanged cloud snapshot is not an edit, but clearing it is', async () => {
+  const talks = { bot_1: [{ id: 'l1', role: 'user', text: 'hi' }] };
+  const { mirror, posts } = harness({ server: [{ name: 'talks', value: JSON.stringify(talks) }] });
+  await mirror.hydrate();
+
+  writeTalks(mirror.storage, 'alice', talks);
+  await mirror.flush();
+  assert.deepEqual(posts, []);
+
+  writeTalks(mirror.storage, 'alice', {});
+  await mirror.flush();
+  assert.deepEqual(posts, [{ items: [{ name: 'talks', value: '{}' }] }]);
+});
+
+test('hydrate does not import cached empty startup defaults from older builds', async () => {
+  const { mirror, posts } = harness({
+    local: {
+      [rosterStorageKey('alice')]: '{"order":[],"extra":[]}',
+      [looksStorageKey('alice')]: '{}',
+      [talkStorageKey('alice')]: '{}',
+    },
+  });
+  await mirror.hydrate();
+  assert.deepEqual(posts, []);
+});
 
 /**
  * Achieves: the mirror covers the desk state that used to be browser-only and leaves the file catalog,
