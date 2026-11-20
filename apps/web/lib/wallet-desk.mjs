@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, SOLANA_USDC_MINT, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Wallet desk view model. No signing, no seed storage, no network.
  * Mainnet mints here are for price quotes only.
@@ -13,7 +14,7 @@ const SNS = /^[a-z0-9][a-z0-9-]{0,62}\.sol$/;
 const UNITS = /^(0|[1-9][0-9]{0,39})$/;
 const WORD = /^[a-z]{3,8}$/;
 
-export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const USDC_MINT = SOLANA_USDC_MINT;
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 export const PRICE_PAIRS = Object.freeze({
@@ -144,13 +145,13 @@ export function usdcUnits({ positions = [], transfers = [] } = {}) {
   return positionUnits(positions, 'USDC');
 }
 
-export function deskTokens({ positions = [], transfers = [], prefs, devnet = null } = {}) {
+export function deskTokens({ positions = [], transfers = [], prefs, solana = null } = {}) {
   const clean = normalizeTokenPrefs(prefs);
-  const onchain = devnet?.ok === true && devnet?.cluster === 'devnet';
-  const failed = Boolean(devnet) && devnet.ok !== true;
-  const stale = Boolean(devnet?.stale === true && typeof devnet?.asOf === 'string');
-  const knownUsdc = UNITS.test(devnet?.usdcAmount) ? devnet.usdcAmount : null;
-  const knownSol = UNITS.test(devnet?.solLamports) ? devnet.solLamports : null;
+  const onchain = solana?.ok === true && solana?.cluster === SOLANA_CLUSTER;
+  const failed = Boolean(solana) && solana.ok !== true;
+  const stale = Boolean(solana?.stale === true && typeof solana?.asOf === 'string');
+  const knownUsdc = UNITS.test(solana?.usdcAmount) ? solana.usdcAmount : null;
+  const knownSol = UNITS.test(solana?.solLamports) ? solana.solLamports : null;
   const book = onchain && knownUsdc != null
     ? knownUsdc
     : (failed ? knownUsdc : usdcUnits({ positions, transfers }));
@@ -160,8 +161,8 @@ export function deskTokens({ positions = [], transfers = [], prefs, devnet = nul
     ...clean.extra.map(token => ({ ...token, core: false })),
   ];
   const seen = new Set(rows.map(token => token.mint));
-  if (onchain && Array.isArray(devnet.tokens)) {
-    for (const token of devnet.tokens) {
+  if (onchain && Array.isArray(solana.tokens)) {
+    for (const token of solana.tokens) {
       if (!token || typeof token.mint !== 'string' || !MINT.test(token.mint) || seen.has(token.mint)) continue;
       if (token.symbol === 'USDC' || token.symbol === 'SOL' || token.mint === USDC_MINT || token.mint === SOL_MINT) continue;
       if (!UNITS.test(token.amount) || token.amount === '0') continue;
@@ -204,14 +205,14 @@ export function deskTokens({ positions = [], transfers = [], prefs, devnet = nul
     }
     const unavailable = !amountKnown || amount == null;
     const amountLabel = unavailable
-      ? `${token.symbol} unavailable${devnet?.code ? ` (${devnet.code})` : ''}${stale ? ` · stale ${devnet.asOf}` : ''}`
-      : `${formatBaseUnits(amount, token.decimals)} ${token.symbol}${stale ? ` · stale ${devnet.asOf}` : ''}`;
+      ? `${token.symbol} unavailable${solana?.code ? ` (${solana.code})` : ''}${stale ? ` · stale ${solana.asOf}` : ''}`
+      : `${formatBaseUnits(amount, token.decimals)} ${token.symbol}${stale ? ` · stale ${solana.asOf}` : ''}`;
     return {
       ...token,
       amount: unavailable ? null : amount,
       amountLabel,
       amountKnown: !unavailable,
-      balanceStatus: failed ? (devnet.code || 'rpc_failed') : (stale ? 'stale' : 'ok'),
+      balanceStatus: failed ? (solana.code || 'rpc_failed') : (stale ? 'stale' : 'ok'),
       hidden: clean.hidden.includes(token.symbol),
       tradeable: !clean.restricted.includes(token.symbol),
     };
@@ -558,7 +559,7 @@ export function swapQuoteUrl(venue, rows, { inputSymbol, outputSymbol, amount } 
   if (!input.tradeable || !output.tradeable || input.hidden || output.hidden) return { error: 'not_tradeable' };
   const url = quoteUrl(venue, { inputMint: input.mint, outputMint: output.mint, amount });
   if (!url) return { error: 'invalid_quote' };
-  return { url, broadcast: false, cluster: 'devnet', pricing: 'mainnet', label: 'devnet execution, mainnet pricing' };
+  return { url, broadcast: false, cluster: SOLANA_CLUSTER, pricing: 'mainnet', label: EXECUTION_LABEL };
 }
 
 export const SETUP_CARD_MS = 4000;
@@ -601,8 +602,8 @@ export function phraseMatches(typed, words) {
  */
 export function swapSendSettlement({ inputSymbol, quoteOut, quote } = {}) {
   if (!quote || quote.broadcast !== false) return { error: 'quote_not_authorization' };
-  if (quote.pricing !== 'mainnet' || quote.cluster !== 'devnet') return { error: 'invalid_quote' };
-  if (quote.label !== 'devnet execution, mainnet pricing') return { error: 'invalid_quote' };
+  if (quote.pricing !== 'mainnet' || quote.cluster !== SOLANA_CLUSTER) return { error: 'invalid_quote' };
+  if (quote.label !== EXECUTION_LABEL) return { error: 'invalid_quote' };
   if (typeof inputSymbol !== 'string' || inputSymbol === 'USDC' || inputSymbol === quote.output?.symbol) {
     return { error: 'invalid_quote' };
   }
@@ -613,10 +614,10 @@ export function swapSendSettlement({ inputSymbol, quoteOut, quote } = {}) {
     amount: quoteOut,
     inputSymbol,
     broadcast: false,
-    executionCluster: 'devnet',
+    executionCluster: SOLANA_CLUSTER,
     pricingCluster: 'mainnet',
     authorizesTransaction: false,
-    label: 'devnet execution, mainnet pricing',
+    label: EXECUTION_LABEL,
   };
 }
 
@@ -642,7 +643,7 @@ export function phraseComplete(picked, length) {
 
 export function recoveryCard({ words, wallets = [], handle = '', passphrase = '', at = '' } = {}) {
   const phrase = recoveryWords(words);
-  const lines = ['Maelstrom recovery', 'devnet execution, mainnet pricing', ''];
+  const lines = ['Maelstrom recovery', EXECUTION_LABEL, ''];
   if (typeof handle === 'string' && handle.trim()) lines.push(`Handle: @${handle.trim().replace(/^@/, '')}`, '');
   if (phrase) {
     lines.push('Seed phrase:', phrase.join(' '), '');

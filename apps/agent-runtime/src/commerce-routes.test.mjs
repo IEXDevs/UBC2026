@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPaymentSignature, NETWORKS } from '@ubc2026/x402';
+import { NETWORKS } from '@ubc2026/x402';
 import worker, { withOfflineOwner } from './owner-auth.fixture.mjs';
 import {
   matchCommerceRoute,
@@ -21,7 +21,7 @@ const bot = {
   cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
 };
 const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
-const payTo = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const payTo = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const feePayer = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
 /**
@@ -31,7 +31,7 @@ const feePayer = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
  * Side effects / state checked: commerce handler mocks.
  * Gaps: payment failure path partial
  */
-test('shopping prepare + settle through worker routes', async () => {
+test('sandbox shopping prepare and settle are disabled on mainnet', async () => {
   assert.equal(matchCommerceRoute('POST', '/bots/bot_shop/shopping/prepare').kind, 'shopping-prepare');
   const env = {
     sandboxStoreClient: {
@@ -45,7 +45,7 @@ test('shopping prepare + settle through worker routes', async () => {
             body: {
               accepts: [{
                 scheme: 'exact',
-                network: NETWORKS.devnet,
+                network: NETWORKS.solana,
                 amount: '1000',
                 asset: payTo,
                 payTo,
@@ -66,10 +66,9 @@ test('shopping prepare + settle through worker routes', async () => {
     headers: { 'content-type': 'application/json', 'x-owner-id': 'own_1' },
     body: JSON.stringify({ bot, ledger, recipient: payTo }),
   }), withOfflineOwner(env), { kind: 'shopping-prepare', botId: 'bot_shop' });
-  assert.equal(prep.status, 200);
+  assert.equal(prep.status, 409);
   const prepBody = await prep.json();
-  assert.equal(prepBody.provider, 'sandbox');
-  assert.equal(prepBody.pick.item.id, 'sku_lo');
+  assert.equal(prepBody.error, 'sandbox_disabled_on_mainnet');
 
   const settle = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_shop/shopping/settle', {
     method: 'POST',
@@ -79,7 +78,7 @@ test('shopping prepare + settle through worker routes', async () => {
       itemId: 'sku_lo',
       accepted: {
         scheme: 'exact',
-        network: NETWORKS.devnet,
+        network: NETWORKS.solana,
         amount: '1000',
         asset: payTo,
         payTo,
@@ -88,48 +87,40 @@ test('shopping prepare + settle through worker routes', async () => {
       },
     }),
   }), withOfflineOwner(env), { kind: 'shopping-settle', botId: 'bot_shop' });
-  assert.equal(settle.status, 200);
+  assert.equal(settle.status, 409);
   const settled = await settle.json();
-  assert.equal(settled.next, 'settled');
+  assert.equal(settled.error, 'sandbox_disabled_on_mainnet');
 });
 
-/**
- * Achieves: signal sell challenges with 402 then settle releases payload after payment.
- * Fails when: 402 skipped or settle returns empty without pay.
- * Oracle: 402 then settled payload fields.
- * Side effects / state checked: payment/settle mocks.
- * Gaps: none
- */
-test('signal sell returns 402 and settle releases payload', async () => {
-  const offers = new Map();
-  const env = {
-    SIGNAL_PAY_TO: payTo,
-    SIGNAL_FEE_PAYER: feePayer,
-    signalOffers: {
-      put: async (k, v) => offers.set(k, v),
-      get: async (k) => offers.get(k) ?? null,
-    },
-  };
-  const offerRes = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_1/commerce/signals/apy-1', {
+test('mainnet signal routes decline offers and assumed payments', async () => {
+  const path = '/bots/bot_1/commerce/signals/sig_1';
+  const offer = await worker.fetch(new Request(`https://runtime${path}`), {});
+  assert.equal(offer.status, 503);
+  assert.equal((await offer.json()).error, 'signal_payments_unavailable');
+  const settle = await worker.fetch(new Request(`https://runtime${path}/settle`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ amount: '25000' }),
-  }), env, { kind: 'signal-offer', botId: 'bot_1', signalId: 'apy-1' });
-  assert.equal(offerRes.status, 402);
-  const challenge = await offerRes.json();
-  const header = buildPaymentSignature({
-    accepted: challenge.accepts[0],
-    signature: 'buyer_sig',
-  });
-  const settle = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_1/commerce/signals/apy-1/settle', {
+    headers: { 'payment-signature': 'unconfirmed' },
+  }), {});
+  assert.equal(settle.status, 503);
+  assert.equal((await settle.json()).error, 'signal_payments_unavailable');
+});
+
+test('mainnet agents cannot bypass permissioned spending with legacy signers', async () => {
+  const sns = await worker.fetch(new Request('https://runtime/bots/bot_1/sns/send', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'payment-signature': header },
-    body: JSON.stringify({ signalPayload: { tip: 'rotate LP' }, buyer: feePayer }),
-  }), env, { kind: 'signal-settle', botId: 'bot_1', signalId: 'apy-1' });
-  assert.equal(settle.status, 200);
-  const body = await settle.json();
-  assert.equal(body.next, 'released');
-  assert.equal(body.payload.tip, 'rotate LP');
+    headers: { 'x-owner-id': 'own_1' },
+    body: JSON.stringify({ execute: true }),
+  }), { executeSnsTransfer: () => assert.fail('unexpected SNS execution') });
+  assert.equal(sns.status, 409);
+  assert.equal((await sns.json()).error, 'use_permissioned_spend');
+
+  const raw = await worker.fetch(new Request('https://runtime/api/wallets/wal_1/sign', {
+    method: 'POST',
+    headers: { 'x-owner-id': 'own_1' },
+    body: JSON.stringify({ bot: { id: 'bot_1' }, transaction: 'unchecked' }),
+  }), {});
+  assert.equal(raw.status, 409);
+  assert.equal((await raw.json()).error, 'use_permissioned_spend');
 });
 
 /**
@@ -189,7 +180,7 @@ test('sns send builds unsigned intent from demo resolver', async () => {
 
 /**
  * Achieves: commerce owner routes reject via worker.fetch without x-owner-id;
- *   signal settle without payment-signature returns 402; grab-back without wallets is 400.
+ *   signal settle returns 503 on mainnet; grab-back without wallets is 400.
  * Fails when: owner checks are skipped at the Worker boundary or settle accepts empty pay.
  * Oracle: status codes + error codes through the live Worker dispatch path.
  * Side effects / state checked: none (no signer / store).
@@ -198,7 +189,7 @@ test('sns send builds unsigned intent from demo resolver', async () => {
 test('commerce exports via worker.fetch enforce owner and payment gates', async () => {
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     BOT: {
       idFromName: name => name,
       get: () => ({ fetch: async () => Response.json({ ok: true }) }),
@@ -225,8 +216,8 @@ test('commerce exports via worker.fetch enforce owner and payment gates', async 
     headers: { 'content-type': 'application/json' },
     body: '{}',
   }), env);
-  assert.equal(settle.status, 402);
-  assert.equal((await settle.json()).error, 'payment_signature_required');
+  assert.equal(settle.status, 503);
+  assert.equal((await settle.json()).error, 'signal_payments_unavailable');
 
   const grab = await worker.fetch(new Request('https://runtime/security/grab-back', {
     method: 'POST',

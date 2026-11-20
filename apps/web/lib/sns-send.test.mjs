@@ -9,14 +9,14 @@ const wallet = {
   ownerId: 'did:privy:abc',
   kind: 'main',
   label: 'Main',
-  address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   frozen: false,
   provider: 'privy',
 };
 const env = {
   PRIVY_APP_ID: 'app',
   PRIVY_APP_SECRET: 'secret',
-  QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+  SOLANA_RPC_URL: 'https://example.invalid/rpc',
 };
 
 /**
@@ -36,12 +36,12 @@ test('a send uses the owner passed in from SNS, not a fixed domain', () => {
 
 /**
  * Achieves: verifies missing QuickNode RPC is reported while still returning the resolved address.
- * Fails when: missing_config omits QUICKNODE_DEVNET_RPC_URL, or address is dropped on config failure.
- * Oracle: error missing_config; missing=['QUICKNODE_DEVNET_RPC_URL']; address preserved.
+ * Fails when: missing_config omits SOLANA_RPC_URL, or address is dropped on config failure.
+ * Oracle: error missing_config; missing=['SOLANA_RPC_URL']; address preserved.
  * Side effects / state checked: N/A.
  * Gaps: none for config gate.
  */
-test('a missing devnet RPC names the secret and still returns the resolved address', () => {
+test('a missing mainnet-beta RPC names the secret and still returns the resolved address', () => {
   const plan = planSnsSend({
     domain: '@richclub.sol',
     address: ADDRESS,
@@ -50,6 +50,6 @@ test('a missing devnet RPC names the secret and still returns the resolved addre
     env: { PRIVY_APP_ID: 'app', PRIVY_APP_SECRET: 'secret' },
   });
   assert.equal(plan.error, 'missing_config');
-  assert.deepEqual(plan.missing, ['QUICKNODE_DEVNET_RPC_URL']);
+  assert.deepEqual(plan.missing, ['SOLANA_RPC_URL']);
   assert.equal(plan.address, ADDRESS);
 });

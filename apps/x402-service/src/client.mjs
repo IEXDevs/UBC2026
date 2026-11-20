@@ -1,12 +1,13 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * x402 buyer for the price/trust Worker.
- * Reserves bot-policy budget, then pays devnet USDC from the bot wallet.
- * Signing goes through the transfers devnet helper. No RPC client is opened here.
+ * Reserves bot-policy budget, then pays mainnet-beta USDC from the bot wallet.
+ * Signing goes through the transfers mainnet-beta helper. No RPC client is opened here.
  */
 import { randomBytes } from 'node:crypto';
-import { DEVNET_USDC_MINT, NETWORKS, X402Error, buildPaymentSignature, paymentFeedEntry } from '@ubc2026/x402';
+import { SOLANA_USDC_MINT, NETWORKS, X402Error, buildPaymentSignature, paymentFeedEntry } from '@ubc2026/x402';
 import { PolicyError } from '@ubc2026/bot-policy/ledger';
-import { TransferError, transferDevnetUsdc } from '@ubc2026/transfers';
+import { TransferError, transferSolanaUsdc } from '@ubc2026/transfers';
 
 const KEY = /^[a-zA-Z0-9:_-]{1,128}$/;
 const fail = message => { throw new X402Error(message); };
@@ -18,7 +19,7 @@ export function buildX402Proposal({ bot, accepted, kind, mint, now, attemptId })
   return {
     id: attemptId,
     botId: bot.id,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     asset: 'USDC',
     recipient: accepted.payTo,
     quoteId: `${kind}:${mint}`,
@@ -87,7 +88,7 @@ export function createX402BotClient({
     if (!accepted || challenge?.resource?.url !== url) {
       return { state: 'blocked', reason: 'challenge-mismatch', paid: false, attemptId: id };
     }
-    if (accepted.scheme !== 'exact' || accepted.network !== NETWORKS.devnet || accepted.asset !== DEVNET_USDC_MINT) {
+    if (accepted.scheme !== 'exact' || accepted.network !== NETWORKS.solana || accepted.asset !== SOLANA_USDC_MINT) {
       return { state: 'blocked', reason: 'wrong-cluster', paid: false, attemptId: id };
     }
     if (payTo && accepted.payTo !== payTo) {
@@ -127,7 +128,7 @@ export function createX402BotClient({
 
     let sent;
     try {
-      sent = await transferDevnetUsdc({
+      sent = await transferSolanaUsdc({
         client,
         bot,
         wallet,
@@ -142,7 +143,7 @@ export function createX402BotClient({
       }
       throw error;
     }
-    if (!sent || sent.cluster !== 'devnet') fail('Refusing to pay outside Solana devnet');
+    if (!sent || sent.cluster !== SOLANA_CLUSTER) fail('Refusing to pay outside Solana mainnet-beta');
 
     const header = buildPaymentSignature({ accepted, signature: sent.signature });
     const second = await request(url, header);

@@ -1,7 +1,7 @@
 /** Browser-only bot order and locally created agents. Not a server record. */
 
 import { randomShape, SHAPES } from './bot-look.mjs';
-import { devnetSpendAsset } from '@ubc2026/contracts';
+import { solanaSpendAsset } from '@ubc2026/contracts';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const ID = /^bot_[a-z0-9_]{1,40}$/;
@@ -154,7 +154,7 @@ export function isTransferLimit(value) {
 }
 
 export function draftTransferCap(asset, maxOutflow, maxPerTransaction) {
-  const identifier = devnetSpendAsset(asset);
+  const identifier = solanaSpendAsset(asset);
   if (!identifier || !isTransferLimit(maxOutflow) || !isTransferLimit(maxPerTransaction)) return null;
   if (BigInt(maxPerTransaction) > BigInt(maxOutflow)) return null;
   return { mode: 'limited', asset: identifier, maxOutflow, maxPerTransaction };

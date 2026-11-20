@@ -1,5 +1,7 @@
 # Devpost form answers — Maelstrom
 
+> Historical pre-mainnet submission snapshot. The devnet wallet balances and deployment statements below are not mainnet assets or current deployment evidence. Current code defaults to mainnet-beta; use [the cutover checklist](docs/mainnet-switch.md). Sandbox purchases are disabled on mainnet.
+
 Copy source for the UBC 2026 Devpost form. Written from `dev` at `a45f458`. This file is not a submitted entry. It does not claim a prize or a metric.
 
 Still open, and not described below as finished:

@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planConnectedDeposit, planWalletMove } from './wallet-move.mjs';
+import { planConnectedDeposit, planWalletMove, selectOwnedMoveWallet } from './wallet-move.mjs';
 
 const env = {
   PRIVY_APP_ID: 'app',
   PRIVY_APP_SECRET: 'secret',
-  QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+  SOLANA_RPC_URL: 'https://example.invalid/rpc',
 };
 
 function wallet(id, address, extra = {}) {
@@ -21,8 +21,16 @@ function wallet(id, address, extra = {}) {
   };
 }
 
-const from = wallet('w_main', '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
+const from = wallet('w_main', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const to = wallet('w_shop', 'Hp6Qyx3K9McpE1w2V7LbNU1NpwjwpqRiiggrcveNrtHF');
+
+test('wallet moves take signing identity and freeze state from stored wallets', () => {
+  const stored = { ...from, frozen: true, spendable: true };
+  const selection = { ...from, privyWalletId: 'another-wallet' };
+  assert.deepEqual(selectOwnedMoveWallet([stored], selection), { ...stored, privyWalletId: from.id });
+  assert.equal(selectOwnedMoveWallet([stored], { ...selection, address: to.address }), null);
+  assert.equal(selectOwnedMoveWallet([{ ...stored, spendable: false }], selection), null);
+});
 
 /**
  * Achieves: a desk move plans both wallets, the amount, and the wallet.move memo.
@@ -43,7 +51,7 @@ test('a wallet move plans two different Privy wallets', () => {
   assert.equal(planWalletMove({ from, to, amount: '1', ownerId: 'did:privy:other', env }).error, 'owner_mismatch');
   const bare = planWalletMove({ from, to, amount: '1', ownerId: from.ownerId, env: {} });
   assert.equal(bare.error, 'missing_config');
-  assert.ok(bare.missing.includes('QUICKNODE_DEVNET_RPC_URL'));
+  assert.ok(bare.missing.includes('SOLANA_RPC_URL'));
 });
 
 /**

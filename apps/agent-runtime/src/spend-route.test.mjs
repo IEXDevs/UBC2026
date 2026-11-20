@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
 import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
-import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 import { SystemInstruction, Transaction } from '@solana/web3.js';
 import { decodeTransferCheckedInstruction } from '@solana/spl-token';
 import { sha256Hex } from './desk-grant.mjs';
@@ -19,7 +19,7 @@ const wallet = {
   ownerId: 'user_1',
   kind: 'main',
   label: 'Main',
-  address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   frozen: false,
   provider: 'privy',
 };
@@ -41,7 +41,7 @@ const ledger = { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', reali
 function spendEnv(extra = {}) {
   return {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     spendNow: NOW,
     trustLookup: null,
     loadSpendContext: async () => ({ bot, wallet, ledger }),
@@ -104,11 +104,11 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
       return new Response(null, { status: 201 });
     },
     transferClient: {
-      getDevnetBlockhash: async () => {
+      getSolanaBlockhash: async () => {
         blockhashReads++;
-        return { cluster: 'devnet', blockhash: DESTINATION };
+        return { cluster: 'mainnet-beta', blockhash: DESTINATION };
       },
-      prepareDevnetTransfer: async ({ transaction }) => {
+      prepareSolanaTransfer: async ({ transaction }) => {
         const ix = Transaction.from(Buffer.from(transaction, 'base64')).instructions[0];
         const transfer = SystemInstruction.decodeTransfer(ix);
         assert.equal(transfer.toPubkey.toBase58(), destination);
@@ -119,14 +119,14 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
         assert.equal(expiresAt, NOW + 60_000);
         return prepared.transaction;
       },
-      signPreparedDevnetTransfer: async input => {
+      signPreparedSolanaTransfer: async input => {
         assert.equal(input.prepared, prepared);
         assert.equal(input.prepared.transaction, originalTransaction);
         assert.equal(input.ownerAuthorization.signature, Buffer.alloc(64, 3).toString('base64'));
         assert.equal(input.accessToken, undefined);
         assert.equal(reserves, 1);
         signs++;
-        return { cluster: 'devnet', signature: 'mock_signature' };
+        return { cluster: 'mainnet-beta', signature: 'mock_signature' };
       },
     },
   });
@@ -220,12 +220,12 @@ test('over-limit SOL waits for a bound one-time approval, then reserves before s
       },
     },
     transferClient: {
-      getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: DESTINATION }),
-      prepareDevnetTransfer: async ({ transaction }) => ({ transaction, feeLamports }),
-      signPreparedDevnetTransfer: async () => {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      prepareSolanaTransfer: async ({ transaction }) => ({ transaction, feeLamports }),
+      signPreparedSolanaTransfer: async () => {
         assert.equal(reserves, 1);
         signs++;
-        return { cluster: 'devnet', signature: 'test_signature' };
+        return { cluster: 'mainnet-beta', signature: 'test_signature' };
       },
     },
   });
@@ -280,9 +280,9 @@ test('a confirmed send returns only public facts about a Privy signing failure',
   const env = spendEnv({
     loadSpendContext: async () => ({ bot: solBot, wallet, ledger: { ...ledger, asset: 'SOL' } }),
     transferClient: {
-      getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: DESTINATION }),
-      prepareDevnetTransfer: async ({ transaction }) => ({ transaction, feeLamports: '5000' }),
-      signPreparedDevnetTransfer: async () => {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      prepareSolanaTransfer: async ({ transaction }) => ({ transaction, feeLamports: '5000' }),
+      signPreparedSolanaTransfer: async () => {
         throw Object.assign(new Error('private provider diagnostics'), {
           code: 'wallet_authorization_failed',
           privyFailure: {
@@ -314,16 +314,16 @@ test('a confirmed send returns only public facts about a Privy signing failure',
   assert.doesNotMatch(JSON.stringify(body), /private/i);
 });
 
-test('a classic SPL send uses the exact mint and devnet decimals', async () => {
+test('a classic SPL send uses the exact mint and mainnet-beta decimals', async () => {
   const mint = 'So11111111111111111111111111111111111111112';
   const splBot = { ...bot, approvalMode: 'fully-automatic', cap: { ...bot.cap, asset: mint } };
   let reserved = false;
   const env = spendEnv({
     loadSpendContext: async () => ({ bot: splBot, wallet, ledger: { ...ledger, asset: mint } }),
     transferClient: {
-      getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: DESTINATION }),
-      readDevnetMint: async input => ({ cluster: 'devnet', mint: input.mint, decimals: 9 }),
-      prepareDevnetTransfer: async ({ transaction }) => {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      readSolanaMint: async input => ({ cluster: 'mainnet-beta', mint: input.mint, decimals: 9 }),
+      prepareSolanaTransfer: async ({ transaction }) => {
         const tx = Transaction.from(Buffer.from(transaction, 'base64'));
         const { keys, data } = decodeTransferCheckedInstruction(tx.instructions[0]);
         assert.equal(keys.mint.pubkey.toBase58(), mint);
@@ -332,9 +332,9 @@ test('a classic SPL send uses the exact mint and devnet decimals', async () => {
         assert.equal(tx.instructions.length, 2);
         return { transaction, feeLamports: '5000' };
       },
-      signPreparedDevnetTransfer: async () => {
+      signPreparedSolanaTransfer: async () => {
         assert.equal(reserved, true);
-        return { cluster: 'devnet', signature: 'mock_spl_signature' };
+        return { cluster: 'mainnet-beta', signature: 'mock_spl_signature' };
       },
     },
     ledgerApi: { reserveBudget: async ({ proposal }) => {
@@ -347,20 +347,20 @@ test('a classic SPL send uses the exact mint and devnet decimals', async () => {
   });
   const request = { permission: 'review', confirmed: true, botId: 'bot_1', action: 'pay', amount: '1000', asset: mint, destination: DESTINATION, idempotencyKey: 'test_spl_send' };
   assert.equal((await (await worker.fetch(spendRequest(request), env)).json()).signed, true);
-  env.transferClient.readDevnetMint = async () => ({ cluster: 'mainnet', mint, decimals: 9 });
+  env.transferClient.readSolanaMint = async () => ({ cluster: 'mainnet', mint, decimals: 9 });
   const invalid = await (await worker.fetch(spendRequest(request), env)).json();
   assert.equal(invalid.signed, false);
   assert.equal(invalid.error, 'transfer_preparation_failed');
 });
 
 /**
- * Achieves: full-permission spend signs on devnet through each spend step.
+ * Achieves: full-permission spend signs on mainnet-beta through each spend step.
  * Fails when: sign skipped or mainnet used.
- * Oracle: devnet signature path; step completion.
+ * Oracle: mainnet-beta signature path; step completion.
  * Side effects / state checked: signer mocks.
  * Gaps: none
  */
-test('full permissions sign on devnet after every spend step', async () => {
+test('full permissions sign on mainnet-beta after every spend step', async () => {
   const calls = [];
   const response = await worker.fetch(spendRequest({
     permission: 'full',
@@ -369,23 +369,23 @@ test('full permissions sign on devnet after every spend step', async () => {
     action: 'pay',
     amount: '1000',
     destination: DESTINATION,
-    quote: { privateKey: 'do-not-keep', pricingCluster: 'devnet' },
+    quote: { privateKey: 'do-not-keep', pricingCluster: 'mainnet-beta' },
   }), spendEnv({
     transferClient: {
-      async getDevnetBlockhash() {
-        return { cluster: 'devnet', blockhash: DESTINATION };
+      async getSolanaBlockhash() {
+        return { cluster: 'mainnet-beta', blockhash: DESTINATION };
       },
-      async signAndBroadcastDevnet(request) {
+      async signAndBroadcastSolana(request) {
         calls.push(request);
-        return { cluster: 'devnet', signature: 'sig_devnet_1', signed_transaction: 'secret-bytes' };
+        return { cluster: 'mainnet-beta', signature: 'sig_mainnet-beta_1', signed_transaction: 'secret-bytes' };
       },
     },
   }));
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.signed, true);
-  assert.equal(body.signature, 'sig_devnet_1');
-  assert.equal(body.cluster, 'devnet');
+  assert.equal(body.signature, 'sig_mainnet-beta_1');
+  assert.equal(body.cluster, 'mainnet-beta');
   assert.deepEqual(body.steps, [
     'trust-gate',
     'verify-consensus',
@@ -418,12 +418,12 @@ test('a mainnet quote never authorizes a signature', async () => {
     quote: { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false },
   }), spendEnv({
     transferClient: {
-      async getDevnetBlockhash() {
-        return { cluster: 'devnet', blockhash: DESTINATION };
+      async getSolanaBlockhash() {
+        return { cluster: 'mainnet-beta', blockhash: DESTINATION };
       },
-      async signAndBroadcastDevnet() {
+      async signAndBroadcastSolana() {
         signed = true;
-        return { cluster: 'devnet', signature: 'sig_should_not' };
+        return { cluster: 'mainnet-beta', signature: 'sig_should_not' };
       },
     },
   }));
@@ -466,7 +466,7 @@ test('voice request_spend does not call the spend route', async () => {
   }), {
     ELEVENLABS_WEBHOOK_SECRET: SECRET,
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
   }, {
     fetchApi: async (request) => {
       seen = { url: request.url, body: JSON.parse(await request.text()) };
@@ -493,15 +493,15 @@ test('voice request_spend does not call the spend route', async () => {
  * Gaps: live Jupiter is not called.
  */
 test('full permission signs after Jupiter trust and a failed lookup does not', async () => {
-  const mint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   let signed = 0;
   const client = {
-    async getDevnetBlockhash() {
-      return { cluster: 'devnet', blockhash: DESTINATION };
+    async getSolanaBlockhash() {
+      return { cluster: 'mainnet-beta', blockhash: DESTINATION };
     },
-    async signAndBroadcastDevnet() {
+    async signAndBroadcastSolana() {
       signed += 1;
-      return { cluster: 'devnet', signature: 'sig_jupiter_full' };
+      return { cluster: 'mainnet-beta', signature: 'sig_jupiter_full' };
     },
   };
   const highEnv = spendEnv({
@@ -625,7 +625,7 @@ function lockedDeskEnv(extra = {}, grantHash = 'ab'.repeat(32)) {
 }
 
 /**
- * Achieves: a missing grant cannot finish a spend, and a valid grant still runs every gate before devnet sign.
+ * Achieves: a missing grant cannot finish a spend, and a valid grant still runs every gate before mainnet-beta sign.
  * Fails when: a bare owner signs, a valid grant skips trust or reserve, or max loss signs.
  * Oracle: no grant stays unsigned after trust and approval; 1000000 with the grant signs once.
  * Side effects: in-memory ledger and mocked desk row. The grant value is a test hash, not a password.
@@ -653,12 +653,12 @@ test('a locked desk does not answer before the spend gates', async () => {
   };
   let signed = 0;
   const client = {
-    async getDevnetBlockhash() {
-      return { cluster: 'devnet', blockhash: DESTINATION };
+    async getSolanaBlockhash() {
+      return { cluster: 'mainnet-beta', blockhash: DESTINATION };
     },
-    async signAndBroadcastDevnet() {
+    async signAndBroadcastSolana() {
       signed += 1;
-      return { cluster: 'devnet', signature: 'sig_locked_desk' };
+      return { cluster: 'mainnet-beta', signature: 'sig_locked_desk' };
     },
   };
   const body = {
@@ -735,8 +735,8 @@ test('a locked desk does not answer before the spend gates', async () => {
       checks += 1;
       return {
         asset: 'USDC',
-        mint: DEVNET_USDC_MINT,
-        cluster: 'devnet',
+        mint: SOLANA_USDC_MINT,
+        cluster: 'mainnet-beta',
         price: '1000000',
         amount: '1',
         trustScore: '800',
@@ -792,12 +792,12 @@ test('a 1 USDC buy is not invalid_spend and an over-cap buy stops at the cap', a
   });
   let signed = 0;
   const client = {
-    async getDevnetBlockhash() {
-      return { cluster: 'devnet', blockhash: DESTINATION };
+    async getSolanaBlockhash() {
+      return { cluster: 'mainnet-beta', blockhash: DESTINATION };
     },
-    async signAndBroadcastDevnet() {
+    async signAndBroadcastSolana() {
       signed += 1;
-      return { cluster: 'devnet', signature: 'sig_should_not' };
+      return { cluster: 'mainnet-beta', signature: 'sig_should_not' };
     },
   };
   const env = spendEnv({
@@ -811,14 +811,14 @@ test('a 1 USDC buy is not invalid_spend and an over-cap buy stops at the cap', a
     action: 'buy',
     amount: 1000000,
     asset: 'USDC',
-    quoteCluster: 'devnet',
+    quoteCluster: 'mainnet-beta',
   }), env);
   const body = await within.json();
   assert.equal(body.error, undefined);
   assert.equal(within.status, 200);
   assert.equal(body.signed, false);
   assert.equal(body.state, 'reserved');
-  assert.equal(body.cluster, 'devnet');
+  assert.equal(body.cluster, 'mainnet-beta');
   assert.equal(body.steps.includes('trust-gate'), true);
   assert.equal(body.steps.includes('verify-consensus'), true);
   assert.equal(body.steps.includes('wallet-freeze'), true);
@@ -836,7 +836,7 @@ test('a 1 USDC buy is not invalid_spend and an over-cap buy stops at the cap', a
     action: 'buy',
     amount: '72860000',
     asset: 'USDC',
-    quoteCluster: 'devnet',
+    quoteCluster: 'mainnet-beta',
     idempotencyKey: 'over_cap',
   }), env);
   const overBody = await over.json();
@@ -886,12 +886,12 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
     },
   };
   const client = {
-    async getDevnetBlockhash() {
-      return { cluster: 'devnet', blockhash: DESTINATION };
+    async getSolanaBlockhash() {
+      return { cluster: 'mainnet-beta', blockhash: DESTINATION };
     },
-    async signAndBroadcastDevnet() {
+    async signAndBroadcastSolana() {
       signed += 1;
-      return { cluster: 'devnet', signature: 'sig_should_not' };
+      return { cluster: 'mainnet-beta', signature: 'sig_should_not' };
     },
   };
   let mode = 'down';
@@ -906,7 +906,7 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
         return Response.json([{ id: 'not-the-mint', organicScore: 99, isVerified: true }]);
       }
       return Response.json([{
-        id: DEVNET_USDC_MINT,
+        id: SOLANA_USDC_MINT,
         organicScore: 10,
         isVerified: false,
       }]);
@@ -923,7 +923,7 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
     action: 'buy',
     amount: 1000000,
     asset: 'USDC',
-    quoteCluster: 'devnet',
+    quoteCluster: 'mainnet-beta',
   };
 
   const held = await worker.fetch(spendRequest(buy), baseEnv());
@@ -933,7 +933,7 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
   assert.equal(heldBody.signed, false);
   assert.equal(heldBody.state, 'trust-confirmation-required');
   assert.equal(heldBody.prompt, 'This has a low trust score, are you sure you want to buy?');
-  assert.equal(heldBody.cluster, 'devnet');
+  assert.equal(heldBody.cluster, 'mainnet-beta');
   assert.equal(heldBody.trustScore, undefined);
   assert.equal(JSON.stringify(heldBody).includes('800'), false);
   assert.equal(heldBody.steps.includes('trust-gate'), true);

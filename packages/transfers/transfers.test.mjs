@@ -3,23 +3,23 @@ import assert from 'node:assert/strict';
 import { Keypair, Transaction } from '@solana/web3.js';
 import { assignBotWallet, createAdditionalWallet, createMainWallet } from '@ubc2026/wallets';
 import {
-  DEVNET_GENESIS_HASH,
+  SOLANA_GENESIS_HASH,
   WalletError,
   createPrivyWalletClient,
 } from '@ubc2026/wallets/privy';
-import { DEVNET_USDC_MINT } from '@ubc2026/x402';
+import { SOLANA_USDC_MINT } from '@ubc2026/x402';
 import {
   ASSOCIATED_TOKEN_PROGRAM,
-  DEVNET_USDC_DECIMALS,
+  SOLANA_USDC_DECIMALS,
   MAINNET_USDC_MINT,
   MEMO_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
   TransferError,
-  buildDevnetUsdcTransaction,
+  buildSolanaUsdcTransaction,
   depositFromWalletAdapter,
   grabBackToMain,
   moveBetweenWallets,
-  transferDevnetUsdc,
+  transferSolanaUsdc,
   withdrawToWalletAdapter,
 } from './transfers.mjs';
 
@@ -90,9 +90,9 @@ function client(fetcher, routes) {
   };
 }
 
-function devnetRoutes({ sign = true } = {}) {
+function solanaRoutes({ sign = true } = {}) {
   const routes = [
-    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: DEVNET_GENESIS_HASH } },
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: SOLANA_GENESIS_HASH } },
     { match: (url, body) => url === rpcUrl && body?.method === 'sendTransaction', body: { result: txSignature } },
   ];
   if (sign) {
@@ -119,27 +119,27 @@ function assertMoveThenMemo(base64, { payer, amount, memo }) {
   assert.equal(transfer.programId.toBase58(), SPL_TOKEN_PROGRAM_ID);
   assert.equal(transfer.data[0], 12);
   assert.equal(transfer.data.readBigUInt64LE(1), BigInt(amount));
-  assert.equal(transfer.data[9], DEVNET_USDC_DECIMALS);
+  assert.equal(transfer.data[9], SOLANA_USDC_DECIMALS);
   assert.equal(note.programId.toBase58(), MEMO_PROGRAM_ID);
   assert.equal(note.data.toString('utf8'), memo);
   assert.equal(tx.instructions.some(ix => ix.programId.toBase58() === MAINNET_USDC_MINT), false);
   const mintKey = transfer.keys[1].pubkey.toBase58();
-  assert.equal(mintKey, DEVNET_USDC_MINT);
-  assert.notEqual(mintKey, MAINNET_USDC_MINT);
+  assert.equal(mintKey, SOLANA_USDC_MINT);
+  assert.equal(mintKey, MAINNET_USDC_MINT);
   return tx;
 }
 
 /**
- * Achieves: transferDevnetUsdc signs via Privy then broadcasts a create-ATA + transferChecked + memo tx for DEVNET_USDC only.
+ * Achieves: transferSolanaUsdc signs via Privy then broadcasts a create-ATA + transferChecked + memo tx for SOLANA_USDC only.
  * Fails when: Mainnet mint appears, memo/order wrong, secrets leak, or sendTransaction skipped/duplicated wrongly.
- * Oracle: SPL Token transferChecked + memo program layout + DEVNET_USDC_MINT.
+ * Oracle: SPL Token transferChecked + memo program layout + SOLANA_USDC_MINT.
  * Side effects: Injected Privy/RPC mock fetch.
  * Gaps: Does not cover ATA already-exists races.
  */
-test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', async () => {
+test('a bot transfer is Privy-signed, then a mainnet-beta USDC move, then a memo', async () => {
   const memo = 'decision:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-  const { client: signer, calls } = client(null, devnetRoutes());
-  const moved = await transferDevnetUsdc({
+  const { client: signer, calls } = client(null, solanaRoutes());
+  const moved = await transferSolanaUsdc({
     client: signer,
     bot,
     wallet: mainWallet,
@@ -149,9 +149,9 @@ test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', asy
     recentBlockhash: blockhash,
   });
   assert.equal(moved.kind, 'transfer');
-  assert.equal(moved.cluster, 'devnet');
+  assert.equal(moved.cluster, 'mainnet-beta');
   assert.equal(moved.signature, txSignature);
-  assert.equal(moved.mint, DEVNET_USDC_MINT);
+  assert.equal(moved.mint, SOLANA_USDC_MINT);
   const sign = calls.find(call => call.body?.method === 'signTransaction');
   assertMoveThenMemo(sign.body.params.transaction, {
     payer: mainWallet.address,
@@ -168,24 +168,24 @@ test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', asy
 /**
  * Achieves: build/transfer refuse mainnet cluster, frozen wallets, and mainnet genesis before sendTransaction.
  * Fails when: Any of those paths still broadcasts.
- * Oracle: DEVNET_GENESIS_HASH gate + WalletError/TransferError codes.
+ * Oracle: SOLANA_GENESIS_HASH gate + WalletError/TransferError codes.
  * Side effects: Injected mocks; asserts no sign/send side effects.
  * Gaps: Does not cover testnet genesis explicitly.
  */
 test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', async () => {
   const calls = [];
   const signer = {
-    async signAndBroadcastDevnet() {
+    async signAndBroadcastSolana() {
       calls.push('sign');
       return { cluster: 'mainnet', signature: txSignature };
     },
-    async getDevnetBlockhash() {
+    async getSolanaBlockhash() {
       calls.push('hash');
-      return { cluster: 'devnet', blockhash };
+      return { cluster: 'mainnet-beta', blockhash };
     },
   };
   assert.throws(
-    () => buildDevnetUsdcTransaction({
+    () => buildSolanaUsdcTransaction({
       feePayer: mainWallet.address,
       sourceOwner: mainWallet.address,
       destinationOwner: recipient.publicKey.toBase58(),
@@ -197,7 +197,7 @@ test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', as
     error => error instanceof TransferError && error.code === 'wrong_cluster',
   );
   await assert.rejects(
-    () => transferDevnetUsdc({
+    () => transferSolanaUsdc({
       client: signer,
       bot,
       wallet: { ...mainWallet, frozen: true },
@@ -216,7 +216,7 @@ test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', as
     },
   ]);
   await assert.rejects(
-    () => transferDevnetUsdc({
+    () => transferSolanaUsdc({
       client: live,
       bot,
       wallet: mainWallet,
@@ -232,13 +232,13 @@ test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', as
 });
 
 /**
- * Achieves: External adapter signs locally; runtime broadcasts on verified devnet; adapter never sendTransaction; mainnet genesis blocks before sign.
+ * Achieves: External adapter signs locally; runtime broadcasts on verified solana; adapter never sendTransaction; mainnet genesis blocks before sign.
  * Fails when: Adapter broadcasts, Privy signs deposits, or mainnet still sends.
  * Oracle: Deposit path ownership: adapter signs, QuickNode broadcasts.
  * Side effects: Injected adapter + RPC mocks.
  * Gaps: Does not cover adapter disconnect mid-sign.
  */
-test('wallet adapter deposit signs locally and broadcasts only on devnet', async () => {
+test('wallet adapter deposit signs locally and broadcasts only on mainnet-beta', async () => {
   let signed = 0;
   let adapterSent = 0;
   const adapter = {
@@ -253,7 +253,7 @@ test('wallet adapter deposit signs locally and broadcasts only on devnet', async
       return tx;
     },
   };
-  const { client: signer, calls } = client(null, devnetRoutes({ sign: false }));
+  const { client: signer, calls } = client(null, solanaRoutes({ sign: false }));
   const deposited = await depositFromWalletAdapter({
     client: signer,
     adapter,
@@ -310,7 +310,7 @@ test('withdraw, wallet moves, and grab-back return USDC to the main wallet', asy
     sendTransaction() { throw new Error('adapter must not broadcast'); },
     async signTransaction() { adapterSigned += 1; },
   };
-  const { client: signer, calls } = client(null, devnetRoutes());
+  const { client: signer, calls } = client(null, solanaRoutes());
   const withdrawn = await withdrawToWalletAdapter({
     client: signer,
     ownerId: 'user_1',
@@ -363,21 +363,21 @@ test('withdraw, wallet moves, and grab-back return USDC to the main wallet', asy
 });
 
 /**
- * Achieves: Missing balances are read via getTokenAccountsByOwner for DEVNET_USDC; partial grab failures retain completed moves.
+ * Achieves: Missing balances are read via getTokenAccountsByOwner for SOLANA_USDC; partial grab failures retain completed moves.
  * Fails when: Mainnet mint queried, or earlier successes discarded on later failure.
  * Oracle: TransferError.completed partial-failure contract.
  * Side effects: Injected RPC mocks.
  * Gaps: Does not retry/resume remaining sleeves after failure.
  */
-test('grab-back can read devnet balances and keeps earlier sweeps when a later one fails', async () => {
-  const routes = devnetRoutes();
+test('grab-back can read mainnet-beta balances and keeps earlier sweeps when a later one fails', async () => {
+  const routes = solanaRoutes();
   routes.push({
     match: (url, body) => url === rpcUrl && body?.method === 'getTokenAccountsByOwner',
     body: {
       result: {
         value: [{
           account: {
-            data: { parsed: { info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
+            data: { parsed: { info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
           },
         }],
       },
@@ -393,18 +393,18 @@ test('grab-back can read devnet balances and keeps earlier sweeps when a later o
   });
   assert.equal(grabbed.moves[0].amount, '42');
   const balanceCall = calls.find(call => call.body?.method === 'getTokenAccountsByOwner');
-  assert.deepEqual(balanceCall.body.params[1], { mint: DEVNET_USDC_MINT });
-  assert.notEqual(DEVNET_USDC_MINT, MAINNET_USDC_MINT);
+  assert.deepEqual(balanceCall.body.params[1], { mint: SOLANA_USDC_MINT });
+  assert.equal(SOLANA_USDC_MINT, MAINNET_USDC_MINT);
 
   let attempts = 0;
   const failing = {
-    async signAndBroadcastOwnerDevnet() {
+    async signAndBroadcastOwnerSolana() {
       attempts += 1;
       if (attempts === 2) {
-        const error = new WalletError('Devnet broadcast did not return a signature', 'rpc_rejected');
+        const error = new WalletError('Solana broadcast did not return a signature', 'rpc_rejected');
         throw error;
       }
-      return { cluster: 'devnet', signature: txSignature };
+      return { cluster: 'mainnet-beta', signature: txSignature };
     },
   };
   await assert.rejects(

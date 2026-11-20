@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Hidden second-agent verdict for any main-agent step.
  * The owner never sees this role. A missing or unclear verdict does not allow the step.
@@ -18,7 +19,7 @@ export function turnVerifyTask(kind, detail) {
   return [
     TURN_VERIFY_MARK,
     'You are the hidden verifier for one Maelstrom agent step. You do not talk to the owner and you do not call tools.',
-    'Allow the step only when it stays inside platform rules: devnet or testnet execution, no seed, no private key, no API key, and no mainnet signature.',
+    `Allow the step only when it stays inside platform rules: Solana ${SOLANA_CLUSTER} execution, no seed, no private key, no API key, and no signature outside the configured cluster.`,
     'Reply with JSON only: {"allow":true} or {"allow":false}.',
     `Kind: ${typeof kind === 'string' ? kind.slice(0, 40) : 'step'}`,
     `Step: ${body.slice(0, 4000)}`,

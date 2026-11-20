@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * ElevenLabs is speech in and speech out.
  * The desk text agent writes the reply. This Worker does not run a second
@@ -45,7 +46,7 @@ const voiceSituations = new Map();
 
 export function ownerPermissionNote(value) {
   if (value === 'full') {
-    return 'The owner set full permissions and let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay. Infer the action and call request_spend. A mainnet price quote never authorizes a transaction. Execution stays on Solana devnet.';
+    return 'The owner set full permissions and let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay. Infer the action and call request_spend. A mainnet price quote never authorizes a transaction. Execution stays on configured Solana network.';
   }
   if (value === 'review') {
     return 'The owner set review by AI. State what would change and wait before a trade or a spend. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. A transaction is not sent until they confirm.';
@@ -769,7 +770,7 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
     if (typeof params.destination === 'string') body.destination = params.destination;
     if (typeof params.handle === 'string') body.handle = params.handle;
     if (typeof params.asset === 'string') body.asset = params.asset;
-    if (params.quoteCluster === 'devnet' || params.quoteCluster === 'mainnet') body.quoteCluster = params.quoteCluster;
+    if (params.quoteCluster === SOLANA_CLUSTER || params.quoteCluster === 'mainnet') body.quoteCluster = params.quoteCluster;
     const reviewCap = typeof options.reviewCap === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(options.reviewCap) && options.reviewCap !== '0'
       ? options.reviewCap
       : '';
@@ -870,7 +871,7 @@ function validateParameters(toolDef, parameters) {
     if (typeof parameters.destination !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.destination)) return false;
   }
   if (toolDef.properties.quoteCluster && parameters.quoteCluster != null) {
-    if (parameters.quoteCluster !== 'mainnet' && parameters.quoteCluster !== 'devnet') return false;
+    if (parameters.quoteCluster !== 'mainnet' && parameters.quoteCluster !== SOLANA_CLUSTER) return false;
   }
   if (toolDef.properties.botId && parameters.botId != null && parameters.botId !== '') {
     if (typeof parameters.botId !== 'string' || !ID.test(parameters.botId)) return false;

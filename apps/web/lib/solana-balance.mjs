@@ -1,7 +1,8 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
- * Display model for the assigned Privy wallet's Solana devnet balances.
+ * Display model for the assigned Privy wallet's Solana mainnet-beta balances.
  * No RPC here — the browser can import this. The server read lives in
- * devnet-balance-read.mjs.
+ * solana-balance-read.mjs.
  */
 import { formatBaseUnits } from './money-views.mjs';
 
@@ -25,11 +26,11 @@ export function assignedWalletAddress(wallets) {
 }
 
 /**
- * Confirmed devnet SOL and USDC, plus any other token the wallet actually holds.
+ * Confirmed mainnet-beta SOL and USDC, plus any other token the wallet actually holds.
  * A mainnet cluster is refused. A missing ledger is irrelevant here.
  */
-export function devnetSpendableLabel(balance) {
-  if (!balance || balance.ok !== true || balance.cluster !== 'devnet') return null;
+export function solanaSpendableLabel(balance) {
+  if (!balance || balance.ok !== true || balance.cluster !== SOLANA_CLUSTER) return null;
   if (typeof balance.solLamports !== 'string' || !UNITS.test(balance.solLamports)) return null;
   if (typeof balance.usdcAmount !== 'string' || !UNITS.test(balance.usdcAmount)) return null;
   const parts = [

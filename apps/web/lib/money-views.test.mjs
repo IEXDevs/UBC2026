@@ -66,7 +66,7 @@ test('demo money rows match the contract shapes', () => {
   assert.equal(payments[0].direction, 'paid');
   assert.equal(payments[0].amountLabel, '0.01 USDC');
   assert.equal(payments[0].badge, null);
-  assert.match(payments[1].detail, /Meteora · x402 · devnet/);
+  assert.match(payments[1].detail, /Meteora · x402 · mainnet-beta/);
 
   const wallets = describeWallets(state.wallets, state.bots);
   assert.equal(wallets[0].kind, 'main');
@@ -77,7 +77,7 @@ test('demo money rows match the contract shapes', () => {
   const positions = describePositions(state.positions, state.bots);
   assert.equal(positions[0].amountLabel, '25 USDC');
   assert.equal(positions[0].pnlLabel, '-1.5 USDC');
-  assert.match(positions[0].note, /devnet execution, mainnet pricing/);
+  assert.match(positions[0].note, /mainnet-beta execution, mainnet pricing/);
 
   const history = describeHistory(state.payments, state.bots);
   assert.equal(history[0].solscanUrl, null);
@@ -89,7 +89,7 @@ test('demo money rows match the contract shapes', () => {
   assert.equal(history[1].flow, 'in');
   assert.equal(history[1].signedFigure, '+0.25');
   assert.equal(history[1].protocol, 'x402');
-  assert.equal(history[1].cluster, 'devnet');
+  assert.equal(history[1].cluster, 'mainnet-beta');
   assert.equal(walletGlance(state.wallets, state.positions).balanceLabel, '25 USDC');
   assert.equal(walletGlance(state.wallets, state.positions).label, 'Main');
   assert.equal(walletGlance(state.wallets, state.positions, [
@@ -99,8 +99,8 @@ test('demo money rows match the contract shapes', () => {
 
 /**
  * Achieves: verifies wallet addresses show the first five and last five characters.
- * Fails when: wallet addresses show the first five and last five characters breaks (e.g. expected '4zMMC...DncDU', 'short').
- * Oracle: assert.equal(shortAddress(address), '4zMMC...DncDU'); assert.equal(shortAddress('short'), 'short')
+ * Fails when: wallet addresses show the first five and last five characters breaks (e.g. expected 'EPjFW...TDt1v', 'short').
+ * Oracle: assert.equal(shortAddress(address), 'EPjFW...TDt1v'); assert.equal(shortAddress('short'), 'short')
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
@@ -135,14 +135,14 @@ test('registered holdings sum wallets and the agent chip is not the owner total'
 });
 
 /**
- * Achieves: a confirmed devnet SOL/USDC label replaces the platform book, even with no ledger rows.
+ * Achieves: a confirmed mainnet-beta SOL/USDC label replaces the platform book, even with no ledger rows.
  * Fails when: the chip stays on the transfer net, or a mainnet-looking label is shown.
  * Oracle: chainLabel '0 SOL · 20 USDC' wins over a 5 USDC book and over empty positions.
  * Side effects / state checked: N/A.
  * Gaps: does not call RPC.
  */
-test('devnet chain label is the holdings number when the wallet read is in', () => {
-  const wallets = [{ id: 'w_main', kind: 'main', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' }];
+test('mainnet-beta chain label is the holdings number when the wallet read is in', () => {
+  const wallets = [{ id: 'w_main', kind: 'main', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' }];
   const transfers = [{ asset: 'USDC', amount: '5000000', direction: 'in' }];
   const chainLabel = '0 SOL · 20 USDC';
   assert.equal(registeredHoldingsLabel({ wallets, positions: [], transfers, chainLabel }), chainLabel);
@@ -160,8 +160,8 @@ test('devnet chain label is the holdings number when the wallet read is in', () 
 });
 
 test('wallet addresses show the first five and last five characters', () => {
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
-  assert.equal(shortAddress(address), '4zMMC...DncDU');
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  assert.equal(shortAddress(address), 'EPjFW...TDt1v');
   assert.equal(shortAddress('short'), 'short');
 });
 
@@ -190,26 +190,26 @@ test('send captions use the bot name, then the wallet name', () => {
 });
 
 /**
- * Achieves: verifies solscan links cover devnet, testnet, and mainnet signatures.
- * Fails when: solscan links cover devnet, testnet, and mainnet signatures breaks (e.g. expected 'devnet', 'devnet', 'mainnet'); failure/null paths flip.
- * Oracle: assert.equal(solscanTxUrl(signature, 'devnet'); assert.equal(solanaExplorerTxUrl(signature, 'devnet'); assert.equal(solscanTxUrl(signature, 'mainnet'); assert.equal(solscanTxUrl(null, 'devnet'); assert.equal(solscanTxUrl(signature, 'mainnet-beta'); assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta')
+ * Achieves: verifies solscan links cover solana, testnet, and mainnet signatures.
+ * Fails when: solscan links cover solana, testnet, and mainnet signatures breaks (e.g. expected 'mainnet-beta', 'mainnet-beta', 'mainnet'); failure/null paths flip.
+ * Oracle: assert.equal(solscanTxUrl(signature, 'mainnet-beta'); assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta'); assert.equal(solscanTxUrl(signature, 'mainnet'); assert.equal(solscanTxUrl(null, 'mainnet-beta'); assert.equal(solscanTxUrl(signature, 'devnet'); assert.equal(solanaExplorerTxUrl(signature, 'devnet')
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
-test('solscan links cover devnet, testnet, and mainnet signatures', () => {
+test('solscan links cover solana, testnet, and mainnet signatures', () => {
   const signature = '5'.repeat(64);
+  assert.equal(solscanTxUrl(signature, 'mainnet-beta'), `https://solscan.io/tx/${signature}`);
+  assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta'), `https://explorer.solana.com/tx/${signature}`);
+  assert.equal(solscanTxUrl(signature, 'mainnet'), `https://solscan.io/tx/${signature}`);
+  assert.equal(solscanTxUrl(null, 'mainnet-beta'), null);
   assert.equal(solscanTxUrl(signature, 'devnet'), `https://solscan.io/tx/${signature}?cluster=devnet`);
   assert.equal(solanaExplorerTxUrl(signature, 'devnet'), `https://explorer.solana.com/tx/${signature}?cluster=devnet`);
-  assert.equal(solscanTxUrl(signature, 'mainnet'), `https://solscan.io/tx/${signature}`);
-  assert.equal(solscanTxUrl(null, 'devnet'), null);
-  assert.equal(solscanTxUrl(signature, 'mainnet-beta'), null);
-  assert.equal(solanaExplorerTxUrl(signature, 'mainnet-beta'), null);
 });
 
 /**
  * Achieves: verifies stream-confirmed payments show the badge and unapproved spend is an alert.
- * Fails when: stream-confirmed payments show the badge and unapproved spend is an alert breaks (e.g. expected 'confirmed', 'out', `https://solscan.io/tx/${signature}?cluster=devnet`).
- * Oracle: assert.equal(row.badge, 'confirmed'); assert.equal(row.flow, 'out'); assert.equal(row.solscanUrl, `https://solscan.io/tx/${signature}?cluster=devnet`); assert.deepEqual(alerts, [{ walletId: 'w1', asset: 'USDC', excessLabel: '1.5' }]); assert.deepEqual(describeSpendAlerts([]), [])
+ * Fails when: stream-confirmed payments show the badge and unapproved spend is an alert breaks (e.g. expected 'confirmed', 'out', `https://solscan.io/tx/${signature}`).
+ * Oracle: assert.equal(row.badge, 'confirmed'); assert.equal(row.flow, 'out'); assert.equal(row.solscanUrl, `https://solscan.io/tx/${signature}`); assert.deepEqual(alerts, [{ walletId: 'w1', asset: 'USDC', excessLabel: '1.5' }]); assert.deepEqual(describeSpendAlerts([]), [])
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
@@ -222,8 +222,8 @@ test('stream-confirmed payments show the badge and unapproved spend is an alert'
     protocol: 'x402',
     amount: '1500000',
     asset: 'USDC',
-    counterparty: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-    cluster: 'devnet',
+    counterparty: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    cluster: 'mainnet-beta',
     txSignature: signature,
     streamConfirmed: true,
     badge: 'confirmed',
@@ -231,7 +231,7 @@ test('stream-confirmed payments show the badge and unapproved spend is an alert'
   const [row] = describeHistory([payment], [{ id: 'bot_shop', name: 'Sandbox shopper' }]);
   assert.equal(row.badge, 'confirmed');
   assert.equal(row.flow, 'out');
-  assert.equal(row.solscanUrl, `https://solscan.io/tx/${signature}?cluster=devnet`);
+  assert.equal(row.solscanUrl, `https://solscan.io/tx/${signature}`);
   const alerts = describeSpendAlerts([
     { walletId: 'w1', alert: 'unapproved_spend', freeze: true, excess: '1500000', asset: 'USDC' },
     { walletId: 'w2', alert: null, freeze: false, excess: '0' },

@@ -1,5 +1,6 @@
 export const runtime = 'nodejs';
 
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { choosePortfolioRpc, loadPortfolio, PortfolioError } from '../../../lib/portfolio.mjs';
 import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
@@ -33,7 +34,7 @@ async function portfolioEnv() {
       PRIVY_APP_SECRET: secretFrom(cfEnv, 'PRIVY_APP_SECRET'),
       PRIVY_AUTHORIZATION_KEY: secretFrom(cfEnv, 'PRIVY_AUTHORIZATION_KEY'),
       NEXT_PUBLIC_PRIVY_APP_ID: secretFrom(cfEnv, 'NEXT_PUBLIC_PRIVY_APP_ID'),
-      QUICKNODE_DEVNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_DEVNET_RPC_URL'),
+      SOLANA_RPC_URL: secretFrom(cfEnv, 'SOLANA_RPC_URL'),
       QUICKNODE_MAINNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_MAINNET_RPC_URL'),
     },
   };
@@ -115,7 +116,7 @@ export async function GET(request) {
       // Public HTTPS only. A service-binding fetch turns QuickNode into a Worker 404.
       fetcher: globalThis.fetch.bind(globalThis),
     });
-    if (requestedCluster === 'devnet' && portfolio.cluster !== 'devnet') throw new PortfolioError('unsupported_cluster');
+    if (requestedCluster === SOLANA_CLUSTER && portfolio.cluster !== (SOLANA_CLUSTER === 'mainnet-beta' ? 'mainnet' : SOLANA_CLUSTER)) throw new PortfolioError('unsupported_cluster');
     return Response.json(portfolio, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = error instanceof PortfolioError ? error.code : walletErrorCode(error);

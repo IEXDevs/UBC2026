@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Persist paper position checks through the Supabase service role.
  * Caller must pass a verified ownerId (from the bot row / cron plan), never a
@@ -102,10 +103,10 @@ export async function persistPositionCheck(env, { ownerId, botId, check, positio
         realized_micro_usdc: '0',
         status: 'open',
         mode: 'paper',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         opened_at: at,
         updated_at: at,
-        label: 'devnet execution, mainnet pricing',
+        label: EXECUTION_LABEL,
       },
       prefer: 'resolution=merge-duplicates,return=minimal',
       fetcher,

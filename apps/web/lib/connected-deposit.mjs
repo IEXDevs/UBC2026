@@ -1,11 +1,12 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Connected-wallet deposit onto the owner's main wallet.
- * Prepare builds the unsigned devnet USDC transfer.
+ * Prepare builds the unsigned mainnet-beta USDC transfer.
  * Broadcast accepts only a signature over that same transfer.
  * Wallet records come from the verified owner, never the request body.
  */
 import { Transaction } from '@solana/web3.js';
-import { buildDevnetUsdcTransaction } from '@ubc2026/transfers';
+import { buildSolanaUsdcTransaction } from '@ubc2026/transfers';
 import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
 import { readRootEnv } from './root-env.mjs';
 import { planConnectedDeposit } from './wallet-move.mjs';
@@ -19,7 +20,7 @@ function rootEnv() {
   return {
     PRIVY_APP_ID: readRootEnv('PRIVY_APP_ID'),
     PRIVY_APP_SECRET: readRootEnv('PRIVY_APP_SECRET'),
-    QUICKNODE_DEVNET_RPC_URL: readRootEnv('QUICKNODE_DEVNET_RPC_URL'),
+    SOLANA_RPC_URL: readRootEnv('SOLANA_RPC_URL'),
     PRIVY_AUTHORIZATION_KEY: readRootEnv('PRIVY_AUTHORIZATION_KEY'),
     NEXT_PUBLIC_PRIVY_APP_ID: readRootEnv('NEXT_PUBLIC_PRIVY_APP_ID'),
     SUPABASE_URL: readRootEnv('SUPABASE_URL'),
@@ -31,7 +32,7 @@ function clientFrom(secrets) {
   return createPrivyWalletClient({
     appId: resolvePrivyAppId(secrets),
     appSecret: secrets.PRIVY_APP_SECRET,
-    rpcUrl: secrets.QUICKNODE_DEVNET_RPC_URL,
+    rpcUrl: secrets.SOLANA_RPC_URL,
     authorizationKey: secrets.PRIVY_AUTHORIZATION_KEY || null,
   });
 }
@@ -117,7 +118,7 @@ export function signedDepositMatches(signedBase64, plan) {
   if (!signedByFeePayer) return false;
   let expected;
   try {
-    expected = buildDevnetUsdcTransaction({
+    expected = buildSolanaUsdcTransaction({
       feePayer: plan.from.address,
       sourceOwner: plan.from.address,
       destinationOwner: plan.to.address,
@@ -135,7 +136,7 @@ export function signedDepositMatches(signedBase64, plan) {
   }
 }
 
-async function readStoredWallets(ownerId, secrets, fetcher) {
+export async function readStoredWallets(ownerId, secrets, fetcher) {
   const url = typeof secrets.SUPABASE_URL === 'string' ? secrets.SUPABASE_URL.trim() : '';
   const key = typeof secrets.SUPABASE_SERVICE_ROLE_KEY === 'string' ? secrets.SUPABASE_SERVICE_ROLE_KEY.trim() : '';
   if (!url || !key) return [];
@@ -181,16 +182,16 @@ function defaultChain(secrets) {
   const client = clientFrom(secrets);
   return {
     async blockhash() {
-      const hash = await client.getDevnetBlockhash();
-      if (!hash || hash.cluster !== 'devnet' || typeof hash.blockhash !== 'string') throw fail('wallet_move_failed');
+      const hash = await client.getSolanaBlockhash();
+      if (!hash || hash.cluster !== SOLANA_CLUSTER || typeof hash.blockhash !== 'string') throw fail('wallet_move_failed');
       return hash.blockhash;
     },
-    async assertDevnet() {
-      await client.assertDevnetCluster();
+    async assertSolana() {
+      await client.assertSolanaCluster();
     },
     async broadcast(signedTransaction) {
-      const sent = await client.broadcastSignedDevnet({ signedTransaction });
-      if (!sent || sent.cluster !== 'devnet' || typeof sent.signature !== 'string') throw fail('wallet_move_failed');
+      const sent = await client.broadcastSignedSolana({ signedTransaction });
+      if (!sent || sent.cluster !== SOLANA_CLUSTER || typeof sent.signature !== 'string') throw fail('wallet_move_failed');
       return sent.signature;
     },
   };
@@ -244,12 +245,12 @@ export async function postConnectedDeposit(request, deps = {}) {
         return json({ error: 'invalid_signature' }, 400);
       }
       if (!signedDepositMatches(signed, plan)) return json({ error: 'transaction_mismatch' }, 400);
-      await chain.assertDevnet();
+      await chain.assertSolana();
       const signature = await chain.broadcast(signed);
-      return json({ ok: true, signature, cluster: 'devnet' });
+      return json({ ok: true, signature, cluster: SOLANA_CLUSTER });
     }
     const blockhash = await chain.blockhash();
-    const built = buildDevnetUsdcTransaction({
+    const built = buildSolanaUsdcTransaction({
       feePayer: plan.from.address,
       sourceOwner: plan.from.address,
       destinationOwner: plan.to.address,
@@ -257,7 +258,7 @@ export async function postConnectedDeposit(request, deps = {}) {
       memo: plan.memo,
       recentBlockhash: blockhash,
     });
-    return json({ ok: true, transaction: built.transactionBase64, cluster: 'devnet' });
+    return json({ ok: true, transaction: built.transactionBase64, cluster: SOLANA_CLUSTER });
   } catch (error) {
     const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code)
       ? error.code

@@ -1,5 +1,7 @@
 'use client';
 
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
 import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
@@ -581,7 +583,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
             title: wallet.label,
             kicker: wallet.frozen ? 'Frozen wallet' : (wallet.readOnly ? 'Read-only wallet' : `${wallet.accountKind} wallet`),
             note: wallet.readOnly
-              ? 'Read-only balance. devnet execution, mainnet pricing. This does not authorize a transaction.'
+              ? `Read-only balance. ${EXECUTION_LABEL}. This does not authorize a transaction.`
               : null,
             address: wallet.fullAddress,
             rows: [
@@ -925,7 +927,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           <>
             <strong>{book.summary.notionalLabel}</strong>
             <span>{book.summary.count} positions · {book.summary.venues} venues · PnL {book.summary.pnlLabel}</span>
-            <span>devnet execution, mainnet pricing</span>
+            <span>{EXECUTION_LABEL}</span>
           </>
         )}
       </p>

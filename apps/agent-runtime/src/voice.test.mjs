@@ -77,7 +77,7 @@ const ORIGIN = 'https://runtime.example';
 function env(extra = {}) {
   return {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ELEVENLABS_WEBHOOK_SECRET: SECRET,
     BOT: {
       idFromName: name => name,

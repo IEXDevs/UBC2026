@@ -34,18 +34,18 @@ test('root env reads a named value and ignores blanks', () => {
 /*
  * Achieves: verifies process.env overrides file-backed reads for worker-injected secrets.
  * Fails when: process.env value is ignored in favor of a missing/blank file value.
- * Oracle: QUICKNODE_DEVNET_RPC_URL from process.env wins for the duration of the test.
+ * Oracle: SOLANA_RPC_URL from process.env wins for the duration of the test.
  * Side effects / state checked: process.env mutated and restored in finally.
  * Gaps: none.
  */
 test('worker process env overrides the local file', () => {
-  const previous = process.env.QUICKNODE_DEVNET_RPC_URL;
-  process.env.QUICKNODE_DEVNET_RPC_URL = 'https://example.invalid/devnet';
+  const previous = process.env.SOLANA_RPC_URL;
+  process.env.SOLANA_RPC_URL = 'https://example.invalid/mainnet-beta';
   try {
-    assert.equal(readRootEnv('QUICKNODE_DEVNET_RPC_URL'), 'https://example.invalid/devnet');
+    assert.equal(readRootEnv('SOLANA_RPC_URL'), 'https://example.invalid/mainnet-beta');
   } finally {
-    if (previous === undefined) delete process.env.QUICKNODE_DEVNET_RPC_URL;
-    else process.env.QUICKNODE_DEVNET_RPC_URL = previous;
+    if (previous === undefined) delete process.env.SOLANA_RPC_URL;
+    else process.env.SOLANA_RPC_URL = previous;
   }
 });
 

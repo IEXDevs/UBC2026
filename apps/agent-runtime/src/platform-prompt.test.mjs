@@ -16,7 +16,7 @@ test('PLATFORM_PROMPT locks versioned company rules', () => {
   assert.equal(PLATFORM_PROMPT_VERSION, 1);
   assert.equal(typeof PLATFORM_PROMPT, 'string');
   assert.match(PLATFORM_PROMPT, /locked/i);
-  assert.match(PLATFORM_PROMPT, /devnet or testnet only/i);
+  assert.match(PLATFORM_PROMPT, /mainnet-beta only/i);
   assert.match(PLATFORM_PROMPT, /Never ask for.*private keys/i);
   assert.match(PLATFORM_PROMPT, /do not sign/i);
   assert.match(PLATFORM_PROMPT, /You can request actions from the platform gate/);

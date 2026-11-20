@@ -8,9 +8,9 @@ const bots = [
 ];
 
 const payments = [
-  { id: 'small', botId: 'bot_shop', direction: 'paid', amount: '10000', asset: 'USDC', counterparty: 'catalog', protocol: 'x402', cluster: 'devnet' },
-  { id: 'in', botId: 'bot_meteora', direction: 'earned', amount: '2000000', asset: 'USDC', counterparty: '@bob', protocol: 'x402', cluster: 'devnet' },
-  { id: 'out', botId: 'bot_meteora', direction: 'paid', amount: '5000000', asset: 'USDC', counterparty: '@bob', protocol: 'x402', cluster: 'devnet' },
+  { id: 'small', botId: 'bot_shop', direction: 'paid', amount: '10000', asset: 'USDC', counterparty: 'catalog', protocol: 'x402', cluster: 'mainnet-beta' },
+  { id: 'in', botId: 'bot_meteora', direction: 'earned', amount: '2000000', asset: 'USDC', counterparty: '@bob', protocol: 'x402', cluster: 'mainnet-beta' },
+  { id: 'out', botId: 'bot_meteora', direction: 'paid', amount: '5000000', asset: 'USDC', counterparty: '@bob', protocol: 'x402', cluster: 'mainnet-beta' },
 ];
 
 const transfers = [
@@ -67,7 +67,7 @@ test('a stream-confirmed payment keeps the confirmed badge', () => {
       asset: 'USDC',
       counterparty: 'desk',
       protocol: 'x402',
-      cluster: 'devnet',
+      cluster: 'mainnet-beta',
       streamConfirmed: true,
       badge: 'confirmed',
     }],

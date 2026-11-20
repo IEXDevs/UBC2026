@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Bot page model: approval preview, live timeline, and the public "why" record.
  * Presentation only. Does not sign, reserve budget, or read secrets.
@@ -206,7 +207,7 @@ export function whyFromListedDecision(row) {
   if (!row || typeof row !== 'object') return null;
   if (!HEX64.test(row.factsDigest || '') || !HEX64.test(row.proposalDigest || '')) return null;
   if (!DECISION_STATUS.has(row.status)) return null;
-  if (row.cluster !== 'devnet' && row.cluster !== 'testnet') return null;
+  if (row.cluster !== SOLANA_CLUSTER) return null;
   const lines = [
     row.status === 'mismatch'
       ? 'Verification did not settle. The spend stays unsigned.'
@@ -325,7 +326,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'preview_meteora',
         botId: 'bot_meteora',
         state: 'approval-needed',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         asset: 'USDC',
         recipient: 'alex.sol',
         outflow: '5000000',
@@ -346,7 +347,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'dec_meteora',
         botId: 'bot_meteora',
         runId: 'run_meteora',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         factsDigest: DIGEST.meteoraFacts,
         proposalDigest: DIGEST.meteoraProposal,
         decisionDigest: DIGEST.meteoraDecision,
@@ -360,7 +361,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'preview_shop',
         botId: 'bot_shop',
         state: 'over-budget',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         asset: 'USDC',
         recipient: 'sandbox-store',
         outflow: '12000000',
@@ -380,7 +381,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'dec_shop',
         botId: 'bot_shop',
         runId: 'run_shop',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         factsDigest: DIGEST.shopFacts,
         proposalDigest: DIGEST.shopProposal,
         decisionDigest: DIGEST.shopDecision,
@@ -399,7 +400,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'dec_guard',
         botId: 'bot_positions',
         runId: 'run_guard',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         factsDigest: DIGEST.guardFacts,
         proposalDigest: DIGEST.guardProposal,
         decisionDigest: DIGEST.guardDecision,

@@ -22,7 +22,7 @@ const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL = 'So11111111111111111111111111111111111111112';
 const BONK = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263';
 const POOL = 'Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE';
-const DEVNET_USDC = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const SOLANA_USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 function pair(mint, extra = {}) {
   return {
@@ -143,7 +143,7 @@ test('a rate limit keeps the saved profile and does not reuse a price', async ()
   assert.equal(view.price, null);
   assert.equal(view.points.length, 0);
   assert.match(view.note, /Saved token details/);
-  assert.match(view.note, /devnet execution, mainnet pricing/);
+  assert.match(view.note, /mainnet-beta execution, mainnet pricing/);
 });
 
 /**
@@ -203,7 +203,7 @@ test('more than thirty mints use a second browser request', async () => {
 test('portfolio dollars use the live dex price, then a peg, and the saved symbol', async () => {
   const wallet = SOL;
   const portfolio = {
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
     wallets: [{
       address: wallet,
       label: 'Desk',
@@ -211,13 +211,13 @@ test('portfolio dollars use the live dex price, then a peg, and the saved symbol
       spendable: false,
       holdings: [
         { mint: BONK, symbol: 'DezXA...B263', amount: '1000', decimals: 0, usdMicro: '0' },
-        { mint: DEVNET_USDC, symbol: 'USDC', amount: '2000000', decimals: 6, usdMicro: '0' },
+        { mint: SOLANA_USDC, symbol: 'USDC', amount: '2000000', decimals: 6, usdMicro: '0' },
       ],
     }],
   };
   const painted = portfolioWithDex(portfolio, [{ mint: BONK, symbol: 'BONK', priceUsd: '2' }]);
   const bonk = painted.wallets[0].holdings.find(row => row.mint === BONK);
-  const usdc = painted.wallets[0].holdings.find(row => row.mint === DEVNET_USDC);
+  const usdc = painted.wallets[0].holdings.find(row => row.mint === SOLANA_USDC);
   assert.equal(bonk.symbol, 'BONK');
   assert.equal(bonk.usdMicro, '2000000000');
   assert.equal(usdc.usdMicro, '2000000');
@@ -264,7 +264,7 @@ test('ranges past one day draw that window, not the 24h move', async () => {
   assert.equal(drawn.points.length, 3);
   assert.notEqual(drawn.points[1].price, day.points[1].price);
   assert.match(drawn.note, /GeckoTerminal history/);
-  assert.match(drawn.note, /devnet execution, mainnet pricing/);
+  assert.match(drawn.note, /mainnet-beta execution, mainnet pricing/);
 
   const now = Date.UTC(2026, 10, 19);
   assert.match(geckoCandleUrl(POOL, '1H', now), /\/ohlcv\/minute\?aggregate=5&limit=12&currency=usd$/);

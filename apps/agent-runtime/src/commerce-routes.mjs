@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Isaac / 6B + 6C Worker routes:
  * - Shopping sandbox prep/settle + Laso tiny-card challenge
@@ -13,7 +14,7 @@ import {
 import { buildSignalOffer, settleSignalSale, CommerceError } from '@ubc2026/agent-commerce';
 import { createSnsResolver, prepareSnsSend, resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { grabBackToMain, TransferError } from '@ubc2026/transfers';
-import { DEVNET_USDC_MINT } from '@ubc2026/x402';
+import { SOLANA_USDC_MINT } from '@ubc2026/x402';
 import { ownerAuthStatus, resolveOwner, testOwnerAuth } from './owner-auth.mjs';
 import { loadOwnerLoopContext, mapWalletRow, supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 
@@ -80,6 +81,7 @@ function shoppingBotFrom(body, botId, owner) {
 /** POST /bots/:botId/shopping/prepare */
 async function handleShoppingPrepare(request, env, botId, owner) {
   const body = await readBody(request);
+  if (SOLANA_CLUSTER === 'mainnet-beta' && body.provider !== 'laso') return json({ error: 'sandbox_disabled_on_mainnet' }, 409);
   try {
     const context = await commerceContext(env, owner, botId, {
       bot: shoppingBotFrom(body, botId, owner),
@@ -100,7 +102,7 @@ async function handleShoppingPrepare(request, env, botId, owner) {
     const result = await prepareSandboxPurchase({
       bot,
       ledger,
-      recipient: body.recipient || env.SANDBOX_PAY_TO || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+      recipient: body.recipient || env.SANDBOX_PAY_TO || SOLANA_USDC_MINT,
       storeClient: env.sandboxStoreClient || null,
       fetcher: env.fetch || fetch,
       baseUrl: env.X402_SANDBOX_BASE_URL,
@@ -113,8 +115,9 @@ async function handleShoppingPrepare(request, env, botId, owner) {
   }
 }
 
-/** POST /bots/:botId/shopping/settle — sandbox only (devnet). */
+/** POST /bots/:botId/shopping/settle — sandbox only (configured test network). */
 async function handleShoppingSettle(request, env, botId, owner) {
+  if (SOLANA_CLUSTER === 'mainnet-beta') return json({ error: 'sandbox_disabled_on_mainnet' }, 409);
   const body = await readBody(request);
   try {
     const context = await commerceContext(env, owner, botId, {
@@ -162,7 +165,7 @@ async function handleShoppingSettle(request, env, botId, owner) {
               ? 'USDC'
               : 'USDC',
             counterparty: result.payment.recipient || null,
-            cluster: 'devnet',
+            cluster: SOLANA_CLUSTER,
             tx_signature: result.payment.transaction || null,
           },
           prefer: 'resolution=merge-duplicates,return=minimal',
@@ -261,6 +264,9 @@ export async function handleSignalSettle(request, env, botId, signalId) {
 /** POST /bots/:botId/sns/send */
 async function handleSnsSend(request, env, botId, owner) {
   const body = await readBody(request);
+  if (SOLANA_CLUSTER === 'mainnet-beta' && body.execute === true) {
+    return json({ error: 'use_permissioned_spend' }, 409);
+  }
   try {
     const resolver = defaultResolver(env);
     const context = await commerceContext(env, owner, botId, { bot: body.bot || null, wallet: body.wallet || null });
@@ -285,7 +291,7 @@ async function handleSnsSend(request, env, botId, owner) {
       executeTransfer,
       memo: body.memo,
     });
-    return json({ ok: true, botId, mintHint: DEVNET_USDC_MINT, ...result });
+    return json({ ok: true, botId, mintHint: SOLANA_USDC_MINT, ...result });
   } catch (error) {
     return err(error);
   }
@@ -312,7 +318,7 @@ async function handleGrabBack(request, env, owner) {
         ok: true,
         dryRun: true,
         kind: 'grab-back',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         memo: 'funds.grabbed',
         moves: wallets
           .filter((w) => w.kind === 'additional')
@@ -353,6 +359,9 @@ export function matchCommerceRoute(method, pathname) {
 }
 
 export async function dispatchCommerceRoute(request, env, matched) {
+  if (SOLANA_CLUSTER === 'mainnet-beta' && (matched.kind === 'signal-offer' || matched.kind === 'signal-settle')) {
+    return json({ error: 'signal_payments_unavailable' }, 503);
+  }
   if (matched.kind === 'signal-offer') return handleSignalOffer(request, env, matched.botId, matched.signalId);
   if (matched.kind === 'signal-settle') return handleSignalSettle(request, env, matched.botId, matched.signalId);
   const { ownerId, error } = await resolveOwner(request, env);

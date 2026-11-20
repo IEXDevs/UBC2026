@@ -16,7 +16,7 @@ import {
 const mint = 'So11111111111111111111111111111111111111112';
 
 /**
- * Achieves: DexScreener lookup returns the highest-liquidity USD pair with mainnet pricing / devnet execution labels.
+ * Achieves: DexScreener lookup returns the highest-liquidity USD pair with mainnet pricing / mainnet-beta execution labels.
  * Fails when: Lower-liquidity pair wins, wrong mint URL, or cluster labels flip.
  * Oracle: DexScreener tokens/v1/solana response shape + PRICE_LABEL.
  * Side effects: Injected fetcher only.
@@ -45,9 +45,9 @@ test('DexScreener provider picks the highest-liquidity USD pair', async () => {
   const quote = await lookup(mint);
   assert.equal(quote.priceUsd, '101.25');
   assert.equal(quote.pairAddress, 'high');
-  assert.equal(quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(quote.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(quote.pricingCluster, 'mainnet');
-  assert.equal(quote.executionCluster, 'devnet');
+  assert.equal(quote.executionCluster, 'mainnet-beta');
 });
 
 /**
@@ -127,9 +127,9 @@ test('Jupiter price provider reads usdPrice for the mint', async () => {
   assert.equal(quote.quoteSource, 'jupiter-price-v3');
   assert.equal(quote.liquidityUsd, 1000.5);
   assert.equal(quote.blockId, 348004023);
-  assert.equal(quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(quote.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(quote.pricingCluster, 'mainnet');
-  assert.equal(quote.executionCluster, 'devnet');
+  assert.equal(quote.executionCluster, 'mainnet-beta');
 });
 
 /**
@@ -189,7 +189,7 @@ test('mainnet prices use DexScreener and fall back to Jupiter', async () => {
   assert.equal(quote.quoteSource, 'jupiter-price-v3');
   assert.equal(quote.priceUsd, '0.000000123');
   assert.equal(quote.fallbackFrom, 'dexscreener');
-  assert.equal(quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(quote.label, 'mainnet-beta execution, mainnet pricing');
 });
 
 /**
@@ -234,9 +234,9 @@ test('agent price quote is paper PnL and does not authorize a transaction', asyn
   assert.equal(quote.fallbackFrom, 'dexscreener');
   assert.equal(quote.priceUsd, '1.5');
   assert.equal(quote.priceBaseUnits, '1500000');
-  assert.equal(quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(quote.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(quote.pricingCluster, 'mainnet');
-  assert.equal(quote.executionCluster, 'devnet');
+  assert.equal(quote.executionCluster, 'mainnet-beta');
   assert.equal(quote.paperPnl, true);
   assert.equal(quote.authorizesTransaction, false);
   assert.equal(Object.hasOwn(quote, 'signature'), false);
@@ -330,8 +330,8 @@ test('Jupiter swap quote reads outAmount and does not return a transaction', asy
   assert.equal(quote.quoteSource, 'jupiter-swap-v1');
   assert.equal(quote.broadcast, false);
   assert.equal(quote.authorizesTransaction, false);
-  assert.equal(quote.executionCluster, 'devnet');
-  assert.equal(quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(quote.executionCluster, 'mainnet-beta');
+  assert.equal(quote.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(Object.hasOwn(quote, 'swapTransaction'), false);
   await assert.rejects(
     readJupiterSwapQuote({ inputMint: mint, outputMint: usdc, amount: '10000000', fetcher: null }),

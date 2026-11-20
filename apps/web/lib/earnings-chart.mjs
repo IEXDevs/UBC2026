@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Paper earnings for the positions pane, plus read-only balances
  * from Phantom and other connected wallets.
@@ -8,8 +9,8 @@ const AMOUNT = /^(0|[1-9][0-9]{0,39})$/;
 const SIGNED = /^-?(0|[1-9][0-9]{0,39})$/;
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-export const PAPER_PNL_LABEL = 'devnet execution, mainnet pricing';
-export const PAPER_PNL_CAPTION = 'Paper PnL. devnet execution, mainnet pricing. A mainnet quote does not authorize a transaction.';
+export const PAPER_PNL_LABEL = EXECUTION_LABEL;
+export const PAPER_PNL_CAPTION = `Paper PnL. ${EXECUTION_LABEL}. A mainnet quote does not authorize a transaction.`;
 
 function units(value) {
   return typeof value === 'string' && AMOUNT.test(value) ? BigInt(value) : null;
@@ -106,7 +107,7 @@ export function mergeConnectedPositions({ positions = [], wallets = [], portfoli
     return { positions: paper, wallets: baseWallets, broadcast: false, authorizesTransaction: false };
   }
   const cluster = portfolio.cluster;
-  if (cluster !== 'mainnet' && cluster !== 'devnet' && cluster !== 'testnet') {
+  if (cluster !== 'mainnet' && cluster !== SOLANA_CLUSTER) {
     return { positions: paper, wallets: baseWallets, broadcast: false, authorizesTransaction: false };
   }
 

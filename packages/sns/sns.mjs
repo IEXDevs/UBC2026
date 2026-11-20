@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * SNS (.sol) resolve + send-intent helpers (Isaac / chunk 6C).
  * Resolution is injectable; no mainnet execution.
@@ -34,7 +35,7 @@ export async function resolveSnsOwner(name, { fetcher = fetch } = {}) {
   if (!response?.ok || body?.s !== 'ok' || typeof body.result !== 'string' || !base58.test(body.result)) {
     fail('sns_not_found');
   }
-  return { domain, address: body.result, clusterRead: 'mainnet-read', executionCluster: 'devnet' };
+  return { domain, address: body.result, clusterRead: 'mainnet-read', executionCluster: SOLANA_CLUSTER };
 }
 
 export function createSnsResolver({ resolveFn }) {
@@ -43,7 +44,7 @@ export function createSnsResolver({ resolveFn }) {
     const domain = normalizeSnsName(name);
     const address = await resolveFn(domain);
     if (typeof address !== 'string' || !base58.test(address)) fail('SNS resolver returned an invalid pubkey');
-    return { domain, address, clusterRead: 'mainnet-read', executionCluster: 'devnet' };
+    return { domain, address, clusterRead: 'mainnet-read', executionCluster: SOLANA_CLUSTER };
   };
 }
 
@@ -68,7 +69,7 @@ export function buildSnsTransferIntent({
     amount,
     asset,
     botId,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     memo: memo ?? `maelstrom:sns:${normalizeSnsName(domain)}`,
     status: 'unsigned',
   };
@@ -76,7 +77,7 @@ export function buildSnsTransferIntent({
 
 /**
  * Resolve a .sol name and build an unsigned intent, then optionally execute via injected signer.
- * `executeTransfer({ to, amount, asset, memo })` should return `{ signature, cluster: 'devnet' }`.
+ * `executeTransfer({ to, amount, asset, memo })` should return `{ signature, cluster: SOLANA_CLUSTER }`.
  */
 export async function prepareSnsSend({
   from,
@@ -108,7 +109,7 @@ export async function prepareSnsSend({
     asset: intent.asset,
     memo: intent.memo,
   });
-  if (!result?.signature || result.cluster !== 'devnet') fail('SNS execute must confirm a devnet signature');
+  if (!result?.signature || result.cluster !== SOLANA_CLUSTER) fail('SNS execute must confirm a mainnet-beta signature');
   return {
     resolved,
     intent: { ...intent, status: 'submitted', signature: result.signature },

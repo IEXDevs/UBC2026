@@ -35,7 +35,7 @@ function samplePath(routePath) {
 function fakeEnv(extra = {}) {
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ...extra,
   };
   if (!env.BOT) {

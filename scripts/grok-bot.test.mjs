@@ -13,7 +13,7 @@ const events = [{
   botId: 'bot_1',
   botName: 'APY hunter',
   kind: 'tx.confirmed',
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   signature: SIG,
   summary: `Landed with ${SECRET}`,
   at: 1_700_000_000_000,

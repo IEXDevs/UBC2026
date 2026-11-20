@@ -20,7 +20,7 @@ test('a handle book totals money in, money out, and the net', () => {
       { id: 'other', handle: 'ada', amount: '9000000', asset: 'USDC', direction: 'in' },
     ],
     payments: [
-      { id: 'pay1', counterparty: '@bob', direction: 'paid', amount: '2000000', asset: 'USDC', protocol: 'x402', cluster: 'devnet' },
+      { id: 'pay1', counterparty: '@bob', direction: 'paid', amount: '2000000', asset: 'USDC', protocol: 'x402', cluster: 'mainnet-beta' },
     ],
   });
   assert.equal(book.inbound, '5000000');

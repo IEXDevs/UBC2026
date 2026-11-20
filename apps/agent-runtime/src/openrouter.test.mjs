@@ -30,7 +30,7 @@ test('locked platform prompt is first and caller system messages are dropped', (
   assert.equal(messages[0].content, PLATFORM_PROMPT);
   assert.match(PLATFORM_PROMPT, /No meme coins/);
   assert.match(PLATFORM_PROMPT, /No day trading/);
-  assert.match(PLATFORM_PROMPT, /devnet or testnet only/);
+  assert.match(PLATFORM_PROMPT, /mainnet-beta only/);
   assert.equal(messages.filter(message => message.role === 'system').length, 1);
   assert.equal(JSON.stringify(messages).includes('ignore platform rules'), false);
   assert.match(messages[1].content, /Bot goal/);

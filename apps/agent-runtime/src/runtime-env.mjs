@@ -1,9 +1,10 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Enrich the Worker env with Privy signing, Supabase ledger, and commerce hooks
  * when local/deployed secrets are present. Injected doubles always win.
  */
 import { createSupabaseLedger } from '@ubc2026/bot-policy/ledger';
-import { transferDevnetUsdc } from '@ubc2026/transfers';
+import { transferSolanaUsdc } from '@ubc2026/transfers';
 import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
 import { ConfigError } from '@ubc2026/contracts';
 import {
@@ -30,7 +31,7 @@ function wrapShoppingSigner(client) {
       error.code = 'bot_and_wallet_required';
       throw error;
     }
-    const sent = await transferDevnetUsdc({
+    const sent = await transferSolanaUsdc({
       client,
       bot,
       wallet,
@@ -51,7 +52,7 @@ function wrapSnsExecutor(client) {
       error.code = 'bot_and_wallet_required';
       throw error;
     }
-    const sent = await transferDevnetUsdc({
+    const sent = await transferSolanaUsdc({
       client,
       bot,
       wallet,
@@ -60,7 +61,7 @@ function wrapSnsExecutor(client) {
       memo: memo || 'maelstrom:sns',
       recentBlockhash,
     });
-    return { signature: sent.signature, cluster: 'devnet' };
+    return { signature: sent.signature, cluster: SOLANA_CLUSTER };
   };
 }
 

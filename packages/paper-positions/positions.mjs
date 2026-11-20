@@ -1,7 +1,8 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Paper positions for trading and position-management bots.
  * Marks to market with a mainnet price lookup (DexScreener, Jupiter fallback).
- * Fills stay on devnet or testnet and never broadcast a swap.
+ * Fills stay on mainnet-beta or testnet and never broadcast a swap.
  */
 import { evaluateProposal } from '@ubc2026/bot-policy';
 
@@ -13,7 +14,7 @@ export class PaperError extends Error {
   }
 }
 
-export const PRICE_LABEL = 'devnet execution, mainnet pricing';
+export const PRICE_LABEL = EXECUTION_LABEL;
 export const MIN_HOLD_MS = 60 * 60 * 1000;
 export const MAX_QUOTE_AGE_MS = 5 * 60 * 1000;
 
@@ -83,14 +84,14 @@ function assertKey(idempotencyKey) {
  * Refuse a mainnet or signed swap. Paper fills are the only trade this package records.
  */
 export function assertNoLiveTrade(request = {}) {
-  const cluster = request.cluster ?? 'devnet';
+  const cluster = request.cluster ?? SOLANA_CLUSTER;
   if (
     cluster === 'mainnet'
     || request.executionCluster === 'mainnet'
     || request.network === 'mainnet'
-    || request.pricingCluster === 'devnet'
+    || request.pricingCluster === SOLANA_CLUSTER
   ) fail('mainnet_trade_refused');
-  if (cluster !== 'devnet' && cluster !== 'testnet') fail('mainnet_trade_refused');
+  if (cluster !== SOLANA_CLUSTER) fail('mainnet_trade_refused');
   if (
     request.broadcast === true
     || request.sign === true
@@ -112,7 +113,7 @@ function usdToMicro(priceUsd) {
 
 function assertQuote(quote, mint, now) {
   if (!quote || quote.mint !== mint) fail('invalid_quote');
-  if (quote.pricingCluster !== 'mainnet' || quote.executionCluster !== 'devnet') fail('invalid_quote');
+  if (quote.pricingCluster !== 'mainnet' || quote.executionCluster !== SOLANA_CLUSTER) fail('invalid_quote');
   if (quote.label !== PRICE_LABEL) fail('invalid_quote');
   if (quote.quoteSource !== 'dexscreener' && quote.quoteSource !== 'jupiter-price-v3') fail('invalid_quote');
   if (typeof quote.fetchedAt !== 'string') fail('invalid_quote');
@@ -392,7 +393,7 @@ export async function markPaperBook({ bot, positions, lookup, now }) {
   return {
     label: PRICE_LABEL,
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
+    executionCluster: SOLANA_CLUSTER,
     mode: 'paper',
     tradesPlaced: 0,
     positions: marked,

@@ -1,10 +1,11 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
- * Agent-to-agent commerce (Isaac / chunk 6C): bots sell signals over x402 on devnet.
+ * Agent-to-agent commerce (Isaac / chunk 6C): bots sell signals over x402 on solana.
  */
 import {
   buildPaymentRequired,
   NETWORKS,
-  DEVNET_USDC_MINT,
+  SOLANA_USDC_MINT,
   paymentFeedEntry,
   parsePaymentSignature,
 } from '@ubc2026/x402';
@@ -29,14 +30,14 @@ export function buildSignalOffer({
     amount,
     payTo: walletAddress,
     feePayer,
-    network: NETWORKS.devnet,
-    asset: DEVNET_USDC_MINT,
+    network: NETWORKS.solana,
+    asset: SOLANA_USDC_MINT,
     serviceName: `maelstrom-bot-${botId}`,
   });
   return {
     botId,
     signalId,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     direction: 'earned',
     challenge,
   };
@@ -56,7 +57,7 @@ export function signalSaleFeedEntry({
     botId,
     recipient: buyer,
     amount,
-    asset: DEVNET_USDC_MINT,
+    asset: SOLANA_USDC_MINT,
     resourceUrl,
     transaction,
     status: transaction ? 'paid' : 'requested',

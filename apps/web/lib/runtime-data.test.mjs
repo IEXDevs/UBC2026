@@ -147,7 +147,7 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
       return jsonResponse({
         items: [
           { id: 'bad', amount: 'nope', asset: 'USDC' },
-          { id: 'p2', botId: 'bot_live', direction: 'paid', protocol: 'x402', amount: '10', asset: 'USDC', counterparty: 'desk', cluster: 'devnet' },
+          { id: 'p2', botId: 'bot_live', direction: 'paid', protocol: 'x402', amount: '10', asset: 'USDC', counterparty: 'desk', cluster: 'mainnet-beta' },
         ],
         crossCheck: [
           { walletId: 'w1', alert: 'unapproved_spend', freeze: true, excess: '10', asset: 'USDC' },
@@ -166,7 +166,7 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
             quantity: '25000000',
             entryMicroUsdc: '2000',
             realizedMicroUsdc: '0',
-            cluster: 'devnet',
+            cluster: 'mainnet-beta',
             mode: 'supply',
           },
           { id: 'pos_zero', botId: 'bot_live', quantity: '0', mint: 'mint' },
@@ -320,7 +320,7 @@ test('sendBotChat delivers a streamed Solscan line before the turn finishes', as
   const prior = globalThis.fetch;
   const seen = [];
   const signature = '5'.repeat(64);
-  const url = `https://solscan.io/tx/${signature}?cluster=devnet`;
+  const url = `https://solscan.io/tx/${signature}`;
   globalThis.fetch = async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({

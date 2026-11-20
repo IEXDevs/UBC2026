@@ -1,13 +1,13 @@
 import { proposalDigest } from './policy.mjs';
 
-const ADDRESS = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const ADDRESS_2 = 'So11111111111111111111111111111111111111112';
 
 export function proposal(overrides = {}) {
   return {
     id: 'p',
     botId: 'bot_1',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
     asset: 'USDC',
     recipient: 'merchant',
     quoteId: 'q',
@@ -418,7 +418,7 @@ export const ledgerCases = [
   /**
    * Achieves: wrong-owner, quote-expired, asset mismatch soft-block; mainnet throws; reserved stays 0.
    * Fails when: Any illegal path reserves, or mainnet soft-blocks instead of throw.
-   * Oracle: reason codes + /devnet or testnet/ throw; snapshot.reserved === '0'.
+   * Oracle: reason codes + /mainnet-beta or testnet/ throw; snapshot.reserved === '0'.
    * Side effects: none on rejects.
    * Gaps: testnet success path not reserved here (allowed by policy).
    */
@@ -433,8 +433,8 @@ export const ledgerCases = [
       const asset = await ledger.reserveBudget(reserveInput('idem_asset', { asset: 'SOL' }));
       assert.equal(asset.reason, 'accounting-asset-mismatch');
       await assert.rejects(
-        () => ledger.reserveBudget(reserveInput('idem_main', { cluster: 'mainnet-beta' })),
-        /devnet or testnet/,
+        () => ledger.reserveBudget(reserveInput('idem_main', { cluster: 'devnet' })),
+        /configured Solana cluster/,
       );
       assert.equal((await ledger.snapshot()).ledgers[0].reserved, '0');
     },

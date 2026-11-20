@@ -13,7 +13,7 @@ import {
   WalletError,
 } from './wallets.mjs';
 
-const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const baseBot = {
   id: 'bot_1',
   ownerId: 'user_1',

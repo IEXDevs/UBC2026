@@ -24,7 +24,7 @@ export function withoutPlaceholderBots(roster) {
 /** Plugin catalog. Builtin rows are product connectors, not sample accounts. */
 export function shellConnectors() {
   return [
-    { id: 'solana', name: 'Solana', detail: 'Devnet only. Mainnet execution stays off.', category: 'Chain', popular: true, builtin: true, linked: true },
+    { id: 'solana', name: 'Solana', detail: 'Mainnet by default. Real funds; policy gates apply.', category: 'Chain', popular: true, builtin: true, linked: true },
     { id: 'privy', name: 'Privy', detail: 'Owner sign-in and the agent wallet.', category: 'Identity', popular: true, builtin: true, linked: true },
     { id: 'firecrawl', name: 'Firecrawl', detail: 'Research pages for the decision loop.', category: 'Research', popular: true, builtin: true, linked: true, logo: composioLogo('firecrawl') },
     { id: 'browser-run', name: 'Browser Run', detail: 'Cloudflare browser session for the live view.', category: 'Research', popular: true, builtin: true, linked: true },

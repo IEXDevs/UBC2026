@@ -60,7 +60,7 @@ test('Privy provider props stay public and Solana-only', () => {
  */
 test('linked wallets and login methods stay on one user', () => {
   const phantom = 'So11111111111111111111111111111111111111112';
-  const extra = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const extra = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const described = describeLoginMethods({
     id: 'did:privy:one',
     linkedAccounts: [

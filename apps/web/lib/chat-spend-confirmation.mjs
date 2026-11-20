@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { devnetSpendAsset, parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
+import { solanaSpendAsset, parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { spendFailureCode, spendFailureMessage, toolStep } from './chat-activity.mjs';
 import { matchingToolGrant } from './spend-permission.mjs';
 import { TextChatError } from './text-chat.mjs';
@@ -8,7 +8,7 @@ import { txReceiptFromResult } from './tx-receipt.mjs';
 const HOLD_LIFETIME_MS = 5 * 60 * 1000;
 
 export function isAssetSpendHold(hold) {
-  return hold?.name === 'request_spend' && devnetSpendAsset(hold.args?.asset ?? 'USDC') !== 'USDC';
+  return hold?.name === 'request_spend' && solanaSpendAsset(hold.args?.asset ?? 'USDC') !== 'USDC';
 }
 
 function holdMac(hold, { ownerId, botId, secret }) {

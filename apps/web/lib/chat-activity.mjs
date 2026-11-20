@@ -1,3 +1,5 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+
 /**
  * Public chat trace for a tool round. Titles, hosts, and queries only.
  * Live View URLs and raw tool payloads stay out.
@@ -53,14 +55,14 @@ const SPEND_SIGN_MESSAGES = new Map([
   ['invalid_authorization_key', 'The Worker could not use its configured Privy authorization key.'],
   ['invalid_wallet', "The agent's wallet is missing a valid Privy signing ID."],
   ['privy_failed', 'Privy rejected the signing request.'],
-  ['rpc_failed', 'The devnet RPC did not return a receipt. Check the wallet before trying again.'],
-  ['rpc_rejected', 'The devnet RPC did not return a receipt. Check the wallet before trying again.'],
+  ['rpc_failed', 'The mainnet-beta RPC did not return a receipt. Check the wallet before trying again.'],
+  ['rpc_rejected', 'The mainnet-beta RPC did not return a receipt. Check the wallet before trying again.'],
   ['simulation_required', 'The signing service could not verify the transaction simulation.'],
   ['transaction_mismatch', 'The signed transaction differed from the simulated payment.'],
   ['wallet_authorization_failed', 'Privy could not authorize signing with this session.'],
   ['wallet_owner_session_required', 'Sign in again as the wallet owner to authorize the payment.'],
   ['wallet_policy_rejected', 'The Privy wallet policy rejected this payment.'],
-  ['wrong_cluster', 'The signing service could not verify the Solana devnet connection.'],
+  ['wrong_cluster', 'The signing service could not verify the Solana mainnet-beta connection.'],
 ]);
 const PRIVY_TRANSPORT_MESSAGES = new Map([
   ['network', 'The Worker could not reach Privy to sign this payment.'],
@@ -180,7 +182,7 @@ export function spendFailureCode(result) {
 
 function privyDiagnosticMessage(privy, reason) {
   const lines = [
-    'Signing stopped before broadcast on Solana devnet.',
+    `Signing stopped before broadcast on Solana ${SOLANA_CLUSTER}.`,
     SPEND_SIGN_MESSAGES.has(reason) && `Maelstrom reason ${reason}.`,
     privy.at && `Worker time ${new Date(privy.at).toISOString()}.`,
     typeof privy.appSignature === 'boolean'

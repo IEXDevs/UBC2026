@@ -31,7 +31,7 @@ test('a platform send request stays a handle and a base-unit amount', () => {
     now: 1_700_000_000_000,
   });
   assert.equal(proposal.proposal.recipient, '@bob');
-  assert.equal(proposal.proposal.cluster, 'devnet');
+  assert.equal(proposal.proposal.cluster, 'mainnet-beta');
   assert.equal(mapTransferRow({
     id: 'send_bob_5000000',
     handle: 'bob',

@@ -1,3 +1,5 @@
+
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Privacy and terms shown at /privacy and /tos.
  * Amounts and product rules match the desk. The store vendor is unnamed.
@@ -31,7 +33,7 @@ export const PRIVACY = Object.freeze({
       paragraphs: Object.freeze([
         'Agent names, goals, and the messages you send are used to run that agent. The model receives file names when a file is attached. It does not receive file bytes or the private address used to open a stored file.',
         'Approvals, ledger totals, decisions, and events are stored for the account. Ledger totals come from that record. A model reply is not a balance.',
-        'Execution that broadcasts is Solana devnet. Prices taken from mainnet are labeled devnet execution, mainnet pricing. A mainnet quote does not authorize a transaction.',
+        `Execution that broadcasts is configured Solana network. Prices taken from mainnet are labeled ${EXECUTION_LABEL}. A mainnet quote does not authorize a transaction.`,
       ]),
     }),
     Object.freeze({
@@ -53,7 +55,7 @@ export const PRIVACY = Object.freeze({
     Object.freeze({
       heading: 'Who else processes it',
       paragraphs: Object.freeze([
-        'Sign-in, wallet signing, the account database, model replies, voice, and Solana devnet execution are handled by the services that run those parts of Maelstrom. They receive what that step needs. Maelstrom does not sell your personal information.',
+        'Sign-in, wallet signing, the account database, model replies, voice, and Solana mainnet-beta execution are handled by the services that run those parts of Maelstrom. They receive what that step needs. Maelstrom does not sell your personal information.',
       ]),
     }),
     Object.freeze({
@@ -75,12 +77,12 @@ export const TERMS = Object.freeze({
   kind: 'terms',
   title: 'Terms',
   updated: LEGAL_UPDATED,
-  intro: 'Maelstrom is a desk for agents that can research, check a spend, and pay on Solana devnet when you allow it. Using it means you agree to these terms and the privacy page.',
+  intro: 'Maelstrom is a desk for agents that can research, check a spend, and pay on Solana mainnet-beta when you allow it. Using it means you agree to these terms and the privacy page.',
   sections: Object.freeze([
     Object.freeze({
       heading: 'What you are using',
       paragraphs: Object.freeze([
-        'Agents can be wrong. Research, prices, trust scores, and suggested spends are information for you to judge. Execution that broadcasts is Solana devnet. Mainnet figures are prices, labeled devnet execution, mainnet pricing. A mainnet quote never authorizes a transaction.',
+        `Agents can be wrong. Research, prices, trust scores, and suggested spends are information for you to judge. Execution that broadcasts is configured Solana network. Mainnet figures are prices, labeled ${EXECUTION_LABEL}. A mainnet quote never authorizes a transaction.`,
         'You choose Ask every time, Review by AI, or Full permissions. Ask and Full still use the confirm slide. Review by AI stores a USDC maximum you set. At or under that cap a spend can continue after the server check. Above that cap, you confirm.',
       ]),
     }),
