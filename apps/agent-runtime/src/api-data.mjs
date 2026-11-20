@@ -12,6 +12,7 @@ import {
   lookupHandleKey,
   parseLookupQuery,
   postgrestEq,
+  publicDisplayName,
 } from '@ubc2026/contracts';
 import { createSnsResolver, resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { accountWriteBodies, WalletError } from '@ubc2026/wallets';
@@ -1367,7 +1368,7 @@ export async function handleApiData(request, env, matched) {
       recipient: {
         kind: 'handle',
         handle: row.handle,
-        displayName: row.display_name,
+        displayName: publicDisplayName(row.display_name) || `@${row.handle}`,
         avatarUrl: row.avatar_url || null,
         self: row.owner_id === ownerId,
         missing: false,
