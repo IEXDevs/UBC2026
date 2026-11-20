@@ -99,6 +99,52 @@ function assertNoSecrets(value) {
   assert.equal(text.includes(authorizationKey.slice('wallet-auth:'.length)), false);
 }
 
+test('a prepared transfer binds the exact simulated message to its signature', async () => {
+  const unsigned = Buffer.alloc(80, 0);
+  unsigned[0] = 1;
+  unsigned[65] = 1;
+  const transaction = unsigned.toString('base64');
+  const signed = Buffer.from(unsigned);
+  signed.fill(4, 1, 65);
+  let swapMessage = false;
+  let broadcasts = 0;
+  const wallet = { id: walletId, privyWalletId: walletId, ownerId: 'user_1', kind: 'main', label: 'Main', address, provider: 'privy', frozen: false };
+  const bot = { ...baseBot, walletId };
+  const privy = client({ fetcher: async (_url, init) => {
+    const req = JSON.parse(init.body);
+    if (req.method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
+    if (req.method === 'getFeeForMessage') {
+      assert.equal(req.params[0], unsigned.subarray(65).toString('base64'));
+      return Response.json({ result: { value: 5000 } });
+    }
+    if (req.method === 'simulateTransaction') {
+      assert.equal(req.params[0], transaction);
+      assert.equal(req.params[1].replaceRecentBlockhash, false);
+      return Response.json({ result: { value: { err: null } } });
+    }
+    if (req.method === 'signTransaction') {
+      assert.equal(req.params.transaction, transaction);
+      const bytes = Buffer.from(signed);
+      if (swapMessage) bytes[79] ^= 1;
+      return Response.json({ data: { signed_transaction: bytes.toString('base64') } });
+    }
+    assert.equal(req.method, 'sendTransaction');
+    assert.equal(req.params[0], signed.toString('base64'));
+    broadcasts++;
+    return Response.json({ result: txSignature });
+  } });
+  const prepared = await privy.prepareDevnetTransfer({ transaction });
+  assert.equal(prepared.feeLamports, '5000');
+  const input = { bot, wallet, prepared };
+  await assert.rejects(privy.signPreparedDevnetTransfer({ ...input, prepared: { ...prepared } }), { code: 'simulation_required' });
+  assert.equal((await privy.signPreparedDevnetTransfer(input)).signature, txSignature);
+  await assert.rejects(privy.signPreparedDevnetTransfer(input), { code: 'simulation_required' });
+  swapMessage = true;
+  const again = await privy.prepareDevnetTransfer({ transaction });
+  await assert.rejects(privy.signPreparedDevnetTransfer({ ...input, prepared: again }), { code: 'transaction_mismatch' });
+  assert.equal(broadcasts, 1);
+});
+
 /**
  * Rigor audit — missing server-signing names throw before any request
  * Achieves: behavior named in the test title (see assertions).

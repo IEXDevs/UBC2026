@@ -114,17 +114,17 @@ export const DASHBOARD_TOOLS = Object.freeze([
   dashboard(
     'request_spend',
     'Move funds through the shared permissioned spend API. Use it for a buy, sell, spend, or pay. When the owner set full permissions, do not ask which of those they mean. A buy of wrapped SOL spends USDC. amount 1000000 is 1 USDC and does not need a destination. quoteCluster devnet does not authorize a mainnet trade. A mainnet price quote does not authorize the transaction. Execution is Solana devnet.',
-    ['botId', 'action', 'amount'],
+    ['botId', 'action', 'amount', 'asset'],
     {
       botId,
       action: { type: 'string', description: 'buy, sell, spend, or pay' },
-      amount: { type: 'string', description: 'Base-unit USDC amount' },
+      amount: { type: 'string', description: 'Integer base units of the asset. Use lamports for SOL (1 SOL = 1000000000). Use the verified mint decimals for an SPL token.' },
       destination: { type: 'string', description: 'Destination Solana address' },
       handle: { type: 'string', description: 'Maelstrom handle without @' },
-      asset: { type: 'string', description: 'USDC' },
+      asset: { type: 'string', description: 'USDC, SOL, or the exact SPL token mint address. Must match the agent accounting asset. SOL and mint addresses support pay or spend transfers.' },
       quoteCluster: { type: 'string', description: 'mainnet or devnet. A mainnet quote never authorizes a transaction.' },
     },
-    [call('POST', '/api/spend', { body: ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'quoteCluster'] })],
+    [call('POST', '/api/spend', { body: ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'quoteCluster', 'idempotencyKey'] })],
   ),
   dashboard(
     'lookup_recipient',

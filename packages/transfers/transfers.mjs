@@ -5,7 +5,7 @@
  * Every transaction is a USDC transfer followed by a memo.
  * This module never opens a Solana connection and never broadcasts.
  */
-import { PublicKey, Transaction, TransactionInstruction } from '@solana/web3.js';
+import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -190,6 +190,31 @@ export function buildDevnetUsdcTransaction({
     transaction,
     transactionBase64,
   };
+}
+
+/** Native SOL or a classic SPL token with an existing destination token account. */
+export function buildDevnetAssetTransaction({ asset, decimals, sourceOwner, destinationOwner, amount: rawAmount, memo, recentBlockhash } = {}) {
+  const units = positiveAmount(rawAmount);
+  const source = pubkey(sourceOwner, 'source wallet');
+  const destination = pubkey(destinationOwner, 'destination wallet');
+  pubkey(recentBlockhash, 'blockhash');
+  if (source.equals(destination)) fail('Source and destination must differ', 'invalid_destination');
+  let instruction;
+  if (asset === 'SOL') {
+    instruction = SystemProgram.transfer({ fromPubkey: source, toPubkey: destination, lamports: units });
+  } else {
+    const mint = pubkey(asset, 'mint');
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) fail('Invalid mint decimals', 'invalid_mint');
+    instruction = createTransferCheckedInstruction(
+      getAssociatedTokenAddressSync(mint, source), mint, getAssociatedTokenAddressSync(mint, destination), source, units, decimals,
+    );
+  }
+  const transaction = new Transaction({ feePayer: source, recentBlockhash }).add(instruction, new TransactionInstruction({
+    programId: MEMO_PROGRAM,
+    keys: [{ pubkey: source, isSigner: true, isWritable: false }],
+    data: memoBytes(memo),
+  }));
+  return transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
 }
 
 function movementResult(kind, built, signature) {

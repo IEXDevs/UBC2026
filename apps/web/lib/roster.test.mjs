@@ -5,6 +5,7 @@ import {
   LEGACY_ROSTER_KEY,
   adoptLegacyRoster,
   draftBot,
+  draftTransferCap,
   looksStorageKey,
   mergeRoster,
   readLooks,
@@ -16,6 +17,16 @@ import {
   writeLooks,
   writeRoster,
 } from './roster.mjs';
+
+test('the roster keeps the full token mint and its base-unit caps after a reload', () => {
+  const store = memoryStorage();
+  const mint = 'So11111111111111111111111111111111111111112';
+  const cap = draftTransferCap(mint, '1000', '500');
+  const bot = draftBot({ id: 'bot_spl', name: 'SPL sender', shape: 'circle', color: '#7c5cff', cap });
+  writeRoster(store, 'alice', { order: [bot.id], extra: [bot] });
+  assert.deepEqual(readRoster(store, 'alice').extra[0].cap, { mode: 'limited', asset: mint, maxOutflow: '1000', maxPerTransaction: '500' });
+  assert.equal(draftTransferCap('SOL', '500', '1000'), null);
+});
 
 function memoryStorage(initial = {}) {
   const data = { ...initial };

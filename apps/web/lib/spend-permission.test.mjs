@@ -71,6 +71,12 @@ test('full permissions manages funds and the other modes still wait', () => {
   assert.equal(over.kind, 'modal');
   assert.match(over.prompt, /Slide to confirm/);
   assert.match(over.label, /30 USDC/);
+  const sol = { amount: '1000000000', asset: 'SOL', handle: 'bob' };
+  const solHold = toolAccessRequest('review', 'request_spend', sol);
+  assert.equal(solHold.kind, 'modal');
+  assert.match(solHold.label, /Send 1 SOL to @bob/);
+  assert.doesNotMatch(solHold.label, /USDC/);
+  assert.equal(grantCovers([solHold], 'request_spend', { ...sol, asset: 'USDC' }), false);
 });
 
 /**

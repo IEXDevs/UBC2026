@@ -31,6 +31,8 @@ const PRIVY_API_BASE = 'https://api.privy.io';
 const PRIVY_AUTH_BASE = 'https://auth.privy.io';
 const REQUEST_TTL_MS = 60_000;
 const MAX_TX_BYTES = 1232;
+const SINGLE_SIGNATURE_MESSAGE_OFFSET = 65;
+const CLASSIC_TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const privyWalletIdPattern = /^[A-Za-z0-9_-]{10,128}$/;
 const ownerIdPattern = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -749,6 +751,16 @@ export function createPrivyWalletClient({
     return sent.result;
   }
 
+  const simulatedTransfers = new WeakSet();
+
+  function singleSignerMessage(transaction) {
+    const bytes = decodeBase64(transaction, 'Transaction');
+    if (bytes.length <= SINGLE_SIGNATURE_MESSAGE_OFFSET || bytes.length > MAX_TX_BYTES || bytes[0] !== 1) {
+      fail('Expected a single-signer Solana transaction', 'invalid_transaction');
+    }
+    return bytes.subarray(SINGLE_SIGNATURE_MESSAGE_OFFSET);
+  }
+
   return {
     async readSession({ accessToken, ownerId, origin } = {}) {
       const token = assertHeaderSafe(accessToken, 'Privy access token');
@@ -887,6 +899,46 @@ export function createPrivyWalletClient({
         privyWalletId: walletId,
         botId: bot.id,
       };
+    },
+
+    async readDevnetMint({ mint } = {}) {
+      if (typeof mint !== 'string' || !base58.test(mint)) fail('Mint address is required', 'invalid_mint');
+      await assertDevnet();
+      const result = await rpc('getAccountInfo', [mint, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+      const account = result.result?.value;
+      const decimals = account?.data?.parsed?.info?.decimals;
+      if (account?.owner !== CLASSIC_TOKEN_PROGRAM || account?.data?.parsed?.type !== 'mint'
+        || account.data.parsed.info?.isInitialized !== true || !Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+        fail('Unsupported or missing devnet mint', 'unsupported_mint');
+      }
+      return { cluster: 'devnet', mint, decimals };
+    },
+
+    async prepareDevnetTransfer({ transaction } = {}) {
+      const message = singleSignerMessage(transaction);
+      await assertDevnet();
+      const [fee, simulation] = await Promise.all([
+        rpc('getFeeForMessage', [message.toString('base64'), { commitment: 'confirmed' }]),
+        rpc('simulateTransaction', [transaction, { encoding: 'base64', commitment: 'confirmed', sigVerify: false, replaceRecentBlockhash: false }]),
+      ]);
+      if (simulation.result?.value?.err !== null) fail('Devnet transfer simulation failed', 'simulation_failed');
+      const lamports = fee.result?.value;
+      if (!Number.isSafeInteger(lamports) || lamports < 0) fail('Devnet transaction fee unavailable', 'rpc_rejected');
+      const prepared = Object.freeze({ transaction, feeLamports: String(lamports) });
+      simulatedTransfers.add(prepared);
+      return prepared;
+    },
+
+    async signPreparedDevnetTransfer({ bot, wallet, prepared } = {}) {
+      assertSpendAllowed({ bot, wallet });
+      if (!simulatedTransfers.delete(prepared)) fail('Transfer simulation is required', 'simulation_required');
+      await assertDevnet();
+      const walletId = assertPrivyWalletId(wallet.privyWalletId);
+      const signed = await signWithPrivy(walletId, prepared.transaction);
+      if (!singleSignerMessage(signed).equals(singleSignerMessage(prepared.transaction))) {
+        fail('Signed transfer differs from the simulation', 'transaction_mismatch');
+      }
+      return { cluster: 'devnet', signature: await sendSigned(signed, { privy: true }) };
     },
 
     /**

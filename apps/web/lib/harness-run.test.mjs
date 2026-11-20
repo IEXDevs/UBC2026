@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planConnectorUse, resolveDeskConnectors } from './connector-access.mjs';
+import { toolAccessRequest } from './spend-permission.mjs';
 import {
   claimVoiceLock,
   refreshVoiceLock,
@@ -26,6 +27,18 @@ function memory() {
     removeItem: (key) => bag.delete(key),
   };
 }
+
+test('a non-USDC spend uses the idempotency key from its matching approval', () => {
+  const sol = { botId: 'bot_test', action: 'pay', asset: 'SOL', amount: '1000000000', handle: 'alice' };
+  const hold = toolAccessRequest('full', 'request_spend', sol);
+  const options = { permissionMode: 'full', confirmSpend: true, grants: [hold] };
+  const approved = stampSpendPermission('request_spend', { ...sol, idempotencyKey: 'model-supplied' }, options);
+  assert.equal(approved.confirmed, true);
+  assert.equal(approved.idempotencyKey, hold.idempotencyKey);
+  const changed = stampSpendPermission('request_spend', { ...sol, amount: '2000000000' }, options);
+  assert.equal(changed.confirmed, undefined);
+  assert.equal(changed.idempotencyKey, undefined);
+});
 
 /**
  * Achieves: built-in connectors stay on, and a linked app can be used automatically.

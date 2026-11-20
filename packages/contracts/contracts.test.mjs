@@ -423,7 +423,11 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
   assert.equal(parsePermissionedSpendBody({ permission: 'sudo', botId: 'bot_1', amount: '1', destination: dest }), null);
   assert.equal(parsePermissionedSpendBody({ permission: 'full', botId: 'bot_1', amount: '0', destination: dest }), null);
   assert.equal(parsePermissionedSpendBody({ permission: 'full', botId: 'bot_1', amount: '1' }), null);
-  assert.equal(parsePermissionedSpendBody({ permission: 'full', botId: 'bot_1', amount: '1', destination: dest, asset: 'SOL' }), null);
+  const native = { permission: 'full', botId: 'bot_1', amount: '1', destination: dest, asset: 'SOL' };
+  assert.equal(parsePermissionedSpendBody(native).asset, 'SOL');
+  assert.equal(parsePermissionedSpendBody({ ...native, action: 'buy' }), null);
+  assert.equal(parsePermissionedSpendBody({ ...native, amount: '18446744073709551616' }), null);
+  assert.equal(parsePermissionedSpendBody({ ...native, asset: dest }).asset, dest);
   assert.equal(parsePermissionedSpendBody({
     permission: 'full', botId: 'bot_1', amount: '1', destination: dest, quote: { pricingCluster: 'bogus' },
   }), null);
