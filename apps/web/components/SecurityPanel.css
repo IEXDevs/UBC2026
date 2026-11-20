@@ -1,8 +1,9 @@
 .security-page {
   width: min(760px, 100%);
-  margin: 0 auto;
-  padding: 8px 4px 24px;
+  padding-bottom: 24px;
 }
+
+.security-bulk { margin-bottom: 12px; }
 
 .security-bulk,
 .security-row-actions {
