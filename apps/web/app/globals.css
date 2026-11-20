@@ -3386,6 +3386,14 @@ button.wallet-export:not(:disabled):hover {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.book-glance .address-copy-label,
+.book-glance .address-copy-status {
+  margin-top: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+}
 
 .book-size { margin: 22px 0 0; font-size: 1.55rem; font-weight: 600; letter-spacing: -0.04em; }
 .book-usd { margin: 4px 0 0; color: #a3a3a3; font-size: 13px; }

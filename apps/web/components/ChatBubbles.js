@@ -115,7 +115,7 @@ export default function ChatBubbles({
                 ) : (
                   <>
                     <Bubble align="end" variant="secondary">
-                      <BubbleContent>
+                      <BubbleContent className={line.mentionAddress ? 'overflow-visible' : undefined}>
                         <MentionText text={line.text} onParty={onParty} />
                         {line.mentionAddress ? <AddressCopy address={line.mentionAddress} inline className="chat-address" /> : null}
                       </BubbleContent>
@@ -150,7 +150,7 @@ export default function ChatBubbles({
             <MessageContent>
               <AgentTrace steps={steps} />
               <Bubble align="start" variant="secondary">
-                <BubbleContent>
+                <BubbleContent className={line.mentionAddress || line.access?.args?.destination ? 'overflow-visible' : undefined}>
                   {linkParts(text).map((part, index) => (
                     part.type === 'link'
                       ? <a key={`${line.id}-link-${index}`} className="chat-link" href={part.value} target="_blank" rel="noreferrer">{part.value}</a>
