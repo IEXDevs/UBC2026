@@ -94,7 +94,7 @@ export async function requestSpeech({
   let response;
   try {
     response = await fetcher(
-      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=mp3_44100_128`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=mp3_22050_32&optimize_streaming_latency=3`,
       {
         method: 'POST',
         headers: {
