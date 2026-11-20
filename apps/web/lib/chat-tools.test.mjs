@@ -7,20 +7,20 @@ import {
   serializeToolResult,
 } from './chat-tools.mjs';
 import worker from '../../agent-runtime/src/index.mjs';
+import { privySessionFixture } from '../../agent-runtime/src/owner-auth.fixture.mjs';
 
 test('the agent tool resolves another signed-in user’s handle to their main wallet', async () => {
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const session = privySessionFixture('did:privy:alice');
   let displayName = 'Bob';
   const env = {
-    PRIVY_APP_ID: 'test-app',
+    PRIVY_APP_ID: session.appId,
     PRIVY_APP_SECRET: 'test-secret',
     SUPABASE_URL: 'https://directory.example',
     SUPABASE_SERVICE_ROLE_KEY: 'test-role-key',
-    transferClient: { acceptLogin: async ({ accessToken }) => {
-      assert.equal(accessToken, 'alice-test-token');
-      return { userId: 'did:privy:alice' };
-    } },
     fetch: async (url, init) => {
+      if (String(url) === session.jwksUrl) return session.jwks();
+      if (new URL(url).pathname.endsWith('/activity_logs')) return new Response(null, { status: 204 });
       assert.equal(init.method, 'GET');
       const target = new URL(url);
       if (target.pathname === '/rest/v1/profiles') {
@@ -35,7 +35,7 @@ test('the agent tool resolves another signed-in user’s handle to their main wa
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:alice',
     botId: 'bot_alice',
-    accessToken: 'alice-test-token',
+    accessToken: session.token,
     runtimeBase: 'https://runtime.example',
     fetcher: (url, init) => worker.fetch(new Request(url, init), env),
   });

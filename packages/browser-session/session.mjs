@@ -451,6 +451,7 @@ export function createDefaultBrowserSessionService(env, store) {
       accountId: env.CLOUDFLARE_ACCOUNT_ID,
       apiToken: env.CLOUDFLARE_API_TOKEN,
       fetcher: env.fetcher,
+      binding: env.BROWSER,
     }),
     maxSessionsPerBot: concurrencyLimit(env.MAX_BROWSER_SESSIONS_PER_BOT),
   });

@@ -20,7 +20,8 @@ import {
 import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
-import { handleApiData, resolveOwner, resolveVerifiedOwner } from './api-data.mjs';
+import { handleApiData } from './api-data.mjs';
+import { ownerAuthStatus, requestOwner, resolveOwner } from './owner-auth.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
 import { botStub, rememberBotAlert } from './bot-alerts.mjs';
 import { createSupabaseRpc, supabaseConfig, supabaseGet } from './supabase-rest.mjs';
@@ -53,13 +54,10 @@ function isOwnerBotAction(action) {
  * Status / positions / control plane: identity from resolveOwner (Privy bearer when
  * secrets exist), then prove that owner owns the bot when Supabase is configured.
  */
-async function assertBotOwner(request, env, botId, verifyToken = false) {
-  const { ownerId, error } = verifyToken
-    ? await resolveVerifiedOwner(request, env, env.fetch ?? fetch)
-    : await resolveOwner(request, env);
+async function assertBotOwner(request, env, botId) {
+  const { ownerId, error } = await resolveOwner(request, env);
   if (error && !ownerId) {
-    const status = error === 'owner_mismatch' ? 403 : 401;
-    return { ok: false, status, error, ownerId: null };
+    return { ok: false, status: ownerAuthStatus(error), error, ownerId: null };
   }
   if (!ownerId) return { ok: false, status: 401, error: 'owner_required', ownerId: null };
   if (!supabaseConfig(env)) return { ok: true, ownerId };
@@ -117,6 +115,12 @@ async function readLoopPayload(request) {
 
 async function enrichLoopPayload(body, env, botId, ownerId) {
   const next = { ...body };
+  if (supabaseConfig(env)) {
+    delete next.bot;
+    delete next.wallet;
+    delete next.ledger;
+    next.botId = botId;
+  }
   if (!LOOP_BOT_ID.test(typeof next.botId === 'string' ? next.botId : '')) next.botId = botId;
   const suppliedGoal = clipLoopGoal(next.goal);
   if (suppliedGoal) next.goal = suppliedGoal;
@@ -338,7 +342,7 @@ async function dispatch(request, env, rawEnv = env) {
       const action = botMatch[2] ?? 'status';
       let ownerId = null;
       if (isOwnerBotAction(action)) {
-        const gate = await assertBotOwner(request, env, botId, action === 'pause' || action === 'resume');
+        const gate = await assertBotOwner(request, env, botId);
         if (!gate.ok) return json({ error: gate.error }, gate.status);
         ownerId = gate.ownerId;
       }
@@ -414,6 +418,7 @@ const worker = {
       response = json({ error: 'internal' }, 500);
     }
     if (logging) {
+      if (captured) captured.ownerId = requestOwner(request);
       const pending = persistHttpActivity(env, { captured, response, started }).catch(() => {});
       if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(pending);
       else await pending;
