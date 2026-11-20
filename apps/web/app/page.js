@@ -91,6 +91,7 @@ import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-previe
 import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
+import { logoutAfterFlush } from '../lib/profile-logout.mjs';
 
 function readAccessToken(getAccessToken) {
   return getPrivyAccessToken(getAccessToken, window.localStorage);
@@ -1388,8 +1389,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     lockWallet();
     setProfileOpen(false);
     try {
-      await flushAccountState();
-      await onLogout();
+      await logoutAfterFlush(flushAccountState, onLogout);
     } catch {
       toast?.('Could not log out. Please try again.');
     }

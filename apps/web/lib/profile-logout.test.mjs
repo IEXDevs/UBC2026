@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { withPrivyLogout, MAELSTROM_TOKEN_KEY, MAELSTROM_CUSTOMER_KEY, MAELSTROM_REFRESH_KEY } from './accept-terms-auth.mjs';
+import { logoutAfterFlush } from './profile-logout.mjs';
 
 function storage() {
   const values = new Map([MAELSTROM_TOKEN_KEY, MAELSTROM_CUSTOMER_KEY, MAELSTROM_REFRESH_KEY].map(key => [key, 'cached']));
@@ -14,7 +15,7 @@ test('profile menu and profile sheet share logout with desk locking and Privy cl
   assert.match(menu, /id: 'logout', label: 'Log out', icon: LogOut/);
   assert.match(menu, /setOpen\(false\);\s+onPick\(item.id\)/);
   assert.match(page, /if \(id === 'logout'\) \{\s+void logOut\(\)/);
-  assert.match(page, /const logOut = useCallback\(async \(\) => \{\s+lockWallet\(\);\s+setProfileOpen\(false\);\s+try \{\s+await flushAccountState\(\);\s+await onLogout\(\)/);
+  assert.match(page, /const logOut = useCallback\(async \(\) => \{\s+lockWallet\(\);\s+setProfileOpen\(false\);\s+try \{\s+await logoutAfterFlush\(flushAccountState, onLogout\)/);
   assert.match(page, /onLogout=\{logOut\}/);
   assert.match(page, /withPrivyLogout\(window, \(\) => logout\(\)\)/);
   assert.match(page, /clearDeskSession\(localStorage, ownerId\)/);
@@ -49,4 +50,23 @@ test('logout works without stored app session state', async () => {
   let called = false;
   await withPrivyLogout({}, async () => { called = true; });
   assert.equal(called, true);
+});
+
+test('logout waits for a queued desk save before ending the session', async () => {
+  const calls = [];
+  await logoutAfterFlush(async () => { calls.push('save'); }, async () => { calls.push('logout'); });
+  assert.deepEqual(calls, ['save', 'logout']);
+});
+
+test('a stalled desk save cannot prevent logout', async () => {
+  let called = false;
+  await logoutAfterFlush(() => new Promise(() => {}), async () => { called = true; }, 10);
+  assert.equal(called, true);
+});
+
+test('logout continues after a failed desk save and propagates logout errors', async () => {
+  await assert.rejects(logoutAfterFlush(
+    async () => { throw new Error('save failed'); },
+    async () => { throw new Error('logout failed'); },
+  ), /logout failed/);
 });
