@@ -124,6 +124,7 @@ test('accountWriteBodies maps login wallets and rejects incomplete login', () =>
   assert.equal(bodies.wallets.length, 2);
   assert.equal(bodies.wallets[0].owner_id, 'user_1');
   assert.equal(bodies.wallets[0].provider, 'privy');
+  assert.equal(Object.hasOwn(bodies.wallets[0], 'frozen'), false);
   assert.equal(bodies.wallets[1].label, 'Sleeve');
   assert.equal(accountWriteBodies(null, 'user_1'), null);
   assert.equal(accountWriteBodies({ additional: [] }, 'user_1'), null);

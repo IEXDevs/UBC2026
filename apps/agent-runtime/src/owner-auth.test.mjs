@@ -107,6 +107,7 @@ test('wallet persistence accepts signed sessions and only writes wallets verifie
   assert.equal((await persist([wallet])).status, 200);
   assert.equal(writes[0][0].owner_id, owner);
   assert.equal(writes[0][0].id, wallet.id);
+  assert.equal(Object.hasOwn(writes[0][0], 'frozen'), false);
   assert.equal((await persist([{ ...wallet, id: 'unregistered_wallet' }])).status, 403);
   assert.equal(writes.length, 1);
 });

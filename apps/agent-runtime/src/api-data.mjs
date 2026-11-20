@@ -153,8 +153,7 @@ function walletRowFromPublic(wallet, ownerId) {
     kind,
     label,
     address,
-    provider: wallet.provider === 'privy' || !wallet.provider ? 'privy' : 'privy',
-    frozen: wallet.frozen === true,
+    provider: 'privy',
   };
 }
 
@@ -525,7 +524,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'wallets.persist') {
     const { ownerId, token, error } = await resolveOwner(request, env);
-    if (error) return json({ error: error === 'owner_required' && !request.headers.has('authorization') ? 'login_required' : error }, ownerAuthStatus(error));
+    if (error) return json({ error: error === 'owner_required' ? 'login_required' : error }, ownerAuthStatus(error));
     if (!token) return json({ error: 'login_required' }, 401);
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
     const body = await request.json().catch(() => null);
