@@ -1527,6 +1527,10 @@ test('an approved swap retry reuses its saved approval', async () => {
   assert.equal(first.run.checkpoints.execute.approvalId, saved[0].id);
   failOrder = false;
   await machine.put('run', { ...first.run, paused: false, pauseReason: null });
+  const late = await (await postLoop(machine, deps, { ...body, now: proposal.expiresAt })).json();
+  assert.equal(late.run.pauseReason, 'quote-expired');
+  assert.equal(live.calls.reserved.length, 1);
+  await machine.put('run', { ...first.run, paused: false, pauseReason: null });
   const second = await (await postLoop(machine, deps, body)).json();
   assert.equal(second.done, true);
   assert.equal(saved.length, 1);

@@ -777,6 +777,9 @@ async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
     ? ctx.deps.swapOrder
     : (fetcher ? intent => readJupiterSwapOrder({ ...intent, fetcher, apiKey: ctx.deps.jupiterApiKey ?? null }) : null);
   if (!orderFn) return waitStep(run, 'execute', 'client_missing', { idempotencyKey }, ctx.now);
+  if (!Number.isSafeInteger(proposal.expiresAt) || proposal.expiresAt <= ctx.now) {
+    return waitStep(run, 'execute', 'quote-expired', { idempotencyKey }, ctx.now);
+  }
   const prior = run.checkpoints.execute;
   if (prior?.signing === true) {
     return waitStep(run, 'execute', 'execute-unconfirmed', { idempotencyKey, signing: true }, ctx.now);
