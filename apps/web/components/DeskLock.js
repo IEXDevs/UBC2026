@@ -5,7 +5,7 @@ import ModalClose from './ModalClose';
 import SecretDraft from './SecretDraft';
 import PasswordFeedback from './PasswordFeedback';
 import { passwordFeedback } from '../lib/password-feedback.mjs';
-import { createDeskLock, passwordProblem } from '../lib/desk-lock.mjs';
+import { createDeskLock, newAccountNote, passwordProblem } from '../lib/desk-lock.mjs';
 import { acceptEnteredPassword, readDeskLockState, saveDeskVerifier } from '../lib/desk-grant-client.mjs';
 import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
@@ -17,7 +17,7 @@ function controlValue(form, name) {
   return node && typeof node.value === 'string' ? node.value : '';
 }
 
-export default function DeskLock({ ownerId, onUnlock, onClose, onSignOut, getAccessToken }) {
+export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose, onSignOut, getAccessToken }) {
   const [status, setStatus] = useState('checking');
   const [attempt, setAttempt] = useState(0);
   const [password, setPassword] = useState('');
@@ -284,6 +284,9 @@ export default function DeskLock({ ownerId, onUnlock, onClose, onSignOut, getAcc
           </>
         ) : (
           <form className="field" autoComplete="off" onSubmit={submit}>
+            {status === 'missing' && !replacing ? (
+              <p className="quiet" role="status">{newAccountNote(accountLabel)}</p>
+            ) : null}
             {phraseGate && !replacing ? (
               <>
                 <p className="quiet">Enter the 12-word seed for this account to reset your desk password.</p>
