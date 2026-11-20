@@ -166,6 +166,10 @@ test('swap preparation derives balances from requested RPC account snapshots, no
     return { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280, data: [data.toString('base64'), 'base64'] };
   };
   let missing = false;
+  let simulationError = null;
+  const system = SystemProgram.programId.toBase58();
+  const token = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const failureLogs = [`Program ${token} failed: custom program error: 0x1`, `Program ${system} failed: custom program error: 0x1`];
   const calls = [];
   const fetcher = async (_url, init) => {
     const { method, params } = JSON.parse(init.body);
@@ -177,7 +181,10 @@ test('swap preparation derives balances from requested RPC account snapshots, no
     else if (method === 'simulateTransaction') {
       assert.equal(params[1].minContextSlot, 42);
       assert.equal(params[1].accounts.addresses[0], signer.toBase58());
-      result = { value: { err: null, accounts: missing ? null : [{ lamports: 989995000 }, account('1000000'), null] } };
+      result = { value: {
+        err: simulationError, accounts: missing ? null : [{ lamports: 989995000 }, account('1000000'), null],
+        logs: ['Program log: https://rpc.invalid/private-key', 'Program data: private-data', ...failureLogs],
+      } };
     } else assert.fail(`unexpected RPC ${method}`);
     return Response.json({ jsonrpc: '2.0', id: 1, result });
   };
@@ -186,6 +193,14 @@ test('swap preparation derives balances from requested RPC account snapshots, no
   const prepared = await privy.prepareSolanaSwap(intent);
   assert.equal(prepared.maxSolCost, '5000');
   assert.equal(calls.includes('sendTransaction'), false);
+  simulationError = { InstructionError: [0, { Custom: 1 }] };
+  await assert.rejects(privy.prepareSolanaSwap(intent), error => {
+    assert.equal(error.code, 'simulation_failed');
+    assert.equal(error.simulationReason, 'instruction_0_custom_1');
+    assert.deepEqual(error.simulationDetails, { instructionProgram: system, logs: failureLogs });
+    return true;
+  });
+  simulationError = null;
   missing = true;
   await assert.rejects(privy.prepareSolanaSwap(intent), { code: 'swap_simulation_unavailable' });
   assert.equal(swapAccountSnapshot(null, signer.toBase58()), null);
