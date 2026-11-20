@@ -74,6 +74,32 @@ test('catalog normalization includes non-reasoning chat models but excludes dupl
   assert.equal(parseProviderModels({ data: [{ id: 'vendor/chat', supported_parameters: ['tools'] }, { id: 'vendor/image', architecture: { output_modalities: ['image'] } }] }, 'openrouter').length, 1);
 });
 
+test('Meta discovery, cached choices, and inference only use Muse Spark 1.3 Contributor', async () => {
+  const storage = memory();
+  const baseUrl = 'https://api.meta.ai/v1';
+  const meta = saveProvider(storage, { name: 'Meta', token, baseUrl }).provider;
+  const contributor = 'muse-spark-1.3-contributor';
+  const retired = 'muse-wonder-1.0';
+  const data = [{ id: retired }, { id: contributor }, { id: 'another-meta-model' }];
+  const catalog = await checkProviderModels({ baseUrl, apiKey: token, fetcher: async () => Response.json({ data }) });
+  assert.deepEqual(catalog.models.map(row => row.id), [contributor]);
+  saveModelCatalog(storage, ACCOUNT_PROVIDER, data);
+  saveModelCatalog(storage, meta.id, data);
+  assert.deepEqual(visibleModelOptions(storage).map(row => row.key), [contributor, modelOptionKey(meta.id, contributor)]);
+  assert.equal(selectedModelRequest(storage, retired), null);
+  for (const options of [{ metaModelApiKey: token }, { modelProvider: { token, baseUrl } }]) {
+    const reply = await completeTextChat({
+      ...options, model: retired, message: 'Hello',
+      fetcher: async (_url, init) => {
+        const body = JSON.parse(init.body);
+        assert.equal(body.model, contributor);
+        return Response.json({ choices: [{ message: { content: init.body.includes('Role: turn-verify') ? '{"allow":true}' : 'Hello' } }] });
+      },
+    });
+    assert.equal(reply.model, contributor);
+  }
+});
+
 test('model checks only contact supported exact HTTPS roots and never echo raw errors or credentials', async () => {
   for (const url of ['http://api.openai.com/v1', 'https://api.openai.com.evil/v1', 'https://localhost/v1', 'https://api.openai.com/v1?key=bad', 'https://user:pass@api.openai.com/v1']) {
     assert.equal(aiProvider(url), null);
@@ -137,7 +163,7 @@ test('account catalogs never advertise router aliases that inference silently re
 });
 
 test('advertised thinking choices for newly discovered models reach inference', async () => {
-  const [discovered] = parseProviderModels({ data: [{ id: 'new-reasoner', reasoning: { efforts: ['low', 'high'] } }] });
+  const [discovered] = parseProviderModels({ data: [{ id: 'gpt-new-reasoner', reasoning: { efforts: ['low', 'high'] } }] }, 'openai');
   const high = discovered.levels.find(level => level.id === 'high');
   let inference;
   await completeTextChat({
