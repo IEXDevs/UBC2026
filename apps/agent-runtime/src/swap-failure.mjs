@@ -1,3 +1,5 @@
+import { swapSimulationDetails } from '@ubc2026/wallets/swap-diagnostics';
+
 const FAILURES = {
   client_sign_required: ['client signing', 'Approve this swap in the browser with the selected wallet.'],
   aborted: ['client signing', 'The swap request was cancelled. Nothing further was submitted.'],
@@ -75,7 +77,11 @@ export function swapFailure(result = {}) {
   if (provider) return { code: provider, step: 'quote', message: `Swap — quote: Jupiter returned HTTP ${provider.slice(-3)}. Check API access or retry later. [${provider}]` };
   const instruction = [result.simulationReason, result.error].find(value => /^instruction_[0-9]+_(?:[A-Za-z]{1,64}|custom_[0-9]+|unknown)$/.test(value ?? ''));
   if (instruction) {
-    return { code: instruction, step: 'simulation', message: `Swap — simulation: A Solana instruction failed. [${instruction}]` };
+    const details = swapSimulationDetails(result.simulationDetails ?? result.failure?.simulationDetails);
+    const lines = [`Swap — simulation: A Solana instruction failed before broadcast. [${instruction}]`];
+    if (details?.instructionProgram) lines.push(`Instruction program ${details.instructionProgram}.`);
+    if (details) lines.push(...details.logs);
+    return { code: instruction, step: 'simulation', message: lines.join('\n'), ...(details ? { simulationDetails: details } : {}) };
   }
   const code = [result.simulationReason, result.reason, result.error, result.state, result.code]
     .find(value => Object.hasOwn(FAILURES, value)) || 'swap_failed';

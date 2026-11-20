@@ -7,7 +7,8 @@
     ".": "./wallets.mjs",
     "./privy": "./privy.mjs",
     "./privy-access-token": "./privy-access-token.mjs",
-    "./balances": "./balances.mjs"
+    "./balances": "./balances.mjs",
+    "./swap-diagnostics": "./swap-diagnostics.mjs"
   },
   "scripts": { "test": "node --test wallets.test.mjs privy.test.mjs privy.worker-login.test.mjs balances.test.mjs" },
   "dependencies": {

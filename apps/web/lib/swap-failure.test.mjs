@@ -28,9 +28,17 @@ test('swap failures identify each failed step without exposing raw errors', () =
 });
 
 test('swap diagnostics survive a failed runtime response and appear in plain chat text', async () => {
+  const program = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const log = `Program ${program} failed: custom program error: 0x1`;
+  const error = 'instruction_3_custom_1';
   const invoke = createChatToolInvoker({ ownerId: 'user_1', botId: 'bot_1', runtimeBase: 'https://runtime.invalid',
-    fetcher: async () => Response.json({ error: 'swap_quote_expired', signed: false, failure: swapFailure({ error: 'swap_quote_expired' }) }, { status: 409 }),
+    fetcher: async () => Response.json({ error, signed: false, failure: swapFailure({
+      error, simulationDetails: { instructionProgram: program, logs: [log, 'Program data: secret'] },
+    }) }, { status: 409 }),
   });
   const result = await invoke('request_spend', { botId: 'bot_1', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1' });
-  assert.match(spendFailureMessage(result), /Swap — quote:.*\[swap_quote_expired\]/);
+  const message = spendFailureMessage(result);
+  assert.match(message, /Swap — simulation:.*\[instruction_3_custom_1\]/);
+  assert.ok(message.includes(`Instruction program ${program}.\n${log}`));
+  assert.doesNotMatch(message, /secret/);
 });

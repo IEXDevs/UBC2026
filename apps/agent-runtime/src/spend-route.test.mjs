@@ -182,6 +182,7 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
       checkpoints: { decide: { status: 'waiting', reason: LOOP_SWAP_PENDING, swapIntent: intent } } });
   }
   let simulation;
+  let simulationError;
   let routeSlippage = 50;
   let reserved = 0;
   let signed = 0;
@@ -201,6 +202,7 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
       getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
       readSolanaMint: async ({ mint }) => ({ cluster: 'mainnet-beta', mint, decimals: 6 }),
       prepareSolanaSwap: async input => {
+        if (simulationError) throw simulationError;
         simulation ??= input.transaction;
         assert.equal(input.transaction, simulation);
         assert.equal(input.amount, '1000000');
@@ -261,11 +263,33 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
   routeSlippage = 100;
   assert.equal((await (await request()).json()).error, 'swap_route_refused');
   routeSlippage = 50;
+  const instructionProgram = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
+  const log = `Program ${instructionProgram} failed: custom program error: 0x1`;
+  const preflightError = Object.assign(new Error('private RPC details'), {
+    code: 'simulation_failed', simulationReason: 'instruction_3_custom_1',
+    simulationDetails: { instructionProgram, logs: ['Program log: private-data', log] },
+  });
+  async function assertPreflightFailure(body) {
+    simulationError = preflightError;
+    const response = await request(body);
+    simulationError = null;
+    assert.equal(response.status, 409);
+    const result = await response.text();
+    assert.doesNotMatch(result, /private|USDC transfer/);
+    const failure = JSON.parse(result);
+    assert.equal(failure.signed, false);
+    assert.equal(failure.failure.code, 'instruction_3_custom_1');
+    assert.deepEqual(failure.failure.simulationDetails, { instructionProgram, logs: [log] });
+    assert.equal(signed, 0);
+    assert.equal(reserved, 0);
+  }
+  await assertPreflightFailure();
   const preview = await (await request()).json();
   assert.equal(preview.swapPreview?.usdMicros, '1000500');
   assert.equal(signed, 0);
   assert.equal(reserved, 0);
   const ticket = preview.swapPreview.ticket;
+  await assertPreflightFailure({ confirmed: true, swapTicket: ticket, swapAuthorization: 'prepare' });
   const changed = await (await request({ confirmed: true, amount: '2000000', swapTicket: ticket, swapAuthorization: 'prepare' })).json();
   assert.equal(changed.error, intent ? 'swap_intent_unavailable' : 'swap_quote_expired');
   const unbound = await (await request({ confirmed: true, swapTicket: ticket })).json();
