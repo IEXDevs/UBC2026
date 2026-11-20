@@ -11,7 +11,7 @@ import {
 } from '@ubc2026/contracts';
 import { mainnetQuoteBlocksSpend, runPermissionedSpend } from '@ubc2026/agent-loop';
 import { proposalDigest } from '@ubc2026/bot-policy';
-import { buildSolanaAssetTransaction, transferSolanaUsdc } from '@ubc2026/transfers';
+import { buildSolanaAssetTransaction, buildSolanaUsdcTransaction, transferSolanaUsdc } from '@ubc2026/transfers';
 import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 import { loadOwnerLoopContext, supabaseConfig, supabaseGet, supabaseWrite } from './supabase-rest.mjs';
 import { alertFromSpend, publishBotAlert } from './bot-alerts.mjs';
@@ -19,6 +19,8 @@ import { deskSpendAllowed, sha256Hex } from './desk-grant.mjs';
 import { ownerAuthStatus, resolveSpendOwner } from './owner-auth.mjs';
 import { verifierFacts } from './spend-verifier.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
+import { mintForAsset, prepareApprovedSwap, previewLiveSwap, readSwapTicket } from './live-swap.mjs';
+import { valueUsdSpend } from './usd-budget.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
 const WALLET_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -63,19 +65,25 @@ async function prepareAssetTransfer(env, parsed, wallet, destination, id, blockh
     if (block?.cluster !== SOLANA_CLUSTER) throw new Error('wrong_cluster');
     blockhash = block.blockhash;
   }
-  let decimals;
-  if (parsed.asset !== 'SOL') {
+  let decimals = parsed.asset === 'SOL' ? 9 : 6;
+  if (parsed.asset !== 'SOL' && parsed.asset !== 'USDC') {
     const mint = await client.readSolanaMint({ mint: parsed.asset });
     if (mint?.cluster !== SOLANA_CLUSTER || mint.mint !== parsed.asset) throw new Error('wrong_mint');
     decimals = mint.decimals;
   }
-  const transaction = buildSolanaAssetTransaction({
+  const args = {
     asset: parsed.asset, decimals, sourceOwner: wallet.address, destinationOwner: destination,
     amount: parsed.amount, memo: `maelstrom:spend:${id}`, recentBlockhash: blockhash,
+  };
+  const isUsdc = parsed.asset === 'USDC';
+  const transaction = isUsdc
+    ? buildSolanaUsdcTransaction({ ...args, feePayer: wallet.address }).transactionBase64
+    : buildSolanaAssetTransaction(args);
+  const prepared = await client.prepareSolanaTransfer({
+    transaction, ...(isUsdc ? { accountCreationPayer: wallet.address } : {}),
   });
-  const prepared = await client.prepareSolanaTransfer({ transaction });
   if (prepared?.transaction !== transaction || !/^(0|[1-9]\d{0,19})$/.test(prepared.feeLamports || '')) throw new Error('invalid_simulation');
-  return { prepared, blockhash };
+  return { prepared, blockhash, decimals };
 }
 
 async function reserveAssetTransfer(env, { ownerId, bot, proposal, policy, now, idempotencyKey, budgetApproval }) {
@@ -134,7 +142,8 @@ export async function handleSpend(request, env = {}) {
   const raw = await request.json().catch(() => null);
   const parsed = parsePermissionedSpendBody(raw);
   if (!parsed) return json({ error: 'invalid_spend', signed: false }, 400);
-  const assetTransfer = parsed.asset !== 'USDC';
+  const swap = parsed.action === 'swap';
+  const assetTransfer = swap || parsed.asset !== 'USDC';
   const overrideToken = request.headers.get('x-spend-approve-once');
   const approvalKey = supabaseConfig(env)?.key;
   const prepareAuthorization = raw.spendAuthorization === 'prepare';
@@ -171,33 +180,83 @@ export async function handleSpend(request, env = {}) {
   }
 
   const now = Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now();
+  const usdBudget = context.bot.cap?.asset === 'USD';
+  if (swap) {
+    if (SOLANA_CLUSTER !== 'mainnet-beta') return json({ error: 'wrong_cluster', signed: false }, 409);
+    if (!usdBudget) return json({ error: 'swap_requires_usd_budget', signed: false }, 409);
+    if (context.bot.frozen || !context.bot.enabled || context.wallet.frozen) {
+      return json({ state: 'blocked', reason: 'spend-frozen', signed: false }, 409);
+    }
+    if (!parsed.idempotencyKey) return json({ error: 'idempotency_key_required', signed: false }, 400);
+    if (!approvalKey || !env.JUPITER_API_KEY || !env.transferClient?.prepareSolanaSwap
+        || !env.transferClient?.signPreparedSolanaTransfer || !env.ledgerApi?.reserveBudget) {
+      return json({ error: 'swap_unavailable', signed: false }, 503);
+    }
+    if (!parsed.confirmed) {
+      try {
+        const preview = await previewLiveSwap(env, context, parsed, approvalKey, now);
+        return json({ state: 'approval-needed', signed: false, swapPreview: preview });
+      } catch {
+        return json({ error: 'swap_quote_unavailable', signed: false }, 409);
+      }
+    }
+    if (desk.ok && (desk.via !== 'grant' || (!prepareAuthorization && !ownerAuthorization))) {
+      return json({ error: 'swap_owner_authorization_required', signed: false }, 403);
+    }
+  }
+  if (usdBudget && !desk.ok) return json({ error: 'desk_locked', signed: false }, 403);
+  if (usdBudget && !swap && (parsed.action === 'buy' || parsed.action === 'sell')) {
+    return json({ error: 'swap_mints_required', signed: false }, 400);
+  }
+  const swapOffer = swap ? readSwapTicket(raw.swapTicket, context, parsed, approvalKey, now) : null;
+  if (swap && !swapOffer) return json({ error: 'swap_quote_expired', signed: false }, 409);
   if (ownerAuthorization && (ownerAuthorization.expiresAt <= now
     || ownerAuthorization.expiresAt > now + SPEND_AUTHORIZATION_TTL_MS)) {
     return json({ error: 'spend_authorization_expired', signed: false }, 409);
   }
   const mint = parsed.asset === 'USDC' ? SOLANA_USDC_MINT : (parsed.asset === 'SOL' ? SOL_TRUST_MINT : parsed.asset);
-  const lookedUp = await spendTrustScore(env, mint);
+  let lookedUp = await spendTrustScore(env, mint);
+  if (swap) {
+    const outputTrust = await spendTrustScore(env, mintForAsset(parsed.outputAsset));
+    if (lookedUp.unavailable || outputTrust.unavailable) return json({ state: 'blocked', reason: 'trust-unavailable', signed: false }, 409);
+    if (BigInt(outputTrust.score) < BigInt(lookedUp.score)) lookedUp = outputTrust;
+  }
   const trustUnavailable = lookedUp.unavailable === true;
   const trustScore = trustUnavailable ? undefined : lookedUp.score;
-  const recipient = assetTransfer
+  const recipient = swap ? context.wallet.address : (assetTransfer || usdBudget)
     ? await transferDestination(env, parsed)
     : (parsed.destination || parsed.handle || (parsed.selfCustody ? context.wallet.address : ''));
   if (typeof recipient !== 'string' || recipient.length < 1) {
     return json({ error: assetTransfer ? 'recipient_address_missing' : 'invalid_spend', signed: false }, 400);
   }
-  const id = parsed.idempotencyKey || (assetTransfer ? `spend_${crypto.randomUUID()}` : `spend_${parsed.botId}`);
+  const id = parsed.idempotencyKey || (assetTransfer || usdBudget ? `spend_${crypto.randomUUID()}` : `spend_${parsed.botId}`);
   let prepared = null;
   let blockhash;
+  let valuation = swapOffer;
   // A proposal may run the gates without an unlock or confirmation, but it cannot sign.
-  if (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset && !context.wallet.frozen && !context.bot.frozen) {
-    if (!parsed.idempotencyKey) return json({ error: 'idempotency_key_required', signed: false }, 400);
+  if ((usdBudget || (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset))
+      && !context.wallet.frozen && !context.bot.frozen) {
+    if (!parsed.idempotencyKey && assetTransfer) return json({ error: 'idempotency_key_required', signed: false }, 400);
     if (!env.ledgerApi?.reserveBudget || !env.transferClient?.signPreparedSolanaTransfer) {
       return json({ error: 'asset_transfer_unavailable', signed: false }, 503);
     }
     try {
-      ({ prepared, blockhash } = await prepareAssetTransfer(env, parsed, context.wallet, recipient, id, ownerAuthorization?.blockhash));
+      if (swap) {
+        blockhash = swapOffer.blockhash;
+        if (ownerAuthorization && ownerAuthorization.blockhash !== blockhash) throw new Error('simulation_failed');
+        prepared = await prepareApprovedSwap(env, context, parsed, swapOffer);
+      } else {
+        let decimals;
+        ({ prepared, blockhash, decimals } = await prepareAssetTransfer(env, parsed, context.wallet, recipient, id, ownerAuthorization?.blockhash));
+        if (usdBudget) {
+          const feeLamports = parsed.asset === 'USDC' ? prepared.maxSolCost : prepared.feeLamports;
+          if (!feeLamports) throw new Error('simulation_failed');
+          valuation = await valueUsdSpend(env, { mint, decimals, amount: parsed.amount, feeLamports, now });
+        }
+      }
     } catch (error) {
-      const code = ['unsupported_mint', 'simulation_failed', 'invalid_destination'].includes(error?.code) ? error.code : 'transfer_preparation_failed';
+      const known = ['unsupported_mint', 'simulation_failed', 'invalid_destination', 'usd_price_unavailable'];
+      const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
       return json({ error: code, signed: false }, 409);
     }
   }
@@ -214,14 +273,14 @@ export async function handleSpend(request, env = {}) {
     id,
     botId: parsed.botId,
     cluster: SOLANA_CLUSTER,
-    asset: parsed.asset,
+    asset: valuation ? 'USD' : parsed.asset,
     recipient,
     quoteId: prepared ? await sha256Hex(prepared.transaction) : (parsed.quote?.pricingCluster === 'mainnet' ? 'mainnet-quote' : SOLANA_CLUSTER),
-    outflow: parsed.amount,
-    expectedReceive: parsed.amount,
-    expectedReceiveAsset: parsed.asset,
-    maxFee: parsed.asset === 'SOL' ? prepared?.feeLamports ?? '0' : '0',
-    expiresAt: now + 120_000,
+    outflow: valuation?.outflow ?? parsed.amount,
+    expectedReceive: swapOffer?.minOutput ?? parsed.amount,
+    expectedReceiveAsset: parsed.outputAsset ?? parsed.asset,
+    maxFee: valuation?.maxFee ?? (parsed.asset === 'SOL' ? prepared?.feeLamports ?? '0' : '0'),
+    expiresAt: swapOffer?.expiresAt ?? now + 120_000,
   };
   const grantOk = desk.ok === true;
   const approvalTerms = prepared && solHandleApproval && desk.via === 'grant'
@@ -251,7 +310,7 @@ export async function handleSpend(request, env = {}) {
     };
     beforeSign = async ({ bot, wallet, proposal, policy, approvedOnce }) => {
       if (prepareAuthorization || ownerAuthorization) {
-        const expiresAt = ownerAuthorization?.expiresAt ?? now + SPEND_AUTHORIZATION_TTL_MS;
+        const expiresAt = ownerAuthorization?.expiresAt ?? Math.min(proposal.expiresAt, now + SPEND_AUTHORIZATION_TTL_MS);
         const payload = env.transferClient.formatPreparedSpendAuthorization({ bot, wallet, prepared, expiresAt });
         const binding = JSON.stringify([
           'maelstrom:spend-authorization:v1', ownerId, bot.id, id, wallet.id, bot.policyVersion,
@@ -270,7 +329,7 @@ export async function handleSpend(request, env = {}) {
         ownerId, bot, proposal, policy, now, idempotencyKey: id, budgetApproval: approvedOnce ? budgetApproval : null,
       });
     };
-  } else if (!assetTransfer && grantOk) {
+  } else if (!assetTransfer && !usdBudget && grantOk) {
     if (parsed.destination && env.transferClient) signSolana = async ({ bot, wallet, memo }) => {
       const sent = await transferSolanaUsdc({
         client: env.transferClient,
@@ -301,8 +360,8 @@ export async function handleSpend(request, env = {}) {
         ? env.spendVerifyFn
         : async () => verifierFacts({
           facts,
-          proposal,
-          parsed: assetTransfer ? { ...parsed, destination: recipient } : parsed,
+          proposal: valuation ? { ...proposal, asset: parsed.asset, outflow: parsed.amount } : proposal,
+          parsed: assetTransfer || usdBudget ? { ...parsed, destination: recipient } : parsed,
           trustScore,
           trustUnavailable,
           mint,
@@ -340,6 +399,7 @@ export async function handleSpend(request, env = {}) {
     ...(overrideToken === null && approvalTerms && perTransferLimit ? { approvalTerms } : {}),
   };
   if (state === 'desk_locked') body.error = 'desk_locked';
+  if (usdBudget && result.policy?.debit) body.usdMicros = result.policy.debit;
   if (typeof result.trust?.prompt === 'string') body.prompt = result.trust.prompt;
   if (result.signed === true && grantOk) body.signature = result.signature;
   const alert = alertFromSpend(result, parsed);

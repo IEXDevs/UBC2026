@@ -76,3 +76,13 @@ test('linked nodes trail a drag and farther ones follow behind', () => {
   assert.equal(nodes[3].x, 800);
   assert.equal(nodes[0].x, -120);
 });
+
+test('wallets without positions keep their cards apart', () => {
+  const wallets = [
+    { id: 'wallet_a', label: 'Preview', address: 'A'.repeat(44) },
+    { id: 'wallet_b', label: 'Shop', address: 'B'.repeat(44) },
+  ];
+  const book = layoutPositionBook([], [], wallets);
+  const [left, right] = book.wallets;
+  assert.ok(right.x - left.x >= 240, `wallet roots ${right.x - left.x}px apart`);
+});

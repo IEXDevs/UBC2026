@@ -3273,6 +3273,12 @@ button.wallet-export:not(:disabled):hover {
 
 .book-tools button:hover { border-color: #fff; }
 
+@media (max-width: 800px) {
+  .book-earnings { top: 74px; left: 12px; width: min(320px, calc(100% - 24px)); }
+  .book-caption { left: 12px; bottom: 12px; max-width: calc(100% - 24px); }
+  .book-tools { right: 12px; }
+}
+
 .book-venue {
   display: flex;
   align-items: center;
@@ -5638,30 +5644,6 @@ body:has(.backdrop.is-cover) {
 .create-look .bot-look-name,
 .create-look .swatch-name,
 .create-look .swatches { margin: 0; }
-.create-assets {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.create-assets label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid #363636;
-  border-radius: 12px;
-  background: #202020;
-  cursor: pointer;
-}
-.create-assets label:hover { background: #292929; }
-.create-assets label:has(input:checked) { border-color: #a2a2a2; }
-.create-assets label > span { display: grid; gap: 4px; }
-.create-assets label span span { color: var(--muted); font-size: 13px; }
-.create-assets input { width: 16px; height: 16px; margin: 0; accent-color: #f5f5f5; cursor: pointer; }
 .create-limits {
   display: grid;
   gap: 14px;
@@ -5686,7 +5668,6 @@ body:has(.backdrop.is-cover) {
   box-sizing: border-box;
 }
 .create-limits .hint { margin: 0; line-height: 1.45; }
-.create-limits .create-conversion { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .create-limits .create-limit-error { color: #ff9999; }
 .create-agent .sheet-actions { margin: 0; padding-top: 2px; gap: 10px; }
 .create-agent .sheet-actions .ghost,

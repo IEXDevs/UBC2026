@@ -38,6 +38,7 @@ export function layoutPositionBook(positions, bots, wallets = []) {
   const accounts = [];
   const LEAF = 236;
   const BRANCH = 28;
+  const WALLET_SPAN = 240;
   let cursor = 0;
   wallets.forEach(wallet => {
     const owned = rows.filter(row => row.walletId === wallet.id);
@@ -48,7 +49,8 @@ export function layoutPositionBook(positions, bots, wallets = []) {
       return { name, leaves, width };
     });
     const total = branches.reduce((sum, branch) => sum + branch.width, 0) + Math.max(0, branches.length - 1) * BRANCH;
-    const rootX = cursor + total / 2;
+    const span = Math.max(total, WALLET_SPAN);
+    const rootX = cursor + span / 2;
     const rootY = 220;
     const notional = addMicro(owned, 'notionalMicroUsdc');
     walletNodes.push({
@@ -66,7 +68,7 @@ export function layoutPositionBook(positions, bots, wallets = []) {
       notionalLabel: `${formatBaseUnits(notional.toString())} USDC`,
       count: owned.length,
     });
-    let branchX = cursor;
+    let branchX = cursor + (span - total) / 2;
     branches.forEach(branch => {
       const center = branchX + branch.width / 2;
       const accountId = `${wallet.id}_${branch.name}`;
@@ -109,7 +111,7 @@ export function layoutPositionBook(positions, bots, wallets = []) {
       });
       branchX += branch.width + BRANCH;
     });
-    cursor += total + 96;
+    cursor += span + 96;
   });
 
   for (let left = 0; left < walletNodes.length; left += 1) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
 import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
 import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
@@ -9,6 +9,7 @@ import { decodeTransferCheckedInstruction } from '@solana/spl-token';
 import { sha256Hex } from './desk-grant.mjs';
 import worker from './owner-auth.fixture.mjs';
 import { handleVoiceRequest } from './voice.mjs';
+import { usdMicros } from './usd-budget.mjs';
 
 const DESTINATION = '11111111111111111111111111111111';
 const NOW = 1_700_000_000_000;
@@ -56,6 +57,124 @@ function spendRequest(body, headers = {}) {
     body: JSON.stringify(body),
   });
 }
+
+test('USD valuation keeps precision and rounds the debit up', () => {
+  assert.equal(usdMicros('1000000000', 9, '142.125'), '142125000');
+  assert.equal(usdMicros('5000', 9, '142.125'), '711');
+  assert.equal(usdMicros('1', 9, '0.000000001'), '1');
+  assert.equal(usdMicros('1', 6, '0'), null);
+});
+
+test('a mainnet swap requires an unchanged owner-approved transaction and reserves a USD debit once', async () => {
+  const sol = 'So11111111111111111111111111111111111111112';
+  const grant = '12'.repeat(32);
+  const grantHash = await sha256Hex(grant);
+  const headers = { 'x-desk-grant': grant };
+  const usdBot = {
+    ...bot, cap: { mode: 'limited', asset: 'USD', maxOutflow: '5000000', maxPerTransaction: '1200000' },
+  };
+  let simulation;
+  let routeSlippage = 50;
+  let reserved = 0;
+  let signed = 0;
+  const env = spendEnv({
+    JUPITER_API_KEY: 'test',
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-role',
+    spendTrustScore: '800',
+    loadSpendContext: async () => ({ bot: usdBot, wallet, ledger: { ...ledger, asset: 'USD' } }),
+    lookupSpendPrice: async mint => ({
+      mint, pricingCluster: 'mainnet', executionCluster: 'mainnet-beta',
+      priceUsd: mint === sol ? '100' : '1', fetchedAt: new Date(NOW).toISOString(),
+    }),
+    transferClient: {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      readSolanaMint: async ({ mint }) => ({ cluster: 'mainnet-beta', mint, decimals: 6 }),
+      prepareSolanaSwap: async input => {
+        simulation ??= input.transaction;
+        assert.equal(input.transaction, simulation);
+        assert.equal(input.amount, '1000000');
+        assert.equal(input.minOutput, '9950000');
+        return { transaction: input.transaction, feeLamports: '5000', maxSolCost: '5000' };
+      },
+      formatPreparedSpendAuthorization: () => Buffer.from('swap-owner-authorization-payload'.repeat(2)).toString('base64'),
+      signPreparedSolanaTransfer: async ({ prepared: { transaction }, ownerAuthorization }) => {
+        assert.equal(transaction, simulation);
+        assert.ok(ownerAuthorization);
+        signed += 1;
+        return { cluster: 'mainnet-beta', signature: '5'.repeat(64) };
+      },
+    },
+    ledgerApi: {
+      reserveBudget: async ({ proposal, idempotencyKey, approvalId }) => {
+        assert.equal(idempotencyKey, 'test_swap');
+        assert.ok(approvalId);
+        assert.equal(proposal.asset, 'USD');
+        assert.equal(proposal.outflow, '1000000');
+        assert.equal(proposal.maxFee, '500');
+        assert.equal(proposal.expectedReceiveAsset, 'SOL');
+        assert.equal(proposal.expectedReceive, '9950000');
+        assert.equal(proposal.quoteId, await sha256Hex(simulation));
+        return { state: 'reserved', replay: reserved++ > 0 };
+      },
+    },
+    fetch: async url => {
+      const target = new URL(url);
+      if (target.hostname === 'api.jup.ag') {
+        assert.equal(target.pathname, '/swap/v2/build');
+        assert.equal(target.searchParams.get('taker'), wallet.address);
+        const data = Buffer.alloc(34);
+        createHash('sha256').update('global:route_v2').digest().copy(data, 0, 0, 8);
+        data.writeBigUInt64LE(1_000_000n, 8);
+        data.writeBigUInt64LE(10_000_000n, 16);
+        data.writeUInt16LE(routeSlippage, 24);
+        return Response.json({
+          inputMint: SOLANA_USDC_MINT, outputMint: sol, inAmount: '1000000',
+          outAmount: '10000000', otherAmountThreshold: '9950000', swapMode: 'ExactIn', slippageBps: 50,
+          swapInstruction: {
+            programId: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+            accounts: [wallet.address, DESTINATION, DESTINATION, SOLANA_USDC_MINT, sol].map((pubkey, index) => ({ pubkey, isSigner: index === 0 })),
+            data: data.toString('base64'),
+          },
+        });
+      }
+      if (target.pathname.endsWith('/desk_locks')) {
+        return Response.json([{ grant_hash: grantHash, grant_until: new Date(NOW + 120_000).toISOString() }]);
+      }
+      if (target.pathname.endsWith('/approvals')) return new Response('', { status: 201 });
+      return new Response('[]');
+    },
+  });
+  const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey: 'test_swap' };
+  const request = body => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
+  routeSlippage = 100;
+  assert.equal((await (await request()).json()).error, 'swap_quote_unavailable');
+  routeSlippage = 50;
+  const preview = await (await request()).json();
+  assert.equal(preview.swapPreview?.usdMicros, '1000500');
+  assert.equal(signed, 0);
+  assert.equal(reserved, 0);
+  const ticket = preview.swapPreview.ticket;
+  const changed = await (await request({ confirmed: true, amount: '2000000', swapTicket: ticket, spendAuthorization: 'prepare' })).json();
+  assert.equal(changed.error, 'swap_quote_expired');
+  const unbound = await (await request({ confirmed: true, swapTicket: ticket })).json();
+  assert.equal(unbound.error, 'swap_owner_authorization_required');
+  usdBot.cap.maxPerTransaction = '1000000';
+  const capped = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization: 'prepare' })).json();
+  assert.equal(capped.reason, 'per-transaction');
+  assert.equal(capped.spendAuthorization, undefined);
+  assert.equal(reserved, 0);
+  usdBot.cap.maxPerTransaction = '1200000';
+  const challenge = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization: 'prepare' })).json();
+  assert.equal(reserved, 0);
+  const { payload, ...binding } = challenge.spendAuthorization;
+  const spendAuthorization = { ...binding, signature: 'A'.repeat(88) };
+  const approved = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization })).json();
+  assert.equal(approved.signed, true);
+  const replay = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization })).json();
+  assert.equal(replay.reason, 'duplicate-spend');
+  assert.equal(signed, 1);
+});
 
 test('SOL to a handle reserves lamports plus the fee and signs the simulated transaction only once', async () => {
   const destination = 'So11111111111111111111111111111111111111112';

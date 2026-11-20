@@ -154,7 +154,7 @@ export function isTransferLimit(value) {
 }
 
 export function draftTransferCap(asset, maxOutflow, maxPerTransaction) {
-  const identifier = solanaSpendAsset(asset);
+  const identifier = asset === 'USD' ? asset : solanaSpendAsset(asset);
   if (!identifier || !isTransferLimit(maxOutflow) || !isTransferLimit(maxPerTransaction)) return null;
   if (BigInt(maxPerTransaction) > BigInt(maxOutflow)) return null;
   return { mode: 'limited', asset: identifier, maxOutflow, maxPerTransaction };

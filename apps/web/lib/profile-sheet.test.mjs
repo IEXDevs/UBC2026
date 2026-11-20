@@ -91,17 +91,16 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   assert.match(tokenScreen, /\[open, accounts, getAccessToken, user\?\.id, previewPortfolio, refreshKey\]/);
 });
 
-test('agent creation shows asset and limits on their own steps after color', () => {
+test('agent creation goes from color straight to USD spending limits', () => {
   const dialog = readFileSync(new URL('../components/CreateBotDialog.js', import.meta.url), 'utf8');
   assert.match(dialog, /className=\{`sheet create-agent/);
   assert.match(dialog, /colorsForPicker\(color, true\)/);
   assert.equal(dialog.includes('More colors'), false);
-  assert.match(dialog, /const STEPS = \['name', 'look', 'asset', 'limits'\]/);
-  assert.match(dialog, /step === 'asset' && \(\s+<fieldset className="create-assets" aria-label="Spending asset"/);
-  assert.match(dialog, /step === 'limits' && selectedAsset && \(\s+<div className="create-limits"/);
-  assert.match(dialog, /formatBaseUnits\(units, asset.decimals\)/);
-  assert.match(dialog, /value: 'SOL', decimals: 9, unit: 'lamports'/);
-  assert.match(dialog, /value: 'USDC', decimals: 6, unit: 'micro-USDC'/);
+  assert.match(dialog, /const STEPS = \['name', 'look', 'limits'\]/);
+  assert.match(dialog, /step === 'limits' && \(\s+<div className="create-limits"/);
+  assert.match(dialog, /draftTransferCap\('USD', total, perTransfer\)/);
+  assert.match(dialog, /dollarsToBaseUnits\(maxOutflow\)/);
+  assert.doesNotMatch(dialog, /Choose a spending asset|lamports|micro-USDC/);
   assert.doesNotMatch(dialog, /<details/);
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.sheet\.create-agent \{[^}]*padding:\s*24px 24px 22px/);

@@ -83,7 +83,7 @@ export function readStoredPermission(storage) {
   }
 }
 
-/** Whole dollars or up to 6 decimal places, as USDC base units. Zero is refused. */
+/** Whole dollars or up to 6 decimal places, as microdollars. Zero is refused. */
 export function dollarsToBaseUnits(text) {
   const raw = typeof text === 'string' ? text.trim() : '';
   if (!/^(?:0|[1-9]\d{0,12})(?:\.\d{1,6})?$/.test(raw)) return null;
@@ -102,7 +102,7 @@ export function readReviewThreshold(storage) {
   }
 }
 
-/** Whole USDC dollars string for the Review by AI editor, from stored base units. */
+/** USD string for the Review by AI editor, from stored base units. */
 export function reviewCapToDollars(baseUnits) {
   if (typeof baseUnits !== 'string' || !AMOUNT.test(baseUnits) || baseUnits === '0') return '';
   const padded = baseUnits.padStart(7, '0');
@@ -141,7 +141,7 @@ export function writeAcceptance(storage, ownerId, { permission, reviewCap } = {}
 
 const FUND_TOOLS = new Set(['request_spend', 'sns_send', 'prepare_shopping']);
 const SEND_TOOLS = new Set(['request_spend', 'sns_send']);
-/** 30 USDC. Used when Review by AI is off and no owner maximum is stored. */
+/** 30 USD. Used when Review by AI is off and no owner maximum is stored. */
 export const DEFAULT_REVIEW_CAP = '30000000';
 
 export function effectiveReviewCap(reviewCap) {
@@ -160,7 +160,7 @@ export function isFundTool(name) {
   return FUND_TOOLS.has(name);
 }
 
-const FUND_ARGUMENTS = ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'quoteCluster', 'provider', 'domain', 'from'];
+const FUND_ARGUMENTS = ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'outputAsset', 'quoteCluster', 'provider', 'domain', 'from'];
 
 function plainArgs(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return {};
@@ -194,8 +194,8 @@ function accessDetail(name, args) {
   return `Send ${amount} base units of mint ${asset}${who}, plus the SOL network fee`;
 }
 
-function isNonUsdcSpend(name, args) {
-  return name === 'request_spend' && solanaSpendAsset(args?.asset ?? 'USDC') !== 'USDC';
+export function needsBoundSpend(name, args) {
+  return name === 'request_spend' && (args?.action === 'swap' || solanaSpendAsset(args?.asset ?? 'USDC') !== 'USDC');
 }
 
 /**
@@ -204,7 +204,7 @@ function isNonUsdcSpend(name, args) {
  */
 export function toolAccessKind(mode, name, args = {}, reviewCap = null) {
   if (!isFundTool(name)) return null;
-  if (mode === 'ask' || isNonUsdcSpend(name, args)) return 'modal';
+  if (mode === 'ask' || needsBoundSpend(name, args)) return 'modal';
   if (SEND_TOOLS.has(name) && amountOverReviewCap(plainArgs(args).amount, reviewCap)) return 'modal';
   return null;
 }
@@ -213,10 +213,10 @@ export function toolAccessRequest(mode, name, args = {}, reviewCap = null) {
   const kind = toolAccessKind(mode, name, args, reviewCap);
   if (!kind) return null;
   const plain = plainArgs(args);
-  const nonUsdc = isNonUsdcSpend(name, plain);
+  const nonUsdc = needsBoundSpend(name, plain);
   let label = accessDetail(name, plain);
   if (!nonUsdc && SEND_TOOLS.has(name) && mode !== 'ask' && amountOverReviewCap(plain.amount, reviewCap)) {
-    label = `${label}. Over ${reviewCapToDollars(effectiveReviewCap(reviewCap))} USDC`;
+    label = `${label}. Over ${reviewCapToDollars(effectiveReviewCap(reviewCap))} USD`;
   }
   return {
     kind,
@@ -231,7 +231,7 @@ export function toolAccessRequest(mode, name, args = {}, reviewCap = null) {
 export function matchingToolGrant(grants, name, args) {
   if (!Array.isArray(grants)) return undefined;
   const want = JSON.stringify(stable(plainArgs(args)));
-  const needsSpendId = isNonUsdcSpend(name, args);
+  const needsSpendId = needsBoundSpend(name, args);
   return grants.find(grant => grant?.name === name
     && (!needsSpendId || (typeof grant.idempotencyKey === 'string'
       && /^spend_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(grant.idempotencyKey)))
@@ -247,7 +247,7 @@ export function permissionInstruction(id) {
   const quiet = ' This is for you, not the owner. Do not repeat the check order. Do not say that trust, verify, the budget reserve, or signing did not run, unless the owner asks whether money moved.';
   const shared = `Fund movements go through the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on configured Solana network. A mainnet price quote never authorizes a transaction.${quiet}`;
   if (mode === 'full') {
-    return `Permissions are fully granted. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay, unless the send is over the review maximum. That maximum still asks for a confirm, including when Review by AI is off. The default maximum is 30 USDC. Follow your goal, and infer the action and call the spend API. Fund movements go through the platform gate, and the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on configured Solana network. A mainnet price quote never authorizes a transaction.${quiet}`;
+    return `Permissions are fully granted. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay, unless the send is over the review maximum. That maximum still asks for a confirm, including when Review by AI is off. The default maximum is 30 USD. Follow your goal, and infer the action and call the spend API. Fund movements go through the platform gate, and the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on configured Solana network. A mainnet price quote never authorizes a transaction.${quiet}`;
   }
   if (mode === 'review') {
     return `Permission is review by AI. At or under the owner's review threshold, continue after the server check. Above that threshold, state what would change and wait. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. ${shared}`;

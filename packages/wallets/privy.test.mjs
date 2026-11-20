@@ -11,6 +11,7 @@ import { ConfigError } from '@ubc2026/contracts';
 import { formatRequestForAuthorizationSignature } from '@privy-io/node';
 import { assignBotWallet, createMainWallet } from './wallets.mjs';
 import { accountWriteBodies } from './wallets.mjs';
+import { verifySwapSimulation } from './swap-simulation.mjs';
 import {
   SOLANA_GENESIS_HASH,
   WalletError,
@@ -22,6 +23,21 @@ import {
 } from './privy.mjs';
 
 const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+test('swap simulation checks exact wallet input, minimum output and SOL fee', () => {
+  const sol = 'So11111111111111111111111111111111111111112';
+  const token = (mint, amount) => ({ owner: address, mint, uiTokenAmount: { amount } });
+  const simulation = {
+    err: null, fee: 5000, preBalances: [1000000000], postBalances: [989995000],
+    preTokenBalances: [token('output', '0'), token('other', '50')],
+    postTokenBalances: [token('output', '1000000'), token('other', '50')],
+  };
+  const intent = { wallet: address, inputMint: sol, outputMint: 'output', amount: '10000000', minOutput: '950000' };
+  assert.deepEqual(verifySwapSimulation(simulation, intent), { feeLamports: '5000', maxSolCost: '5000' });
+  assert.equal(verifySwapSimulation(simulation, { ...intent, minOutput: '1000001' }), null);
+  assert.equal(verifySwapSimulation(simulation, { ...intent, amount: '10000001' }), null);
+  assert.equal(verifySwapSimulation({ ...simulation, postTokenBalances: [token('output', '1000000')] }, intent), null);
+});
 const appId = 'app_test';
 const appSecret = 'app-secret-value';
 const accessToken = 'privy-access-token-value';

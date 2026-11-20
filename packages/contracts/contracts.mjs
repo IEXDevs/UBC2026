@@ -439,7 +439,7 @@ export function profileInitials(label) {
 }
 
 export const OWNER_SPEND_PERMISSIONS = Object.freeze(['ask', 'review', 'full']);
-export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay']);
+export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay', 'swap']);
 export const PERMISSIONED_SPEND_PATH = '/api/spend';
 
 export function parseSpendAuthorization(value) {
@@ -599,10 +599,14 @@ export function parsePermissionedSpendBody(body) {
   const action = FUND_ACTIONS.includes(body.action) ? body.action : 'spend';
   const asset = solanaSpendAsset(body.asset ?? 'USDC');
   if (!asset) return null;
+  const swap = action === 'swap';
+  const outputAsset = swap ? solanaSpendAsset(body.outputAsset) : null;
+  if (swap && (!outputAsset || asset === outputAsset || body.destination != null || body.handle != null
+      || body.quote != null || body.quoteCluster != null || BigInt(units) > 18446744073709551615n)) return null;
   if (asset !== 'USDC' && (action === 'buy' || action === 'sell' || BigInt(units) > 18446744073709551615n)) return null;
   // A USDC buy of wrapped SOL stays in the assigned wallet. The spend is the cap asset.
   const selfCustody = action === 'buy' && !destination && !handle;
-  if (!destination && !handle && !selfCustody) return null;
+  if (!destination && !handle && !selfCustody && !swap) return null;
   if (body.quoteCluster != null && body.quoteCluster !== SOLANA_CLUSTER && body.quoteCluster !== 'mainnet') return null;
   let quote = sanitizeSpendQuote(body.quote);
   if (body.quote != null && quote == null && body.quote !== null) return null;
@@ -618,6 +622,7 @@ export function parsePermissionedSpendBody(body) {
     action,
     amount: units,
     asset,
+    ...(swap ? { outputAsset } : {}),
     destination,
     handle,
     selfCustody,
