@@ -59,6 +59,8 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.wallet-overview, \.wallet-settings-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(css, /\.wallet-body \{[^}]*min-height: 0;[^}]*overflow-y: auto/s);
+  assert.match(sheet, /function openParty\(party\) \{\s+if \(!onParty\) return;\s+onClose\(\);\s+onParty\(party\)/);
+  assert.equal((sheet.match(/onParty=\{openParty\}/g) || []).length, 2);
 });
 
 test('agent creation shows asset and limits on their own steps after color', () => {

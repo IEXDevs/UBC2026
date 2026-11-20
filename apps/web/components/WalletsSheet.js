@@ -132,6 +132,12 @@ export default function WalletsSheet({
     transferRef.current?.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'nearest' });
   }
 
+  function openParty(party) {
+    if (!onParty) return;
+    onClose();
+    onParty(party);
+  }
+
   const wallets = (state?.wallets || []).filter(wallet => wallet && !wallet.deletedAt && !wallet.deleted_at);
   const bots = state?.bots || [];
   const positions = state?.positions || [];
@@ -275,7 +281,7 @@ export default function WalletsSheet({
             <summary>Recent activity<ChevronDown size={16} aria-hidden="true" /></summary>
             <div className="wallet-fold-body">
               {bot ? (
-                <BotHistory bot={bot} bots={bots} payments={state?.payments || []} transfers={transfers} onParty={onParty} />
+                <BotHistory bot={bot} bots={bots} payments={state?.payments || []} transfers={transfers} onParty={openParty} />
               ) : (
                 <TxnLog
                   rows={transfers.map(row => {
@@ -290,7 +296,7 @@ export default function WalletsSheet({
                       party: partyFromToken(`@${row.handle}`),
                     };
                   })}
-                  onParty={onParty}
+                  onParty={openParty}
                   empty="No history yet."
                 />
               )}
