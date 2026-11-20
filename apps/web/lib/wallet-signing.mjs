@@ -21,10 +21,47 @@ export function walletConnectionOptions(wallet) {
   };
 }
 
+export function browserSignerHasWallet(signer, wallet) {
+  return signer?.ready === true && typeof signer.signTransaction === 'function'
+    && (Array.isArray(signer.wallets) ? signer.wallets : []).some(item => typeof item?.address === 'string'
+      && item.address.toLowerCase() === wallet?.address?.toLowerCase());
+}
+
+export function withLinkedSolanaWallets(wallets, standardWallets, user) {
+  const merged = [...wallets];
+  const standard = standardWallets.find(wallet => wallet?.features?.['privy:']?.privy?.signTransaction);
+  if (!standard) return merged;
+  for (const account of user?.linkedAccounts || []) {
+    if (account.type !== 'wallet' || account.chainType !== 'solana' || account.walletClientType !== 'privy'
+        || account.userCanSign === false || !account.address || merged.some(wallet => wallet.address === account.address)) continue;
+    merged.push({
+      address: account.address,
+      standardWallet: standard,
+      signTransaction: ({ transaction, chain, options }) => standard.features['privy:'].privy.signTransaction({
+        transaction, address: account.address, chain, options,
+      }),
+    });
+  }
+  return merged;
+}
+
+export async function waitForBrowserSigner(readSigner, wallets, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const signer = readSigner();
+    if (signer?.ready === true && typeof signer.signTransaction === 'function'
+        && wallets.every(wallet => signer.wallets?.some(item => item?.address === wallet.address))) return signer;
+    if (Date.now() >= deadline) return readSigner();
+    await new Promise(resolve => setTimeout(resolve, Math.min(100, Math.max(0, deadline - Date.now()))));
+  }
+}
+
 export async function signSelectedWalletTransaction({ from, transaction, signer } = {}) {
   if (!from?.address || from.frozen) fail('wallet_frozen');
   if (!(transaction instanceof Uint8Array) || transaction.length <= 64) fail('invalid_transaction');
-  const wallet = (Array.isArray(signer?.wallets) ? signer.wallets : []).find(item => item?.address === from.address);
+  const wallets = Array.isArray(signer?.wallets) ? signer.wallets : [];
+  const wallet = wallets.find(item => item?.address === from.address)
+    || wallets.find(item => typeof item?.address === 'string' && item.address.toLowerCase() === from.address.toLowerCase());
   if (!wallet || typeof signer?.signTransaction !== 'function') {
     signer?.connectWallet?.(walletConnectionOptions(from));
     fail('wallet_connection_required');

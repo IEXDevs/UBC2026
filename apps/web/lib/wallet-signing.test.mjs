@@ -2,10 +2,37 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
 import { Keypair, Transaction, SystemProgram } from '@solana/web3.js';
-import { serverSignsWallet, signSelectedWalletTransaction, signWalletMoveTransaction } from './wallet-signing.mjs';
+import { browserSignerHasWallet, waitForBrowserSigner, withLinkedSolanaWallets, serverSignsWallet, signSelectedWalletTransaction, signWalletMoveTransaction } from './wallet-signing.mjs';
 
 const transaction = new Uint8Array(100);
 const from = { address: 'selected-external-account', label: 'Phantom', spendable: false };
+
+test('browser signer polling re-reads readiness and supports a final case-insensitive lookup', async () => {
+  const ready = { ready: true, wallets: [{ address: from.address }], signTransaction() {} };
+  let reads = 0;
+  assert.equal(await waitForBrowserSigner(() => ++reads === 1 ? { ready: false, wallets: [] } : ready, [from], 0), ready);
+  assert.equal(browserSignerHasWallet(ready, from), true);
+  assert.equal(browserSignerHasWallet({ ...ready, ready: false }, from), false);
+  const differentCase = { ...ready, wallets: [{ address: from.address.toUpperCase() }] };
+  assert.equal(browserSignerHasWallet(await waitForBrowserSigner(() => differentCase, [from], 0), from), true);
+  assert.equal(browserSignerHasWallet({ ...ready, wallets: [] }, from), false);
+});
+
+test('linked Solana accounts use the Privy standard-wallet signing feature when absent from useWallets', async () => {
+  const signedTransaction = new Uint8Array(120);
+  let input;
+  const standard = { features: { 'privy:': { privy: { async signTransaction(args) {
+    input = args;
+    return { signedTransaction };
+  } } } } };
+  const account = { type: 'wallet', chainType: 'solana', walletClientType: 'privy', address: from.address };
+  const wallets = withLinkedSolanaWallets([], [standard], { linkedAccounts: [account] });
+  assert.equal(await signSelectedWalletTransaction({ from, transaction, signer: { wallets,
+    signTransaction: args => args.wallet.signTransaction(args) } }), signedTransaction);
+  assert.deepEqual(input, { transaction, address: from.address, chain: SOLANA_PRIVY_CHAIN, options: undefined });
+  assert.deepEqual(withLinkedSolanaWallets([], [], { linkedAccounts: [account] }), []);
+  assert.deepEqual(withLinkedSolanaWallets([], [standard], { linkedAccounts: [{ ...account, userCanSign: false }] }), []);
+});
 
 test('browser move retains both signatures even when the second signer clears the first', async () => {
   const source = Keypair.generate();
