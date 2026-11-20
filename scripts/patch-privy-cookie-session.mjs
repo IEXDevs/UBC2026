@@ -14,6 +14,18 @@ const REFRESH_GUARD = 'if(!(e&&t||this.mightHaveServerCookies||this.client?.useS
 
 const REPLACEMENTS = Object.freeze([
   [
+    'import h,{buildSolanaOffchainMessage as p',
+    'import h,{PrivyApiError as MaelstromPrivyApiError,buildSolanaOffchainMessage as p',
+  ],
+  [
+    'new h({appId:r.appId,clientId:r.clientId,storage:xe,baseUrl:r.apiUrl,sdkVersion:"react-auth:3.51.4"})',
+    'maelstromWalletRpcClient(new h({appId:r.appId,clientId:r.clientId,storage:xe,baseUrl:r.apiUrl,sdkVersion:"react-auth:3.51.4"}),$,MaelstromPrivyApiError)',
+  ],
+  [
+    'new L.default({appId:l.appId,clientId:l.clientId,storage:o.s,baseUrl:l.apiUrl,sdkVersion:"react-auth:3.51.4"})',
+    'maelstromWalletRpcClient(new L.default({appId:l.appId,clientId:l.clientId,storage:o.s,baseUrl:l.apiUrl,sdkVersion:"react-auth:3.51.4"}),n.getGlobalClient,L.PrivyApiError)',
+  ],
+  [
     'return this.mightHaveServerCookies||t&&n',
     'return this.mightHaveServerCookies||t&&n||this.client?.useServerCookies===!0',
   ],
@@ -162,6 +174,26 @@ function rewriteIframeOrigin(source) {
   ));
 }
 
+// Keep the canonical URL for authorization signatures, but send through the
+// client that owns the in-memory access token and the HttpOnly session proxy.
+function maelstromWalletRpcClient(client, getLegacyClient, ApiError) {
+  client.fetchPrivyRoute = async (route, options = {}) => {
+    const url = new URL(client.getCompiledPath(route, options));
+    try {
+      return await getLegacyClient().api.baseFetch(url.pathname + url.search, {
+        method: route.method,
+        body: options.body,
+        headers: options.headers,
+        signal: options.signal,
+      });
+    } catch (error) {
+      if (error?.response) throw new ApiError({ ...error.data, status: error.response.status });
+      throw error;
+    }
+  };
+  return client;
+}
+
 export function patchPrivyCookieSession(source) {
   let next = String(source);
   for (const [from, to] of REPLACEMENTS) {
@@ -169,5 +201,8 @@ export function patchPrivyCookieSession(source) {
     next = next.replaceAll(from, to);
   }
   if (!next.includes('?"https://auth.privy.io":')) next = rewriteIframeOrigin(next);
+  if (next.includes('maelstromWalletRpcClient(new ') && !next.includes('function maelstromWalletRpcClient(')) {
+    next += `\n${maelstromWalletRpcClient.toString()}\n`;
+  }
   return next;
 }

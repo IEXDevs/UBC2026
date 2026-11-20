@@ -15,6 +15,34 @@ const REFRESH = 'refresh-token-value';
 const NEXT = 'rotated-refresh-token';
 const ACCESS = 'header.payload.signature';
 
+test('wallet RPC preserves authorization signatures and uses Bearer or the HttpOnly access cookie', async () => {
+  const path = '/api/v1/wallets/wallet-id/rpc';
+  const body = JSON.stringify({ chain_type: 'solana', method: 'signTransaction', params: { transaction: 'mock' } });
+  for (const bearer of ['', 'in-memory-access']) {
+    for (const status of [200, 401]) {
+      const payload = status === 200 ? { data: { signed_transaction: 'mock' } } : { code: 'invalid_jwt' };
+      const response = await proxyPrivyAuth(requestFor(`https://app.example/api/privy-auth${path}`, {
+        body,
+        cookie: `${PRIVY_ACCESS_COOKIE}=${ACCESS}`,
+        headers: {
+          ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+          'privy-authorization-signature': 'mock-signature',
+          'privy-request-expiry': '123',
+        },
+      }), path, async (url, init) => {
+        assert.equal(url, `https://auth.privy.io${path}`);
+        assert.equal(init.headers.get('authorization'), `Bearer ${bearer || ACCESS}`);
+        assert.equal(init.headers.get('privy-authorization-signature'), 'mock-signature');
+        assert.equal(init.headers.get('privy-request-expiry'), '123');
+        assert.equal(init.body, body);
+        return Response.json(payload, { status });
+      });
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), payload);
+    }
+  }
+});
+
 function requestFor(url, { method = 'POST', cookie = '', body = '', headers = {} } = {}) {
   return new Request(url, {
     method,
