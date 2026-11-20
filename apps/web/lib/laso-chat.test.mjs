@@ -1,13 +1,80 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lasoPreparationArgs, lasoPurchaseHold, pendingLasoConfirmation } from './laso-chat.mjs';
+import { readFileSync } from 'node:fs';
+import { cacheSpendConfirmation, lasoPreparationArgs, lasoPurchaseHold, pendingSpendConfirmation } from './laso-chat.mjs';
 import { sealAssetSpendHold, resumeAssetSpend } from './chat-spend-confirmation.mjs';
 import { createChatToolInvoker, serializeToolResult } from './chat-tools.mjs';
 import { completeTextChat } from './text-chat.mjs';
+import { toolAccessRequest } from './spend-permission.mjs';
 
 const context = { ownerId: 'owner_1', botId: 'bot_1', secret: 'offline-test-key' };
 const args = { botId: context.botId, provider: 'laso', amountUsd: '10' };
 const prepared = { provider: 'laso', lasoTicket: `payload.${'a'.repeat(64)}`, proposal: { outflow: '10000000' } };
+
+test('ordinary sends and swaps reopen the identical local confirmation without changing approval fields', () => {
+  const sends = [
+    toolAccessRequest('ask', 'request_spend', { botId: context.botId, action: 'spend', asset: 'USDC', amount: '1000000', destination: '11111111111111111111111111111111' }),
+    sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', { botId: context.botId, action: 'pay', asset: 'SOL', amount: '1000000000', handle: 'alice' }), context, 1000),
+    sealAssetSpendHold({ ...toolAccessRequest('ask', 'request_spend', { botId: context.botId, action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000' }), swapTicket: 'offline-quote', expiresAt: 5000 }, context, 1000),
+  ];
+  for (const hold of sends) {
+    const original = structuredClone(hold);
+    const pending = cacheSpendConfirmation(null, hold, context, 1000);
+    assert.ok(pending);
+    for (const message of ['yes', 'ok', 'approved', 'do it', 'okay approved', 'Yes!']) {
+      const reopened = pendingSpendConfirmation(pending, message, context, 2000);
+      assert.equal(reopened, hold);
+      assert.deepEqual(reopened, original);
+      assert.equal(reopened.args.confirmed, undefined);
+      assert.equal(cacheSpendConfirmation(pending, reopened, context, 2000), pending);
+    }
+    assert.equal(pendingSpendConfirmation(pending, 'yes', context, pending.expiresAt), null);
+    assert.equal(cacheSpendConfirmation(pending, hold, context, pending.expiresAt), null);
+    assert.deepEqual(hold, original);
+  }
+  assert.equal(sends[0].proof, undefined);
+  assert.equal(sends[0].expiresAt, undefined);
+});
+
+test('pending spend recovery rejects absent, expired, unsigned bound or differently scoped confirmations', () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', {
+    botId: context.botId, action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000',
+  }), context, 1000);
+  const pending = cacheSpendConfirmation(null, hold, context, 1000);
+  for (const message of ['', 'no', 'cancel', 'yes but send 2 USDC', 'yes to someone else', 'do it tomorrow']) {
+    assert.equal(pendingSpendConfirmation(pending, message, context, 2000), null);
+  }
+  for (const scope of [{ ...context, ownerId: 'other' }, { ...context, botId: 'other' }, { ownerId: '', botId: '' }]) {
+    assert.equal(pendingSpendConfirmation(pending, 'yes', scope, 2000), null);
+  }
+  for (const candidate of [
+    null, {}, { ...pending, ownerId: 'other' }, { ...pending, botId: 'other' },
+    { ...pending, hold: { ...hold, name: 'prepare_shopping' } },
+    { ...pending, hold: { ...hold, kind: 'inline' } },
+    { ...pending, hold: { ...hold, args: { ...hold.args, botId: 'other' } } },
+    { ...pending, hold: { ...hold, proof: '' } },
+    { ...pending, hold: { ...hold, proof: undefined } },
+    { ...pending, hold: { ...hold, expiresAt: undefined } },
+    { ...pending, hold: { ...hold, expiresAt: 2000 } },
+  ]) assert.equal(pendingSpendConfirmation(candidate, 'yes', context, 2000), null);
+  assert.equal(cacheSpendConfirmation(null, null, context, 2000), null);
+  assert.equal(cacheSpendConfirmation(null, { ...hold, proof: '' }, context, 2000), null);
+});
+
+test('Composer uses the shared local recovery before any model request and still requires the confirmation slide', () => {
+  const composer = readFileSync(new URL('../components/Composer.js', import.meta.url), 'utf8');
+  assert.match(composer, /pendingSpend\.current = cacheSpendConfirmation\(pendingSpend\.current, result\.hold,/);
+  assert.match(composer, /pendingSpend\.current = null;[\s\S]*?\}, \[ownerId, botId\]\)/);
+  const runChat = composer.slice(composer.indexOf('async function runChat('), composer.indexOf('async function runChat(') + 12000);
+  const recovery = runChat.slice(runChat.indexOf('const pending = pendingSpendConfirmation('), runChat.indexOf('pendingSpend.current = null;'));
+  assert.match(recovery, /if \(!grants\?\.length && pending\)/);
+  assert.match(recovery, /await settleChat\([\s\S]*hold: pending[\s\S]*return;/);
+  assert.doesNotMatch(recovery, /sendBotChat|continueChat|submitChatSpend/);
+  assert.ok(runChat.indexOf('const pending = pendingSpendConfirmation(') < runChat.indexOf('needsChatModel('));
+  assert.ok(runChat.indexOf('const pending = pendingSpendConfirmation(') < runChat.indexOf('sendBotChat('));
+  assert.match(composer, /const accepted = [\s\S]*?await onConfirm\([\s\S]*?if \(!accepted\) \{[\s\S]*?return;[\s\S]*?await continueChat\(spoken, prior, \[result\.hold\]\)/);
+  assert.match(composer, /if \(!pendingSpendConfirmation\([\s\S]*?&& needsChatModel\(spoken\)/);
+});
 
 test('Laso preparation preserves the requested amount and directly produces an x402 confirmation', () => {
   assert.equal(lasoPreparationArgs({ ...args, amountUsd: 5 }, 'get a Laso card for 10 USDC').amountUsd, '10');
@@ -27,13 +94,13 @@ test('yes and okay approved reuse the same sealed ticket; expiry and another own
   const hold = sealAssetSpendHold(lasoPurchaseHold(args, prepared), context, 1000);
   const pending = { ...context, hold };
   for (const message of ['yes', 'okay approved', 'Yes!']) {
-    assert.equal(pendingLasoConfirmation(pending, message, context, 2000), hold);
+    assert.equal(pendingSpendConfirmation(pending, message, context, 2000), hold);
   }
   for (const message of ['', 'no', 'yes but make it 20 USDC']) {
-    assert.equal(pendingLasoConfirmation(pending, message, context, 2000), null);
+    assert.equal(pendingSpendConfirmation(pending, message, context, 2000), null);
   }
-  assert.equal(pendingLasoConfirmation(pending, 'yes', { ...context, ownerId: 'other' }, 2000), null);
-  assert.equal(pendingLasoConfirmation(pending, 'yes', context, hold.expiresAt), null);
+  assert.equal(pendingSpendConfirmation(pending, 'yes', { ...context, ownerId: 'other' }, 2000), null);
+  assert.equal(pendingSpendConfirmation(pending, 'yes', context, hold.expiresAt), null);
   let calls = 0;
   await resumeAssetSpend(hold, context, async (name, inputs) => {
     calls++;
