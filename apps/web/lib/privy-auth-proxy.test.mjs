@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   PRIVY_REFRESH_COOKIE,
+  PRIVY_ACCESS_COOKIE,
   PRIVY_SESSION_MARKER,
   bodyWithStoredRefresh,
   privyUpstreamUrl,
@@ -59,7 +60,7 @@ test('a later refresh uses the HttpOnly cookie and not page storage', async () =
     }),
     '/api/v1/passwordless/authenticate',
     async (url, init) => {
-      seen.push({ url, body: init.body });
+      seen.push({ url, body: init.body, authorization: init.headers.get('authorization') });
       return new Response(JSON.stringify({ token: ACCESS, refresh_token: REFRESH }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -70,6 +71,8 @@ test('a later refresh uses the HttpOnly cookie and not page storage', async () =
   const setCookie = setCookies.join('; ');
   assert.equal(setCookies.some((cookie) => cookie.includes('HttpOnly')), true);
   assert.equal(setCookies.some((cookie) => cookie.startsWith(`${PRIVY_REFRESH_COOKIE}=`)), true);
+  assert.equal(setCookies.some((cookie) => cookie.startsWith(`${PRIVY_ACCESS_COOKIE}=`) && cookie.includes('HttpOnly; Path=/api/privy-auth; SameSite=Lax; Secure')), true);
+  assert.equal(setCookies.some((cookie) => cookie.includes('Domain=')), false);
   assert.equal(setCookies.some((cookie) => cookie.startsWith(`${PRIVY_SESSION_MARKER}=1`) && !cookie.includes('HttpOnly')), true);
   assert.equal(setCookie.includes(REFRESH), true);
   const loginBody = await login.json();
@@ -79,12 +82,12 @@ test('a later refresh uses the HttpOnly cookie and not page storage', async () =
 
   const refresh = await proxyPrivyAuth(
     requestFor('https://maelstrom.iexdevs.com/api/privy-auth/api/v1/sessions', {
-      cookie: setCookie,
+      cookie: setCookies.map(cookie => cookie.split(';')[0]).join('; '),
       body: '{}',
     }),
     '/api/v1/sessions',
     async (url, init) => {
-      seen.push({ url, body: init.body });
+      seen.push({ url, body: init.body, authorization: init.headers.get('authorization') });
       return new Response(JSON.stringify({ token: ACCESS, refresh_token: NEXT }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -92,6 +95,7 @@ test('a later refresh uses the HttpOnly cookie and not page storage', async () =
     },
   );
   assert.equal(JSON.parse(seen[1].body).refresh_token, REFRESH);
+  assert.equal(seen[1].authorization, `Bearer ${ACCESS}`);
   assert.equal(seen[1].url, 'https://auth.privy.io/api/v1/sessions');
   const again = await refresh.json();
   assert.equal(again.token, ACCESS);
@@ -119,7 +123,7 @@ test('logout clears the refresh cookie', async () => {
     async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
   );
   const cleared = response.headers.getSetCookie();
-  assert.equal(cleared.filter((cookie) => /Max-Age=0/.test(cookie)).length, 2);
+  assert.equal(cleared.filter((cookie) => /Max-Age=0/.test(cookie)).length, 3);
   assert.equal(cleared.some((cookie) => cookie.startsWith(`${PRIVY_REFRESH_COOKIE}=`)), true);
   assert.equal(cleared.some((cookie) => cookie.startsWith(`${PRIVY_SESSION_MARKER}=`)), true);
 });
@@ -144,5 +148,59 @@ test('a rejected refresh clears the stored token', async () => {
     }),
   );
   const cleared = response.headers.getSetCookie();
-  assert.equal(cleared.filter((cookie) => /Max-Age=0/.test(cookie)).length, 2);
+  assert.equal(cleared.filter((cookie) => /Max-Age=0/.test(cookie)).length, 3);
+});
+
+test('OAuth authentication and linking rotate the server access credential', async () => {
+  for (const path of ['/api/v1/oauth/authenticate', '/api/v1/oauth/link']) {
+    const response = await proxyPrivyAuth(
+      requestFor(`https://dev.maelstrom.iexdevs.com/api/privy-auth${path}`, {
+        body: '{}', cookie: `${PRIVY_ACCESS_COOKIE}=${ACCESS}; ${PRIVY_REFRESH_COOKIE}=${REFRESH}`,
+      }),
+      path,
+      async (url, init) => {
+        assert.equal(init.headers.get('authorization'), `Bearer ${ACCESS}`);
+        assert.equal(init.body, '{}');
+        return Response.json({ token: ACCESS, refresh_token: NEXT });
+      },
+    );
+    assert.equal(response.headers.getSetCookie().some(cookie => cookie.startsWith(`${PRIVY_ACCESS_COOKIE}=`)), true);
+    assert.equal(readRefreshCookie(response.headers.getSetCookie().join('; ')), NEXT);
+    assert.equal(Object.hasOwn(await response.json(), 'refresh_token'), false);
+  }
+});
+
+test('absent cookies preserve bearer auth and empty or failed responses do not create credentials', async () => {
+  for (const [body, status] of [['{}', 200], ['not json', 502]]) {
+    const response = await proxyPrivyAuth(
+      requestFor('https://dev.maelstrom.iexdevs.com/api/privy-auth/api/v1/sessions', {
+        body: '{}', headers: { authorization: `Bearer ${ACCESS}` },
+      }),
+      '/api/v1/sessions',
+      async (url, init) => {
+        assert.equal(init.headers.get('authorization'), `Bearer ${ACCESS}`);
+        assert.equal(init.body, '{}');
+        return new Response(body, { status });
+      },
+    );
+    assert.deepEqual(response.headers.getSetCookie(), []);
+  }
+});
+
+test('OAuth callback failures preserve the session and an explicit bearer takes precedence', async () => {
+  for (const path of ['/api/v1/oauth/authenticate', '/api/v1/oauth/link']) {
+    const response = await proxyPrivyAuth(
+      requestFor(`https://dev.maelstrom.iexdevs.com/api/privy-auth${path}`, {
+        body: '{}', cookie: `${PRIVY_ACCESS_COOKIE}=${ACCESS}`,
+        headers: { authorization: 'Bearer current-access-token' },
+      }),
+      path,
+      async (url, init) => {
+        assert.equal(init.headers.get('authorization'), 'Bearer current-access-token');
+        return Response.json({ error: 'invalid_oauth_code' }, { status: 401 });
+      },
+    );
+    assert.equal(response.status, 401);
+    assert.deepEqual(response.headers.getSetCookie(), []);
+  }
 });
