@@ -172,7 +172,6 @@ export default function LiveViewPanel({
   const framed = Boolean(frame?.embed && frame.src);
 
   if (screen) {
-    if (!sessionRecordId) return null;
     return (
       <section className="side-computer" aria-label="Computer">
         <h3>Computer</h3>
@@ -195,7 +194,7 @@ export default function LiveViewPanel({
             >
               {busy ? null : <span className="computer-screen-label">{framed ? 'Watch' : 'Open Computer'}</span>}
             </button>
-            {error ? <p className="preview-note" role="alert">{error}</p> : null}
+            {error ? <p className="preview-note" role="alert">{error}</p> : (!sessionRecordId && !busy ? <p className="preview-note">{status}</p> : null)}
           </div>
         </div>
       </section>
