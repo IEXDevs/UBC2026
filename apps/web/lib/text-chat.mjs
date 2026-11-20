@@ -3,10 +3,10 @@
  * Falls back to OpenRouter when only OPENROUTER_API_KEY (sk-or-…) is set.
  * OpenRouter calls use a free model only.
  */
-import { OPENROUTER_FREE_MODEL, selectFreeOpenRouterModel } from '@ubc2026/contracts';
+import { OPENROUTER_FREE_MODEL, parseLookupQuery, selectFreeOpenRouterModel } from '@ubc2026/contracts';
 import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import { thinkStep, toolStep } from './chat-activity.mjs';
-import { grantCovers, toolAccessRequest } from './spend-permission.mjs';
+import { grantCovers, isFundTool, toolAccessRequest } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
 import { reasoningEffortFor } from './thinking-levels.mjs';
 import {
@@ -177,6 +177,13 @@ function parseToolArgs(raw) {
   } catch {
     return {};
   }
+}
+
+/** Validate the two read-only steps used to find a sender and recipient. */
+function validRecipientDiscovery(name, args) {
+  if (name === 'list_bots') return Object.keys(args).length === 0;
+  if (name === 'lookup_recipient') return Object.keys(args).length === 1 && Boolean(parseLookupQuery(args.q));
+  return true;
 }
 
 function reasoningText(message) {
@@ -475,6 +482,7 @@ export async function completeTextChat({
       const args = parseToolArgs(call?.function?.arguments);
       const signature = toolSignature(name, args);
       const blocked = blockedBrowser(name, args);
+      const access = toolAccessRequest(permissionMode, name, args);
       let result;
       if (!name || seenTools.has(signature)) {
         repeated = true;
@@ -486,9 +494,11 @@ export async function completeTextChat({
           host: blocked,
           hint: 'This site blocks datacenter browsers. Do not retry. Answer from search.',
         };
-      } else if (toolAccessRequest(permissionMode, name, args) && !grantCovers(grants, name, args)) {
-        return toolAccessRequest(permissionMode, name, args);
-      } else if (!(await allowStep('tool', JSON.stringify({ name, args })))) {
+      } else if (access && !grantCovers(grants, name, args)) {
+        return access;
+      } else if (!validRecipientDiscovery(name, args)) {
+        result = { error: name === 'lookup_recipient' ? 'invalid_recipient' : 'invalid_parameters' };
+      } else if (isFundTool(name) && !(await allowStep('tool', JSON.stringify({ name, args })))) {
         result = { error: 'verifier_blocked', hint: BLOCKED_TURN };
       } else {
         seenTools.add(signature);

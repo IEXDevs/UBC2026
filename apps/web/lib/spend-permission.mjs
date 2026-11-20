@@ -140,31 +140,12 @@ export function writeAcceptance(storage, ownerId, { permission, reviewCap } = {}
 
 const FUND_TOOLS = new Set(['request_spend', 'sns_send', 'prepare_shopping']);
 
+export function isFundTool(name) {
+  return FUND_TOOLS.has(name);
+}
+
 const ACCESS_COPY = Object.freeze({
-  web_search: 'Search the web',
-  web_scrape: 'Read a page',
-  browser_open: 'Open the browser',
-  browser_navigate: 'Open a page',
-  browser_live_view: 'Show the live view',
-  browser_release: 'Close the browser',
-  get_price: 'Look up a price',
-  get_wallets: 'Read wallet balances',
-  get_overview: 'Read the overview',
-  get_activity: 'Read activity',
-  get_payment_feed: 'Read payments',
-  list_bots: 'List agents',
-  get_bot_status: 'Read agent status',
-  list_browser_sessions: 'List browser sessions',
-  what_happened_while_away: 'Read what happened while you were away',
-  why_decision: 'Read a decision',
   prepare_shopping: 'Prepare a purchase',
-  request_spend: 'Move funds',
-  sns_send: 'Send to a .sol name',
-  pause_bot: 'Pause an agent',
-  resume_bot: 'Resume an agent',
-  wake_bot: 'Wake an agent',
-  start_task: 'Start a task',
-  stop_all: 'Stop every agent',
 });
 
 function plainArgs(args) {
@@ -186,14 +167,8 @@ function stable(value) {
 }
 
 function accessDetail(name, args) {
-  const query = typeof args?.query === 'string' ? args.query.trim() : '';
-  const url = typeof args?.url === 'string' ? args.url.trim() : '';
   const amount = typeof args?.amount === 'string' ? args.amount.trim() : '';
   const handle = typeof args?.handle === 'string' ? args.handle.replace(/^@/, '').trim() : '';
-  if (name === 'web_search' && query) return `Search the web for “${query.slice(0, 80)}”`;
-  if ((name === 'web_scrape' || name === 'browser_navigate' || name === 'browser_open') && url) {
-    return `Open ${url.slice(0, 120)}`;
-  }
   if (name === 'request_spend' || name === 'sns_send') {
     const who = handle ? ` to @${handle}` : '';
     return amount ? `Move ${amount} USDC${who}` : `Move funds${who}`;
@@ -201,13 +176,9 @@ function accessDetail(name, args) {
   return ACCESS_COPY[name] || `Use ${name}`;
 }
 
-/** Ask shows an inline access request for tools. Fund moves use the confirm slide in ask.
- * Full permission does not ask. The spend still goes through the same gate. */
+/** Ask mode requires the confirmation slide for fund tools. */
 export function toolAccessKind(mode, name) {
-  if (typeof name !== 'string' || !name.trim()) return null;
-  if (FUND_TOOLS.has(name) && mode === 'ask') return 'modal';
-  if (mode === 'ask') return 'inline';
-  return null;
+  return isFundTool(name) && mode === 'ask' ? 'modal' : null;
 }
 
 export function toolAccessRequest(mode, name, args = {}) {
@@ -219,7 +190,7 @@ export function toolAccessRequest(mode, name, args = {}) {
     name,
     args: plainArgs(args),
     label,
-    prompt: kind === 'modal' ? `${label}. Slide to confirm.` : label,
+    prompt: `${label}. Slide to confirm.`,
   };
 }
 
