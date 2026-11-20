@@ -758,7 +758,7 @@ export function createPrivyWalletClient({
     return { cluster: 'devnet' };
   }
 
-  async function checkPrivyWalletAccess(walletId) {
+  async function checkPrivyWalletAccess(walletId, walletAddress) {
     try {
       const response = await fetcher(`${privyApi}/v1/wallets/${encodeURIComponent(walletId)}`, {
         method: 'GET',
@@ -768,7 +768,10 @@ export function createPrivyWalletClient({
       });
       if (response.status === 200) {
         const wallet = await response.json();
-        return wallet?.id === walletId && wallet.chain_type === 'solana' ? 200 : null;
+        const matchesWallet = wallet?.id === walletId
+          && wallet.chain_type === 'solana'
+          && wallet.address === walletAddress;
+        return matchesWallet ? 200 : null;
       }
       await response.body?.cancel().catch(() => {});
       return response.status;
@@ -797,13 +800,16 @@ export function createPrivyWalletClient({
       }
       return signedBody?.data?.signed_transaction;
     } catch (error) {
+      if (!userAuthorization) throw error;
+      const { ownerId, accessToken, walletAddress } = userAuthorization;
+      let requiresOwnerAuthorization = error?.code === 'wallet_authorization_required';
       const diagnostic = error?.privyFailure;
-      if (userAuthorization && error?.code === 'privy_failed' && diagnostic?.status === 401 && !diagnostic.code) {
-        const walletLookupStatus = await checkPrivyWalletAccess(walletId);
+      if (error?.code === 'privy_failed' && diagnostic?.status === 401 && !diagnostic.code) {
+        const walletLookupStatus = await checkPrivyWalletAccess(walletId, walletAddress);
         error.privyFailure = parsePrivySigningFailure({ ...diagnostic, walletLookupStatus });
+        requiresOwnerAuthorization = walletLookupStatus === 200;
       }
-      if (error?.code !== 'wallet_authorization_required') throw error;
-      const { ownerId, accessToken } = userAuthorization;
+      if (!requiresOwnerAuthorization) throw error;
       // The local sub check scopes the request. Privy verifies the JWT and
       // enforces wallet ownership and policy during the exchange and signature.
       if (!accessToken || jwtSub(accessToken) !== ownerId) {
@@ -1045,7 +1051,11 @@ export function createPrivyWalletClient({
       if (!simulatedTransfers.delete(prepared)) fail('Transfer simulation is required', 'simulation_required');
       await assertDevnet();
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
-      const signed = await signWithPrivy(walletId, prepared.transaction, { ownerId: wallet.ownerId, accessToken });
+      const signed = await signWithPrivy(walletId, prepared.transaction, {
+        ownerId: wallet.ownerId,
+        walletAddress: wallet.address,
+        accessToken,
+      });
       if (!singleSignerMessage(signed).equals(singleSignerMessage(prepared.transaction))) {
         fail('Signed transfer differs from the simulation', 'transaction_mismatch');
       }

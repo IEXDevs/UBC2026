@@ -162,10 +162,17 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
   });
   const sessionKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   let rejection = { error: { code: 'zero_correct_authorization_signatures' } };
+  let signingStatus = 403;
+  let lookups = 0;
   let exchanged = 0;
   let broadcasts = 0;
   const privy = client({ authorizationKey, fetcher: async (url, init) => {
     const path = new URL(url).pathname;
+    if (init.method === 'GET') {
+      assert.equal(path, `/v1/wallets/${walletId}`);
+      lookups++;
+      return Response.json({ id: walletId, chain_type: 'solana', address });
+    }
     const body = JSON.parse(init.body);
     if (path === '/v1/wallets/authenticate') {
       exchanged++;
@@ -195,7 +202,7 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
       };
       const payload = Buffer.from(canonicalizeJson({ version: 1, method: 'POST', url: String(url), body, headers: signedHeaders }));
       const signature = Buffer.from(headers.get('privy-authorization-signature'), 'base64');
-      if (verify('sha256', payload, publicKey, signature)) return Response.json(rejection, { status: 403 });
+      if (verify('sha256', payload, publicKey, signature)) return Response.json(rejection, { status: signingStatus });
       assert.equal(verify('sha256', payload, sessionKey.publicKey, signature), true);
       return Response.json({ method: 'signTransaction', data: { signed_transaction: signed.toString('base64'), encoding: 'base64' } });
     }
@@ -217,17 +224,25 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
   assert.equal((await send(token(privyUserId))).signature, txSignature);
   assert.equal(exchanged, 1);
   assert.equal(broadcasts, 1);
+  assert.equal(lookups, 0);
+  signingStatus = 401;
+  rejection = { error: 'Unauthorized' };
+  assert.equal((await send(token(privyUserId))).signature, txSignature);
+  assert.equal(lookups, 1);
+  assert.equal(exchanged, 2);
+  assert.equal(broadcasts, 2);
   rejection = { code: 'zero_correct_authorization_signatures', error: { code: 'policy_violation' } };
   await assert.rejects(send(token(privyUserId)), { code: 'wallet_policy_rejected' });
   rejection = { error: 'provider detail', code: 'insufficient_app_secret_permissions', message: appSecret };
   await assert.rejects(send(token(privyUserId)), error => {
     assert.equal(error.code, 'privy_failed');
-    assert.deepEqual(error.privyFailure, { status: 403, code: 'insufficient_app_secret_permissions' });
+    assert.deepEqual(error.privyFailure, { status: 401, code: 'insufficient_app_secret_permissions' });
     assertNoSecrets(error.message);
     return true;
   });
-  assert.equal(exchanged, 1);
-  assert.equal(broadcasts, 1);
+  assert.equal(lookups, 1);
+  assert.equal(exchanged, 2);
+  assert.equal(broadcasts, 2);
 });
 
 test('an unexplained signing 401 checks wallet access with the same app credentials', async () => {
@@ -239,6 +254,7 @@ test('an unexplained signing 401 checks wallet access with the same app credenti
   const privyCalls = [];
   let lookupStatus = 200;
   let returnedWalletId = walletId;
+  let returnedAddress = address;
   const privy = client({ authorizationKey, fetcher: async (url, init) => {
     const path = new URL(url).pathname;
     if (path.startsWith('/v1/wallets/')) {
@@ -247,7 +263,7 @@ test('an unexplained signing 401 checks wallet access with the same app credenti
       privyCalls.push([init.method, path]);
       if (init.method === 'GET') {
         assert.equal(init.headers['privy-authorization-signature'], undefined);
-        return Response.json({ id: returnedWalletId, chain_type: 'solana', address }, { status: lookupStatus });
+        return Response.json({ id: returnedWalletId, chain_type: 'solana', address: returnedAddress }, { status: lookupStatus });
       }
       return Response.json({ error: 'undocumented detail' }, { status: 401 });
     }
@@ -259,17 +275,22 @@ test('an unexplained signing 401 checks wallet access with the same app credenti
   } });
 
   const cases = [
-    { status: 200, id: walletId, diagnostic: { status: 401, walletLookupStatus: 200 } },
+    {
+      status: 200, id: walletId, code: 'wallet_owner_session_required',
+      diagnostic: { status: 401, walletLookupStatus: 200 },
+    },
     { status: 401, id: walletId, diagnostic: { status: 401, walletLookupStatus: 401 } },
     { status: 404, id: walletId, diagnostic: { status: 401, walletLookupStatus: 404 } },
     { status: 200, id: otherWalletId, diagnostic: { status: 401 } },
+    { status: 200, id: walletId, walletAddress: '11111111111111111111111111111111', diagnostic: { status: 401 } },
   ];
-  for (const { status, id, diagnostic } of cases) {
+  for (const { status, id, walletAddress = address, code = 'privy_failed', diagnostic } of cases) {
     lookupStatus = status;
     returnedWalletId = id;
+    returnedAddress = walletAddress;
     const prepared = await privy.prepareDevnetTransfer({ transaction });
     await assert.rejects(privy.signPreparedDevnetTransfer({ bot, wallet, prepared }), {
-      code: 'privy_failed',
+      code,
       privyFailure: diagnostic,
     });
   }
