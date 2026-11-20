@@ -1383,7 +1383,7 @@ export function createPrivyWalletClient({
      * Bot freeze does not apply: Stop All grab-back must still move a frozen wallet.
      * Broadcast still refuses any cluster whose genesis hash is not solana.
      */
-    async signAndBroadcastOwnerSolana({ ownerId, wallet, transaction } = {}) {
+    async signAndBroadcastOwnerSolana({ ownerId, wallet, transaction, accessToken } = {}) {
       const owner = assertOwnerId(ownerId);
       try {
         validateWallet(wallet);
@@ -1393,7 +1393,10 @@ export function createPrivyWalletClient({
       }
       if (wallet.ownerId !== owner) fail('Wallet owner must match', 'owner_mismatch');
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
-      const signedTransaction = await signWithPrivy(walletId, transaction);
+      const ownerSession = typeof accessToken === 'string' && accessToken
+        ? { ownerId: owner, accessToken, walletAddress: wallet.address }
+        : undefined;
+      const signedTransaction = await signWithPrivy(walletId, transaction, ownerSession);
       const signature = await sendSigned(signedTransaction, { privy: true });
       return { cluster: SOLANA_CLUSTER, signature, privyWalletId: walletId };
     },
