@@ -93,4 +93,15 @@ test('a selected custom model uses its key and endpoint with the existing turn v
   assert.equal(reply.text, 'Hello');
   assert.ok(calls > 1, 'the existing verifier still runs');
   await assert.rejects(completeTextChat({ modelProvider: { token, baseUrl: 'https://localhost/v1' }, message: 'Hello' }), error => error.code === 'provider_not_supported');
+  await assert.rejects(completeTextChat({ modelProvider: { token, baseUrl }, message: 'Hello' }), error => error.code === 'model_required');
+  await assert.rejects(completeTextChat({ modelProvider: { token, baseUrl }, model: 'gpt-test', message: 'Hello', fetcher: async () => Response.json({ error: { message: `Rejected ${token}` } }, { status: 401 }) }), error => !error.detail.includes(token));
+});
+
+test('custom OpenRouter models do not weaken the free-only policy for account keys', async () => {
+  const model = 'vendor/paid-chat';
+  const fetcher = async (_url, init) => Response.json({ choices: [{ message: { content: init.body.includes('Role: turn-verify') ? '{"allow":true}' : 'Hello' } }] });
+  await assert.rejects(completeTextChat({ openrouterApiKey: token, model, message: 'Hello', fetcher }), error => error.code === 'openrouter_paid_model');
+  const reply = await completeTextChat({ modelProvider: { token, baseUrl: 'https://openrouter.ai/api/v1' }, model, message: 'Hello', fetcher });
+  assert.equal(reply.model, model);
+  assert.equal(reply.provider, 'openrouter');
 });
