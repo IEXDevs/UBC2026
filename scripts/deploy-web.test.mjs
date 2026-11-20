@@ -36,7 +36,7 @@ test('root package exposes local web deploy commands for dev and prod', () => {
   assert.doesNotMatch(web.scripts['deploy:dev'], /npm ci/);
   assert.doesNotMatch(web.scripts['deploy:prod'], /npm ci/);
 
-  const workflow = readFileSync(join(root, '.github/workflows/dev-page.yml'), 'utf8');
+  const workflow = readFileSync(join(root, '.github/workflows/dev-page.yml'), 'utf8').replaceAll('\r\n', '\n');
   assert.equal((workflow.match(/npm ci/g) || []).length, 1);
   assert.match(workflow, /npm run deploy:web:dev/);
   assert.doesNotMatch(workflow, /npx opennextjs-cloudflare build/);
