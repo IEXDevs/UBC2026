@@ -150,6 +150,8 @@ test('wallets are collapsed in settings and the stage has no wallet badge', () =
   assert.match(profile, /className="settings-fold"/);
   assert.match(profile, /<summary>Wallets<\/summary>/);
   assert.match(profile, /<WalletAdd/);
+  assert.match(sheet, /return createPortal\(/);
+  assert.match(sheet, /document\.body\s*\)/);
   assert.match(page, /expandWallets=\{walletsFold\}/);
   assert.match(page, /setWalletsFold\(true\)/);
   assert.match(sheet, /Connect a wallet/);
