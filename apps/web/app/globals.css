@@ -4970,7 +4970,7 @@ body:has(.backdrop.is-cover) {
 
 .profile-form { min-width: 0; max-width: 420px; }
 .profile-photo { width: 112px; height: 112px; margin: 22px 0 20px; }
-.profile-photo .you-mark { width: 112px; height: 112px; border-radius: 26px; object-fit: cover; }
+.profile-photo .you-mark { width: 112px; height: 112px; border-radius: 26px; object-fit: cover; font-size: 38px; }
 .profile-photo .agent-pencil { opacity: 1; pointer-events: auto; width: 30px; height: 30px; border-radius: 10px; }
 .profile-name-row { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 .profile-name-row > .icon-btn { flex: none; }

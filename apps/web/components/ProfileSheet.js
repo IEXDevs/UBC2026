@@ -124,7 +124,7 @@ export default function ProfileSheet({
         <form className="profile-identity profile-form" onSubmit={save}>
           <p className="plugin-kicker">Profile</p>
           <div className="agent-photo profile-photo">
-            <ProfileMark src={photo} label={displayName || accountLabel} className="you-mark is-huge" />
+            <ProfileMark src={photo} label={displayName || accountLabel} />
             {signedIn ? <>
               <button type="button" className="agent-pencil" aria-label="Change profile photo" disabled={saving} onClick={() => photoInput.current?.click()}><Pencil size={15} /></button>
               <input ref={photoInput} className="agent-file" type="file" accept="image/*" aria-label="Profile photo" tabIndex={-1} disabled={saving} onChange={choosePhoto} />
