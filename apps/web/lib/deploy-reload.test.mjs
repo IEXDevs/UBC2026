@@ -377,7 +377,59 @@ test('the deploy watcher reuses tracking installed before hydration even if anot
   assert.equal(tracker.snapshot(), 1);
 });
 
-test('the session lock only applies to same-origin refresh and logout posts', async () => {
+test('a rejected refresh does not erase a concurrent OAuth login in another tab', async () => {
+  const origin = 'https://dev.maelstrom.example';
+  const refreshPath = '/api/v1/sessions';
+  const oauthPath = '/api/v1/oauth/authenticate';
+  const started = [];
+  let cookie = `${PRIVY_REFRESH_COOKIE}=expired`;
+  let queue = Promise.resolve();
+  let startRefresh;
+  let finishRefresh;
+  const refreshStarted = new Promise((resolve) => { startRefresh = resolve; });
+  const refreshResponse = new Promise((resolve) => { finishRefresh = resolve; });
+  const locks = {
+    request: (_, __, run) => {
+      const result = queue.then(run);
+      queue = result.catch(() => {});
+      return result;
+    },
+  };
+  const fetch = async (input, init) => {
+    const path = new URL(input).pathname.replace('/api/privy-auth', '');
+    started.push(path);
+    const request = new Request(input, { ...init, headers: { cookie } });
+    const response = await proxyPrivyAuth(request, path, async () => {
+      if (path === refreshPath) {
+        startRefresh();
+        await refreshResponse;
+        return Response.json({ code: 'missing_or_invalid_token' }, { status: 401 });
+      }
+      return Response.json({ refresh_token: 'fresh-login' });
+    });
+    cookie = response.headers.getSetCookie()
+      .find((value) => value.startsWith(`${PRIVY_REFRESH_COOKIE}=`)).split(';')[0];
+    return response;
+  };
+  const makeTab = () => {
+    const tab = { fetch, location: { origin }, navigator: { locks } };
+    installAuthFetchTracker(tab);
+    return tab;
+  };
+  const post = (tab, path) => tab.fetch(`${origin}/api/privy-auth${path}`, { method: 'POST', body: '{}' });
+  const refresh = post(makeTab(), refreshPath);
+  await refreshStarted;
+  const oauth = post(makeTab(), oauthPath);
+  // If the callback can bypass the refresh lock, let its cookie be written first.
+  if (started.includes(oauthPath)) await oauth;
+  finishRefresh();
+
+  assert.deepEqual((await Promise.all([refresh, oauth])).map(({ status }) => status), [401, 200]);
+  assert.deepEqual(started, [refreshPath, oauthPath]);
+  assert.equal(readRefreshCookie(cookie), 'fresh-login');
+});
+
+test('the session lock only applies to same-origin refresh, logout and OAuth login posts', async () => {
   const origin = 'https://dev.maelstrom.example';
   const requests = [];
   const locks = {
@@ -390,15 +442,21 @@ test('the session lock only applies to same-origin refresh and logout posts', as
   installAuthFetchTracker(view);
   const signal = new AbortController().signal;
   const path = '/api/privy-auth/api/v1/sessions';
+  const oauth = '/api/privy-auth/api/v1/oauth';
   await view.fetch(path);
+  await view.fetch(`${oauth}/init`, { method: 'POST' });
+  await view.fetch(`${oauth}/link`, { method: 'POST' });
   await view.fetch('/api/privy-auth/api/v1/siws/authenticate', { method: 'POST' });
   await view.fetch(`https://example.org${path}`, { method: 'POST' });
+  await view.fetch(`https://example.org${oauth}/authenticate`, { method: 'POST' });
   assert.deepEqual(requests, []);
   await view.fetch(path, { method: 'POST', signal });
   await view.fetch(new Request(`${origin}${path}/logout`, { method: 'POST' }));
-  assert.equal(requests.length, 2);
+  await view.fetch(`${oauth}/authenticate`, { method: 'POST' });
+  assert.equal(requests.length, 3);
   assert.equal(requests[0].signal, signal);
   assert.equal(requests[0].name, requests[1].name);
+  assert.equal(requests[0].name, requests[2].name);
 });
 
 test('auth activity during cache cleanup defers the deploy without consuming its reload', async () => {
