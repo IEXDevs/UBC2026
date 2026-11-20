@@ -143,8 +143,9 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
     <section className="panel" aria-label="Shopping">
       <h2>Shopping</h2>
       <p className="hint">
-        Compare the x402 sandbox catalog on price and quality, or open a tiny Laso mainnet card challenge.
-        The result is a proposal. Nothing is bought until you approve. Sandbox purchases are disabled on mainnet.
+        Compare the x402 sandbox catalog on price and quality, or open a Laso card challenge.
+        The result is a proposal. Nothing is bought until you approve.
+        {SOLANA_CLUSTER === 'mainnet-beta' ? ' Sandbox purchases are unavailable.' : null}
       </p>
       <div className="live-actions">
         <button className="cta" type="button" disabled={busy || SOLANA_CLUSTER === 'mainnet-beta'} onClick={() => prepare('sandbox')}>

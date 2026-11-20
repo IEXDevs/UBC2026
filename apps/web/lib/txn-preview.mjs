@@ -1,4 +1,4 @@
-import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Transaction preview and log rows. No signing.
  */
@@ -21,7 +21,6 @@ export function sendPreview({ from, to, amountLabel }) {
       { label: 'From', value: from || 'Agent wallet' },
       { label: 'To', value: to || '' },
       { label: 'Amount', value: amountLabel },
-      { label: 'Network', value: EXECUTION_LABEL },
     ],
   };
 }
@@ -34,7 +33,6 @@ export function swapPreview({ pay, receive, from, to }) {
       { label: 'Pay', value: `${pay} ${from}` },
       { label: 'Receive', value: receive ? `${receive} ${to}` : 'Quoted when you slide' },
       { label: 'Route', value: 'Jupiter' },
-      { label: 'Network', value: EXECUTION_LABEL },
     ],
   };
 }
@@ -84,7 +82,6 @@ export function logRows({ receipts = [], payments = [], transfers = [], events =
       lines: [
         line('Counterparty', payment.counterparty),
         line('Protocol', payment.protocol),
-        line('Network', cluster),
         line('Signature', payment.txSignature),
       ].filter(Boolean),
       solscanUrl: solscanTxUrl(payment.txSignature, cluster),
@@ -101,7 +98,7 @@ export function logRows({ receipts = [], payments = [], transfers = [], events =
       title: `${direction} ${amountLabel}`,
       lines: [
         line('Handle', transfer.handle ? `@${String(transfer.handle).replace(/^@/, '')}` : ''),
-        line('Network', `Platform ledger · ${EXECUTION_LABEL}`),
+        line('Method', 'Platform ledger'),
       ].filter(Boolean),
       solscanUrl: null,
     });

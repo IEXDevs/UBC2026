@@ -47,7 +47,7 @@ export default function ApprovalPreview({ preview, botType = 'trading' }) {
       )}
       {preview && (preview.state === 'approval-needed' || preview.state === 'over-budget') && (
         <>
-          <p className="pill">● {preview.cluster} · preview before sign</p>
+          <p className="pill">● Preview before signing</p>
           <p className="approval-amount">{preview.outflowLabel}</p>
           <p>{preview.body}</p>
           <dl className="approval-facts">

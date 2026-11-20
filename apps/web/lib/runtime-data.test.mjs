@@ -207,7 +207,7 @@ test('owner lists load bots, wallets, payments, and paper positions from the pro
   assert.equal(lists.positions[0].asset, 'SOL');
   assert.equal(lists.positions[0].pnlMicroUsdc, '-500');
   assert.equal(lists.positions[0].botId, 'bot_live');
-  assert.equal(lists.positions[0].market, 'mainnet price');
+  assert.equal(lists.positions[0].market, undefined);
   assert.deepEqual(positionsFromBook([{ id: 'x', botId: 'bot_live', quantity: 'nope' }], []), []);
   assert.deepEqual(positionsFromStatus('bot_live', { positionCheck: { positions: [{ amount: 'nope' }] } }), []);
   const unsigned = await fetchOwnerLists('');

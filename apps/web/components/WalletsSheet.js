@@ -42,7 +42,6 @@ import { accountStorage } from '../lib/account-state.mjs';
 import { sendPreview } from '../lib/txn-preview.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
 import { walletSendAssets, NATIVE_SOL_MINT } from '../lib/wallet-send-assets.mjs';
-import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 
 const TRANSFER = [
   { id: 'send', label: 'Send' },
@@ -942,15 +941,15 @@ function SendPane({
 function targetHint(target, observing = false) {
   if (observing) {
     if (target?.kind === 'wallet' && target.walletKind === 'main') {
-      return `This sends the selected asset on ${SOLANA_CLUSTER} to the main wallet. The connected wallet approves it.`;
+      return 'This sends the selected asset to the main wallet. The connected wallet approves it.';
     }
-    return `A connected wallet sends the selected asset on ${SOLANA_CLUSTER} to the main wallet.`;
+    return 'A connected wallet sends the selected asset to the main wallet.';
   }
   if (!target) return 'Type a @handle, .sol name, or Solana address, or pick a wallet.';
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
-  if (target.kind === 'wallet') return `Sends the selected asset on Solana ${SOLANA_CLUSTER} to ${target.caption}.`;
+  if (target.kind === 'wallet') return `Sends the selected asset to ${target.caption}.`;
   if (target.kind === 'invalid-address') return 'That address is not a valid Solana pubkey.';
-  return target.kind === 'address' ? `Sends directly on Solana ${SOLANA_CLUSTER}. Check the recipient address.` : '';
+  return target.kind === 'address' ? 'Sends directly. Check the recipient address.' : '';
 }
 
 function ReceivePane({ active, handle }) {

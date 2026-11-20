@@ -1,5 +1,5 @@
 'use client';
-import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
@@ -1229,7 +1229,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           signature: body.signature,
           receipt: { id: `asset_${body.signature}`, at: new Date().toISOString(), title: `Send ${amountLabel}`, lines: [
             { label: 'To', value: pending.destination }, { label: 'Amount', value: amountLabel },
-            { label: 'Asset', value: pending.walletAsset }, { label: 'Network', value: EXECUTION_LABEL }, { label: 'Signature', value: body.signature },
+            { label: 'Asset', value: pending.walletAsset }, { label: 'Signature', value: body.signature },
           ], signature: body.signature, cluster: SOLANA_CLUSTER },
         };
       } catch { return { ok: false, message: 'The wallet send did not complete.' }; }
@@ -1253,7 +1253,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         const where = body.address ? clipAddress(body.address) : target.domain;
         if (body.error === 'missing_config') {
           const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'SOLANA_RPC_URL';
-          return { ok: false, message: `${target.domain} is ${where}. The mainnet-beta send needs ${names}.` };
+          return { ok: false, message: `${target.domain} is ${where}. This send needs ${names}.` };
         }
         if (body.error === 'sns_not_found' || body.error === 'sns_failed') {
           return { ok: false, message: 'Failed.' };
@@ -1274,7 +1274,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
               { label: 'To', value: `${target.domain} (${where})` },
               { label: 'Amount', value: amountLabel },
               { label: 'Signature', value: body.signature },
-              { label: 'Network', value: EXECUTION_LABEL },
             ],
             signature: body.signature,
             cluster: SOLANA_CLUSTER,
@@ -1295,7 +1294,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         const token = await getAccessToken?.();
         if (from.spendable === false) {
           if (dest.kind !== 'main') {
-            return { ok: false, message: 'A connected wallet sends mainnet-beta USDC to the main wallet.' };
+            return { ok: false, message: 'A connected wallet sends USDC to the main wallet.' };
           }
           const headers = {
             'content-type': 'application/json',
@@ -1361,7 +1360,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
                 { label: 'To', value: 'Main wallet' },
                 { label: 'Amount', value: amountLabel },
                 { label: 'Signature', value: body.signature },
-                { label: 'Network', value: EXECUTION_LABEL },
               ],
               signature: body.signature,
               cluster: SOLANA_CLUSTER,
@@ -1381,7 +1379,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         const where = target.caption || clipAddress(target.address);
         if (body.error === 'missing_config') {
           const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'SOLANA_RPC_URL';
-          return { ok: false, message: `The mainnet-beta send needs ${names}.` };
+          return { ok: false, message: `This send needs ${names}.` };
         }
         if (body.error === 'wallet_frozen') return { ok: false, message: 'That wallet is frozen.' };
         if (body.error === 'invalid_destination') return { ok: false, message: 'Pick a different wallet.' };
@@ -1399,7 +1397,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
               { label: 'To', value: where },
               { label: 'Amount', value: amountLabel },
               { label: 'Signature', value: body.signature },
-              { label: 'Network', value: EXECUTION_LABEL },
             ],
             signature: body.signature,
             cluster: SOLANA_CLUSTER,
@@ -1480,7 +1477,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             { label: 'To', value: `@${body.transfer.handle}` },
             { label: 'Amount', value: amountLabel },
             ...(pricedFrom ? [{ label: 'Priced from', value: `${pricedFrom} · quote not broadcast` }] : []),
-            { label: 'Network', value: `Platform ledger · ${EXECUTION_LABEL}` },
+            { label: 'Method', value: 'Platform ledger' },
           ],
           cluster: SOLANA_CLUSTER,
         },
@@ -1861,7 +1858,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           lines: [
             { label: 'To', value: `@${pending.command.handle}` },
             { label: 'Amount', value: amountLabel },
-            { label: 'Network', value: 'Solana mainnet-beta' },
           ],
           signature: body.signature,
           cluster: SOLANA_CLUSTER,
@@ -1877,7 +1873,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       const reason = body.state === 'blocked' && body.reason === 'spend-frozen'
         ? 'That wallet is frozen.'
         : body.state === 'quote-not-authorization'
-          ? 'A mainnet quote cannot authorize this send.'
+          ? 'A price quote cannot authorize this send.'
           : body.state === 'approval-needed'
             ? 'The send still needs you to confirm it.'
             : 'The send did not post.';
@@ -1930,7 +1926,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       lines: [
         { label: 'To', value: `@${body.transfer.handle}` },
         { label: 'Amount', value: amountLabel },
-        { label: 'Network', value: `Platform ledger · ${EXECUTION_LABEL}` },
+        { label: 'Method', value: 'Platform ledger' },
       ],
       cluster: SOLANA_CLUSTER,
     });

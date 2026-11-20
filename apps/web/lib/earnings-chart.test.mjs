@@ -22,7 +22,7 @@ const paper = {
   pnlMicroUsdc: '-1500000',
   quoteSource: 'jupiter',
   venue: 'Jupiter',
-  market: 'mainnet price',
+  market: 'SOL',
   side: 'long',
 };
 
@@ -84,7 +84,7 @@ test('earnings chart is paper PnL and does not authorize a transaction', () => {
   assert.equal(series.authorizesTransaction, false);
   assert.equal(series.paperPnl, true);
   assert.equal(series.label, PAPER_PNL_LABEL);
-  assert.match(series.caption, /mainnet-beta execution, mainnet pricing/);
+  assert.equal(series.caption, 'Paper PnL. A price quote does not authorize a transaction.');
   assert.match(series.caption, /does not authorize a transaction/);
   assert.deepEqual(series.points.map(point => point.micro), ['0', '-250000', '750000', '1250000', '-250000']);
   assert.equal(series.totalMicro, '-250000');
@@ -96,7 +96,7 @@ test('earnings chart is paper PnL and does not authorize a transaction', () => {
 /**
  * Achieves: verifies connected wallets add read-only mainnet balances and keep paper lots.
  * Fails when: connected wallets add read-only mainnet balances and keep paper lots breaks (e.g. expected false, false, PAPER_PNL_LABEL).
- * Oracle: assert.equal(merged.broadcast, false); assert.equal(merged.authorizesTransaction, false); assert.equal(merged.label, PAPER_PNL_LABEL); assert.equal(merged.positions[0].id, 'pos_sol'); assert.equal(merged.positions.length, 3); assert.equal(phantom.market, 'mainnet price')
+ * Oracle: assert.equal(merged.broadcast, false); assert.equal(merged.authorizesTransaction, false); assert.equal(merged.label, PAPER_PNL_LABEL); assert.equal(merged.positions[0].id, 'pos_sol'); assert.equal(merged.positions.length, 3); assert.equal(phantom.quoteSource, 'Wallet balance')
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
@@ -113,7 +113,7 @@ test('connected wallets add read-only mainnet balances and keep paper lots', () 
   assert.equal(merged.positions.length, 3);
   const phantom = merged.positions.find(row => row.holder === 'Phantom');
   const solflare = merged.positions.find(row => row.holder === 'Solflare');
-  assert.equal(phantom.market, 'mainnet price');
+  assert.equal(phantom.quoteSource, 'Wallet balance');
   assert.equal(phantom.broadcast, false);
   assert.equal(phantom.readOnly, true);
   assert.equal(phantom.pnlMicroUsdc, '0');
@@ -132,14 +132,14 @@ test('connected wallets add read-only mainnet balances and keep paper lots', () 
 
   const described = describePositions(merged.positions, [{ id: 'bot_positions', name: 'Position guard' }]);
   assert.equal(described[0].botName, 'Position guard');
-  assert.equal(described.find(row => row.asset === 'SOL' && row.botName === 'Phantom').market, 'mainnet price');
-  assert.match(described.find(row => row.botName === 'Phantom').note, /mainnet-beta execution, mainnet pricing/);
+  assert.equal(described.find(row => row.asset === 'SOL' && row.botName === 'Phantom').market, 'SOL');
+  assert.equal(described.find(row => row.botName === 'Phantom').note, 'Wallet balance');
 
   const book = layoutPositionBook(merged.positions, [], merged.wallets);
   const node = book.wallets.find(wallet => wallet.label === 'Phantom');
   assert.equal(node.readOnly, true);
   assert.equal(book.cards.filter(card => card.walletId === node.id).length, 1);
-  assert.equal(book.cards.find(card => card.holder === 'Phantom' || card.botName === 'Phantom').market, 'mainnet price');
+  assert.equal(book.cards.find(card => card.holder === 'Phantom' || card.botName === 'Phantom').market, 'SOL');
 });
 
 /**

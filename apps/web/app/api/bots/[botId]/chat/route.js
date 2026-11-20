@@ -52,7 +52,7 @@ function budgetApprovalReply(hold, gate) {
   if (hold.budgetOverride || action !== 'spend' || asset !== 'SOL'
     || !handle || !destination || !terms || gate.signed !== false
     || (gate.error || gate.state) !== 'approval-needed' || gate.reason !== 'per-transaction') return null;
-  const label = `Approve once: send ${formatBaseUnits(amount, 9)} SOL to @${handle} (${shortAddress(destination)}) on Solana mainnet-beta plus a ${formatBaseUnits(terms.feeLamports, 9)} SOL fee.`;
+  const label = `Approve once: send ${formatBaseUnits(amount, 9)} SOL to @${handle} (${shortAddress(destination)}) plus a ${formatBaseUnits(terms.feeLamports, 9)} SOL fee.`;
   const prompt = `${label} This overrides the agent’s per-transfer limit and, if needed, its remaining budget for this payment only. The limits won’t change. Slide to approve once.`;
   return { provider: 'desk', toolRounds: 1, text: prompt, hold: { ...hold, budgetOverride: terms, label, prompt } };
 }

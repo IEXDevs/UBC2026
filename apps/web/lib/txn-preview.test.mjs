@@ -3,16 +3,15 @@ import assert from 'node:assert/strict';
 import { logRows, sendPreview, swapPreview } from './txn-preview.mjs';
 
 /**
- * Achieves: verifies send preview title and From/To/Amount/Network line labels.
+ * Achieves: verifies send preview title and From/To/Amount line labels.
  * Fails when: title omits amount, label order drifts, or destination value is wrong.
  * Oracle: sendPreview({ from, to, amountLabel }) → title 'Send …' and fixed line labels.
  * Side effects / state checked: N/A.
- * Gaps: does not assert Network line value or From line.
  */
 test('a send preview names the wallet, destination, and amount', () => {
   const preview = sendPreview({ from: 'Main', to: '@alex', amountLabel: '1.5 USDC' });
   assert.equal(preview.title, 'Send 1.5 USDC');
-  assert.deepEqual(preview.lines.map(line => line.label), ['From', 'To', 'Amount', 'Network']);
+  assert.deepEqual(preview.lines.map(line => line.label), ['From', 'To', 'Amount']);
   assert.equal(preview.lines[1].value, '@alex');
   assert.equal(preview.lines[0].value, 'Main');
   assert.equal(preview.lines[2].value, '1.5 USDC');
@@ -43,7 +42,7 @@ test('log rows keep a timestamp, the transfer, and a solscan link', () => {
       asset: 'USDC',
       direction: 'paid',
       counterparty: 'shop',
-      cluster: 'mainnet-beta',
+      cluster: 'testnet',
       txSignature: signature,
       createdAt: '2026-11-15T04:00:00.000Z',
     }],
@@ -61,8 +60,13 @@ test('log rows keep a timestamp, the transfer, and a solscan link', () => {
   assert.match(rows[0].solscanUrl, /solscan.io\/tx\//);
   assert.equal(new URL(rows[0].solscanUrl).search, '');
   assert.deepEqual(rows.map(row => row.id), ['r1', 'p1', 't1', `stream:${deposit}`, 'refund']);
+  assert.deepEqual(rows[1].lines.map(line => line.label), ['Counterparty', 'Signature']);
+  assert.equal(new URL(rows[1].solscanUrl).searchParams.get('cluster'), 'testnet');
+  assert.deepEqual(rows[2].lines, [{ label: 'Handle', value: '@alex' }, { label: 'Method', value: 'Platform ledger' }]);
   assert.equal(rows[2].solscanUrl, null);
   assert.equal(rows[3].solscanUrl, `https://solscan.io/tx/${deposit}`);
   assert.equal(rows[3].lines[0].value, 'Stream deposit');
-  assert.equal(swapPreview({ pay: '1', from: 'USDC', to: 'SOL', receive: '' }).lines[1].value, 'Quoted when you slide');
+  const swap = swapPreview({ pay: '1', from: 'USDC', to: 'SOL', receive: '' });
+  assert.deepEqual(swap.lines.map(line => line.label), ['Pay', 'Receive', 'Route']);
+  assert.equal(swap.lines[1].value, 'Quoted when you slide');
 });

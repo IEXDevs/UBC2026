@@ -643,7 +643,7 @@ export function phraseComplete(picked, length) {
 
 export function recoveryCard({ words, wallets = [], handle = '', passphrase = '', at = '' } = {}) {
   const phrase = recoveryWords(words);
-  const lines = ['Maelstrom recovery', EXECUTION_LABEL, ''];
+  const lines = ['Maelstrom recovery', ''];
   if (typeof handle === 'string' && handle.trim()) lines.push(`Handle: @${handle.trim().replace(/^@/, '')}`, '');
   if (phrase) {
     lines.push('Seed phrase:', phrase.join(' '), '');
