@@ -4141,6 +4141,7 @@ button.chat-edit:disabled:focus-visible {
 }
 
 .composer .prompt-bar {
+  --pb-control-height: 36px;
   width: 100%;
 }
 
@@ -4160,7 +4161,6 @@ button.chat-edit:disabled:focus-visible {
 }
 
 .composer .prompt-bar__tool,
-.composer .prompt-bar__pick,
 .composer .prompt-bar__send,
 .composer .voice-mode {
   height: 36px;
