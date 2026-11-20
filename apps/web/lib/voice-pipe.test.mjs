@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { playAgentSpeech, startVoicePipe } from './voice-pipe.mjs';
+import { createReplySpeech, createSpeechQueue, playAgentSpeech, splitSpeechSentences, startVoicePipe } from './voice-pipe.mjs';
 
 function fakeClient() {
   const CommitStrategy = { VAD: 'vad' };
@@ -14,6 +14,129 @@ function fakeClient() {
   };
   return { CommitStrategy, RealtimeEvents, Scribe: { connect() {} } };
 }
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('sentence splitting holds fragments, combines tiny sentences and flushes the last tail', () => {
+  assert.deepEqual(splitSpeechSentences(''), { sentences: [], rest: '' });
+  assert.deepEqual(splitSpeechSentences('Hi. Still thinking'), { sentences: [], rest: 'Hi. Still thinking' });
+  assert.deepEqual(splitSpeechSentences('Hi. This is a complete response. Next fragment'), {
+    sentences: ['Hi. This is a complete response.'], rest: ' Next fragment',
+  });
+  assert.deepEqual(splitSpeechSentences('A long complete question here? Another complete sentence here!\nA final fragment', { final: true }), {
+    sentences: ['A long complete question here?', 'Another complete sentence here!', 'A final fragment'], rest: '',
+  });
+  assert.deepEqual(splitSpeechSentences('A complete newline boundary here\nNext'), {
+    sentences: ['A complete newline boundary here'], rest: 'Next',
+  });
+  assert.equal(splitSpeechSentences('Not a boundary.yet!still incomplete').sentences.length, 0);
+});
+
+test('reply speech buffers the first sentence and does not repeat the final full reply', () => {
+  const spoken = [];
+  let cleared = 0;
+  const queue = { enqueue: text => spoken.push(text), clear: () => { cleared++; } };
+  const reply = createReplySpeech(queue);
+  reply.event({ type: 'reply_delta', text: 'The beginning of an answer' });
+  assert.deepEqual(spoken, []);
+  reply.event({ type: 'reply_delta', text: '. The last tail' });
+  assert.deepEqual(spoken, ['The beginning of an answer.']);
+  if (!reply.complete()) queue.enqueue('The beginning of an answer. The last tail');
+  assert.deepEqual(spoken, ['The beginning of an answer.', 'The last tail']);
+  reply.event({ type: 'reply_delta', text: 'A new unverified answer here.' });
+  reply.event({ type: 'reply_retract' });
+  assert.equal(cleared, 1);
+  assert.equal(reply.complete(), false);
+  const textOnly = createReplySpeech(null);
+  textOnly.event({ type: 'reply_delta', text: 'Ignored.' });
+  assert.equal(textOnly.complete(), false);
+});
+
+test('speech queue plays in order and prefetches only the next sentence during playback', async () => {
+  const requests = [];
+  const played = [];
+  const gates = [deferred(), deferred(), deferred()];
+  const started = [deferred(), deferred(), deferred()];
+  const queue = createSpeechQueue({
+    fetcher: async (_url, init) => { const text = JSON.parse(init.body).text; requests.push(text); return { text }; },
+    play: async ({ text, response }) => {
+      assert.equal((await response).text, text);
+      const index = played.length;
+      played.push(text);
+      started[index].resolve();
+      await gates[index].promise;
+    },
+  });
+  queue.enqueue('First sentence.');
+  queue.enqueue('Second sentence.');
+  queue.enqueue('Third sentence.');
+  await started[0].promise;
+  assert.deepEqual(requests, ['First sentence.', 'Second sentence.']);
+  assert.deepEqual(played, ['First sentence.']);
+  gates[0].resolve();
+  await started[1].promise;
+  assert.deepEqual(requests, ['First sentence.', 'Second sentence.', 'Third sentence.']);
+  assert.deepEqual(played, ['First sentence.', 'Second sentence.']);
+  gates[1].resolve();
+  await started[2].promise;
+  gates[2].resolve();
+  queue.stop();
+});
+
+test('queue retraction cancels active playback and prefetch, clears pending work, and can resume', async () => {
+  const signals = [];
+  const played = [];
+  const started = deferred();
+  const resumed = deferred();
+  const queue = createSpeechQueue({
+    fetcher: async (_url, init) => { signals.push(init.signal); return {}; },
+    play: async ({ text, response, signal }) => {
+      await response;
+      played.push(text);
+      if (text === 'Replacement') { resumed.resolve(); return; }
+      started.resolve();
+      await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    },
+  });
+  queue.enqueue('First');
+  queue.enqueue('Prefetched');
+  queue.enqueue('Not prefetched');
+  await started.promise;
+  assert.equal(signals.length, 2);
+  queue.clear();
+  assert.ok(signals.every(signal => signal.aborted));
+  queue.enqueue('Replacement');
+  await resumed.promise;
+  assert.deepEqual(played, ['First', 'Replacement']);
+  queue.stop();
+  queue.enqueue('Ignored after stop');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(played, ['First', 'Replacement']);
+});
+
+test('queue handles prefetch failure without unhandled rejection or losing subsequent speech', async () => {
+  const errors = [];
+  const finished = deferred();
+  const queue = createSpeechQueue({
+    fetcher: async (_url, init) => {
+      if (JSON.parse(init.body).text === 'Bad') throw new Error('offline');
+      return {};
+    },
+    play: async ({ text, response }) => { await response; if (text === 'Good') finished.resolve(); },
+    onError: error => errors.push(error.message),
+  });
+  queue.enqueue('');
+  queue.enqueue('Bad');
+  queue.enqueue('Good');
+  await finished.promise;
+  assert.deepEqual(errors, ['offline']);
+  queue.stop();
+});
 
 /**
  * Achieves: a committed phrase is handed to the desk, and playback is not transcribed.
@@ -307,4 +430,30 @@ test('an empty blob response does not play or leak a URL', async t => {
   });
   assert.deepEqual(f.revoked, []);
   assert.deepEqual(f.suppression, [true, false]);
+});
+
+test('queue cancellation stops real prefetched playback and keeps current voice settings', async t => {
+  const f = streamFixture(t, { supported: false });
+  const settings = { voiceId: 'first', volume: 50 };
+  const requests = [];
+  const queue = createSpeechQueue({
+    pipe: f.pipe, settings: () => ({ ...settings }),
+    fetcher: async (_url, init) => {
+      requests.push({ ...JSON.parse(init.body), signal: init.signal });
+      return { ok: true, arrayBuffer: async () => new Uint8Array([1]).buffer };
+    },
+    play: options => playAgentSpeech({ ...options, createAudio: () => f.audio }),
+  });
+  queue.enqueue('First sentence');
+  settings.voiceId = 'second';
+  queue.enqueue('Second sentence');
+  await f.playing;
+  assert.deepEqual(requests.map(request => request.voiceId), ['first', 'second']);
+  queue.clear();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(requests.every(request => request.signal.aborted));
+  assert.equal(f.audio.pause.mock.callCount(), 1);
+  assert.deepEqual(f.revoked, [...f.sources.keys()]);
+  assert.deepEqual(f.suppression, [true, false]);
+  queue.stop();
 });

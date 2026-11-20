@@ -210,6 +210,16 @@ function speechMediaSource() {
     .find(Source => typeof Source === 'function' && Source.isTypeSupported?.('audio/mpeg'));
 }
 
+function fetchSpeech(text, settings, fetcher, signal) {
+  return fetcher('/api/voice/speak', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: text.slice(0, 2000), voiceId: settings.voiceId, speed: settings.speed, volume: settings.volume }),
+    cache: 'no-store',
+    signal,
+  });
+}
+
 /** Play a streamed reply when supported, otherwise use a complete MP3 blob. */
 export async function playAgentSpeech({
   text,
@@ -217,11 +227,16 @@ export async function playAgentSpeech({
   fetcher = fetch,
   createAudio = null,
   pipe = null,
+  response: prefetched = null,
+  signal: parentSignal = null,
 } = {}) {
   const spoken = typeof text === 'string' ? text.trim() : '';
   if (!spoken) return;
   const controller = new AbortController();
   const { signal } = controller;
+  const abort = () => controller.abort();
+  parentSignal?.addEventListener('abort', abort, { once: true });
+  if (parentSignal?.aborted) controller.abort();
   const release = pipe?.registerSpeech?.(() => controller.abort());
   let reader = null;
   let audio = null;
@@ -249,18 +264,8 @@ export async function playAgentSpeech({
   pipe?.suppress?.(true);
   pipe?.setOutputVolume?.(0.7);
   try {
-    const response = await fetcher('/api/voice/speak', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        text: spoken.slice(0, 2000),
-        voiceId: settings.voiceId,
-        speed: settings.speed,
-        volume: settings.volume,
-      }),
-      cache: 'no-store',
-      signal,
-    });
+    const response = await (prefetched || fetchSpeech(spoken, settings, fetcher, signal));
+    signal.throwIfAborted();
     if (!response?.ok) {
       const error = new Error('voice_rejected');
       error.code = 'voice_rejected';
@@ -325,6 +330,7 @@ export async function playAgentSpeech({
   } catch (error) {
     if (!signal.aborted) throw error;
   } finally {
+    parentSignal?.removeEventListener('abort', abort);
     controller.abort();
     if (reader) {
       await reader.cancel().catch(() => {});
@@ -336,4 +342,100 @@ export async function playAgentSpeech({
       pipe?.suppress?.(false);
     }
   }
+}
+
+export function splitSpeechSentences(text, { final = false, minLength = 24 } = {}) {
+  const sentences = [];
+  let start = 0;
+  const boundaries = /[.!?](?=\s|$)|\n/g;
+  for (const match of text.matchAll(boundaries)) {
+    const end = match.index + 1;
+    if (text.slice(start, end).trim().length < minLength) continue;
+    sentences.push(text.slice(start, end).trim());
+    start = end;
+  }
+  const rest = text.slice(start);
+  if (final && rest.trim()) sentences.push(rest.trim());
+  return { sentences, rest: final ? '' : rest };
+}
+
+export function createSpeechQueue({ settings = {}, pipe = null, fetcher = fetch, play = playAgentSpeech, onError = null } = {}) {
+  const pending = [];
+  let active = null;
+  let running = false;
+  let stopped = false;
+  let generation = 0;
+  const prepare = item => {
+    if (!item || item.response) return;
+    item.response = Promise.resolve().then(() => fetchSpeech(item.text, item.settings, fetcher, item.controller.signal));
+    item.response.catch(() => {});
+  };
+  const drain = async () => {
+    if (running || stopped) return;
+    running = true;
+    const current = generation;
+    try {
+      while (pending.length && current === generation && !stopped) {
+        active = pending.shift();
+        const item = active;
+        prepare(item);
+        prepare(pending[0]);
+        try {
+          await play({ text: item.text, settings: item.settings, pipe, response: item.response, signal: item.controller.signal });
+        } catch (error) {
+          if (!item.controller.signal.aborted) onError?.(error);
+        } finally {
+          item.controller.abort();
+        }
+      }
+    } finally {
+      active = null;
+      running = false;
+      if (pending.length && !stopped) void drain();
+    }
+  };
+  return {
+    enqueue(text) {
+      if (stopped || !text?.trim()) return;
+      const spoken = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+      if (!spoken) return;
+      pending.push({ text: spoken, settings: typeof settings === 'function' ? settings() : settings, controller: new AbortController(), response: null });
+      if (active) prepare(pending[0]);
+      void drain();
+    },
+    clear() {
+      generation += 1;
+      active?.controller.abort();
+      for (const item of pending.splice(0)) item.controller.abort();
+    },
+    stop() { stopped = true; this.clear(); },
+  };
+}
+
+export function createReplySpeech(queue) {
+  let partial = '';
+  let streamed = false;
+  return {
+    event(event) {
+      if (!queue) return;
+      if (event.type === 'reply_retract') {
+        partial = '';
+        streamed = false;
+        queue.clear();
+      } else if (event.type === 'reply_delta') {
+        streamed = true;
+        partial += event.text;
+        const split = splitSpeechSentences(partial);
+        partial = split.rest;
+        for (const sentence of split.sentences) queue.enqueue(sentence);
+      }
+    },
+    complete() {
+      if (!queue || !streamed) return false;
+      for (const sentence of splitSpeechSentences(partial, { final: true }).sentences) queue.enqueue(sentence);
+      partial = '';
+      streamed = false;
+      return true;
+    },
+  };
 }
