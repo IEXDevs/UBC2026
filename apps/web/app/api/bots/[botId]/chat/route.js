@@ -297,8 +297,13 @@ export async function POST(request, context) {
       ...hold.args, botId, permission: permissionMode, reviewCap: effectiveReviewCap(reviewCap),
       idempotencyKey: hold.idempotencyKey, autoSwap: true,
     }, { swapTicket: swapHold.swapTicket });
-    if (sent?.signed !== true || typeof sent.signature !== 'string') return null;
-    return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted within your review limit: https://solscan.io/tx/${sent.signature}`;
+    if (sent?.signed === true && typeof sent.signature === 'string') {
+      return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted within your review limit: https://solscan.io/tx/${sent.signature}`;
+    }
+    // Only a swap stopped before its reservation can still go to the slide under the same key.
+    const beforeReserve = sent?.state === 'approval-needed' || sent?.state === 'trust-confirmation-required'
+      || sent?.error === 'desk_locked';
+    return beforeReserve ? null : 'The automatic swap did not complete. Check activity before trying again.';
   }
 
   async function loadPendingSwapHold() {
