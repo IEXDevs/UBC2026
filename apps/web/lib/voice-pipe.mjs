@@ -4,6 +4,7 @@
  */
 
 import { dictationUnsupportedError } from './dictation.mjs';
+import { replySpeechText } from './reply-markdown.mjs';
 
 export function startVoicePipe({
   tokenUrl = '/api/voice/scribe-token',
@@ -397,7 +398,7 @@ export function createSpeechQueue({ settings = {}, pipe = null, fetcher = fetch,
   return {
     enqueue(text) {
       if (stopped || !text?.trim()) return;
-      const spoken = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+      const spoken = replySpeechText(text);
       if (!spoken) return;
       pending.push({ text: spoken, settings: typeof settings === 'function' ? settings() : settings, controller: new AbortController(), response: null });
       if (active) prepare(pending[0]);

@@ -31,8 +31,7 @@ test('chat formats agent and assistant replies at render time and leaves user te
   const composer = readFileSync(new URL('../components/Composer.js', import.meta.url), 'utf8');
   assert.match(composer, /if \(hint && !address\) pushLine\('assistant', hint, targetId\)/);
   assert.match(bubbles, /line\.role === 'agent' \|\| line\.role === 'assistant'\s*\? formatAgentOutput\(line\.text\)\s*: line\.text/);
-  assert.match(bubbles, /linkParts\(text\)/);
-  assert.match(bubbles, /className="chat-link"/);
+  assert.match(bubbles, /<ChatMarkdown text=\{text\}/);
   assert.match(bubbles, /const urls = urlsIn\(line\.text\)/);
 });
 

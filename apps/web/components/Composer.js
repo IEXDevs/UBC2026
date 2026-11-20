@@ -54,6 +54,7 @@ import { browserSituation } from '../lib/owner-situation.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
 import { AGENT_SKILLS, AVAILABLE_SKILLS } from '@ubc2026/agent-tools';
 import { createReplySpeech, createSpeechQueue, startVoicePipe } from '../lib/voice-pipe.mjs';
+import { replySpeechText } from '../lib/reply-markdown.mjs';
 import { voiceConfirmDecision } from '../lib/voice-allow.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
@@ -692,7 +693,7 @@ export default function Composer({
       const line = pushLine('agent', text);
       if (line && !anchor) anchor = line.id;
       shown.push(text);
-      const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+      const aloud = replySpeechText(text);
       say(aloud || 'Sent.');
     }
     if (anchor && result.activity?.length) onPatchLine?.(anchor, { activity: result.activity }, botIdRef.current);
@@ -806,7 +807,7 @@ export default function Composer({
             const line = pushLine('agent', text, targetId);
             if (line && !firstLineId) firstLineId = line.id;
             shown.push(text);
-            const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+            const aloud = replySpeechText(text);
             if (!voiceReply.complete()) say(aloud || 'Sent.');
             if (/solscan\.io\/tx\//.test(text)) {
               setThinking(false);
