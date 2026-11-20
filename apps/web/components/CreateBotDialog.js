@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ModalClose from './ModalClose';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
@@ -114,7 +115,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     if (open && (step === 'look' || step === 'asset')) stepTitle.current?.focus();
   }, [open, step]);
 
-  if (!mounted) return null;
+  if (!mounted || typeof document === 'undefined') return null;
   const stepIndex = STEPS.indexOf(step);
   const selectedAsset = SPEND_ASSETS.find(option => option.value === asset);
   const cap = draftTransferCap(asset, maxOutflow.trim(), maxPerTransaction.trim());
@@ -146,7 +147,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     onCreate({ ...bot, image });
   }
 
-  return (
+  return createPortal(
     <div className={`backdrop is-center${first ? ' is-cover' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={onClose}>
       {celebrate ? (
         <div className="create-splash" aria-hidden="true">
@@ -286,6 +287,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
           </button>
         </div>
       </form>
-    </div>
+    </div>, document.body,
   );
 }
