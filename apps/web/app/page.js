@@ -1106,7 +1106,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
         return {
           ok: true,
-          message: `Sent ${amountLabel} to ${target.domain}(${where}).`,
+          message: `Sent ${amountLabel} to ${target.domain} (${where}).`,
           signature: body.signature,
           receipt: {
             id: `sns_${body.signature}`,

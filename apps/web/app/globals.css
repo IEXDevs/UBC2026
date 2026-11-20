@@ -2078,6 +2078,19 @@ button.add-agent:not(:disabled):hover {
   color: #f3d48a;
   font-size: 14px;
 }
+.password-feedback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.password-feedback svg { flex: none; }
+.password-feedback.is-error { color: #ff9d9d; }
+.password-feedback.is-ok { color: #8fdbaf; }
+.wallet-gate input[aria-invalid="true"] { box-shadow: inset 0 0 0 1px #ff9d9d; }
 .phrase-grid {
   list-style: none;
   margin: 0;

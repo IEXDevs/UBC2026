@@ -5,6 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
+import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
+import { CipherSuite, DhkemP256HkdfSha256, HkdfSha256 } from '@hpke/core';
 import { ConfigError } from '@ubc2026/contracts';
 import { assignBotWallet, createMainWallet } from './wallets.mjs';
 import { accountWriteBodies } from './wallets.mjs';
@@ -142,6 +144,82 @@ test('a prepared transfer binds the exact simulated message to its signature', a
   swapMessage = true;
   const again = await privy.prepareDevnetTransfer({ transaction });
   await assert.rejects(privy.signPreparedDevnetTransfer({ ...input, prepared: again }), { code: 'transaction_mismatch' });
+  assert.equal(broadcasts, 1);
+});
+
+test('a prepared send uses the wallet owner session only when Privy requires it', async () => {
+  const unsigned = Buffer.alloc(80);
+  unsigned[0] = 1;
+  unsigned[65] = 1;
+  const transaction = unsigned.toString('base64');
+  const signed = Buffer.from(unsigned);
+  signed.fill(4, 1, 65);
+  const wallet = { ...createMainWallet({ ownerId: privyUserId, address, id: walletId }), privyWalletId: walletId };
+  const bot = { ...baseBot, ownerId: wallet.ownerId, walletId };
+  const token = sub => `eyJhbGciOiJFUzI1NiJ9.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.test`;
+  const suite = new CipherSuite({
+    kem: new DhkemP256HkdfSha256(), kdf: new HkdfSha256(), aead: new Chacha20Poly1305(),
+  });
+  const sessionKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  let rejection = 'zero_correct_authorization_signatures';
+  let exchanged = 0;
+  let broadcasts = 0;
+  const privy = client({ authorizationKey, fetcher: async (url, init) => {
+    const path = new URL(url).pathname;
+    const body = JSON.parse(init.body);
+    if (path === '/v1/wallets/authenticate') {
+      exchanged++;
+      assert.equal(body.user_jwt, token(privyUserId));
+      assert.equal(body.encryption_type, 'HPKE');
+      const recipientPublicKey = await crypto.subtle.importKey('spki', Buffer.from(body.recipient_public_key, 'base64'),
+        { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+      const sessionPkcs8 = sessionKey.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
+      const { enc, ct } = await suite.seal({ recipientPublicKey }, Buffer.from(sessionPkcs8));
+      return Response.json({
+        encrypted_authorization_key: {
+          encryption_type: 'HPKE',
+          encapsulated_key: Buffer.from(enc).toString('base64'),
+          ciphertext: Buffer.from(ct).toString('base64'),
+        },
+        expires_at: Date.now() + 60000,
+      });
+    }
+    if (path.endsWith('/rpc')) {
+      assert.equal(path, `/v1/wallets/${walletId}/rpc`);
+      assert.equal(body.method, 'signTransaction');
+      assert.equal(body.params.transaction, transaction);
+      const headers = new Headers(init.headers);
+      const signedHeaders = {
+        'privy-app-id': headers.get('privy-app-id'),
+        'privy-request-expiry': headers.get('privy-request-expiry'),
+      };
+      const payload = Buffer.from(canonicalizeJson({ version: 1, method: 'POST', url: String(url), body, headers: signedHeaders }));
+      const signature = Buffer.from(headers.get('privy-authorization-signature'), 'base64');
+      if (verify('sha256', payload, publicKey, signature)) return Response.json({ code: rejection }, { status: 403 });
+      assert.equal(verify('sha256', payload, sessionKey.publicKey, signature), true);
+      return Response.json({ method: 'signTransaction', data: { signed_transaction: signed.toString('base64'), encoding: 'base64' } });
+    }
+    if (body.method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
+    if (body.method === 'getFeeForMessage') return Response.json({ result: { value: 5000 } });
+    if (body.method === 'simulateTransaction') return Response.json({ result: { value: { err: null } } });
+    assert.equal(body.method, 'sendTransaction');
+    assert.equal(body.params[0], signed.toString('base64'));
+    broadcasts++;
+    return Response.json({ result: txSignature });
+  } });
+  async function send(accessToken) {
+    const prepared = await privy.prepareDevnetTransfer({ transaction });
+    return privy.signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken });
+  }
+  await assert.rejects(send(token('did:privy:other')), { code: 'wallet_owner_session_required' });
+  assert.equal(exchanged, 0);
+  assert.equal(broadcasts, 0);
+  assert.equal((await send(token(privyUserId))).signature, txSignature);
+  assert.equal(exchanged, 1);
+  assert.equal(broadcasts, 1);
+  rejection = 'policy_violation';
+  await assert.rejects(send(token(privyUserId)), { code: 'wallet_policy_rejected' });
+  assert.equal(exchanged, 1);
   assert.equal(broadcasts, 1);
 });
 

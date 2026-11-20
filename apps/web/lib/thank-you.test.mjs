@@ -23,6 +23,7 @@ test('thank-you logos link to the sponsor sites', () => {
     'QuickNode',
     'Supabase',
     'Cloudflare',
+    'Devin',
   ]);
   for (const company of THANK_YOU) {
     assert.match(company.href, /^https:\/\/.+/);

@@ -18,6 +18,8 @@ export default function SecretDraft({
   autoComplete = 'new-password',
   name = 'secret',
   disabled = false,
+  describedBy,
+  invalid = false,
 }) {
   const [copyFailed, setCopyFailed] = useState(false);
 
@@ -49,15 +51,19 @@ export default function SecretDraft({
             className={generated ? 'secret-mask is-clear' : 'secret-mask'}
             type="text"
             name={name}
+            aria-label={label}
+            aria-describedby={describedBy}
+            aria-invalid={invalid || undefined}
             autoComplete={autoComplete}
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             value={value}
             disabled={disabled}
-            onCopy={() => {
-              onCopied(true);
-              setCopyFailed(false);
+            onCopy={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void copy();
             }}
             onChange={(event) => {
               onGenerated(false);
@@ -81,7 +87,9 @@ export default function SecretDraft({
         <p className="secret-warning" role="status">
           {copyFailed
             ? 'Copy failed. Select the field and copy it yourself, then continue.'
-            : 'Copy this before you continue. It stays on this screen only until you accept.'}
+            : (copied
+              ? 'Copied. Keep it somewhere safe before you continue.'
+              : 'Copy this before you continue. It stays on this screen only until you accept.')}
         </p>
       ) : null}
     </div>
