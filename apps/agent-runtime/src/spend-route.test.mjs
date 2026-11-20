@@ -1199,3 +1199,106 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
   assert.equal(signed, 0);
   assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
 });
+
+async function autoSwapSetup({ trust = '800' } = {}) {
+  const sol = 'So11111111111111111111111111111111111111112';
+  const grant = '34'.repeat(32);
+  const grantHash = await sha256Hex(grant);
+  const usdBot = { ...bot, cap: { mode: 'limited', asset: 'USD', maxOutflow: '5000000', maxPerTransaction: '1200000' } };
+  const now = Date.now();
+  const machine = new BotStateMachine();
+  const intent = createLoopSwapIntent({ bot: usdBot, wallet, now, swap: { inputMint: SOLANA_USDC_MINT, outputMint: sol, inAmount: '1000000' } });
+  await machine.put('meta', { botId: bot.id, ownerId: bot.ownerId, cluster: 'mainnet-beta' });
+  await machine.put('run', { botId: bot.id, step: 'decide', paused: true, pauseReason: LOOP_SWAP_PENDING, events: [],
+    checkpoints: { decide: { status: 'waiting', reason: LOOP_SWAP_PENDING, swapIntent: intent } } });
+  const calls = { signed: [], reserved: 0 };
+  const env = spendEnv({
+    spendNow: now,
+    BOT: { idFromName: name => name, get: () => ({ fetch: request => machine.handle(request) }) },
+    JUPITER_API_KEY: 'test',
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-role',
+    spendTrustScore: trust,
+    loadSpendContext: async () => ({ bot: usdBot, wallet, ledger: { ...ledger, asset: 'USD' } }),
+    lookupSpendPrice: async mint => ({
+      mint, pricingCluster: 'mainnet', executionCluster: 'mainnet-beta',
+      priceUsd: mint === sol ? '100' : '1', fetchedAt: new Date(now).toISOString(),
+    }),
+    transferClient: {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      readSolanaMint: async ({ mint }) => ({ cluster: 'mainnet-beta', mint, decimals: 6 }),
+      prepareSolanaSwap: async input => ({ transaction: input.transaction, feeLamports: '5000', maxSolCost: '5000' }),
+      formatPreparedSpendAuthorization: () => Buffer.from('swap-owner-authorization-payload'.repeat(2)).toString('base64'),
+      signPreparedSolanaTransfer: async (request) => {
+        calls.signed.push(request);
+        return { cluster: 'mainnet-beta', signature: '6'.repeat(64) };
+      },
+    },
+    ledgerApi: { reserveBudget: async () => ({ state: 'reserved', replay: calls.reserved++ > 0 }) },
+    fetch: async url => {
+      const target = new URL(url);
+      if (target.hostname === 'api.jup.ag') {
+        const data = Buffer.alloc(34);
+        createHash('sha256').update('global:route_v2').digest().copy(data, 0, 0, 8);
+        data.writeBigUInt64LE(1_000_000n, 8);
+        data.writeBigUInt64LE(10_000_000n, 16);
+        data.writeUInt16LE(50, 24);
+        return Response.json({
+          inputMint: SOLANA_USDC_MINT, outputMint: sol, inAmount: '1000000',
+          outAmount: '10000000', otherAmountThreshold: '9950000', swapMode: 'ExactIn', slippageBps: 50,
+          swapInstruction: {
+            programId: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+            accounts: [wallet.address, DESTINATION, DESTINATION, SOLANA_USDC_MINT, sol].map((pubkey, index) => ({ pubkey, isSigner: index === 0 })),
+            data: data.toString('base64'),
+          },
+        });
+      }
+      if (target.pathname.endsWith('/desk_locks')) {
+        return Response.json([{ grant_hash: grantHash, grant_until: new Date(now + 120_000).toISOString() }]);
+      }
+      if (target.pathname.endsWith('/approvals')) return new Response('', { status: 201 });
+      return new Response('[]');
+    },
+  });
+  const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey: intent.idempotencyKey };
+  const request = (body, headers = { 'x-desk-grant': grant }) => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
+  const ticket = (await (await request()).json()).swapPreview.ticket;
+  return { calls, request, ticket, machine };
+}
+
+/**
+ * Achieves: a queued agent swap runs without the slide only on an agent send's terms.
+ * Fails when: an auto swap signs over the review cap, without the desk, or as a non-loop spend; or a trusted one under the cap does not sign.
+ * Oracle: signed result once, with no owner wallet authorization; every other case unsigned.
+ * Side effects: in-memory bot DO; Jupiter, prices, Privy and the ledger are doubles.
+ * Gaps: live Jupiter and Privy are not called.
+ */
+test('an auto agent swap signs only within the review cap and with the desk unlocked', async () => {
+  const { calls, request, ticket } = await autoSwapSetup();
+  const over = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '1000000' })).json();
+  assert.equal(over.signed, false);
+  assert.equal(over.state, 'approval-needed');
+  const locked = await (await request({ autoSwap: true, swapTicket: ticket }, {})).json();
+  assert.equal(locked.signed, false);
+  const ask = await (await request({ autoSwap: true, swapTicket: ticket, permission: 'ask' })).json();
+  assert.equal(ask.error, 'invalid_auto_swap');
+  assert.equal(calls.signed.length, 0);
+  const auto = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
+  assert.equal(auto.signed, true);
+  assert.equal(calls.signed.length, 1);
+  assert.equal(calls.signed[0].ownerAuthorization, undefined);
+});
+
+/**
+ * Achieves: an untrusted token never auto-swaps.
+ * Fails when: a low trust score signs without the owner.
+ * Oracle: unsigned trust-confirmation result and no signature.
+ * Side effects: in-memory bot DO; doubles only.
+ * Gaps: none.
+ */
+test('an auto agent swap of an untrusted token waits for the owner', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ trust: '100' });
+  const low = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
+  assert.equal(low.signed, false);
+  assert.equal(calls.signed.length, 0);
+});

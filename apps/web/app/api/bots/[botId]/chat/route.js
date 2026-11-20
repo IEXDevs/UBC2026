@@ -13,7 +13,7 @@ import {
 } from '../../../../../lib/chat-tools.mjs';
 import { fetchAgentRuntime } from '../../../../../lib/runtime-fetch.mjs';
 import { completeTextChat, TextChatError } from '../../../../../lib/text-chat.mjs';
-import { parsePermission, permissionInstruction } from '../../../../../lib/spend-permission.mjs';
+import { amountOverReviewCap, effectiveReviewCap, parsePermission, permissionInstruction } from '../../../../../lib/spend-permission.mjs';
 import {
   agentToolSchemas,
   dispatchHarness,
@@ -289,6 +289,18 @@ export async function POST(request, context) {
     return completeTextChat({ ...turnArgs, onMessage: ownerAsksForOneTrade(message) ? null : onMessage });
   }
 
+  /** A queued agent swap runs on the terms an agent send would: Full or Review, within the review cap. The runtime re-checks trust, policy and the desk. */
+  async function autoLoopSwap(hold, swapHold, swapPreview) {
+    if ((permissionMode !== 'full' && permissionMode !== 'review') || !hold.idempotencyKey?.startsWith('loop_swap_')
+        || amountOverReviewCap(swapPreview.usdMicros, reviewCap)) return null;
+    const sent = await invokeRaw('request_spend', {
+      ...hold.args, botId, permission: permissionMode, reviewCap: effectiveReviewCap(reviewCap),
+      idempotencyKey: hold.idempotencyKey, autoSwap: true,
+    }, { swapTicket: swapHold.swapTicket });
+    if (sent?.signed !== true || typeof sent.signature !== 'string') return null;
+    return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted within your review limit: https://solscan.io/tx/${sent.signature}`;
+  }
+
   async function loadPendingSwapHold() {
     const status = await invokeRaw('get_bot_status', { botId });
     return pendingSwapHold(botId, status?.pendingSwap);
@@ -319,7 +331,10 @@ export async function POST(request, context) {
         ...reply.hold.args, botId, permission: 'ask', idempotencyKey: reply.hold.idempotencyKey,
       });
       const swapHold = swapHoldFromPreview(reply.hold, preview?.swapPreview);
-      reply = swapHold
+      const auto = swapHold && await autoLoopSwap(reply.hold, swapHold, preview.swapPreview);
+      reply = auto
+        ? { ...reply, text: auto, hold: null }
+        : swapHold
         ? { ...reply, text: swapHold.label, hold: swapHold }
         : { ...reply, text: preview?.error === 'swap_requires_usd_budget'
           ? 'Live swaps need an agent with USD spending limits.'

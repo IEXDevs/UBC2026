@@ -645,6 +645,7 @@ export function createChatToolInvoker({
     }
     if (name === 'request_spend' && spendAuthorization) body.spendAuthorization = spendAuthorization;
     if (name === 'request_spend' && args.action === 'swap' && swapTicket) body.swapTicket = swapTicket;
+    if (name === 'request_spend' && args.action === 'swap' && swapTicket && args.autoSwap === true) body.autoSwap = true;
     return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body,
       name === 'request_spend' && approveOnce ? { 'x-spend-approve-once': approveOnce } : undefined);
   }
