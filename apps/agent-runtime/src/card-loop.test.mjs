@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BotStateMachine, INTERNAL_CARD_LOOP_VALUE, INTERNAL_POSITION_HEADER } from './bot-do.mjs';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
 
 const NOW = 1_700_000_000_000;

@@ -2,8 +2,8 @@
  * Live /api/* data routes backed by Supabase + Privy when secrets exist.
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
-import { createPrivyWalletClientFromEnv, readPrivyAccessTokenSub } from '@ubc2026/wallets/privy';
-import { verifyPrivyAccessToken } from '@ubc2026/wallets/privy-access-token';
+import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
+import { ownerAuthStatus, resolveOwner } from './owner-auth.mjs';
 import {
   ConfigError,
   devnetSpendAsset,
@@ -65,17 +65,6 @@ async function deskDenied(request, env, ownerId, fetcher) {
   return json({ error: desk.error }, status);
 }
 
-function ownerHeader(request) {
-  const value = request.headers.get('x-owner-id');
-  if (typeof value === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(value)) return value;
-  return null;
-}
-
-function bearerToken(request) {
-  const header = request.headers.get('authorization') ?? '';
-  return header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
-}
-
 function privyClient(env) {
   if (env.transferClient) return env.transferClient;
   try {
@@ -87,88 +76,6 @@ function privyClient(env) {
   } catch (error) {
     if (error instanceof ConfigError || error?.code === 'missing_secrets') return null;
     throw error;
-  }
-}
-
-function privySecretsPresent(env) {
-  return typeof env?.PRIVY_APP_ID === 'string' && env.PRIVY_APP_ID.trim() !== ''
-    && typeof env?.PRIVY_APP_SECRET === 'string' && env.PRIVY_APP_SECRET.trim() !== '';
-}
-
-/**
- * Resolve the caller’s owner id when Privy secrets exist.
- * Prefer the access-token JWT `sub` (same trust as acceptLogin’s loadUser path) so
- * events/browser polls do not run a full wallet sync on every request.
- * A bare `x-owner-id` is only accepted when Privy secrets are unset.
- * When both header and JWT are present, the JWT identity wins; a conflict is rejected.
- */
-export async function resolveOwner(request, env) {
-  const header = ownerHeader(request);
-  const token = bearerToken(request);
-  const needsLogin = privySecretsPresent(env);
-
-  if (!token) {
-    if (needsLogin) return { ownerId: null, user: null, token: '', error: 'login_required' };
-    return { ownerId: header, user: null, token: '' };
-  }
-
-  const sub = readPrivyAccessTokenSub(token);
-  if (sub && /^[a-zA-Z0-9:_-]{1,128}$/.test(sub)) {
-    if (header && header !== sub) {
-      return { ownerId: null, user: null, token, error: 'owner_mismatch' };
-    }
-    return { ownerId: sub, user: null, token };
-  }
-
-  const client = privyClient(env);
-  if (!client?.acceptLogin) {
-    if (needsLogin) return { ownerId: null, user: null, token, error: 'login_required' };
-    return { ownerId: header, user: null, token };
-  }
-
-  try {
-    const result = await client.acceptLogin({
-      accessToken: token,
-      ownerId: header || undefined,
-      // Workers cannot set outbound Origin; JWT sub / owner id drive loadUser.
-    });
-    const verified = result?.main?.ownerId || result?.privyUserId || result?.userId || null;
-    if (header && verified && header !== verified) {
-      return { ownerId: null, user: null, token, error: 'owner_mismatch' };
-    }
-    // When Privy secrets are configured, never fall back to a client header after
-    // a "successful" login that did not yield a verified owner id.
-    if (needsLogin && !verified) {
-      return { ownerId: null, user: result, token, error: 'login_required' };
-    }
-    return { ownerId: verified || (!needsLogin ? header : null) || null, user: result, token };
-  } catch (error) {
-    if (error instanceof WalletError) {
-      // Do not fall back to a client-supplied header after a failed Privy verify.
-      const detail = typeof error.message === 'string'
-        ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
-        : undefined;
-      return { ownerId: null, user: null, token, error: error.code || 'privy_failed', detail };
-    }
-    const detail = typeof error?.message === 'string'
-      ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
-      : undefined;
-    return { ownerId: null, user: null, token, error: 'privy_failed', detail };
-  }
-}
-
-async function resolveDeletionOwner(request, env, fetcher) {
-  const appId = env.PRIVY_APP_ID?.trim();
-  if (!appId) return resolveOwner(request, env);
-  const token = bearerToken(request);
-  if (!token) return { error: 'login_required' };
-  try {
-    const { sub } = await verifyPrivyAccessToken(token, { appId, fetcher });
-    const header = ownerHeader(request);
-    if (header && header !== sub) return { error: 'owner_mismatch' };
-    return { ownerId: sub, verified: true };
-  } catch {
-    return { error: 'login_required' };
   }
 }
 
@@ -246,33 +153,27 @@ function walletRowFromPublic(wallet, ownerId) {
     kind,
     label,
     address,
-    provider: wallet.provider === 'privy' || !wallet.provider ? 'privy' : 'privy',
-    frozen: wallet.frozen === true,
+    provider: 'privy',
   };
 }
 
-async function persistWalletRows(env, ownerId, wallets, fetcher) {
-  if (!supabaseConfig(env) || !ownerId) return { wrote: 0 };
-  const rows = (Array.isArray(wallets) ? wallets : [])
-    .map((wallet) => walletRowFromPublic(wallet, ownerId))
-    .filter(Boolean)
-    .slice(0, 20);
-  if (!rows.length) return { wrote: 0 };
-  await supabaseWrite(env, {
+async function persistWalletRows(env, ownerId, rows, fetcher) {
+  const userWrite = await supabaseWrite(env, {
     path: 'users',
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=minimal',
     body: { id: ownerId, privy_user_id: ownerId },
     fetcher,
   });
-  await supabaseWrite(env, {
+  if (!userWrite.ok) return false;
+  const walletWrite = await supabaseWrite(env, {
     path: 'wallets',
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=minimal',
     body: rows,
     fetcher,
   });
-  return { wrote: rows.length };
+  return walletWrite.ok;
 }
 
 function formatFixedUnits(amount, decimals, symbol) {
@@ -546,32 +447,31 @@ export async function handleApiData(request, env, matched) {
   const fetcher = env.fetch ?? fetch;
 
   if (routeId === 'me') {
-    const { ownerId, user, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
-    const liveMethods = Array.isArray(user?.loginMethods) ? user.loginMethods : [];
     if (!supabaseConfig(env)) {
       return json({
         ok: true,
         source: 'unconfigured',
-        user: { id: ownerId, privyUserId: user?.main?.ownerId || ownerId, loginMethods: liveMethods },
+        user: { id: ownerId, privyUserId: ownerId, loginMethods: [] },
       });
     }
     const result = await supabaseGet(env, `users?id=eq.${encodeURIComponent(ownerId)}&select=*`, fetcher);
     const row = result.rows?.[0];
-    const storedMethods = Array.isArray(row?.login_methods) ? row.login_methods : liveMethods;
+    const storedMethods = Array.isArray(row?.login_methods) ? row.login_methods : [];
     return json({
       ok: true,
       source: result.configured ? 'supabase' : 'unconfigured',
       user: row
         ? { id: row.id, privyUserId: row.privy_user_id, createdAt: row.created_at, loginMethods: storedMethods }
-        : { id: ownerId, privyUserId: user?.main?.ownerId || ownerId, loginMethods: liveMethods },
+        : { id: ownerId, privyUserId: ownerId, loginMethods: [] },
     });
   }
 
   if (routeId === 'wallets.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) {
       return json({
@@ -623,18 +523,29 @@ export async function handleApiData(request, env, matched) {
   }
 
   if (routeId === 'wallets.persist') {
-    // Cloudflare Workers strip Origin on outbound Privy calls — Next provisions
-    // wallets, then posts them here so Supabase (and agents) see the same rows.
-    // Skip Privy here: require bearer + x-owner-id (same trust as list when Privy fails).
-    const ownerId = ownerHeader(request);
-    const token = bearerToken(request);
+    const { ownerId, token, error } = await resolveOwner(request, env);
+    if (error) return json({ error: error === 'owner_required' && !request.headers.has('authorization') ? 'login_required' : error }, ownerAuthStatus(error));
     if (!token) return json({ error: 'login_required' }, 401);
-    if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
     const body = await request.json().catch(() => null);
-    const wallets = Array.isArray(body?.wallets) ? body.wallets : [];
-    const { wrote } = await persistWalletRows(env, ownerId, wallets, fetcher);
-    if (!wrote) return json({ error: 'invalid_wallets' }, 400);
+    const requested = Array.isArray(body?.wallets) ? body.wallets
+      .map(wallet => walletRowFromPublic(wallet, ownerId)).filter(Boolean).slice(0, 20) : [];
+    if (!requested.length) return json({ error: 'invalid_wallets' }, 400);
+    const client = privyClient(env);
+    if (!client?.ensureMainWallet) return json({ error: 'signer_not_configured' }, 503);
+    let owned;
+    try {
+      const { main, additional = [] } = await client.ensureMainWallet({ privyUserId: ownerId, ownerId });
+      owned = new Map([main, ...additional].filter(wallet => wallet?.ownerId === ownerId).map(wallet => [wallet.id, wallet]));
+    } catch {
+      return json({ error: 'wallet_directory_unavailable' }, 502);
+    }
+    if (!requested.every(wallet => owned.get(wallet.id)?.address === wallet.address)) {
+      return json({ error: 'wallet_not_owned' }, 403);
+    }
+    const rows = [...new Set(requested.map(wallet => wallet.id))]
+      .map(id => walletRowFromPublic(owned.get(id), ownerId));
+    if (!await persistWalletRows(env, ownerId, rows, fetcher)) return json({ error: 'wallet_persist_failed' }, 502);
     const listed = await supabaseGet(
       env,
       `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=created_at.asc`,
@@ -643,29 +554,20 @@ export async function handleApiData(request, env, matched) {
     return json({
       ok: true,
       source: 'supabase',
-      wrote,
+      wrote: rows.length,
       wallets: (listed.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
     });
   }
 
   if (routeId === 'wallets.create') {
-    const { ownerId, user, token, error, detail: ownerDetail } = await resolveOwner(request, env);
-    if (error) {
-      const status = 502;
-      let detail = typeof ownerDetail === 'string' ? ownerDetail : undefined;
-      if (!detail && (error === 'worker_origin_forbidden' || error === 'missing_origin')) {
-        detail = 'Privy login needs a JWT user id on Cloudflare Workers (users/me unavailable). Sign out and sign in again.';
-      } else if (!detail && error === 'privy_failed') {
-        detail = 'Privy acceptLogin failed on agent-runtime. Confirm PRIVY_APP_SECRET and PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime.';
-      }
-      return json(detail ? { error, detail } : { error }, status);
-    }
+    const { ownerId, token, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!token) return json({ error: 'login_required' }, 401);
     const client = privyClient(env);
-    if (!client) return json({ error: 'signer_not_configured' }, 503);
+    if (!client?.acceptLogin) return json({ error: 'signer_not_configured' }, 503);
     try {
       // Do not pass Origin — Workers forbid that outbound header.
-      const login = user || await client.acceptLogin({
+      const login = await client.acceptLogin({
         accessToken: token,
         ownerId: ownerId || undefined,
       });
@@ -689,7 +591,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'wallets.sign') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const denied = await deskDenied(request, env, ownerId, fetcher);
     if (denied) return denied;
@@ -700,22 +602,27 @@ export async function handleApiData(request, env, matched) {
     if (!body?.transaction || typeof body.transaction !== 'string') {
       return json({ error: 'transaction_required' }, 400);
     }
-    let wallet = body.wallet || null;
-    if (!wallet && supabaseConfig(env)) {
-      const loaded = await supabaseGet(
-        env,
-        `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
-        fetcher,
-      );
-      wallet = mapWalletRow(loaded.rows?.[0]);
-    }
-    if (!wallet) return json({ error: 'wallet_not_found' }, 404);
+    const loaded = await supabaseGet(
+      env,
+      `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
+      fetcher,
+    );
+    const wallet = mapWalletRow(loaded.rows?.[0]);
+    if (!wallet || wallet.ownerId !== ownerId) return json({ error: 'wallet_not_found' }, 404);
     if (wallet.spendable === false || String(wallet.id).startsWith('linked_')) {
       return json({ error: 'observing_wallet' }, 400);
     }
     try {
-      const sent = body.bot
-        ? await client.signAndBroadcastDevnet({ bot: body.bot, wallet, transaction: body.transaction })
+      const bot = body.bot && mapBotRow((await supabaseGet(
+        env,
+        `bots?${postgrestEq('id', body.bot.id)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
+        fetcher,
+      )).rows?.[0]);
+      if (body.bot && (!bot || bot.ownerId !== ownerId || bot.walletId !== wallet.id)) {
+        return json({ error: 'bot_not_found' }, 404);
+      }
+      const sent = bot
+        ? await client.signAndBroadcastDevnet({ bot, wallet, transaction: body.transaction })
         : await client.signAndBroadcastOwnerDevnet({ ownerId, wallet, transaction: body.transaction });
       return json({ ok: true, ...sent });
     } catch (err) {
@@ -726,7 +633,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'wallets.export') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const denied = await deskDenied(request, env, ownerId, fetcher);
     if (denied) return denied;
@@ -759,7 +666,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'bots.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const result = await supabaseGet(
@@ -776,7 +683,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'bots.create') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
     const body = await request.json().catch(() => null);
@@ -843,15 +750,26 @@ export async function handleApiData(request, env, matched) {
         : null,
     };
 
-    const written = await supabaseWrite(env, {
+    let written = await supabaseWrite(env, {
       path: 'bots',
       method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=representation',
+      prefer: 'resolution=ignore-duplicates,return=representation',
       body: row,
       fetcher,
     });
     if (written.code === 'PT410') return json({ error: 'agent_deleted' }, 410);
     if (written.ok === false) return json({ error: 'persist_failed' }, 502);
+    if (Array.isArray(written.rows) && written.rows.length === 0) {
+      const { id, owner_id, ...changes } = row;
+      written = await supabaseWrite(env, {
+        path: `bots?${postgrestEq('id', id)}&${postgrestEq('owner_id', owner_id)}`,
+        method: 'PATCH',
+        body: changes,
+        fetcher,
+      });
+      if (!written.ok) return json({ error: 'persist_failed' }, 502);
+      if (!written.rows?.length) return json({ error: 'bot_id_conflict' }, 409);
+    }
 
     await supabaseWrite(env, {
       path: 'spend_ledgers',
@@ -874,8 +792,8 @@ export async function handleApiData(request, env, matched) {
   }
 
   if (routeId === 'bots.delete') {
-    const { ownerId, error, verified } = await resolveDeletionOwner(request, env, fetcher);
-    if (error && !ownerId) return json({ error }, 401);
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const botId = matched?.params?.botId;
     if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
@@ -884,22 +802,15 @@ export async function handleApiData(request, env, matched) {
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
 
     const owner = encodeURIComponent(ownerId);
-    if (verified) {
-      const removed = await supabaseWrite(env, {
-        path: 'rpc/delete_owner_agent',
-        body: { p_owner_id: ownerId, p_bot_id: botId },
-        prefer: 'return=minimal',
-        fetcher,
-      });
-      if (removed.ok) return json({ ok: true, deleted: botId, source: 'supabase' });
-      if (removed.status !== 404 || removed.code !== 'PGRST202') {
-        return json({ error: 'delete_failed' }, 502);
-      }
-    } else {
-      const deletions = await supabaseGet(env, `rpc/list_deleted_owner_agents?p_owner_id=${owner}`, fetcher);
-      if (deletions.status !== 404 || deletions.code !== 'PGRST202') {
-        return json({ error: 'agent_delete_auth_unconfigured' }, 503);
-      }
+    const removed = await supabaseWrite(env, {
+      path: 'rpc/delete_owner_agent',
+      body: { p_owner_id: ownerId, p_bot_id: botId },
+      prefer: 'return=minimal',
+      fetcher,
+    });
+    if (removed.ok) return json({ ok: true, deleted: botId, source: 'supabase' });
+    if (removed.status !== 404 || removed.code !== 'PGRST202') {
+      return json({ error: 'delete_failed' }, 502);
     }
 
     // An older database still supports deletion, but cannot record a tombstone.
@@ -931,7 +842,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'bots.chat') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const botId = matched?.params?.botId;
     if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
@@ -995,7 +906,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'logs.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const url = new URL(request.url);
@@ -1025,7 +936,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'events.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const url = new URL(request.url);
     const botId = url.searchParams.get('botId');
@@ -1063,7 +974,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'decisions.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const url = new URL(request.url);
@@ -1101,7 +1012,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'payments.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     // Empty until a QuickNode Stream row exists. No Supabase config means no read and no invented rows.
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [], crossCheck: [] });
@@ -1170,7 +1081,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'positions.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [], checks: [] });
     const url = new URL(request.url);
@@ -1218,7 +1129,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'metrics.get') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const result = await supabaseGet(
@@ -1248,7 +1159,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'profiles.me' && request.method === 'GET') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', profile: null });
     const result = await supabaseGet(
@@ -1273,7 +1184,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'profiles.update') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const body = await request.json().catch(() => ({}));
     const handle = normalizeHandle(body.handle);
@@ -1323,7 +1234,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'profiles.lookup') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const query = new URL(request.url).searchParams.get('q') || '';
     const parsed = parseLookupQuery(query);
@@ -1397,7 +1308,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'transfers.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const owner = encodeURIComponent(ownerId);
@@ -1415,7 +1326,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'transfers.create') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const denied = await deskDenied(request, env, ownerId, fetcher);
     if (denied) return denied;
@@ -1476,7 +1387,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'bots.freeze') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
     const body = await request.json().catch(() => ({}));
@@ -1510,7 +1421,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'desk.status') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', locked: false });
     const existing = await supabaseGet(
@@ -1526,7 +1437,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'desk.lock') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const body = await request.json().catch(() => null);
     const verifier = parseDeskVerifier(body);
@@ -1603,7 +1514,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'desk.unlock') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const body = await request.json().catch(() => null);
     const password = body && typeof body.password === 'string' ? body.password : '';
@@ -1648,7 +1559,7 @@ export async function handleApiData(request, env, matched) {
 
   if (ACCOUNT_ROUTES.has(routeId)) {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     return handleAccountRoute(routeId, request, env, ownerId, fetcher);
   }

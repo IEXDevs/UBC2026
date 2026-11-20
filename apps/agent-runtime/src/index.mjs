@@ -20,7 +20,8 @@ import {
 import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
-import { handleApiData, resolveOwner } from './api-data.mjs';
+import { handleApiData } from './api-data.mjs';
+import { ownerAuthStatus, requestOwner, resolveOwner } from './owner-auth.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
 import { botStub, rememberBotAlert } from './bot-alerts.mjs';
 import { supabaseConfig, supabaseGet } from './supabase-rest.mjs';
@@ -56,8 +57,7 @@ function isOwnerBotAction(action) {
 async function assertBotOwner(request, env, botId) {
   const { ownerId, error } = await resolveOwner(request, env);
   if (error && !ownerId) {
-    const status = error === 'owner_mismatch' ? 403 : 401;
-    return { ok: false, status, error, ownerId: null };
+    return { ok: false, status: ownerAuthStatus(error), error, ownerId: null };
   }
   if (!ownerId) return { ok: false, status: 401, error: 'owner_required', ownerId: null };
   if (!supabaseConfig(env)) return { ok: true, ownerId };
@@ -115,6 +115,12 @@ async function readLoopPayload(request) {
 
 async function enrichLoopPayload(body, env, botId, ownerId) {
   const next = { ...body };
+  if (supabaseConfig(env)) {
+    delete next.bot;
+    delete next.wallet;
+    delete next.ledger;
+    next.botId = botId;
+  }
   if (!LOOP_BOT_ID.test(typeof next.botId === 'string' ? next.botId : '')) next.botId = botId;
   const suppliedGoal = clipLoopGoal(next.goal);
   if (suppliedGoal) next.goal = suppliedGoal;
@@ -398,6 +404,7 @@ const worker = {
       response = json({ error: 'internal' }, 500);
     }
     if (logging) {
+      if (captured) captured.ownerId = requestOwner(request);
       const pending = persistHttpActivity(env, { captured, response, started }).catch(() => {});
       if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(pending);
       else await pending;

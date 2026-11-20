@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPaymentSignature, NETWORKS } from '@ubc2026/x402';
-import worker from './index.mjs';
+import worker, { withOfflineOwner } from './owner-auth.fixture.mjs';
 import {
   matchCommerceRoute,
   dispatchCommerceRoute,
@@ -65,7 +65,7 @@ test('shopping prepare + settle through worker routes', async () => {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-owner-id': 'own_1' },
     body: JSON.stringify({ bot, ledger, recipient: payTo }),
-  }), env, { kind: 'shopping-prepare', botId: 'bot_shop' });
+  }), withOfflineOwner(env), { kind: 'shopping-prepare', botId: 'bot_shop' });
   assert.equal(prep.status, 200);
   const prepBody = await prep.json();
   assert.equal(prepBody.provider, 'sandbox');
@@ -87,7 +87,7 @@ test('shopping prepare + settle through worker routes', async () => {
         extra: { feePayer },
       },
     }),
-  }), env, { kind: 'shopping-settle', botId: 'bot_shop' });
+  }), withOfflineOwner(env), { kind: 'shopping-settle', botId: 'bot_shop' });
   assert.equal(settle.status, 200);
   const settled = await settle.json();
   assert.equal(settled.next, 'settled');
@@ -154,7 +154,7 @@ test('grab-back dry-run plans additional wallet sweeps', async () => {
         address: feePayer, frozen: false, provider: 'privy',
       }],
     }),
-  }), {}, { kind: 'grab-back' });
+  }), withOfflineOwner({}), { kind: 'grab-back' });
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.dryRun, true);
@@ -178,9 +178,9 @@ test('sns send builds unsigned intent from demo resolver', async () => {
       domain: 'alex.sol',
       amount: '1000',
     }),
-  }), {
+  }), withOfflineOwner({
     SNS_DEMO_MAP: { 'alex.sol': dest },
-  }, { kind: 'sns-send', botId: 'bot_1' });
+  }), { kind: 'sns-send', botId: 'bot_1' });
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.intent.to, dest);

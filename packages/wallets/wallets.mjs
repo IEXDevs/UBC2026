@@ -92,7 +92,6 @@ export function accountWriteBodies(login, ownerId) {
     label: wallet.label,
     address: wallet.address,
     provider: 'privy',
-    frozen: wallet.frozen === true,
     spendable: wallet.spendable !== false,
   }));
   return {

@@ -4,6 +4,7 @@ import { resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { withdrawToWalletAdapter } from '@ubc2026/transfers';
 import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
 import { accessTokenFromRequest } from '../../../../lib/privy-cookie-session.mjs';
+import { verifyPrivyAccessToken } from '../../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../../lib/root-env.mjs';
 import { planSnsSend } from '../../../../lib/sns-send.mjs';
 import { resolvePrivyAppId } from '../../../../lib/wallet-provision.mjs';
@@ -23,9 +24,19 @@ export async function POST(request) {
   if (!accessToken) {
     return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
-  const body = await request.json().catch(() => ({}));
+  const secrets = env();
+  const appId = resolvePrivyAppId(secrets);
+  let ownerId;
+  try {
+    ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
+  } catch {
+    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
   const ownerHeader = request.headers.get('x-owner-id');
-  const ownerId = typeof ownerHeader === 'string' ? ownerHeader.trim() : '';
+  if (ownerHeader !== null && ownerHeader !== ownerId) {
+    return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+  }
+  const body = await request.json().catch(() => ({}));
   let resolved;
   try {
     resolved = await resolveSnsOwner(body.domain);
@@ -38,7 +49,7 @@ export async function POST(request) {
     address: resolved.address,
     amount: body.amount,
     wallet: body.wallet,
-    env: env(),
+    env: secrets,
   });
   if (plan.error) {
     const status = plan.error === 'missing_config' ? 503 : 400;
@@ -48,17 +59,20 @@ export async function POST(request) {
     return Response.json({ error: 'owner_mismatch', domain: plan.domain, address: plan.address }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
   }
   try {
-    const secrets = env();
     const client = createPrivyWalletClient({
-      appId: resolvePrivyAppId(secrets),
+      appId,
       appSecret: secrets.PRIVY_APP_SECRET,
       rpcUrl: secrets.QUICKNODE_DEVNET_RPC_URL,
       authorizationKey: secrets.PRIVY_AUTHORIZATION_KEY || null,
     });
+    const { main } = await client.ensureMainWallet({ privyUserId: ownerId, ownerId });
+    if (!main || main.id !== plan.wallet.id || main.address !== plan.wallet.address) {
+      return Response.json({ error: 'wallet_not_owned' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+    }
     const sent = await withdrawToWalletAdapter({
       client,
       ownerId,
-      mainWallet: plan.wallet,
+      mainWallet: main,
       adapter: { publicKey: plan.address },
       amount: plan.amount,
       memo: plan.memo,

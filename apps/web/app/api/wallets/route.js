@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 import { accountWriteBodies } from '@ubc2026/wallets';
 import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
 import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
+import { verifyPrivyAccessToken } from '../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { fetchAgentRuntime } from '../../../lib/runtime-fetch.mjs';
 import { missingWalletSecrets, resolvePrivyAppId, walletConfigFlags } from '../../../lib/wallet-provision.mjs';
@@ -202,24 +203,31 @@ export async function POST(request) {
     }
   }
 
+  const appId = resolvePrivyAppId(env);
+  let ownerId;
+  try {
+    ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
+  } catch {
+    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
+  const ownerHeader = request.headers.get('x-owner-id');
+  if (ownerHeader !== null && ownerHeader !== ownerId) {
+    return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+  }
   try {
     const client = createPrivyWalletClient({
-      appId: resolvePrivyAppId(env),
+      appId,
       appSecret: env.PRIVY_APP_SECRET,
       // acceptLogin does not call RPC; allow empty and require it only for signing routes.
       rpcUrl: env.QUICKNODE_DEVNET_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
       allowUsersMeFallback: !onCloudflareWorker,
     });
-    const ownerHeader = request.headers.get('x-owner-id');
     const result = await client.acceptLogin({
       accessToken,
       origin: onCloudflareWorker ? undefined : requestOrigin(request),
-      ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
+      ownerId,
     });
-    const ownerId = typeof ownerHeader === 'string' && ownerHeader.trim()
-      ? ownerHeader.trim()
-      : result.main?.ownerId;
     try {
       await persistAccount(result, ownerId);
     } catch {
@@ -236,9 +244,7 @@ export async function POST(request) {
             headers: {
               Authorization: `Bearer ${accessToken}`,
               'content-type': 'application/json',
-              ...(typeof ownerHeader === 'string' && ownerHeader.trim()
-                ? { 'x-owner-id': ownerHeader.trim() }
-                : {}),
+              'x-owner-id': ownerId,
             },
             body: JSON.stringify({ wallets }),
             cache: 'no-store',
