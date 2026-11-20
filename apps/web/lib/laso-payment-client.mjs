@@ -15,6 +15,7 @@ export async function submitLasoChatPayment({ send, sign, unlock, signal, now = 
   }
   const result = await post({ phase: 'prepare' });
   const payment = parseLasoBrowserPayment(result?.lasoPayment);
+  if (result?.lasoPayment && (!payment || payment.phase !== 'prepared')) return { ok: false, error: 'invalid_laso_payment' };
   if (!payment || payment.phase !== 'prepared') return result;
   if (stopped()) return aborted;
   if (payment.expiresAt <= now()) return { ok: false, error: 'laso_payment_expired' };

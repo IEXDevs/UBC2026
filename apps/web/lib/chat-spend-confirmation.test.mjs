@@ -15,6 +15,31 @@ const args = {
 };
 const signature = '5'.repeat(64);
 
+test('sealed Laso confirmations forward browser phases outside model args and return unsigned payloads only to the owner', async () => {
+  const args = { botId, action: 'x402', amount: '10000000', asset: 'USDC', lasoTicket: `payload.${'a'.repeat(64)}` };
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
+  const payment = { phase: 'prepared', transaction: Buffer.alloc(200).toString('base64'),
+    walletAddress: 'So11111111111111111111111111111111111111112', blockhash: 'So11111111111111111111111111111111111111112',
+    expiresAt: 3000, proof: 'b'.repeat(64) };
+  const invoke = createChatToolInvoker({ ownerId, botId, runtimeBase: 'https://runtime.example',
+    fetcher: async (url, options) => {
+      assert.equal(url, 'https://runtime.example/api/spend');
+      const body = JSON.parse(options.body);
+      assert.deepEqual(body.lasoPayment, { phase: 'prepare' });
+      assert.equal(body.confirmed, true);
+      assert.equal(body.lasoTicket, args.lasoTicket);
+      assert.equal(body.spendAuthorization, undefined);
+      return Response.json({ signed: false, lasoPayment: payment });
+    } });
+  const reply = await resumeAssetSpend(hold, context, (name, inputs) => invoke(name,
+    stampSpendPermission(name, inputs, { permissionMode: 'ask', confirmSpend: true, grants: [hold] }),
+    { lasoPayment: { phase: 'prepare' } }), 2000);
+  assert.deepEqual(reply.lasoPayment, payment);
+  assert.equal(reply.text, undefined);
+  assert.equal(reply.activity, undefined);
+  await resumeAssetSpend({ ...hold, proof: '' }, context, () => assert.fail('invalid hold must not prepare'), 2000);
+});
+
 test('sealing binds an omitted bot ID to the current bot without accepting its later removal', async () => {
   const { botId: _botId, ...omitted } = args;
   const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', omitted), context, 1000);

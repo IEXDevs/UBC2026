@@ -1412,6 +1412,8 @@ function voiceFailureNote(error) {
 function chatFailureNote(code) {
   if (code === 'desk_locked') return 'The wallet is still locked. Unlock it before trying the payment again.';
   if (code === 'unlock_cancelled') return 'Wallet unlock was cancelled. The payment was not sent.';
+  if (code === 'browser_wallet_required') return 'Connect your Privy wallet to approve this payment.';
+  if (code === 'invalid_laso_payment' || code === 'laso_payment_expired') return 'The card payment preparation is invalid or expired. Ask for a fresh card purchase.';
   if (code === 'browser_wallet_authorization_failed') {
     return 'Privy could not authorize this payment in your browser. No payment was sent.';
   }
