@@ -24,7 +24,7 @@ import { partyFromToken } from '../lib/party-book.mjs';
 import { embeddedCreateOptions, embeddedSolanaCount } from '../lib/wallet-provision.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
 import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
-import { describeWallets, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
+import { describeWallets, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
   displayToUnits,
