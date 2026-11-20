@@ -6,6 +6,13 @@ import { devnetSpendAsset } from '@ubc2026/contracts';
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const ID = /^bot_[a-z0-9_]{1,40}$/;
 
+export const DEFAULT_TRANSFER_CAP = Object.freeze({
+  mode: 'limited',
+  asset: 'USDC',
+  maxOutflow: '1000000',
+  maxPerTransaction: '1000000',
+});
+
 /** Legacy unscoped keys from before agents were tied to an account. */
 export const LEGACY_ROSTER_KEY = 'maelstrom.roster';
 export const LEGACY_LOOKS_KEY = 'maelstrom.botLooks';
@@ -142,11 +149,14 @@ export function adoptLegacyRoster(storage, ownerId) {
   return { roster: legacyRoster, looks: legacyLooks, adopted: true };
 }
 
+export function isTransferLimit(value) {
+  return typeof value === 'string' && /^[1-9][0-9]{0,39}$/.test(value);
+}
+
 export function draftTransferCap(asset, maxOutflow, maxPerTransaction) {
   const identifier = devnetSpendAsset(asset);
-  const limit = /^[1-9][0-9]{0,39}$/;
-  if (!identifier || !limit.test(maxOutflow) || !limit.test(maxPerTransaction)) return null;
-  if (typeof maxOutflow !== 'string' || typeof maxPerTransaction !== 'string' || BigInt(maxPerTransaction) > BigInt(maxOutflow)) return null;
+  if (!identifier || !isTransferLimit(maxOutflow) || !isTransferLimit(maxPerTransaction)) return null;
+  if (BigInt(maxPerTransaction) > BigInt(maxOutflow)) return null;
   return { mode: 'limited', asset: identifier, maxOutflow, maxPerTransaction };
 }
 

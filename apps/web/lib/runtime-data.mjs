@@ -9,6 +9,7 @@ import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { sanitizeActivity } from './chat-activity.mjs';
 import { catalogPayload } from './file-catalog.mjs';
 import { clipOwnerMessage, MESSAGE_CHAR_CAP } from './context-usage.mjs';
+import { DEFAULT_TRANSFER_CAP } from './roster.mjs';
 import { situationBody } from './owner-situation.mjs';
 import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
 
@@ -331,7 +332,7 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
         frozen: bot.frozen === true,
         cap: bot.cap && typeof bot.cap === 'object'
           ? bot.cap
-          : { mode: 'limited', asset: 'USDC', maxOutflow: '1000000', maxPerTransaction: '1000000' },
+          : DEFAULT_TRANSFER_CAP,
       }),
       cache: 'no-store',
     });
