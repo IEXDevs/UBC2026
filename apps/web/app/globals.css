@@ -26,6 +26,15 @@
   --hover: #2a2a2a;
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: dark;
+  /* Privy’s key-export iframe reads these from the document root. The modal
+     sets them on itself, so an empty root paints Continue as a blank bar. */
+  --privy-color-background: #020713;
+  --privy-color-background-2: #1a2230;
+  --privy-color-foreground-3: #f8f8f8;
+  --privy-color-foreground-accent: #141414;
+  --privy-color-accent: #3dd6c6;
+  --privy-color-accent-dark: #2bb5a8;
+  --privy-color-success: #0e3e2d;
 }
 
 * { box-sizing: border-box; }
