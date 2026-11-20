@@ -9,6 +9,7 @@ import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { sanitizeActivity } from './chat-activity.mjs';
 import { catalogPayload } from './file-catalog.mjs';
 import { clipOwnerMessage, MESSAGE_CHAR_CAP } from './context-usage.mjs';
+import { DEFAULT_TRANSFER_CAP } from './roster.mjs';
 import { situationBody } from './owner-situation.mjs';
 import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
 
@@ -331,7 +332,7 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
         frozen: bot.frozen === true,
         cap: bot.cap && typeof bot.cap === 'object'
           ? bot.cap
-          : { mode: 'limited', asset: 'USDC', maxOutflow: '1000000', maxPerTransaction: '1000000' },
+          : DEFAULT_TRANSFER_CAP,
       }),
       cache: 'no-store',
     });
@@ -451,6 +452,7 @@ export async function sendBotChat({
   grants = null,
   spendAuthorization,
   model,
+  modelProvider = null,
   effort,
   shellBots = null,
   shellWallets = null,
@@ -508,6 +510,7 @@ export async function sendBotChat({
         ...(Array.isArray(grants) ? { grants: grants.slice(0, 4) } : {}),
         ...(spendAuthorization ? { spendAuthorization } : {}),
         ...(typeof model === 'string' && model.trim() ? { model: model.trim().slice(0, 80) } : {}),
+        ...(modelProvider ? { modelProvider } : {}),
         ...(typeof effort === 'string' && effort.trim() ? { effort: effort.trim().slice(0, 16) } : {}),
         ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),
         ...(Array.isArray(shellWallets) ? { shellWallets: shellWallets.slice(0, 40) } : {}),

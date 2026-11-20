@@ -25,19 +25,6 @@ test('profile shows the wallet name and address once', () => {
   assert.equal(logins.includes('Add a wallet'), false);
   assert.equal(logins.includes('linkWallet'), false);
   assert.equal(logins.includes('described.wallets'), false);
-  const dialog = readFileSync(new URL('../components/CreateBotDialog.js', import.meta.url), 'utf8');
-  assert.match(dialog, /className=\{`sheet create-agent/);
-  assert.match(dialog, /colorsForPicker\(color, true\)/);
-  assert.equal(dialog.includes('More colors'), false);
-  assert.match(dialog, /className="create-limits"/);
-  assert.match(dialog, /ariaLabel="Spending asset"/);
-  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
-  assert.match(css, /\.sheet\.create-agent \{[^}]*padding:\s*24px 24px 22px/);
-  assert.match(css, /\.create-limits \{[^}]*padding:\s*16px 16px 18px/);
-  assert.match(css, /\.create-limits:not\(\[open\]\) > :not\(summary\) \{ display: none; \}/);
-  assert.match(dialog, /value: 'USDC'/);
-  assert.match(dialog, /value: 'SOL'/);
-  assert.equal(dialog.includes('Asset (USDC, SOL, or token mint address)'), false);
   for (const pane of ['assets', 'signin', 'portfolio', 'transfer', 'history', 'keys']) {
     assert.match(sheet, new RegExp(`id: '${pane}'`));
   }
@@ -51,4 +38,21 @@ test('profile shows the wallet name and address once', () => {
   assert.match(sheet, /function ReceivePane\(\{ active, handle \}\)/);
   assert.equal(sheet.includes('SNS name'), false);
   assert.match(sheet, /aria-label="Transfer"/);
+});
+
+test('agent creation shows asset and limits on their own steps after color', () => {
+  const dialog = readFileSync(new URL('../components/CreateBotDialog.js', import.meta.url), 'utf8');
+  assert.match(dialog, /className=\{`sheet create-agent/);
+  assert.match(dialog, /colorsForPicker\(color, true\)/);
+  assert.equal(dialog.includes('More colors'), false);
+  assert.match(dialog, /const STEPS = \['name', 'look', 'asset', 'limits'\]/);
+  assert.match(dialog, /step === 'asset' && \(\s+<fieldset className="create-assets" aria-label="Spending asset"/);
+  assert.match(dialog, /step === 'limits' && selectedAsset && \(\s+<div className="create-limits"/);
+  assert.match(dialog, /formatBaseUnits\(units, asset.decimals\)/);
+  assert.match(dialog, /value: 'SOL', decimals: 9, unit: 'lamports'/);
+  assert.match(dialog, /value: 'USDC', decimals: 6, unit: 'micro-USDC'/);
+  assert.doesNotMatch(dialog, /<details/);
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.sheet\.create-agent \{[^}]*padding:\s*24px 24px 22px/);
+  assert.match(css, /\.create-limits \{[^}]*padding:\s*16px 16px 18px/);
 });

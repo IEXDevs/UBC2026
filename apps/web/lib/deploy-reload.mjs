@@ -15,7 +15,11 @@ export const SESSION_QUIET_MS = 350;
 export const SESSION_SETTLE_MS = 4_000;
 const PRIVY_AUTH_HOST = 'auth.privy.io';
 const PRIVY_SESSION_LOCK = 'maelstrom.privy-session';
-const PRIVY_SESSION_PATH = '/api/privy-auth/api/v1/sessions';
+const PRIVY_SESSION_WRITES = new Set([
+  '/api/privy-auth/api/v1/sessions',
+  '/api/privy-auth/api/v1/sessions/logout',
+  '/api/privy-auth/api/v1/oauth/authenticate',
+]);
 const authTrackers = new WeakMap();
 const SESSION_KEY = /^privy(?::[\w-]+)?:(?:token|pat|refresh_token|id[_-]?token)$/;
 const FALLBACK_SESSION_KEYS = Object.freeze([
@@ -90,7 +94,7 @@ function isSessionWrite(input, init, origin) {
   if (!origin || String(init?.method ?? input?.method).toUpperCase() !== 'POST') return false;
   try {
     const url = new URL(requestUrl(input), origin);
-    return url.origin === origin && (url.pathname === PRIVY_SESSION_PATH || url.pathname === `${PRIVY_SESSION_PATH}/logout`);
+    return url.origin === origin && PRIVY_SESSION_WRITES.has(url.pathname);
   } catch {
     return false;
   }

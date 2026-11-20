@@ -648,6 +648,8 @@ export function spendApprovalMessage({ ownerId, spend, terms, expiresAt }) {
 }
 
 export const API_ROUTES = Object.freeze([
+  { id: 'models.list', method: 'GET', path: '/api/models', phase: 1, auth: 'none', status: 'guarded' },
+  { id: 'models.check', method: 'POST', path: '/api/models', phase: 1, auth: 'none', status: 'guarded' },
   { id: 'health', method: 'GET', path: '/health', phase: 1, auth: 'none', status: 'live' },
   { id: 'routes.list', method: 'GET', path: '/api/routes', phase: 0, auth: 'none', status: 'live' },
   { id: 'me', method: 'GET', path: '/api/me', phase: 1, auth: 'privy', status: 'live' },

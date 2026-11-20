@@ -23,8 +23,8 @@ export function takeQueued(queue, id) {
  * A finished turn releases the oldest queued message.
  * A stop leaves the queue where it is.
  */
-export function releaseQueued(queue, { stopped = false } = {}) {
+export function releaseQueued(queue, { stopped = false, canRelease = () => true } = {}) {
   const rows = Array.isArray(queue) ? queue : [];
-  if (stopped || rows.length === 0) return { next: null, queue: rows };
+  if (stopped || rows.length === 0 || !canRelease(rows[0])) return { next: null, queue: rows };
   return { next: rows[0], queue: rows.slice(1) };
 }

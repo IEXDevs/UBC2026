@@ -210,6 +210,7 @@ export async function POST(request, context) {
   const chatKeys = {
     metaModelApiKey,
     openrouterApiKey,
+    ...(body.modelProvider != null ? { modelProvider: body.modelProvider } : {}),
     botName: typeof body.name === 'string' ? body.name : 'Agent',
     botGoal: typeof body.goal === 'string' ? body.goal : '',
     botType: typeof body.type === 'string' ? body.type : 'trading',
@@ -238,6 +239,7 @@ export async function POST(request, context) {
   const turnArgs = {
     metaModelApiKey: chatKeys.metaModelApiKey,
     openrouterApiKey: chatKeys.openrouterApiKey,
+    ...(chatKeys.modelProvider != null ? { modelProvider: chatKeys.modelProvider } : {}),
     botName: typeof body.name === 'string' ? body.name : 'Agent',
     botGoal: typeof body.goal === 'string' ? body.goal : '',
     botType: typeof body.type === 'string' ? body.type : 'trading',
