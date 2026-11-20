@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { transformSync } from 'esbuild';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,7 +32,7 @@ test('Live View expiration clears the selected record, count and viewer before e
  * while the full browser controls stay in the computer sheet.
  * Fails when: AgentThread embeds LiveViewPanel, FileLibrary embeds LiveViewPanel, AgentDetail
  * drops the agent head / computer / files stack, or the computer sheet loses its controls.
- * Oracle: only an open session renders the sidebar Computer section; ComputerSheet keeps fill autoStart.
+ * Oracle: the sidebar Computer section stays visible; ComputerSheet keeps fill autoStart.
  * Side effects / state checked: component source text.
  * Gaps: source snapshot only — browser session HTTP not exercised.
  */
@@ -66,7 +69,7 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(sheet, /if \(!mounted \|\| !syncedBotId\) return/);
   assert.match(sheet, /syncedBotId \? \([\s\S]*?botId=\{syncedBotId\}/);
   assert.match(panel, /computer-screen/);
-  assert.match(panel, /if \(screen\) \{\s*if \(!sessionRecordId\) return null;\s*return \(\s*<section className="side-computer"/);
+  assert.match(panel, /if \(screen\) \{\s*return \(\s*<section className="side-computer"/);
   assert.match(panel, /is-off/);
   assert.match(panel, /framed \? 'Watch' : 'Open Computer'/);
   assert.doesNotMatch(source('components/AccountMenu.js'), /id: 'computer', label: 'Computer'/);
@@ -81,4 +84,35 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(css, /\.library-panes \{[^}]*margin:\s*0 auto 8px/);
   assert.doesNotMatch(panel, /live-row/);
   assert.doesNotMatch(panel, /You can interact/);
+});
+
+test('sidebar Computer stays visible and opens the sheet for healthy, idle and failed sessions', () => {
+  const panel = source('components/LiveViewPanel.js');
+  const screenBranch = panel.slice(panel.indexOf('  if (screen) {'), panel.indexOf('\n  return (\n    <div className={`live-view'));
+  const { code } = transformSync(`function renderScreen({ sessionRecordId, frame, error = '', busy = false, onExpand }) {
+    const screen = true;
+    const framed = Boolean(frame?.embed && frame.src);
+    const status = 'No browser session is open.';
+    ${screenBranch}
+  }`, { loader: 'jsx', jsx: 'transform' });
+  const renderScreen = new Function('React', 'LatticeLoader', `${code}; return renderScreen;`)(React, () => null);
+  for (const state of [
+    { sessionRecordId: 'active', frame: { embed: true, src: 'https://live.browser.run/ui/view' } },
+    {},
+    { error: 'That browser session ended. Open a new one.' },
+    { error: 'Browser request failed.' },
+  ]) {
+    let expanded = false;
+    const tree = renderScreen({ ...state, onExpand: () => { expanded = true; } });
+    const html = renderToStaticMarkup(tree);
+    assert.match(html, /aria-label="Computer"/);
+    assert.match(html, state.frame ? /aria-label="Watch"/ : /aria-label="Open Computer"/);
+    if (state.error) assert.ok(html.includes(state.error));
+    if (!state.sessionRecordId && !state.error) assert.match(html, /No browser session is open/);
+    const screen = tree.props.children[1].props.children;
+    const button = screen.props.children.find(child => child?.type === 'button');
+    assert.equal(button.props.disabled, false);
+    button.props.onClick();
+    assert.equal(expanded, true);
+  }
 });
