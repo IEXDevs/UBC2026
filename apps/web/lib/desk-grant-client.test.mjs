@@ -48,6 +48,23 @@ test('a dismissed or stopped unlock and other spend failures never retry', async
   }
 });
 
+test('a grant returned after dismissal is not stored', async () => {
+  let active = true;
+  let writes = 0;
+  const result = await acceptEnteredPassword({
+    ownerId: 'did:privy:u1',
+    password: 'test-password',
+    fetchImpl: async () => {
+      active = false;
+      return Response.json({ grant: 'a'.repeat(64), until: Date.now() + 60_000 });
+    },
+    sessionStorage: { setItem() { writes++; } },
+    shouldAccept: () => active,
+  });
+  assert.deepEqual(result, { ok: false, error: 'unlock_cancelled' });
+  assert.equal(writes, 0);
+});
+
 /**
  * Rigor audit — desk client missing runtime / owner
  * Achieves: no owner (or missing password/verifier) returns ok:false without fetch.

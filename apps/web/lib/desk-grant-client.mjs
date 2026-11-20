@@ -80,12 +80,15 @@ export async function acceptEnteredPassword({
   record,
   localStorage,
   sessionStorage,
+  shouldAccept = () => true,
 } = {}) {
   if (record) {
     const matches = await unlockDesk(password, record);
     if (!matches) return { ok: false, error: 'wrong_password' };
   }
+  if (!shouldAccept()) return { ok: false, error: 'unlock_cancelled' };
   const opened = await openDeskGrant(fetchImpl, { ownerId, token, password });
+  if (!shouldAccept()) return { ok: false, error: 'unlock_cancelled' };
   if (!opened.ok || !writeDeskGrant(sessionStorage, ownerId, opened.grant, opened.until)) {
     return { ok: false, error: opened.error || 'desk_locked' };
   }
