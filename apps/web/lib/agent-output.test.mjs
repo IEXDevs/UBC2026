@@ -20,7 +20,7 @@ test('chat formats agent and assistant replies at render time and leaves user te
   const bubbles = readFileSync(new URL('../components/ChatBubbles.js', import.meta.url), 'utf8');
   assert.match(bubbles, /<MentionText text=\{line\.text\}/);
   assert.match(bubbles, /className="chat-address"/);
-  assert.match(bubbles, /line\.mentionAddress \? <CopyAddress address=\{line\.mentionAddress\}/);
+  assert.match(bubbles, /line\.mentionAddress \? <AddressCopy address=\{line\.mentionAddress\} inline/);
   assert.equal(bubbles.includes('has-mention-address'), false);
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   const address = css.slice(css.indexOf('.chat-address {'), css.indexOf('.chat-address small'));

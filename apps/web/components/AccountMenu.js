@@ -6,6 +6,8 @@ import { markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
 import SpecularButton from './SpecularButton';
 import { accountMenuPlacement } from '../lib/account-menu-placement.mjs';
+import { addressForLabel } from '../lib/address-labels.mjs';
+import AddressCopy from './AddressCopy';
 
 const ITEMS = [
   { id: 'profile', label: 'Profile', icon: UserRound },
@@ -17,7 +19,7 @@ const ITEMS = [
   { id: 'logs', label: 'Logs', icon: ScrollText },
 ];
 
-export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, walletLockAvailable = false, holdingsLabel = '', onLogin, onPick }) {
+export default function AccountMenu({ accountLabel, accountAddress = '', avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, walletLockAvailable = false, holdingsLabel = '', onLogin, onPick }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState({});
   const rootRef = useRef(null);
@@ -78,6 +80,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
   const walletAction = walletUnlocked
     ? { id: 'lock-wallet', label: 'Lock wallet', icon: Lock }
     : { id: 'unlock-wallet', label: 'Unlock wallet', icon: LockOpen };
+  const copyAddress = !collapsed && addressForLabel(accountLabel, [accountAddress]);
   return (
     <div className={`account-menu${open ? ' is-open' : ''}`} ref={rootRef}>
       <div className="account-pop" style={placement} role="menu" aria-label="Account" inert={open ? undefined : true}>
@@ -103,6 +106,13 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
         })}
       </div>
       <div className="you-row">
+        {copyAddress ? <div className="you-id">
+          <button type="button" className="you-avatar-trigger" aria-label="Open account menu" aria-haspopup="menu" aria-expanded={open} ref={triggerRef} onClick={() => (open ? closeMenu() : setOpen(true))}>
+            <ProfileMark src={avatarUrl} label={accountLabel} className="you-mark is-round" />
+          </button>
+          <strong><AddressCopy address={copyAddress} inline /></strong>
+          {holdingsLabel ? <span className="you-holdings">{holdingsLabel}</span> : null}
+        </div> : (
         <button
           type="button"
           className="you-id"
@@ -117,6 +127,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
           {/* Read-only USD value across the account's connected wallets. */}
           {collapsed || !holdingsLabel ? null : <span className="you-holdings">{holdingsLabel}</span>}
         </button>
+        )}
       </div>
     </div>
   );

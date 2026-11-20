@@ -57,7 +57,7 @@ export default function PartySheet({ open, party, transfers = [], payments = [],
         <div className="sheet-head">
           <div>
             <h2 id="party-title">{party.label}</h2>
-            {address ? <AddressCopy address={address} /> : <p className="quiet">Platform handle</p>}
+            {address ? <AddressCopy address={address} dotted /> : <p className="quiet">Platform handle</p>}
           </div>
           <ModalClose label="Close counterparty" onClick={onClose} />
         </div>

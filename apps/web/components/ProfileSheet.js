@@ -1,5 +1,7 @@
 'use client';
 
+import AddressText from './AddressText';
+
 import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -19,7 +21,7 @@ import { profilePhoto, PROFILE_LOOK_KEY } from '../lib/profile-photo.mjs';
 import { usePresence } from './usePresence';
 
 export default function ProfileSheet({
-  open, onClose, accountLabel, avatarUrl = null, profile = null,
+  open, onClose, accountLabel, accountAddress = '', avatarUrl = null, profile = null,
   voiceMs = 0, talks = {}, payments = [], transfers = [],
   signedIn, loginDisabled, onLogin, onLogout, onSave,
   ownerId, getAccessToken, connections,
@@ -137,7 +139,7 @@ export default function ProfileSheet({
               <button type="submit" className="icon-btn" aria-label="Save display name" disabled={saving || !dirty}><Check size={18} /></button>
               <button type="button" className="icon-btn" aria-label="Cancel name edit" disabled={saving} onClick={() => { setDisplayName(initialName); setEditingName(false); setNote(''); }}><X size={17} /></button>
             </> : <>
-              <h2>{displayName || accountLabel}</h2>
+              <h2><AddressText text={displayName || accountLabel} addresses={[accountAddress]} /></h2>
               {signedIn ? <button type="button" className="icon-btn" aria-label="Edit display name" disabled={saving} onClick={() => setEditingName(true)}><Pencil size={16} /></button> : null}
             </>}
           </div>

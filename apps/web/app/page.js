@@ -12,6 +12,7 @@ import SecurityPanel from '../components/SecurityPanel';
 import LogsPanel from '../components/LogsPanel';
 import AccountMenu from '../components/AccountMenu';
 import AccountValue from '../components/AccountValue';
+import AddressText from '../components/AddressText';
 import PaneDock from '../components/PaneDock';
 import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
@@ -1443,10 +1444,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const confirmResolve = useRef(null);
   const accessRef = useRef(null);
   const [slideConfirm, setSlideConfirm] = useState(null);
-  const askSlideConfirm = useCallback((prompt) => new Promise((resolve) => {
+  const askSlideConfirm = useCallback((prompt, address = '') => new Promise((resolve) => {
     confirmResolve.current = resolve;
     const text = typeof prompt === 'string' ? prompt.trim() : '';
-    setSlideConfirm(text || 'Confirm this action?');
+    setSlideConfirm({ text: text || 'Confirm this action?', address });
   }), []);
   const finishSlideConfirm = useCallback((accepted) => {
     const resolve = confirmResolve.current;
@@ -1924,6 +1925,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         />
         <footer className="you">
           <AccountMenu
+            accountAddress={user?.wallet?.address || ''}
             accountLabel={profileRailLabel({
               handle: confirmedHandle === undefined ? profile?.handle : confirmedHandle,
               displayName: profile?.displayName,
@@ -2230,7 +2232,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         <div className="backdrop is-center" onMouseDown={() => finishSlideConfirm(false)}>
           <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Confirm" onMouseDown={event => event.stopPropagation()}>
             <h2>Confirm</h2>
-            <p className="quiet">{slideConfirm}</p>
+            <p className="quiet"><AddressText text={slideConfirm.text} addresses={[slideConfirm.address]} /></p>
             <p className="quiet">Say yes to confirm, or no to cancel.</p>
             <div className="spend-actions">
               <button type="button" className="ghost" onClick={() => finishSlideConfirm(false)}>Cancel</button>
@@ -2288,6 +2290,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         open={profileOpen}
         onClose={closeProfile}
         accountLabel={profile?.displayName || accountLabel}
+        accountAddress={user?.wallet?.address || ''}
         avatarUrl={avatarUrl}
         profile={confirmedHandle === undefined ? profile : { ...profile, handle: confirmedHandle || '' }}
         ownerId={ownerId}

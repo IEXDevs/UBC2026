@@ -6,6 +6,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
 import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
 import AddressCopy from './AddressCopy';
+import AddressText from './AddressText';
+import { addressTextParts } from '../lib/address-labels.mjs';
+import { copyText } from '../lib/copy-text.mjs';
 import EarningsChart from './EarningsChart';
 
 const PLACE_KEY = 'maelstrom.cardPlaces';
@@ -51,6 +54,55 @@ function metric(parent, label, value, extra) {
   parent.append(row);
 }
 
+// The 3D cards are DOM nodes, so keep the same address controls as the React details.
+function addressText(node, text, address) {
+  for (const part of addressTextParts(text, [address])) {
+    if (!part.address) {
+      if (part.punctuation) {
+        const token = document.createElement('span');
+        token.className = 'address-copy-token';
+        token.textContent = part.text + part.punctuation;
+        node.append(token);
+      } else {
+        node.append(document.createTextNode(part.text));
+      }
+      continue;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'address-copy is-inline is-dotted';
+    button.setAttribute('aria-label', `Copy ${part.address}`);
+    button.title = 'Copy address';
+    const label = document.createElement('span');
+    label.className = 'address-copy-label';
+    label.textContent = part.text;
+    const status = document.createElement('span');
+    status.className = 'address-copy-status';
+    status.setAttribute('role', 'status');
+    let timer;
+    button.onpointerdown = event => event.stopPropagation();
+    button.onclick = async event => {
+      event.stopPropagation();
+      window.clearTimeout(timer);
+      const ok = await copyText(part.address);
+      const note = document.createElement('small');
+      note.className = 'address-copy-feedback';
+      note.textContent = ok ? 'Copied' : 'Copy failed';
+      status.replaceChildren(note);
+      timer = window.setTimeout(() => status.replaceChildren(), 1200);
+    };
+    button.append(label, status);
+    if (part.punctuation) {
+      const token = document.createElement('span');
+      token.className = 'address-copy-token';
+      token.append(button, document.createTextNode(part.punctuation));
+      node.append(token);
+    } else {
+      node.append(button);
+    }
+  }
+}
+
 function face(className) {
   const side = document.createElement('div');
   side.className = `book-face ${className}`;
@@ -93,7 +145,7 @@ function cardElement(card) {
   if (mark) heading.append(mark);
   const names = document.createElement('div');
   const asset = document.createElement('strong');
-  asset.textContent = card.asset;
+  addressText(asset, card.asset, card.mint);
   names.append(asset);
   if (card.side) {
     const side = document.createElement('span');
@@ -104,7 +156,7 @@ function cardElement(card) {
 
   const size = document.createElement('p');
   size.className = 'book-size';
-  size.textContent = card.amountLabel;
+  addressText(size, card.amountLabel, card.mint);
   const usd = document.createElement('p');
   usd.className = 'book-usd';
   usd.textContent = usdLabel(card.notionalLabel);
@@ -115,7 +167,7 @@ function cardElement(card) {
   const top = document.createElement('div');
   top.className = 'book-card-top';
   const market = document.createElement('strong');
-  market.textContent = card.market;
+  addressText(market, card.market, card.mint);
   top.append(market);
   if (card.venue) {
     const venue = document.createElement('span');
@@ -586,6 +638,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
               ? `Read-only balance. ${EXECUTION_LABEL}. This does not authorize a transaction.`
               : null,
             address: wallet.fullAddress,
+            copyAddresses: [wallet.fullAddress],
             rows: [
               ['Notional', wallet.notionalLabel],
               ['Kind', wallet.frozen ? 'Frozen' : wallet.accountKind],
@@ -616,6 +669,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           const owner = book.wallets.find(item => item.id === account.walletId);
           return {
             title: account.venue,
+            copyAddresses: [owner?.fullAddress],
             kicker: 'Subaccount',
             rows: [
               ['Wallet', owner?.label ?? account.walletId],
@@ -643,6 +697,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         const owner = book.wallets.find(item => item.id === card.walletId);
         return {
           title: card.amountLabel,
+          copyAddresses: [card.mint, owner?.fullAddress],
           kicker: `${card.venue} · ${card.side ?? card.asset}`,
           rows: [
             ['Asset', card.asset],
@@ -954,13 +1009,13 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
             onMouseDown={event => event.stopPropagation()}
           >
             <p>{detail.kicker}</p>
-            <h2>{detail.title}</h2>
-            {detail.address ? <AddressCopy address={detail.address} /> : null}
+            <h2><AddressText text={detail.title} addresses={detail.copyAddresses} /></h2>
+            {detail.address ? <AddressCopy address={detail.address} dotted /> : null}
             <dl>
               {detail.rows.map(([label, value]) => (
                 <div key={label}>
                   <dt>{label}</dt>
-                  <dd>{label === 'Address' ? <AddressCopy address={value} /> : value}</dd>
+                  <dd>{label === 'Address' || label === 'Mint' ? <AddressCopy address={value} dotted /> : <AddressText text={value} addresses={detail.copyAddresses} />}</dd>
                 </div>
               ))}
             </dl>
@@ -970,8 +1025,8 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
                 <dl>
                   {section.rows.map(([label, value], index) => (
                     <div key={`${section.title}-${index}`}>
-                      <dt>{label}</dt>
-                      <dd>{value}</dd>
+                      <dt><AddressText text={label} addresses={detail.copyAddresses} /></dt>
+                      <dd><AddressText text={value} addresses={detail.copyAddresses} /></dd>
                     </div>
                   ))}
                 </dl>
