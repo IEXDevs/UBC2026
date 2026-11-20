@@ -94,6 +94,11 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   const tokenScreen = readFileSync(new URL('../components/TokenScreen.js', import.meta.url), 'utf8');
   assert.match(tokenScreen, /previewPortfolio = null, refreshKey = 0/);
   assert.match(tokenScreen, /\[open, accounts, getAccessToken, user\?\.id, previewPortfolio, refreshKey\]/);
+  assert.match(tokenScreen, /enrichPortfolio\(previewPortfolio, \{ storage: window\.localStorage \}\)/);
+  for (const source of [tokenScreen, sheet]) {
+    assert.doesNotMatch(source, /rememberPortfolio\(cacheKey, body\)/);
+    assert.doesNotMatch(source, /setPortfolio\(body\)/);
+  }
 });
 
 test('agent creation goes from color straight to USD spending limits', () => {
