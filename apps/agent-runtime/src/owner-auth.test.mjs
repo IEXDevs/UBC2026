@@ -10,10 +10,10 @@ const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
 
-function session(claims = {}, header = { alg: 'ES256', kid: 'key1' }) {
+function session(claims = {}, header = { alg: 'ES256', kid: 'key1' }, key = privateKey) {
   const payload = encode({ iss: 'privy.io', aud: appId, sub: owner, exp: Math.floor(Date.now() / 1000) + 600, ...claims });
   const message = `${encode(header)}.${payload}`;
-  const signature = sign('sha256', Buffer.from(message), { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  const signature = sign('sha256', Buffer.from(message), { key, dsaEncoding: 'ieee-p1363' });
   return `${message}.${signature.toString('base64url')}`;
 }
 
@@ -87,6 +87,41 @@ test('signed Privy sessions read owner-scoped data without an owner header or wa
   const missingApp = await worker.fetch(request('/api/me', token), { ...env, PRIVY_APP_ID: '' });
   assert.equal(missingApp.status, 503);
   assert.equal((await missingApp.json()).error, 'owner_auth_unconfigured');
+});
+
+test('owner auth refreshes cached JWKS on rotation and limits further unknown key lookups', async () => {
+  const rotated = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  let fetches = 0;
+  const env = envWith(null, { fetch: async url => {
+    if (new URL(url).hostname === 'auth.privy.io') {
+      const key = ++fetches === 1 ? publicKey : rotated.publicKey;
+      return Response.json({ keys: [{ ...key.export({ format: 'jwk' }), kid: `key${fetches}` }] });
+    }
+    if (new URL(url).pathname.endsWith('/activity_logs')) return new Response(null, { status: 204 });
+    return Response.json([{ id: owner }]);
+  } });
+  const read = token => worker.fetch(request('/api/me', token), env);
+  assert.equal((await read(session())).status, 200);
+  assert.equal((await read(session({}, { alg: 'ES256', kid: 'key2' }, rotated.privateKey))).status, 200);
+  for (const kid of ['unknown1', 'unknown2']) {
+    assert.equal((await read(session({}, { alg: 'ES256', kid }))).status, 401);
+  }
+  assert.equal(fetches, 2);
+});
+
+test('only authenticated voice webhook spends are recorded in the owner activity log', async () => {
+  const logged = [];
+  const env = envWith(async (url, init) => {
+    assert.equal(url.pathname, '/rest/v1/activity_logs');
+    logged.push(JSON.parse(init.body).owner_id);
+    return new Response(null, { status: 204 });
+  }, { ELEVENLABS_WEBHOOK_SECRET: 'offline-voice-secret' });
+  const submit = secret => worker.fetch(request('/api/spend', null, {
+    method: 'POST', ownerHeader: owner, extraHeaders: { 'x-elevenlabs-webhook-secret': secret },
+  }), env);
+  assert.equal((await submit('wrong-secret')).status, 401);
+  assert.equal((await submit('offline-voice-secret')).status, 400);
+  assert.deepEqual(logged, [null, owner]);
 });
 
 test('wallet persistence accepts signed sessions and only writes wallets verified with Privy', async () => {

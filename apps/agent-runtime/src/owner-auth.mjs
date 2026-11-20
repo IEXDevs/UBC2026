@@ -1,4 +1,5 @@
 import { privyJwksUrl, verifyPrivyAccessToken } from '@ubc2026/wallets/privy-access-token';
+import { voiceWebhookMatches } from './desk-grant.mjs';
 
 export const testOwnerAuth = Symbol('testOwnerAuth');
 const verifiedOwners = new WeakMap();
@@ -26,6 +27,16 @@ export async function resolveOwner(request, env) {
   } catch {
     return { error: 'login_required' };
   }
+}
+
+export async function resolveSpendOwner(request, env) {
+  if (request.headers.has('authorization') || !voiceWebhookMatches(request, env)) {
+    return resolveOwner(request, env);
+  }
+  const ownerId = request.headers.get('x-owner-id')?.trim() ?? '';
+  if (!/^[a-zA-Z0-9:_.-]{1,256}$/.test(ownerId)) return { error: 'owner_required' };
+  verifiedOwners.set(request, ownerId);
+  return { ownerId };
 }
 
 export function ownerAuthStatus(error) {
