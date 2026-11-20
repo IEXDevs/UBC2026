@@ -3,7 +3,6 @@
 import { ArrowDownLeft, ArrowUpRight, ExternalLink } from 'lucide-react';
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import { flowName, signedUsdc } from '../lib/party-book.mjs';
-import AddressText from './AddressText';
 
 function printDelta(delta, decimals = 6) {
   const text = typeof delta === 'string' ? delta : '';
@@ -67,8 +66,8 @@ export default function TxnLog({ rows = [], onParty, onToggle, openId = null, re
                 <div className="txn-copy">
                   {row.party && onParty ? (
                     <button type="button" className="party-link" onClick={() => onParty(row.party)}>{row.title}</button>
-                  ) : <strong><AddressText text={row.title} /></strong>}
-                  {row.detail ? <small><AddressText text={row.detail} /></small> : null}
+                  ) : <strong>{row.title}</strong>}
+                  {row.detail ? <small>{row.detail}</small> : null}
                   {row.badge === 'confirmed' ? <span className="txn-badge">Confirmed</span> : null}
                 </div>
                 {row.explorerUrl ? (

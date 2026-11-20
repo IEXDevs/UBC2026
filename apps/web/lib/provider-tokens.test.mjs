@@ -53,7 +53,7 @@ test('provider management lives in Plugins, not profile or wallet settings', () 
   const providers = readFileSync(join(web, 'components/ModelProviders.js'), 'utf8');
   const dialog = readFileSync(join(web, 'components/ProviderAdd.js'), 'utf8');
   assert.match(prompt, /label: 'Add Provider'/);
-  assert.doesNotMatch(profile, /ProviderAdd|provider-tokens|@richclub\.sol/);
+  assert.doesNotMatch(profile, /ProviderAdd|provider-tokens/);
   assert.doesNotMatch(wallets, /ProviderAdd|provider-tokens/);
   assert.match(plugins, />Model providers</);
   assert.match(plugins, /<ModelProviders/);

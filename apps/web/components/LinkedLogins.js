@@ -17,7 +17,7 @@ function clientLabel(client) {
   return CLIENT_LABELS[client] || 'Wallet';
 }
 
-export default function LinkedLogins({ showWallets = true }) {
+export default function LinkedLogins() {
   const { user, ready, authenticated } = usePrivy();
   const [note, setNote] = useState('');
   const { linkEmail, linkGoogle, linkGithub, linkDiscord, linkWallet } = useLinkAccount({
@@ -59,17 +59,18 @@ export default function LinkedLogins({ showWallets = true }) {
 
   return (
     <div className="linked-logins">
-      <h2 className="linked-logins-title">Sign-in methods</h2>
+      <h2 className="linked-logins-title">Sign-in</h2>
       <p className="quiet">
-        Manage the ways you sign in to your account.
+        Email, Google, GitHub, Discord, and every wallet you add all sign into this same account.
+        Add as many Solana wallets as you need.
       </p>
       <ul className="profile-wallets">
-        {showWallets ? described.wallets.map(wallet => (
+        {described.wallets.map(wallet => (
           <li key={wallet.address}>
             <strong>{clientLabel(wallet.client)}</strong>
             <AddressCopy address={wallet.address} />
           </li>
-        )) : null}
+        ))}
         {described.methods.filter(method => method.linked).map(method => (
           <li key={method.id}>
             <strong>{method.label}</strong>
@@ -78,7 +79,7 @@ export default function LinkedLogins({ showWallets = true }) {
         ))}
       </ul>
       <div className="wallet-switch">
-        {showWallets ? <button type="button" onClick={addWallet}>Add a wallet</button> : null}
+        <button type="button" onClick={addWallet}>Add a wallet</button>
         {described.methods.filter(method => !method.linked).map(method => (
           <button key={method.id} type="button" onClick={() => addMethod(method.id)}>
             Link {method.label}

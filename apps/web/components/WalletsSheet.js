@@ -3,15 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
-import { Plus, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, ChartNoAxesCombined, Coins, History, KeyRound, Layers, Wallet, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
-import AddressText from './AddressText';
 import GlideSelect from './GlideSelect';
 import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
 import TokenScreen from './TokenScreen';
-import ConnectedWallets from './ConnectedWallets';
 import SlideCommit from './bits/SlideCommit';
 import TxnLog from './TxnLog';
 import SendToField from './SendToField';
@@ -43,15 +41,14 @@ import { sendPreview } from '../lib/txn-preview.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
 
 const PANES = [
-  { id: 'assets', label: 'Overview', icon: Layers, description: 'Your balances and assets, at a glance.' },
-  { id: 'wallets', label: 'Connections', icon: Wallet, description: 'Manage your connected Solana wallets.' },
-  { id: 'portfolio', label: 'Portfolio', icon: ChartNoAxesCombined, description: 'See how your assets are distributed.' },
-  { id: 'send', label: 'Send', icon: ArrowUpRight, description: 'Transfer funds from your agent wallet.' },
-  { id: 'receive', label: 'Receive', icon: ArrowDownLeft, description: 'Your wallet address and payment details.' },
-  { id: 'swap', label: 'Swap', icon: ArrowLeftRight, description: 'Review a token swap before confirming.' },
-  { id: 'tokens', label: 'Tokens', icon: Coins, description: 'Choose which tokens appear in your wallet.' },
-  { id: 'history', label: 'Activity', icon: History, description: 'Your recent transactions.' },
-  { id: 'keys', label: 'Security', icon: KeyRound, description: 'Manage your wallet keys securely with Privy.' },
+  { id: 'assets', label: 'Assets' },
+  { id: 'portfolio', label: 'Portfolio' },
+  { id: 'send', label: 'Send' },
+  { id: 'receive', label: 'Receive' },
+  { id: 'swap', label: 'Swap' },
+  { id: 'tokens', label: 'Tokens' },
+  { id: 'history', label: 'History' },
+  { id: 'keys', label: 'Keys' },
 ];
 
 export default function WalletsSheet({
@@ -159,7 +156,7 @@ export default function WalletsSheet({
         onMouseDown={event => event.stopPropagation()}
       >
         <nav className="wallet-nav" aria-label="Wallet sections">
-          <strong id="wallets-title"><Wallet size={19} />Wallets</strong>
+          <strong id="wallets-title">Wallet</strong>
           {PANES.map(item => (
             <button
               key={item.id}
@@ -168,25 +165,22 @@ export default function WalletsSheet({
               aria-current={pane === item.id ? 'page' : undefined}
               onClick={() => setPane(item.id)}
             >
-              <item.icon size={17} strokeWidth={1.7} />
               {item.label}
             </button>
           ))}
-          <span className="wallet-network"><i />Solana devnet</span>
         </nav>
         <div className="wallet-body">
           <div className="sheet-head">
-            <div><p className="plugin-kicker">Wallets</p><h2>{PANES.find(item => item.id === pane)?.label}</h2><p className="quiet">{PANES.find(item => item.id === pane)?.description}</p></div>
+            <h2>{PANES.find(item => item.id === pane)?.label}</h2>
             <button type="button" className="icon-btn" aria-label="Close wallets" onClick={onClose}>
               <X size={18} strokeWidth={1.75} />
             </button>
           </div>
-          {pane === 'wallets' ? <ConnectedWallets wallets={wallets} /> : null}
           {needsWallet ? <WalletPick rows={rows} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
           {pane === 'assets' ? (
             <>
               {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
-              {signedIn ? <LinkedLogins showWallets={false} /> : null}
+              {signedIn ? <LinkedLogins /> : null}
               <WalletRoster
                 rows={rows}
                 activeId={active?.id || ''}
@@ -209,13 +203,6 @@ export default function WalletsSheet({
               />
               {retireNote ? <p className="quiet" role="status">{retireNote}</p> : null}
               {signedIn && active?.address ? (
-                <>
-                <div className="wallet-quick-actions">
-                  <button type="button" onClick={() => setPane('send')}><ArrowUpRight size={18} /><span>Send</span></button>
-                  <button type="button" onClick={() => setPane('receive')}><ArrowDownLeft size={18} /><span>Receive</span></button>
-                  <button type="button" onClick={() => setPane('swap')}><ArrowLeftRight size={18} /><span>Swap</span></button>
-                  <button type="button" onClick={() => setPane('wallets')}><Wallet size={18} /><span>Wallets</span></button>
-                </div>
                 <TokenScreen
                   open={open}
                   address={active.address}
@@ -224,7 +211,6 @@ export default function WalletsSheet({
                   onReceive={() => setPane('receive')}
                   onSwap={() => setPane('swap')}
                 />
-                </>
               ) : null}
               {!signedIn ? <p className="quiet">Sign in to read the assets in your wallets.</p> : null}
             </>
@@ -611,7 +597,7 @@ function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
 function WalletPick({ rows, activeId, onSelect }) {
   if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one in settings, or generate a new one.</p>;
   return (
-    <div className="wallet-pick-label">
+    <label className="wallet-pick-label">
       Wallet
       <GlideSelect
         className="wallet-pick"
@@ -625,13 +611,12 @@ function WalletPick({ rows, activeId, onSelect }) {
         value={activeId}
         options={rows.map(row => ({
           value: row.id,
-          label: row.label,
+          label: `${row.label} · ${shortAddress(row.address)}`,
           tag: row.kind === 'main' ? 'Main' : 'Added',
         }))}
         onChange={onSelect}
       />
-      <AddressCopy address={rows.find(row => row.id === activeId)?.address} compact />
-    </div>
+    </label>
   );
 }
 
@@ -653,7 +638,7 @@ function SendPane({
   const [resetKey, setResetKey] = useState(0);
   const [folded, setFolded] = useState(false);
   const asset = tokens.find(token => token.symbol === symbol) || tokens[0] || null;
-  const picked = destinations.find(row => row.id === pickedId && to === (row.label || row.caption)) || null;
+  const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
   const target = picked?.kind === 'recent'
     ? parseSendTarget(picked.caption)
     : picked
@@ -735,14 +720,14 @@ function SendPane({
     )
   );
   const destination = target?.kind === 'wallet'
-    ? target.caption.replace(shortAddress(target.address), target.address)
+    ? target.caption
     : target?.kind === 'handle'
-      ? `@${target.handle}${handleRecipient?.address ? ` (${handleRecipient.address})` : ''}`
+      ? `@${target.handle}`
       : target?.kind === 'sns'
-        ? `${target.domain}${snsAddress ? ` (${snsAddress})` : ''}`
+        ? (snsAddress || target.domain)
         : '';
   const preview = ready ? sendPreview({
-    from: active?.address ? `${active.label} (${active.address})` : 'Agent wallet',
+    from: active?.label || 'Agent wallet',
     to: destination,
     amountLabel: `${amount.trim()} ${asset.symbol}`,
   }) : null;
@@ -761,7 +746,7 @@ function SendPane({
           onPick={(row) => setPickedId(row?.id || '')}
         />
       </label>
-      {target?.kind === 'wallet' ? <AddressCopy address={target.address} /> : target?.kind === 'sns' && snsFailed ? (
+      {target?.kind === 'sns' && snsFailed ? (
         <p className="quiet" role="status">Failed.</p>
       ) : target?.kind === 'sns' && snsAddress ? (
         <AddressCopy address={snsAddress} prefix={target.domain} />
@@ -832,7 +817,7 @@ function SendPane({
           });
         }}
       />
-      {status ? <p className="quiet" role="status"><AddressText text={status} /></p> : null}
+      {status ? <p className="quiet" role="status">{status}</p> : null}
     </form>
   );
 }
@@ -986,7 +971,7 @@ function SwapPane({ tokens }) {
         <input value={amount} inputMode="decimal" placeholder="0.00" onChange={event => { setAmount(event.target.value); setQuote(''); }} />
       </label>
       {quote ? <p className="wallet-figure wallet-figure-sm">{quote}</p> : null}
-      {status ? <p className="quiet" role="status"><AddressText text={status} /></p> : null}
+      {status ? <p className="quiet" role="status">{status}</p> : null}
     </form>
   );
 }

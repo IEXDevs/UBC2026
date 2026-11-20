@@ -15,7 +15,6 @@ import { buildEarningsSeries, mergeConnectedPositions } from '../lib/earnings-ch
 import { linkedWalletKey } from '../lib/wallet-provision.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
 import AddressCopy from './AddressCopy';
-import AddressText from './AddressText';
 import GlideSelect from './GlideSelect';
 import PositionBook from './PositionBook';
 import TxnLog from './TxnLog';
@@ -165,7 +164,7 @@ function Detail({ label, value, flow }) {
   return (
     <div className="ledger-meta">
       <dt>{label}</dt>
-      <dd className={flow ? flowName(flow) : undefined}>{typeof value === 'string' ? <AddressText text={value} /> : value}</dd>
+      <dd className={flow ? flowName(flow) : undefined}>{value}</dd>
     </div>
   );
 }

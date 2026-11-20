@@ -107,6 +107,7 @@ export default function ProfileSheet({
                   onChange={event => setHandle(event.target.value.replace(/^@/, ''))}
                 />
               </label>
+              <p className="quiet">@{handle || 'alex'} pays this account. @richclub.sol goes through SNS, not this directory.</p>
               {note ? <p className="voice-note" role="status">{note}</p> : null}
               <button type="submit" className="solid">Save profile</button>
             </form>

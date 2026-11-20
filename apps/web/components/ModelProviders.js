@@ -15,7 +15,7 @@ export default function ModelProviders() {
 
   return (
     <section className="model-providers" aria-labelledby="plugins-title">
-      <header className="settings-section-head">
+      <header className="model-provider-head">
         <div>
           <p className="plugin-kicker">AI settings</p>
           <h2 id="plugins-title">Model providers</h2>
@@ -28,7 +28,7 @@ export default function ModelProviders() {
         <ul className="model-provider-list">
           {providers.map(item => (
             <li key={item.id}>
-              <span className="settings-icon"><KeyRound size={20} /></span>
+              <span className="model-provider-icon"><KeyRound size={20} /></span>
               <div><strong>{item.name}</strong><span>{item.baseUrl || 'Custom endpoint'}</span><code>{item.hint}</code></div>
               <button type="button" className="provider-remove" aria-label={`Remove ${item.name}`} onClick={() => {
                 try { removeProvider(localStorage, item.id); refresh(); setNote(`${item.name} removed.`); }
@@ -37,7 +37,7 @@ export default function ModelProviders() {
             </li>
           ))}
         </ul>
-      ) : <div className="settings-empty"><span className="settings-icon"><KeyRound size={24} /></span><h3>No custom providers</h3><p>Add an API token to keep your provider credentials here.</p></div>}
+      ) : <div className="model-provider-empty"><span className="model-provider-icon"><KeyRound size={24} /></span><h3>No custom providers</h3><p>Add an API token to keep your provider credentials here.</p></div>}
       {note ? <p className="quiet" role="status">{note}</p> : null}
       <ProviderAdd open={adding} onClose={() => setAdding(false)} onSaved={refresh} />
     </section>

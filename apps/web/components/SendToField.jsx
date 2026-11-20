@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import AddressCopy from './AddressCopy';
 import './GlideSelect.css';
 
 export default function SendToField({ value, destinations = [], selectedId = '', onChange, onPick }) {
@@ -12,7 +11,7 @@ export default function SendToField({ value, destinations = [], selectedId = '',
   const id = useId();
   const query = value.trim().toLowerCase();
   const selected = destinations.find(row => row.id === selectedId) || null;
-  const browsing = !query || (selected && value === (selected.label || selected.caption));
+  const browsing = !query || (selected && value === selected.caption);
   const matched = browsing
     ? destinations
     : destinations.filter(row => (
@@ -44,7 +43,7 @@ export default function SendToField({ value, destinations = [], selectedId = '',
     if (!row || row.disabled || row.spendable === false) return;
     setOpen(false);
     onPick?.(row);
-    onChange?.(row.label || row.caption);
+    onChange?.(row.caption);
   }
 
   function onKeyDown(event) {
@@ -81,7 +80,6 @@ export default function SendToField({ value, destinations = [], selectedId = '',
         <input
           id={`${id}-input`}
           role="combobox"
-          aria-haspopup="grid"
           aria-expanded={shown}
           aria-controls={`${id}-list`}
           aria-autocomplete="list"
@@ -112,26 +110,25 @@ export default function SendToField({ value, destinations = [], selectedId = '',
       </div>
       {shown ? (
         <div className="glide-select__menu" data-state="open" data-side="bottom" data-align="left">
-          <div id={`${id}-list`} role="grid" aria-label="Wallets" className="glide-select__list">
+          <div id={`${id}-list`} role="listbox" aria-label="Wallets" className="glide-select__list">
             {options.map((row, index) => {
               const locked = row.disabled || row.spendable === false;
               return (
-                <div key={row.id} role="row" aria-selected={index === active} className="send-to-row">
-                  <div role="gridcell" id={`${id}-${index}`} className="send-to-choice">
-                    <button
-                      type="button"
-                      disabled={locked || undefined}
-                      className="glide-select__option"
-                      onMouseEnter={() => setActive(index)}
-                      onClick={() => choose(index)}
-                    >
-                      <span className="glide-select__name">{row.label || row.caption}</span>
-                      {row.frozen ? <span className="glide-select__tag">Frozen</span> : null}
-                      {!row.frozen && row.spendable === false ? <span className="glide-select__tag">Read only</span> : null}
-                    </button>
-                  </div>
-                  <div role="gridcell">{row.address ? <AddressCopy address={row.address} compact /> : null}</div>
-                </div>
+                <button
+                  key={row.id}
+                  id={`${id}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === active}
+                  disabled={locked || undefined}
+                  className="glide-select__option"
+                  onMouseEnter={() => setActive(index)}
+                  onClick={() => choose(index)}
+                >
+                  <span className="glide-select__name">{row.caption}</span>
+                  {row.frozen ? <span className="glide-select__tag">Frozen</span> : null}
+                  {!row.frozen && row.spendable === false ? <span className="glide-select__tag">Read only</span> : null}
+                </button>
               );
             })}
           </div>

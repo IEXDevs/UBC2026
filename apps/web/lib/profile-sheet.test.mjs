@@ -9,13 +9,11 @@ import test from 'node:test';
  * Side effects / state checked: source snapshot.
  * Gaps: does not render the dialog.
  */
-test('wallet management stays on the wallet sheet, not the profile sheet', () => {
+test('profile shows the wallet name and address once', () => {
   const profile = readFileSync(new URL('../components/ProfileSheet.js', import.meta.url), 'utf8');
   const sheet = readFileSync(new URL('../components/WalletsSheet.js', import.meta.url), 'utf8');
   assert.equal(profile.includes('WalletAdd'), false);
   assert.equal(profile.includes('<summary>Wallets</summary>'), false);
-  assert.match(sheet, /<ConnectedWallets wallets=\{wallets\}/);
-  assert.match(sheet, /<LinkedLogins showWallets=\{false\}/);
   assert.match(sheet, /Connect a wallet/);
   assert.match(sheet, /Import seed/);
   assert.match(sheet, /Import key/);

@@ -134,7 +134,7 @@ test('claim handle stays outside the shell that fades on first login', () => {
  * Side effects / state checked: page.js, AgentDetail.js, ProfileSheet.js, WalletsSheet.js, globals.css source.
  * Gaps: source snapshot only — no browser layout.
  */
-test('wallets open in their own sheet and the stage has no wallet badge', () => {
+test('wallets are collapsed in settings and the stage has no wallet badge', () => {
   const root = dirname(fileURLToPath(import.meta.url));
   const page = readFileSync(join(root, '../app/page.js'), 'utf8');
   const detail = readFileSync(join(root, '../components/AgentDetail.js'), 'utf8');
@@ -152,7 +152,6 @@ test('wallets open in their own sheet and the stage has no wallet badge', () => 
   assert.equal(page.includes('AccountWallets'), false);
   assert.match(page, /if \(id === 'wallet'\) \{\s*openWallet\(\);/);
   assert.match(page, /<WalletsSheet/);
-  assert.match(css, /\.shell:not\(\.is-claim\) \{ animation-fill-mode: backwards; \}/);
   assert.match(sheet, /Connect a wallet/);
   assert.equal(sheet.includes('SpecularButton'), false);
   assert.equal(sheet.includes('data-hint'), false);

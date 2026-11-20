@@ -1305,14 +1305,8 @@ button.add-agent:not(:disabled):hover {
   margin: 0 8px 12px;
   font-size: 15px;
   color: #f5f5f5;
-  display: flex;
-  align-items: center;
-  gap: 9px;
 }
 .wallet-nav button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -1356,16 +1350,6 @@ button.add-agent:not(:disabled):hover {
   scrollbar-width: none;
 }
 .wallet-body::-webkit-scrollbar { display: none; }
-.wallet-body > .sheet-head { align-items: flex-start; margin-bottom: 24px; }
-.wallet-body > .sheet-head h2 { margin: 4px 0 8px; font-size: 26px; letter-spacing: -0.035em; }
-.wallet-body > .sheet-head .quiet { margin: 0; line-height: 1.5; }
-.wallet-body .token-screen { padding: 24px; border: 1px solid #303030; border-radius: 18px; background: #181818; }
-.wallet-body .token-screen > .wallet-figure { order: -1; font-size: clamp(32px, 5vw, 46px); margin: 0 0 4px; }
-.wallet-network { display: flex; align-items: center; gap: 7px; margin: auto 8px 0; padding-top: 24px; color: #a3a3a3; font-size: 11px; white-space: nowrap; }
-.wallet-network i { width: 6px; height: 6px; border-radius: 50%; background: #77cbb5; }
-.wallet-quick-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 22px; }
-.wallet-quick-actions button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 13px 8px; background: #232323; border: 1px solid #353535; border-radius: 12px; font-size: 13px; }
-.wallet-quick-actions button:hover { background: #2d2d2d; border-color: #555; }
 .wallet-figure {
   margin: 8px 0 0;
   font-size: 40px;
@@ -1646,7 +1630,6 @@ button.add-agent:not(:disabled):hover {
 }
 .price-graph-empty { height: 72px; }
 .address-copy {
-  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1658,32 +1641,10 @@ button.add-agent:not(:disabled):hover {
   padding: 6px 10px 6px 12px;
   font: inherit;
   font-variant-numeric: tabular-nums;
-  color: inherit;
-  cursor: copy;
-  vertical-align: baseline;
 }
-.address-copy-text { text-decoration: underline dotted; text-underline-offset: 4px; text-decoration-color: #929292; white-space: nowrap; }
-.address-copy small { color: #a3a3a3; font-size: 12px; text-decoration: none; }
-.address-copy-feedback { min-width: 46px; text-align: center; }
-.address-copy[data-state="copied"] .address-copy-feedback { color: #a8ddbe; animation: address-copied 220ms ease-out; }
-.address-copy[data-state="error"] .address-copy-feedback { color: #efb0b0; }
-.address-copy:focus-visible { outline: 2px solid #d4d4d8; outline-offset: 4px; }
-.address-copy.is-inline { display: inline; padding: 0; border-radius: 3px; background: transparent; box-shadow: none; font: inherit; }
-.address-copy.is-inline .address-copy-feedback, .address-copy.is-compact .address-copy-feedback {
-  position: absolute; z-index: 2; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%);
-  padding: 5px 8px; border: 1px solid #444; border-radius: 6px; background: #252525; white-space: nowrap; box-shadow: 0 3px 12px #0006;
-}
-.address-copy.is-inline .address-copy-feedback:empty, .address-copy.is-compact .address-copy-feedback:empty { display: none; }
-@keyframes address-copied { from { opacity: 0; translate: 0 4px; } to { opacity: 1; translate: 0 0; } }
-@media (prefers-reduced-motion: reduce) { .address-copy[data-state="copied"] .address-copy-feedback { animation: none; } }
+.address-copy small { color: #a3a3a3; font-size: 12px; }
 .address-copy.is-empty { box-shadow: none; background: transparent; padding-left: 0; }
 .address-copy.is-compact { padding: 4px 8px; background: transparent; }
-.send-to-row { display: flex; align-items: center; min-width: 0; }
-.send-to-choice { flex: 1; min-width: 0; }
-.send-to-row[aria-selected="true"] .glide-select__option { background: #303030; }
-.send-to-row .address-copy { flex: none; margin-right: 4px; font-size: 12px; }
-/* Dropdowns clip floating bubbles, so keep their copy result inside the row. */
-.send-to-row .address-copy .address-copy-feedback { position: static; transform: none; min-width: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
 @media (hover: hover) and (pointer: fine) {
   .address-copy:hover { background: #2a2a2a; }
 }
@@ -2179,8 +2140,8 @@ button.add-agent:not(:disabled):hover {
 @media (max-width: 720px) {
   .sheet.wallets-sheet {
     grid-template-columns: 1fr;
-    width: calc(100vw - 32px);
-    height: calc(100dvh - 32px);
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
   }
   .wallet-nav {
     flex-direction: row;
@@ -2732,39 +2693,20 @@ button.wallet-export:not(:disabled):hover {
 .profile-settings > .ghost:hover,
 .settings-fold > .ghost:hover { background: #1c1c1c; }
 
-/* Wallet connections and model credentials share a consistent settings scale. */
-.settings-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.settings-section-head h2 { margin: 4px 0 8px; font-size: 26px; font-weight: 600; letter-spacing: -0.035em; }
-.settings-section-head h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
-.settings-section-head .quiet { line-height: 1.5; }
-.settings-section-head > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: none; font-size: 13px; white-space: nowrap; }
-.settings-icon { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 1px solid #333; border-radius: 12px; background: #242424; color: #d4d4d4; }
-.connected-wallets { padding: 18px; background: #191919; border: 1px solid #303030; border-radius: 16px; }
-.connected-wallet-list { list-style: none; padding: 0; margin: 16px 0 0; }
-.connected-wallet-list > li { border-top: 1px solid #303030; padding: 16px 0; }
-.connected-wallet-list > li:last-child { padding-bottom: 0; }
-.connected-wallet-row { display: flex; align-items: flex-start; gap: 12px; }
-.connected-wallet-info { display: grid; gap: 5px; min-width: 0; flex: 1; }
-.connected-wallet-info > strong { font-size: 14px; font-weight: 550; text-transform: capitalize; }
-.connected-wallet-info > span { font-size: 12px; color: #a3a3a3; }
-.connected-wallet-info .address-copy { padding: 5px 8px; font-size: 12px; max-width: 100%; }
-.wallet-type { font-size: 11px; padding: 5px 8px; border: 1px solid #3b4944; color: #a8c4b9; border-radius: 6px; }
-.wallet-unlink { display: inline-flex; align-items: center; gap: 5px; flex: none; background: transparent; color: #b8b8b8; border: 1px solid #3b3b3b; border-radius: 8px; padding: 7px 9px; font-size: 12px; }
-.wallet-unlink:not(:disabled):hover { border-color: #c48f8f; color: #edb5b5; }
-.wallet-unlink-confirm { margin-top: 12px; padding: 12px; border: 1px solid #564343; border-radius: 10px; background: #292121; }
-.wallet-unlink-confirm p { margin: 0 0 10px; font-size: 13px; color: #d5c6c6; line-height: 1.5; }
-.wallet-unlink-confirm > div { display: flex; justify-content: flex-end; gap: 8px; }
-.wallet-unlink-confirm button { font-size: 12px; }
-.wallet-empty { display: grid; justify-items: center; gap: 8px; padding: 28px 8px 16px; color: #999; text-align: center; }
-.wallet-empty p { margin: 4px 0 0; color: #ddd; font-size: 14px; }
-.wallet-empty > span { font-size: 12px; }
+/* Model provider settings and dialog typography. */
+.model-provider-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.model-provider-head h2 { margin: 4px 0 8px; font-size: 26px; font-weight: 600; letter-spacing: -0.035em; }
+.model-provider-head h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+.model-provider-head .quiet { line-height: 1.5; }
+.model-provider-head > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: none; font-size: 13px; white-space: nowrap; }
+.model-provider-icon { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 1px solid #333; border-radius: 12px; background: #242424; color: #d4d4d4; }
 .integration-tabs { display: flex; flex: none; gap: 6px; margin: 0 44px 24px 0; padding-bottom: 14px; border-bottom: 1px solid #343434; }
 .integration-tabs button { padding: 9px 14px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #a3a3a3; font-size: 13px; }
 .integration-tabs button[aria-selected="true"] { background: #303030; color: #f5f5f5; border-color: #3b3b3b; }
 .integration-tabs button:hover { color: #fff; }
 .integration-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
 .model-providers { padding: 4px 4px 24px; min-height: 360px; }
-.model-providers .settings-section-head { align-items: center; margin-bottom: 22px; }
+.model-providers .model-provider-head { align-items: center; margin-bottom: 22px; }
 .provider-storage-note { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px; border: 1px solid #353535; border-radius: 12px; background: #222; color: #b3b3b3; }
 .provider-storage-note svg { flex: none; margin-top: 2px; }
 .provider-storage-note p { margin: 0; font-size: 13px; line-height: 1.6; max-width: 65ch; }
@@ -2775,9 +2717,9 @@ button.wallet-export:not(:disabled):hover {
 .model-provider-list li > div > span { color: #999; font-size: 12px; overflow-wrap: anywhere; }
 .model-provider-list code { color: #bbb; font-size: 12px; }
 .model-provider-list .provider-remove { display: inline-flex; align-items: center; gap: 6px; }
-.settings-empty { display: grid; justify-items: center; padding: 38px 12px 20px; text-align: center; }
-.settings-empty h3 { margin: 16px 0 6px; font-size: 15px; font-weight: 550; }
-.settings-empty p { margin: 0; font-size: 13px; color: #999; line-height: 1.6; }
+.model-provider-empty { display: grid; justify-items: center; padding: 38px 12px 20px; text-align: center; }
+.model-provider-empty h3 { margin: 16px 0 6px; font-size: 15px; font-weight: 550; }
+.model-provider-empty p { margin: 0; font-size: 13px; color: #999; line-height: 1.6; }
 .sheet.provider-modal { width: min(460px, calc(100vw - 32px)); padding: 26px; gap: 18px; }
 .provider-modal h2 { font-size: 24px; }
 .provider-modal > .plugin-kicker { margin: 0 0 -10px; }
@@ -2785,29 +2727,9 @@ button.wallet-export:not(:disabled):hover {
 .provider-modal input { font-size: 14px; height: 44px; }
 .provider-modal-actions { margin-top: 4px; }
 .provider-modal-actions button { font-size: 13px; }
-.profile-settings { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-.profile-settings > .plugin-kicker { margin: 0; }
-.profile-settings > .quiet { line-height: 1.5; margin: 0 0 8px; }
-.profile-settings .profile-stats { margin: 0; }
-.profile-settings .profile-wallets { margin: 0; }
-.profile-settings .linked-logins { margin-top: 6px; padding: 16px 0; }
-.profile-settings > .ghost { align-self: flex-start; }
 @media (max-width: 720px) {
-  .sheet.wallets-sheet { grid-template-rows: auto minmax(0, 1fr); }
-  .wallet-nav { flex-wrap: nowrap; gap: 4px; }
-  .wallet-nav strong { display: none; }
-  .wallet-nav button { flex: none; padding: 9px 10px; font-size: 12px; }
-  .wallet-network { display: none; }
-  .wallet-body { padding: 20px 16px; }
-  .wallet-body .token-screen { padding: 18px; }
-  .wallet-quick-actions { gap: 6px; }
-  .wallet-quick-actions button { flex-direction: column; font-size: 12px; }
-  .settings-section-head { flex-wrap: wrap; gap: 10px; }
-  .connected-wallets { padding: 14px; }
-  .connected-wallet-row { gap: 8px; flex-wrap: wrap; }
-  .connected-wallet-info { min-width: 120px; }
-  .wallet-unlink { margin-left: auto; }
-  .model-providers .settings-section-head { align-items: flex-start; }
+  .model-provider-head { flex-wrap: wrap; gap: 10px; }
+  .model-providers .model-provider-head { align-items: flex-start; }
   .model-provider-list li { flex-wrap: wrap; gap: 10px; }
   .integration-tabs { margin-bottom: 18px; }
 }
@@ -4879,11 +4801,6 @@ button.chat-edit:disabled:focus-visible {
 .shell:not(.is-claim) {
   animation: page-arrive 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-
-/* Retaining the completed transform animation makes the shell the containing
-   block for fixed dialogs. Release it so overlays share viewport positioning
-   and keep their existing sibling stacking order. */
-.shell:not(.is-claim) { animation-fill-mode: backwards; }
 
 @media (prefers-reduced-motion: reduce) {
   .legal-body,
@@ -7396,12 +7313,4 @@ html, body, * {
   width: 0;
   height: 0;
   display: none;
-}
-
-.profile-modal { gap: 32px; padding: 30px; grid-template-columns: 0.9fr 1.1fr; }
-.profile-identity h2 { font-size: clamp(30px, 4vw, 44px); line-height: 1.1; overflow-wrap: anywhere; }
-.profile-handle { font-size: 15px; margin-bottom: 20px; }
-.profile-identity .you-mark.is-huge { width: 80px; height: 80px; border-radius: 22px; font-size: 32px; }
-@media (max-width: 720px) {
-  .profile-modal { grid-template-columns: 1fr; padding: 24px 18px; gap: 28px; }
 }

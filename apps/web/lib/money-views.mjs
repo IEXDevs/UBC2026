@@ -148,7 +148,6 @@ export function sendDestinations(wallets, bots, activeId) {
       return {
         id: row.id,
         address: row.address,
-        label: row.bots.find(name => typeof name === 'string' && name.trim()) || row.label || 'Wallet',
         caption: walletSendCaption(row),
         frozen: Boolean(row.frozen),
         walletKind: row.kind === 'main' ? 'main' : 'additional',
