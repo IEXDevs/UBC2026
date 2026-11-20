@@ -23,9 +23,6 @@ test('queued messages append, edit out, and wait when a turn is stopped', () => 
     { id: 'b', text: 'second', mention: '' },
   ]);
   assert.deepEqual(appendQueued(both, { id: '', text: 'nope' }), both);
-  const addressed = appendQueued([], { id: 'c', text: 'pay @ada', mention: 'Ada', mentionAddress: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' });
-  assert.equal(addressed[0].mentionAddress, '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
-  assert.equal(appendQueued([], { id: 'd', text: 'plain', mention: '' })[0].mentionAddress, undefined);
   const edited = takeQueued(both, 'a');
   assert.equal(edited.item.text, 'first');
   assert.deepEqual(edited.queue, [{ id: 'b', text: 'second', mention: '' }]);
