@@ -1238,3 +1238,140 @@ test('a within-cap USDC buy of wrapped SOL clears the gates and an over-cap buy 
   assert.equal(mismatchBody.run.checkpoints['trust-gate'], undefined);
   assert.equal(mismatchTransfer.calls.length, 0);
 });
+
+function liveSwapDouble() {
+  const calls = { prepared: [], signed: [], orders: [] };
+  const client = {
+    async prepareSolanaTransfer({ transaction }) {
+      calls.prepared.push(transaction);
+      return Object.freeze({ transaction, feeLamports: '5000' });
+    },
+    async signPreparedSolanaTransfer(request) {
+      calls.signed.push(request);
+      return { cluster: 'mainnet-beta', signature: 'sig_swap_1' };
+    },
+  };
+  const swapOrder = async (intent) => {
+    calls.orders.push(intent);
+    return {
+      inputMint: intent.inputMint, outputMint: intent.outputMint, inAmount: intent.amount,
+      outAmount: '747000', minOutAmount: '743000', transaction: 'AQAAswapTx',
+    };
+  };
+  return { calls, client, swapOrder };
+}
+
+function swapDecider(models) {
+  const decide = models.openRouter;
+  const original = decide.complete.bind(decide);
+  decide.complete = async (input) => {
+    const task = typeof input?.task === 'string' ? input.task : '';
+    if (task.includes('Role: decide')) {
+      return {
+        model: 'test',
+        text: JSON.stringify({
+          summary: 'Move a slice of SOL into USDC',
+          facts: { ...facts, mint: SOL_MINT, price: '74730000', reasonSummary: 'Move SOL into USDC' },
+          proposal: { ...proposal, swap: { inputMint: SOL_MINT, outputMint: USDC_MINT, inAmount: '10000000' } },
+        }),
+      };
+    }
+    return original(input);
+  };
+  return decide;
+}
+
+const swapPrice = async (mint) => ({
+  mint,
+  priceUsd: mint === USDC_MINT ? '1.00' : '74.73',
+  quoteSource: 'dexscreener',
+  pricingCluster: 'mainnet',
+  executionCluster: 'mainnet-beta',
+  label: 'mainnet-beta execution, mainnet pricing',
+  fetchedAt: new Date(NOW).toISOString(),
+});
+
+/**
+ * Achieves: an agent swap under the cap with a Jupiter-trusted token signs the exact simulated Jupiter transaction.
+ * Fails when: the order is not simulated before signing, or another transaction is signed.
+ * Oracle: one order for the proposal, one simulation, one prepared signature, executed swap checkpoint.
+ * Side effects: in-memory run; Jupiter and Privy are doubles.
+ * Gaps: live Jupiter and Privy are not called.
+ */
+test('a trusted agent swap under the cap signs the simulated Jupiter transaction', async () => {
+  const machine = new BotStateMachine();
+  const live = liveSwapDouble();
+  const response = await postLoop(machine, {
+    openRouter: swapDecider(scriptedOpenRouter()),
+    transferClient: live.client,
+    swapOrder: live.swapOrder,
+    search: async () => [],
+    lookupPrice: swapPrice,
+  }, payload({ goal: TRADING_GOAL }));
+  const body = await response.json();
+  assert.equal(body.error, undefined);
+  assert.equal(body.done, true);
+  assert.equal(body.run.checkpoints['trust-gate'].trust.state, 'allowed');
+  assert.equal(body.run.checkpoints.approval.automatic, true);
+  assert.deepEqual(live.calls.orders, [{ inputMint: SOL_MINT, outputMint: USDC_MINT, amount: '10000000', userPublicKey: wallet.address }]);
+  assert.deepEqual(live.calls.prepared, ['AQAAswapTx']);
+  assert.equal(live.calls.signed.length, 1);
+  assert.equal(live.calls.signed[0].prepared.transaction, 'AQAAswapTx');
+  const execute = body.run.checkpoints.execute;
+  assert.equal(execute.mode, 'swap');
+  assert.equal(execute.executed, true);
+  assert.equal(execute.signature, 'sig_swap_1');
+  assert.equal(execute.swapQuote.outAmount, '747000');
+});
+
+/**
+ * Achieves: a low-trust agent swap waits for a person even after trust confirmation and within the cap.
+ * Fails when: a confirmed low-trust swap signs without an approval.
+ * Oracle: approval-needed pause and no order, simulation, or signature.
+ * Side effects: in-memory run; doubles only.
+ * Gaps: the approval record path is covered by the transfer tests.
+ */
+test('a low-trust agent swap needs approval before any order or signature', async () => {
+  const machine = new BotStateMachine();
+  const live = liveSwapDouble();
+  const response = await postLoop(machine, {
+    openRouter: swapDecider(scriptedOpenRouter()),
+    transferClient: live.client,
+    swapOrder: live.swapOrder,
+    search: async () => [],
+    lookupPrice: swapPrice,
+  }, payload({ goal: TRADING_GOAL, trustScore: '100', trustConfirmed: true }));
+  const body = await response.json();
+  assert.equal(body.run.paused, true);
+  assert.equal(body.run.pauseReason, 'approval-needed');
+  assert.equal(body.run.step, 'approval');
+  assert.equal(live.calls.orders.length + live.calls.prepared.length + live.calls.signed.length, 0);
+});
+
+/**
+ * Achieves: AGENT_SWAPS=paper keeps agent swaps as paper fills even with a live signer.
+ * Fails when: paper mode orders, simulates, or signs.
+ * Oracle: paper execute checkpoint and no live calls.
+ * Side effects: in-memory run; doubles only.
+ * Gaps: none beyond the paper test above.
+ */
+test('AGENT_SWAPS=paper keeps agent swaps on paper', async () => {
+  const machine = new BotStateMachine();
+  const live = liveSwapDouble();
+  const response = await postLoop(machine, {
+    openRouter: swapDecider(scriptedOpenRouter()),
+    transferClient: live.client,
+    swapOrder: live.swapOrder,
+    AGENT_SWAPS: 'paper',
+    search: async () => [],
+    lookupPrice: swapPrice,
+    swapQuote: async (swap) => ({
+      ...swap, outAmount: '747000', quoteSource: 'jupiter-swap-v1', pricingCluster: 'mainnet',
+      executionCluster: 'mainnet-beta', label: 'mainnet-beta execution, mainnet pricing', broadcast: false, authorizesTransaction: false,
+    }),
+  }, payload({ goal: TRADING_GOAL }));
+  const body = await response.json();
+  assert.equal(body.done, true);
+  assert.equal(body.run.checkpoints.execute.mode, 'paper');
+  assert.equal(live.calls.orders.length + live.calls.signed.length, 0);
+});

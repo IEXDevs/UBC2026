@@ -88,6 +88,8 @@ function loopDeps(env) {
       ? env.JUPITER_API_KEY.trim()
       : null,
     swapQuote: typeof env.swapQuote === 'function' ? env.swapQuote : null,
+    swapOrder: typeof env.swapOrder === 'function' ? env.swapOrder : null,
+    swapMode: env.AGENT_SWAPS === 'paper' ? 'paper' : 'live',
     recentBlockhash: env.recentBlockhash,
     secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
   };

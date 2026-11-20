@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  JUPITER_SWAP_BUILD_URL,
+  readJupiterSwapOrder,
   createDexScreenerPriceProvider,
   createJupiterPriceProvider,
   createMainnetPriceProvider,
@@ -337,4 +339,33 @@ test('Jupiter swap quote reads outAmount and does not return a transaction', asy
     readJupiterSwapQuote({ inputMint: mint, outputMint: usdc, amount: '10000000', fetcher: null }),
     error => error.code === 'client_missing',
   );
+});
+
+/**
+ * Achieves: a live Jupiter order quotes, then builds the unsigned transaction for the given signer.
+ * Fails when: the quote is not passed to /swap, the signer changes, or a mismatched quote is accepted.
+ * Oracle: request bodies and the returned order; a mismatched quote throws.
+ * Side effects: none. fetch is injected.
+ * Gaps: live Jupiter is not called.
+ */
+test('readJupiterSwapOrder builds the swap for the quoted pair and signer', async () => {
+  const SOL = 'So11111111111111111111111111111111111111112';
+  const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const OWNER = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin';
+  const quote = { inputMint: SOL, outputMint: USDC, inAmount: '10000000', outAmount: '747000', otherAmountThreshold: '743000' };
+  const seen = [];
+  const fetcher = async (url, init) => {
+    seen.push({ url: String(url), init });
+    if (String(url).includes('/quote')) return Response.json(quote);
+    return Response.json({ swapTransaction: 'AQAAswap==', lastValidBlockHeight: 1 });
+  };
+  const order = await readJupiterSwapOrder({ inputMint: SOL, outputMint: USDC, amount: '10000000', userPublicKey: OWNER, fetcher });
+  assert.equal(order.transaction, 'AQAAswap==');
+  assert.equal(order.minOutAmount, '743000');
+  assert.equal(seen[1].url, JUPITER_SWAP_BUILD_URL);
+  const body = JSON.parse(seen[1].init.body);
+  assert.deepEqual(body.quoteResponse, quote);
+  assert.equal(body.userPublicKey, OWNER);
+  const wrong = async url => String(url).includes('/quote') ? Response.json({ ...quote, inAmount: '1' }) : Response.json({ swapTransaction: 'AQ==' });
+  await assert.rejects(readJupiterSwapOrder({ inputMint: SOL, outputMint: USDC, amount: '10000000', userPublicKey: OWNER, fetcher: wrong }));
 });

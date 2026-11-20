@@ -13,6 +13,7 @@ const mintPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 export const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 export const JUPITER_SWAP_QUOTE_URL = 'https://lite-api.jup.ag/swap/v1/quote';
+export const JUPITER_SWAP_BUILD_URL = 'https://lite-api.jup.ag/swap/v1/swap';
 
 /**
  * Unwrap a UI label such as `SOL (So11…112)` down to the mint.
@@ -347,5 +348,67 @@ export async function readJupiterSwapQuote({
     label: PRICE_LABEL,
     broadcast: false,
     authorizesTransaction: false,
+  };
+}
+
+async function jupiterJson(client, url, init) {
+  let response;
+  try {
+    response = await client(url, { ...init, signal: AbortSignal.timeout(15000) });
+  } catch (error) {
+    if (error instanceof PriceError) throw error;
+    throw new PriceError('provider_unavailable');
+  }
+  if (!response.ok) throw providerStatus(response.status);
+  try { return await response.json(); } catch { throw new PriceError('invalid_provider_response'); }
+}
+
+/**
+ * Live Jupiter swap order for one signer: quote, then the unsigned serialized
+ * transaction from /swap. The caller still simulates, signs, and broadcasts
+ * through @ubc2026/wallets after every spend gate has passed.
+ */
+export async function readJupiterSwapOrder({
+  inputMint,
+  outputMint,
+  amount,
+  userPublicKey,
+  fetcher = fetch,
+  apiKey = null,
+} = {}) {
+  const client = requireFetcher(fetcher);
+  const owner = assertMint(userPublicKey);
+  const url = jupiterSwapQuoteUrl({ inputMint, outputMint, amount });
+  const headers = { Accept: 'application/json' };
+  if (apiKey) headers['x-api-key'] = apiKey;
+  const quote = await jupiterJson(client, url, { headers });
+  if (quote?.inputMint !== inputMint || quote?.outputMint !== outputMint || quote?.inAmount !== amount
+    || typeof quote?.outAmount !== 'string' || !AMOUNT.test(quote.outAmount)
+    || typeof quote?.otherAmountThreshold !== 'string' || !AMOUNT.test(quote.otherAmountThreshold)) {
+    throw new PriceError('invalid_provider_response');
+  }
+  const built = await jupiterJson(client, JUPITER_SWAP_BUILD_URL, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      quoteResponse: quote,
+      userPublicKey: owner,
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+    }),
+  });
+  const transaction = built?.swapTransaction;
+  if (typeof transaction !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(transaction) || built.simulationError) {
+    throw new PriceError('invalid_provider_response');
+  }
+  return {
+    inputMint,
+    outputMint,
+    inAmount: amount,
+    outAmount: quote.outAmount,
+    minOutAmount: quote.otherAmountThreshold,
+    transaction,
+    quoteSource: 'jupiter-swap-v1',
+    executionCluster: SOLANA_CLUSTER,
   };
 }

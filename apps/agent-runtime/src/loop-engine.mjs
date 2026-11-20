@@ -7,7 +7,7 @@ import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
  */
 import { approvalRequirement } from '@ubc2026/agent-loop';
 import { assetByMint, createPaperBook, openPaperPosition } from '@ubc2026/paper-positions';
-import { readJupiterSwapQuote, usdPriceBaseUnits } from '@ubc2026/prices';
+import { readJupiterSwapOrder, readJupiterSwapQuote, usdPriceBaseUnits } from '@ubc2026/prices';
 import { evaluateProposal, validateApproval } from '@ubc2026/bot-policy';
 import { evaluateTrust } from '@ubc2026/trust-score';
 import { transferSolanaUsdc } from '@ubc2026/transfers';
@@ -256,7 +256,8 @@ export function decideTask(goal, bot) {
       'A buy of wrapped SOL spends the cap asset: inputMint is that asset and outputMint is wrapped SOL.',
       'inAmount is base units of the cap asset and must stay at or under the per-transaction cap.',
       'A mainnet price is paper only. It is not the spend and it does not raise the cap.',
-      `Do not include a swap transaction. The platform quotes Jupiter, signs on ${SOLANA_CLUSTER} only, and marks the paper position from the mainnet price.`,
+      `Do not include a swap transaction. After every gate the platform builds the Jupiter swap, simulates it, and signs on ${SOLANA_CLUSTER} only.`,
+      'A token below the Jupiter trust threshold, or a swap over the auto-approve cap, waits for the owner to approve.',
       'The platform gate still blocks a failed trust check, a failed verify, a policy or cap block, and any trade outside the configured cluster.',
     );
     if (typeof bot?.cap?.asset === 'string' && bot.cap.asset) {
@@ -576,7 +577,8 @@ function performApproval(run, ctx) {
     return waitStep(run, 'approval', 'policy-invalid', {}, ctx.now);
   }
   if (policy.state === 'blocked') return waitStep(run, 'approval', policy.reason ?? 'blocked', { policy: slimPolicy(policy) }, ctx.now);
-  const needed = run.checkpoints.policy?.approvalNeeded === true || policy.state === 'over-budget';
+  const untrustedSwap = Boolean(proposal.swap) && liveSwaps(ctx) && run.checkpoints['trust-gate']?.trust?.state !== 'allowed';
+  const needed = run.checkpoints.policy?.approvalNeeded === true || policy.state === 'over-budget' || untrustedSwap;
   if (!needed) {
     return finishStep(run, 'approval', { action: 'auto', automatic: true, ownerId: ctx.bot.ownerId }, ctx.now);
   }
@@ -722,11 +724,114 @@ async function tradeQuoteAndPaper(swap, ctx, idempotencyKey) {
   };
 }
 
+/** Live swaps need a signer that binds the exact simulated transaction. `AGENT_SWAPS=paper` keeps paper fills. */
+function liveSwaps(ctx) {
+  const client = ctx.deps.transferClient;
+  return ctx.deps.swapMode !== 'paper'
+    && typeof client?.prepareSolanaTransfer === 'function'
+    && typeof client?.signPreparedSolanaTransfer === 'function';
+}
+
+async function reserveSpend(run, ctx, proposal, idempotencyKey) {
+  if (!ctx.deps.ledgerApi || typeof ctx.deps.ledgerApi.reserveBudget !== 'function') return { reservation: null };
+  try {
+    const reservation = await ctx.deps.ledgerApi.reserveBudget({
+      ownerId: ctx.ownerId,
+      now: ctx.now,
+      idempotencyKey,
+      proposal,
+      approvalId: run.checkpoints.approval?.approvalId,
+    });
+    if (reservation?.state && reservation.state !== 'ready-to-reserve' && reservation.state !== 'reserved') {
+      return { wait: [reservation.reason || reservation.state || 'reserve-blocked', { idempotencyKey, reservation }] };
+    }
+    return { reservation };
+  } catch (error) {
+    return {
+      wait: [error?.code || 'reserve-failed', {
+        idempotencyKey,
+        message: typeof error?.message === 'string' ? error.message.slice(0, 200) : undefined,
+      }],
+    };
+  }
+}
+
+/**
+ * Live Jupiter swap after trust, verify, policy and approval. A swap that is not
+ * Jupiter-trusted reaches here only with a person's approval. The order must match
+ * the proposal, simulate on the configured cluster, and sign as that exact transaction.
+ */
+async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
+  const approval = run.checkpoints.approval;
+  if (run.checkpoints['trust-gate']?.trust?.state !== 'allowed' && approval?.automatic !== false) {
+    return waitStep(run, 'execute', 'approval-needed', { idempotencyKey }, ctx.now);
+  }
+  const swap = proposal.swap;
+  const fetcher = typeof ctx.deps.fetch === 'function' ? ctx.deps.fetch : null;
+  const orderFn = typeof ctx.deps.swapOrder === 'function'
+    ? ctx.deps.swapOrder
+    : (fetcher ? intent => readJupiterSwapOrder({ ...intent, fetcher, apiKey: ctx.deps.jupiterApiKey ?? null }) : null);
+  if (!orderFn) return waitStep(run, 'execute', 'client_missing', { idempotencyKey }, ctx.now);
+  const started = withCheckpoint(run, 'execute', { at: ctx.now, status: 'started', idempotencyKey, memo });
+  await ctx.persist(started);
+  const reserved = await reserveSpend(started, ctx, proposal, idempotencyKey);
+  if (reserved.wait) return waitStep(started, 'execute', reserved.wait[0], reserved.wait[1], ctx.now);
+  let order;
+  try {
+    order = await orderFn({
+      inputMint: swap.inputMint,
+      outputMint: swap.outputMint,
+      amount: swap.inAmount,
+      userPublicKey: ctx.wallet.address,
+    });
+  } catch (error) {
+    return waitStep(started, 'execute', priceErrorCode(error), { idempotencyKey }, ctx.now);
+  }
+  if (!order || order.inputMint !== swap.inputMint || order.outputMint !== swap.outputMint
+    || order.inAmount !== swap.inAmount || typeof order.transaction !== 'string'
+    || !/^(?:[1-9][0-9]{0,39})$/.test(order.outAmount ?? '')) {
+    return waitStep(started, 'execute', 'invalid_quote', { idempotencyKey }, ctx.now);
+  }
+  let sent;
+  try {
+    const client = ctx.deps.transferClient;
+    const prepared = await client.prepareSolanaTransfer({ transaction: order.transaction });
+    if (prepared?.transaction !== order.transaction) throw Object.assign(new Error('invalid_simulation'), { code: 'invalid_simulation' });
+    sent = await client.signPreparedSolanaTransfer({ bot: ctx.bot, wallet: ctx.wallet, prepared });
+  } catch (error) {
+    return waitStep(started, 'execute', typeof error?.code === 'string' ? error.code : 'swap-failed', { idempotencyKey }, ctx.now);
+  }
+  if (sent?.cluster !== SOLANA_CLUSTER) return waitStep(started, 'execute', 'wrong-cluster', { idempotencyKey }, ctx.now);
+  if (typeof sent.signature !== 'string' || !sent.signature) {
+    return waitStep(started, 'execute', 'execute-unconfirmed', { idempotencyKey }, ctx.now);
+  }
+  return finishStep(started, 'execute', {
+    mode: 'swap',
+    signature: sent.signature,
+    memo,
+    idempotencyKey,
+    cluster: SOLANA_CLUSTER,
+    executed: true,
+    broadcast: true,
+    reserved: reserved.reservation?.state === 'reserved' || reserved.reservation?.ok === true,
+    swapQuote: {
+      inputMint: swap.inputMint,
+      outputMint: swap.outputMint,
+      inAmount: swap.inAmount,
+      outAmount: order.outAmount,
+      minOutAmount: typeof order.minOutAmount === 'string' ? order.minOutAmount : null,
+      quoteSource: 'jupiter-swap-v1',
+      executionCluster: SOLANA_CLUSTER,
+    },
+  }, ctx.now);
+}
+
 async function performExecute(run, ctx) {
   const memo = run.checkpoints.verify?.memo;
   const proposal = run.checkpoints.decide?.proposal;
   if (typeof memo !== 'string' || !memo || !proposal) return waitStep(run, 'execute', 'memo-missing', {}, ctx.now);
   const idempotencyKey = run.runId;
+  if (proposal.swap && liveSwaps(ctx)) return executeLiveSwap(run, ctx, proposal, memo, idempotencyKey);
   if (proposal.swap) {
     const traded = await tradeQuoteAndPaper(proposal.swap, ctx, idempotencyKey);
     if (traded.error) return waitStep(run, 'execute', traded.error, { idempotencyKey }, ctx.now);
