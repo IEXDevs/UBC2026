@@ -9,11 +9,25 @@ const activity = readFileSync(new URL('./migrations/20261114180000_activity_logs
 const grants = readFileSync(new URL('./migrations/20261114190000_service_role_grants.sql', import.meta.url), 'utf8');
 const SEED = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
+/**
+ * Achieves: service_role grants migration includes ALL on tables and EXECUTE on functions.
+ * Fails when: Grants omitted or narrowed so Worker writes fail.
+ * Oracle: 20261114190000_service_role_grants.sql text contract.
+ * Side effects: Reads migration file.
+ * Gaps: Does not execute grants against a live Supabase project.
+ */
 test('service role can use the tables the Worker writes', () => {
   assert.match(grants, /grant all privileges on all tables in schema public to service_role/);
   assert.match(grants, /grant execute on all functions in schema public to service_role/);
 });
 
+/**
+ * Achieves: Insert trigger redacts seed/privateKey/long blobs; RLS shows only owner rows; authenticated cannot insert; anon denied.
+ * Fails when: Secrets persist, cross-owner reads succeed, or clients can insert forged logs.
+ * Oracle: activity_logs redaction + RLS policies.
+ * Side effects: PGlite with pgcrypto; applies migrations.
+ * Gaps: Does not cover service_role write path end-to-end.
+ */
 test('activity logs redact secrets and hide other owners', async () => {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(foundations);
@@ -27,7 +41,7 @@ test('activity logs redact secrets and hide other owners', async () => {
     [JSON.stringify({
       goal: `fund ${SEED} please`,
       privateKey: 'do-not-store',
-      address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+      address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
       amount: '10',
       blob: '2'.repeat(88),
     })],
@@ -41,7 +55,7 @@ test('activity logs redact secrets and hide other owners', async () => {
   assert.equal(encoded.includes('2'.repeat(20)), false);
   assert.match(encoded, /fund/);
   assert.match(encoded, /please/);
-  assert.match(detail.address, /4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU/);
+  assert.match(detail.address, /EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/);
   assert.equal(String(detail.amount), '10');
 
   await db.query(`select set_config('request.jwt.claims', '{"owner_id":"alice"}', false)`);

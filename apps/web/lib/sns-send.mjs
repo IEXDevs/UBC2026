@@ -1,5 +1,5 @@
 /**
- * Plan a devnet USDC send to an owner the SNS proxy already returned.
+ * Plan a mainnet-beta USDC send to an owner the SNS proxy already returned.
  * This file does not look up domains.
  */
 import { normalizeSnsName } from '@ubc2026/sns';
@@ -22,7 +22,7 @@ export function planSnsSend({ domain, address, amount, wallet, env = {} } = {}) 
   }
   if (wallet.address === address) return { error: 'invalid_destination', domain: name, address };
   const missing = [];
-  for (const key of ['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']) {
+  for (const key of ['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'SOLANA_RPC_URL']) {
     const value = typeof env[key] === 'string' ? env[key].trim() : '';
     const pub = key === 'PRIVY_APP_ID' && typeof env.NEXT_PUBLIC_PRIVY_APP_ID === 'string'
       ? env.NEXT_PUBLIC_PRIVY_APP_ID.trim()

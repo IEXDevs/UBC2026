@@ -113,6 +113,13 @@ function createPgLedger(db) {
   };
 }
 
+/**
+ * Achieves: All ledgerCases pass against Postgres RPCs; proposal digest matches JS; wrong JWT cannot reserve.
+ * Fails when: Any ledger case diverges from JS bot-policy, or forbidden reserve mutates reserved.
+ * Oracle: packages/bot-policy ledgerCases as cross-runtime oracle.
+ * Side effects: PGlite with schema.sql; mutates ledger tables per case.
+ * Gaps: Depends on ledgerCases coverage breadth.
+ */
 test('postgres policy ledger matches the bot-policy contract', async () => {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(schema);

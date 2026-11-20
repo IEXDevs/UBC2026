@@ -1,7 +1,9 @@
+import { configuredSolanaRpc, SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
 import { handleSpend } from './spend-route.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
-import { BotDurableObject } from './bot-do.mjs';
+import { BotDurableObject, INTERNAL_POSITION_HEADER, INTERNAL_POSITION_VALUE } from './bot-do.mjs';
+import { persistPositionCheck } from './position-persist.mjs';
 import {
   processQuickNodeWebhook,
   processStreamWalletSync,
@@ -12,7 +14,8 @@ import {
   assessPositions,
   listScheduledBotsFromSupabase,
   planScheduledWork,
-  readDevnetUsdcBalance,
+  readSolanaUsdcBalance,
+  readSolanaWalletBalances,
   readStreamHealthFromSupabase,
   walletAddress,
 } from './schedules.mjs';
@@ -20,10 +23,179 @@ import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 import { handleApiData } from './api-data.mjs';
+import { ownerAuthStatus, requestOwner, resolveOwner } from './owner-auth.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
-import { rememberBotAlert } from './bot-alerts.mjs';
-import { supabaseConfig } from './supabase-rest.mjs';
+import { botStub, rememberBotAlert } from './bot-alerts.mjs';
+import { createSupabaseRpc, supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 import { corsPreflightResponse, withCors } from './cors.mjs';
+import { SOL_MINT } from './usd-budget.mjs';
+
+const OWNER_HEADER = 'x-owner-id';
+
+/** Bot control + status actions that mutate or expose DO run / position state. */
+const OWNER_BOT_ACTIONS = new Set([
+  'status',
+  'wake',
+  'pause',
+  'resume',
+  'advance',
+  'decide',
+  'loop',
+  'card-loop',
+  'card-loop/cooldown',
+  'card-loop/break',
+]);
+
+function isOwnerBotAction(action) {
+  if (!action) return false;
+  if (OWNER_BOT_ACTIONS.has(action)) return true;
+  // Browser leaves share the DO and must not skip the edge owner gate.
+  return String(action).startsWith('browser/');
+}
+
+/**
+ * Status / positions / control plane: identity from resolveOwner (Privy bearer when
+ * secrets exist), then prove that owner owns the bot when Supabase is configured.
+ */
+async function assertBotOwner(request, env, botId) {
+  const { ownerId, error } = await resolveOwner(request, env);
+  if (error && !ownerId) {
+    return { ok: false, status: ownerAuthStatus(error), error, ownerId: null };
+  }
+  if (!ownerId) return { ok: false, status: 401, error: 'owner_required', ownerId: null };
+  if (!supabaseConfig(env)) return { ok: true, ownerId };
+  const result = await supabaseGet(
+    env,
+    `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+    env.fetch ?? fetch,
+  );
+  if (result.status !== 200 || !Array.isArray(result.rows)) {
+    return { ok: false, status: 503, error: 'bot_directory_unavailable', ownerId };
+  }
+  if (result.rows.length === 0) return { ok: false, status: 404, error: 'bot_not_found', ownerId };
+  return { ok: true, ownerId };
+}
+
+/**
+ * Forward to a DO stub with a verified owner header. Always strip the internal
+ * position-check header so clients cannot smuggle cron privileges.
+ */
+function forwardToBot(stub, target, request, ownerId = null) {
+  const headers = new Headers(request.headers);
+  headers.delete(INTERNAL_POSITION_HEADER);
+  if (ownerId) headers.set(OWNER_HEADER, ownerId);
+  const init = {
+    method: request.method,
+    headers,
+    redirect: request.redirect,
+  };
+  if (request.method !== 'GET' && request.method !== 'HEAD' && request.body) {
+    init.body = request.body;
+    // Node/undici requires duplex when re-wrapping a streaming body.
+    init.duplex = 'half';
+  }
+  return stub.fetch(new Request(target, init));
+}
+
+const LOOP_BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
+
+function clipLoopGoal(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, 2000);
+}
+
+async function readLoopPayload(request) {
+  const text = await request.text();
+  if (!text.trim()) return { kind: 'json', value: {} };
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'raw', text };
+    return { kind: 'json', value: parsed };
+  } catch {
+    return { kind: 'raw', text };
+  }
+}
+
+async function enrichLoopPayload(body, env, botId, ownerId) {
+  const next = { ...body };
+  if (supabaseConfig(env)) {
+    delete next.bot;
+    delete next.wallet;
+    delete next.ledger;
+    next.botId = botId;
+  }
+  if (!LOOP_BOT_ID.test(typeof next.botId === 'string' ? next.botId : '')) next.botId = botId;
+  const suppliedGoal = clipLoopGoal(next.goal);
+  if (suppliedGoal) next.goal = suppliedGoal;
+  else delete next.goal;
+  if (next.permission === 'full' && next.ownerPermission == null) next.ownerPermission = 'full';
+  if (next.ownerPermission !== 'full' && next.ownerPermission !== 'review') delete next.ownerPermission;
+  const complete = next.bot && next.wallet && next.ledger;
+  if (!complete && typeof env.loadLoopContext === 'function') {
+    try {
+      const loaded = await env.loadLoopContext({
+        botId,
+        ownerId,
+        goal: next.goal || '',
+      });
+      if (loaded && typeof loaded === 'object') {
+        if (!next.bot && loaded.bot) next.bot = loaded.bot;
+        if (!next.wallet && loaded.wallet) next.wallet = loaded.wallet;
+        if (!next.ledger && loaded.ledger) next.ledger = loaded.ledger;
+      }
+    } catch {
+      // A missing record is reported by the loop. Do not invent a bot or a balance.
+    }
+  }
+  if (!next.goal) {
+    const fromBot = clipLoopGoal(next.bot?.goal);
+    if (fromBot) next.goal = fromBot;
+  }
+  return next;
+}
+
+function forwardPrepared(stub, target, request, ownerId, body, raw = false) {
+  const headers = new Headers(request.headers);
+  headers.delete(INTERNAL_POSITION_HEADER);
+  headers.delete('content-length');
+  if (ownerId) headers.set(OWNER_HEADER, ownerId);
+  if (!raw) headers.set('content-type', 'application/json');
+  return stub.fetch(new Request(target, {
+    method: 'POST',
+    headers,
+    body: raw ? body : JSON.stringify(body),
+  }));
+}
+
+async function forwardBotAction(stub, target, request, ownerId, env, botId, action) {
+  if (request.method === 'POST' && (action === 'pause' || action === 'resume') && supabaseConfig(env)) {
+    // Update the spend policy before changing the checkpoint. The RPC is
+    // idempotent, so a caller can retry if the checkpoint write fails.
+    try {
+      const rpc = createSupabaseRpc(env, env.fetch ?? fetch);
+      const result = await rpc(action === 'pause' ? 'policy_pause_bot' : 'policy_resume_bot', {
+        payload: { ownerId, botId, now: Date.now() },
+      });
+      if (result?.state === 'blocked') return json({ error: result.reason }, 409);
+      if (result?.enabled !== (action === 'resume')) return json({ error: 'agent_control_failed' }, 502);
+    } catch {
+      return json({ error: 'agent_control_failed' }, 502);
+    }
+  }
+  if (action === 'loop' && request.method === 'POST') {
+    const read = await readLoopPayload(request);
+    if (read.kind === 'raw') return forwardPrepared(stub, target, request, ownerId, read.text, true);
+    const payload = await enrichLoopPayload(read.value, env, botId, ownerId);
+    return forwardPrepared(stub, target, request, ownerId, payload, false);
+  }
+  if (typeof action === 'string' && action.startsWith('card-loop') && request.method === 'POST') {
+    const read = await readLoopPayload(request);
+    const value = read.kind === 'json' ? { ...read.value } : {};
+    value.botId = botId;
+    return forwardPrepared(stub, target, request, ownerId, value, false);
+  }
+  return forwardToBot(stub, target, request, ownerId);
+}
 
 export { BotDurableObject };
 
@@ -31,17 +203,12 @@ function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-function botStub(env, botId) {
-  const id = env.BOT.idFromName(botId);
-  return env.BOT.get(id);
-}
-
 /**
  * Maelstrom agent runtime Worker.
  * Routes wake/pause/resume/status, the checkpointed bot loop, and owner-bound browser sessions to a per-bot Durable Object.
- * QuickNode Streams wake bots through /wake. Hourly cron records a paper
- * position check. A second cron re-checks devnet USDC when the stream is stale.
- * ElevenLabs webhook tools and the Grok custom LLM live under /voice and call these same routes.
+ * QuickNode Streams wake bots through /wake. Hourly cron reads on-chain holdings.
+ * A second cron re-checks USDC when the stream is stale.
+ * ElevenLabs speech hits /voice. The desk text agent decides. Webhook tools do not.
  */
 const routed = {
   async fetch(request, rawEnv) {
@@ -70,16 +237,24 @@ async function dispatch(request, env, rawEnv = env) {
       return json({
         ok: true,
         product: env.PRODUCT ?? 'Maelstrom',
-        cluster: env.CLUSTER ?? 'devnet',
+        cluster: SOLANA_CLUSTER,
+        rpcConfigured: Boolean(configuredSolanaRpc(rawEnv)),
         signing: Boolean(env.transferClient),
         supabase: Boolean(sb),
         secrets: {
           PRIVY_APP_ID: flag('PRIVY_APP_ID'),
           PRIVY_APP_SECRET: flag('PRIVY_APP_SECRET'),
-          QUICKNODE_DEVNET_RPC_URL: flag('QUICKNODE_DEVNET_RPC_URL'),
+          PRIVY_AUTHORIZATION_KEY: flag('PRIVY_AUTHORIZATION_KEY'),
+          SOLANA_RPC_URL: flag('SOLANA_RPC_URL'),
+          QUICKNODE_MAINNET_RPC_URL: flag('QUICKNODE_MAINNET_RPC_URL'),
           SUPABASE_URL: flag('SUPABASE_URL'),
           SUPABASE_ANON_KEY: flag('SUPABASE_ANON_KEY'),
           SUPABASE_SERVICE_ROLE_KEY: flag('SUPABASE_SERVICE_ROLE_KEY'),
+          META_MODEL_API_KEY: flag('META_MODEL_API_KEY'),
+          OPENROUTER_API_KEY: flag('OPENROUTER_API_KEY'),
+          ELEVENLABS_API_KEY: flag('ELEVENLABS_API_KEY'),
+          ELEVENLABS_AGENT_ID: flag('ELEVENLABS_AGENT_ID'),
+          ELEVENLABS_WEBHOOK_SECRET: flag('ELEVENLABS_WEBHOOK_SECRET'),
         },
       });
     }
@@ -113,14 +288,20 @@ async function dispatch(request, env, rawEnv = env) {
     const matched = matchApiRoute(request.method, url.pathname);
     if (matched?.route.id === 'spend.create') return handleSpend(request, env);
     if (matched?.route.action && matched.params.botId) {
-      const stub = botStub(env, matched.params.botId);
       const botId = matched.params.botId;
+      let ownerId = null;
+      if (isOwnerBotAction(matched.route.action)) {
+        const gate = await assertBotOwner(request, env, botId);
+        if (!gate.ok) return json({ error: gate.error }, gate.status);
+        ownerId = gate.ownerId;
+      }
+      const stub = botStub(env, botId);
       const prefix = `/bots/${encodeURIComponent(botId)}`;
       const rest = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : '';
       const target = rest.startsWith('/browser/')
         ? new URL(`https://bot/id/${encodeURIComponent(botId)}${rest}`)
         : new URL(`https://bot/${matched.route.action}`);
-      return stub.fetch(new Request(target, request));
+      return forwardBotAction(stub, target, request, ownerId, env, botId, matched.route.action);
     }
 
     // Live data / wallet routes (Supabase + Privy when secrets exist).
@@ -130,10 +311,20 @@ async function dispatch(request, env, rawEnv = env) {
       'wallets.create',
       'wallets.persist',
       'wallets.sign',
+      'wallets.export',
       'bots.list',
       'bots.create',
       'bots.delete',
+      'bots.freeze',
       'bots.chat',
+      'desk.lock',
+      'desk.unlock',
+      'desk.status',
+      'state.list',
+      'state.write',
+      'recovery.status',
+      'recovery.issue',
+      'recovery.verify',
       'events.list',
       'logs.list',
       'decisions.list',
@@ -144,6 +335,7 @@ async function dispatch(request, env, rawEnv = env) {
       'profiles.lookup',
       'transfers.list',
       'transfers.create',
+      'positions.list',
     ].includes(matched.route.id)) {
       const response = await handleApiData(request, env, matched);
       if (response) return response;
@@ -153,9 +345,15 @@ async function dispatch(request, env, rawEnv = env) {
     if (botMatch) {
       const botId = decodeURIComponent(botMatch[1]);
       const action = botMatch[2] ?? 'status';
+      let ownerId = null;
+      if (isOwnerBotAction(action)) {
+        const gate = await assertBotOwner(request, env, botId);
+        if (!gate.ok) return json({ error: gate.error }, gate.status);
+        ownerId = gate.ownerId;
+      }
       const stub = botStub(env, botId);
       const target = new URL(`https://bot/${action}`);
-      return stub.fetch(new Request(target, request));
+      return forwardBotAction(stub, target, request, ownerId, env, botId, action);
     }
 
     return json({ error: 'not_found' }, 404);
@@ -177,12 +375,25 @@ async function runScheduled(controller, rawEnv, ctx) {
       ? await env.readStreamHealth(now)
       : await readStreamHealthFromSupabase(env, env.fetch ?? fetch);
     const plan = planScheduledWork({ bots, now, cron, health });
-    const needsPrices = plan.positionChecks.some(bot => Array.isArray(bot.positions) && bot.positions.length > 0);
-    const lookup = needsPrices ? priceLookup(env) : null;
-
+    const holdingsByWallet = new Map();
+    let lookup;
     for (const bot of plan.positionChecks) {
-      const quotes = lookup ? await quotePositions(lookup, bot.positions) : {};
-      ctx.waitUntil(deliverCheck(env, bot, { reason: 'cron-hourly', quotes, balance: null, now }));
+      const address = walletAddress(bot);
+      if (address && !holdingsByWallet.has(address)) {
+        const readHoldings = env.readTradeHoldings ?? (address => readSolanaWalletBalances({
+          address, rpcUrl: configuredSolanaRpc(env), fetcher: env.fetch ?? fetch,
+        }));
+        const live = await readHoldings(address).catch(() => null);
+        holdingsByWallet.set(address, live);
+      }
+      const snapshot = holdingsByWallet.get(address);
+      const available = snapshot?.ok === true && snapshot.cluster === SOLANA_CLUSTER;
+      const positions = available ? (snapshot.holdings ?? []).map(({ mint, asset, amount, decimals }) => ({
+        mint: mint || (asset === 'SOL' ? SOL_MINT : null), amount, decimals,
+      })) : [];
+      if (positions.length && lookup === undefined) lookup = priceLookup(env);
+      const quotes = lookup && positions.length ? await quotePositions(lookup, positions) : {};
+      ctx.waitUntil(deliverCheck(env, bot, { reason: 'cron-hourly', positions, quotes, available, now }));
     }
 
     if (!plan.streamDropped) {
@@ -225,6 +436,7 @@ const worker = {
       response = json({ error: 'internal' }, 500);
     }
     if (logging) {
+      if (captured) captured.ownerId = requestOwner(request);
       const pending = persistHttpActivity(env, { captured, response, started }).catch(() => {});
       if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(pending);
       else await pending;
@@ -239,10 +451,17 @@ const worker = {
 
 function logCron(env, ctx, detail) {
   if (!supabaseConfig(env) || typeof ctx?.waitUntil !== 'function') return;
+  // Security: never log full position books, quotes, or balances — ids + flags only.
+  const safe = {
+    cron: typeof detail?.cron === 'string' ? detail.cron.slice(0, 64) : null,
+    botCount: Array.isArray(detail?.bots) ? detail.bots.length : 0,
+    bots: Array.isArray(detail?.bots) ? detail.bots.slice(0, 50).map(id => String(id).slice(0, 128)) : [],
+    streamDropped: detail?.streamDropped === true,
+  };
   ctx.waitUntil(persistActivity(env, {
     source: 'cron',
-    action: `cron ${detail.cron ?? 'scheduled'}`,
-    detail,
+    action: `cron ${safe.cron ?? 'scheduled'}`,
+    detail: safe,
   }).catch(() => {}));
 }
 
@@ -271,24 +490,25 @@ async function readBalance(env, address) {
     try {
       return await env.readWalletBalance({ address });
     } catch {
-      return { ok: false, code: 'rpc_failed', cluster: 'devnet', address };
+      return { ok: false, code: 'rpc_failed', cluster: SOLANA_CLUSTER, address };
     }
   }
-  return readDevnetUsdcBalance({
-    rpcUrl: env.QUICKNODE_DEVNET_RPC_URL,
+  return readSolanaUsdcBalance({
+    rpcUrl: configuredSolanaRpc(env),
     address,
     fetcher: env.fetch ?? fetch,
   });
 }
 
-function checkPayload(bot, { reason, quotes, balance, now }) {
+function checkPayload(bot, { reason, positions, quotes, balance, available, now }) {
   return {
     botId: bot.id,
     goal: typeof bot.goal === 'string' ? bot.goal : '',
     type: bot.type ?? null,
     maxLoss: bot.maxLoss ?? bot.cap?.maxLoss ?? null,
     ownerId: typeof bot.ownerId === 'string' ? bot.ownerId : null,
-    positions: Array.isArray(bot.positions) ? bot.positions : [],
+    positions: positions ?? [],
+    available: available === true,
     quotes: quotes ?? {},
     balance: balance ?? null,
     reason,
@@ -314,6 +534,7 @@ function deliverCheck(env, bot, details) {
     balance: payload.balance,
     reason: payload.reason,
     now: payload.now,
+    available: payload.available,
   });
   const quotes = {};
   for (const [mint, quote] of Object.entries(payload.quotes ?? {})) quotes[mint] = slimQuote(quote);
@@ -321,20 +542,30 @@ function deliverCheck(env, bot, details) {
   payload.balance = recorded.balance;
   const response = botStub(env, bot.id).fetch(new Request('https://bot/position-check', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      [INTERNAL_POSITION_HEADER]: INTERNAL_POSITION_VALUE,
+      ...(payload.ownerId ? { [OWNER_HEADER]: payload.ownerId } : {}),
+    },
     body: JSON.stringify(payload),
   })).then(response => response, () => Response.json({ ok: false, check: recorded }));
-  if (recorded.flag === 'max-loss' && payload.ownerId) {
-    return response.then(async (delivered) => {
+  return response.then(async (delivered) => {
+    if (delivered.ok && payload.ownerId) {
+      await persistPositionCheck(env, {
+        ownerId: payload.ownerId,
+        botId: bot.id,
+        check: recorded,
+      }).catch(() => {});
+    }
+    if ((recorded.flag === 'max-loss' || recorded.flag === 'near-max-loss') && payload.ownerId) {
       await rememberBotAlert(env, null, {
-        alert: 'max-loss',
+        alert: recorded.flag === 'max-loss' ? 'max-loss' : 'near-max-loss',
         botId: bot.id,
         ownerId: payload.ownerId,
         at: payload.now,
-        scope: payload.now,
+        scope: recorded.flag === 'near-max-loss' ? 'near-max-loss' : payload.now,
       });
-      return delivered;
-    });
-  }
-  return response;
+    }
+    return delivered;
+  });
 }

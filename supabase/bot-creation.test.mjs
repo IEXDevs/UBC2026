@@ -7,7 +7,7 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 const owner = 'user_1';
 const now = 1_700_000_000_000;
-const mainAddress = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const mainAddress = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const extraAddress = 'So11111111111111111111111111111111111111112';
 
 function parseResult(value) {
@@ -49,6 +49,13 @@ function draft(overrides = {}) {
   };
 }
 
+/**
+ * Achieves: Builtin templates are locked; drafts force enabled=false; frozen/foreign wallets refused; enable_bot is idempotent; JWT owner enforced.
+ * Fails when: Builtins deletable, enabled=true drafts, or cross-owner create succeeds.
+ * Oracle: schema.sql bot template + create_bot_draft/enable_bot RPCs.
+ * Side effects: PGlite with full schema.sql.
+ * Gaps: Does not cover concurrent enable races.
+ */
 test('postgres keeps three locked templates and creates disabled bots', async () => {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(schema);

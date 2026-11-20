@@ -1,17 +1,20 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Checkpointed bot loop:
  * research → decide → trust gate → verify → bot-policy → approval → execute → memo → monitor.
  * Each completed or waiting step is persisted before the next one starts.
- * Signing goes through an injected devnet transfer client. This module does not call x402.
+ * Signing goes through an injected mainnet-beta transfer client. This module does not call x402.
  */
 import { approvalRequirement } from '@ubc2026/agent-loop';
 import { usdPriceBaseUnits } from '@ubc2026/prices';
 import { evaluateProposal, validateApproval } from '@ubc2026/bot-policy';
 import { evaluateTrust } from '@ubc2026/trust-score';
-import { transferDevnetUsdc } from '@ubc2026/transfers';
+import { transferSolanaUsdc } from '@ubc2026/transfers';
 import { memoFromDecision, normalizeFacts, reachConsensus } from '@ubc2026/verify-consensus';
+import { parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import { assertSpendAllowed } from '@ubc2026/wallets';
 import { advanceRun, pauseRun, resumeRun } from './checkpoint.mjs';
+import { createLoopSwapIntent, LOOP_SWAP_PENDING, pendingLoopSwap } from './loop-swap.mjs';
 
 export class LoopEngineError extends Error {
   constructor(code, status = 400) {
@@ -106,31 +109,34 @@ function asAmount(value) {
 
 function proposalFrom(raw, bot, run) {
   if (!raw || typeof raw !== 'object') return null;
-  const cluster = raw.cluster == null ? 'devnet' : raw.cluster;
-  if (cluster !== 'devnet' && cluster !== 'testnet') return { rejectedCluster: String(cluster).slice(0, 32) };
+  const cluster = raw.cluster == null ? SOLANA_CLUSTER : raw.cluster;
+  if (cluster !== SOLANA_CLUSTER) return { rejectedCluster: String(cluster).slice(0, 32) };
   if (raw.asset !== bot.cap?.asset) return { assetMismatch: true };
+  const asset = raw.asset;
   const outflow = asAmount(raw.outflow);
   const expectedReceive = asAmount(raw.expectedReceive);
   const maxFee = asAmount(raw.maxFee);
-  if (!outflow || outflow === '0' || !expectedReceive || !maxFee) return null;
+  if (!outflow || outflow === '0' || !expectedReceive || maxFee == null) return null;
   if (typeof raw.recipient !== 'string' || raw.recipient.length < 32 || raw.recipient.length > 64) return null;
   if (!Number.isSafeInteger(raw.expiresAt) || raw.expiresAt <= 0) return null;
   const id = typeof raw.id === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(raw.id) ? raw.id : `p_${run.runId}`;
   const quoteId = typeof raw.quoteId === 'string' && quoteIdOk(raw.quoteId) ? raw.quoteId : `q_${run.runId}`;
-  const expectedReceiveAsset = typeof raw.expectedReceiveAsset === 'string' && raw.expectedReceiveAsset.length <= 64
+  const namedReceive = typeof raw.expectedReceiveAsset === 'string'
+    && raw.expectedReceiveAsset.length > 0
+    && raw.expectedReceiveAsset.length <= 64
     ? raw.expectedReceiveAsset
-    : raw.asset;
+    : null;
   return {
     proposal: {
       id,
       botId: bot.id,
       cluster,
-      asset: raw.asset,
+      asset,
       recipient: raw.recipient,
       quoteId,
       outflow,
       expectedReceive,
-      expectedReceiveAsset,
+      expectedReceiveAsset: namedReceive || asset,
       maxFee,
       expiresAt: raw.expiresAt,
     },
@@ -173,6 +179,57 @@ function goalFor(run, bot) {
   return run.goal || bot.goal || '';
 }
 
+/** Trading goals, including a long-term inflation goal, must leave decide with a proposal. */
+export function isTradingGoal(goal, bot) {
+  if (bot?.type === 'trading') return true;
+  if (bot?.type === 'shopping') return false;
+  const text = `${goal || ''}`.toLowerCase();
+  return /\b(trad(?:e|ing)|swap|inflation)\b/.test(text);
+}
+
+/** Full permission continues. Ask is not an override of a fully-automatic bot. */
+function trustedOwnerPermission(input) {
+  const value = input?.ownerPermission;
+  if (value === 'full' || value === 'review') return value;
+  return undefined;
+}
+
+function approvalOptions(input) {
+  const ownerPermission = trustedOwnerPermission(input);
+  if (!ownerPermission) return {};
+  return {
+    ownerPermission,
+    confirmed: input?.confirmed === true,
+    reviewCap: typeof input?.reviewCap === 'string' ? input.reviewCap : undefined,
+  };
+}
+
+export function decideTask(goal, bot) {
+  if (isTradingGoal(goal, bot)) {
+    const lines = [
+      'Role: decide',
+      'Return JSON with summary and proposal. For a trade, proposal has cluster and swap. If the goal only asks for monitoring or there is no suitable trade, return proposal: null.',
+      `Use only ${SOLANA_CLUSTER}. Swap fields are inputMint, outputMint and inAmount. Use exact Solana mint addresses and an input amount in that mint\'s base units. Use the wrapped SOL mint to identify native SOL.`,
+      'Use an asset held by the assigned wallet. Leave SOL for the network fee. The spending limit is in USD and does not select which token is spent.',
+      'The desk gets a fresh Jupiter quote and reviews it with the owner. Do not supply a price, a recipient, a signed transaction or an authorization.',
+    ];
+    if (bot.cap?.asset === 'USD' && /^[1-9][0-9]{0,39}$/.test(bot.cap.maxPerTransaction ?? '')) {
+      lines.push(`The per-transaction cap is ${bot.cap.maxPerTransaction} microdollars.`);
+    }
+    return lines.join('\n');
+  }
+  return [
+    'Role: decide',
+    'Return JSON only with summary, facts, and proposal.',
+    'facts fields: asset, mint, cluster, price, amount, trustScore, reasonSummary.',
+    'When a Jupiter trust lookup is configured, the platform replaces trustScore with the Jupiter Tokens API v2 score before the trust gate. A model-invented score does not pass that gate.',
+    'The platform uses server prices before verification. A price quote does not authorize a transaction.',
+    'proposal fields: asset, recipient, outflow, expectedReceive, expectedReceiveAsset, maxFee, expiresAt, cluster.',
+    `cluster must be ${SOLANA_CLUSTER}. Amounts are integer strings in base units.`,
+    'Do not invent an API key or a signature.',
+  ].join('\n');
+}
+
 function resolvePause(run, ctx) {
   if (!run.paused) return run;
   if (APPROVAL_RETRY.has(run.pauseReason) && ctx.input.approval) return resumeRun(run, ctx.now);
@@ -188,6 +245,15 @@ function resolvePause(run, ctx) {
     return resumeRun({ ...run, checkpoints }, ctx.now);
   }
   return run;
+}
+
+async function acceptTurn(ctx, kind, detail) {
+  const completion = await ctx.models.complete({
+    role: 'verify',
+    goal: ctx.bot?.goal || '',
+    task: turnVerifyTask(kind, detail),
+  });
+  return parseTurnVerdict(completion.text).allow;
 }
 
 async function performResearch(run, ctx) {
@@ -220,7 +286,24 @@ async function performResearch(run, ctx) {
     summary = completion.text;
     model = completion.model;
   }
-  return finishStep(run, 'research', { summary: clip(summary), sources: slim, model, searchNote }, ctx.now);
+  if (!(await acceptTurn(ctx, 'research', summary))) {
+    return waitStep(run, 'research', 'verifier-blocked', { model }, ctx.now);
+  }
+  const positions = Array.isArray(ctx.input.positions) ? ctx.input.positions.slice(0, 30) : [];
+  return finishStep(run, 'research', {
+    summary: clip(summary),
+    sources: slim,
+    model,
+    searchNote,
+    read: {
+      goal: clip(goalFor(run, ctx.bot), 500),
+      type: ctx.bot?.type ?? null,
+      walletId: ctx.wallet?.id ?? null,
+      approvalMode: ctx.bot?.approvalMode ?? null,
+      cap: ctx.bot?.cap ?? null,
+      positionCount: positions.length,
+    },
+  }, ctx.now);
 }
 
 async function performDecide(run, ctx) {
@@ -234,18 +317,16 @@ async function performDecide(run, ctx) {
     rawFacts = ctx.input.facts;
     rawProposal = ctx.input.proposal;
   } else {
+    const goal = goalFor(run, ctx.bot);
+    const holdings = ctx.bot.cap?.asset === 'USD' && isTradingGoal(goal, ctx.bot)
+      ? await ctx.deps.readTradeHoldings?.(ctx.wallet.address) : null;
+    const walletContext = holdings?.ok === true && Array.isArray(holdings.holdings)
+      ? `On-chain wallet holdings (base units): ${JSON.stringify(holdings.holdings.map(({ mint, asset, amount, decimals }) => ({ mint, asset, amount, decimals })))}`
+      : 'On-chain wallet holdings are unavailable. Do not infer a balance.';
     const completion = await ctx.models.complete({
       role: 'decide',
-      goal: goalFor(run, ctx.bot),
-      task: [
-        'Role: decide',
-        'Return JSON only with summary, facts, and proposal.',
-        'facts fields: asset, mint, cluster, price, amount, trustScore, reasonSummary.',
-        'When a mainnet price lookup is configured, the platform replaces price with that paper quote before verify. A price quote does not sign, broadcast, or authorize a transaction.',
-        'proposal fields: asset, recipient, outflow, expectedReceive, expectedReceiveAsset, maxFee, expiresAt, cluster.',
-        'cluster must be devnet or testnet. Amounts are integer strings in base units.',
-        'Do not invent an API key or a signature.',
-      ].join('\n'),
+      goal,
+      task: `${decideTask(goal, ctx.bot)}\n${walletContext}`,
       untrusted: [{ role: 'user', content: `Untrusted research summary:\n${clip(research?.summary ?? '', 2000)}` }],
     });
     model = completion.model;
@@ -254,6 +335,21 @@ async function performDecide(run, ctx) {
     summary = typeof parsed.summary === 'string' ? parsed.summary : clip(completion.text, 500);
     rawFacts = parsed.facts;
     rawProposal = parsed.proposal;
+  }
+  if (rawProposal?.swap != null) {
+    if (SOLANA_CLUSTER !== 'mainnet-beta' || (rawProposal.cluster != null && rawProposal.cluster !== SOLANA_CLUSTER)) {
+      return waitStep(run, 'decide', 'cluster-rejected', { model }, ctx.now);
+    }
+    if (ctx.bot.cap?.asset !== 'USD') return waitStep(run, 'decide', 'swap_requires_usd_budget', { model }, ctx.now);
+    const swapIntent = createLoopSwapIntent({ swap: rawProposal.swap, bot: ctx.bot, wallet: ctx.wallet, now: ctx.now });
+    if (!swapIntent) return waitStep(run, 'decide', 'decide-invalid', { model }, ctx.now);
+    if (!(await acceptTurn(ctx, 'decide', { summary, swap: rawProposal.swap }))) {
+      return waitStep(run, 'decide', 'verifier-blocked', { model }, ctx.now);
+    }
+    return waitStep(run, 'decide', LOOP_SWAP_PENDING, { model, summary: clip(summary, 500), swapIntent }, ctx.now);
+  }
+  if (rawProposal === null && isTradingGoal(goalFor(run, ctx.bot), ctx.bot)) {
+    return waitStep(run, 'decide', 'no-trade-found', { model }, ctx.now);
   }
   const built = proposalFrom(rawProposal, ctx.bot, run);
   if (!built) return waitStep(run, 'decide', 'decide-invalid', { model }, ctx.now);
@@ -264,15 +360,52 @@ async function performDecide(run, ctx) {
   if (facts.amount !== built.proposal.outflow || facts.cluster !== built.proposal.cluster || facts.asset !== built.proposal.asset) {
     return waitStep(run, 'decide', 'amount-mismatch', { model }, ctx.now);
   }
-  return finishStep(run, 'decide', { summary: clip(summary, 500), proposal: built.proposal, facts, model }, ctx.now);
+  const looked = await requestJupiterTrust(facts, ctx);
+  if (looked?.error) return waitStep(run, 'decide', looked.error, { model }, ctx.now);
+  if (looked?.score) facts.trustScore = looked.score;
+  if (!(await acceptTurn(ctx, 'decide', summary))) {
+    return waitStep(run, 'decide', 'verifier-blocked', { model }, ctx.now);
+  }
+  return finishStep(run, 'decide', {
+    summary: clip(summary, 500),
+    proposal: built.proposal,
+    facts,
+    model,
+    ...(looked?.score ? { trust: { score: looked.score, source: looked.source } } : {}),
+  }, ctx.now);
+}
+
+function readLookupScore(looked) {
+  if (typeof looked === 'string' || typeof looked === 'number') return String(looked);
+  if (looked && (typeof looked.score === 'string' || typeof looked.score === 'number')) return String(looked.score);
+  return null;
+}
+
+/** Request a Jupiter trust score while deciding. Null when no lookup is configured. */
+async function requestJupiterTrust(facts, ctx) {
+  if (typeof ctx.deps.trustLookup !== 'function') return null;
+  try {
+    const looked = await ctx.deps.trustLookup(facts.mint);
+    const score = readLookupScore(looked);
+    if (!score) return { error: 'trust-unavailable' };
+    const source = looked && typeof looked === 'object' && typeof looked.source === 'string'
+      ? looked.source
+      : 'jupiter-tokens-v2';
+    return { score, source };
+  } catch {
+    return { error: 'trust-unavailable' };
+  }
 }
 
 async function performTrust(run, ctx) {
   const facts = run.checkpoints.decide.facts;
-  let score = ctx.input.trustScore;
+  const recorded = run.checkpoints.decide.trust;
+  let score = recorded?.score ?? null;
+  if (score == null) score = ctx.input.trustScore;
   if (score == null && typeof ctx.deps.trustLookup === 'function') {
-    const looked = await ctx.deps.trustLookup(facts.mint);
-    score = typeof looked === 'string' || typeof looked === 'number' ? looked : looked?.score;
+    const looked = await requestJupiterTrust(facts, ctx);
+    if (looked?.error) return waitStep(run, 'trust-gate', looked.error, {}, ctx.now);
+    score = looked?.score ?? null;
   }
   if (score == null) return waitStep(run, 'trust-gate', 'trust-not-configured', {}, ctx.now);
   let trust;
@@ -306,8 +439,8 @@ function publicQuote(quote) {
     priceUsd: typeof quote.priceUsd === 'string' ? quote.priceUsd : null,
     quoteSource: typeof quote.quoteSource === 'string' ? quote.quoteSource.slice(0, 64) : null,
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
-    label: quote.label === 'devnet execution, mainnet pricing' ? quote.label : 'devnet execution, mainnet pricing',
+    executionCluster: SOLANA_CLUSTER,
+    label: quote.label === EXECUTION_LABEL ? quote.label : EXECUTION_LABEL,
     paperPnl: true,
     authorizesTransaction: false,
   };
@@ -351,10 +484,8 @@ async function performVerify(run, ctx) {
       if (priced) {
         const again = await quotedPrice(facts, ctx);
         if (!again || again.error) throw new LoopEngineError(again?.error || 'price_unavailable', 422);
-        const base = ctx.input.verifyFacts ? ctx.input.verifyFacts : facts;
-        return { ...base, price: again.price };
+        return { ...facts, price: again.price };
       }
-      if (ctx.input.verifyFacts) return ctx.input.verifyFacts;
       if (ctx.deps.trustLookup) return verifyFromProviders(facts, ctx);
       const completion = await ctx.models.complete({
         role: 'verify',
@@ -382,6 +513,7 @@ async function performVerify(run, ctx) {
   if (consensus.state !== 'consensus') {
     return waitStep({ ...run, attempts }, 'verify', 'verify-mismatch', {
       attemptCount: consensus.attempts.length,
+      outcome: consensus.state === 'manual-review' ? 'manual-review' : consensus.state,
     }, ctx.now);
   }
   const memo = memoFromDecision(consensus.decisionRecord);
@@ -405,7 +537,7 @@ function performPolicy(run, ctx) {
   if (policy.state === 'blocked') return waitStep(run, 'policy', policy.reason ?? 'blocked', { policy: slimPolicy(policy) }, ctx.now);
   let needed;
   try {
-    needed = approvalRequirement(ctx.bot, policy, { ownerPermission: ctx.input?.ownerPermission });
+    needed = approvalRequirement(ctx.bot, policy, approvalOptions(ctx.input));
   } catch {
     return waitStep(run, 'policy', 'policy-invalid', { policy: slimPolicy(policy) }, ctx.now);
   }
@@ -465,6 +597,10 @@ async function performExecute(run, ctx) {
   const proposal = run.checkpoints.decide?.proposal;
   if (typeof memo !== 'string' || !memo || !proposal) return waitStep(run, 'execute', 'memo-missing', {}, ctx.now);
   const idempotencyKey = run.runId;
+  if (proposal.swap) return waitStep(run, 'execute', 'legacy-swap-expired', { idempotencyKey }, ctx.now);
+  if (ctx.input.scheduled === true || ctx.bot.cap?.asset === 'USD') {
+    return waitStep(run, 'execute', 'use-permissioned-spend', { idempotencyKey }, ctx.now);
+  }
   if (!ctx.deps.transferClient && typeof ctx.deps.execute !== 'function') {
     return waitStep(run, 'execute', 'signer-not-configured', { idempotencyKey }, ctx.now);
   }
@@ -501,7 +637,7 @@ async function performExecute(run, ctx) {
   }
 
   const result = ctx.deps.transferClient
-    ? await transferDevnetUsdc({
+    ? await transferSolanaUsdc({
       client: ctx.deps.transferClient,
       bot: ctx.bot,
       wallet: ctx.wallet,
@@ -518,7 +654,7 @@ async function performExecute(run, ctx) {
       idempotencyKey,
     });
   const cluster = result?.cluster;
-  if (cluster !== 'devnet' && cluster !== 'testnet') {
+  if (cluster !== SOLANA_CLUSTER) {
     return waitStep(started, 'execute', 'wrong-cluster', { idempotencyKey }, ctx.now);
   }
   if (result.memo != null && result.memo !== memo) {
@@ -552,8 +688,11 @@ async function performMonitor(run, ctx) {
   const completion = await ctx.models.complete({
     role: 'monitor',
     goal: goalFor(run, ctx.bot),
-    task: 'Role: monitor\nThe devnet execution finished. Write a one-line watch note. Do not propose a new spend.',
+    task: 'Role: monitor\nThe mainnet-beta execution finished. Write a one-line watch note. Do not propose a new spend.',
   });
+  if (!(await acceptTurn(ctx, 'monitor', completion.text))) {
+    return waitStep(run, 'monitor', 'verifier-blocked', { model: completion.model }, ctx.now);
+  }
   return finishStep(run, 'monitor', { note: clip(completion.text, 500), model: completion.model }, ctx.now);
 }
 
@@ -598,6 +737,7 @@ export async function runBotLoop({
 
   const ctx = { bot, wallet, ledger, ownerId, input, models, deps, now, persist };
   let current = { ...run, checkpoints: { ...(run.checkpoints ?? {}) } };
+  if (pendingLoopSwap(current)) return { run: current, waiting: true, done: false };
 
   if (current.paused) {
     const resumed = resolvePause(current, ctx);

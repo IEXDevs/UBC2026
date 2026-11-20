@@ -4,6 +4,7 @@ import CrashGuard from '../components/CrashGuard';
 import DeployReload from '../components/DeployReload';
 import HostedPreview from '../components/HostedPreview';
 import PrivyRoot from '../components/PrivyRoot';
+import SoftTouch from '../components/SoftTouch';
 import { readHostedDevPreview } from '../lib/hosted-preview.mjs';
 import { publicPrivyIds } from '../lib/public-env.mjs';
 
@@ -27,6 +28,7 @@ export default async function RootLayout({ children }) {
     <html lang="en">
       <body className={chatFont.variable}>
         <DeployReload />
+        <SoftTouch />
         <HostedPreview enabled={hostedPreview}>
           <CrashGuard>
             <PrivyRoot appId={privy.appId} clientId={privy.clientId}>{children}</PrivyRoot>

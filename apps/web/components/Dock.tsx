@@ -325,7 +325,7 @@ function DockMenu({
     const layers = [outer?.firstElementChild, glassRef.current, shapeRef.current, listRef.current].filter(
       (layer): layer is Element => Boolean(layer)
     );
-    const duration = reduceRef.current ? 100 : 150;
+    const duration = reduceRef.current ? 100 : 220;
     let done = false;
     const finish = () => {
       if (done || !aliveRef.current) return;
@@ -333,9 +333,9 @@ function DockMenu({
       callbacks.current.onExited?.();
     };
     if (outer && !reduceRef.current) {
-      outer.animate([{ transform: 'scale(1)' }, { transform: 'scale(0.96)' }], {
+      outer.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(0.92)', opacity: 0 }], {
         duration,
-        easing: 'ease-in',
+        easing: 'cubic-bezier(0.4, 0, 1, 1)',
         fill: 'forwards'
       });
     }

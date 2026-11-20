@@ -1,11 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import ModalClose from './ModalClose';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
-import { draftBot } from '../lib/roster.mjs';
+import { draftBot, draftTransferCap } from '../lib/roster.mjs';
+import { dollarsToBaseUnits } from '../lib/spend-permission.mjs';
 import { AgentPhoto } from './AgentEdit';
 import { usePresence } from './usePresence';
+
+const STEPS = ['name', 'look', 'limits'];
+const STEP_TITLES = {
+  name: 'Create new agent',
+  look: 'Choose a color',
+  limits: 'Set spending limits',
+};
 
 const SPLASH = [
   { kind: 'circle', color: '#7c5cff', size: 196, side: 'left', y: '16%', gap: 28, rot: -8 },
@@ -38,15 +47,37 @@ const CONFETTI = Array.from({ length: 42 }, (_, i) => {
   };
 });
 
+function LimitField({ id, label, value, onChange, autoFocus, exceedsTotal = false }) {
+  const invalid = Boolean(value.trim()) && !dollarsToBaseUnits(value);
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label} (USD)</label>
+      <input
+        id={id}
+        value={value}
+        inputMode="decimal"
+        placeholder="0.00"
+        autoFocus={autoFocus}
+        aria-describedby={exceedsTotal ? 'agent-limit-error' : invalid ? `${id}-error` : undefined}
+        aria-invalid={exceedsTotal || invalid}
+        onChange={event => onChange(event.target.value)}
+      />
+      {invalid && <p id={`${id}-error`} className="hint">Enter a dollar amount above zero.</p>}
+    </div>
+  );
+}
+
 export default function CreateBotDialog({ open, onClose, onCreate, first = false }) {
   const { mounted, leaving } = usePresence(open);
   const [name, setName] = useState('');
   const [color, setColor] = useState('#7c5cff');
   const [image, setImage] = useState('');
   const [shape, setShape] = useState('circle');
+  const [maxOutflow, setMaxOutflow] = useState('');
+  const [maxPerTransaction, setMaxPerTransaction] = useState('');
   const [celebrate, setCelebrate] = useState(false);
   const [step, setStep] = useState('name');
-  const [moreColors, setMoreColors] = useState(false);
+  const stepTitle = useRef(null);
   const [seenOpen, setSeenOpen] = useState(open);
   if (open !== seenOpen) {
     setSeenOpen(open);
@@ -59,8 +90,9 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     setColor('#7c5cff');
     setImage('');
     setShape(randomShape());
+    setMaxOutflow('');
+    setMaxPerTransaction('');
     setStep('name');
-    setMoreColors(false);
     function onKey(event) {
       if (event.key === 'Escape') onClose();
     }
@@ -68,21 +100,36 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!mounted) return null;
+  useEffect(() => {
+    if (open && step === 'look') stepTitle.current?.focus();
+  }, [open, step]);
+
+  if (!mounted || typeof document === 'undefined') return null;
+  const stepIndex = STEPS.indexOf(step);
+  const total = dollarsToBaseUnits(maxOutflow);
+  const perTransfer = dollarsToBaseUnits(maxPerTransaction);
+  const cap = draftTransferCap('USD', total, perTransfer);
+  const perTransferTooHigh = Boolean(total && perTransfer && !cap);
+  const canContinue = {
+    name: Boolean(name.trim()),
+    look: true,
+    limits: Boolean(cap),
+  }[step];
 
   function submit(event) {
     event.preventDefault();
-    if (step === 'name') {
-      if (name.trim()) setStep('look');
+    if (!open || !canContinue) return;
+    if (step !== 'limits') {
+      setStep(STEPS[stepIndex + 1]);
       return;
     }
-    const bot = draftBot({ name, shape, color });
+    const bot = draftBot({ name, shape, color, cap });
     if (!bot) return;
     onCreate({ ...bot, image });
   }
 
-  return (
-    <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
+  return createPortal(
+    <div className={`backdrop is-center${first ? ' is-cover' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={onClose}>
       {celebrate ? (
         <div className="create-splash" aria-hidden="true">
           {SPLASH.map(piece => (
@@ -101,13 +148,14 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
         </div>
       ) : null}
       <form
-        className={`sheet${celebrate ? ' is-create' : ''}`}
+        className={`sheet create-agent${celebrate ? ' is-create' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-agent-title"
         onMouseDown={event => event.stopPropagation()}
         onSubmit={submit}
       >
+        <ModalClose label="Close create agent" onClick={onClose} />
         {celebrate ? (
           <>
             <div className="create-scrim" aria-hidden="true" />
@@ -131,56 +179,75 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
           </>
         ) : null}
         <div className="sheet-head">
-          <h2 id="create-agent-title">{step === 'name' ? 'Create new agent' : 'Choose a color'}</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            <X size={18} strokeWidth={1.75} />
+          <div>
+            <p className="create-progress">Step {stepIndex + 1} of {STEPS.length}</p>
+            <h2 id="create-agent-title" ref={stepTitle} tabIndex={-1}>{STEP_TITLES[step]}</h2>
+          </div>
+        </div>
+        <div className="create-step" key={step}>
+          {step === 'name' && (
+            <div className="create-name">
+              <label className="bot-name-label" htmlFor="agent-name">Name</label>
+              <input
+                id="agent-name"
+                className="bot-name"
+                value={name}
+                maxLength={64}
+                autoFocus
+                onChange={event => setName(event.target.value)}
+              />
+            </div>
+          )}
+          {step === 'look' && (
+            <div className="create-look">
+              <div className="bot-preview">
+                <AgentPhoto shape={shape} color={color} image={image} name={name} size={112} onImage={setImage} />
+              </div>
+              <div className="create-look-copy">
+                <p className="bot-look-name">{name.trim()}</p>
+                <p className="swatch-name">{colorLabel(color)}</p>
+              </div>
+              <div className="swatches" role="group" aria-label="Agent color">
+                {colorsForPicker(color, true).map(swatch => (
+                  <button
+                    key={swatch.id}
+                    type="button"
+                    className={swatch.value === color ? 'is-on' : ''}
+                    style={{ background: swatch.value }}
+                    aria-label={colorLabel(swatch.value)}
+                    aria-pressed={swatch.value === color}
+                    onClick={() => setColor(swatch.value)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {step === 'limits' && (
+            <div className="create-limits">
+              <p className="hint">
+                These limits cover all tokens and network fees.
+              </p>
+              <LimitField id="agent-total-limit" label="Total limit"
+                value={maxOutflow} onChange={setMaxOutflow} autoFocus />
+              <LimitField id="agent-transfer-limit" label="Per-transaction limit"
+                value={maxPerTransaction} onChange={setMaxPerTransaction} exceedsTotal={perTransferTooHigh} />
+              {perTransferTooHigh && (
+                <p id="agent-limit-error" className="hint create-limit-error" role="status">
+                  The per-transaction limit must be at or below the total limit.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="sheet-actions">
+          <button type="button" className="ghost" onClick={step === 'name' ? onClose : () => setStep(STEPS[stepIndex - 1])}>
+            {step === 'name' ? 'Cancel' : 'Back'}
+          </button>
+          <button type="submit" className="solid" disabled={!canContinue}>
+            {step === 'limits' ? 'Create agent' : 'Continue'}
           </button>
         </div>
-        {step === 'name' ? (
-          <>
-            <label className="bot-name-label" htmlFor="agent-name">Name</label>
-            <input
-              id="agent-name"
-              className="bot-name"
-              value={name}
-              maxLength={64}
-              autoFocus
-              onChange={event => setName(event.target.value)}
-            />
-            <div className="sheet-actions">
-              <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-              <button type="submit" className="solid" disabled={!name.trim()}>Continue</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="bot-preview">
-              <AgentPhoto shape={shape} color={color} image={image} size={112} onImage={setImage} />
-            </div>
-            <p className="swatch-name">{colorLabel(color)}</p>
-            <div className="swatches" role="listbox" aria-label="Agent color">
-              {colorsForPicker(color, moreColors).map(swatch => (
-                <button
-                  key={swatch.id}
-                  type="button"
-                  className={swatch.value === color ? 'is-on' : ''}
-                  style={{ background: swatch.value }}
-                  aria-label={colorLabel(swatch.value)}
-                  aria-pressed={swatch.value === color}
-                  onClick={() => setColor(swatch.value)}
-                />
-              ))}
-            </div>
-            {moreColors ? null : (
-              <button type="button" className="ghost" onClick={() => setMoreColors(true)}>More colors</button>
-            )}
-            <div className="sheet-actions">
-              <button type="button" className="ghost" onClick={() => setStep('name')}>Back</button>
-              <button type="submit" className="solid" disabled={!name.trim()}>Create</button>
-            </div>
-          </>
-        )}
       </form>
-    </div>
+    </div>, document.body,
   );
 }

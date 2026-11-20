@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Mic, MicOff, Minimize2, Maximize2, Square } from 'lucide-react';
 import { Attachment01Icon } from '@hugeicons/core-free-icons';
@@ -14,7 +14,14 @@ import { orbSpeed, voiceOrbLook } from '../lib/voice-orb.mjs';
 import WakeSlider from './WakeSlider';
 import GlideSelect from './GlideSelect';
 import PromptBar from './PromptBar';
-import ProviderAdd from './ProviderAdd';
+import AIProvidersSheet from './AIProvidersSheet';
+import { providerStorage } from '../lib/provider-storage.mjs';
+import { canReleaseChatMessage, modelFreeCommand, needsChatModel } from '../lib/model-free-command.mjs';
+import { cacheSpendConfirmation, isLasoCardRequest, pendingSpendConfirmation } from '../lib/laso-chat.mjs';
+import {
+  ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
+  selectedModelRequest, visibleModelOptions,
+} from '../lib/provider-models.mjs';
 import { clampFloat, FLOAT_SIZE, FLOAT_STORAGE_KEY } from '../lib/voice-float.mjs';
 import { createMicGate } from '../lib/mic-gate.mjs';
 import {
@@ -32,11 +39,32 @@ import {
   LANGUAGES,
   VOICES,
   parseVoiceSettings,
-  voiceOverrides,
 } from '../lib/voice-settings.mjs';
-import { SPEND_PERMISSION_KEY, parsePermission, permissionById } from '../lib/spend-permission.mjs';
+import {
+  SPEND_PERMISSION_KEY,
+  parsePermission,
+  permissionById,
+  readReviewThreshold,
+  reviewCapToDollars,
+  writeReviewCap,
+} from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
-import { sendBotChat } from '../lib/runtime-data.mjs';
+import { fetchPendingSwap, sendBotChat } from '../lib/runtime-data.mjs';
+import { browserSituation } from '../lib/owner-situation.mjs';
+import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
+import { AGENT_SKILLS, AVAILABLE_SKILLS } from '@ubc2026/agent-tools';
+import { createReplySpeech, createSpeechQueue, startVoicePipe } from '../lib/voice-pipe.mjs';
+import { voiceConfirmDecision } from '../lib/voice-allow.mjs';
+import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
+import { rememberSessionFile } from '../lib/file-session.mjs';
+import { readDeskGrant } from '../lib/desk-lock.mjs';
+import { submitChatSpend } from '../lib/desk-grant-client.mjs';
+import { submitLasoChatPayment } from '../lib/laso-payment-client.mjs';
+import { accountStorage } from '../lib/account-state.mjs';
+import { stageKind } from '../lib/file-view.mjs';
+import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
+import { appendQueued, releaseQueued, takeQueued } from '../lib/message-queue.mjs';
+import MessageQueue from './MessageQueue';
 
 const LEAVE_MS = 760;
 const PROMPT_SOURCES = [
@@ -45,10 +73,11 @@ const PROMPT_SOURCES = [
 function promptModels(rows) {
   const source = Array.isArray(rows) && rows.length > 0 ? rows : fallbackThinkingCatalog();
   return source.map(model => ({
-    key: model.id,
+    key: model.key || model.id,
     name: model.name,
     tag: 'Chat',
     levels: Array.isArray(model.levels) ? model.levels : [],
+    contextWindow: contextWindowFor(model.id, model.contextWindow),
   }));
 }
 const SUGGESTIONS = [
@@ -56,6 +85,41 @@ const SUGGESTIONS = [
   'Summarize the latest activity',
   'Show the open positions',
 ];
+const PROMPT_COMMANDS = [...AGENT_SKILLS, ...AVAILABLE_SKILLS].map(skill => ({
+  key: skill.id,
+  name: skill.command,
+  group: skill.group || 'Desk',
+  description: skill.description,
+}));
+const HOSTED_IMAGE_BYTES = 400_000;
+
+function previewUrl(file) {
+  const image = isImageFile(file);
+  const type = file?.type || '';
+  const kind = stageKind(file);
+  const playable = image || type.startsWith('video/') || type.startsWith('audio/') || kind === 'pdf' || kind === 'doc' || kind === 'code';
+  if (!playable || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return Promise.resolve('');
+  if (image && file.size > 0 && file.size <= HOSTED_IMAGE_BYTES && typeof FileReader !== 'undefined') {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const value = typeof reader.result === 'string' ? reader.result : '';
+        resolve(value.startsWith('data:image/') ? value : '');
+      };
+      reader.onerror = () => resolve('');
+      try {
+        reader.readAsDataURL(file);
+      } catch {
+        resolve('');
+      }
+    });
+  }
+  try {
+    return Promise.resolve(URL.createObjectURL(file));
+  } catch {
+    return Promise.resolve('');
+  }
+}
 
 export default function Composer({
   botId = null,
@@ -66,6 +130,10 @@ export default function Composer({
   shellBots = null,
   shellWallets = null,
   shellBalanceLabel = null,
+  fileCatalog = null,
+  getAccessToken = null,
+  authorizeSpend = null,
+  signChatTransaction = null,
   lines = [],
   onLine,
   onThinking,
@@ -75,8 +143,16 @@ export default function Composer({
   usage = null,
   onAttach = null,
   onEditLine = null,
-  clientTools = null,
+  onPatchLine = null,
+  onConfirm = null,
+  onDeskUnlock = null,
+  onSpokenConfirm = null,
+  onVoiceLive = null,
+  onBindAccess = null,
+  onContextWindow = null,
+  mentionHandles = [],
 }) {
+  const modelStorage = useMemo(() => providerStorage(typeof window === 'undefined' ? null : localStorage, ownerId), [ownerId]);
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
   const [note, setNote] = useState('');
@@ -85,18 +161,59 @@ export default function Composer({
   const [dragging, setDragging] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_VOICE_SETTINGS);
   const [permission, setPermission] = useState('ask');
+  const [reviewCap, setReviewCap] = useState('');
+  const [pendingSwap, setPendingSwap] = useState(null);
+  const [lasoClaim, setLasoClaim] = useState(null);
+  const pendingSpend = useRef(null);
+  useEffect(() => {
+    pendingSpend.current = null;
+    setLasoClaim(null);
+  }, [ownerId, botId]);
+
+  useEffect(() => {
+    setPendingSwap(null);
+    if (hidden || !ownerId || !botId) return undefined;
+    const controller = new AbortController();
+    let reading = false;
+    async function refresh() {
+      if (reading || document.visibilityState === 'hidden') return;
+      reading = true;
+      try {
+        const accessToken = await getAccessToken?.();
+        if (controller.signal.aborted) return;
+        const pending = await fetchPendingSwap(ownerId, botId, accessToken, controller.signal);
+        if (!controller.signal.aborted) setPendingSwap(pending);
+      } catch {
+        // Keep the last owner-scoped result until the connection returns.
+      } finally {
+        reading = false;
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [botId, getAccessToken, hidden, ownerId]);
   const [models, setModels] = useState(() => promptModels());
   const [chatModel, setChatModel] = useState(() => promptModels()[0]?.key || '');
-  const [providerOpen, setProviderOpen] = useState(false);
+  const [aiProvidersOpen, setAIProvidersOpen] = useState(false);
   const [callName, setCallName] = useState('');
   const [callBotId, setCallBotId] = useState(null);
   const [speaker, setSpeaker] = useState('idle');
   const [draft, setDraft] = useState('');
   const [files, setFiles] = useState([]);
+  const catalogRef = useRef(fileCatalog);
+  catalogRef.current = fileCatalog;
   const fileRef = useRef(null);
   const [mention, setMention] = useState('');
   const [mentionCopy, setMentionCopy] = useState(null);
   const [thinking, setThinking] = useState(false);
+  const [queue, setQueue] = useState([]);
+  const [draftSeed, setDraftSeed] = useState(null);
   const [settingsReady, setSettingsReady] = useState(false);
   const [stage, setStage] = useState(null);
   const [body, setBody] = useState(null);
@@ -105,6 +222,8 @@ export default function Composer({
   const dockRef = useRef(null);
   const settingsRef = useRef(settings);
   const permissionRef = useRef(permission);
+  const reviewCapRef = useRef(reviewCap);
+  const callNameRef = useRef('');
   const modelRef = useRef(models[0]?.key || '');
   const effortRef = useRef(models[0]?.levels?.find(level => level.default)?.label || '');
   const modelsRef = useRef(models);
@@ -115,24 +234,31 @@ export default function Composer({
   const callBotRef = useRef(null);
   const presenceRef = useRef('off');
   const sessionRef = useRef(null);
+  const sayRef = useRef(null);
   const micGate = useRef(null);
   if (!micGate.current) micGate.current = createMicGate();
   const dictationRef = useRef(null);
   const modeRef = useRef('listening');
   const vadRef = useRef(0);
   const connectingRef = useRef(false);
+  const userEndedRef = useRef(false);
   const sendingRef = useRef(false);
+  const queueRef = useRef([]);
+  const runRef = useRef(0);
+  const abortRef = useRef(null);
+  const stopHold = useRef(false);
+  const threadRef = useRef(lines);
   const placeRef = useRef(place);
   const leaveTimer = useRef(0);
   const warmTimer = useRef(0);
   const thinkTimer = useRef(0);
   const voiceStarted = useRef(0);
   const onVoiceSpanRef = useRef(onVoiceSpan);
-  const clientToolsRef = useRef(clientTools);
   onVoiceSpanRef.current = onVoiceSpan;
-  clientToolsRef.current = clientTools;
   settingsRef.current = settings;
   permissionRef.current = permission;
+  reviewCapRef.current = reviewCap;
+  callNameRef.current = callName;
   modelsRef.current = models;
   botIdRef.current = botId;
   botNameRef.current = botName;
@@ -144,6 +270,10 @@ export default function Composer({
     presenceRef.current = next;
     setPresence(next);
   }
+
+  useEffect(() => {
+    onVoiceLiveRef.current?.(presence !== 'off');
+  }, [presence]);
 
   function commitVoice() {
     const started = voiceStarted.current;
@@ -176,6 +306,14 @@ export default function Composer({
   }, [presence]);
 
   useEffect(() => {
+    if (presence !== 'on' || !callBotId) return undefined;
+    const beat = () => refreshVoiceLock(localStorage, callBotId, Date.now());
+    beat();
+    const timer = window.setInterval(beat, 5000);
+    return () => window.clearInterval(timer);
+  }, [presence, callBotId]);
+
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(VOICE_STORAGE_KEY);
       if (raw) setSettings(parseVoiceSettings(JSON.parse(raw)));
@@ -184,31 +322,68 @@ export default function Composer({
     }
     setSettingsReady(true);
     setPermission(parsePermission(localStorage.getItem(SPEND_PERMISSION_KEY)));
+    setReviewCap(readReviewThreshold(localStorage) || '');
   }, []);
 
   useEffect(() => {
     let stop = false;
+    function refresh() {
+      const next = visibleModelOptions(modelStorage);
+      setModels(next);
+      setChatModel(current => (next.some(item => item.key === current) ? current : next[0]?.key || ''));
+      if (!next.some(item => item.key === modelRef.current)) {
+        modelRef.current = next[0]?.key || '';
+        effortRef.current = next[0]?.levels?.find(level => level.default)?.label || '';
+      }
+    }
+    refresh();
+    window.addEventListener(MODEL_SETTINGS_EVENT, refresh);
+    window.addEventListener('storage', refresh);
     fetch('/api/models', { cache: 'no-store' })
       .then(response => (response.ok ? response.json() : null))
       .then(data => {
-        if (stop || !Array.isArray(data?.models) || data.models.length === 0) return;
-        const next = promptModels(data.models);
-        setModels(next);
-        setChatModel(current => (next.some(item => item.key === current) ? current : next[0].key));
-        if (!next.some(item => item.key === modelRef.current)) modelRef.current = next[0].key;
+        if (stop || !data?.checked || !Array.isArray(data.models)) return;
+        saveModelCatalog(modelStorage, ACCOUNT_PROVIDER, data.models);
+        announceModelSettings();
       })
       .catch(() => {});
-    return () => { stop = true; };
-  }, []);
+    return () => {
+      stop = true;
+      window.removeEventListener(MODEL_SETTINGS_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, [modelStorage]);
+
+  useEffect(() => {
+    const model = models.find(item => item.key === chatModel) ?? models[0];
+    onContextWindow?.(contextWindowFor(model?.key, model?.contextWindow));
+  }, [models, chatModel, onContextWindow]);
 
   useEffect(() => {
     if (!settingsReady) return;
-    localStorage.setItem(VOICE_STORAGE_KEY, JSON.stringify(settings));
+    accountStorage.setItem(VOICE_STORAGE_KEY, JSON.stringify(settings));
   }, [settings, settingsReady]);
 
   const editToken = editTokenIn(lines);
   const linesRef = useRef(lines);
   linesRef.current = lines;
+  threadRef.current = lines;
+  const queueBot = useRef(botId);
+  if (queueBot.current !== botId) {
+    queueBot.current = botId;
+    if (queueRef.current.length > 0) {
+      queueRef.current = [];
+      setQueue([]);
+    }
+  }
+  const resolveRef = useRef(null);
+  const onSpokenConfirmRef = useRef(onSpokenConfirm);
+  onSpokenConfirmRef.current = onSpokenConfirm;
+  const onVoiceLiveRef = useRef(onVoiceLive);
+  onVoiceLiveRef.current = onVoiceLive;
+  useEffect(() => {
+    onBindAccess?.((line, accepted) => resolveRef.current?.(line, accepted));
+  }, [onBindAccess]);
   const seenEdit = useRef('');
   useEffect(() => {
     if (!editToken) return undefined;
@@ -268,8 +443,15 @@ export default function Composer({
     const generation = gate.generation;
     const live = sessionRef.current;
     sessionRef.current = null;
-    gate.stop();
-    Promise.resolve(live?.endSession?.()).finally(() => gate.disarm(generation));
+    sayRef.current = null;
+    onVoiceLiveRef.current?.(false);
+    releaseVoiceLock(localStorage, callBotRef.current);
+    Promise.resolve(live?.endSession?.())
+      .catch(() => {})
+      .finally(() => {
+        gate.stop();
+        gate.disarm(generation);
+      });
   }, []);
 
   useEffect(() => {
@@ -300,18 +482,30 @@ export default function Composer({
     return () => { stop = true; };
   }, [draft, resolveMention]);
 
-  function addFiles(list) {
+  async function addFiles(list) {
     const room = Math.max(0, 10 - files.length);
-    const next = [...list].slice(0, room).map(file => ({
-      id: `${file.name}-${file.size}-${file.lastModified}`,
-      name: file.name,
-      size: file.size,
-      type: file.type || 'file',
-      url: isImageFile({ name: file.name, type: file.type }) ? URL.createObjectURL(file) : '',
-    }));
+    const picked = [...list].slice(0, room);
+    const next = [];
+    for (const file of picked) {
+      const name = displayFileName(file.name) || canonicalFileName(file.name) || 'file';
+      const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const sessionUrl = rememberSessionFile(id, file);
+      const url = (await previewUrl(file)) || sessionUrl;
+      next.push({
+        id,
+        name,
+        size: file.size,
+        type: file.type || 'file',
+        url,
+        blob: file,
+        addedAt: Date.now(),
+      });
+    }
     if (next.length === 0) return;
     setFiles(current => [...current, ...next].slice(0, 10));
-    onAttach?.(next.map(file => ({ ...file, addedAt: Date.now() })));
+    onAttach?.(next);
   }
 
   function dropFile(id) {
@@ -356,104 +550,333 @@ export default function Composer({
       || '';
   }
 
-  async function sendMessage(text) {
+  function spokenFrom(text) {
     const spokenText = typeof text === 'string' ? text.trim() : draft.trim();
     const attached = files.map(file => file.name).join(', ');
-    const spoken = attached ? `${spokenText}${spokenText ? '\n' : ''}${attached}` : spokenText;
-    if (!spoken || sendingRef.current) return;
-    const prior = lines;
-    pushLine('user', spoken);
-    if (mention) pushLine('assistant', mention);
+    return clipOwnerMessage(attached ? `${spokenText}${spokenText ? '\n' : ''}${attached}` : spokenText);
+  }
+
+  function parkDraft() {
     setDraft('');
     setFiles([]);
     setMention('');
-    setThinking(true);
-    onThinking?.(true);
-    window.clearTimeout(thinkTimer.current);
-    sendingRef.current = true;
-    try {
-      if (!ownerId || !botId) {
-        pushLine('agent', ownerId
-          ? 'Pick a bot before chatting.'
-          : 'Sign in to chat with this bot.');
-        return;
-      }
-      const result = await sendBotChat({
-        ownerId,
-        botId,
-        message: spoken,
-        history: prior,
-        name: botName,
-        goal: botGoal,
-        type: botType,
-        permission,
-        model: modelRef.current,
-        effort: currentEffortId(),
-        shellBots,
-        shellWallets,
-        shellBalanceLabel,
-      });
-      if (result.ok) {
-        pushLine('agent', result.reply, botId, result.tokens, result.activity);
-      } else {
-        pushLine('agent', chatFailureNote(result.error));
-      }
-    } catch {
-      pushLine('agent', chatFailureNote('network'));
-    } finally {
-      sendingRef.current = false;
-      setThinking(false);
-      onThinking?.(false);
+    setMentionCopy(null);
+  }
+
+  function rememberQueue(next) {
+    queueRef.current = next;
+    setQueue(next);
+  }
+
+  function editQueued(id) {
+    const taken = takeQueued(queueRef.current, id);
+    if (!taken.item) return;
+    rememberQueue(taken.queue);
+    setDraftSeed({ id: `${taken.item.id}-edit`, text: taken.item.text });
+  }
+
+  function sendQueuedNow(id) {
+    const queued = queueRef.current.find(item => item.id === id);
+    if (queued && needsChatModel(queued.text) && !selectedModelRequest(modelStorage, modelRef.current)) {
+      setAIProvidersOpen(true);
+      return;
     }
+    const taken = takeQueued(queueRef.current, id);
+    if (!taken.item) return;
+    rememberQueue(taken.queue);
+    stopHold.current = 0;
+    abortRef.current?.abort();
+    runRef.current += 1;
+    const history = threadRef.current.slice();
+    postUser(taken.item.text, taken.item.mention, taken.item.mentionAddress);
+    void runChat(taken.item.text, history);
+  }
+
+  function stopChat() {
+    sessionRef.current?.speechQueue?.clear();
+    if (!sendingRef.current) return;
+    stopHold.current = runRef.current;
+    abortRef.current?.abort();
+  }
+
+  function sendMessage(text) {
+    const spoken = spokenFrom(text);
+    if (!spoken) return false;
+    if (!pendingSpendConfirmation(pendingSpend.current, spoken, { ownerId, botId: botIdRef.current })
+        && needsChatModel(spoken) && !selectedModelRequest(modelStorage, modelRef.current)) {
+      pushLine('note', 'Show a model in AI Providers before sending a message.');
+      setAIProvidersOpen(true);
+      return false;
+    }
+    if (sendingRef.current) {
+      rememberQueue(appendQueued(queueRef.current, {
+        id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        text: spoken,
+        mention: mention || '',
+        mentionAddress: mentionCopy?.address || '',
+      }));
+      parkDraft();
+      return true;
+    }
+    sendingRef.current = true;
+    const prior = linesRef.current;
+    const hint = mention;
+    const address = mentionCopy?.address || '';
+    parkDraft();
+    postUser(spoken, hint, address);
+    void runChat(spoken, prior);
+    return true;
   }
 
   async function regenerate(text, prior) {
-    const spoken = typeof text === 'string' ? text.trim() : '';
+    const spoken = clipOwnerMessage(text);
     if (!spoken || sendingRef.current) return;
+    await runChat(spoken, prior);
+  }
+
+  function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = [], access = null, extra = null) {
+    const spoken = typeof text === 'string' ? text.trim() : '';
+    if (!spoken) return null;
+    const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
+    if (typeof extra?.mentionAddress === 'string' && extra.mentionAddress) line.mentionAddress = extra.mentionAddress;
+    if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
+    if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
+    if (access && access.kind === 'inline' && typeof access.name === 'string') line.access = access;
+    if (targetId === botIdRef.current) threadRef.current = [...threadRef.current, line];
+    onLine?.(line, targetId);
+    return line;
+  }
+
+  function postUser(text, hint, address, targetId = botIdRef.current) {
+    pushLine('user', text, targetId, 0, [], null, { mentionAddress: address || '' });
+    if (hint && !address) pushLine('assistant', hint, targetId);
+  }
+
+  function say(text) {
+    const line = typeof text === 'string' ? text.trim() : '';
+    const speak = sayRef.current;
+    if (!line || typeof speak !== 'function') return;
+    void speak(line).catch(() => {});
+  }
+
+  function sayConfirm(text) {
+    const line = typeof text === 'string' ? text.trim() : '';
+    const cue = 'Say yes to confirm, or no to cancel.';
+    if (!line) {
+      say(cue);
+      return;
+    }
+    say(/say yes to confirm/i.test(line) ? line : `${line} ${cue}`);
+  }
+
+  async function settleChat(result, spoken, prior, grants, run, shown = [], firstLineId = null) {
+    if (run !== runRef.current) return;
+    if (result?.claimUrl) setLasoClaim({ botId: botIdRef.current, url: result.claimUrl });
+    if (!result?.ok) {
+      if (result?.error === 'aborted') return;
+      if (shown.length > 0) return;
+      const note = chatFailureNote(result?.error);
+      pushLine('agent', note);
+      say(note);
+      return;
+    }
+    const holdLabel = result.hold ? (result.reply || result.hold.prompt || result.hold.label || '') : '';
+    const lines = Array.isArray(result.replies) && result.replies.length > 0
+      ? result.replies
+      : (result.reply && !result.hold ? [result.reply] : []);
+    let anchor = firstLineId;
+    for (const text of lines) {
+      if (!text || shown.includes(text) || text === holdLabel) continue;
+      const line = pushLine('agent', text);
+      if (line && !anchor) anchor = line.id;
+      shown.push(text);
+      const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+      say(aloud || 'Sent.');
+    }
+    if (anchor && result.activity?.length) onPatchLine?.(anchor, { activity: result.activity }, botIdRef.current);
+    if (result.hold?.kind === 'modal') {
+      pendingSpend.current = cacheSpendConfirmation(pendingSpend.current, result.hold, { ownerId, botId: botIdRef.current });
+      if (result.hold.args?.action === 'x402') {
+        setLasoClaim(null);
+      }
+      const label = result.reply || result.hold.prompt || result.hold.label;
+      if (label && !shown.includes(label)) {
+        pushLine('agent', label, botIdRef.current, 0, [], null, { mentionAddress: result.hold.args?.destination });
+        sayConfirm(label);
+      }
+      setThinking(false);
+      onThinking?.(false);
+      const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label, result.hold.args?.destination) : false;
+      if (run !== runRef.current) return;
+      if (!accepted) {
+        pushLine('note', 'That stayed unconfirmed.');
+        say('That stayed unconfirmed.');
+        return;
+      }
+      await continueChat(spoken, prior, [result.hold]);
+      return;
+    }
+    if (result.hold?.kind === 'inline') {
+      const line = result.reply || result.hold.label;
+      if (line && !shown.includes(line)) {
+        pushLine('agent', line, botIdRef.current, result.tokens, [], result.hold);
+      }
+      sayConfirm(line);
+    }
+  }
+
+  async function continueChat(spoken, prior, grants) {
+    await runChat(spoken, prior, grants);
+  }
+
+  async function runChat(spoken, prior, grants) {
+    sessionRef.current?.speechQueue?.clear();
+    const selection = selectedModelRequest(modelStorage, modelRef.current);
+    const run = ++runRef.current;
+    const targetId = botIdRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    sendingRef.current = true;
     setThinking(true);
     onThinking?.(true);
     window.clearTimeout(thinkTimer.current);
-    sendingRef.current = true;
     try {
-      if (!ownerId || !botId) {
-        pushLine('agent', ownerId
-          ? 'Pick a bot before chatting.'
-          : 'Sign in to chat with this bot.');
+      const pending = pendingSpendConfirmation(pendingSpend.current, spoken, { ownerId, botId: targetId });
+      if (!grants?.length && pending) {
+        await settleChat({ ok: true, reply: pending.label, hold: pending }, spoken, prior, [], run, [pending.label]);
         return;
       }
-      const result = await sendBotChat({
-        ownerId,
-        botId,
-        message: spoken,
-        history: prior,
-        name: botName,
-        goal: botGoal,
-        type: botType,
-        permission,
-        model: modelRef.current,
-        effort: currentEffortId(),
-        shellBots,
-        shellWallets,
-        shellBalanceLabel,
-      });
-      pushLine('agent', result.ok ? result.reply : chatFailureNote(result.error), botId, result.ok ? result.tokens : 0, result.ok ? result.activity : []);
+      pendingSpend.current = null;
+      if (isLasoCardRequest(spoken) || grants?.some(hold => hold.args?.action === 'x402')) setLasoClaim(null);
+      // Every turn, including non-model commands and rejected queued messages,
+      // must reach the same finally block to release the queue and busy state.
+      if (!selection && modelFreeCommand(spoken) === 'platform-send') return;
+      if (!selection && needsChatModel(spoken, grants)) {
+        pushLine('note', 'Show a model in AI Providers before sending a message.');
+        setAIProvidersOpen(true);
+        return;
+      }
+      if (!ownerId || !targetId) {
+        if (run === runRef.current) {
+          const note = ownerId
+            ? 'Pick an agent before chatting.'
+            : 'Sign in to chat with this agent.';
+          pushLine('agent', note);
+          say(note);
+        }
+        return;
+      }
+      const shown = [];
+      const voiceReply = createReplySpeech(sessionRef.current?.speechQueue);
+      let firstLineId = null;
+      const send = async (spendAuthorization, lasoPayment) => {
+        let accessToken = '';
+        try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+        if (controller.signal.aborted || targetId !== botIdRef.current) return { ok: false, error: 'aborted' };
+        return sendBotChat({
+          ownerId,
+          botId: targetId,
+          message: spoken,
+          history: prior,
+          name: botName,
+          goal: botGoal,
+          type: botType,
+          permission: permissionRef.current,
+          grants,
+          spendAuthorization,
+          lasoPayment,
+          ...selection,
+          effort: currentEffortId(),
+          shellBots,
+          shellWallets,
+          shellBalanceLabel,
+          fileCatalog: catalogRef.current,
+          reviewCap: reviewCapRef.current || '',
+          situation: browserSituation(),
+          accessToken,
+          deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
+          signal: controller.signal,
+          onReplyEvent: event => {
+            if (run === runRef.current && !controller.signal.aborted) voiceReply.event(event);
+          },
+          onReply: (text) => {
+            if (run !== runRef.current) return;
+            const line = pushLine('agent', text, targetId);
+            if (line && !firstLineId) firstLineId = line.id;
+            shown.push(text);
+            const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+            if (!voiceReply.complete()) say(aloud || 'Sent.');
+            if (/solscan\.io\/tx\//.test(text)) {
+              setThinking(false);
+              onThinking?.(false);
+            }
+          },
+        });
+      };
+      const confirmedSpend = grants?.some(hold => hold?.name === 'request_spend' && typeof hold.proof === 'string');
+      const lasoSpend = grants?.some(hold => hold?.name === 'request_spend' && hold.args?.action === 'x402');
+      const result = lasoSpend
+        ? await submitLasoChatPayment({ send, sign: signChatTransaction, unlock: onDeskUnlock, signal: controller.signal })
+        : confirmedSpend
+          ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal, authorize: authorizeSpend })
+          : await send();
+      if (run !== runRef.current || result?.error === 'aborted') return;
+      if (grants?.some(hold => hold.idempotencyKey === pendingSwap?.idempotencyKey)
+          && result?.reply?.startsWith('Swap submitted.')) setPendingSwap(null);
+      await settleChat(result, spoken, prior, grants, run, shown, firstLineId);
     } catch {
-      pushLine('agent', chatFailureNote('network'));
+      if (run === runRef.current && stopHold.current !== run) {
+        const note = chatFailureNote('network');
+        pushLine('agent', note);
+        say(note);
+      }
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      if (run !== runRef.current) return;
+      const stopped = stopHold.current === run;
+      if (stopped) stopHold.current = 0;
+      const hasModel = Boolean(selectedModelRequest(modelStorage, modelRef.current));
+      // A model-dependent message stays queued while models are hidden. The
+      // shell owns USDC approvals; don't replace one by auto-starting another.
+      const paymentPending = modelFreeCommand(spoken) === 'platform-send';
+      const released = releaseQueued(queueRef.current, {
+        stopped,
+        canRelease: item => canReleaseChatMessage(item.text, { hasModel, paymentPending }),
+      });
+      if (!stopped && released.next) {
+        rememberQueue(released.queue);
+        const history = threadRef.current.slice();
+        postUser(released.next.text, released.next.mention, released.next.mentionAddress);
+        void runChat(released.next.text, history);
+        return;
+      }
       sendingRef.current = false;
       setThinking(false);
       onThinking?.(false);
     }
   }
 
-  function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = []) {
-    const spoken = typeof text === 'string' ? text.trim() : '';
-    if (!spoken) return;
-    const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
-    if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
-    if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
-    onLine?.(line, targetId);
-  }
+  resolveRef.current = (line, accepted) => {
+    if (!line?.access || sendingRef.current) return false;
+    onPatchLine?.(line.id, { access: null }, botIdRef.current);
+    if (accepted !== true) {
+      pushLine('note', 'Access stayed off.');
+      return true;
+    }
+    const thread = linesRef.current;
+    const index = thread.findIndex(item => item.id === line.id);
+    const before = index >= 0 ? thread.slice(0, index) : thread;
+    let userIndex = -1;
+    for (let i = before.length - 1; i >= 0; i -= 1) {
+      if (before[i]?.role === 'user') {
+        userIndex = i;
+        break;
+      }
+    }
+    if (userIndex < 0) return true;
+    void continueChat(before[userIndex].text, before.slice(0, userIndex), [line.access]);
+    return true;
+  };
 
   function sealMic(live = sessionRef.current) {
     micGate.current.enforce();
@@ -471,12 +894,14 @@ export default function Composer({
     const generation = gate.generation;
     const live = sessionRef.current;
     sessionRef.current = null;
+    sayRef.current = null;
     connectingRef.current = false;
     setMuted(false);
     setWarm(false);
     setMode('full');
     setCallName('');
     setCallBotId(null);
+    releaseVoiceLock(localStorage, callBotRef.current);
     callBotRef.current = null;
     if (!keepNote) setNote('');
     setPhase('off');
@@ -485,11 +910,19 @@ export default function Composer({
     } catch {
       /* the track lock covers the hang-up */
     }
-    gate.stop();
-    Promise.resolve(live?.endSession?.()).finally(() => gate.disarm(generation));
+    // End the session before stopping tracks so LiveKit is not told the peer
+    // vanished mid-hangup (that showed up as a LiveKit disconnect on retry).
+    Promise.resolve(live?.endSession?.())
+      .catch(() => {})
+      .finally(() => {
+        gate.stop();
+        gate.disarm(generation);
+        userEndedRef.current = false;
+      });
   }
 
-  function closeStage(keepNote = false) {
+  function closeStage(keepNote = false, { userEnded = false } = {}) {
+    if (userEnded) userEndedRef.current = true;
     if (presenceRef.current === 'off' || presenceRef.current === 'leave') return;
     setPhase('leave');
     setWarm(false);
@@ -534,6 +967,13 @@ export default function Composer({
     dictationRef.current = null;
     connectingRef.current = true;
     const id = botIdRef.current;
+    const claimed = claimVoiceLock(localStorage, { botId: id, name: botNameRef.current, now: Date.now() });
+    if (!claimed.ok) {
+      connectingRef.current = false;
+      const who = claimed.holder?.name || 'Another agent';
+      setNote(`${who} is already on a call. End that call before starting another.`);
+      return;
+    }
     callBotRef.current = id;
     setCallBotId(id);
     setCallName(botName);
@@ -544,74 +984,45 @@ export default function Composer({
     micGate.current.setMuted(false);
     setMuted(false);
     try {
-      const response = await fetch('/api/voice/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settingsRef.current),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'voice_failed');
-      const { Conversation } = await import('@elevenlabs/client');
-      const tools = clientToolsRef.current;
-      const owner = typeof ownerId === 'string' ? ownerId.trim() : '';
-      const live = await Conversation.startSession({
-        conversationToken: payload.token,
-        overrides: payload.overrides ?? voiceOverrides(payload),
-        // ElevenLabs substitutes {{owner_id}} on voice webhook headers (list_bots / get_wallets).
-        ...(owner ? { dynamicVariables: { owner_id: owner, spend_permission: permissionRef.current } } : {}),
-        customLlmExtraBody: {
-          ownerPermission: permissionRef.current,
-          botName: botNameRef.current,
-          botGoal: botGoalRef.current,
-          botType: botTypeRef.current,
-        },
-        ...(tools && typeof tools === 'object' ? { clientTools: tools } : {}),
-        onMessage: ({ message, role }) => {
+      let live = null;
+      const pipe = startVoicePipe({
+        onPartial: (text) => {
           if (sessionRef.current !== live) return;
-          pushLine(role === 'user' ? 'user' : 'agent', message, callBotRef.current);
+          vadRef.current = text ? 0.45 : 0;
         },
-        onModeChange: ({ mode }) => {
-          if (sessionRef.current === live) modeRef.current = mode;
-        },
-        onVadScore: ({ vadScore }) => {
-          if (sessionRef.current === live) vadRef.current = vadScore;
-        },
-        onError: () => {
-          if (sessionRef.current === live) setNote('The voice session hit an error.');
-        },
-        onDisconnect: () => {
+        onCommit: (text) => {
           if (sessionRef.current !== live) return;
-          sessionRef.current = null;
-          modeRef.current = 'listening';
-          vadRef.current = 0;
-          closeStage();
+          const decision = voiceConfirmDecision(text);
+          if ((decision === 'allow' || decision === 'deny') && onSpokenConfirmRef.current?.(decision) === true) return;
+          void sendMessage(text);
+        },
+        onError: (error) => {
+          if (sessionRef.current !== live) return;
+          setNote(voiceFailureNote(error));
         },
       });
+      const speechQueue = createSpeechQueue({ settings: () => settingsRef.current, pipe });
+      live = {
+        speechQueue,
+        endSession: () => { speechQueue.stop(); pipe.endSession(); },
+        setMicMuted: (next) => pipe.setMicMuted(next),
+        getInputVolume: () => pipe.getInputVolume(),
+        getOutputVolume: () => pipe.getOutputVolume(),
+        speak: async (text) => speechQueue.enqueue(text),
+      };
+      await pipe.ready;
       if (!connectingRef.current) {
         micGate.current.setMuted(true);
         micGate.current.stop();
-        await live.endSession?.().catch(() => {});
+        releaseVoiceLock(localStorage, id);
+        pipe.endSession();
         return;
       }
       sessionRef.current = live;
-      live.setVolume?.({ volume: 1 });
+      sayRef.current = (text) => live.speak(text);
+      modeRef.current = 'listening';
       sealMic(live);
       voiceStarted.current = performance.now();
-      // Bind conversation → Privy owner so Worker tool webhooks can resolve owner_id
-      // even when ElevenLabs does not substitute {{owner_id}} in headers.
-      try {
-        const conversationId = typeof live.getId === 'function' ? live.getId() : '';
-        if (owner && conversationId) {
-          void fetch('/api/voice/bind', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversationId, ownerId: owner }),
-            cache: 'no-store',
-          }).catch(() => {});
-        }
-      } catch {
-        /* tools may still work via dynamicVariables */
-      }
     } catch (error) {
       micGate.current.disarm();
       setNote(voiceFailureNote(error));
@@ -661,7 +1072,7 @@ export default function Composer({
       </div>
       <div className="voice-script" aria-live="polite">
         {callBotId && callBotId === botId ? (
-          <ChatBubbles lines={lines} botName={callName || botName} thinking={thinking} onEdit={onEditLine} />
+          <ChatBubbles lines={lines} botName={callName || botName} thinking={thinking} onEdit={onEditLine} hideAccessActions />
         ) : (
           <p className="voice-note">Talking with {callName}. Minimize to keep chatting.</p>
         )}
@@ -689,7 +1100,7 @@ export default function Composer({
             <button type="button" className="icon-btn" aria-label="Minimize voice" onClick={() => setMode('mini')}>
               <Minimize2 size={16} strokeWidth={1.75} />
             </button>
-            <button type="button" className="icon-btn is-stop" aria-label="Stop voice" onClick={() => closeStage()}>
+            <button type="button" className="icon-btn is-stop" aria-label="Stop voice" onClick={() => closeStage(false, { userEnded: true })}>
               <Square size={16} strokeWidth={1.75} />
             </button>
           </div>
@@ -721,7 +1132,7 @@ export default function Composer({
           <button type="button" aria-label="Full view" onClick={() => setMode('full')}>
             <Maximize2 size={16} strokeWidth={1.75} />
           </button>
-          <button type="button" className="is-stop" aria-label="End" onClick={() => closeStage()}>
+          <button type="button" className="is-stop" aria-label="End" onClick={() => closeStage(false, { userEnded: true })}>
             <Square size={14} strokeWidth={1.75} />
           </button>
           <span className="voice-float-who" data-side={speaker}>{callName || botName}</span>
@@ -751,11 +1162,22 @@ export default function Composer({
       {stageNode}
       {floatNode}
       {settingsNode}
-      <ProviderAdd open={providerOpen} onClose={() => setProviderOpen(false)} />
+      {lasoClaim?.botId === botId ? (
+        <p className="voice-note" role="status">
+          <a href={lasoClaim.url} target="_blank" rel="noreferrer">View your Laso card</a>
+          {' · One-time login link, expires in 15 minutes.'}
+        </p>
+      ) : null}
+      <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mentionCopy ? (
-        <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} /></p>
+        <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} dotted /></p>
       ) : mention ? <p className="mention-hint" role="status">{mention}</p> : null}
+      {pendingSwap?.botId === botId ? (
+        <div className="entry-suggestions">
+          <Suggestion onClick={() => { void sendMessage('Review pending swap'); }}>Review pending swap</Suggestion>
+        </div>
+      ) : null}
       {lines.length === 0 ? (
         <div className="entry-suggestions">
           {SUGGESTIONS.map((text) => (
@@ -765,15 +1187,19 @@ export default function Composer({
       ) : null}
       <div className="composer" aria-label="Message the agent">
         <input ref={fileRef} className="sr-only" type="file" multiple aria-label="Attach files" />
+        <MessageQueue items={queue} onEdit={editQueued} onSendNow={sendQueuedNow} />
         <PromptBar
           placeholder={`Message ${botName}`}
           label={`Message ${botName}`}
           sources={PROMPT_SOURCES}
+          handles={mentionHandles}
+          commands={PROMPT_COMMANDS}
           models={models}
           defaultModel={chatModel}
           efforts={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.map(level => level.label) ?? []}
           defaultEffort={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.find(level => level.default)?.label ?? ''}
           busy={thinking}
+          sendDisabled={text => models.length === 0 && needsChatModel(spokenFrom(text))}
           background="transparent"
           color="#f5f5f5"
           menuBackground="#27272a"
@@ -781,14 +1207,17 @@ export default function Composer({
           width={1200}
           radius={20}
           onDraftChange={setDraft}
+          draftSeed={draftSeed}
           onAttach={pickFiles}
           extraReady={files.length > 0}
           chips={files.length > 0 ? <Attachments files={files} onRemove={dropFile} /> : null}
           onSend={(text) => sendMessage(text)}
+          onStop={stopChat}
           onDictate={live ? undefined : runDictation}
           permission={permission}
+          reviewCapDollars={reviewCapToDollars(reviewCap)}
           onEffortChange={(label) => { effortRef.current = label; }}
-          onAddProvider={() => setProviderOpen(true)}
+          onAddProvider={() => setAIProvidersOpen(true)}
           onModelChange={(key) => {
             const item = models.find(model => model.key === key);
             if (!item || item.key === modelRef.current) return;
@@ -802,8 +1231,19 @@ export default function Composer({
             const mode = parsePermission(next);
             if (mode === permissionRef.current) return;
             setPermission(mode);
-            localStorage.setItem(SPEND_PERMISSION_KEY, mode);
+            accountStorage.setItem(SPEND_PERMISSION_KEY, mode);
+            window.dispatchEvent(new Event('storage'));
             pushLine('note', `Permissions set to ${permissionById(mode).label}`);
+          }}
+          onReviewCapChange={(next) => {
+            try {
+              const saved = writeReviewCap(accountStorage, next);
+              setReviewCap(saved);
+              window.dispatchEvent(new Event('storage'));
+              pushLine('note', `Review by AI maximum set to ${reviewCapToDollars(saved)} USD`);
+            } catch {
+              /* keep the prior threshold when the amount is invalid */
+            }
           }}
           accessory={usage ? <ContextUsage usage={usage} /> : null}
           endSlot={(
@@ -814,7 +1254,15 @@ export default function Composer({
               aria-pressed={live}
               title={live ? 'Stop voice mode' : 'Talk live with the agent'}
               onMouseDown={event => event.preventDefault()}
-              onClick={() => { if (live) closeStage(); else startSession(); }}
+              onClick={() => {
+                if (live && callBotRef.current && callBotRef.current !== botIdRef.current) {
+                  setNote(`${callNameRef.current || 'Another agent'} is already on a call. End that call before starting another.`);
+                  setMode('mini');
+                  return;
+                }
+                if (live) closeStage(false, { userEnded: true });
+                else startSession();
+              }}
             >
               <span className="voice-mode-bars" aria-hidden="true">
                 <i />
@@ -953,13 +1401,23 @@ function voiceFailureNote(error) {
   if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError' || error?.name === 'OverconstrainedError') {
     return 'No microphone was found, so the session stayed closed.';
   }
-  if (error?.message === 'voice_unconfigured') return 'Voice is not configured on the server.';
-  if (error?.message === 'voice_rejected') return 'The voice service refused the session. Publish the agent and turn on Voice ID and Speed overrides.';
-  if (error?.message === 'voice_unreachable') return 'The voice service did not respond.';
+  const code = error?.code || error?.message;
+  if (code === 'voice_unconfigured') return 'Voice is not configured on the server.';
+  if (code === 'unsupported') return 'Speech recognition is not available in this browser.';
+  if (code === 'dictation_rejected' || code === 'voice_rejected') return 'Speech recognition did not start.';
+  if (code === 'dictation_unreachable' || code === 'voice_unreachable') return 'The voice service did not respond.';
   return 'The voice session did not start.';
 }
 
 function chatFailureNote(code) {
+  if (code === 'desk_locked') return 'The wallet is still locked. Unlock it before trying the payment again.';
+  if (code === 'unlock_cancelled') return 'Wallet unlock was cancelled. The payment was not sent.';
+  if (code === 'browser_wallet_required') return 'Connect your Privy wallet to approve this payment.';
+  if (code === 'invalid_laso_payment' || code === 'laso_payment_expired') return 'The card payment preparation is invalid or expired. Ask for a fresh card purchase.';
+  if (code === 'browser_wallet_authorization_failed') {
+    return 'Privy could not authorize this payment in your browser. No payment was sent.';
+  }
+  if (code === 'spend_authorization_expired') return 'Wallet authorization expired. Ask for the payment again.';
   if (code === 'openrouter_not_configured') {
     return 'Add MODEL_API_KEY=LLM_… (Meta Model API) to the root .env.local and restart Next.';
   }
@@ -970,8 +1428,9 @@ function chatFailureNote(code) {
   if (code === 'openrouter_failed' || code === 'openrouter_unavailable') {
     return 'The model call failed. Try again in a moment.';
   }
-  if (code === 'not_found' || code === 'bot_not_found') return 'This bot was not found for your account.';
-  if (code === 'invalid_request') return 'Sign in to chat with this bot.';
+  if (code === 'not_found' || code === 'bot_not_found') return 'This agent was not found for your account.';
+  if (code === 'invalid_request') return 'Sign in to chat with this agent.';
+  if (code === 'message_too_long') return 'That message is over 500 characters.';
   if (code === 'network') return 'Could not reach the chat API for a reply.';
   return 'I could not reply just now.';
 }

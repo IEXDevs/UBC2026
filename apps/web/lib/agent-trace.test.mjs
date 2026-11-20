@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { browserTrace, callStatus, clipTrace, traceModel } from './agent-trace.mjs';
 
+/**
+ * Achieves: verifies live traces group tool calls, mark mismatches as errors, and clip long text.
+ * Fails when: null input is non-empty, tool chips miscount, verify.mismatch is not error, or clip exceeds max.
+ * Oracle: two tool.call → Tool section children=2; chips length 2; clipTrace(80 chars, 42) ≤ 42.
+ * Side effects / state checked: N/A.
+ * Gaps: none for traceModel helpers.
+ */
 test('a live trace groups tools and drops empty input', () => {
   assert.deepEqual(traceModel(null), { chips: [], sections: [] });
   const trace = traceModel([
@@ -19,15 +26,28 @@ test('a live trace groups tools and drops empty input', () => {
   assert.ok(clipTrace('x'.repeat(80), 42).length <= 42);
 });
 
-test('an open browser session joins the thread as a running terminal chip', () => {
+/**
+ * Achieves: verifies open browser sessions collapse to one idle chip without leaking purposes/URLs.
+ * Fails when: closed sessions produce chips, multiple opens produce multiple chips, or purpose/http leaks.
+ * Oracle: closed→empty; 2 open→one Browser chip argument '2 open' and status done; named purpose kept; no http in JSON.
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
+test('an open browser session is one chip and drops a generic purpose', () => {
   const quiet = browserTrace([{ sessionRecordId: 'rec_closed', status: 'closed', purpose: 'browse' }]);
   assert.deepEqual(quiet, { chips: [], section: null });
-  const live = browserTrace([{ sessionRecordId: 'rec_1', status: 'open', purpose: 'browse' }]);
+  const live = browserTrace([
+    { sessionRecordId: 'rec_1', status: 'open', purpose: 'browse' },
+    { sessionRecordId: 'rec_2', status: 'open', purpose: 'search' },
+  ]);
+  assert.equal(live.chips.length, 1);
   assert.equal(live.chips[0].name, 'Browser');
-  assert.equal(live.chips[0].status, 'running');
-  assert.equal(live.chips[0].icon, 'terminal');
-  assert.equal(live.chips[0].argument, 'browse');
-  assert.equal(live.section.label, 'Browser');
-  assert.equal(live.section.children[0].value, 'browser-rec_1');
-  assert.equal(JSON.stringify(live).includes('http'), false);
+  assert.equal(live.chips[0].status, 'done');
+  assert.equal(live.chips[0].argument, '2 open');
+  assert.equal(live.section, null);
+  assert.equal(live.chips[0].argument.includes('browse'), false);
+  assert.equal(live.chips[0].argument.includes('search'), false);
+  const named = browserTrace([{ sessionRecordId: 'rec_1', status: 'open', purpose: 'Circle rates' }]);
+  assert.equal(named.chips[0].argument, 'Circle rates');
+  assert.equal(JSON.stringify(named).includes('http'), false);
 });

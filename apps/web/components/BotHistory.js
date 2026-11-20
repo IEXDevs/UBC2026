@@ -12,7 +12,7 @@ export default function BotHistory({ bot, bots = [], payments = [], transfers = 
 
   return (
     <div className="bot-history">
-      <TxnLog rows={rows} onParty={onParty} empty="No history for this bot." />
+      <TxnLog rows={rows} onParty={onParty} empty="No history for this agent." />
     </div>
   );
 }

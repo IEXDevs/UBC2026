@@ -4,16 +4,25 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
+    "prebuild": "node ../../scripts/patch-privy-svg-props.mjs",
     "build": "next build --webpack",
     "start": "next start",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
+    "build:worker": "opennextjs-cloudflare build",
+    "deploy:worker": "opennextjs-cloudflare deploy",
+    "deploy:worker:dev": "opennextjs-cloudflare deploy -- --env=dev",
+    "preview": "npm run build:worker && opennextjs-cloudflare preview",
+    "deploy": "npm run deploy:prod",
+    "deploy:prod": "npm run build:worker && npm run deploy:worker",
+    "deploy:dev": "npm run build:worker && npm run deploy:worker:dev",
+    "upload": "npm run build:worker && opennextjs-cloudflare upload",
+    "upload:dev": "npm run build:worker && opennextjs-cloudflare upload -- --env=dev",
     "test": "node --test lib/*.test.mjs && node --test components/permit-menu.test.mjs"
   },
   "dependencies": {
     "@elevenlabs/client": "^1.36.1",
     "@elevenlabs/react": "^1.22.1",
+    "@hpke/chacha20poly1305": "^1.8.1",
+    "@hpke/core": "^1.10.1",
     "@hugeicons/core-free-icons": "^4.4.0",
     "@hugeicons/react": "^1.1.10",
     "@opennextjs/cloudflare": "^1.20.17",
@@ -28,9 +37,10 @@
     "@ubc2026/browser-search": "0.1.0",
     "@ubc2026/browser-session": "0.1.0",
     "@ubc2026/contracts": "0.1.0",
+    "@ubc2026/prices": "0.1.0",
     "@ubc2026/sns": "0.1.0",
     "@ubc2026/transfers": "0.1.0",
-    "@ubc2026/prices": "0.1.0",
+    "@ubc2026/verify-consensus": "0.1.0",
     "@ubc2026/wallets": "0.1.0",
     "@yogesharc/thinking-orbs": "^0.1.2",
     "clsx": "^1.2.1",
@@ -45,6 +55,8 @@
     "three": "^0.170.0"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261113.0-beta",
     "wrangler": "^4.162.0"
   },
   "engines": {

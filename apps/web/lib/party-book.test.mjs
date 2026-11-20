@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { flowName, partyBook, partyFromToken, signedUsdc } from './party-book.mjs';
 
+/**
+ * Achieves: verifies handle parsing and inbound/outbound/net totals across transfers + payments.
+ * Fails when: @handle casing wrong, foreign handles counted, net math wrong, or signedUsdc format drifts.
+ * Oracle: bob inbound 5e6; outbound 1e6 transfer + 2e6 payment = 3e6; net 2e6 → signedUsdc '+2'.
+ * Side effects / state checked: N/A.
+ * Gaps: none for aggregation helpers.
+ */
 test('a handle book totals money in, money out, and the net', () => {
   assert.equal(partyFromToken('@Bob').handle, 'bob');
   assert.equal(partyFromToken('not a handle'), null);
@@ -13,7 +20,7 @@ test('a handle book totals money in, money out, and the net', () => {
       { id: 'other', handle: 'ada', amount: '9000000', asset: 'USDC', direction: 'in' },
     ],
     payments: [
-      { id: 'pay1', counterparty: '@bob', direction: 'paid', amount: '2000000', asset: 'USDC', protocol: 'x402', cluster: 'devnet' },
+      { id: 'pay1', counterparty: '@bob', direction: 'paid', amount: '2000000', asset: 'USDC', protocol: 'x402', cluster: 'mainnet-beta' },
     ],
   });
   assert.equal(book.inbound, '5000000');

@@ -21,6 +21,13 @@ function memoryStorage(seed = {}) {
 const PAT = 'aaaa.bbbb.cccc';
 const REFRESH = 'refresh-token-value-1';
 
+/**
+ * Achieves: verifies readStoredAccessToken prefers privy:token then privy:pat.
+ * Fails when: readStoredAccessToken prefers privy:token then privy:pat breaks (e.g. expected PAT, 'xxxx.yyyy.zzzz').
+ * Oracle: assert.equal(readStoredAccessToken(storage), PAT); assert.equal(readStoredAccessToken(storage), 'xxxx.yyyy.zzzz')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('readStoredAccessToken prefers privy:token then privy:pat', () => {
   const storage = memoryStorage({
     [PRIVY_TOKEN_KEY]: JSON.stringify(PAT),
@@ -31,6 +38,13 @@ test('readStoredAccessToken prefers privy:token then privy:pat', () => {
   assert.equal(readStoredAccessToken(storage), 'xxxx.yyyy.zzzz');
 });
 
+/**
+ * Achieves: verifies readStoredRefreshToken reads privy:refresh_token.
+ * Fails when: readStoredRefreshToken reads privy:refresh_token breaks (e.g. expected REFRESH).
+ * Oracle: assert.equal(readStoredRefreshToken(storage), REFRESH)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('readStoredRefreshToken reads privy:refresh_token', () => {
   const storage = memoryStorage({
     [PRIVY_REFRESH_KEY]: JSON.stringify(REFRESH),
@@ -38,6 +52,13 @@ test('readStoredRefreshToken reads privy:refresh_token', () => {
   assert.equal(readStoredRefreshToken(storage), REFRESH);
 });
 
+/**
+ * Achieves: verifies getPrivyAccessToken skips Privy when refresh is missing so storage is not wiped.
+ * Fails when: getPrivyAccessToken skips Privy when refresh is missing so storage is not wiped breaks (e.g. expected false, PAT, called !== false).
+ * Oracle: assert.equal(called, false); assert.equal(token, PAT)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('getPrivyAccessToken skips Privy when refresh is missing so storage is not wiped', async () => {
   const storage = memoryStorage({
     [PRIVY_TOKEN_KEY]: JSON.stringify(PAT),
@@ -51,6 +72,13 @@ test('getPrivyAccessToken skips Privy when refresh is missing so storage is not 
   assert.equal(token, PAT);
 }, { timeout: 5000 });
 
+/**
+ * Achieves: verifies getPrivyAccessToken waits for refresh that arrives right after access.
+ * Fails when: getPrivyAccessToken waits for refresh that arrives right after access breaks (e.g. expected 'from-privy').
+ * Oracle: assert.equal(token, 'from-privy')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('getPrivyAccessToken waits for refresh that arrives right after access', async () => {
   const storage = memoryStorage({
     [PRIVY_TOKEN_KEY]: JSON.stringify(PAT),
@@ -62,6 +90,13 @@ test('getPrivyAccessToken waits for refresh that arrives right after access', as
   assert.equal(token, 'from-privy');
 });
 
+/**
+ * Achieves: verifies getPrivyAccessToken uses Privy when refresh is present.
+ * Fails when: getPrivyAccessToken uses Privy when refresh is present breaks (e.g. expected 'from-privy').
+ * Oracle: assert.equal(token, 'from-privy')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('getPrivyAccessToken uses Privy when refresh is present', async () => {
   const storage = memoryStorage({
     [PRIVY_TOKEN_KEY]: JSON.stringify(PAT),
@@ -71,6 +106,13 @@ test('getPrivyAccessToken uses Privy when refresh is present', async () => {
   assert.equal(token, 'from-privy');
 });
 
+/**
+ * Achieves: verifies getPrivyAccessToken falls back to storage if Privy throws.
+ * Fails when: getPrivyAccessToken falls back to storage if Privy throws breaks (e.g. expected PAT).
+ * Oracle: assert.equal(token, PAT)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('getPrivyAccessToken falls back to storage if Privy throws', async () => {
   const storage = memoryStorage({
     [PRIVY_TOKEN_KEY]: JSON.stringify(PAT),
@@ -80,4 +122,48 @@ test('getPrivyAccessToken falls back to storage if Privy throws', async () => {
     throw new Error('network');
   }, storage);
   assert.equal(token, PAT);
+});
+
+/**
+ * Achieves: verifies an HttpOnly session cookie may refresh without a local refresh token.
+ * Fails when: privy-session is ignored, or a readable privy-token marker is treated as that session.
+ * Oracle: getAccessToken runs for privy-session=1. privy-token=t does not refresh a stored access token.
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
+/**
+ * Achieves: verifies an empty store still asks Privy for the in-memory token.
+ * Fails when: a missing localStorage refresh skips getAccessToken and the call goes out with no bearer.
+ * Oracle: getAccessToken runs and its token is returned. A stored access token without refresh is still left alone.
+ * Side effects / state checked: in-memory storage only.
+ * Gaps: does not call Privy.
+ */
+test('an empty store asks Privy instead of sending no bearer', async () => {
+  let called = false;
+  const token = await getPrivyAccessToken(async () => {
+    called = true;
+    return 'from-memory';
+  }, memoryStorage());
+  assert.equal(called, true);
+  assert.equal(token, 'from-memory');
+});
+
+test('an HttpOnly session cookie may refresh without a local refresh token', async () => {
+  const storage = memoryStorage();
+  let called = false;
+  const token = await getPrivyAccessToken(async () => {
+    called = true;
+    return 'from-cookie';
+  }, storage, 'privy-session=1');
+  assert.equal(called, true);
+  assert.equal(token, 'from-cookie');
+
+  const stored = memoryStorage({ [PRIVY_TOKEN_KEY]: JSON.stringify(PAT) });
+  let markerCalled = false;
+  const kept = await getPrivyAccessToken(async () => {
+    markerCalled = true;
+    return 'nope';
+  }, stored, 'privy-token=t');
+  assert.equal(markerCalled, false);
+  assert.equal(kept, PAT);
 });

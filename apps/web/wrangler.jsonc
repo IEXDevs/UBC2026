@@ -24,6 +24,12 @@
   "observability": {
     "enabled": true
   },
+  "cache": {
+    "enabled": true
+  },
+  "vars": {
+    "SOLANA_CLUSTER": "mainnet-beta"
+  },
   "routes": [
     {
       "pattern": "maelstrom.iexdevs.com",
@@ -33,7 +39,13 @@
   "env": {
     "dev": {
       "name": "maelstrom-web-dev",
+      "vars": {
+        "SOLANA_CLUSTER": "mainnet-beta"
+      },
       "workers_dev": false,
+      "cache": {
+        "enabled": true
+      },
       "services": [
         {
           "binding": "WORKER_SELF_REFERENCE",
@@ -52,7 +64,17 @@
       ]
     }
   }
+  // Workers Builds for maelstrom-web (main) and maelstrom-web-dev (dev):
+  // root directory apps/web, build cache on, SKIP_DEPENDENCY_INSTALL=true.
+  // Build: npm --prefix ../.. run cf:web:build
+  //   (one npm ci, then build:worker). Deploy: cf:web:deploy or cf:web:deploy:dev.
+  // Those deploy scripts do not install or build again. Cloudflare caches
+  // apps/web/.next/cache only when this directory is the build root.
   // Public Next build names live in .env.example: NEXT_PUBLIC_PRIVY_APP_ID,
   // NEXT_PUBLIC_PRIVY_CLIENT_ID, NEXT_PUBLIC_AGENT_RUNTIME_URL.
+  // Secret names for this Worker, set with wrangler secret bulk on the top-level
+  // worker and again with --env dev: GOOGLE_DRIVE_CLIENT_ID,
+  // GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN,
+  // SOLANA_RPC_URL (or QUICKNODE_MAINNET_RPC_URL on mainnet), QUICKNODE_TESTNET_RPC_URL.
   // Do not put PRIVY_APP_SECRET or any other secret value in this file.
 }

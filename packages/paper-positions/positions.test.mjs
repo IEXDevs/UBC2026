@@ -6,6 +6,7 @@ import {
   PRICE_LABEL,
   MIN_HOLD_MS,
   PaperError,
+  assetByMint,
   assertNoLiveTrade,
   closePaperPosition,
   createPaperBook,
@@ -37,7 +38,7 @@ function quote(mint, priceUsd, overrides = {}) {
     priceUsd,
     quoteSource: 'dexscreener',
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
+    executionCluster: 'mainnet-beta',
     label: PRICE_LABEL,
     pairAddress: 'pair',
     liquidityUsd: 1000,
@@ -49,7 +50,7 @@ function quote(mint, priceUsd, overrides = {}) {
 const proposal = {
   id: 'p',
   botId: 'bot_watch',
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   asset: 'USDC',
   recipient: 'treasury',
   quoteId: 'q',
@@ -61,6 +62,13 @@ const proposal = {
 };
 const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 
+/**
+ * Achieves: Trading bots open paper SOL positions from mainnet quotes on the execution cluster with broadcast=false; idempotent keys replay.
+ * Fails when: Positions mark live/mainnet broadcast, wrong entry cost, or duplicate keys create a second lot.
+ * Oracle: Paper trading rules: mainnet pricing / execution-cluster paper fills / PRICE_LABEL.
+ * Side effects: Mutates an in-memory paper book.
+ * Gaps: Does not cover concurrent idempotency under shared durable storage.
+ */
 test('trading bot opens a paper SOL lot from a mainnet quote and does not broadcast', () => {
   const book = createPaperBook();
   const opened = openPaperPosition({
@@ -74,7 +82,7 @@ test('trading bot opens a paper SOL lot from a mainnet quote and does not broadc
   });
   assert.equal(opened.replayed, false);
   assert.equal(opened.position.mode, 'paper');
-  assert.equal(opened.position.cluster, 'devnet');
+  assert.equal(opened.position.cluster, 'mainnet-beta');
   assert.equal(opened.position.label, PRICE_LABEL);
   assert.equal(opened.position.symbol, 'SOL');
   assert.equal(opened.position.entryMicroUsdc, '75000000');
@@ -97,6 +105,13 @@ test('trading bot opens a paper SOL lot from a mainnet quote and does not broadc
   assert.equal(book.fills.length, 1);
 });
 
+/**
+ * Achieves: Position/shopping/disabled bots, meme mints, mainnet/live swap flags, invalid/stale quotes are refused with stable codes.
+ * Fails when: Any refused path opens a position, or assertNoLiveTrade accepts mainnet.
+ * Oracle: PaperError codes from the paper-positions gate matrix.
+ * Side effects: Mutates an in-memory paper book (expects empty).
+ * Gaps: Does not cover every PAPER_UNIVERSE mint positively.
+ */
 test('position bots, shopping bots, meme mints, and live trades are refused', () => {
   const book = createPaperBook();
   const attempt = overrides => openPaperPosition({
@@ -122,6 +137,13 @@ test('position bots, shopping bots, meme mints, and live trades are refused', ()
   assert.throws(() => assertNoLiveTrade({ network: 'mainnet' }), PaperError);
 });
 
+/**
+ * Achieves: Closes before MIN_HOLD_MS throw; partial/full closes realize micro-USDC PnL without broadcast; other bots cannot close; close keys replay.
+ * Fails when: Early sells succeed, PnL math drifts, broadcast=true, cross-bot close is allowed, or close idempotency doubles fills.
+ * Oracle: MIN_HOLD_MS + paper PnL arithmetic from quote prices.
+ * Side effects: Mutates an in-memory paper book.
+ * Gaps: Does not cover loss-side closes across multiple mints in one assertion.
+ */
 test('a sell after the hold realizes paper PnL and a same-hour sell does not', () => {
   const book = createPaperBook();
   const opened = openPaperPosition({
@@ -132,9 +154,9 @@ test('a sell after the hold realizes paper PnL and a same-hour sell does not', (
     quote: quote(SOL, '150'),
     now: NOW,
     idempotencyKey: 'buy-2',
-    cluster: 'testnet',
+    cluster: 'mainnet-beta',
   });
-  assert.equal(opened.position.cluster, 'testnet');
+  assert.equal(opened.position.cluster, 'mainnet-beta');
   assert.throws(() => closePaperPosition({
     book,
     bot: trader,
@@ -164,6 +186,17 @@ test('a sell after the hold realizes paper PnL and a same-hour sell does not', (
   assert.equal(partial.position.quantity, '250000000');
   assert.equal(partial.position.entryMicroUsdc, '37500000');
   assert.equal(partial.position.status, 'open');
+  const replayedClose = closePaperPosition({
+    book,
+    bot: trader,
+    positionId: opened.position.id,
+    quantity: '250000000',
+    quote: quote(SOL, '160', { fetchedAt: new Date(NOW + MIN_HOLD_MS).toISOString() }),
+    now: NOW + MIN_HOLD_MS,
+    idempotencyKey: 'sell-half',
+  });
+  assert.equal(replayedClose.replayed, true);
+  assert.equal(partial.position.quantity, '250000000');
 
   const rest = closePaperPosition({
     book,
@@ -189,6 +222,13 @@ test('a sell after the hold realizes paper PnL and a same-hour sell does not', (
   }), error => error.code === 'bot_mismatch');
 });
 
+/**
+ * Achieves: markPaperBook prices each open mint once, marks max-loss stop, and positionLossDecision blocks further proposals.
+ * Fails when: Fallback runs unnecessarily, max loss is ignored, or a stop still returns approval-needed.
+ * Oracle: Position-management maxLoss policy + mainnet price adapter contract.
+ * Side effects: Calls injected price provider (no network).
+ * Gaps: Does not persist stop decisions to the policy ledger.
+ */
 test('mark to market uses the price adapter once per mint and stops a position bot at max loss', async () => {
   const book = createPaperBook();
   openPaperPosition({
@@ -265,6 +305,13 @@ test('mark to market uses the price adapter once per mint and stops a position b
   assert.equal(calls.length, 4);
 });
 
+/**
+ * Achieves: Marking another bot’s lots throws bot_mismatch; disabled position bots stop with zero trades/PnL.
+ * Fails when: Cross-bot marks succeed, or disabled bots still place trades.
+ * Oracle: Bot ownership + enabled gate for markPaperBook.
+ * Side effects: none
+ * Gaps: Does not cover frozen bots separately from disabled.
+ */
 test('a trading bot mark ignores other bots and a disabled position bot stops without a trade', async () => {
   const book = createPaperBook();
   const opened = openPaperPosition({
@@ -296,4 +343,60 @@ test('a trading bot mark ignores other bots and a disabled position bot stops wi
   assert.equal(stopped.action, 'stop');
   assert.equal(stopped.pnlMicroUsdc, '0');
   assert.equal(stopped.tradesPlaced, 0);
+});
+
+/**
+ * Achieves: assetByMint returns PAPER_UNIVERSE rows for known mints and null for unknowns.
+ * Fails when: Unknown mint returns a stub asset, or SOL/USDC symbols swapped.
+ * Oracle: PAPER_UNIVERSE mint → symbol map.
+ * Side effects: none.
+ * Gaps: does not cover mint case folding (mints are case-sensitive base58).
+ */
+test('assetByMint resolves paper universe mints and returns null for unknowns', () => {
+  assert.equal(assetByMint(SOL).symbol, 'SOL');
+  assert.equal(assetByMint(USDC).symbol, 'USDC');
+  assert.equal(assetByMint(PAPER_UNIVERSE[2].mint).symbol, 'USDT');
+  assert.equal(assetByMint(BONK), null);
+  assert.equal(assetByMint(''), null);
+  assert.equal(assetByMint(null), null);
+});
+
+/**
+ * Rigor audit — cross-owner paper book refusal
+ * Achieves: close/mark refuse when position.ownerId != bot.ownerId (IDOR).
+ * Fails when: attacker bot object can close or mark another owner's lot.
+ * Oracle: bot_mismatch / owner_mismatch guards in closePaperPosition / markPaperBook.
+ * Side effects: none beyond in-memory book.
+ * Gaps: persistence/RLS covered in supabase/paper-positions.test.mjs.
+ */
+test('a bot cannot close or mark another owner\'s paper lot by swapping ownerId', async () => {
+  const book = createPaperBook();
+  const opened = openPaperPosition({
+    book,
+    bot: trader,
+    mint: SOL,
+    quantity: '1000000000',
+    quote: quote(SOL, '100'),
+    now: NOW,
+    idempotencyKey: 'owned',
+  });
+  assert.throws(() => closePaperPosition({
+    book,
+    bot: { ...trader, ownerId: 'attacker' },
+    positionId: opened.position.id,
+    quantity: '1',
+    quote: quote(SOL, '100', { fetchedAt: new Date(NOW + MIN_HOLD_MS).toISOString() }),
+    now: NOW + MIN_HOLD_MS,
+    idempotencyKey: 'steal-owner',
+  }), error => error.code === 'bot_mismatch');
+
+  await assert.rejects(
+    markPaperBook({
+      bot: { ...watcher, ownerId: 'attacker' },
+      positions: [opened.position],
+      lookup: async () => quote(SOL, '90'),
+      now: NOW,
+    }),
+    error => error.code === 'owner_mismatch',
+  );
 });

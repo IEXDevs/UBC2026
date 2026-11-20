@@ -1,7 +1,8 @@
 /**
  * Shared agent tools for same-origin text chat (parity with voice).
  * Browser open/live-view/release prefer the Worker (same DO store as Live View).
- * Search/scrape use Firecrawl from root env when present.
+ * Search/scrape call https://api.firecrawl.dev/v1 with FIRECRAWL_API_KEY.
+ * They do not ride the runtime service binding.
  * Dashboard tools call the same owner HTTP routes as voice webhooks.
  */
 
@@ -15,20 +16,31 @@ import { createBrowserProvider, createScrape, createSearch } from '@ubc2026/brow
 import {
   DASHBOARD_TOOLS,
   SHARED_AGENT_TOOLS,
+  applySituation,
   parseAwaySince,
   sharedToolsInstruction,
   spokenAwayBriefing,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
-import { readAgentPriceQuote } from '@ubc2026/prices';
-import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
+import { parsePrivySigningFailure, parseSpendApprovalTerms } from '@ubc2026/contracts';
+import { ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { normalizePriceMint, readAgentPriceQuote } from '@ubc2026/prices';
+import { ownerAsksForOneTrade } from './owner-trade.mjs';
+import {
+  BALANCE_READ_FAILED,
+  classifyBalanceRead,
+  readWalletBalancesAcrossClusters,
+  unavailableBalanceLabel,
+} from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
+import { isLasoCardRequest, lasoPreparationArgs } from './laso-chat.mjs';
 
 const MAX_TOOL_RESULT = 6000;
 const DASHBOARD_NAMES = new Set(DASHBOARD_TOOLS.map((tool) => tool.name));
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const CLUSTER_NOTE = 'Holdings are whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet for these addresses. Mainnet is never queried.';
+const CLUSTER_NOTE = `Execution uses Solana ${SOLANA_CLUSTER}. Use each holding’s network label when reporting balances.`;
 
 export function openAiAgentTools(tools = SHARED_AGENT_TOOLS) {
   return toOpenAiTools(tools);
@@ -44,38 +56,89 @@ function clipJson(value) {
   return `${text.slice(0, MAX_TOOL_RESULT)}…[truncated]`;
 }
 
+function gateFields(detail) {
+  if (!detail || typeof detail !== 'object') return {};
+  const steps = Array.isArray(detail.steps)
+    ? detail.steps.filter(step => typeof step === 'string').slice(0, 8)
+    : [];
+  const privyFailure = parsePrivySigningFailure(detail.privyFailure);
+  const approvalTerms = parseSpendApprovalTerms(detail.approvalTerms);
+  return {
+    ...(typeof detail.state === 'string' ? { state: detail.state } : {}),
+    ...(detail.failure ? { failure: detail.failure } : {}),
+    ...(steps.length > 0 ? { steps } : {}),
+    ...(typeof detail.signed === 'boolean' ? { signed: detail.signed } : {}),
+    ...(typeof detail.reason === 'string' ? { reason: detail.reason } : {}),
+    ...(typeof detail.simulationReason === 'string' && /^[a-zA-Z0-9_]{1,100}$/.test(detail.simulationReason)
+      ? { simulationReason: detail.simulationReason } : {}),
+    ...(privyFailure ? { privyFailure } : {}),
+    ...(approvalTerms ? { approvalTerms } : {}),
+    ...(typeof detail.prompt === 'string' ? { prompt: detail.prompt } : {}),
+    ...(typeof detail.cluster === 'string' ? { cluster: detail.cluster } : {}),
+  };
+}
+
 function toolErrorPayload(error) {
   const code = typeof error?.code === 'string' && error.code
     ? error.code
     : (error instanceof ProviderError || error instanceof SessionError ? error.code : 'tool_failed');
-  return { error: code };
+  const gate = gateFields(error?.detail);
+  return {
+    error: code,
+    ...gate,
+    ...(code === 'desk_locked' && !gate.state
+      ? { hint: 'Desk lock is not an approval hold.' }
+      : {}),
+  };
 }
 
-async function workerJson(fetcher, url, ownerId, method, body) {
+async function workerJson(fetcher, url, ownerId, method, body, accessToken = '', extraHeaders = null) {
+  const headers = {
+    'content-type': 'application/json',
+    'x-owner-id': ownerId,
+  };
+  if (extraHeaders && extraHeaders['x-loop-break'] === 'owner-asked') {
+    headers['x-loop-break'] = 'owner-asked';
+  }
+  if (
+    extraHeaders
+    && typeof extraHeaders['x-desk-grant'] === 'string'
+    && /^[0-9a-f]{64}$/.test(extraHeaders['x-desk-grant'])
+  ) {
+    headers['x-desk-grant'] = extraHeaders['x-desk-grant'];
+  }
+  if (typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000) {
+    headers.authorization = `Bearer ${accessToken.trim()}`;
+  }
+  const approval = extraHeaders?.['x-spend-approve-once'];
+  if (typeof approval === 'string' && /^v1\.[0-9]{13}\.[a-f0-9]{64}$/.test(approval)) {
+    headers['x-spend-approve-once'] = approval;
+  }
   const response = await fetcher(url, {
     method,
-    headers: {
-      'content-type': 'application/json',
-      'x-owner-id': ownerId,
-    },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: 'no-store',
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const code = typeof data.error === 'string' ? data.error : 'browser_request_failed';
+    const code = typeof data.error === 'string'
+      ? data.error
+      : (typeof data.state === 'string' ? data.state : 'browser_request_failed');
     const err = new Error(code);
     err.code = code;
+    err.detail = gateFields(data);
     throw err;
   }
   return data;
 }
 
-function localBrowserService(env = {}, fetcher = fetch) {
+function localBrowserService(env = {}, fetcher = fetch, researchFetch = fetch) {
+  const apiKey = typeof env.FIRECRAWL_API_KEY === 'string' ? env.FIRECRAWL_API_KEY.trim() : '';
   return createBrowserSessionService({
     store: createMemoryStore(),
-    search: createSearch({ apiKey: env.FIRECRAWL_API_KEY, fetcher }),
-    scrape: createScrape({ apiKey: env.FIRECRAWL_API_KEY, fetcher }),
+    search: createSearch({ apiKey, fetcher: researchFetch }),
+    scrape: createScrape({ apiKey, fetcher: researchFetch }),
     browsers: createBrowserProvider({
       accountId: env.CLOUDFLARE_ACCOUNT_ID,
       apiToken: env.CLOUDFLARE_API_TOKEN,
@@ -166,7 +229,13 @@ function publicTokens(tokens) {
   })).filter((token) => token.label);
 }
 
-/** Read whatever non-zero SOL/SPL balances exist on Solana-devnet + Solana-testnet. */
+function walletAlreadyOnchainOk(wallet) {
+  return wallet?.balanceStatus === 'ok'
+    || (typeof wallet?.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports))
+    || (Array.isArray(wallet?.holdings) && wallet.holdings.some((row) => row?.label));
+}
+
+/** Read on-chain holdings using the configured network. */
 async function enrichWalletsOnchain(wallets, { env = {}, fetcher = fetch } = {}) {
   const list = Array.isArray(wallets) ? wallets : [];
   const head = list.slice(0, 8);
@@ -181,6 +250,11 @@ async function enrichWalletsOnchain(wallets, { env = {}, fetcher = fetch } = {})
       };
     }
     const bal = await readWalletBalancesAcrossClusters({ address, env, fetcher });
+    // Never clobber a successful runtime/onchain read with a later RPC miss
+    // (e.g. QuickNode URL sent through the AGENT_RUNTIME service binding).
+    if (!bal.ok && walletAlreadyOnchainOk(wallet)) {
+      return wallet;
+    }
     const holdings = Array.isArray(bal.holdings) ? bal.holdings.filter((row) => row?.label) : [];
     const tokens = publicTokens(bal.tokens);
     const usdc = bal.usdcAmount;
@@ -228,22 +302,31 @@ function summarizeOnchain(items) {
     }
   }
   let sol = 0n;
+  let solKnown = false;
   for (const wallet of items) {
     if (typeof wallet?.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports)) {
       sol += BigInt(wallet.solLamports);
+      solKnown = true;
     }
   }
+  const classified = classifyBalanceRead({ items });
+  const failed = classified.status === BALANCE_READ_FAILED
+    || classified.status === 'partial'
+    || classified.ok === false;
   const displayBalanceLabel = holdings.map((row) => row.label).filter(Boolean).join(' · ')
-    || formatSolLabel(sol.toString());
+    || (failed ? unavailableBalanceLabel(classified.code || 'rpc_failed') : (solKnown ? formatSolLabel(sol.toString()) : null));
   return {
-    onchainSol: sol.toString(),
-    onchainSolLabel: formatSolLabel(sol.toString()),
+    onchainSol: solKnown ? sol.toString() : null,
+    onchainSolLabel: solKnown ? formatSolLabel(sol.toString()) : null,
     tokens,
     tokensLabel: tokens.map((token) => token.label).filter(Boolean).join(' · ') || null,
     holdings,
     displayBalanceLabel,
-    displaySolLabel: formatSolLabel(sol.toString()),
+    displaySolLabel: solKnown ? formatSolLabel(sol.toString()) : null,
     displaySource: 'onchain',
+    balanceStatus: classified.status,
+    balanceCode: classified.code,
+    balanceOk: classified.ok,
   };
 }
 
@@ -292,19 +375,28 @@ function withDisplayBalances(payload, {
     || items.find((wallet) => typeof wallet?.usdcBalanceLabel === 'string')?.usdcBalanceLabel
     || null;
   const onchain = summarizeOnchain(items);
+  const failed = onchain.balanceOk === false;
   const solLabelFinal = onchain.onchainSolLabel || solLabel;
   const onchainLabel = onchain.holdings?.length
     ? onchain.displayBalanceLabel
-    : (onchain.onchainSol !== '0' ? onchain.displayBalanceLabel : null);
-  const displayBalanceLabel = [
-    platform.transferCount > 0 ? platform.label : null,
-    onchainLabel,
-    shellHint,
-    solLabelFinal,
-    displayUsdcLabel,
-  ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ')
-    || onchain.displayBalanceLabel
-    || '0 SOL';
+    : (onchain.onchainSol != null && onchain.onchainSol !== '0' ? onchain.displayBalanceLabel : null);
+  const unavailable = unavailableBalanceLabel(onchain.balanceCode || 'rpc_failed');
+  const displayBalanceLabel = failed
+    ? ([
+      shellHint ? `${shellHint} (shell · onchain unavailable)` : null,
+      platform.transferCount > 0 ? platform.label : null,
+      onchain.holdings?.length ? onchain.displayBalanceLabel : unavailable,
+    ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ')
+      || unavailable)
+    : ([
+      platform.transferCount > 0 ? platform.label : null,
+      onchainLabel,
+      shellHint,
+      solLabelFinal,
+      displayUsdcLabel,
+    ].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ')
+      || onchain.displayBalanceLabel
+      || '0 SOL');
   const balances = {
     ...(existing || {}),
     ...onchain,
@@ -313,11 +405,16 @@ function withDisplayBalances(payload, {
       platformUsdcLabel: platform.label,
       platformTransferCount: platform.transferCount,
     } : {}),
-    displayUsdcLabel: displayUsdcLabel || existing?.displayUsdcLabel || null,
-    displaySolLabel: solLabelFinal,
+    displayUsdcLabel: failed
+      ? (shellHint || (platform.transferCount > 0 ? platform.label : null))
+      : (displayUsdcLabel || existing?.displayUsdcLabel || null),
+    displaySolLabel: failed ? null : solLabelFinal,
     displayBalanceLabel,
+    balanceStatus: failed && shellHint ? 'partial' : onchain.balanceStatus,
+    balanceCode: onchain.balanceCode,
+    ok: onchain.balanceOk !== false,
     displaySource: platform.transferCount > 0
-      ? (onchain.tokens.length || onchain.onchainSol !== '0' ? 'mixed' : 'platform')
+      ? (onchain.tokens.length || (onchain.onchainSol != null && onchain.onchainSol !== '0') ? 'mixed' : 'platform')
       : 'onchain',
     clusterNote: CLUSTER_NOTE,
   };
@@ -346,23 +443,56 @@ export function createChatToolInvoker({
   shellBots = null,
   shellWallets = null,
   shellBalanceLabel = null,
+  accessToken = '',
+  ownerMessage = '',
+  priceFetch = null,
+  searchFetch = fetch,
+  /** Solana JSON-RPC must use global fetch — never AGENT_RUNTIME.bind. */
+  rpcFetch = null,
+  deskGrant = '',
+  situation = null,
 } = {}) {
   if (typeof ownerId !== 'string' || !ownerId || typeof botId !== 'string' || !botId) {
     throw new Error('invalid_identity');
   }
   const identity = { ownerId, botId };
-  const local = localBrowserService(env, fetcher);
+  // Firecrawl must not ride the runtime fetcher. A Worker 404 is not an outage.
+  const researchFetch = typeof searchFetch === 'function' ? searchFetch : null;
+  // Prefer dedicated rpcFetch (global fetch in production). Fall back to
+  // fetcher so unit tests that mock Solana on the same double still work.
+  const solanaFetch = typeof rpcFetch === 'function' ? rpcFetch : fetcher;
+  const local = localBrowserService(env, fetcher, researchFetch);
   const root = runtimeBaseUrl(runtimeBase);
   const localBots = shellBotItems(shellBots);
   const localWallets = shellWalletItems(shellWallets);
+  const token = typeof accessToken === 'string' ? accessToken.trim() : '';
+  const spendGrant = typeof deskGrant === 'string' && /^[0-9a-f]{64}$/.test(deskGrant) ? deskGrant : '';
   const balanceHint = typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
     ? shellBalanceLabel.trim().slice(0, 64)
     : null;
 
+  function callWorker(url, method, body, extraHeaders) {
+    const headers = { ...(extraHeaders || {}) };
+    if (spendGrant && typeof url === 'string' && url.includes('/api/spend')) {
+      headers['x-desk-grant'] = spendGrant;
+    }
+    return workerJson(fetcher, url, ownerId, method, body, token, headers);
+  }
+
   async function invokeBrowser(name, args = {}) {
     const openUrl = browserSessionUrl(root, botId);
+    let sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId.trim() : '';
+    if (['browser_navigate', 'browser_live_view', 'browser_release'].includes(name) && !sessionRecordId) {
+      const listed = openUrl ? await callWorker(openUrl, 'GET') : await local.listOpenSessions(identity);
+      const sessions = (Array.isArray(listed.sessions) ? listed.sessions : []).filter(session =>
+        session?.status === 'open' && typeof session.sessionRecordId === 'string' && session.sessionRecordId.trim());
+      if (sessions.length !== 1) {
+        return { error: sessions.length ? 'browser_session_ambiguous' : 'browser_session_missing' };
+      }
+      sessionRecordId = sessions[0].sessionRecordId;
+    }
     if (!openUrl) {
-      return local.invokeTool(name, args, identity);
+      return local.invokeTool(name, { ...args, sessionRecordId }, identity);
     }
     if (name === 'browser_open') {
       const body = {
@@ -370,7 +500,7 @@ export function createChatToolInvoker({
       };
       if (typeof args.url === 'string' && args.url.trim()) body.url = args.url.trim();
       try {
-        const opened = await workerJson(fetcher, openUrl, ownerId, 'POST', body);
+        const opened = await callWorker(openUrl, 'POST', body);
         return {
           sessionRecordId: opened.sessionRecordId,
           purpose: opened.purpose,
@@ -383,7 +513,7 @@ export function createChatToolInvoker({
       } catch (error) {
         // Older Workers still return concurrency_limit — reuse via list + navigate.
         if (error?.code !== 'concurrency_limit') throw error;
-        const listed = await workerJson(fetcher, openUrl, ownerId, 'GET');
+        const listed = await callWorker(openUrl, 'GET');
         const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
         const newest = [...sessions].sort((a, b) => {
           const aAt = Number(a?.updatedAt ?? a?.createdAt ?? 0);
@@ -396,7 +526,7 @@ export function createChatToolInvoker({
             sessionRecordId: newest.sessionRecordId,
             action: 'navigate',
           });
-          const navigated = await workerJson(fetcher, navUrl, ownerId, 'POST', { url: args.url.trim() });
+          const navigated = await callWorker(navUrl, 'POST', { url: args.url.trim() });
           return {
             sessionRecordId: navigated.sessionRecordId || newest.sessionRecordId,
             purpose: newest.purpose || body.purpose,
@@ -419,14 +549,8 @@ export function createChatToolInvoker({
       }
     }
     if (name === 'browser_navigate') {
-      let sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
-      if (!sessionRecordId) {
-        const listed = await workerJson(fetcher, openUrl, ownerId, 'GET');
-        const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
-        sessionRecordId = sessions[0]?.sessionRecordId || '';
-      }
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'navigate' });
-      const navigated = await workerJson(fetcher, url, ownerId, 'POST', {
+      const navigated = await callWorker(url, 'POST', {
         url: typeof args.url === 'string' ? args.url : '',
       });
       return {
@@ -436,9 +560,8 @@ export function createChatToolInvoker({
       };
     }
     if (name === 'browser_live_view') {
-      const sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'live-view' });
-      const view = await workerJson(fetcher, url, ownerId, 'POST', {});
+      const view = await callWorker(url, 'POST', {});
       // Never return viewerUrl to the model.
       return {
         sessionRecordId: view.sessionRecordId || sessionRecordId,
@@ -453,9 +576,8 @@ export function createChatToolInvoker({
       };
     }
     if (name === 'browser_release') {
-      const sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'release' });
-      const released = await workerJson(fetcher, url, ownerId, 'POST', {});
+      const released = await callWorker(url, 'POST', {});
       return {
         sessionRecordId: released.sessionRecordId || sessionRecordId,
         status: released.status || 'closed',
@@ -466,13 +588,14 @@ export function createChatToolInvoker({
 
   const apiBase = root || 'shell';
 
-  async function invokeDashboard(name, args = {}, { sessionBot = true } = {}) {
+  async function invokeDashboard(name, args = {}, { sessionBot = true, approveOnce, spendAuthorization, swapTicket, lasoPayment } = {}) {
+    if (name === 'break_loop' && !ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
     const def = DASHBOARD_TOOLS.find((tool) => tool.name === name);
     if (!def?.voiceCalls?.length) return { error: 'unknown_tool' };
     if (name === 'stop_all') {
       const listPath = ownerApiUrl('/api/bots', apiBase);
       if (!listPath) return { error: 'runtime_unconfigured' };
-      const listed = await workerJson(fetcher, listPath, ownerId, 'GET');
+      const listed = await callWorker(listPath, 'GET');
       const items = Array.isArray(listed.items) ? listed.items : [];
       const paused = [];
       for (const item of items) {
@@ -480,7 +603,7 @@ export function createChatToolInvoker({
         if (!id) continue;
         const pausePath = ownerApiUrl(`/bots/${encodeURIComponent(id)}/pause`, apiBase);
         if (!pausePath) continue;
-        const result = await workerJson(fetcher, pausePath, ownerId, 'POST', {});
+        const result = await callWorker(pausePath, 'POST', {});
         paused.push({ botId: id, status: result.status || 'paused' });
       }
       return { list: listed, paused };
@@ -508,29 +631,85 @@ export function createChatToolInvoker({
     }
     const body = {};
     for (const key of entry.body || []) {
-      if (typeof args[key] === 'string' && args[key].trim()) body[key] = args[key].trim();
+      let raw = args[key];
+      if (key === 'cooldownMinutes' && Number.isInteger(raw)) raw = String(raw);
+      if (key === 'amount' && typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0) raw = String(raw);
+      if (key === 'amountUsd' && typeof raw === 'number' && Number.isFinite(raw)) raw = String(raw);
+      if (typeof raw === 'string' && raw.trim()) body[key] = raw.trim();
     }
-    return workerJson(
-      fetcher,
-      url,
-      ownerId,
-      entry.method,
-      entry.method === 'GET' ? undefined : body,
-    );
+    if (args.confirmed === true) body.confirmed = true;
+    if (args.permission === 'ask' || args.permission === 'review' || args.permission === 'full') {
+      body.permission = args.permission;
+    }
+    if ((name === 'request_spend' || name === 'sns_send') && typeof args.reviewCap === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(args.reviewCap) && args.reviewCap !== '0') {
+      body.reviewCap = args.reviewCap;
+    }
+    if (name === 'start_task' && args.ownerPermission === 'full') body.ownerPermission = 'full';
+    if (name === 'wake_bot' && ownerAsksForOneTrade(ownerMessage)) body.reason = 'owner-ask';
+    if (name === 'break_loop') {
+      if (!ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
+      return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body, { 'x-loop-break': 'owner-asked' });
+    }
+    if (name === 'request_spend' && spendAuthorization) body.spendAuthorization = spendAuthorization;
+    if (name === 'request_spend' && args.action === 'x402' && lasoPayment) body.lasoPayment = lasoPayment;
+    if (name === 'request_spend' && args.action === 'swap' && swapTicket) body.swapTicket = swapTicket;
+    if (name === 'request_spend' && args.action === 'swap' && swapTicket && args.autoSwap === true) body.autoSwap = true;
+    return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body,
+      name === 'request_spend' && approveOnce ? { 'x-spend-approve-once': approveOnce } : undefined);
   }
 
-  return async function invokeTool(name, args = {}) {
+  return async function invokeTool(name, args = {}, { approveOnce, spendAuthorization, swapTicket, lasoPayment } = {}) {
+    args = applySituation(name, args, situation);
+    if (isLasoCardRequest(ownerMessage)) {
+      if (name === 'prepare_shopping') args = lasoPreparationArgs(args, ownerMessage);
+      if (name === 'request_spend' && args.action !== 'x402') {
+        return { error: 'laso_requires_x402', hint: 'Use action x402 with the prepared lasoTicket, never a plain transfer to Laso payTo.' };
+      }
+    }
+    if (name === 'create_loop' || name === 'set_loop_cooldown' || name === 'break_loop') {
+      args = { ...args, botId };
+      delete args.ownerAsked;
+      delete args.userAsked;
+    }
     try {
       if (name === 'get_price') {
-        const mint = typeof args.mint === 'string' ? args.mint.trim() : '';
+        const mint = normalizePriceMint(typeof args.mint === 'string' ? args.mint : '');
         const apiKey = typeof env.JUPITER_API_KEY === 'string' && env.JUPITER_API_KEY.trim()
           ? env.JUPITER_API_KEY.trim()
           : null;
-        const quote = await readAgentPriceQuote(mint, { fetcher, apiKey });
-        return { ok: true, quote };
+        const client = typeof priceFetch === 'function' ? priceFetch : fetcher;
+        if (typeof client !== 'function') {
+          return { error: 'client_missing', hint: 'The price client is not configured.' };
+        }
+        try {
+          const quote = await readAgentPriceQuote(mint, { fetcher: client, apiKey });
+          return { ok: true, quote };
+        } catch (error) {
+          const code = typeof error?.code === 'string' ? error.code : 'price_unavailable';
+          if (code === 'client_missing') return { error: code, hint: 'The price client is not configured.' };
+          if (code === 'invalid_mint') return { error: code, hint: 'That is not a Solana mint.' };
+          if (code === 'provider_failed' || code === 'provider_unavailable') {
+            return { error: code, hint: 'The price provider is down.' };
+          }
+          return { error: code };
+        }
       }
       if (name === 'web_search' || name === 'web_scrape') {
-        return await local.invokeTool(name, args, identity);
+        try {
+          return await local.invokeTool(name, args, identity);
+        } catch (error) {
+          const code = typeof error?.code === 'string' ? error.code : 'tool_failed';
+          if (code === 'search_not_configured' || code === 'scrape_not_configured') {
+            return { error: code, hint: 'FIRECRAWL_API_KEY is not configured.' };
+          }
+          if (code === 'client_missing') {
+            return { error: code, hint: 'The research client is not configured.' };
+          }
+          if (code === 'provider_failed') {
+            return { error: code, hint: 'The research provider is down.' };
+          }
+          return toolErrorPayload(error);
+        }
       }
       if (
         name === 'browser_open'
@@ -541,19 +720,38 @@ export function createChatToolInvoker({
         return await invokeBrowser(name, args);
       }
       if (name === 'list_bots') {
-        const remote = await invokeDashboard(name, args);
+        let remote;
+        try {
+          remote = await invokeDashboard(name, args);
+        } catch (error) {
+          if (error?.code === 'login_required' && localBots.length > 0) {
+            return { ok: true, source: 'shell', items: localBots };
+          }
+          throw error;
+        }
         const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
         if (remoteItems.length > 0) return remote;
         if (localBots.length > 0) return { ok: true, source: 'shell', items: localBots };
         return remote;
       }
       if (name === 'get_wallets') {
-        const remote = await invokeDashboard(name, args);
+        let remote = null;
+        try {
+          remote = await invokeDashboard(name, args);
+        } catch (error) {
+          // Runtime requires Bearer when Privy secrets are bound. Fall back to
+          // shell wallets the composer already posted so chat still answers.
+          if (error?.code === 'login_required' && localWallets.length > 0) {
+            remote = { ok: true, source: 'shell', items: [] };
+          } else {
+            throw error;
+          }
+        }
         const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
         let transfers = null;
         try {
           const transferPath = ownerApiUrl('/api/transfers', apiBase);
-          if (transferPath) transfers = await workerJson(fetcher, transferPath, ownerId, 'GET');
+          if (transferPath) transfers = await callWorker(transferPath, 'GET');
         } catch {
           transfers = null;
         }
@@ -563,7 +761,7 @@ export function createChatToolInvoker({
         const source = remoteItems.length > 0
           ? (remote?.source || 'supabase')
           : (localWallets.length > 0 ? 'shell' : (remote?.source || 'empty'));
-        const enriched = await enrichWalletsOnchain(baseItems, { env, fetcher });
+        const enriched = await enrichWalletsOnchain(baseItems, { env, fetcher: solanaFetch });
         return withDisplayBalances(
           {
             ok: true,
@@ -592,7 +790,7 @@ export function createChatToolInvoker({
         });
       }
       if (DASHBOARD_NAMES.has(name)) {
-        return await invokeDashboard(name, args);
+        return await invokeDashboard(name, args, { approveOnce, spendAuthorization, swapTicket, lasoPayment });
       }
       return await local.invokeTool(name, args, identity);
     } catch (error) {
@@ -602,6 +800,14 @@ export function createChatToolInvoker({
 }
 
 export function serializeToolResult(result) {
+  if (result?.provider === 'laso' && result.lasoTicket) {
+    const { botId, provider, amountUsd, proposal, policy, next, lasoTicket, instruction } = result;
+    return clipJson({ lasoTicket, instruction, botId, provider, amountUsd, proposal, policy, next });
+  }
+  if (result && typeof result === 'object' && (result.claimUrl || result.auth)) {
+    const { claimUrl: _claimUrl, auth: _auth, ...rest } = result;
+    return serializeToolResult(rest);
+  }
   if (result && typeof result === 'object' && result.viewerUrl) {
     const { viewerUrl: _viewerUrl, ...rest } = result;
     return clipJson(rest);

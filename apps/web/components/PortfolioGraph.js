@@ -3,6 +3,7 @@
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import AddressCopy from './AddressCopy';
 import { formatShare, formatUsdMicro } from '../lib/portfolio.mjs';
+import { portfolioEmptyMessage, unpricedHoldingLabels } from '../lib/portfolio-display.mjs';
 
 const COLORS = ['#3dd6c6', '#f5f5f5', '#7eb6ff', '#f0c36a', '#f07171', '#c4b5fd', '#a3a3a3'];
 
@@ -63,8 +64,8 @@ export default function PortfolioGraph({
   return (
     <div className="portfolio">
       <div className="portfolio-actions">
-        <button type="button" className="ghost" onClick={onConnect}>Connect a wallet</button>
-        <p className="quiet">Link as many Solana wallets as you have. They are read for this graph and are not agent spend wallets.</p>
+        <button type="button" className="ghost" onClick={onConnect}>Link a wallet</button>
+        <p className="quiet">Linked wallets are read for this graph. Agents do not spend from them.</p>
       </div>
       {loading ? <p className="quiet">Reading wallets from QuickNode…</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
@@ -73,9 +74,8 @@ export default function PortfolioGraph({
           <div className="portfolio-layout">
             <Ring slices={slices} />
             <div>
-              <p className="wallet-figure">{formatUsdMicro(total)}</p>
-              <p className="quiet">{portfolio.note}</p>
-              {slices.length === 0 ? <p className="quiet">No priced tokens on this cluster yet.</p> : (
+              {slices.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
+              {slices.length === 0 ? <p className="quiet">{portfolioEmptyMessage(wallets)}</p> : (
                 <ul className="portfolio-legend">
                   {slices.map((slice, index) => (
                     <li key={slice.mint}>
@@ -126,11 +126,11 @@ export default function PortfolioGraph({
                   <small>
                     {wallet.holdings.filter(row => row.usdMicro !== '0').map(row => `${formatBaseUnits(row.amount, row.decimals)} ${row.symbol}`).join(' · ')
                       || 'No priced balance'}
-                    {wallet.holdings.some(row => row.usdMicro === '0')
-                      ? ` · ${wallet.holdings.filter(row => row.usdMicro === '0').length} unpriced`
-                      : ''}
                   </small>
                 ) : <small>{wallet.spendable ? 'Agent wallet' : 'Connected'}</small>}
+                {unpricedHoldingLabels(wallet.holdings).map((label, index) => (
+                  <small key={index}>{label}</small>
+                ))}
               </li>
             ))}
           </ul>

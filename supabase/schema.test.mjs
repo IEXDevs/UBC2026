@@ -2,19 +2,39 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
-const foundations = readFileSync(new URL('./migrations/20261114000000_foundations.sql', import.meta.url), 'utf8');
-const policy = readFileSync(new URL('./migrations/20261114020000_policy_ledger.sql', import.meta.url), 'utf8');
-const templates = readFileSync(new URL('./migrations/20261114040000_bot_templates.sql', import.meta.url), 'utf8');
+function readSql(path) {
+  return readFileSync(new URL(path, import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+}
+
+const schema = readSql('./schema.sql');
+const foundations = readSql('./migrations/20261114000000_foundations.sql');
+const policy = readSql('./migrations/20261114020000_policy_ledger.sql');
+const templates = readSql('./migrations/20261114040000_bot_templates.sql');
+const walletSoftDelete = readSql('./migrations/20261119000000_wallet_soft_delete.sql');
+const mainnet = readSql('./migrations/20261120000000_solana_mainnet.sql');
 
 function concat(parts) {
   return parts.reduce((sql, part) => (sql.endsWith('\n') ? sql + part : `${sql}\n${part}`));
 }
 
-test('schema.sql is foundations, the policy ledger, and bot templates', () => {
-  assert.equal(schema, concat([foundations, policy, templates]));
+/**
+ * Achieves: schema.sql matches the migrations it bundles in their listed order.
+ * Fails when: schema.sql drifts from migrations.
+ * Oracle: Text equality after line-ending normalization.
+ * Side effects: Reads SQL files.
+ * Gaps: This check covers only the bundled migrations.
+ */
+test('schema.sql matches the three phase-1 migrations and wallet soft delete', () => {
+  assert.equal(schema, concat([foundations, policy, templates, walletSoftDelete, mainnet]));
 });
 
+/**
+ * Achieves: schema.sql mentions required tables, cap columns, RLS, realtime, policy RPCs, and no embedded live secrets.
+ * Fails when: A required symbol disappears or a secret literal is committed.
+ * Oracle: Phase-1 schema checklist.
+ * Side effects: Reads schema.sql.
+ * Gaps: String presence only — not executable DDL validation.
+ */
 test('schema covers phase 1 tables, caps, RLS, and realtime', () => {
   for (const name of [
     'users',

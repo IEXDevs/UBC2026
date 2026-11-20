@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BotStateMachine } from './bot-do.mjs';
-import { LOOP_STEPS } from './loop-engine.mjs';
+import { LOOP_STEPS, decideTask, isTradingGoal } from './loop-engine.mjs';
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
 import { createOpenRouter } from './openrouter.mjs';
+import { createMainnetPriceProvider } from '@ubc2026/prices';
+import { resolveTrustLookup } from './trust-lookup.mjs';
 
 const API_KEY = 'test-openrouter-key-value';
 const NOW = 1_700_000_000_000;
@@ -14,7 +16,7 @@ const wallet = {
   ownerId: 'user_1',
   kind: 'main',
   label: 'Main',
-  address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   frozen: false,
   provider: 'privy',
 };
@@ -34,8 +36,8 @@ const bot = {
 const ledger = { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 const facts = {
   asset: 'USDC',
-  mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-  cluster: 'devnet',
+  mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  cluster: 'mainnet-beta',
   price: '1000000',
   amount: '1000',
   trustScore: '800',
@@ -49,7 +51,7 @@ const proposal = {
   expectedReceiveAsset: 'USDC',
   maxFee: '10',
   expiresAt: NOW + 60_000,
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
 };
 
 function scriptedOpenRouter() {
@@ -66,10 +68,11 @@ function scriptedOpenRouter() {
       typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
     )).join('\n');
     let content = 'research summary for yield';
-    if (text.includes('Role: decide')) {
-      content = JSON.stringify({ summary: 'Devnet USDC transfer under cap', facts, proposal });
+    if (text.includes('Role: turn-verify')) content = '{"allow":true}';
+    else if (text.includes('Role: decide')) {
+      content = JSON.stringify({ summary: 'Solana USDC transfer under cap', facts, proposal });
     } else if (text.includes('Role: verify')) content = JSON.stringify(facts);
-    else if (text.includes('Role: monitor')) content = 'watching the devnet position';
+    else if (text.includes('Role: monitor')) content = 'watching the mainnet-beta position';
     return Response.json({ choices: [{ message: { content } }] });
   };
   return {
@@ -83,12 +86,12 @@ function transferDouble() {
   return {
     calls,
     client: {
-      async getDevnetBlockhash() {
-        return { cluster: 'devnet', blockhash: DESTINATION };
+      async getSolanaBlockhash() {
+        return { cluster: 'mainnet-beta', blockhash: DESTINATION };
       },
-      async signAndBroadcastDevnet(request) {
+      async signAndBroadcastSolana(request) {
         calls.push(request);
-        return { cluster: 'devnet', signature: 'sig_devnet_1' };
+        return { cluster: 'mainnet-beta', signature: 'sig_mainnet-beta_1' };
       },
     },
   };
@@ -108,9 +111,9 @@ async function wake(machine) {
 }
 
 async function postLoop(machine, env, body, owner = 'user_1') {
-  const runtime = env && Object.prototype.hasOwnProperty.call(env, 'lookupPrice')
-    ? env
-    : { ...env, lookupPrice: null };
+  const runtime = { ...(env || {}) };
+  if (!Object.prototype.hasOwnProperty.call(env || {}, 'lookupPrice')) runtime.lookupPrice = null;
+  if (!Object.prototype.hasOwnProperty.call(env || {}, 'trustLookup')) runtime.trustLookup = null;
   return machine.handle(new Request('https://bot/loop', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-owner-id': owner },
@@ -127,6 +130,13 @@ function stepOrder(run) {
   return seen;
 }
 
+/**
+ * Achieves: when lookupPrice missing, loop fetches DexScreener rather than asking the model for a price.
+ * Fails when: model asked for price or DexScreener not consulted.
+ * Oracle: DexScreener fetch observed; model prompts exclude price invention duty as asserted.
+ * Side effects / state checked: fetch + OpenRouter mocks.
+ * Gaps: none
+ */
 test('a missing lookupPrice reads DexScreener instead of asking the model for a price', async () => {
   const machine = new BotStateMachine();
   await wake(machine);
@@ -141,7 +151,8 @@ test('a missing lookupPrice reads DexScreener instead of asking the model for a 
     OPENROUTER_API_KEY: API_KEY,
     openRouter: models.openRouter,
     transferClient: transfer.client,
-    search: async () => [{ title: 'Pool', url: 'https://example.com/pool', snippet: 'devnet apy' }],
+    trustLookup: null,
+    search: async () => [{ title: 'Pool', url: 'https://example.com/pool', snippet: 'mainnet-beta apy' }],
     fetch: async (url) => {
       seen.push(String(url));
       if (!String(url).includes('api.dexscreener.com')) throw new Error('unexpected price host');
@@ -160,16 +171,17 @@ test('a missing lookupPrice reads DexScreener instead of asking the model for a 
   assert.equal(seen.every(url => url.startsWith('https://api.dexscreener.com/')), true);
   const roles = models.calls.map(call => {
     const text = call.messages.map(message => message.content).join('\n');
+    if (text.includes('Role: turn-verify')) return 'turn-verify';
     if (text.includes('Role: decide')) return 'decide';
     if (text.includes('Role: verify')) return 'verify';
     if (text.includes('Role: monitor')) return 'monitor';
     return 'research';
   });
-  assert.deepEqual(roles, ['research', 'decide', 'monitor']);
+  assert.deepEqual(roles, ['research', 'turn-verify', 'decide', 'turn-verify', 'monitor', 'turn-verify']);
   const quote = body.run.checkpoints.verify.priceQuote;
-  assert.equal(quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(quote.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(quote.pricingCluster, 'mainnet');
-  assert.equal(quote.executionCluster, 'devnet');
+  assert.equal(quote.executionCluster, 'mainnet-beta');
   assert.equal(quote.quoteSource, 'dexscreener');
   assert.equal(quote.priceUsd, '1.50');
   assert.equal(quote.authorizesTransaction, false);
@@ -177,11 +189,18 @@ test('a missing lookupPrice reads DexScreener instead of asking the model for a 
   assert.equal(body.run.checkpoints.verify.decisionRecord.facts.price, '1500000');
   assert.equal(transfer.calls.length, 1);
   assert.equal(typeof transfer.calls[0].transaction, 'string');
-  assert.equal(body.run.checkpoints.execute.signature, 'sig_devnet_1');
+  assert.equal(body.run.checkpoints.execute.signature, 'sig_mainnet-beta_1');
   assert.equal(JSON.stringify(transfer.calls).includes('authorizesTransaction'), false);
   assert.equal(JSON.stringify(quote).includes('signature'), false);
 });
 
+/**
+ * Achieves: loop checkpoints each step using injected OpenRouter (no live key/network).
+ * Fails when: steps skip checkpoints or live network called.
+ * Oracle: checkpoint sequence; OpenRouter mock used.
+ * Side effects / state checked: checkpoint store + mock chat.
+ * Gaps: none
+ */
 test('the bot loop checkpoints every step and calls OpenRouter without a live key', async () => {
   const machine = new BotStateMachine();
   const snapshots = [];
@@ -202,7 +221,7 @@ test('the bot loop checkpoints every step and calls OpenRouter without a live ke
     transferClient: transfer.client,
     search: async query => {
       searches.push(query);
-      return [{ title: 'Pool', url: 'https://example.com/pool', snippet: 'devnet apy' }];
+      return [{ title: 'Pool', url: 'https://example.com/pool', snippet: 'mainnet-beta apy' }];
     },
   };
   const response = await postLoop(machine, env, payload());
@@ -221,13 +240,17 @@ test('the bot loop checkpoints every step and calls OpenRouter without a live ke
   assert.equal(searches[0].includes(API_KEY), false);
   const roles = models.calls.map(call => {
     const text = call.messages.map(message => message.content).join('\n');
+    if (text.includes('Role: turn-verify')) return 'turn-verify';
     if (text.includes('Role: decide')) return 'decide';
     if (text.includes('Role: verify')) return 'verify';
     if (text.includes('Role: monitor')) return 'monitor';
     return 'research';
   });
-  assert.deepEqual(roles, ['research', 'decide', 'verify', 'monitor']);
+  assert.deepEqual(roles, ['research', 'turn-verify', 'decide', 'turn-verify', 'verify', 'monitor', 'turn-verify']);
   assert.deepEqual(models.calls.map(call => call.model), [
+    'muse-spark-1.3-contributor',
+    'muse-spark-1.3-contributor',
+    'muse-spark-1.3-contributor',
     'muse-spark-1.3-contributor',
     'muse-spark-1.3-contributor',
     'muse-spark-1.3-contributor',
@@ -236,7 +259,7 @@ test('the bot loop checkpoints every step and calls OpenRouter without a live ke
   const memo = JSON.parse(body.run.checkpoints.memo.memo);
   assert.equal(memo.r, body.run.checkpoints.memo.digest);
   assert.equal(body.run.checkpoints.execute.memo, body.run.checkpoints.memo.memo);
-  assert.equal(body.run.checkpoints.execute.signature, 'sig_devnet_1');
+  assert.equal(body.run.checkpoints.execute.signature, 'sig_mainnet-beta_1');
   assert.equal(body.run.checkpoints.approval.automatic, true);
 
   const again = await postLoop(machine, env, payload());
@@ -244,6 +267,13 @@ test('the bot loop checkpoints every step and calls OpenRouter without a live ke
   assert.equal(transfer.calls.length, 1);
 });
 
+/**
+ * Achieves: ask mode pauses for approval then executes a single time after approve.
+ * Fails when: double execute or execute before approval.
+ * Oracle: one execution after approval.
+ * Side effects / state checked: approval + execute mocks.
+ * Gaps: none
+ */
 test('ask mode waits for the owner and then executes once', async () => {
   const machine = new BotStateMachine();
   await wake(machine);
@@ -276,6 +306,13 @@ test('ask mode waits for the owner and then executes once', async () => {
   assert.equal(transfer.calls.length, 1);
 });
 
+/**
+ * Achieves: low trust / frozen wallet abort before verify and before model calls.
+ * Fails when: verify/model still invoked.
+ * Oracle: no model calls; early stop reason.
+ * Side effects / state checked: call counters.
+ * Gaps: none
+ */
 test('low trust and a frozen wallet stop before verify and before any model call', async () => {
   const machine = new BotStateMachine();
   await wake(machine);
@@ -299,6 +336,13 @@ test('low trust and a frozen wallet stop before verify and before any model call
   assert.equal(frozenModels.calls.length, 0);
 });
 
+/**
+ * Achieves: missing OpenRouter key fails closed without network fetch.
+ * Fails when: global fetch invoked.
+ * Oracle: no network; expected error/stop.
+ * Side effects / state checked: fetch guard.
+ * Gaps: none
+ */
 test('a missing OpenRouter key does not call the network', async () => {
   const machine = new BotStateMachine();
   await wake(machine);
@@ -313,6 +357,13 @@ test('a missing OpenRouter key does not call the network', async () => {
   assert.equal(body.run.checkpoints.research, undefined);
 });
 
+/**
+ * Achieves: post-crash execute retry reuses the same idempotency key.
+ * Fails when: new key minted on retry.
+ * Oracle: idempotency keys equal across attempts.
+ * Side effects / state checked: execute call args.
+ * Gaps: none
+ */
 test('execute retries with the same idempotency key after a crash', async () => {
   const machine = new BotStateMachine();
   await wake(machine);
@@ -325,12 +376,14 @@ test('execute retries with the same idempotency key after a crash', async () => 
       keys.push(idempotencyKey);
       crashes += 1;
       if (crashes === 1) throw new Error(`crash ${memo}`);
-      return { mode: 'executed', cluster: 'devnet', signature: 'sig_retry', memo };
+      return { mode: 'executed', cluster: 'mainnet-beta', signature: 'sig_retry', memo };
     },
   };
   const first = await postLoop(machine, env, payload());
   assert.equal(first.status, 500);
-  const saved = await machine.handle(new Request('https://bot/status'));
+  const saved = await machine.handle(new Request('https://bot/status', {
+    headers: { 'x-owner-id': 'user_1' },
+  }));
   const mid = await saved.json();
   assert.equal(mid.run.checkpoints.execute.status, 'started');
   assert.equal(mid.run.checkpoints.memo, undefined);
@@ -344,6 +397,13 @@ test('execute retries with the same idempotency key after a crash', async () => 
   assert.equal(done.run.checkpoints.execute.idempotencyKey, mid.run.runId);
 });
 
+/**
+ * Achieves: mainnet proposals and missing owners are refused before execute.
+ * Fails when: execute still called.
+ * Oracle: blocked outcomes; execute count 0.
+ * Side effects / state checked: execute mock.
+ * Gaps: none
+ */
 test('mainnet proposals and missing owners do not execute', async () => {
   const machine = new BotStateMachine();
   await wake(machine);
@@ -352,7 +412,9 @@ test('mainnet proposals and missing owners do not execute', async () => {
     const body = JSON.parse(options.body);
     calls.push(body);
     const text = JSON.stringify(body.messages);
-    const content = text.includes('Role: decide')
+    const content = text.includes('Role: turn-verify')
+      ? '{"allow":true}'
+      : text.includes('Role: decide')
       ? JSON.stringify({ summary: 'no', facts, proposal: { ...proposal, cluster: 'mainnet' } })
       : 'research summary';
     return Response.json({ choices: [{ message: { content } }] });
@@ -369,6 +431,13 @@ test('mainnet proposals and missing owners do not execute', async () => {
   assert.equal(missing.status, 401);
 });
 
+/**
+ * Achieves: fully-automatic over-budget still needs approve-once before spend.
+ * Fails when: auto-executes over budget without approval.
+ * Oracle: approval-needed then single execute after approve.
+ * Side effects / state checked: ledger/approval mocks.
+ * Gaps: none
+ */
 test('over-budget automatic mode still requires approve-once', async () => {
   const machine = new BotStateMachine();
   await wake(machine);
@@ -397,4 +466,255 @@ test('over-budget automatic mode still requires approve-once', async () => {
   assert.equal(done.done, true);
   assert.equal(done.run.checkpoints.approval.action, 'approve-once');
   assert.equal(transfer.calls.length, 1);
+});
+
+function jupiterToken(organicScore, isVerified) {
+  return [{
+    id: facts.mint,
+    organicScore,
+    isVerified,
+    audit: { mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
+  }];
+}
+
+/**
+ * Achieves: decide calls Jupiter Tokens API v2, the trust gate uses that score,
+ *   and full permission executes without an owner approval when the score passes.
+ * Fails when: the model score is kept, the gate is skipped, or ask-mode still waits under full.
+ * Oracle: organicScore 70 → 700; approval.automatic; one mainnet-beta signature.
+ * Side effects / state checked: mocked Jupiter fetch and signer.
+ * Gaps: live Jupiter is not called.
+ */
+test('decide requests Jupiter trust and full permission trades without asking', async () => {
+  const machine = new BotStateMachine();
+  await wake(machine);
+  const models = scriptedOpenRouter();
+  const transfer = transferDouble();
+  const urls = [];
+  const env = {
+    OPENROUTER_API_KEY: API_KEY,
+    openRouter: models.openRouter,
+    transferClient: transfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async (url) => {
+        urls.push(String(url));
+        return Response.json(jupiterToken(70, true));
+      },
+    }),
+  };
+  const response = await postLoop(machine, env, payload({
+    bot: { ...bot, approvalMode: 'ask' },
+    ownerPermission: 'full',
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.done, true);
+  assert.equal(urls.length >= 1, true);
+  assert.match(urls[0], /api\.jup\.ag\/tokens\/v2\/search\?query=/);
+  assert.equal(body.run.checkpoints.decide.trust.score, '700');
+  assert.equal(body.run.checkpoints.decide.trust.source, 'jupiter-tokens-v2');
+  assert.equal(body.run.checkpoints.decide.facts.trustScore, '700');
+  assert.equal(body.run.checkpoints['trust-gate'].trust.score, '700');
+  assert.equal(body.run.checkpoints['trust-gate'].trust.state, 'allowed');
+  assert.equal(body.run.checkpoints.approval.automatic, true);
+  assert.equal(body.run.checkpoints.execute.signature, 'sig_mainnet-beta_1');
+  assert.equal(transfer.calls.length, 1);
+
+  const lowMachine = new BotStateMachine();
+  await wake(lowMachine);
+  const lowModels = scriptedOpenRouter();
+  const lowTransfer = transferDouble();
+  const low = await postLoop(lowMachine, {
+    openRouter: lowModels.openRouter,
+    transferClient: lowTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async () => Response.json(jupiterToken(10, false)),
+    }),
+  }, payload({ bot: { ...bot, approvalMode: 'ask' }, ownerPermission: 'full' }));
+  const lowBody = await low.json();
+  assert.equal(lowBody.run.pauseReason, 'trust-confirmation');
+  assert.equal(lowBody.run.checkpoints.decide.trust.score, '100');
+  assert.equal(lowTransfer.calls.length, 0);
+  assert.equal(lowBody.run.checkpoints.execute, undefined);
+
+  const downMachine = new BotStateMachine();
+  await wake(downMachine);
+  const downModels = scriptedOpenRouter();
+  const downTransfer = transferDouble();
+  const down = await postLoop(downMachine, {
+    openRouter: downModels.openRouter,
+    transferClient: downTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async () => { throw new Error('jupiter down'); },
+    }),
+  }, payload({ bot: { ...bot, approvalMode: 'ask' }, ownerPermission: 'full' }));
+  const downBody = await down.json();
+  assert.equal(downBody.run.pauseReason, 'trust-unavailable');
+  assert.equal(downTransfer.calls.length, 0);
+});
+
+const TRADING_GOAL = 'beat usd inflation in the long run with long term trading';
+
+test('the scheduled loop queues a swap from the on-chain wallet and blocks paper execution', async () => {
+  const machine = new BotStateMachine();
+  const now = Date.now();
+  const outputMint = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
+  const usdBot = { ...bot, cap: { ...bot.cap, asset: 'USD' } };
+  const initial = await machine.handle(new Request('https://bot/card-loop', {
+    method: 'POST', headers: { 'x-owner-id': bot.ownerId },
+    body: JSON.stringify({ botId: bot.id, purpose: TRADING_GOAL, cooldownMinutes: '15' }),
+  }));
+  assert.equal(initial.status, 200);
+  await machine.put('cardLoop', { ...await machine.get('cardLoop'), nextWakeAt: now });
+  await machine.put('run', {
+    runId: 'old_paper', step: 'monitor',
+    checkpoints: { execute: { status: 'done', mode: 'paper', paper: { quantity: '999' } } },
+  });
+  let decisions = 0;
+  const env = {
+    loadLoopContext: async () => ({ bot: usdBot, wallet, ledger: { ...ledger, asset: 'USD' } }),
+    readTradeHoldings: async address => {
+      assert.equal(address, wallet.address);
+      return { ok: true, holdings: [{ asset: 'SOL', mint: null, amount: '20000000', decimals: 9 }] };
+    },
+    openRouter: {
+      async complete({ role, task }) {
+        if (role === 'verify') return { text: '{"allow":true}' };
+        if (role === 'research') return { text: 'Research summary.' };
+        assert.equal(role, 'decide');
+        assert.match(task, /On-chain wallet holdings.*20000000/);
+        decisions += 1;
+        return { text: JSON.stringify({ summary: 'Swap SOL into the chosen mint.', proposal: {
+          cluster: 'mainnet-beta', swap: {
+            inputMint: 'So11111111111111111111111111111111111111112', outputMint, inAmount: '10000000',
+          },
+        } }) };
+      },
+    },
+    execute: async () => assert.fail('The scheduler cannot sign a swap'),
+    ledgerApi: { reserveBudget: async () => assert.fail('The scheduler cannot reserve a swap') },
+  };
+  const tick = await machine.wakeCardLoop(env, now);
+  assert.equal(tick.spent, false);
+  assert.equal(tick.gate, 'swap-approval-required');
+  const status = async () => (await machine.handle(new Request('https://bot/status', {
+    headers: { 'x-owner-id': bot.ownerId },
+  }))).json();
+  const queued = await status();
+  assert.notEqual(queued.run.runId, 'old_paper');
+  assert.equal(queued.pendingSwap.asset, 'SOL');
+  assert.equal(queued.pendingSwap.outputAsset, outputMint);
+  assert.equal(queued.pendingSwap.amount, '10000000');
+  assert.equal(queued.run.checkpoints.execute, undefined);
+  assert.equal(await machine.get('positions'), null);
+  await machine.wakeCardLoop(env, tick.loop.nextWakeAt);
+  assert.equal(decisions, 1);
+  assert.equal((await status()).pendingSwap.idempotencyKey, queued.pendingSwap.idempotencyKey);
+});
+
+test('a trading decision uses exact mints and asks the owner to review a real quote', () => {
+  const task = decideTask(TRADING_GOAL, { type: 'trading', cap: { asset: 'USD', maxPerTransaction: '5000000' } });
+  assert.match(task, /Use only mainnet-beta/);
+  assert.match(task, /inputMint, outputMint and inAmount/);
+  assert.match(task, /5000000 microdollars/);
+  assert.match(task, /fresh Jupiter quote/);
+  assert.equal(isTradingGoal(TRADING_GOAL, { type: 'research' }), true);
+  assert.doesNotMatch(decideTask('compare prices', { type: 'research' }), /inputMint/);
+});
+
+/**
+ * Achieves: a normal start with no checkpoint creates a run and pursues the trading goal
+ *   through research, decide, Jupiter trust, and the gate. Fully-automatic does not ask.
+ * Fails when: the route returns no_run, decide is not told to trade, or execution skips the gate.
+ * Oracle: run.goal, Jupiter score 700, approval.automatic, one mainnet-beta signature.
+ * Side effects / state checked: in-memory run, mocked search, Jupiter, and signer.
+ * Gaps: live Jupiter and Privy are not called.
+ */
+test('start_task creates a run and a fully-automatic trading goal passes the gate', async () => {
+  const machine = new BotStateMachine();
+  const models = scriptedOpenRouter();
+  const transfer = transferDouble();
+  const searches = [];
+  const urls = [];
+  const response = await postLoop(machine, {
+    openRouter: models.openRouter,
+    transferClient: transfer.client,
+    search: async query => {
+      searches.push(query);
+      return [{ title: 'CPI', url: 'https://example.com/cpi', snippet: 'long-run inflation' }];
+    },
+    trustLookup: resolveTrustLookup({
+      fetch: async (url) => {
+        urls.push(String(url));
+        return Response.json(jupiterToken(70, true));
+      },
+    }),
+  }, payload({ goal: TRADING_GOAL }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.error, undefined);
+  assert.equal(body.done, true);
+  assert.equal(body.run.goal, TRADING_GOAL);
+  assert.equal(body.run.botId, 'bot_1');
+  assert.equal(searches[0], TRADING_GOAL);
+  assert.equal(body.run.checkpoints.research.status, 'done');
+  const decideCall = models.calls.find(call => call.messages.some(message => (
+    typeof message.content === 'string' && message.content.includes('Role: decide')
+  )));
+  const decideText = decideCall.messages.map(message => message.content).join('\n');
+  assert.match(decideText, /Use only mainnet-beta/);
+  assert.match(urls[0], /api\.jup\.ag\/tokens\/v2\/search\?query=/);
+  assert.equal(body.run.checkpoints.decide.trust.score, '700');
+  assert.equal(body.run.checkpoints['trust-gate'].trust.state, 'allowed');
+  assert.equal(body.run.checkpoints.approval.automatic, true);
+  assert.equal(body.run.checkpoints.execute.signature, 'sig_mainnet-beta_1');
+  assert.equal(body.run.checkpoints.execute.cluster, 'mainnet-beta');
+  assert.equal(transfer.calls.length, 1);
+  assert.equal(typeof transfer.calls[0].transaction, 'string');
+  assert.equal(transfer.calls[0].wallet.address, wallet.address);
+
+  const asking = new BotStateMachine();
+  const askModels = scriptedOpenRouter();
+  const askTransfer = transferDouble();
+  const full = await postLoop(asking, {
+    openRouter: askModels.openRouter,
+    transferClient: askTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async () => Response.json(jupiterToken(70, true)),
+    }),
+    loadLoopContext: async ({ botId, ownerId }) => {
+      assert.equal(botId, 'bot_1');
+      assert.equal(ownerId, 'user_1');
+      return {
+        bot: { ...bot, approvalMode: 'ask', goal: TRADING_GOAL },
+        wallet,
+        ledger,
+      };
+    },
+  }, { goal: TRADING_GOAL, botId: 'bot_1', now: NOW, ownerPermission: 'full' });
+  const fullBody = await full.json();
+  assert.equal(full.status, 200);
+  assert.equal(fullBody.run.goal, TRADING_GOAL);
+  assert.equal(fullBody.run.checkpoints.approval.automatic, true);
+  assert.equal(fullBody.run.checkpoints.execute.signature, 'sig_mainnet-beta_1');
+  assert.equal(askTransfer.calls.length, 1);
+
+  const blocked = new BotStateMachine();
+  const blockedModels = scriptedOpenRouter();
+  const blockedTransfer = transferDouble();
+  const low = await postLoop(blocked, {
+    openRouter: blockedModels.openRouter,
+    transferClient: blockedTransfer.client,
+    trustLookup: resolveTrustLookup({
+      fetch: async () => Response.json(jupiterToken(10, false)),
+    }),
+  }, payload({
+    goal: TRADING_GOAL,
+    bot: { ...bot, approvalMode: 'fully-automatic' },
+    ownerPermission: 'full',
+  }));
+  const lowBody = await low.json();
+  assert.equal(lowBody.run.pauseReason, 'trust-confirmation');
+  assert.equal(lowBody.run.checkpoints.execute, undefined);
+  assert.equal(blockedTransfer.calls.length, 0);
 });

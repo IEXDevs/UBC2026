@@ -1,15 +1,36 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
-import { contextTone, formatTokens } from '../lib/context-usage.mjs';
+import { useEffect, useId, useRef, useState } from 'react';
+import { contextTone, formatTokens, meterWidth } from '../lib/context-usage.mjs';
 
-const OPEN_DELAY = 10;
-const CLOSE_DELAY = 100;
+const OPEN_DELAY = 80;
+const CLOSE_DELAY = 220;
 
-function Ring({ percent, color }) {
+const SOURCES = [
+  { key: 'input', label: 'Input', color: '#2563eb' },
+  { key: 'output', label: 'Output', color: '#dc2626' },
+  { key: 'messages', label: 'Messages sent', color: '#16a34a' },
+  { key: 'compaction', label: 'Automatic compaction', color: '#eab308' },
+];
+
+function sourceValue(usage, key) {
+  if (key === 'input') return Number(usage?.input) || 0;
+  if (key === 'output') return Number(usage?.output) || 0;
+  if (key === 'messages') return Number(usage?.messages) || 0;
+  return usage?.compacted ? 1 : 0;
+}
+
+function sourceLabel(usage, key) {
+  if (key === 'compaction') return usage?.compacted ? 'Applied' : 'On';
+  if (key === 'messages') return String(Number(usage?.messages) || 0);
+  return formatTokens(sourceValue(usage, key));
+}
+
+function Ring({ percent, color, used }) {
   const radius = 6.5;
   const length = 2 * Math.PI * radius;
-  const filled = (Math.min(100, Math.max(0, percent)) / 100) * length;
+  const ratio = Math.min(100, Math.max(0, percent)) / 100;
+  const filled = ratio > 0 ? ratio * length : Number(used) > 0 ? 3 : 0;
   return (
     <svg className="context-ring" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
       <circle cx="9" cy="9" r={radius} fill="none" stroke="currentColor" strokeOpacity="0.28" strokeWidth="2" />
@@ -28,7 +49,7 @@ function Ring({ percent, color }) {
   );
 }
 
-export default function ContextUsage({ usage }) {
+export default function ContextUsage({ usage, closeSignal = 0, onOpen, onClose }) {
   const [open, setOpen] = useState(false);
   const timer = useRef(0);
   const panelId = useId();
@@ -37,13 +58,25 @@ export default function ContextUsage({ usage }) {
 
   function show() {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setOpen(true), OPEN_DELAY);
+    timer.current = window.setTimeout(() => {
+      setOpen(true);
+      onOpen?.();
+    }, OPEN_DELAY);
   }
 
   function hide() {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setOpen(false), CLOSE_DELAY);
+    timer.current = window.setTimeout(() => {
+      setOpen(false);
+      onClose?.();
+    }, CLOSE_DELAY);
   }
+
+  useEffect(() => {
+    if (!closeSignal) return;
+    window.clearTimeout(timer.current);
+    setOpen(false);
+  }, [closeSignal]);
 
   return (
     <div className="context-hover" onPointerEnter={show} onPointerLeave={hide} onFocus={show} onBlur={hide}>
@@ -57,7 +90,7 @@ export default function ContextUsage({ usage }) {
           if (event.key === 'Escape') setOpen(false);
         }}
       >
-        <Ring percent={percent} color={color} />
+        <Ring percent={percent} color={color} used={usage?.used} />
       </button>
       {open ? (
         <div className="context-card" id={panelId} role="dialog" aria-label="Context">
@@ -73,13 +106,27 @@ export default function ContextUsage({ usage }) {
             aria-valuemax={100}
             aria-valuenow={Math.round(percent)}
           >
-            <span style={{ width: `${percent}%`, background: color }} />
+            {SOURCES.filter(source => source.key === 'input' || source.key === 'output').map(source => {
+              const value = sourceValue(usage, source.key);
+              const share = usage?.limit ? (value / usage.limit) * 100 : 0;
+              return (
+                <span
+                  key={source.key}
+                  style={{ width: meterWidth(share, value), background: source.color }}
+                />
+              );
+            })}
           </div>
           <ul>
-            <li><span>Input</span><b>{formatTokens(usage.input)}</b></li>
-            <li><span>Output</span><b>{formatTokens(usage.output)}</b></li>
-            <li><span>Messages sent</span><b>{usage.messages}</b></li>
-            <li><span>Automatic compaction</span><b>{usage.compacted ? 'Applied' : 'On'}</b></li>
+            {SOURCES.map(source => (
+              <li key={source.key}>
+                <span>
+                  <i className="context-swatch" style={{ background: source.color }} aria-hidden="true" />
+                  {source.label}
+                </span>
+                <b>{sourceLabel(usage, source.key)}</b>
+              </li>
+            ))}
           </ul>
         </div>
       ) : null}

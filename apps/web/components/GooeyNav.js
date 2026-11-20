@@ -287,6 +287,8 @@ const GooeyNav = ({
     let raf = 0;
     let last = 0;
     let disposed = false;
+    let slide = null;
+    let slideBox = null;
     let layoutSig = '';
 
     const measure = () => {
@@ -399,9 +401,10 @@ const GooeyNav = ({
       const rect = rects[index];
       if (!rect || amount <= 0.002) return null;
       if (amount >= 0.995) return { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
-      const t = Math.max(0, amount);
-      const h = rect.h * Math.min(1, 0.42 + 0.58 * Math.sqrt(t));
-      const w = Math.max(h, rect.w * t ** 0.75);
+      const t = Math.min(1, Math.max(0, amount));
+      const grow = 1 - (1 - t) * (1 - t);
+      const h = rect.h * (0.3 + 0.7 * grow);
+      const w = Math.max(h, rect.w * grow);
       return { x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h };
     };
 
@@ -412,9 +415,9 @@ const GooeyNav = ({
       const reach = Math.max(0, s.spread);
       const ex = rect.x + rect.w / 2 + (Math.random() - 0.5) * rect.w * 0.45;
       const ey = rect.y + rect.h / 2 + (Math.random() - 0.5) * rect.h * 0.2;
-      const base = Math.max(0.15, s.animationTime / 1000);
+      const base = Math.max(0.36, s.animationTime / 1000);
       const variance = (Math.random() - 0.5) * (Math.max(0, s.timeVariance) / 1000);
-      const duration = Math.max(0.15, base * (0.62 + Math.random() * 0.32) + variance * 0.6);
+      const duration = Math.max(0.36, base * (0.9 + Math.random() * 0.16) + variance * 0.22);
       const out = Math.random() * Math.PI * 2;
       const into = Math.random() * Math.PI * 2;
       const burst = reach * (0.7 + Math.random() * 0.6);
@@ -426,10 +429,10 @@ const GooeyNav = ({
       drop.path = [
         drop.x,
         drop.y,
-        fresh ? drop.x + Math.cos(out) * burst * 1.6 : drop.x + drop.vx * carry,
-        fresh ? drop.y + Math.sin(out) * burst * 1.6 : drop.y + drop.vy * carry,
-        ex + Math.cos(into) * swing * 1.5,
-        ey + Math.sin(into) * swing * 1.5,
+        fresh ? drop.x + Math.cos(out) * burst * 0.62 : drop.x + drop.vx * carry,
+        fresh ? drop.y + Math.sin(out) * burst * 0.62 : drop.y + drop.vy * carry,
+        ex + Math.cos(into) * swing * 0.55,
+        ey + Math.sin(into) * swing * 0.55,
         ex,
         ey
       ];
@@ -445,7 +448,7 @@ const GooeyNav = ({
       const room = MAX_DROPS - drops.length;
       const count = Math.min(room, Math.max(1, Math.round(Math.max(1, s.particleCount) * available)));
       if (count <= 0) return;
-      const window = Math.max(0.15, s.animationTime / 1000) * 0.16;
+      const window = Math.max(0.06, s.animationTime / 1000) * 0.2;
       for (let i = 0; i < count; i++) {
         const mass = available / count;
         source.outgoing += mass;
@@ -475,12 +478,21 @@ const GooeyNav = ({
       const smooth = height * (0.18 + 0.5 * clamp01(s.gooeyness));
       const boxes = [];
       const blobs = [];
-      for (const [index, state] of pills) {
-        const box = shape(index, state.scale);
-        if (box) boxes.push({ cx: box.x + box.w / 2, cy: box.y + box.h / 2, hw: box.w / 2, hh: box.h / 2 });
+      if (slideBox) {
+        boxes.push({
+          cx: slideBox.x + slideBox.w / 2,
+          cy: slideBox.y + slideBox.h / 2,
+          hw: slideBox.w / 2,
+          hh: slideBox.h / 2,
+        });
+      } else {
+        for (const [index, state] of pills) {
+          const box = shape(index, state.scale);
+          if (box) boxes.push({ cx: box.x + box.w / 2, cy: box.y + box.h / 2, hw: box.w / 2, hh: box.h / 2 });
+        }
       }
       for (const drop of drops) {
-        if (drop.state === 'waiting') continue;
+        if (slideBox || drop.state === 'waiting') continue;
         const radius = 0.26 * height * drop.size * Math.min(drop.emerged, 1 - drop.absorbed);
         if (radius <= 0.05) continue;
         const speed = Math.hypot(drop.vx, drop.vy);
@@ -505,7 +517,7 @@ const GooeyNav = ({
       overlay.style.visibility = 'visible';
 
       if (!pipeline || !gl) {
-        const box = shape(target, 1);
+        const box = slideBox || shape(target, 1);
         if (box) {
           fallback.style.transform = `translate(${box.x.toFixed(2)}px, ${box.y.toFixed(2)}px)`;
           fallback.style.width = `${box.w}px`;
@@ -571,8 +583,9 @@ const GooeyNav = ({
       const s = settingsRef.current;
       const dt = Math.min(0.05, (now - last) / 1000 || 0);
       last = now;
-      const emergeTime = 0.09;
-      const absorbTime = 0.12;
+      const travel = Math.max(0.36, s.animationTime / 1000);
+      const emergeTime = travel * 0.42;
+      const absorbTime = travel * 0.5;
 
       for (let i = drops.length - 1; i >= 0; i--) {
         const drop = drops[i];
@@ -614,8 +627,8 @@ const GooeyNav = ({
         }
       }
 
-      const zeta = reduced ? 1 : 1 - 0.72 * clamp01(s.wobble);
-      const omega = 26;
+      const zeta = reduced ? 1 : 1 - 0.42 * clamp01(s.wobble);
+      const omega = reduced ? 28 : Math.min(13, 8 / travel);
       const steps = Math.max(1, Math.ceil(dt / (1 / 240)));
       const h = dt / steps;
       for (const [index, state] of pills) {
@@ -630,14 +643,39 @@ const GooeyNav = ({
 
       if (hover.index >= 0 && rects[hover.index]) {
         const rect = rects[hover.index];
-        const k = 1 - Math.exp(-dt / 0.06);
+        const k = 1 - Math.exp(-dt / 0.14);
         hover.x += (rect.x + rect.w / 2 - hover.x) * k;
         hover.y += (rect.y + rect.h / 2 - hover.y) * k;
         hover.w += (rect.w - hover.w) * k;
         hover.h += (rect.h - hover.h) * k;
       }
       const hoverGoal = s.hoverEffect && hover.index >= 0 && hover.index !== target ? 1 : 0;
-      hover.alpha += (hoverGoal - hover.alpha) * (1 - Math.exp(-dt / 0.08));
+      hover.alpha += (hoverGoal - hover.alpha) * (1 - Math.exp(-dt / 0.18));
+
+      if (slide) {
+        const from = rects[slide.from];
+        const to = rects[slide.to];
+        const t = Math.min(1, (now - slide.start) / slide.duration);
+        const ease = 1 - (1 - t) ** 3;
+        if (from && to) {
+          slideBox = {
+            x: from.x + (to.x - from.x) * ease,
+            y: from.y + (to.y - from.y) * ease,
+            w: from.w + (to.w - from.w) * ease,
+            h: from.h + (to.h - from.h) * ease,
+          };
+        }
+        if (t >= 1) {
+          slide = null;
+          slideBox = null;
+          pills.clear();
+          drops.length = 0;
+          const state = pill(target);
+          state.mass = 1;
+          state.scale = 1;
+          state.velocity = 0;
+        }
+      }
 
       render();
 
@@ -647,6 +685,7 @@ const GooeyNav = ({
 
       const host = pills.get(target);
       const resting =
+        !slide &&
         drops.length === 0 &&
         pills.size === 1 &&
         host &&
@@ -685,6 +724,24 @@ const GooeyNav = ({
 
     const go = (index, animate) => {
       if (index === target) return;
+      if ((settingsRef.current.particleCount || 0) <= 0) {
+        drops.length = 0;
+        if (!rects[index] || !animate || reduced || target < 0) {
+          slide = null;
+          slideBox = null;
+          settle(index);
+          return;
+        }
+        slide = {
+          from: target,
+          to: index,
+          start: performance.now(),
+          duration: Math.max(220, settingsRef.current.animationTime * 0.42),
+        };
+        target = index;
+        wake();
+        return;
+      }
       if (!rects[index] || !animate || reduced || target < 0) {
         settle(index);
         return;
@@ -731,6 +788,10 @@ const GooeyNav = ({
 
     const resizeObserver = new ResizeObserver(() => {
       measure();
+      if (slide) {
+        wake();
+        return;
+      }
       if (!drops.length) settle(target < 0 ? indexRef.current : target);
       else render();
       wake();
@@ -744,7 +805,7 @@ const GooeyNav = ({
     measure();
     settle(indexRef.current);
     document.fonts?.ready.then(() => {
-      if (disposed) return;
+      if (disposed || slide) return;
       measure();
       if (!drops.length) settle(target);
     });

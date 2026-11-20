@@ -46,7 +46,7 @@ export function describeLiveViewEmbed(viewerUrl) {
 export const agentTools = Object.freeze([
   {
     name: 'web_search',
-    description: 'Search the public web via Firecrawl for general research, shopping, or assistant questions. Returns titles, URLs, and snippets. Not a payment or trading authority.',
+    description: 'Search the public web via Firecrawl for general research, shopping, or assistant questions. When the prompt lists an owner place or local time, include them in the query for weather, hours, events, news for today, or anything near them. Returns titles, URLs, and snippets. Not a payment or trading authority.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -71,7 +71,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_open',
-    description: 'Open a Cloudflare browser session owned by this bot. Pass url (https) to load a page — without url the Live View stays on about:blank. If this bot is already at its session limit, reuses the newest open session and navigates when url is set. Does not expose CDP or privileged URLs.',
+    description: 'Open a Cloudflare browser session owned by this agent. Pass url (https) to load a page — without url the Live View stays on about:blank. If this agent is already at its session limit, reuses the newest open session and navigates when url is set. When the page is a search or map for a local or time-bound ask, include the owner place and local date from the prompt. Do not open x.com, twitter.com, or reddit.com; those sites block this browser. Does not expose CDP or privileged URLs.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -83,7 +83,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_navigate',
-    description: 'Open a new tab to an https URL in an existing bot-owned browser session. Prefer this over browser_open when a session is already open and the owner asks to look something up or change pages.',
+    description: 'Open a new tab to an https URL in an existing agent-owned browser session. Prefer this over browser_open when a session is already open and the owner asks to look something up or change pages. When the page is a search or map for a local or time-bound ask, include the owner place and local date from the prompt. Do not open x.com, twitter.com, or reddit.com.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -147,6 +147,18 @@ export function createBrowserSessionService({
     const record = await store.get(keyFor(ownerId, botId, sessionRecordId));
     if (!record || record.ownerId !== ownerId || record.botId !== botId || record.status !== 'open') fail('session_not_found', 404);
     return record;
+  }
+
+  async function withSession(record, work) {
+    try { return await work(); }
+    catch (error) {
+      if (error?.code === 'browser_session_expired') {
+        await store.put(keyFor(record.ownerId, record.botId, record.sessionRecordId), {
+          ...record, status: 'closed', updatedAt: clock(), closedAt: clock(),
+        });
+      }
+      throw error;
+    }
   }
 
   return {
@@ -266,6 +278,7 @@ export function createBrowserSessionService({
         status: 'open',
         url: pageUrl,
         targetId,
+        revision: 0,
         createdAt: clock(),
         updatedAt: clock(),
       };
@@ -304,14 +317,18 @@ export function createBrowserSessionService({
       }
       const record = await requireOwned(ownerId, botId, recordId);
       if (record.control === 'owner') fail('owner_has_control', 409);
-      const tab = await browsers.openTab(record.providerSessionId, url);
+      const tab = await withSession(record, () => browsers.openTab(record.providerSessionId, url));
       const updated = {
         ...record,
         url: tab.url,
         targetId: tab.targetId,
+        revision: (record.revision ?? 0) + 1,
         updatedAt: clock(),
       };
       await store.put(keyFor(ownerId, botId, record.sessionRecordId), updated);
+      if (record.targetId && record.targetId !== tab.targetId && typeof browsers.closeTab === 'function') {
+        try { await browsers.closeTab(record.providerSessionId, record.targetId); } catch {}
+      }
       return {
         sessionRecordId: record.sessionRecordId,
         url: tab.url,
@@ -340,10 +357,10 @@ export function createBrowserSessionService({
           updatedAt: clock(),
         });
       }
-      const view = await browsers.readonlyView(record.providerSessionId, {
+      const view = await withSession(record, () => browsers.readonlyView(record.providerSessionId, {
         targetId: typeof record.targetId === 'string' ? record.targetId : undefined,
         interactive: nextControl === 'owner',
-      });
+      }));
       const embed = describeLiveViewEmbed(view.viewerUrl);
       // Viewer URLs contain bearer credentials: return only to the authorized owner with no-store.
       // Do not put the URL on the tool event.
@@ -364,7 +381,10 @@ export function createBrowserSessionService({
     async releaseSession({ ownerId, botId, sessionRecordId }) {
       const record = await requireOwned(ownerId, botId, sessionRecordId);
       if (browsers && typeof browsers.closeSession === 'function') {
-        await browsers.closeSession(record.providerSessionId);
+        try { await browsers.closeSession(record.providerSessionId); }
+        catch (error) {
+          if (error?.code !== 'browser_session_expired') throw error;
+        }
       }
       const closed = { ...record, status: 'closed', updatedAt: clock(), closedAt: clock() };
       await store.put(keyFor(ownerId, botId, sessionRecordId), closed);
@@ -379,12 +399,13 @@ export function createBrowserSessionService({
       if (![ownerId, botId].every(idOk)) fail('invalid_identity');
       const rows = (await store.list(prefixFor(ownerId, botId)))
         .filter(row => row.status === 'open')
-        .map(({ sessionRecordId, purpose, createdAt, updatedAt, status, url }) => ({
+        .map(({ sessionRecordId, purpose, createdAt, updatedAt, status, url, revision }) => ({
           sessionRecordId,
           purpose,
           createdAt,
           updatedAt,
           status,
+          revision: revision ?? 0,
           url: typeof url === 'string' ? url : null,
         }));
       return { sessions: rows, maxSessionsPerBot };
@@ -451,6 +472,7 @@ export function createDefaultBrowserSessionService(env, store) {
       accountId: env.CLOUDFLARE_ACCOUNT_ID,
       apiToken: env.CLOUDFLARE_API_TOKEN,
       fetcher: env.fetcher,
+      binding: env.BROWSER,
     }),
     maxSessionsPerBot: concurrencyLimit(env.MAX_BROWSER_SESSIONS_PER_BOT),
   });

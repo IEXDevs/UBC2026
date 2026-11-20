@@ -1,28 +1,31 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
- * ElevenLabs voice agent.
- * Custom LLM is Meta Muse Spark 1.3 Contributor via Meta Model API (or OpenRouter
- * fallback). ElevenLabs calls this Worker; the Worker streams chat completions.
- * Webhook tools call the same bot, event, wallet, and browser routes as the UI.
+ * ElevenLabs is speech in and speech out.
+ * The desk text agent writes the reply. This Worker does not run a second
+ * model, and webhook tools no longer call bot, wallet, or browser routes.
  * No secret values are written into the agent payload.
  */
 import { timingSafeEqual } from 'node:crypto';
 import { OPENROUTER_FREE_MODEL, SECRET_NAMES, selectFreeOpenRouterModel } from '@ubc2026/contracts';
+import { LOOP_BREAK_HEADER, LOOP_BREAK_VALUE, ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
 import { createScrape, createSearch } from '@ubc2026/browser-search';
 import {
   DASHBOARD_TOOLS,
   PRICE_TOOLS,
-  SHARED_AGENT_TOOLS,
   VOICE_BROWSER_ALIASES,
   VOICE_RESEARCH_WEBHOOKS,
+  applySituation,
   parseAwaySince,
   sharedToolsInstruction,
+  situationFromEdge,
+  situationInstruction,
   spokenAwayBriefing,
-  toOpenAiTools,
 } from '@ubc2026/agent-tools';
 import { buildTextChatMessages } from '../../web/lib/text-chat.mjs';
 import { permissionInstruction } from '../../web/lib/spend-permission.mjs';
 import { readAgentPriceQuote } from '@ubc2026/prices';
-import { META_SPARK_MODEL, resolveModelProvider } from './openrouter.mjs';
+import { META_SPARK_MODEL, createOpenRouterFromEnv, resolveModelProvider } from './openrouter.mjs';
+import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 
 export const DEFAULT_VOICE_MODEL = META_SPARK_MODEL;
 /** @deprecated Prefer DEFAULT_VOICE_MODEL — kept for older imports. */
@@ -36,10 +39,14 @@ const MODEL_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
 /** conversation_id → ownerId for the life of this isolate (plus Cache API when available). */
 const voiceOwners = new Map();
+/** conversation_id → latest owner utterance seen by the custom LLM. Not tool parameters. */
+const voiceUtterances = new Map();
+/** conversation_id → owner situation for later tool webhooks. Clock and place only. */
+const voiceSituations = new Map();
 
 export function ownerPermissionNote(value) {
   if (value === 'full') {
-    return 'The owner set full permissions and let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay. Infer the action and call request_spend. A mainnet price quote never authorizes a transaction. Execution stays on Solana devnet.';
+    return 'The owner set full permissions and let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay. Infer the action and call request_spend. A mainnet price quote never authorizes a transaction. Execution stays on configured Solana network.';
   }
   if (value === 'review') {
     return 'The owner set review by AI. State what would change and wait before a trade or a spend. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. A transaction is not sent until they confirm.';
@@ -53,8 +60,91 @@ export function ownerPermissionNote(value) {
 /**
  * ElevenLabs only transcribes and speaks. Policy, tools, and the permission
  * line are applied on the custom LLM, the same way as text chat.
+ * Never hang up from silence or a greeting — the owner ends the call.
  */
-export const VOICE_SPEAK_PROMPT = 'Transcribe the owner and speak the custom LLM reply. Do not add a policy.';
+export const VOICE_SPEAK_PROMPT = [
+  'Transcribe the owner and speak the desk text agent reply. Do not add a policy, do not call tools, and do not decide.',
+  'Never end the call, hang up, or call end_call unless the owner clearly says goodbye.',
+].join(' ');
+
+/** Meta often returns tool_calls with empty content; ElevenLabs then ends with custom_llm generation failed. */
+export const VOICE_SPEAK_BEFORE_TOOLS = 'Before any tool call, speak one short sentence to the owner. Never reply with tools only.';
+
+/** Spoken immediately on connect so silence does not trip agent hangup. */
+export const VOICE_FIRST_MESSAGE = "Hey — I'm here. What should we look at?";
+
+/** Fallback line when the model emits tool_calls with no spoken text. */
+export const VOICE_TOOL_FILLER = 'On it.';
+
+/**
+ * ElevenLabs treats custom_llm.url as an OpenAI base and POSTs
+ * `{url}/chat/completions`. Storing the full completions path makes that
+ * request 404 (`custom_llm generation failed`).
+ */
+export function voiceCustomLlmBase(origin) {
+  return `${String(origin ?? '').replace(/\/$/, '')}/voice/llm`;
+}
+
+/** Full path, OpenAI `/v1` path, and the doubled path from an old full URL. */
+function isVoiceChatCompletionsPath(pathname) {
+  return /^\/voice\/llm(?:\/v1)?\/chat\/completions(?:\/chat\/completions)?$/.test(pathname);
+}
+
+/** System tools ElevenLabs may inject; keep them out of the custom LLM. */
+const VOICE_BLOCKED_TOOL = /^(end_call|end call|hang_up|hangup|leave_call)$/i;
+
+export function isBlockedVoiceToolName(name) {
+  return typeof name === 'string' && VOICE_BLOCKED_TOOL.test(name.trim());
+}
+
+/**
+ * Drop hangup / system tools ElevenLabs attaches so the model cannot end the call.
+ */
+export function filterVoiceLlmTools(tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return null;
+  const kept = tools.filter((tool) => {
+    const name = tool?.function?.name || tool?.name || '';
+    return name && !isBlockedVoiceToolName(name);
+  }).slice(0, 32);
+  return kept.length > 0 ? kept : null;
+}
+
+function voiceAgentConversationConfig({ origin, modelId, webhookSecretRef }) {
+  const base = String(origin ?? '').replace(/\/$/, '');
+  return {
+    agent: {
+      first_message: VOICE_FIRST_MESSAGE,
+      language: 'en',
+      disable_first_message_interruptions: false,
+      prompt: {
+        prompt: VOICE_SPEAK_PROMPT,
+        llm: 'custom-llm',
+        // null removes dashboard-default end_call (empty {} does not clear it).
+        built_in_tools: { end_call: null },
+        custom_llm: {
+          url: voiceCustomLlmBase(base),
+          model_id: modelId,
+          api_type: 'chat_completions',
+          ...(webhookSecretRef
+            ? {
+              api_key: webhookSecretRef,
+              request_headers: { [WEBHOOK_HEADER]: webhookSecretRef },
+            }
+            : {
+              request_headers: { [WEBHOOK_HEADER]: SECRET_PLACEHOLDER },
+            }),
+        },
+        tools: [],
+      },
+    },
+    turn: {
+      // -1 disables silence hangup (dashboard agents often set a short timeout).
+      silence_end_call_timeout: -1,
+      turn_timeout: 20,
+      turn_eagerness: 'patient',
+    },
+  };
+}
 
 function toVoiceTool(def) {
   const required = Array.isArray(def.required)
@@ -114,43 +204,14 @@ function webhookHeaders() {
     [WEBHOOK_HEADER]: SECRET_PLACEHOLDER,
     'x-owner-id': '{{owner_id}}',
     'x-spend-permission': '{{spend_permission}}',
+    'x-review-cap': '{{review_cap}}',
   });
 }
 
 export function voiceAgentCreateBody({ origin, modelId = DEFAULT_VOICE_MODEL } = {}) {
-  const base = String(origin ?? '').replace(/\/$/, '');
   return {
     name: 'Maelstrom operator',
-    conversation_config: {
-      agent: {
-        prompt: {
-          prompt: VOICE_SPEAK_PROMPT,
-          llm: 'custom-llm',
-          custom_llm: {
-            url: `${base}/voice/llm/chat/completions`,
-            model_id: modelId,
-            api_type: 'chat_completions',
-            request_headers: { [WEBHOOK_HEADER]: SECRET_PLACEHOLDER },
-          },
-          tools: VOICE_TOOLS.map(item => ({
-            type: 'webhook',
-            name: item.name,
-            description: item.description,
-            response_timeout_secs: 20,
-            api_schema: {
-              url: `${base}/voice/tools/${item.name}`,
-              method: 'POST',
-              request_headers: { ...webhookHeaders() },
-              request_body_schema: {
-                type: 'object',
-                properties: { ...item.properties },
-                required: [...item.required],
-              },
-            },
-          })),
-        },
-      },
-    },
+    conversation_config: voiceAgentConversationConfig({ origin, modelId }),
   };
 }
 
@@ -166,10 +227,7 @@ export function voiceAgentSpec(request, env = {}) {
       streaming: true,
       apiKeyIncluded: false,
     },
-    tools: VOICE_TOOLS.map(item => ({
-      name: item.name,
-      calls: item.calls.map(entry => ({ method: entry.method, path: entry.path })),
-    })),
+    tools: [],
     elevenlabs: voiceAgentCreateBody({ origin, modelId }),
   };
 }
@@ -204,16 +262,144 @@ export async function provisionVoiceAgent({ env = {}, origin, fetcher = fetch } 
   return { ok: Boolean(agentId), error: agentId ? undefined : 'elevenlabs_invalid_response', agentId, network: true };
 }
 
+/**
+ * Push the live Worker URLs + webhook secret into the existing ElevenLabs agent.
+ * Without this, custom LLM calls often 401 (unsubstituted {{secret}}) and voice
+ * connects with no replies.
+ */
+export async function syncVoiceAgent({ env = {}, origin, fetcher = fetch } = {}) {
+  const apiKey = typeof env.ELEVENLABS_API_KEY === 'string' ? env.ELEVENLABS_API_KEY.trim() : '';
+  const agentId = typeof env.ELEVENLABS_AGENT_ID === 'string' ? env.ELEVENLABS_AGENT_ID.trim() : '';
+  const webhookSecret = typeof env.ELEVENLABS_WEBHOOK_SECRET === 'string'
+    ? env.ELEVENLABS_WEBHOOK_SECRET.trim()
+    : '';
+  if (!apiKey || !agentId) return { ok: false, error: 'elevenlabs_not_configured', network: false };
+  if (!webhookSecret) return { ok: false, error: 'elevenlabs_webhook_not_configured', network: false };
+
+  const headers = {
+    'xi-api-key': apiKey,
+    'content-type': 'application/json',
+    accept: 'application/json',
+  };
+
+  let secretId = null;
+  try {
+    const listed = await fetcher('https://api.elevenlabs.io/v1/convai/secrets', {
+      method: 'GET',
+      headers: { 'xi-api-key': apiKey, accept: 'application/json' },
+    });
+    const listedBody = listed?.ok ? await listed.json().catch(() => ({})) : {};
+    const rows = Array.isArray(listedBody?.secrets)
+      ? listedBody.secrets
+      : (Array.isArray(listedBody) ? listedBody : []);
+    const existing = rows.find((row) => row?.name === 'ELEVENLABS_WEBHOOK_SECRET' && typeof row?.secret_id === 'string');
+    if (existing) secretId = existing.secret_id;
+  } catch {
+    /* create below */
+  }
+
+  if (secretId) {
+    try {
+      const updated = await fetcher(`https://api.elevenlabs.io/v1/convai/secrets/${encodeURIComponent(secretId)}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          type: 'update',
+          name: 'ELEVENLABS_WEBHOOK_SECRET',
+          value: webhookSecret,
+        }),
+      });
+      if (!updated?.ok) {
+        return {
+          ok: false,
+          error: 'elevenlabs_secret_failed',
+          status: updated?.status ?? 502,
+          network: true,
+        };
+      }
+    } catch {
+      return { ok: false, error: 'elevenlabs_unavailable', network: true };
+    }
+  } else {
+    try {
+      const created = await fetcher('https://api.elevenlabs.io/v1/convai/secrets', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'new',
+          name: 'ELEVENLABS_WEBHOOK_SECRET',
+          value: webhookSecret,
+        }),
+      });
+      const createdBody = created?.ok ? await created.json().catch(() => ({})) : {};
+      secretId = typeof createdBody?.secret_id === 'string' ? createdBody.secret_id : null;
+      if (!secretId) {
+        return {
+          ok: false,
+          error: 'elevenlabs_secret_failed',
+          status: created?.status ?? 502,
+          network: true,
+        };
+      }
+    } catch {
+      return { ok: false, error: 'elevenlabs_unavailable', network: true };
+    }
+  }
+
+  const base = String(origin ?? '').replace(/\/$/, '');
+  const modelId = grokVoiceModel(env);
+  const secretRef = { secret_id: secretId };
+  const patchBody = {
+    // Composer sends customLlmExtraBody (bot name/goal/type + spend permission).
+    // Without this Security override, ElevenLabs fails the call before the LLM.
+    platform_settings: {
+      overrides: {
+        custom_llm_extra_body: true,
+      },
+    },
+    conversation_config: voiceAgentConversationConfig({
+      origin: base,
+      modelId,
+      webhookSecretRef: secretRef,
+    }),
+  };
+
+  let response;
+  try {
+    response = await fetcher(`https://api.elevenlabs.io/v1/convai/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(patchBody),
+    });
+  } catch {
+    return { ok: false, error: 'elevenlabs_unavailable', network: true };
+  }
+  if (!response?.ok) {
+    return { ok: false, error: 'elevenlabs_sync_failed', status: response?.status ?? 502, network: true };
+  }
+  return {
+    ok: true,
+    agentId,
+    secretId,
+    customLlmUrl: voiceCustomLlmBase(base),
+    network: true,
+  };
+}
+
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
 }
 
 function presentedSecret(request) {
   const header = request.headers.get(WEBHOOK_HEADER);
-  if (typeof header === 'string' && header !== '') return header;
+  if (typeof header === 'string' && header !== '' && !header.includes('{{')) return header;
   const authorization = request.headers.get('authorization') ?? '';
   const match = /^Bearer\s+(\S+)$/i.exec(authorization);
-  return match ? match[1] : '';
+  if (match && !match[1].includes('{{')) return match[1];
+  // Custom LLM "API key" secrets sometimes arrive as xi-api-key.
+  const xi = request.headers.get('xi-api-key');
+  if (typeof xi === 'string' && xi !== '' && !xi.includes('{{')) return xi;
+  return '';
 }
 
 function secretMatches(expected, presented) {
@@ -232,6 +418,15 @@ function authorize(request, env) {
   if (expected.trim() === '') return json({ error: 'elevenlabs_webhook_not_configured' }, 503);
   if (!secretMatches(expected, presentedSecret(request))) return json({ error: 'unauthorized' }, 401);
   return null;
+}
+
+/** Web sync may present the ElevenLabs API key when the webhook secret is not bound there. */
+function authorizeSync(request, env) {
+  const denied = authorize(request, env);
+  if (!denied) return null;
+  const apiKey = typeof env.ELEVENLABS_API_KEY === 'string' ? env.ELEVENLABS_API_KEY.trim() : '';
+  if (apiKey && secretMatches(apiKey, presentedSecret(request))) return null;
+  return denied;
 }
 
 function readOwnerCandidate(value) {
@@ -299,6 +494,44 @@ async function recallVoiceOwner(conversationId) {
   }
 }
 
+function ownerUtterance(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return '';
+  for (const key of ['user_message', 'userMessage', 'utterance']) {
+    if (typeof body[key] === 'string' && body[key].trim()) return body[key].trim().slice(0, 4000);
+  }
+  return '';
+}
+
+function rememberUtterance(conversationId, messages) {
+  if (!ID.test(conversationId) || !Array.isArray(messages)) return;
+  let last = '';
+  for (const message of messages) {
+    if (message?.role === 'user' && typeof message.content === 'string' && message.content.trim()) {
+      last = message.content.trim().slice(0, 4000);
+    }
+  }
+  if (last) voiceUtterances.set(conversationId, last);
+}
+
+function recallUtterance(conversationId) {
+  if (!ID.test(conversationId) || !voiceUtterances.has(conversationId)) return '';
+  return voiceUtterances.get(conversationId);
+}
+
+function rememberSituation(conversationId, situation) {
+  if (!ID.test(conversationId) || !situation || typeof situation.at !== 'string') return;
+  voiceSituations.set(conversationId, situation);
+  if (voiceSituations.size > 200) {
+    const oldest = voiceSituations.keys().next().value;
+    voiceSituations.delete(oldest);
+  }
+}
+
+function recallSituation(conversationId) {
+  if (!ID.test(conversationId) || !voiceSituations.has(conversationId)) return null;
+  return voiceSituations.get(conversationId);
+}
+
 function parameterBag(body, name) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'invalid_body' };
   if (typeof body.tool_name === 'string' && body.tool_name !== name) return { error: 'tool_name_mismatch' };
@@ -330,9 +563,11 @@ function requestFor(entry, parameters, owner) {
   if (entry.method !== 'GET') {
     const body = {};
     for (const key of entry.body) {
-      if (typeof parameters[key] !== 'string' || parameters[key].trim() === '') continue;
-      const max = key === 'url' || key === 'goal' ? 2000 : 256;
-      body[key] = parameters[key].trim().slice(0, max);
+      let raw = parameters[key];
+      if (key === 'cooldownMinutes' && Number.isInteger(raw)) raw = String(raw);
+      if (typeof raw !== 'string' || raw.trim() === '') continue;
+      const max = key === 'url' || key === 'goal' ? 2000 : key === 'purpose' ? 500 : 256;
+      body[key] = raw.trim().slice(0, max);
     }
     if (entry.path.endsWith('/browser/sessions') && body.purpose == null) body.purpose = 'browse';
     init.headers['content-type'] = 'application/json';
@@ -491,6 +726,39 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
     return { calls: toolDef.calls.map(entry => ({ method: entry.method, path: entry.path })), list: summary, paused };
   }
   let params = { ...parameters };
+  if (toolDef.name === 'start_task' && trustedSpendPermission(options.spendPermission) === 'full') {
+    const entry = toolDef.calls[0];
+    const outbound = requestFor(entry, params, owner);
+    if (!outbound) return { error: 'invalid_parameters' };
+    const payload = await outbound.json().catch(() => ({}));
+    payload.ownerPermission = 'full';
+    const stamped = new Request(outbound.url, {
+      method: 'POST',
+      headers: outbound.headers,
+      body: JSON.stringify(payload),
+    });
+    const response = await fetchApi(stamped, env);
+    return {
+      calls: [{ method: entry.method, path: entry.path, ...(await speakable(response, secrets)) }],
+    };
+  }
+  if (toolDef.name === 'break_loop') {
+    if (!ownerAskedToBreakLoop(options.ownerUtterance)) return { error: 'owner_must_ask' };
+    const entry = toolDef.calls[0];
+    const outbound = requestFor(entry, params, owner);
+    if (!outbound) return { error: 'invalid_parameters' };
+    const headers = new Headers(outbound.headers);
+    headers.set(LOOP_BREAK_HEADER, LOOP_BREAK_VALUE);
+    const stamped = new Request(outbound.url, {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    const response = await fetchApi(stamped, env);
+    return {
+      calls: [{ method: 'POST', path: entry.path, ...(await speakable(response, secrets)) }],
+    };
+  }
   if (toolDef.name === 'request_spend') {
     const body = {
       botId: params.botId,
@@ -502,6 +770,11 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
     if (typeof params.destination === 'string') body.destination = params.destination;
     if (typeof params.handle === 'string') body.handle = params.handle;
     if (typeof params.asset === 'string') body.asset = params.asset;
+    if (params.quoteCluster === SOLANA_CLUSTER || params.quoteCluster === 'mainnet') body.quoteCluster = params.quoteCluster;
+    const reviewCap = typeof options.reviewCap === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(options.reviewCap) && options.reviewCap !== '0'
+      ? options.reviewCap
+      : '';
+    if (body.permission === 'review' && reviewCap) body.reviewCap = reviewCap;
     if (params.quoteCluster === 'mainnet') {
       body.quote = { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false };
     }
@@ -511,6 +784,9 @@ async function runCalls(toolDef, parameters, owner, fetchApi, env, options = {})
         'x-owner-id': owner,
         accept: 'application/json',
         'content-type': 'application/json',
+        ...(typeof env.ELEVENLABS_WEBHOOK_SECRET === 'string' && env.ELEVENLABS_WEBHOOK_SECRET
+          ? { 'x-elevenlabs-webhook-secret': env.ELEVENLABS_WEBHOOK_SECRET }
+          : {}),
       },
       body: JSON.stringify(body),
     });
@@ -546,6 +822,10 @@ function validateParameters(toolDef, parameters) {
       if (typeof parameters.query !== 'string' || !parameters.query.trim() || parameters.query.length > 1000) return false;
       continue;
     }
+    if (key === 'q') {
+      if (typeof parameters.q !== 'string' || !parameters.q.trim() || parameters.q.length > 128) return false;
+      continue;
+    }
     if (key === 'url') {
       if (typeof parameters.url !== 'string' || !parameters.url.trim() || parameters.url.length > 2000) return false;
       continue;
@@ -554,6 +834,9 @@ function validateParameters(toolDef, parameters) {
   }
   if (toolDef.properties.query && parameters.query != null) {
     if (typeof parameters.query !== 'string' || !parameters.query.trim() || parameters.query.length > 1000) return false;
+  }
+  if (toolDef.properties.q && parameters.q != null) {
+    if (typeof parameters.q !== 'string' || !parameters.q.trim() || parameters.q.length > 128) return false;
   }
   if (toolDef.properties.url && parameters.url != null) {
     if (typeof parameters.url !== 'string' || !parameters.url.trim() || parameters.url.length > 2000) return false;
@@ -588,7 +871,7 @@ function validateParameters(toolDef, parameters) {
     if (typeof parameters.destination !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(parameters.destination)) return false;
   }
   if (toolDef.properties.quoteCluster && parameters.quoteCluster != null) {
-    if (parameters.quoteCluster !== 'mainnet' && parameters.quoteCluster !== 'devnet') return false;
+    if (parameters.quoteCluster !== 'mainnet' && parameters.quoteCluster !== SOLANA_CLUSTER) return false;
   }
   if (toolDef.properties.botId && parameters.botId != null && parameters.botId !== '') {
     if (typeof parameters.botId !== 'string' || !ID.test(parameters.botId)) return false;
@@ -602,7 +885,18 @@ function validateParameters(toolDef, parameters) {
 export async function handleVoiceRequest(request, env = {}, { fetchApi, fetcher = fetch } = {}) {
   const url = new URL(request.url);
   if (url.pathname === '/voice/agent' && request.method === 'GET') return json(voiceAgentSpec(request, env));
-  if (url.pathname === '/voice/llm/chat/completions' && request.method === 'POST') {
+  if (url.pathname === '/voice/agent/sync' && request.method === 'POST') {
+    const denied = authorizeSync(request, env);
+    if (denied) return denied;
+    const result = await syncVoiceAgent({
+      env,
+      origin: url.origin,
+      fetcher,
+    });
+    const status = result.ok ? 200 : (result.status || (result.network ? 502 : 503));
+    return json(result, status);
+  }
+  if (request.method === 'POST' && isVoiceChatCompletionsPath(url.pathname)) {
     return handleCustomLlm(request, env, fetcher);
   }
   if (url.pathname === '/voice/session-owner' && request.method === 'POST') {
@@ -637,41 +931,11 @@ async function resolveToolOwner(request, body) {
   return null;
 }
 
-async function handleTool(name, request, env, fetchApi) {
+async function handleTool(name, request, env) {
   const denied = authorize(request, env);
   if (denied) return denied;
-  const toolDef = VOICE_TOOLS.find(item => item.name === name);
-  if (!toolDef) return json({ error: 'unknown_tool' }, 404);
-  const body = await request.json().catch(() => null);
-  const parsed = parameterBag(body, name);
-  if (parsed.error) return json({ error: parsed.error }, 400);
-  if (!validateParameters(toolDef, parsed.parameters)) return json({ error: 'invalid_parameters' }, 400);
-  const owner = await resolveToolOwner(request, body);
-  if (!owner) return json({ error: 'owner_required' }, 400);
-  if (parsed.conversationId) await rememberVoiceOwner(parsed.conversationId, owner);
-  let result;
-  try {
-    if (toolDef.handler === 'research') {
-      result = await runResearchTool(name, parsed.parameters, env);
-    } else if (toolDef.handler === 'price') {
-      result = await runPriceTool(parsed.parameters, env);
-    } else {
-      if (typeof fetchApi !== 'function') return json({ error: 'voice_api_unavailable' }, 503);
-      result = await runCalls(toolDef, parsed.parameters, owner, fetchApi, env, {
-        spendPermission: request.headers.get('x-spend-permission'),
-      });
-    }
-  } catch {
-    return json({ error: 'voice_api_failed' }, 502);
-  }
-  if (result.error) return json({ error: result.error }, result.error === 'session_not_found' ? 404 : 400);
-  return json({
-    result: {
-      tool: name,
-      ...(parsed.conversationId ? { conversationId: parsed.conversationId } : {}),
-      ...result,
-    },
-  });
+  if (!VOICE_TOOLS.some(item => item.name === name)) return json({ error: 'unknown_tool' }, 404);
+  return json({ error: 'voice_tools_retired' }, 410);
 }
 
 function clip(value, max) {
@@ -686,12 +950,15 @@ function sanitizeContent(content, secrets) {
 }
 
 function sanitizeMessages(messages, secrets) {
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 32) return null;
-  const roles = new Set(['system', 'user', 'assistant', 'tool']);
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 48) return null;
+  const roles = new Set(['system', 'user', 'assistant', 'tool', 'developer']);
   const cleaned = [];
   for (const message of messages) {
-    if (!message || !roles.has(message.role)) return null;
-    const next = { role: message.role, content: sanitizeContent(message.content, secrets) };
+    if (!message || typeof message !== 'object') continue;
+    // Skip unknown roles instead of failing the whole ElevenLabs turn.
+    if (!roles.has(message.role)) continue;
+    const role = message.role === 'developer' ? 'system' : message.role;
+    const next = { role, content: sanitizeContent(message.content, secrets) };
     if (typeof message.tool_call_id === 'string') next.tool_call_id = clip(message.tool_call_id, 128);
     if (Array.isArray(message.tool_calls) && message.tool_calls.length <= 8) {
       next.tool_calls = message.tool_calls.map(callItem => ({
@@ -705,7 +972,42 @@ function sanitizeMessages(messages, secrets) {
     }
     cleaned.push(next);
   }
-  return cleaned;
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/**
+ * ElevenLabs drops the call when a custom LLM stream has tool_calls and no
+ * spoken content ("custom_llm generation failed"). Prepend a short line.
+ */
+export function ensureSpokenToolSse(raw, filler = VOICE_TOOL_FILLER) {
+  const text = typeof raw === 'string' ? raw : '';
+  if (!text.includes('tool_calls')) return text;
+  let hasSpoken = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') continue;
+    try {
+      const parsed = JSON.parse(payload);
+      const content = parsed?.choices?.[0]?.delta?.content
+        ?? parsed?.choices?.[0]?.message?.content
+        ?? '';
+      if (typeof content === 'string' && content.trim() !== '') {
+        hasSpoken = true;
+        break;
+      }
+    } catch {
+      /* keep scanning */
+    }
+  }
+  if (hasSpoken) return text;
+  const spoken = typeof filler === 'string' && filler.trim() ? filler.trim().slice(0, 120) : VOICE_TOOL_FILLER;
+  const chunk = {
+    id: 'chatcmpl-voice-tool',
+    object: 'chat.completion.chunk',
+    choices: [{ index: 0, delta: { role: 'assistant', content: spoken }, finish_reason: null }],
+  };
+  return `data: ${JSON.stringify(chunk)}\n\n${text.endsWith('\n') ? text : `${text}\n`}`;
 }
 
 /**
@@ -721,6 +1023,7 @@ export function voiceDecisionMessages({
   transcript = [],
   secrets = [],
   provider = 'meta',
+  situation = null,
 } = {}) {
   const prefix = buildTextChatMessages({
     botName,
@@ -730,7 +1033,11 @@ export function voiceDecisionMessages({
     message: '',
     secrets,
     provider: provider === 'openrouter' ? 'openrouter' : 'meta',
-    toolsInstruction: sharedToolsInstruction(),
+    toolsInstruction: [
+      sharedToolsInstruction(),
+      'When this call is handed to the agent, that agent uses search, the browser, /goal, /aihero, /vercel, /github, and /search, plus the connected apps. Speak its reply, including what a subagent returned. Do not start a second voice call.',
+      situationInstruction(situation),
+    ].join('\n'),
     permission: permissionInstruction(ownerPermission),
   });
   const turns = [];
@@ -756,76 +1063,34 @@ export function voiceDecisionMessages({
   return [...prefix, ...turns];
 }
 
-async function handleCustomLlm(request, env, fetcher) {
-  const denied = authorize(request, env);
-  if (denied) return denied;
-  const resolved = resolveModelProvider(env);
-  const apiKey = modelApiKey(env);
-  if (!apiKey) return json({ error: 'openrouter_not_configured' }, 503);
-  const secrets = knownSecrets(env);
-  const incoming = await request.json().catch(() => null);
-  if (!incoming || typeof incoming !== 'object') return json({ error: 'invalid_body' }, 400);
-  const messages = sanitizeMessages(incoming.messages, secrets);
-  if (!messages) return json({ error: 'invalid_body' }, 400);
-  const provider = resolved.provider === 'openrouter' ? 'openrouter' : 'meta';
-  const adapted = voiceDecisionMessages({
-    botName: incoming.botName,
-    botGoal: incoming.botGoal,
-    botType: incoming.botType,
-    ownerPermission: incoming.ownerPermission,
-    transcript: messages,
-    secrets,
-    provider,
-  });
-  if (!adapted.some(item => item.role === 'user' && item.content)) return json({ error: 'invalid_body' }, 400);
-  let model = grokVoiceModel(env);
-  if (resolved.provider === 'openrouter') {
-    const selected = selectFreeOpenRouterModel(model);
-    if (!selected) return json({ error: 'openrouter_paid_model' }, 400);
-    model = selected;
-  }
-  const payload = {
-    model,
-    messages: adapted,
-    stream: true,
-  };
-  if (provider !== 'meta') payload.temperature = 0.5;
-  else payload.reasoning_effort = 'minimal';
-  payload.tools = toOpenAiTools(SHARED_AGENT_TOOLS);
-  payload.tool_choice = 'auto';
-  let response;
-  try {
-    response = await fetcher(voiceChatCompletionsUrl(env), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        accept: 'text/event-stream',
-        'content-type': 'application/json',
-        'x-title': 'Maelstrom',
-      },
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    return json({ error: 'openrouter_unavailable' }, 502);
-  }
-  if (!response?.ok) {
-    return json({ error: response?.status === 401 ? 'openrouter_unauthorized' : 'openrouter_failed' }, response?.status === 401 ? 401 : 502);
-  }
-  const type = response.headers?.get?.('content-type') ?? '';
-  if (type.includes('text/event-stream') && response.body) {
-    return new Response(response.body, {
-      status: 200,
-      headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
-    });
-  }
-  const data = await response.json().catch(() => null);
-  const text = redactString(typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : '', secrets);
+/** Keep the LiveKit room up when the upstream model fails — JSON 5xx drops the call. */
+export function spokenVoiceSse(text, max = 500) {
+  const limit = Number.isInteger(max) && max > 40 ? Math.min(max, 1500) : 500;
+  const content = typeof text === 'string' && text.trim()
+    ? text.trim().slice(0, limit)
+    : 'I hit a model error. Please try again in a moment.';
   const chunk = {
     id: 'chatcmpl-voice',
     object: 'chat.completion.chunk',
-    choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
+    choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }],
   };
   const done = { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
   const sse = `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(done)}\n\ndata: [DONE]\n\n`;
-  return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' } });
+  return new Response(sse, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
+  });
+}
+
+/** Spoken when an old ConvAI agent still calls this Worker. The desk speaks the text agent. */
+export const VOICE_PIPE_LINE = 'Voice is speech in and speech out. The desk text agent writes the reply.';
+
+async function handleCustomLlm(request, env) {
+  const denied = authorize(request, env);
+  if (denied) return denied;
+  const incoming = await request.json().catch(() => null);
+  if (!incoming || typeof incoming !== 'object') {
+    return spokenVoiceSse('I could not read that turn. Please try again.');
+  }
+  return spokenVoiceSse(VOICE_PIPE_LINE);
 }

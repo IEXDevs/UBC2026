@@ -14,6 +14,35 @@ async function jsonRequest(fetcher, url, options) {
   try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
 }
 
+/**
+ * provider_failed is a Firecrawl server error (HTTP 5xx).
+ * A missing key, a missing client, or a 4xx from the wrong host is not an outage.
+ */
+function firecrawlStatus(status) {
+  if (status === 429) return new ProviderError('provider_rate_limited', 429);
+  if (status === 401 || status === 403) return new ProviderError('client_missing', status);
+  if (status >= 500 && status <= 599) return new ProviderError('provider_failed', 502);
+  return new ProviderError('provider_rejected', 502);
+}
+
+function firecrawlKey(apiKey) {
+  return typeof apiKey === 'string' ? apiKey.trim() : '';
+}
+
+async function firecrawlRequest(fetcher, url, options) {
+  if (typeof fetcher !== 'function') throw new ProviderError('client_missing', 503);
+  let response;
+  try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(30000) }); }
+  catch (error) {
+    if (error instanceof ProviderError) throw error;
+    throw new ProviderError('provider_unavailable');
+  }
+  if (!response.ok) throw firecrawlStatus(response.status);
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
+}
+
 function firecrawlHeaders(apiKey) {
   return {
     Authorization: `Bearer ${apiKey}`,
@@ -27,14 +56,16 @@ function firecrawlHeaders(apiKey) {
  * API key must come from Worker secrets (FIRECRAWL_API_KEY), never the model or client.
  */
 export function createSearch({ apiKey, fetcher = fetch, baseUrl = 'https://api.firecrawl.dev/v1' }) {
+  const key = firecrawlKey(apiKey);
   return async function search(query, limit = 5) {
-    if (!apiKey) throw new ProviderError('search_not_configured', 503);
+    if (!key) throw new ProviderError('search_not_configured', 503);
+    if (typeof fetcher !== 'function') throw new ProviderError('client_missing', 503);
     if (typeof query !== 'string' || !query.trim() || query.length > 1000 || !Number.isInteger(limit) || limit < 1 || limit > 10) {
       throw new ProviderError('invalid_search', 400);
     }
-    const data = await jsonRequest(fetcher, `${baseUrl}/search`, {
+    const data = await firecrawlRequest(fetcher, `${baseUrl}/search`, {
       method: 'POST',
-      headers: firecrawlHeaders(apiKey),
+      headers: firecrawlHeaders(key),
       body: JSON.stringify({ query: query.trim(), limit, ignoreInvalidURLs: true }),
     });
     if (!data || data.success !== true || !Array.isArray(data.data)) throw new ProviderError('invalid_provider_response');
@@ -58,8 +89,10 @@ export function createSearch({ apiKey, fetcher = fetch, baseUrl = 'https://api.f
  * Firecrawl page→Markdown scrape for research. Caps markdown size so tool events stay concise.
  */
 export function createScrape({ apiKey, fetcher = fetch, baseUrl = 'https://api.firecrawl.dev/v1', maxMarkdownChars = 12000 }) {
+  const key = firecrawlKey(apiKey);
   return async function scrape(url) {
-    if (!apiKey) throw new ProviderError('scrape_not_configured', 503);
+    if (!key) throw new ProviderError('scrape_not_configured', 503);
+    if (typeof fetcher !== 'function') throw new ProviderError('client_missing', 503);
     if (typeof url !== 'string' || !url.trim() || url.length > 2000) throw new ProviderError('invalid_scrape', 400);
     let target;
     try {
@@ -69,9 +102,9 @@ export function createScrape({ apiKey, fetcher = fetch, baseUrl = 'https://api.f
     if (!Number.isSafeInteger(maxMarkdownChars) || maxMarkdownChars < 500 || maxMarkdownChars > 50000) {
       throw new ProviderError('invalid_scrape', 400);
     }
-    const data = await jsonRequest(fetcher, `${baseUrl}/scrape`, {
+    const data = await firecrawlRequest(fetcher, `${baseUrl}/scrape`, {
       method: 'POST',
-      headers: firecrawlHeaders(apiKey),
+      headers: firecrawlHeaders(key),
       body: JSON.stringify({ url: target.href, formats: ['markdown'], onlyMainContent: true }),
     });
     if (!data || data.success !== true || !data.data || typeof data.data !== 'object') {
@@ -111,9 +144,148 @@ export function assertPublicHttpUrl(value) {
   return target;
 }
 
-export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) {
-  // Browser Run REST API. The older `/browser-rendering/` prefix is not the Live View API.
-  const base = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-run/devtools/browser`;
+// Browser Run egress location is not configurable, so Google may geo-localize
+// (e.g. Hong Kong, Chinese UI). Pin English / US unless the URL already says otherwise.
+const GOOGLE_HOST = /^(?:[a-z0-9-]+\.)*google\.(?:com|[a-z]{2}|com?\.[a-z]{2})$/;
+export function withEnglishGoogle(target) {
+  if (!GOOGLE_HOST.test(target.hostname)) return target;
+  const next = new URL(target.href);
+  if (!next.searchParams.has('hl')) next.searchParams.set('hl', 'en');
+  if (!next.searchParams.has('gl')) next.searchParams.set('gl', 'us');
+  return next;
+}
+
+function browserHttpError(status, sessionScoped) {
+  if (status === 410 && sessionScoped) return new ProviderError('browser_session_expired', 410);
+  if (status === 429) return new ProviderError('provider_rate_limited', 429);
+  if (status === 401 || status === 403) return new ProviderError('browser_not_configured', 503);
+  if (status === 404) return new ProviderError('browser_endpoint_missing', 502);
+  if (status >= 500 && status <= 599) return new ProviderError('provider_failed', 502);
+  return new ProviderError('provider_rejected', 502);
+}
+
+async function browserRequest(fetcher, url, options, sessionScoped = false) {
+  let response;
+  try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(30000) }); }
+  catch { throw new ProviderError('provider_unavailable'); }
+  if (!response.ok) {
+    const error = browserHttpError(response.status, sessionScoped);
+    error.providerStatus = response.status;
+    const body = await response.text();
+    if (sessionScoped && /failed to fetch targets/i.test(body)) error.providerReason = 'targets_unavailable';
+    throw error;
+  }
+  const text = await response.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
+}
+
+function sanitizedBindingError(value) {
+  return String(value ?? '')
+    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S+/gi, '[redacted]')
+    .replace(/\b[\w.-]+\.[a-z]{2,}(?:[/:?]\S*)?/gi, '[redacted]')
+    .replace(/\b(?:bearer\s+\S+|[\w-]*(?:token|secret|password|key)[\w-]*\s*[:=]\s*\S+)/gi, '[redacted]')
+    .replace(/\b[a-zA-Z0-9_+/=-]{20,}\b/g, '[redacted]')
+    .replace(/[\r\n\t]/g, ' ')
+    .slice(0, 240);
+}
+
+async function viaBinding(method, work) {
+  try { return await work(); }
+  catch (error) {
+    if (error instanceof ProviderError) throw error;
+    if (method !== 'acquire' && /(?:session\b[^\n]{0,120}\b(?:not found|does not exist|expired|closed)|no such session|unknown session|failed to fetch targets)/i.test(String(error?.message))) {
+      if (method === 'closeSession') return { status: 'closed' };
+      const expired = new ProviderError('browser_session_expired', 410);
+      expired.providerReason = 'binding_session_expired';
+      throw expired;
+    }
+    console.error(`Browser binding ${method}: ${sanitizedBindingError(error?.name)}: ${sanitizedBindingError(error?.message)}`);
+    if (/429|rate limit/i.test(String(error?.message))) throw new ProviderError('provider_rate_limited', 429);
+    const failed = new ProviderError('provider_failed', 502);
+    failed.providerReason = 'binding_failed';
+    throw failed;
+  }
+}
+
+function checkedTab(result, fallbackUrl) {
+  const targetId = typeof result?.id === 'string' ? result.id : '';
+  if (!TARGET_ID.test(targetId)) throw new ProviderError('invalid_provider_response');
+  return {
+    targetId,
+    url: typeof result.url === 'string' && result.url.startsWith('http') ? result.url : fallbackUrl,
+    title: typeof result.title === 'string' ? result.title.slice(0, 200) : '',
+  };
+}
+
+function checkedViewer(result, interactive) {
+  let url;
+  try { url = new URL(result?.devtoolsFrontendUrl); } catch { throw new ProviderError('invalid_provider_response'); }
+  if (url.protocol !== 'https:' || url.hostname !== 'live.browser.run' || url.username || url.password) throw new ProviderError('invalid_provider_response');
+  if (url.pathname !== '/ui/view' && url.pathname !== '/ui/inspector') throw new ProviderError('invalid_provider_response');
+  return {
+    viewerUrl: url.href,
+    connectBefore: new Date(Date.now() + LIVE_VIEW_TTL_MS).toISOString(),
+    mode: interactive ? 'interactive' : 'readonly',
+  };
+}
+
+function liveViewOptions({ targetId, interactive }) {
+  const body = { mode: 'tab', expiresInMs: LIVE_VIEW_TTL_MS };
+  if (!interactive) body.guardrails = { mode: 'readonly' };
+  if (typeof targetId === 'string' && TARGET_ID.test(targetId)) body.targetId = targetId;
+  return body;
+}
+
+function assertSessionId(sessionId) {
+  if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
+}
+
+/** Workers Browser Run binding (`env.BROWSER`): no API token, runs from the calling Worker. */
+function createBindingBrowserProvider(binding, restProvider) {
+  return {
+    async createSession() {
+      const result = await viaBinding('acquire', () => binding.acquire({ keepAlive: 600000 }));
+      if (typeof result?.sessionId !== 'string' || !result.sessionId) throw new ProviderError('invalid_provider_response');
+      return { sessionId: result.sessionId };
+    },
+    async openTab(sessionId, url) {
+      assertSessionId(sessionId);
+      const target = withEnglishGoogle(assertPublicHttpUrl(url));
+      return checkedTab(await viaBinding('devtools.newTarget', () => binding.devtools.newTarget(sessionId, target.href)), target.href);
+    },
+    async readonlyView(sessionId, { targetId, interactive = false } = {}) {
+      assertSessionId(sessionId);
+      if (!interactive) {
+        if (!restProvider) throw new ProviderError('browser_readonly_not_configured', 503);
+        return restProvider.readonlyView(sessionId, { targetId });
+      }
+      return checkedViewer(await viaBinding('getLiveView', () => binding.getLiveView(sessionId, liveViewOptions({ targetId, interactive: true }))), true);
+    },
+    async closeTab(sessionId, targetId) {
+      if (!restProvider) throw new ProviderError('browser_readonly_not_configured', 503);
+      return restProvider.closeTab(sessionId, targetId);
+    },
+    async closeSession(sessionId) {
+      assertSessionId(sessionId);
+      const result = await viaBinding('closeSession', () => binding.closeSession(sessionId));
+      const status = typeof result === 'string' ? result : result?.status;
+      return { status: typeof status === 'string' ? status : 'closing' };
+    },
+  };
+}
+
+export function createBrowserProvider({ accountId, apiToken, fetcher = fetch, binding } = {}) {
+  if (binding && typeof binding.acquire === 'function' && typeof binding.devtools?.newTarget === 'function') {
+    const restProvider = accountId && apiToken ? createBrowserProvider({ accountId, apiToken, fetcher }) : null;
+    return createBindingBrowserProvider(binding, restProvider);
+  }
+  // Live View is served from browser-run. Accounts that still publish the
+  // session API under browser-rendering get that path when browser-run 404s.
+  const prefixes = [
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-run/devtools/browser`,
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId ?? '')}/browser-rendering/devtools/browser`,
+  ];
   async function call(path, { method = 'POST', body } = {}) {
     if (!accountId || !apiToken) throw new ProviderError('browser_not_configured', 503);
     const headers = { Authorization: `Bearer ${apiToken}`, Accept: 'application/json' };
@@ -122,17 +294,39 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) 
       headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(body);
     }
-    const result = await jsonRequest(fetcher, base + path, options);
-    if (result && result.success === false) throw new ProviderError('browser_provider_failed');
-    return result?.result ?? result ?? {};
+    let last;
+    for (const base of prefixes) {
+      try {
+        const result = await browserRequest(fetcher, base + path, options, path.startsWith('/'));
+        if (result && result.success === false) throw new ProviderError('browser_provider_failed');
+        return result?.result ?? result ?? {};
+      } catch (error) {
+        last = error;
+        if (error?.code === 'browser_session_expired' && method === 'DELETE') return { status: 'closed' };
+        if (!(error instanceof ProviderError) || error.code !== 'browser_endpoint_missing') throw error;
+      }
+    }
+    if (last?.code === 'browser_endpoint_missing' && path.startsWith('/')) {
+      if (method === 'DELETE') return { status: 'closed' };
+      const expired = new ProviderError('browser_session_expired', 410);
+      expired.providerStatus = last.providerStatus;
+      expired.providerReason = last.providerReason;
+      throw expired;
+    }
+    throw last ?? new ProviderError('browser_endpoint_missing', 502);
   }
   return {
     async createSession() {
-      const result = await call('?keep_alive=600000&targets=true', { body: {} });
+      const result = await call('?keep_alive=600000&targets=true');
       if (typeof result.sessionId !== 'string' || !result.sessionId) throw new ProviderError('invalid_provider_response');
       // Do not return provider CDP URLs or privileged default viewer links to the frontend.
       // New sessions start on about:blank until openTab navigates.
       return { sessionId: result.sessionId };
+    },
+    async closeTab(sessionId, targetId) {
+      assertSessionId(sessionId);
+      if (typeof targetId !== 'string' || !TARGET_ID.test(targetId)) throw new ProviderError('invalid_target', 400);
+      return call(`/${encodeURIComponent(sessionId)}/json/close/${encodeURIComponent(targetId)}`, { method: 'GET' });
     },
     /**
      * Open a tab and navigate. Sessions otherwise stay on about:blank.
@@ -140,7 +334,7 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) 
      */
     async openTab(sessionId, url) {
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
-      const target = assertPublicHttpUrl(url);
+      const target = withEnglishGoogle(assertPublicHttpUrl(url));
       const result = await call(
         `/${encodeURIComponent(sessionId)}/json/new?url=${encodeURIComponent(target.href)}`,
         { method: 'PUT' },
@@ -158,9 +352,7 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) 
     },
     async readonlyView(sessionId, { targetId, interactive = false } = {}) {
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
-      const body = { mode: 'tab', expiresInMs: LIVE_VIEW_TTL_MS };
-      if (!interactive) body.guardrails = { mode: 'readonly' };
-      if (typeof targetId === 'string' && TARGET_ID.test(targetId)) body.targetId = targetId;
+      const body = liveViewOptions({ targetId, interactive });
       const result = await call(`/${encodeURIComponent(sessionId)}/live_view`, { body });
       let url;
       try { url = new URL(result.devtoolsFrontendUrl); } catch { throw new ProviderError('invalid_provider_response'); }

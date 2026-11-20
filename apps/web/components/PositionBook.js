@@ -1,14 +1,20 @@
 'use client';
 
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
 import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
 import AddressCopy from './AddressCopy';
+import AddressText from './AddressText';
+import { addressTextParts } from '../lib/address-labels.mjs';
+import { copyText } from '../lib/copy-text.mjs';
 import EarningsChart from './EarningsChart';
 
 const PLACE_KEY = 'maelstrom.cardPlaces';
 const DRAG_PX = 7;
 const HOME_Z = 2300;
+const SAFE_GAP = 12;
+const MIN_SAFE = 48;
 
 function readPlaces() {
   try {
@@ -47,6 +53,55 @@ function metric(parent, label, value, extra) {
   amount.textContent = value;
   row.append(name, amount);
   parent.append(row);
+}
+
+// The 3D cards are DOM nodes, so keep the same address controls as the React details.
+function addressText(node, text, address) {
+  for (const part of addressTextParts(text, [address])) {
+    if (!part.address) {
+      if (part.punctuation) {
+        const token = document.createElement('span');
+        token.className = 'address-copy-token';
+        token.textContent = part.text + part.punctuation;
+        node.append(token);
+      } else {
+        node.append(document.createTextNode(part.text));
+      }
+      continue;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'address-copy is-inline is-dotted';
+    button.setAttribute('aria-label', `Copy ${part.address}`);
+    button.title = 'Copy address';
+    const label = document.createElement('span');
+    label.className = 'address-copy-label';
+    label.textContent = part.text;
+    const status = document.createElement('span');
+    status.className = 'address-copy-status';
+    status.setAttribute('role', 'status');
+    let timer;
+    button.onpointerdown = event => event.stopPropagation();
+    button.onclick = async event => {
+      event.stopPropagation();
+      window.clearTimeout(timer);
+      const ok = await copyText(part.address);
+      const note = document.createElement('small');
+      note.className = 'address-copy-feedback';
+      note.textContent = ok ? 'Copied' : 'Copy failed';
+      status.replaceChildren(note);
+      timer = window.setTimeout(() => status.replaceChildren(), 1200);
+    };
+    button.append(label, status);
+    if (part.punctuation) {
+      const token = document.createElement('span');
+      token.className = 'address-copy-token';
+      token.append(button, document.createTextNode(part.punctuation));
+      node.append(token);
+    } else {
+      node.append(button);
+    }
+  }
 }
 
 function face(className) {
@@ -91,7 +146,7 @@ function cardElement(card) {
   if (mark) heading.append(mark);
   const names = document.createElement('div');
   const asset = document.createElement('strong');
-  asset.textContent = card.asset;
+  addressText(asset, card.asset, card.mint);
   names.append(asset);
   if (card.side) {
     const side = document.createElement('span');
@@ -102,7 +157,7 @@ function cardElement(card) {
 
   const size = document.createElement('p');
   size.className = 'book-size';
-  size.textContent = card.amountLabel;
+  addressText(size, card.amountLabel, card.mint);
   const usd = document.createElement('p');
   usd.className = 'book-usd';
   usd.textContent = usdLabel(card.notionalLabel);
@@ -113,7 +168,7 @@ function cardElement(card) {
   const top = document.createElement('div');
   top.className = 'book-card-top';
   const market = document.createElement('strong');
-  market.textContent = card.market;
+  addressText(market, card.market, card.mint);
   top.append(market);
   if (card.venue) {
     const venue = document.createElement('span');
@@ -251,16 +306,18 @@ function starTexture() {
   return canvas;
 }
 
-export default function PositionBook({ positions, bots, wallets = [], earnings = null }) {
+export default function PositionBook({ positions, bots, wallets = [], earnings = null, onWallet }) {
   const book = useMemo(() => layoutPositionBook(positions, bots, wallets), [positions, bots, wallets]);
   const mountRef = useRef(null);
   const cameraRef = useRef(null);
   const openRef = useRef(null);
+  const walletRef = useRef(onWallet);
   const [detail, setDetail] = useState(null);
   const [drifted, setDrifted] = useState(false);
   const driftedRef = useRef(false);
   const setDriftedRef = useRef(setDrifted);
   openRef.current = setDetail;
+  walletRef.current = onWallet;
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -579,9 +636,10 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
             title: wallet.label,
             kicker: wallet.frozen ? 'Frozen wallet' : (wallet.readOnly ? 'Read-only wallet' : `${wallet.accountKind} wallet`),
             note: wallet.readOnly
-              ? 'Read-only balance. devnet execution, mainnet pricing. This does not authorize a transaction.'
+              ? 'Read-only balance. This does not authorize a transaction.'
               : null,
             address: wallet.fullAddress,
+            copyAddresses: [wallet.fullAddress],
             rows: [
               ['Notional', wallet.notionalLabel],
               ['Kind', wallet.frozen ? 'Frozen' : wallet.accountKind],
@@ -612,6 +670,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           const owner = book.wallets.find(item => item.id === account.walletId);
           return {
             title: account.venue,
+            copyAddresses: [owner?.fullAddress],
             kicker: 'Subaccount',
             rows: [
               ['Wallet', owner?.label ?? account.walletId],
@@ -639,6 +698,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         const owner = book.wallets.find(item => item.id === card.walletId);
         return {
           title: card.amountLabel,
+          copyAddresses: [card.mint, owner?.fullAddress],
           kicker: `${card.venue} · ${card.side ?? card.asset}`,
           rows: [
             ['Asset', card.asset],
@@ -660,24 +720,66 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         };
       }
 
-      function framedDistance() {
+      // Phones stack the chart, zoom tools and caption over the book, so frame it in the gap they leave.
+      function safeArea() {
         const width = mount.clientWidth || 1;
+        const height = mount.clientHeight || 1;
+        const full = { left: 0, top: 0, right: width, bottom: height };
+        if (!window.matchMedia('(max-width: 800px)').matches) return full;
+        const box = mount.getBoundingClientRect();
+        const edge = selector => {
+          const rect = mount.querySelector(selector)?.getBoundingClientRect();
+          return rect && rect.width && rect.height ? rect : null;
+        };
+        const earnings = edge('.book-earnings');
+        const caption = edge('.book-caption');
+        const tools = edge('.book-tools');
+        const area = { ...full };
+        if (caption) area.bottom = caption.top - box.top - SAFE_GAP;
+        if (tools) {
+          area.left = SAFE_GAP;
+          area.right = tools.left - box.left - SAFE_GAP;
+        }
+        if (area.right - area.left < MIN_SAFE) {
+          area.left = full.left;
+          area.right = full.right;
+        }
+        if (earnings) {
+          // Below the chart on portrait phones, beside it on short landscape ones: whichever shows the book larger.
+          const below = { ...area, top: earnings.bottom - box.top + SAFE_GAP };
+          const beside = { ...area, top: earnings.top - box.top, left: earnings.right - box.left + SAFE_GAP };
+          const frame = bookFrame(book);
+          const scale = r => Math.min((r.right - r.left) / Math.max(frame.maxX - frame.minX, 1), (r.bottom - r.top) / Math.max(frame.maxY - frame.minY, 1));
+          const fits = [below, beside].filter(r => r.right - r.left >= MIN_SAFE && r.bottom - r.top >= MIN_SAFE);
+          if (fits.length) return fits.reduce((a, b) => (scale(b) > scale(a) ? b : a));
+        }
+        if (area.bottom - area.top < MIN_SAFE) {
+          area.top = full.top;
+          area.bottom = full.bottom;
+        }
+        return area;
+      }
+
+      function framedDistance(area) {
         const height = mount.clientHeight || 1;
         const frame = bookFrame(book);
         const worldW = Math.max(frame.maxX - frame.minX, 1);
         const worldH = Math.max(frame.maxY - frame.minY, 1);
-        const vHalf = (camera.fov * Math.PI) / 360;
-        const distH = (worldH / 2) / Math.tan(vHalf);
-        const hHalf = Math.atan((width / height) * Math.tan(vHalf));
-        const distW = (worldW / 2) / Math.tan(hHalf);
+        const tan = Math.tan((camera.fov * Math.PI) / 360);
+        const distH = (worldH * height) / (2 * tan * Math.max(area.bottom - area.top, 1));
+        const distW = (worldW * height) / (2 * tan * Math.max(area.right - area.left, 1));
         return THREE.MathUtils.clamp(Math.max(distH, distW) * 1.18, 700, 12000);
       }
 
       function applyHome(snap = true) {
+        const width = mount.clientWidth || 1;
+        const height = mount.clientHeight || 1;
         const frame = bookFrame(book);
-        home.x = frame.x;
-        home.y = frame.y;
-        home.z = framedDistance();
+        const area = safeArea();
+        home.z = framedDistance(area);
+        const perPixel = (2 * Math.tan((camera.fov * Math.PI) / 360) * home.z) / height;
+        home.x = frame.x - ((area.left + area.right) / 2 - width / 2) * perPixel;
+        home.y = frame.y + ((area.top + area.bottom) / 2 - height / 2) * perPixel;
         focus.x = home.x;
         focus.y = home.y;
         focus.z = home.z;
@@ -809,8 +911,11 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           if (!gesture.moved) {
             const body = bodyById.get(gesture.id);
             if (body) body.pin = false;
-            const payload = detailPayload(gesture.id);
-            if (payload) openRef.current?.(payload);
+            if (element?.dataset.kind === 'wallet') walletRef.current?.(gesture.id);
+            else {
+              const payload = detailPayload(gesture.id);
+              if (payload) openRef.current?.(payload);
+            }
           }
           const state = tiltState.get(gesture.id);
           if (state) {
@@ -915,14 +1020,13 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       <EarningsChart series={earnings} />
       <p className="book-caption">
         {book.summary.count === 0 ? (
-          <span>No positions yet.</span>
+          <span>No Positions Yet.</span>
         ) : (
           <>
             <strong>{book.summary.notionalLabel}</strong>
-            <span>{book.summary.count} positions · {book.summary.venues} venues · PnL {book.summary.pnlLabel}</span>
+            <span>{book.summary.count} positions · {book.summary.venues} venues{book.summary.pnlLabel ? ` · PnL ${book.summary.pnlLabel}` : ''}</span>
           </>
         )}
-        <span>devnet execution, mainnet pricing</span>
       </p>
       <div className="book-tools">
         <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.86)}>
@@ -947,13 +1051,13 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
             onMouseDown={event => event.stopPropagation()}
           >
             <p>{detail.kicker}</p>
-            <h2>{detail.title}</h2>
-            {detail.address ? <AddressCopy address={detail.address} /> : null}
+            <h2><AddressText text={detail.title} addresses={detail.copyAddresses} /></h2>
+            {detail.address ? <AddressCopy address={detail.address} dotted /> : null}
             <dl>
               {detail.rows.map(([label, value]) => (
                 <div key={label}>
                   <dt>{label}</dt>
-                  <dd>{label === 'Address' ? <AddressCopy address={value} /> : value}</dd>
+                  <dd>{label === 'Address' || label === 'Mint' ? <AddressCopy address={value} dotted /> : <AddressText text={value} addresses={detail.copyAddresses} />}</dd>
                 </div>
               ))}
             </dl>
@@ -963,8 +1067,8 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
                 <dl>
                   {section.rows.map(([label, value], index) => (
                     <div key={`${section.title}-${index}`}>
-                      <dt>{label}</dt>
-                      <dd>{value}</dd>
+                      <dt><AddressText text={label} addresses={detail.copyAddresses} /></dt>
+                      <dd><AddressText text={value} addresses={detail.copyAddresses} /></dd>
                     </div>
                   ))}
                 </dl>

@@ -2,14 +2,21 @@
  * Live /api/* data routes backed by Supabase + Privy when secrets exist.
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
-import { createPrivyWalletClientFromEnv, sanitizeOrigin } from '@ubc2026/wallets/privy';
+import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { ownerAuthStatus, resolveOwner } from './owner-auth.mjs';
 import {
   ConfigError,
+  parsePrivySigningFailure,
+  solanaSpendAsset,
   httpsAvatarUrl,
   normalizeDisplayName,
   normalizeHandle,
-  parseRecipient,
+  lookupHandleFilter,
+  lookupHandleKey,
+  parseLookupQuery,
   postgrestEq,
+  publicDisplayName,
 } from '@ubc2026/contracts';
 import { createSnsResolver, resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { accountWriteBodies, WalletError } from '@ubc2026/wallets';
@@ -24,77 +31,54 @@ import {
 } from './supabase-rest.mjs';
 import { readBotAlerts } from './bot-alerts.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
+import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import {
   mapTransferRow,
   platformProposal,
   transferErrorCode,
   transferRequest,
 } from './platform-transfer.mjs';
-import { readWalletBalancesAcrossClusters } from '@ubc2026/wallets/balances';
+import {
+  BALANCE_READ_FAILED,
+  classifyBalanceRead,
+  readWalletBalancesAcrossClusters,
+  unavailableBalanceLabel,
+} from '@ubc2026/wallets/balances';
+import {
+  deskSpendAllowed,
+  newDeskGrant,
+  parseDeskVerifier,
+  passwordMatches,
+  sha256Hex,
+} from './desk-grant.mjs';
 import { spendLedgerCrossCheck, streamConfirmedPayments } from '@ubc2026/quicknode-streams';
+import { handleAccountRoute } from './account-state.mjs';
+import { SOL_MINT } from './usd-budget.mjs';
+
+const ACCOUNT_ROUTES = new Set(['state.list', 'state.write', 'recovery.status', 'recovery.issue', 'recovery.verify']);
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-function ownerHeader(request) {
-  const value = request.headers.get('x-owner-id');
-  if (typeof value === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(value)) return value;
-  return null;
-}
-
-function bearerToken(request) {
-  const header = request.headers.get('authorization') ?? '';
-  return header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+async function deskDenied(request, env, ownerId, fetcher) {
+  const desk = await deskSpendAllowed(env, request, ownerId, fetcher);
+  if (desk.ok) return null;
+  const status = desk.error === 'desk_lock_unavailable' ? 503 : 403;
+  return json({ error: desk.error }, status);
 }
 
 function privyClient(env) {
   if (env.transferClient) return env.transferClient;
   try {
-    return createPrivyWalletClientFromEnv(env, { fetcher: env.fetch ?? fetch });
+    // Workers cannot set outbound Origin — never fall through to /users/me here.
+    return createPrivyWalletClientFromEnv(env, {
+      fetcher: env.fetch ?? fetch,
+      allowUsersMeFallback: false,
+    });
   } catch (error) {
     if (error instanceof ConfigError || error?.code === 'missing_secrets') return null;
     throw error;
-  }
-}
-
-/** Browser Origin for Privy /users/me — required when creating/syncing wallets. */
-function requestOrigin(request, env = {}) {
-  const headerOrigin = sanitizeOrigin(request.headers.get('origin') || request.headers.get('Origin'));
-  if (headerOrigin) return headerOrigin;
-  const maelstrom = sanitizeOrigin(request.headers.get('x-maelstrom-origin'));
-  if (maelstrom) return maelstrom;
-  const referer = request.headers.get('referer') || request.headers.get('Referer');
-  if (typeof referer === 'string' && referer.trim()) {
-    try {
-      const fromReferer = sanitizeOrigin(new URL(referer.trim()).origin);
-      if (fromReferer) return fromReferer;
-    } catch { /* ignore */ }
-  }
-  return sanitizeOrigin(env.WEB_ORIGIN || env.PRIVY_ALLOWED_ORIGIN || '');
-}
-
-async function resolveOwner(request, env) {
-  const header = ownerHeader(request);
-  const token = bearerToken(request);
-  if (!token) return { ownerId: header, user: null, token: '' };
-
-  const client = privyClient(env);
-  if (!client?.acceptLogin) return { ownerId: header, user: null, token };
-
-  try {
-    const result = await client.acceptLogin({
-      accessToken: token,
-      ownerId: header || undefined,
-      origin: requestOrigin(request, env),
-    });
-    const ownerId = header || result?.main?.ownerId || result?.userId || null;
-    return { ownerId, user: result, token };
-  } catch (error) {
-    if (error instanceof WalletError) {
-      return { ownerId: header, user: null, token, error: error.code || 'privy_failed' };
-    }
-    return { ownerId: header, user: null, token, error: 'privy_failed' };
   }
 }
 
@@ -172,33 +156,27 @@ function walletRowFromPublic(wallet, ownerId) {
     kind,
     label,
     address,
-    provider: wallet.provider === 'privy' || !wallet.provider ? 'privy' : 'privy',
-    frozen: wallet.frozen === true,
+    provider: 'privy',
   };
 }
 
-async function persistWalletRows(env, ownerId, wallets, fetcher) {
-  if (!supabaseConfig(env) || !ownerId) return { wrote: 0 };
-  const rows = (Array.isArray(wallets) ? wallets : [])
-    .map((wallet) => walletRowFromPublic(wallet, ownerId))
-    .filter(Boolean)
-    .slice(0, 20);
-  if (!rows.length) return { wrote: 0 };
-  await supabaseWrite(env, {
+async function persistWalletRows(env, ownerId, rows, fetcher) {
+  const userWrite = await supabaseWrite(env, {
     path: 'users',
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=minimal',
     body: { id: ownerId, privy_user_id: ownerId },
     fetcher,
   });
-  await supabaseWrite(env, {
+  if (!userWrite.ok) return false;
+  const walletWrite = await supabaseWrite(env, {
     path: 'wallets',
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=minimal',
     body: rows,
     fetcher,
   });
-  return { wrote: rows.length };
+  return walletWrite.ok;
 }
 
 function formatFixedUnits(amount, decimals, symbol) {
@@ -301,10 +279,12 @@ function tokensLabel(tokens) {
   return labels.length ? labels.join(' · ') : null;
 }
 
-/** Attach whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet. */
+/** Attach whatever non-zero SOL/SPL balances exist on Solana-mainnet-beta and Solana-testnet. */
 async function withOnchainBalances(env, wallets) {
   const list = Array.isArray(wallets) ? wallets : [];
-  const fetcher = env.fetch ?? fetch;
+  // Always hit Solana over public HTTPS (or the injected test double). Never
+  // reuse a service-binding fetcher if one is later stuffed onto env.fetch.
+  const fetcher = typeof env.fetch === 'function' ? env.fetch : globalThis.fetch;
   const head = list.slice(0, BALANCE_CAP);
   const enriched = await Promise.all(head.map(async (wallet) => {
     const bal = await readWalletBalancesAcrossClusters({
@@ -336,7 +316,7 @@ async function withOnchainBalances(env, wallets) {
       cluster: bal.cluster || null,
       clusters: bal.clusters
         ? {
-          devnet: bal.clusters.devnet?.ok === true,
+          solana: bal.clusters.solana?.ok === true,
           testnet: bal.clusters.testnet?.ok === true,
         }
         : null,
@@ -403,8 +383,13 @@ function walletDisplayParts(wallet) {
 }
 
 function walletBalanceSummary(items, platform) {
+  const classified = classifyBalanceRead({ items });
+  const failed = classified.ok === false;
   const onchainUsdc = sumField(items, 'usdcBalance');
-  const onchainSol = sumField(items, 'solLamports');
+  const onchainSolKnown = Array.isArray(items) && items.some((wallet) => (
+    typeof wallet?.solLamports === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(wallet.solLamports)
+  ));
+  const onchainSol = onchainSolKnown ? sumField(items, 'solLamports') : null;
   const tokens = mergeTokenHoldings(items);
   const holdings = [];
   for (const wallet of Array.isArray(items) ? items : []) {
@@ -413,7 +398,7 @@ function walletBalanceSummary(items, platform) {
     }
   }
   const hasPlatform = platform.transferCount > 0 && platform.amount != null;
-  const hasSol = onchainSol !== '0';
+  const hasSol = onchainSol != null && onchainSol !== '0';
   const parts = [];
   if (hasPlatform) parts.push(platform.label);
   if (holdings.length) {
@@ -425,28 +410,34 @@ function walletBalanceSummary(items, platform) {
     }
   }
   if (!parts.length) {
-    parts.push(formatSolLabel(onchainSol) || formatUsdcLabel(onchainUsdc));
+    if (failed) parts.push(unavailableBalanceLabel(classified.code || 'rpc_failed'));
+    else parts.push(formatSolLabel(onchainSol || '0') || formatUsdcLabel(onchainUsdc || '0'));
   }
-  const displayBalanceLabel = joinBalanceParts(parts);
+  const displayBalanceLabel = failed && !holdings.length && !hasSol
+    ? unavailableBalanceLabel(classified.code || 'rpc_failed')
+    : joinBalanceParts(parts);
   const displaySource = hasPlatform
     ? (hasSol || tokens.length || holdings.length ? 'mixed' : 'platform')
     : 'onchain';
-  const displayUsdc = hasPlatform ? platform.amount : onchainUsdc;
+  const displayUsdc = hasPlatform ? platform.amount : (failed ? null : onchainUsdc);
   return {
     platformUsdc: platform.amount,
     platformUsdcLabel: platform.label,
     platformTransferCount: platform.transferCount,
-    onchainUsdc,
-    onchainUsdcLabel: formatUsdcLabel(onchainUsdc),
+    onchainUsdc: failed && !hasPlatform ? null : onchainUsdc,
+    onchainUsdcLabel: failed && !hasPlatform ? null : formatUsdcLabel(onchainUsdc),
     onchainSol,
-    onchainSolLabel: formatSolLabel(onchainSol),
+    onchainSolLabel: onchainSol != null ? formatSolLabel(onchainSol) : null,
+    balanceStatus: classified.status,
+    balanceCode: classified.code,
+    ok: classified.ok,
     tokens,
     tokensLabel: tokensLabel(tokens),
     holdings,
     displayUsdc,
-    displayUsdcLabel: formatUsdcLabel(displayUsdc),
+    displayUsdcLabel: displayUsdc != null ? formatUsdcLabel(displayUsdc) : null,
     displaySol: onchainSol,
-    displaySolLabel: formatSolLabel(onchainSol),
+    displaySolLabel: onchainSol != null ? formatSolLabel(onchainSol) : null,
     displayBalanceLabel,
     displaySource,
   };
@@ -459,32 +450,31 @@ export async function handleApiData(request, env, matched) {
   const fetcher = env.fetch ?? fetch;
 
   if (routeId === 'me') {
-    const { ownerId, user, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
-    const liveMethods = Array.isArray(user?.loginMethods) ? user.loginMethods : [];
     if (!supabaseConfig(env)) {
       return json({
         ok: true,
         source: 'unconfigured',
-        user: { id: ownerId, privyUserId: user?.main?.ownerId || ownerId, loginMethods: liveMethods },
+        user: { id: ownerId, privyUserId: ownerId, loginMethods: [] },
       });
     }
     const result = await supabaseGet(env, `users?id=eq.${encodeURIComponent(ownerId)}&select=*`, fetcher);
     const row = result.rows?.[0];
-    const storedMethods = Array.isArray(row?.login_methods) ? row.login_methods : liveMethods;
+    const storedMethods = Array.isArray(row?.login_methods) ? row.login_methods : [];
     return json({
       ok: true,
       source: result.configured ? 'supabase' : 'unconfigured',
       user: row
         ? { id: row.id, privyUserId: row.privy_user_id, createdAt: row.created_at, loginMethods: storedMethods }
-        : { id: ownerId, privyUserId: user?.main?.ownerId || ownerId, loginMethods: liveMethods },
+        : { id: ownerId, privyUserId: ownerId, loginMethods: [] },
     });
   }
 
   if (routeId === 'wallets.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) {
       return json({
@@ -536,18 +526,29 @@ export async function handleApiData(request, env, matched) {
   }
 
   if (routeId === 'wallets.persist') {
-    // Cloudflare Workers strip Origin on outbound Privy calls — Next provisions
-    // wallets, then posts them here so Supabase (and agents) see the same rows.
-    // Skip Privy here: require bearer + x-owner-id (same trust as list when Privy fails).
-    const ownerId = ownerHeader(request);
-    const token = bearerToken(request);
+    const { ownerId, token, error } = await resolveOwner(request, env);
+    if (error) return json({ error: error === 'owner_required' && !request.headers.has('authorization') ? 'login_required' : error }, ownerAuthStatus(error));
     if (!token) return json({ error: 'login_required' }, 401);
-    if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
     const body = await request.json().catch(() => null);
-    const wallets = Array.isArray(body?.wallets) ? body.wallets : [];
-    const { wrote } = await persistWalletRows(env, ownerId, wallets, fetcher);
-    if (!wrote) return json({ error: 'invalid_wallets' }, 400);
+    const requested = Array.isArray(body?.wallets) ? body.wallets
+      .map(wallet => walletRowFromPublic(wallet, ownerId)).filter(Boolean).slice(0, 20) : [];
+    if (!requested.length) return json({ error: 'invalid_wallets' }, 400);
+    const client = privyClient(env);
+    if (!client?.ensureMainWallet) return json({ error: 'signer_not_configured' }, 503);
+    let owned;
+    try {
+      const { main, additional = [] } = await client.ensureMainWallet({ privyUserId: ownerId, ownerId });
+      owned = new Map([main, ...additional].filter(wallet => wallet?.ownerId === ownerId).map(wallet => [wallet.id, wallet]));
+    } catch {
+      return json({ error: 'wallet_directory_unavailable' }, 502);
+    }
+    if (!requested.every(wallet => owned.get(wallet.id)?.address === wallet.address)) {
+      return json({ error: 'wallet_not_owned' }, 403);
+    }
+    const rows = [...new Set(requested.map(wallet => wallet.id))]
+      .map(id => walletRowFromPublic(owned.get(id), ownerId));
+    if (!await persistWalletRows(env, ownerId, rows, fetcher)) return json({ error: 'wallet_persist_failed' }, 502);
     const listed = await supabaseGet(
       env,
       `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=*&order=created_at.asc`,
@@ -556,29 +557,22 @@ export async function handleApiData(request, env, matched) {
     return json({
       ok: true,
       source: 'supabase',
-      wrote,
+      wrote: rows.length,
       wallets: (listed.rows || []).map(mapWalletRow).filter(Boolean).map(publicWallet),
     });
   }
 
   if (routeId === 'wallets.create') {
-    const { ownerId, user, token, error } = await resolveOwner(request, env);
-    if (error) {
-      const status = error === 'missing_origin' ? 503 : 502;
-      const detail = error === 'privy_failed' || error === 'missing_origin'
-        ? 'Worker cannot set Origin for Privy; use POST /api/wallets on Next then /api/wallets/persist'
-        : undefined;
-      return json(detail ? { error, detail } : { error }, status);
-    }
+    const { ownerId, token, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!token) return json({ error: 'login_required' }, 401);
     const client = privyClient(env);
-    if (!client) return json({ error: 'signer_not_configured' }, 503);
+    if (!client?.acceptLogin) return json({ error: 'signer_not_configured' }, 503);
     try {
-      const origin = requestOrigin(request, env);
-      const login = user || await client.acceptLogin({
+      // Do not pass Origin — Workers forbid that outbound header.
+      const login = await client.acceptLogin({
         accessToken: token,
         ownerId: ownerId || undefined,
-        origin,
       });
       const owner = ownerId || login.main?.ownerId;
       await persistLogin(env, login, owner);
@@ -600,32 +594,42 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'wallets.sign') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const body = await request.json().catch(() => ({}));
+    if (SOLANA_CLUSTER === 'mainnet-beta' && body?.bot) {
+      return json({ error: 'use_permissioned_spend' }, 409);
+    }
+    const denied = await deskDenied(request, env, ownerId, fetcher);
+    if (denied) return denied;
     const client = privyClient(env);
     if (!client) return json({ error: 'signer_not_configured' }, 503);
     const walletId = matched.params?.walletId;
-    const body = await request.json().catch(() => ({}));
     if (!body?.transaction || typeof body.transaction !== 'string') {
       return json({ error: 'transaction_required' }, 400);
     }
-    let wallet = body.wallet || null;
-    if (!wallet && supabaseConfig(env)) {
-      const loaded = await supabaseGet(
-        env,
-        `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
-        fetcher,
-      );
-      wallet = mapWalletRow(loaded.rows?.[0]);
-    }
-    if (!wallet) return json({ error: 'wallet_not_found' }, 404);
+    const loaded = await supabaseGet(
+      env,
+      `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
+      fetcher,
+    );
+    const wallet = mapWalletRow(loaded.rows?.[0]);
+    if (!wallet || wallet.ownerId !== ownerId) return json({ error: 'wallet_not_found' }, 404);
     if (wallet.spendable === false || String(wallet.id).startsWith('linked_')) {
       return json({ error: 'observing_wallet' }, 400);
     }
     try {
-      const sent = body.bot
-        ? await client.signAndBroadcastDevnet({ bot: body.bot, wallet, transaction: body.transaction })
-        : await client.signAndBroadcastOwnerDevnet({ ownerId, wallet, transaction: body.transaction });
+      const bot = body.bot && mapBotRow((await supabaseGet(
+        env,
+        `bots?${postgrestEq('id', body.bot.id)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
+        fetcher,
+      )).rows?.[0]);
+      if (body.bot && (!bot || bot.ownerId !== ownerId || bot.walletId !== wallet.id)) {
+        return json({ error: 'bot_not_found' }, 404);
+      }
+      const sent = bot
+        ? await client.signAndBroadcastSolana({ bot, wallet, transaction: body.transaction })
+        : await client.signAndBroadcastOwnerSolana({ ownerId, wallet, transaction: body.transaction });
       return json({ ok: true, ...sent });
     } catch (err) {
       const code = err instanceof WalletError ? err.code : err?.code || 'sign_failed';
@@ -633,9 +637,42 @@ export async function handleApiData(request, env, matched) {
     }
   }
 
+  if (routeId === 'wallets.export') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const denied = await deskDenied(request, env, ownerId, fetcher);
+    if (denied) return denied;
+    const client = privyClient(env);
+    if (!client?.exportOwnerWallet) return json({ error: 'signer_not_configured' }, 503);
+    const walletId = matched.params?.walletId;
+    const body = await request.json().catch(() => ({}));
+    const recipientPublicKey = typeof body?.recipientPublicKey === 'string' ? body.recipientPublicKey : '';
+    if (!supabaseConfig(env)) return json({ error: 'wallet_not_found' }, 404);
+    const loaded = await supabaseGet(
+      env,
+      `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*`,
+      fetcher,
+    );
+    const wallet = mapWalletRow(loaded.rows?.[0]);
+    if (!wallet) return json({ error: 'wallet_not_found' }, 404);
+    try {
+      const exported = await client.exportOwnerWallet({ ownerId, wallet, recipientPublicKey });
+      return json({
+        ok: true,
+        encryptionType: 'HPKE',
+        encapsulatedKey: exported.encapsulatedKey,
+        ciphertext: exported.ciphertext,
+      });
+    } catch (err) {
+      const code = err instanceof WalletError ? err.code : 'export_failed';
+      return json({ error: code }, 400);
+    }
+  }
+
   if (routeId === 'bots.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const result = await supabaseGet(
@@ -652,7 +689,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'bots.create') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
     const body = await request.json().catch(() => null);
@@ -691,9 +728,8 @@ export async function handleApiData(request, env, matched) {
     });
 
     const capMode = body.cap?.mode === 'unlimited' ? 'unlimited' : 'limited';
-    const capAsset = typeof body.cap?.asset === 'string' && body.cap.asset.trim()
-      ? body.cap.asset.trim().slice(0, 32)
-      : 'USDC';
+    const rawCapAsset = typeof body.cap?.asset === 'string' ? body.cap.asset.trim() : '';
+    const capAsset = solanaSpendAsset(rawCapAsset) || rawCapAsset.slice(0, 32) || 'USDC';
     const row = {
       id: botId,
       owner_id: ownerId,
@@ -720,19 +756,31 @@ export async function handleApiData(request, env, matched) {
         : null,
     };
 
-    const written = await supabaseWrite(env, {
+    let written = await supabaseWrite(env, {
       path: 'bots',
       method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=representation',
+      prefer: 'resolution=ignore-duplicates,return=representation',
       body: row,
       fetcher,
     });
+    if (written.code === 'PT410') return json({ error: 'agent_deleted' }, 410);
     if (written.ok === false) return json({ error: 'persist_failed' }, 502);
+    if (Array.isArray(written.rows) && written.rows.length === 0) {
+      const { id, owner_id, ...changes } = row;
+      written = await supabaseWrite(env, {
+        path: `bots?${postgrestEq('id', id)}&${postgrestEq('owner_id', owner_id)}`,
+        method: 'PATCH',
+        body: changes,
+        fetcher,
+      });
+      if (!written.ok) return json({ error: 'persist_failed' }, 502);
+      if (!written.rows?.length) return json({ error: 'bot_id_conflict' }, 409);
+    }
 
     await supabaseWrite(env, {
       path: 'spend_ledgers',
       method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=minimal',
+      prefer: 'resolution=ignore-duplicates,return=minimal',
       body: {
         bot_id: botId,
         asset: capAsset,
@@ -751,7 +799,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'bots.delete') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const botId = matched?.params?.botId;
     if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
@@ -759,55 +807,48 @@ export async function handleApiData(request, env, matched) {
     }
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
 
-    const existing = await supabaseGet(
-      env,
-      `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+    const owner = encodeURIComponent(ownerId);
+    const removed = await supabaseWrite(env, {
+      path: 'rpc/delete_owner_agent',
+      body: { p_owner_id: ownerId, p_bot_id: botId },
+      prefer: 'return=minimal',
       fetcher,
-    );
-    if (!Array.isArray(existing.rows) || existing.rows.length < 1) {
-      return json({ error: 'not_found' }, 404);
+    });
+    if (removed.ok) return json({ ok: true, deleted: botId, source: 'supabase' });
+    if (removed.status !== 404 || removed.code !== 'PGRST202') {
+      return json({ error: 'delete_failed' }, 502);
     }
 
-    // Child tables reference bots(id) without ON DELETE CASCADE — clear dependents first.
+    // An older database still supports deletion, but cannot record a tombstone.
+    const bot = encodeURIComponent(botId);
+    const existing = await supabaseGet(env, `bots?id=eq.${bot}&owner_id=eq.${owner}&select=id`, fetcher);
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) return json({ error: 'delete_failed' }, 502);
+    if (!existing.rows.length) return json({ ok: true, deleted: botId });
+
     const dependents = [
-      `budget_reservations?bot_id=eq.${encodeURIComponent(botId)}`,
-      `spend_ledgers?bot_id=eq.${encodeURIComponent(botId)}`,
-      `approvals?bot_id=eq.${encodeURIComponent(botId)}`,
-      `decision_records?bot_id=eq.${encodeURIComponent(botId)}`,
-      `timeline_events?bot_id=eq.${encodeURIComponent(botId)}`,
-      `payments?bot_id=eq.${encodeURIComponent(botId)}`,
-      `metrics?bot_id=eq.${encodeURIComponent(botId)}`,
-      `stream_events?bot_id=eq.${encodeURIComponent(botId)}`,
-      `activity_logs?bot_id=eq.${encodeURIComponent(botId)}`,
-    ];
+      'budget_reservations', 'spend_ledgers', 'approvals', 'decision_records',
+      'timeline_events', 'payments', 'metrics', 'stream_events',
+    ].map(table => `${table}?bot_id=eq.${bot}`);
+    dependents.push(`activity_logs?bot_id=eq.${bot}&owner_id=eq.${owner}`);
     for (const path of dependents) {
-      const cleared = await supabaseWrite(env, {
-        path,
-        method: 'DELETE',
-        prefer: 'return=minimal',
-        fetcher,
-      });
-      // 404 = table/row missing on older schemas; treat as already clear.
+      const cleared = await supabaseWrite(env, { path, method: 'DELETE', prefer: 'return=minimal', fetcher });
       if (cleared.configured && cleared.status >= 400 && cleared.status !== 404) {
         return json({ error: 'delete_failed', detail: path.split('?')[0] }, 502);
       }
     }
-
-    const removed = await supabaseWrite(env, {
-      path: `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}`,
+    const legacy = await supabaseWrite(env, {
+      path: `bots?id=eq.${bot}&owner_id=eq.${owner}`,
       method: 'DELETE',
       prefer: 'return=minimal',
       fetcher,
     });
-    if (removed.ok === false && removed.status !== 204) {
-      return json({ error: 'delete_failed' }, 502);
-    }
+    if (!legacy.ok) return json({ error: 'delete_failed' }, 502);
     return json({ ok: true, deleted: botId, source: 'supabase' });
   }
 
   if (routeId === 'bots.chat') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const botId = matched?.params?.botId;
     if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
@@ -850,10 +891,16 @@ export async function handleApiData(request, env, matched) {
         history,
         message,
       });
+      const verdict = await openrouter.complete({
+        role: 'verify',
+        goal: botGoal,
+        task: turnVerifyTask('reply', reply.text),
+      });
+      const text = parseTurnVerdict(verdict.text).allow ? reply.text : BLOCKED_TURN;
       return json({
         ok: true,
         botId,
-        reply: reply.text,
+        reply: text,
         model: reply.model,
       });
     } catch (err) {
@@ -865,7 +912,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'logs.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const url = new URL(request.url);
@@ -895,7 +942,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'events.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const url = new URL(request.url);
     const botId = url.searchParams.get('botId');
@@ -933,7 +980,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'decisions.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const url = new URL(request.url);
@@ -971,7 +1018,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'payments.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     // Empty until a QuickNode Stream row exists. No Supabase config means no read and no invented rows.
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [], crossCheck: [] });
@@ -1038,9 +1085,56 @@ export async function handleApiData(request, env, matched) {
     });
   }
 
+  if (routeId === 'positions.list') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [], checks: [] });
+    const url = new URL(request.url);
+    const botId = url.searchParams.get('botId');
+    if (botId != null && !WALLET_ID.test(botId)) return json({ error: 'invalid_bot' }, 400);
+    const ownerFilter = postgrestEq('owner_id', ownerId);
+    let walletId = null;
+    if (botId) {
+      const bots = await supabaseGet(env, `bots?${ownerFilter}&${postgrestEq('id', botId)}&select=id,wallet_id`, fetcher);
+      if (!Array.isArray(bots.rows)) return json({ error: 'bot_directory_unavailable' }, 503);
+      walletId = bots.rows.find(row => row.id === botId)?.wallet_id;
+      if (!walletId) return json({ ok: true, source: 'onchain', items: [], checks: [] });
+    }
+    const walletFilter = walletId ? `&${postgrestEq('id', walletId)}` : '';
+    const checksFilter = botId ? `&${postgrestEq('bot_id', botId)}` : '';
+    const [wallets, checks] = await Promise.all([
+      supabaseGet(env, `wallets?${ownerFilter}${walletFilter}&select=*&order=created_at.asc`, fetcher),
+      supabaseGet(env, `position_checks?${ownerFilter}${checksFilter}&select=*&order=at.desc&limit=50`, fetcher),
+    ]);
+    if (!Array.isArray(wallets.rows)) return json({ error: 'wallet_directory_unavailable' }, 503);
+    const owned = wallets.rows.map(mapWalletRow).filter(wallet => wallet?.ownerId === ownerId && (!walletId || wallet.id === walletId));
+    const balances = await withOnchainBalances(env, owned);
+    const items = balances.flatMap(wallet => wallet.holdings.filter(row => row.cluster === SOLANA_CLUSTER).map(row => ({
+      id: `wallet:${wallet.id}:${row.mint || 'native'}`, ownerId, botId, walletId: wallet.id,
+      mint: row.mint || SOL_MINT, symbol: row.mint === SOL_MINT ? 'wSOL' : row.symbol,
+      quantity: row.amount, decimals: row.decimals,
+      status: 'open', mode: 'onchain', cluster: row.cluster,
+    })));
+    return json({
+      ok: true, source: 'onchain', items,
+      partial: balances.some(wallet => wallet.balanceStatus !== 'ok'),
+      checks: (checks.rows || []).filter(row => row.owner_id === ownerId && row.detail?.paper === false).map(row => ({
+        id: row.id,
+        botId: row.bot_id,
+        at: row.at,
+        reason: row.reason,
+        status: row.status,
+        flag: row.flag,
+        unrealizedLossMicroUsd: row.detail.lossKnown === true ? amountText(row.unrealized_loss_micro_usd) : null,
+        maxLoss: amountText(row.max_loss),
+      })),
+    });
+  }
+
   if (routeId === 'metrics.get') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const result = await supabaseGet(
@@ -1070,7 +1164,7 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'profiles.me' && request.method === 'GET') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', profile: null });
     const result = await supabaseGet(
@@ -1095,10 +1189,11 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'profiles.update') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const body = await request.json().catch(() => ({}));
-    const handle = normalizeHandle(body.handle);
+    let handle = normalizeHandle(body.handle);
+    const editOnly = body.editOnly === true;
     const displayName = normalizeDisplayName(body.displayName);
     const avatarUrl = body.avatarUrl == null || body.avatarUrl === '' ? null : httpsAvatarUrl(body.avatarUrl);
     if (!handle || !displayName) return json({ error: 'invalid_profile' }, 400);
@@ -1106,23 +1201,30 @@ export async function handleApiData(request, env, matched) {
     if (!supabaseConfig(env)) {
       return json({ ok: true, source: 'unconfigured', profile: { handle, displayName, avatarUrl } });
     }
-    const userWrite = await supabaseWrite(env, {
-      path: 'users?on_conflict=id',
-      method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=minimal',
-      body: { id: ownerId, privy_user_id: ownerId },
-      fetcher,
-    });
-    if (userWrite?.ok !== true) {
-      return json({ error: userWrite?.code || 'profile_save_failed' }, 502);
+    if (editOnly) {
+      const existing = await supabaseGet(env, `profiles?${postgrestEq('owner_id', ownerId)}&select=handle`, fetcher);
+      if (existing.status !== 200 || !Array.isArray(existing.rows)) return json({ error: existing.code || 'profile_read_failed' }, 502);
+      if (!existing.rows[0]?.handle) return json({ error: 'profile_not_registered' }, 409);
+      handle = existing.rows[0].handle;
+    }
+    if (!editOnly) {
+      const userWrite = await supabaseWrite(env, {
+        path: 'users?on_conflict=id',
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=minimal',
+        body: { id: ownerId, privy_user_id: ownerId },
+        fetcher,
+      });
+      if (userWrite?.ok !== true) {
+        return json({ error: userWrite?.code || 'profile_save_failed' }, 502);
+      }
     }
     const saved = await supabaseWrite(env, {
-      path: 'profiles?on_conflict=owner_id',
-      method: 'POST',
+      path: editOnly ? `profiles?${postgrestEq('owner_id', ownerId)}` : 'profiles?on_conflict=owner_id',
+      method: editOnly ? 'PATCH' : 'POST',
       prefer: 'resolution=merge-duplicates,return=representation',
       body: {
-        owner_id: ownerId,
-        handle,
+        ...(!editOnly ? { owner_id: ownerId, handle } : {}),
         display_name: displayName,
         avatar_url: avatarUrl,
         updated_at: new Date().toISOString(),
@@ -1137,17 +1239,18 @@ export async function handleApiData(request, env, matched) {
       fetcher,
     );
     if (stored.status !== 200 || stored.rows?.[0]?.handle !== handle) {
-      return json({ error: stored.code || 'profile_save_failed' }, 502);
+      const code = stored.code || (stored.status === 200 ? 'profile_not_confirmed' : 'profile_save_failed');
+      return json({ error: code }, 502);
     }
     return json({ ok: true, source: 'supabase', profile: { handle, displayName, avatarUrl } });
   }
 
   if (routeId === 'profiles.lookup') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const query = new URL(request.url).searchParams.get('q') || '';
-    const parsed = parseRecipient(query);
+    const parsed = parseLookupQuery(query);
     if (!parsed) return json({ error: 'invalid_recipient' }, 400);
     if (parsed.kind === 'sns') {
       try {
@@ -1172,38 +1275,53 @@ export async function handleApiData(request, env, matched) {
       }
     }
     if (!supabaseConfig(env)) {
-      return json({ ok: true, source: 'unconfigured', recipient: { kind: 'handle', handle: parsed.handle, missing: true } });
+      return json({ error: 'directory_unconfigured' }, 503);
     }
-    const found = await supabaseGet(
-      env,
-      `profiles?handle=eq.${encodeURIComponent(parsed.handle)}&select=owner_id,handle,display_name,avatar_url`,
-      fetcher,
-    );
-    const row = found.rows?.[0];
+    const columns = 'owner_id,handle,display_name,avatar_url';
+    const exactHandle = normalizeHandle(query) || parsed.handle;
+    const exact = await supabaseGet(env, `profiles?${postgrestEq('handle', exactHandle)}&select=${columns}&limit=1`, fetcher);
+    if (exact.status !== 200 || !Array.isArray(exact.rows)) {
+      return json({ error: exact.code || 'profile_read_failed' }, 502);
+    }
+    let row = exact.rows[0];
+    if (!row && !exactHandle.includes('_')) {
+      const found = await supabaseGet(env, `profiles?${lookupHandleFilter(parsed.handle)}&select=${columns}&limit=2`, fetcher);
+      if (found.status !== 200 || !Array.isArray(found.rows)) {
+        return json({ error: found.code || 'profile_read_failed' }, 502);
+      }
+      if (found.rows.length > 1) return json({ error: 'ambiguous_handle' }, 409);
+      row = found.rows[0];
+    }
     if (!row) return json({ ok: true, source: 'supabase', recipient: { kind: 'handle', handle: parsed.handle, missing: true } });
+    if (!/^[a-zA-Z0-9:_-]{1,128}$/.test(row.owner_id || '') || lookupHandleKey(row.handle) !== parsed.handle) {
+      return json({ error: 'profile_read_failed' }, 502);
+    }
     const wallet = await supabaseGet(
       env,
       `wallets?owner_id=eq.${encodeURIComponent(row.owner_id)}&kind=eq.main&select=address&limit=1`,
       fetcher,
     );
+    if (wallet.status !== 200 || !Array.isArray(wallet.rows)) {
+      return json({ error: 'recipient_wallet_lookup_failed' }, 502);
+    }
     return json({
       ok: true,
       source: 'supabase',
       recipient: {
         kind: 'handle',
         handle: row.handle,
-        displayName: row.display_name,
+        displayName: publicDisplayName(row.display_name) || `@${row.handle}`,
         avatarUrl: row.avatar_url || null,
         self: row.owner_id === ownerId,
         missing: false,
-        address: wallet.rows?.[0]?.address || null,
+        address: WALLET_ADDRESS.test(wallet.rows[0]?.address || '') ? wallet.rows[0].address : null,
       },
     });
   }
 
   if (routeId === 'transfers.list') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [] });
     const owner = encodeURIComponent(ownerId);
@@ -1221,8 +1339,10 @@ export async function handleApiData(request, env, matched) {
 
   if (routeId === 'transfers.create') {
     const { ownerId, error } = await resolveOwner(request, env);
-    if (error && !ownerId) return json({ error }, 401);
+    if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const denied = await deskDenied(request, env, ownerId, fetcher);
+    if (denied) return denied;
     const body = await request.json().catch(() => ({}));
     const requestBody = transferRequest(body);
     if (!requestBody) return json({ error: 'invalid_transfer' }, 400);
@@ -1248,7 +1368,8 @@ export async function handleApiData(request, env, matched) {
             }),
           });
         } catch (err) {
-          return json({ error: 'policy_failed' }, 502);
+          const privy = parsePrivySigningFailure(err?.privyFailure);
+          return json({ error: 'policy_failed', ...(privy ? { privy } : {}) }, 502);
         }
         if (decision?.state !== 'reserved') {
           return json({
@@ -1274,8 +1395,204 @@ export async function handleApiData(request, env, matched) {
       if (!transfer) return json({ error: 'transfer_failed' }, 502);
       return json({ ok: true, source: 'supabase', replay: posted.replay === true, transfer });
     } catch (err) {
-      return json({ error: transferErrorCode(err) }, 409);
+      const privy = parsePrivySigningFailure(err?.privyFailure);
+      return json({ error: transferErrorCode(err), ...(privy ? { privy } : {}) }, 409);
     }
+  }
+
+  if (routeId === 'bots.freeze') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const raw = await request.text();
+    let body;
+    try {
+      body = raw === '' ? {} : JSON.parse(raw);
+    } catch {
+      return json({ error: 'invalid_freeze_request' }, 400);
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+        || ('frozen' in body && typeof body.frozen !== 'boolean')
+        || ('botId' in body && (typeof body.botId !== 'string' || !WALLET_ID.test(body.botId)))) {
+      return json({ error: 'invalid_freeze_request' }, 400);
+    }
+    const { botId, frozen: freeze = true } = body;
+    const filter = botId ? `&id=eq.${encodeURIComponent(botId)}` : '';
+    const listed = await supabaseGet(
+      env,
+      `bots?owner_id=eq.${encodeURIComponent(ownerId)}&select=id${filter}`,
+      fetcher,
+    );
+    if (listed.status !== 200 || !Array.isArray(listed.rows)) {
+      return json({ error: 'freeze_failed' }, 502);
+    }
+    const targets = listed.rows.filter(row => row?.id && (!botId || row.id === botId));
+    if (botId && !targets.length) return json({ error: 'bot_not_found' }, 404);
+    const rpc = createSupabaseRpc(env, fetcher);
+    const fn = freeze ? 'policy_freeze_bot' : 'policy_unfreeze_bot';
+    const items = [];
+    let failures = 0;
+    for (const row of targets) {
+      try {
+        const item = await rpc(fn, {
+          payload: { ownerId, botId: row.id, now: Date.now() },
+        });
+        if (item?.botId === row.id && item.frozen === freeze) items.push(item);
+        else failures += 1;
+      } catch {
+        failures += 1;
+      }
+    }
+    if (failures) {
+      return json({ error: 'freeze_failed', frozen: freeze, count: items.length, items }, 502);
+    }
+    return json({ ok: true, source: 'supabase', frozen: freeze, count: items.length, items });
+  }
+
+  if (routeId === 'desk.status') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', locked: false });
+    const existing = await supabaseGet(
+      env,
+      `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}&select=owner_id`,
+      fetcher,
+    );
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) {
+      return json({ error: 'desk_lock_unavailable' }, 503);
+    }
+    return json({ ok: true, source: 'supabase', locked: Boolean(existing.rows[0]) });
+  }
+
+  if (routeId === 'desk.lock') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const body = await request.json().catch(() => null);
+    const verifier = parseDeskVerifier(body);
+    if (!verifier) return json({ error: 'invalid_verifier' }, 400);
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const existing = await supabaseGet(
+      env,
+      `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}&select=owner_id`,
+      fetcher,
+    );
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) {
+      return json({ error: 'desk_lock_unavailable' }, 503);
+    }
+    if (existing.rows[0]) {
+      if (body.replace !== true) return json({ error: 'desk_lock_exists' }, 409);
+      const proof = typeof body.proof === 'string' ? body.proof.trim().toLowerCase() : '';
+      if (!/^[0-9a-f]{64}$/.test(proof)) return json({ error: 'recovery_required' }, 401);
+      const recovery = await supabaseGet(
+        env,
+        `owner_recovery?owner_id=eq.${encodeURIComponent(ownerId)}&select=verifier_hash`,
+        fetcher,
+      );
+      if (recovery.status !== 200 || !Array.isArray(recovery.rows)) {
+        return json({ error: 'desk_lock_unavailable' }, 503);
+      }
+      const stored = recovery.rows[0]?.verifier_hash;
+      if (typeof stored !== 'string' || !/^[0-9a-f]{64}$/.test(stored)) {
+        return json({ error: 'recovery_missing' }, 404);
+      }
+      let diff = 0;
+      for (let index = 0; index < proof.length; index += 1) {
+        diff |= proof.charCodeAt(index) ^ stored.charCodeAt(index);
+      }
+      if (diff !== 0) return json({ error: 'recovery_mismatch' }, 401);
+      const replaced = await supabaseWrite(env, {
+        path: `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}`,
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: {
+          salt: verifier.salt,
+          hash: verifier.hash,
+          iterations: verifier.iterations,
+          grant_hash: null,
+          grant_until: null,
+        },
+        fetcher,
+      });
+      if (replaced?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
+      return json({ ok: true, replaced: true });
+    }
+    const userWrite = await supabaseWrite(env, {
+      path: 'users?on_conflict=id',
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: { id: ownerId, privy_user_id: ownerId },
+      fetcher,
+    });
+    if (userWrite?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
+    const written = await supabaseWrite(env, {
+      path: 'desk_locks',
+      method: 'POST',
+      prefer: 'return=minimal',
+      body: {
+        owner_id: ownerId,
+        salt: verifier.salt,
+        hash: verifier.hash,
+        iterations: verifier.iterations,
+      },
+      fetcher,
+    });
+    if (written?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
+    return json({ ok: true });
+  }
+
+  if (routeId === 'desk.unlock') {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const body = await request.json().catch(() => null);
+    const password = body && typeof body.password === 'string' ? body.password : '';
+    if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
+    const existing = await supabaseGet(
+      env,
+      `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}&select=salt,hash,iterations`,
+      fetcher,
+    );
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) {
+      return json({ error: 'desk_lock_unavailable' }, 503);
+    }
+    const row = existing.rows[0];
+    if (!row) return json({ error: 'desk_lock_missing' }, 404);
+    let matches = false;
+    try {
+      matches = await passwordMatches(password, {
+        salt: row.salt,
+        hash: row.hash,
+        iterations: row.iterations,
+      });
+    } catch (error) {
+      if (error?.code === 'password_check_unsupported') {
+        return json({ error: 'password_check_unsupported' }, 409);
+      }
+      throw error;
+    }
+    if (!matches) return json({ error: 'desk_locked' }, 401);
+    const grant = newDeskGrant();
+    const grantHash = await sha256Hex(grant);
+    const untilMs = Date.now() + (30 * 60 * 1000);
+    const saved = await supabaseWrite(env, {
+      path: `desk_locks?owner_id=eq.${encodeURIComponent(ownerId)}`,
+      method: 'PATCH',
+      prefer: 'return=minimal',
+      body: { grant_hash: grantHash, grant_until: new Date(untilMs).toISOString() },
+      fetcher,
+    });
+    if (saved?.ok !== true) return json({ error: 'desk_lock_failed' }, 502);
+    return json({ ok: true, grant, until: untilMs });
+  }
+
+  if (ACCOUNT_ROUTES.has(routeId)) {
+    const { ownerId, error } = await resolveOwner(request, env);
+    if (error) return json({ error }, ownerAuthStatus(error));
+    if (!ownerId) return json({ error: 'owner_required' }, 401);
+    return handleAccountRoute(routeId, request, env, ownerId, fetcher);
   }
 
   return null;

@@ -6,6 +6,10 @@
   --pb-radius: 16px;
   --pb-press: 0.96;
   --pb-spark: #b39dff;
+  --pb-control-height: 28px;
+  --pb-control-bg: #27272a;
+  --pb-control-highlight: #3f3f46;
+  --pb-control-hover: color-mix(in srgb, var(--pb-control-highlight) 60%, var(--pb-control-bg));
   --pb-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --pb-muted: color-mix(in srgb, var(--pb-ink) 55%, transparent);
   --pb-hover: color-mix(in srgb, var(--pb-ink) 8%, transparent);
@@ -24,6 +28,8 @@
   bottom: calc(100% + 8px);
   left: 0;
   z-index: 2;
+  max-height: 320px;
+  overflow: auto;
   padding: 4px;
   border-radius: 12px;
   background: var(--pb-menu);
@@ -31,7 +37,7 @@
     0 10px 30px -10px rgba(0, 0, 0, 0.35),
     0 1px 2px rgba(0, 0, 0, 0.08);
   transform-origin: bottom center;
-  animation: prompt-bar-pop 180ms var(--pb-ease-out) both;
+  animation: prompt-bar-pop 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .prompt-bar__menu[data-kind='model'] {
@@ -40,10 +46,27 @@
   transform-origin: bottom left;
 }
 
+/* In flow under the starter prompts. An absolute menu is clipped by the stage
+   and, on an empty thread, paints on top of those prompts. */
+.prompt-bar__menu[data-kind='handle'] {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  margin: 0 0 8px;
+}
+
 @keyframes prompt-bar-pop {
-  from {
+  0% {
     opacity: 0;
-    transform: translateY(4px) scale(0.98);
+    transform: translateY(8px) scale(0.92);
+  }
+  64% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -65,6 +88,16 @@
   cursor: pointer;
   outline: none;
   -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+  transition:
+    background-color 150ms ease,
+    transform 440ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.prompt-bar__row:active {
+  transform: scale(0.98);
+  transition-duration: 90ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
 }
 
 .prompt-bar__row-icon {
@@ -75,6 +108,18 @@
   width: 16px;
   height: 16px;
   color: color-mix(in srgb, var(--pb-ink) 70%, transparent);
+}
+
+.prompt-bar__group-label {
+  padding: 8px 8px 2px;
+  color: var(--pb-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.prompt-bar__menu[data-kind='slash'] .prompt-bar__row-name,
+.prompt-bar__slash {
+  color: #f0c36a;
 }
 
 .prompt-bar__row-name {
@@ -133,6 +178,16 @@
   border-radius: var(--pb-radius);
   background: var(--pb-bg);
   cursor: text;
+}
+
+.prompt-bar__field[data-sent] {
+  animation: field-release 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes field-release {
+  0% { transform: scale(0.985); }
+  55% { transform: scale(1.012); }
+  100% { transform: scale(1); }
 }
 
 .prompt-bar__field::before {
@@ -215,8 +270,26 @@
   opacity: 1;
 }
 
+.prompt-bar__entry {
+  position: relative;
+}
+
+.prompt-bar__mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  pointer-events: none;
+}
+
 .prompt-bar__input {
   display: block;
+  position: relative;
   width: 100%;
   padding: 0;
   border: 0;
@@ -227,7 +300,12 @@
   line-height: 22px;
   resize: none;
   outline: none;
-  overflow-wrap: normal;
+  overflow-wrap: break-word;
+}
+
+.prompt-bar__input[data-paint] {
+  color: transparent;
+  caret-color: var(--pb-ink);
 }
 
 .prompt-bar__input::placeholder {
@@ -235,7 +313,8 @@
 }
 
 @media (pointer: coarse) {
-  .prompt-bar__input {
+  .prompt-bar__input,
+  .prompt-bar__mirror {
     font-size: 16px;
   }
 }
@@ -274,42 +353,66 @@
   border-radius: 8px;
   background: transparent;
   color: color-mix(in srgb, var(--pb-ink) 60%, transparent);
+  position: relative;
+  overflow: hidden;
   transition:
     background-color 150ms ease,
     color 150ms ease,
-    transform 160ms var(--pb-ease-out);
+    transform 440ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .prompt-bar__tool:active {
-  transform: scale(0.94);
+  transform: scale(0.92);
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 90ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+.prompt-bar__glide .glide-select__trigger,
+.prompt-bar__pick {
+  height: var(--pb-control-height);
 }
 
 .prompt-bar__pick {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: 8px;
-  background: transparent;
-  color: color-mix(in srgb, var(--pb-ink) 70%, transparent);
+  gap: 6px;
+  padding: 0 8px 0 10px;
+  border-radius: 6px;
+  background: var(--pb-control-bg);
+  color: var(--pb-ink);
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
+  position: relative;
+  overflow: hidden;
   transition:
     background-color 150ms ease,
-    color 150ms ease;
+    color 150ms ease,
+    transform 440ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.prompt-bar__pick:active {
+  transform: scale(0.96);
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 90ms cubic-bezier(0.4, 0, 1, 1);
 }
 
 .prompt-bar__tool[data-on],
-.prompt-bar__pick[data-on],
 .prompt-bar__row[aria-selected='true'] {
   background: #3f3f46;
   color: var(--pb-ink);
 }
 
+.prompt-bar__pick[aria-expanded='true'] {
+  background: var(--pb-control-hover);
+}
+
 @media (hover: hover) and (pointer: fine) {
   button.prompt-bar__tool:not(:disabled):hover,
-  button.prompt-bar__pick:not(:disabled):hover,
   button.prompt-bar__row:not(:disabled):hover,
   button.prompt-bar__chip-x:not(:disabled):hover,
   button.prompt-bar__send:not(:disabled):hover {
@@ -317,14 +420,14 @@
     color: var(--pb-ink);
   }
 
+  button.prompt-bar__pick:not(:disabled):hover {
+    background: var(--pb-control-hover);
+  }
+
   button.prompt-bar__send[data-armed]:not(:disabled):hover {
     background: var(--pb-ink);
     color: var(--pb-bg);
   }
-}
-
-.prompt-bar__pick[data-max] {
-  color: var(--pb-spark);
 }
 
 .prompt-bar__menu[data-kind='effort'] {
@@ -470,10 +573,11 @@
   border-radius: 10px;
   background: color-mix(in srgb, var(--pb-ink) 12%, var(--pb-bg));
   color: color-mix(in srgb, var(--pb-ink) 55%, var(--pb-bg));
+  overflow: hidden;
   transition:
     background-color 200ms ease,
     color 200ms ease,
-    transform 160ms var(--pb-ease-out);
+    transform 480ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .prompt-bar__send:disabled {
@@ -487,7 +591,11 @@
 }
 
 .prompt-bar__send[data-pressed] {
-  transform: scale(var(--pb-press));
+  transform: scale(0.88);
+  transition:
+    background-color 200ms ease,
+    color 200ms ease,
+    transform 90ms cubic-bezier(0.4, 0, 1, 1);
 }
 
 .prompt-bar__glyph {
@@ -497,12 +605,10 @@
   transform-origin: 50% 50%;
 }
 
-.permit { position: relative; }
-
-.permit-chip,
 .permit-menu button {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   height: 28px;
   padding: 0 8px;
   border: 1px solid transparent;
@@ -513,28 +619,140 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 440ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.permit-chip.is-full,
-.permit-menu button.is-full {
-  border-color: #e10600;
+.permit-menu button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.permit-menu button:active {
+  transform: scale(0.96);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 90ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+.permit-chevron {
+  color: var(--pb-muted);
+  flex: none;
 }
 
 .permit-menu {
   position: absolute;
   z-index: 30;
   bottom: calc(100% + 8px);
-  left: 0;
+  right: 12px;
   display: grid;
   gap: 4px;
-  min-width: 180px;
+  width: min(280px, calc(100% - 24px));
   padding: 6px;
   border-radius: 12px;
-  background: #27272a;
+  background: var(--pb-control-bg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  transform-origin: bottom right;
+  animation: prompt-bar-pop 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.permit-menu button { width: 100%; justify-content: flex-start; }
+.permit-choice {
+  display: grid;
+  grid-template-columns: minmax(104px, 1fr) minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 4px;
+}
+
+.permit-option {
+  white-space: nowrap;
+}
+
+.permit-option:not([data-mode='review']) {
+  grid-column: 1 / -1;
+}
+
+.permit-option[data-mode='ask'] {
+  color: #59d686;
+}
+
+.permit-option[data-mode='review'] {
+  color: #ffae5c;
+}
+
+.permit-option[data-mode='full'] {
+  color: #ff8b8b;
+}
+
+.permit-menu .permit-edit {
+  grid-column: 3;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+.permit-cap-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pb-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permit-cap-field {
+  display: flex;
+  min-width: 0;
+  height: 28px;
+  gap: 4px;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid #52525b;
+  border-radius: 8px;
+  background: #18181b;
+  color: var(--pb-muted);
+  font-size: 11px;
+}
+
+.permit-cap-field:focus-within {
+  border-color: var(--pb-ink);
+}
+
+.permit-cap-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--pb-ink);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.permit-menu .permit-option[aria-pressed='true'] {
+  background: var(--pb-control-highlight);
+}
+
+.permit-check {
+  margin-left: auto;
+  color: var(--pb-ink);
+  font-size: 12px;
+}
+
+.permit-cap-note {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0 6px 2px;
+  color: #ff8b8b;
+  font-size: 11px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 
 .spend-confirm {
   width: min(440px, calc(100vw - 32px));
@@ -570,7 +788,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .prompt-bar__menu,
-  .prompt-bar__chip {
+  .prompt-bar__chip,
+  .permit-menu,
+  .prompt-bar__field[data-sent] {
     animation: none;
   }
 
@@ -580,7 +800,9 @@
   }
 
   .prompt-bar__tool:active,
-  .prompt-bar__send[data-pressed] {
+  .prompt-bar__pick:active,
+  .prompt-bar__send[data-pressed],
+  .permit-menu button:active {
     transform: none;
   }
 }

@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Shared Maelstrom data shapes for bots, wallets, events, and approvals.
  * Pure validators only — no I/O, no signing, no secrets.
@@ -20,7 +21,7 @@ const pubkey = value => {
 
 export const BOT_TYPES = Object.freeze(['trading', 'shopping', 'position-management']);
 export const APPROVAL_MODES = Object.freeze(['fully-automatic', 'capped-automatic', 'ask']);
-export const CLUSTERS = Object.freeze(['devnet', 'testnet']);
+export const CLUSTERS = Object.freeze([SOLANA_CLUSTER]);
 export const BUILTIN_TEMPLATES = Object.freeze(['trading', 'shopping', 'position-management']);
 
 export const EVENT_KINDS = Object.freeze([
@@ -86,7 +87,7 @@ export function validateSpendLedger(ledger) {
 
 export function validateDecisionRecord(record) {
   if (!record || !idOk(record.id) || !idOk(record.botId) || !idOk(record.runId)) fail('Decision record ids are required');
-  if (!CLUSTERS.includes(record.cluster)) fail('Hackathon execution must use devnet or testnet');
+  if (!CLUSTERS.includes(record.cluster)) fail('Execution must use the configured Solana cluster');
   if (!text(record.factsDigest, 64) || !/^[a-f0-9]{64}$/.test(record.factsDigest)) fail('factsDigest must be sha256 hex');
   if (!text(record.proposalDigest, 64) || !/^[a-f0-9]{64}$/.test(record.proposalDigest)) fail('proposalDigest must be sha256 hex');
   if (!Number.isSafeInteger(record.createdAt) || record.createdAt <= 0) fail('createdAt is required');
@@ -123,7 +124,7 @@ export function validatePayment(payment) {
   if (payment.protocol !== 'x402') fail('Only x402 payments are supported');
   amount(payment.amount);
   if (!text(payment.asset, 64)) fail('Payment asset is required');
-  if (!CLUSTERS.includes(payment.cluster)) fail('Hackathon execution must use devnet or testnet');
+  if (!CLUSTERS.includes(payment.cluster)) fail('Execution must use the configured Solana cluster');
   if (payment.txSignature != null && (typeof payment.txSignature !== 'string' || payment.txSignature.length > 128)) {
     fail('Invalid transaction signature');
   }
@@ -167,16 +168,20 @@ export const SECRET_NAMES = Object.freeze([
   'META_MODEL_API_KEY',
   'OPENROUTER_API_KEY',
   'FIRECRAWL_API_KEY',
-  'QUICKNODE_DEVNET_RPC_URL',
+  'SOLANA_RPC_URL',
   'QUICKNODE_MAINNET_RPC_URL',
   'QUICKNODE_TESTNET_RPC_URL',
   'QUICKNODE_WEBHOOK_SECRET',
   'ELEVENLABS_API_KEY',
   'ELEVENLABS_AGENT_ID',
   'ELEVENLABS_WEBHOOK_SECRET',
+  'GOOGLE_DRIVE_CLIENT_ID',
+  'GOOGLE_DRIVE_CLIENT_SECRET',
+  'GOOGLE_DRIVE_REFRESH_TOKEN',
 ]);
 
 export const PUBLIC_CONFIG_NAMES = Object.freeze([
+  'NEXT_PUBLIC_SOLANA_CLUSTER',
   'NEXT_PUBLIC_PRIVY_APP_ID',
   'NEXT_PUBLIC_AGENT_RUNTIME_URL',
 ]);
@@ -190,12 +195,13 @@ export const SECRET_GROUPS = Object.freeze({
   metaModel: Object.freeze(['META_MODEL_API_KEY']),
   openrouter: Object.freeze(['OPENROUTER_API_KEY']),
   firecrawl: Object.freeze(['FIRECRAWL_API_KEY']),
-  quicknode: Object.freeze(['QUICKNODE_DEVNET_RPC_URL']),
+  quicknode: Object.freeze(['SOLANA_RPC_URL']),
   quicknodePortfolio: Object.freeze(['QUICKNODE_MAINNET_RPC_URL']),
   quicknodeTestnet: Object.freeze(['QUICKNODE_TESTNET_RPC_URL']),
   quicknodeWebhook: Object.freeze(['QUICKNODE_WEBHOOK_SECRET']),
   elevenlabs: Object.freeze(['ELEVENLABS_API_KEY', 'ELEVENLABS_AGENT_ID', 'ELEVENLABS_WEBHOOK_SECRET']),
-  serverSigning: Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']),
+  googleDrive: Object.freeze(['GOOGLE_DRIVE_CLIENT_ID', 'GOOGLE_DRIVE_CLIENT_SECRET', 'GOOGLE_DRIVE_REFRESH_TOKEN']),
+  serverSigning: Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'SOLANA_RPC_URL']),
 });
 
 /** OpenRouter fallback. The id ends with :free so a low-balance key is not billed. */
@@ -299,6 +305,12 @@ export function normalizeDisplayName(value) {
   return name;
 }
 
+/** Public recipient names can come from older profiles that used an email as the label. */
+export function publicDisplayName(value) {
+  const name = normalizeDisplayName(value);
+  return name && !/[^\s@]+@[^\s@]+/.test(name) ? name : null;
+}
+
 export function normalizeHandle(value) {
   if (typeof value !== 'string') return null;
   const handle = value.trim().replace(/^@/, '').toLowerCase();
@@ -307,13 +319,13 @@ export function normalizeHandle(value) {
 }
 
 /**
- * PostgREST `eq` filter. A Privy DID contains colons, which PostgREST treats
- * as reserved unless the value is quoted.
+ * PostgREST `eq` filter. Quotes are part of the value for `eq`, not delimiters,
+ * so `eq."did:privy:…"` matches nothing. Percent-encode the raw value so a
+ * colon in a Privy DID stays inside it.
  */
 export function postgrestEq(column, value) {
   if (typeof column !== 'string' || !/^[a-z_][a-z0-9_]*$/i.test(column)) return '';
-  const text = String(value ?? '').replaceAll('"', '""');
-  return `${column}=eq.${encodeURIComponent(`"${text}"`)}`;
+  return `${column}=eq.${encodeURIComponent(String(value ?? ''))}`;
 }
 
 /** SQLSTATE / PGRST code, else the HTTP status. Never the provider message. */
@@ -337,6 +349,87 @@ export function parseRecipient(value) {
   return null;
 }
 
+const LOOKUP_SKIP = new Set([
+  'a', 'an', 'the', 'up', 'look', 'lookup', 'find', 'for', 'me', 'my', 'please',
+  'what', 'whats', 'is', 'can', 'you', 'show', 'check', 'who', 'send', 'to', 'of',
+  'and', 'their', 'his', 'her', 'hey', 'hi', 'wallet', 'handle', 'address', 'user',
+  'profile', 'name', 'about', 'with', 'from', 'this', 'that', 'just', 'like', 'do',
+  'does', 'has', 'have', 'on', 'in', 'at', 'it', 'its', 'get', 'tell', 'where',
+  'which', 'your', 'our', 'them', 'him', 'pay', 'money', 'usdc', 'solana',
+  'maelstrom', 'account',
+]);
+
+/** Words that end a spoken name. "the" can still sit inside the name. */
+const HANDLE_CLOSERS = new Set([
+  'please', 'thanks', 'thank', 'wallet', 'address', 'handle', 'account', 'for',
+  'to', 'send', 'me', 'my', 'now', 'today', 'ok', 'okay', 'and', 'then', 'so',
+  'their', 'his', 'her', 'its', 'on', 'in', 'with', 'from', 'about', 'of',
+  'show', 'check', 'what', 'whats', 'is', 'can', 'you', 'who', 'just',
+  'pay', 'money', 'usdc',
+]);
+
+function lookupWords(text) {
+  return text.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+/** Keep the spoken name, then stop when the sentence turns back into a request. */
+function takeSpokenName(words) {
+  const kept = [];
+  for (const word of words) {
+    if (HANDLE_CLOSERS.has(word)) break;
+    kept.push(word);
+    if (kept.length === 5) break;
+  }
+  const meaningful = kept.filter(word => word !== 'the' && word !== 'a' && word !== 'an');
+  if (meaningful.length === 0) return '';
+  const handle = kept.join('');
+  return /^[a-z0-9]{2,32}$/.test(handle) ? handle : '';
+}
+
+/** Letters and numbers only, for a lookup. Underscores and other marks drop out. */
+export function lookupHandleKey(value) {
+  if (typeof value !== 'string') return '';
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * A lookup can be a sentence. Pull out a .sol name or a handle and keep only
+ * letters and numbers on the handle. A bare send token still uses parseRecipient.
+ */
+export function parseLookupQuery(value) {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (!raw || raw.length > 240) return null;
+  const bareHandle = normalizeHandle(raw);
+  if (bareHandle) return { kind: 'handle', handle: lookupHandleKey(bareHandle) };
+  const lower = raw.toLowerCase().replace(/[’']s\b/g, '').replace(/[’']/g, '');
+  const sns = lower.match(/\b([a-z0-9][a-z0-9-]{0,62}\.sol)\b/);
+  if (sns && SNS_NAME.test(sns[1])) return { kind: 'sns', domain: sns[1] };
+  const at = lower.match(/@([\s\S]+)$/);
+  if (at) {
+    const handle = takeSpokenName(lookupWords(at[1]));
+    if (handle) return { kind: 'handle', handle };
+  }
+  const spokenAt = lower.match(/(?:^|\s)at\s+([a-z0-9][\s\S]*)$/);
+  if (spokenAt) {
+    const handle = takeSpokenName(lookupWords(spokenAt[1]));
+    if (handle) return { kind: 'handle', handle };
+  }
+  const words = lookupWords(lower);
+  let start = 0;
+  while (start < words.length && LOOKUP_SKIP.has(words[start])) start += 1;
+  const handle = takeSpokenName(words.slice(start));
+  if (handle) return { kind: 'handle', handle };
+  return null;
+}
+
+/** Exact handle, or the same letters and numbers with weird marks between them. */
+export function lookupHandleFilter(handle) {
+  if (!/^[a-z0-9]{2,32}$/.test(handle)) return '';
+  const pattern = `^${handle.split('').join('[^a-z0-9]*')}$`;
+  return `or=(handle.eq.${encodeURIComponent(handle)},handle.imatch.${encodeURIComponent(pattern)})`;
+}
+
 export function profileInitials(label) {
   const text = typeof label === 'string' ? label.trim().replace(/^@/, '') : '';
   if (!text) return '?';
@@ -346,14 +439,126 @@ export function profileInitials(label) {
 }
 
 export const OWNER_SPEND_PERMISSIONS = Object.freeze(['ask', 'review', 'full']);
-export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay']);
+export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay', 'swap', 'x402']);
 export const PERMISSIONED_SPEND_PATH = '/api/spend';
+
+export function parseSpendAuthorization(value) {
+  if (!value || typeof value !== 'object') return null;
+  const { blockhash, expiresAt, proof } = value;
+  if (typeof blockhash !== 'string' || !base58.test(blockhash)
+    || !Number.isSafeInteger(expiresAt) || expiresAt <= 0
+    || typeof proof !== 'string' || !/^[a-f0-9]{64}$/.test(proof)) return null;
+  return { blockhash, expiresAt, proof };
+}
+
+export function parseSpendAuthorizationChallenge(value) {
+  const binding = parseSpendAuthorization(value);
+  const payload = value?.payload;
+  if (!binding || typeof payload !== 'string' || !/^[A-Za-z0-9+/]{64,4096}={0,2}$/.test(payload)
+    || payload.length % 4 !== 0) return null;
+  return { ...binding, payload };
+}
+
+export function parseSpendAuthorizationSignature(value) {
+  const binding = parseSpendAuthorization(value);
+  const signature = value?.signature;
+  if (!binding || typeof signature !== 'string' || !/^[A-Za-z0-9+/]{80,128}={0,2}$/.test(signature)
+    || signature.length % 4 !== 0) return null;
+  return { ...binding, signature };
+}
+
+const PRIVY_SIGN_CODES = new Set([
+  'policy_violation',
+  'insufficient_funds',
+  'transaction_broadcast_failure',
+  'missing_or_empty_authorization_header',
+  'zero_correct_authorization_signatures',
+  'insufficient_correct_authorization_signatures',
+  'incorrect_quantity_of_authorization_signatures',
+  'request_expired',
+  'no_valid_user_session_keys',
+  'user_session_keys_expired',
+  'insufficient_app_secret_permissions',
+]);
+const PRIVY_SIGN_TRANSPORT = new Set(['network', 'timeout', 'redirect', 'invalid-response']);
+const PRIVY_SIGN_STAGES = new Set(['app-sign', 'wallet-lookup', 'session-exchange', 'owner-sign', 'browser-owner-sign']);
+const PRIVY_REQUEST_CODES = new Set([
+  ...PRIVY_SIGN_CODES, 'invalid_data', 'invalid_auth_token', 'mfa_required', 'missing_mfa_enrollment',
+]);
+const PRIVY_SIGN_DETAILS = new Set([
+  'wallet-matched', 'wallet-mismatch', 'missing-signed-transaction',
+  'mfa-required', 'mfa-enrollment-required', 'token-expired', 'token-invalid',
+  'jwt-configuration', 'no-wallets', 'invalid-encryption', 'invalid-data',
+  'provider-detail', 'local-failure',
+]);
+const PRIVY_SESSION_CHECKS = new Set(['missing', 'unreadable', 'owner-mismatch', 'owner-matched']);
+const PRIVY_CLAIM_CHECKS = new Set(['missing', 'match', 'mismatch']);
+const PRIVY_EXPIRY_CHECKS = new Set(['missing', 'expired', 'current']);
+
+function parsePrivySigningRequest(value) {
+  if (!PRIVY_SIGN_STAGES.has(value?.stage)) return null;
+  const { stage, status, code, transport, detail, requestId, edgeId, mfaProof } = value;
+  return {
+    stage,
+    ...(Number.isInteger(status) && status >= 200 && status <= 599 ? { status } : {}),
+    ...(PRIVY_REQUEST_CODES.has(code) ? { code } : {}),
+    ...(PRIVY_SIGN_TRANSPORT.has(transport) ? { transport } : {}),
+    ...(PRIVY_SIGN_DETAILS.has(detail) ? { detail } : {}),
+    ...(typeof requestId === 'string'
+      && /^(?:req[_-][a-z0-9_-]{6,64}|[a-f0-9]{16,64}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i.test(requestId)
+      ? { requestId } : {}),
+    ...(typeof edgeId === 'string' && /^[a-f0-9]{16,32}-[a-z]{3}$/i.test(edgeId) ? { edgeId } : {}),
+    ...(stage === 'session-exchange' && typeof mfaProof === 'boolean' ? { mfaProof } : {}),
+  };
+}
+
+/** Carry provider diagnostics without response bodies, URLs, or credentials. */
+export function parsePrivySigningFailure(value) {
+  const status = Number.isInteger(value?.status) && value.status >= 400 && value.status <= 599
+    ? value.status
+    : null;
+  const code = PRIVY_SIGN_CODES.has(value?.code) ? value.code : null;
+  const transport = PRIVY_SIGN_TRANSPORT.has(value?.transport) ? value.transport : null;
+  const lookup = value?.walletLookupStatus;
+  const walletLookupStatus = status === 401 && (lookup === 200
+    || Number.isInteger(lookup) && lookup >= 400 && lookup <= 599)
+    ? lookup
+    : null;
+  const requests = Array.isArray(value?.requests)
+    ? value.requests.slice(0, 4).map(parsePrivySigningRequest).filter(Boolean)
+    : [];
+  const { session, appSignature, at } = value ?? {};
+  const sessionCheck = PRIVY_SESSION_CHECKS.has(session?.check) ? {
+    check: session.check,
+    ...(PRIVY_CLAIM_CHECKS.has(session.audience) ? { audience: session.audience } : {}),
+    ...(PRIVY_CLAIM_CHECKS.has(session.issuer) ? { issuer: session.issuer } : {}),
+    ...(PRIVY_EXPIRY_CHECKS.has(session.expiry) ? { expiry: session.expiry } : {}),
+  } : null;
+  if (!status && !code && !transport && !requests.length) return null;
+  return {
+    ...(status ? { status } : {}),
+    ...(code ? { code } : {}),
+    ...(transport ? { transport } : {}),
+    ...(walletLookupStatus ? { walletLookupStatus } : {}),
+    ...(requests.length ? { requests } : {}),
+    ...(sessionCheck ? { session: sessionCheck } : {}),
+    ...(typeof appSignature === 'boolean' ? { appSignature } : {}),
+    ...(Number.isSafeInteger(at) && at > 0 && at <= 8.64e15 ? { at } : {}),
+  };
+}
+
+/** Budget units are lamports for SOL, micro-USDC for USDC, or raw units for one mint. */
+export function solanaSpendAsset(value) {
+  const asset = typeof value === 'string' ? value.trim() : '';
+  if (asset.toUpperCase() === 'SOL' || asset.toUpperCase() === 'USDC') return asset.toUpperCase();
+  return base58.test(asset) ? asset : null;
+}
 
 function sanitizeSpendQuote(quote) {
   if (quote == null) return null;
   if (typeof quote !== 'object' || Array.isArray(quote)) return undefined;
-  const pricingCluster = quote.pricingCluster === 'mainnet' || quote.pricingCluster === 'devnet' ? quote.pricingCluster : null;
-  const cluster = quote.cluster === 'mainnet' || quote.cluster === 'devnet' ? quote.cluster : null;
+  const pricingCluster = quote.pricingCluster === 'mainnet' || quote.pricingCluster === SOLANA_CLUSTER ? quote.pricingCluster : null;
+  const cluster = quote.cluster === 'mainnet' || quote.cluster === SOLANA_CLUSTER ? quote.cluster : null;
   if (quote.pricingCluster != null && !pricingCluster) return undefined;
   if (quote.cluster != null && !cluster) return undefined;
   return {
@@ -364,6 +569,22 @@ function sanitizeSpendQuote(quote) {
   };
 }
 
+function spendUnits(value) {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return value;
+}
+
+/** A mainnet-beta quote does not authorize. A mainnet quote stays paper and never signs. */
+function quoteFromCluster(cluster) {
+  if (cluster === 'mainnet') {
+    return { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false };
+  }
+  if (cluster === SOLANA_CLUSTER) {
+    return { pricingCluster: SOLANA_CLUSTER, cluster: SOLANA_CLUSTER, authorizesTransaction: false };
+  }
+  return null;
+}
+
 /** Shared body for voice, the glass UI, and Grok Bot. Returns null when the body cannot be a spend. */
 export function parsePermissionedSpendBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
@@ -371,23 +592,48 @@ export function parsePermissionedSpendBody(body) {
   if (!idOk(body.botId)) return null;
   if (body.action != null && !FUND_ACTIONS.includes(body.action)) return null;
   let units;
-  try { units = amount(body.amount); } catch { return null; }
+  try { units = amount(spendUnits(body.amount)); } catch { return null; }
   if (units === '0') return null;
   const destination = typeof body.destination === 'string' && base58.test(body.destination) ? body.destination : null;
   const handle = typeof body.handle === 'string' ? normalizeHandle(body.handle) : null;
-  if (!destination && !handle) return null;
-  if (body.asset != null && body.asset !== 'USDC') return null;
-  const quote = sanitizeSpendQuote(body.quote);
+  const action = FUND_ACTIONS.includes(body.action) ? body.action : 'spend';
+  const asset = solanaSpendAsset(body.asset ?? 'USDC');
+  if (!asset) return null;
+  const swap = action === 'swap';
+  const x402 = action === 'x402';
+  if (x402 && (asset !== 'USDC' || typeof body.lasoTicket !== 'string' || body.lasoTicket.length > 5000
+      || !/^[A-Za-z0-9_-]+\.[0-9a-f]{64}$/.test(body.lasoTicket) || body.destination != null || body.handle != null
+      || body.quote != null || body.quoteCluster != null || body.outputAsset != null)) return null;
+  if (!x402 && body.lasoTicket != null) return null;
+  const outputAsset = swap ? solanaSpendAsset(body.outputAsset) : null;
+  if (swap && (!outputAsset || asset === outputAsset || body.destination != null || body.handle != null
+      || body.quote != null || body.quoteCluster != null || BigInt(units) > 18446744073709551615n)) return null;
+  if (asset !== 'USDC' && (action === 'buy' || action === 'sell' || BigInt(units) > 18446744073709551615n)) return null;
+  // A USDC buy of wrapped SOL stays in the assigned wallet. The spend is the cap asset.
+  const selfCustody = action === 'buy' && !destination && !handle;
+  if (!destination && !handle && !selfCustody && !swap && !x402) return null;
+  if (body.quoteCluster != null && body.quoteCluster !== SOLANA_CLUSTER && body.quoteCluster !== 'mainnet') return null;
+  let quote = sanitizeSpendQuote(body.quote);
   if (body.quote != null && quote == null && body.quote !== null) return null;
+  if (quote == null && body.quoteCluster != null) quote = quoteFromCluster(body.quoteCluster);
+  let reviewCap = null;
+  if (body.reviewCap != null) {
+    try { reviewCap = amount(body.reviewCap); } catch { return null; }
+    if (reviewCap === '0') return null;
+  }
   return {
     permission: body.permission,
     botId: body.botId,
-    action: FUND_ACTIONS.includes(body.action) ? body.action : 'spend',
+    action,
     amount: units,
-    asset: 'USDC',
+    asset,
+    ...(swap ? { outputAsset } : {}),
+    ...(x402 ? { lasoTicket: body.lasoTicket } : {}),
     destination,
     handle,
+    selfCustody,
     confirmed: body.confirmed === true,
+    reviewCap,
     quote,
     idempotencyKey: typeof body.idempotencyKey === 'string' && idOk(body.idempotencyKey) ? body.idempotencyKey : null,
   };
@@ -399,26 +645,59 @@ export function buildPermissionedSpendRequest(input) {
   return { method: 'POST', path: PERMISSIONED_SPEND_PATH, body: parsed };
 }
 
+export function parseSpendApprovalTerms(value) {
+  if (!value || !idOk(value.walletId) || typeof value.walletAddress !== 'string' || !base58.test(value.walletAddress)
+    || !Number.isSafeInteger(value.policyVersion) || value.policyVersion < 1
+    || typeof value.feeLamports !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(value.feeLamports)) return null;
+  return { walletId: value.walletId, walletAddress: value.walletAddress, policyVersion: value.policyVersion, feeLamports: value.feeLamports };
+}
+
+export function spendApprovalMessage({ ownerId, spend, terms, expiresAt }) {
+  return JSON.stringify([
+    'maelstrom:sol-solana:approve-once:v1', ownerId, spend.botId,
+    spend.idempotencyKey, spend.action, spend.asset, spend.amount, spend.handle, spend.destination,
+    terms.walletId, terms.walletAddress, terms.policyVersion, terms.feeLamports, expiresAt,
+  ]);
+}
+
 export const API_ROUTES = Object.freeze([
+  { id: 'models.list', method: 'GET', path: '/api/models', phase: 1, auth: 'none', status: 'guarded' },
+  { id: 'models.check', method: 'POST', path: '/api/models', phase: 1, auth: 'none', status: 'guarded' },
   { id: 'health', method: 'GET', path: '/health', phase: 1, auth: 'none', status: 'live' },
   { id: 'routes.list', method: 'GET', path: '/api/routes', phase: 0, auth: 'none', status: 'live' },
   { id: 'me', method: 'GET', path: '/api/me', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.list', method: 'GET', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'solana.balance', method: 'GET', path: '/api/solana-balance', phase: 1, auth: 'privy', status: 'guarded' },
   { id: 'wallets.create', method: 'POST', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'wallets.additional', method: 'POST', path: '/api/wallets/additional', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.persist', method: 'POST', path: '/api/wallets/persist', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.sign', method: 'POST', path: '/api/wallets/:walletId/sign', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'wallets.export', method: 'POST', path: '/api/wallets/:walletId/export', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.list', method: 'GET', path: '/api/bots', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.create', method: 'POST', path: '/api/bots', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.delete', method: 'DELETE', path: '/api/bots/:botId', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'bots.freeze', method: 'POST', path: '/api/bots/freeze', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'desk.lock', method: 'POST', path: '/api/desk/lock', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'desk.unlock', method: 'POST', path: '/api/desk/unlock', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'desk.status', method: 'GET', path: '/api/desk', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'state.list', method: 'GET', path: '/api/state', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'state.write', method: 'POST', path: '/api/state', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'recovery.status', method: 'GET', path: '/api/recovery', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'recovery.issue', method: 'POST', path: '/api/recovery', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'recovery.verify', method: 'POST', path: '/api/recovery/verify', phase: 1, auth: 'privy', status: 'live' },
   { id: 'bots.chat', method: 'POST', path: '/api/bots/:botId/chat', phase: 1, auth: 'privy', status: 'live' },
-  { id: 'bots.status', method: 'GET', path: '/bots/:botId/status', phase: 1, auth: 'none', status: 'live', action: 'status' },
-  { id: 'bots.status.root', method: 'GET', path: '/bots/:botId', phase: 1, auth: 'none', status: 'live', action: 'status' },
-  { id: 'bots.wake', method: 'POST', path: '/bots/:botId/wake', phase: 1, auth: 'none', status: 'live', action: 'wake' },
-  { id: 'bots.pause', method: 'POST', path: '/bots/:botId/pause', phase: 1, auth: 'none', status: 'live', action: 'pause' },
-  { id: 'bots.resume', method: 'POST', path: '/bots/:botId/resume', phase: 1, auth: 'none', status: 'live', action: 'resume' },
-  { id: 'bots.advance', method: 'POST', path: '/bots/:botId/advance', phase: 1, auth: 'none', status: 'live', action: 'advance' },
-  { id: 'bots.decide', method: 'POST', path: '/bots/:botId/decide', phase: 1, auth: 'none', status: 'live', action: 'decide' },
+  { id: 'bots.status', method: 'GET', path: '/bots/:botId/status', phase: 1, auth: 'owner', status: 'live', action: 'status' },
+  { id: 'bots.status.root', method: 'GET', path: '/bots/:botId', phase: 1, auth: 'owner', status: 'live', action: 'status' },
+  { id: 'positions.list', method: 'GET', path: '/api/positions', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'bots.wake', method: 'POST', path: '/bots/:botId/wake', phase: 1, auth: 'owner', status: 'live', action: 'wake' },
+  { id: 'bots.pause', method: 'POST', path: '/bots/:botId/pause', phase: 1, auth: 'owner', status: 'live', action: 'pause' },
+  { id: 'bots.resume', method: 'POST', path: '/bots/:botId/resume', phase: 1, auth: 'owner', status: 'live', action: 'resume' },
+  { id: 'bots.advance', method: 'POST', path: '/bots/:botId/advance', phase: 1, auth: 'owner', status: 'live', action: 'advance' },
+  { id: 'bots.decide', method: 'POST', path: '/bots/:botId/decide', phase: 1, auth: 'owner', status: 'live', action: 'decide' },
   { id: 'bots.loop', method: 'POST', path: '/bots/:botId/loop', phase: 4, auth: 'owner', status: 'live', action: 'loop' },
+  { id: 'bots.cardLoop.create', method: 'POST', path: '/bots/:botId/card-loop', phase: 4, auth: 'owner', status: 'live', action: 'card-loop' },
+  { id: 'bots.cardLoop.cooldown', method: 'POST', path: '/bots/:botId/card-loop/cooldown', phase: 4, auth: 'owner', status: 'live', action: 'card-loop/cooldown' },
+  { id: 'bots.cardLoop.break', method: 'POST', path: '/bots/:botId/card-loop/break', phase: 4, auth: 'owner', status: 'live', action: 'card-loop/break' },
   { id: 'bots.browser.list', method: 'GET', path: '/bots/:botId/browser/sessions', phase: 3, auth: 'owner', status: 'live', action: 'browser/sessions' },
   { id: 'bots.browser.open', method: 'POST', path: '/bots/:botId/browser/sessions', phase: 3, auth: 'owner', status: 'live', action: 'browser/sessions' },
   { id: 'bots.browser.navigate', method: 'POST', path: '/bots/:botId/browser/sessions/:sessionRecordId/navigate', phase: 3, auth: 'owner', status: 'live', action: 'browser/navigate' },
@@ -426,8 +705,8 @@ export const API_ROUTES = Object.freeze([
   { id: 'bots.browser.release', method: 'POST', path: '/bots/:botId/browser/sessions/:sessionRecordId/release', phase: 3, auth: 'owner', status: 'live', action: 'browser/release' },
   { id: 'bots.shopping.prepare', method: 'POST', path: '/bots/:botId/shopping/prepare', phase: 6, auth: 'owner', status: 'live' },
   { id: 'bots.shopping.settle', method: 'POST', path: '/bots/:botId/shopping/settle', phase: 6, auth: 'owner', status: 'live' },
-  { id: 'bots.commerce.signal', method: 'GET', path: '/bots/:botId/commerce/signals/:signalId', phase: 6, auth: 'none', status: 'live' },
-  { id: 'bots.commerce.signal.settle', method: 'POST', path: '/bots/:botId/commerce/signals/:signalId/settle', phase: 6, auth: 'none', status: 'live' },
+  { id: 'bots.commerce.signal', method: 'GET', path: '/bots/:botId/commerce/signals/:signalId', phase: 6, auth: 'none', status: 'guarded' },
+  { id: 'bots.commerce.signal.settle', method: 'POST', path: '/bots/:botId/commerce/signals/:signalId/settle', phase: 6, auth: 'none', status: 'guarded' },
   { id: 'bots.sns.send', method: 'POST', path: '/bots/:botId/sns/send', phase: 6, auth: 'owner', status: 'live' },
   { id: 'security.grab-back', method: 'POST', path: '/security/grab-back', phase: 6, auth: 'owner', status: 'live' },
   { id: 'events.list', method: 'GET', path: '/api/events', phase: 1, auth: 'privy', status: 'live' },
@@ -476,4 +755,17 @@ export function matchApiRoute(method, pathname) {
     return { route, params };
   }
   return null;
+}
+
+export const PROFILE_LOOK_KEY = '$profile';
+
+export function profilePhoto(looks) {
+  const image = looks?.[PROFILE_LOOK_KEY]?.image;
+  return typeof image === 'string' && image.length <= 32768
+    && /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(image) ? image : '';
+}
+
+export function withProfilePhoto(looks, image) {
+  if (!profilePhoto({ [PROFILE_LOOK_KEY]: { image } })) return null;
+  return { ...looks, [PROFILE_LOOK_KEY]: { image } };
 }

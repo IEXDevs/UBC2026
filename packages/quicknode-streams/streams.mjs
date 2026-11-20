@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, SOLANA_STREAM_NETWORK, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 /**
  * QuickNode Streams helpers for Maelstrom (Isaac / chunk 5A).
  * HMAC verify → normalize → dedupe → Supabase persist → wallet→bot wake → KV sync → backfill.
@@ -87,6 +88,8 @@ export function verifyQuickNodeSignature({
 
 export function normalizeStreamEvent(raw) {
   const source = raw?.event ?? raw ?? {};
+  if ((source.cluster != null && source.cluster !== SOLANA_CLUSTER)
+    || (source.network != null && source.network !== SOLANA_STREAM_NETWORK)) fail('wrong_cluster');
   const signature = String(source.signature ?? source.txSignature ?? source.txid ?? '');
   if (!signature || signature.length < 32 || signature.length > 128) fail('invalid_event_signature');
   const wallet = String(source.wallet ?? source.account ?? source.owner ?? '');
@@ -106,8 +109,8 @@ export function normalizeStreamEvent(raw) {
     token,
     slot,
     botId: typeof botId === 'string' && botId ? botId : null,
-    cluster: 'devnet',
-    network: 'solana-devnet',
+    cluster: SOLANA_CLUSTER,
+    network: SOLANA_STREAM_NETWORK,
   };
 }
 
@@ -139,7 +142,7 @@ export function planWalletKvSync({ wallets, existing = [] }) {
   const add = [...next].filter(addr => !prev.has(addr));
   const remove = [...prev].filter(addr => !next.has(addr));
   return {
-    network: 'solana-devnet',
+    network: SOLANA_STREAM_NETWORK,
     dataset: 'block',
     filterNote: 'Keep txs touching KV wallet set; emit {signature,wallet,type,amount,token,slot}',
     destination: 'POST /webhooks/quicknode',
@@ -155,7 +158,7 @@ export function planBackfill({ wallets, fromSlot, toSlot }) {
     fail('invalid_slot_range');
   }
   return {
-    network: 'solana-devnet',
+    network: SOLANA_STREAM_NETWORK,
     wallets: wallets.map(w => (typeof w === 'string' ? w : w.address)).filter(a => base58.test(a)),
     fromSlot,
     toSlot,
@@ -243,8 +246,16 @@ export function createQuickNodeKvClient({ apiKey, listKey, fetchImpl = fetch, ba
     listKey,
     async list() {
       const data = await req('GET', `/lists/${encodeURIComponent(listKey)}`);
-      const items = Array.isArray(data) ? data : data?.data ?? data?.items ?? [];
-      return items.map(String);
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(data?.data)
+            ? data.data
+            : Array.isArray(data?.data?.items)
+              ? data.data.items
+              : [];
+      return items.map(item => (typeof item === 'string' ? item : '')).filter(Boolean);
     },
     async add(address) {
       if (!base58.test(address)) fail('invalid_wallet');
@@ -326,7 +337,7 @@ export function createSupabaseStreamStore({ url, serviceKey, fetchImpl = fetch }
           amount: event.amount,
           token: event.token,
           slot: event.slot,
-          cluster: event.cluster || 'devnet',
+          cluster: event.cluster || SOLANA_CLUSTER,
           raw: event,
         },
       });
@@ -440,8 +451,8 @@ export function createKvDedupeStore(ns, { ttlSeconds = 60 * 60 * 24 * 14, prefix
   };
 }
 
-/** Circle devnet USDC mint. Public address, not a secret. */
-export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+/** Circle mainnet-beta USDC mint. Public address, not a secret. */
+export { SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 
 const PAYMENT_DIRECTIONS = Object.freeze({ 'x402-in': 'earned', 'x402-out': 'paid' });
 const OUTFLOW_TYPES = new Set(['x402-out', 'withdrawal']);
@@ -460,7 +471,7 @@ export function streamAsset(token) {
   if (token == null) return null;
   const value = String(token).trim();
   if (!value || value.length > 64) return null;
-  if (value === 'USDC' || value === DEVNET_USDC_MINT) return 'USDC';
+  if (value === 'USDC' || value === SOLANA_USDC_MINT) return 'USDC';
   return value;
 }
 
@@ -496,7 +507,7 @@ export function streamConfirmedPayments(events, { bots = [] } = {}) {
     const amount = integerAmount(event.amount);
     const asset = streamAsset(event.token ?? event.asset);
     const botId = attributeBot(event, bots);
-    const cluster = event?.cluster === 'testnet' ? 'testnet' : event?.cluster === 'devnet' ? 'devnet' : null;
+    const cluster = event?.cluster === 'testnet' ? 'testnet' : event?.cluster === SOLANA_CLUSTER ? SOLANA_CLUSTER : null;
     const counterparty = typeof event?.counterparty === 'string' && event.counterparty.trim()
       ? event.counterparty.trim()
       : event?.wallet;
@@ -614,7 +625,7 @@ export function streamsReadmeSection() {
   return [
     '## QuickNode Streams (Stream 1)',
     '',
-    '- **Network:** `solana-devnet`',
+    `- **Network:** \`${SOLANA_STREAM_NETWORK}\``,
     '- **Dataset:** Block (or Programs + Logs) filtered to Privy bot wallets',
     '- **Filter logic:** Keep transactions touching addresses in the QuickNode Key-Value Store wallet set; emit compact `{signature, wallet, type, amount, token, slot}`',
     '- **Destination:** Cloudflare Worker `POST /webhooks/quicknode` (HMAC via `X-QN-Nonce` / `X-QN-Timestamp` / `X-QN-Signature`)',

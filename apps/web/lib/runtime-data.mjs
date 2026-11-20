@@ -4,13 +4,19 @@
  * Worker URL is configured on the server. Empty arrays when unsigned or unconfigured.
  * Never invent PreviewMain / demo bots.
  */
+import { publicCardLoop } from '@ubc2026/contracts/card-loop';
+import { parseLasoBrowserPayment } from '../../agent-runtime/src/laso-browser-payment.mjs';
+import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { sanitizeActivity } from './chat-activity.mjs';
+import { catalogPayload } from './file-catalog.mjs';
+import { clipOwnerMessage, MESSAGE_CHAR_CAP } from './context-usage.mjs';
+import { DEFAULT_TRANSFER_CAP } from './roster.mjs';
+import { situationBody } from './owner-situation.mjs';
 import { isAllowedRuntimePath, safeRuntimeSearch } from './runtime-proxy.mjs';
 
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const AMOUNT = /^(0|[1-9][0-9]{0,39})$/;
-const SIGNED = /^-?(0|[1-9][0-9]{0,39})$/;
 
 export function runtimeBaseUrl(value = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL) {
   if (typeof value !== 'string' || !value.trim()) return '';
@@ -44,6 +50,7 @@ export function shellBotFromRemote(row, looks = {}) {
     enabled,
     frozen,
     record: row,
+    loop: publicCardLoop(row.loop),
   };
 }
 
@@ -81,54 +88,6 @@ export function ownerApiUrl(path, runtimeBase) {
   return `${root}${pathname}${search}`;
 }
 
-function shortMint(mint) {
-  if (typeof mint !== 'string' || mint.length < 8) return 'asset';
-  return `${mint.slice(0, 5)}...${mint.slice(-5)}`;
-}
-
-/** Paper rows from GET /bots/:id/status `positionCheck`. Drops unusable amounts. */
-export function positionsFromStatus(botId, body) {
-  if (typeof botId !== 'string' || !BOT_ID.test(botId)) return [];
-  const rows = Array.isArray(body?.positionCheck?.positions) ? body.positionCheck.positions : [];
-  const out = [];
-  for (const row of rows) {
-    const amount = typeof row?.amount === 'string' && AMOUNT.test(row.amount) ? row.amount : null;
-    if (!amount) continue;
-    const entry = typeof row.entryMicroUsd === 'string' && SIGNED.test(row.entryMicroUsd) ? row.entryMicroUsd : null;
-    const mark = typeof row.markMicroUsd === 'string' && SIGNED.test(row.markMicroUsd) ? row.markMicroUsd : null;
-    let pnl = '0';
-    if (entry && mark) {
-      const delta = (BigInt(mark) - BigInt(entry)).toString();
-      if (SIGNED.test(delta)) pnl = delta;
-    }
-    const mint = typeof row.mint === 'string' ? row.mint : '';
-    const asset = typeof row.asset === 'string' && row.asset.trim()
-      ? row.asset.trim().slice(0, 16)
-      : shortMint(mint);
-    out.push({
-      id: `${botId}:${mint || out.length}`,
-      botId,
-      asset,
-      mint: mint || null,
-      amount,
-      decimals: Number.isInteger(row.decimals) && row.decimals >= 0 && row.decimals <= 18 ? row.decimals : 6,
-      pnlMicroUsdc: pnl,
-      quoteSource: typeof row.quoteSource === 'string' && row.quoteSource.trim()
-        ? row.quoteSource.trim().slice(0, 64)
-        : 'runtime',
-      ...(typeof row.venue === 'string' && row.venue.trim() ? { venue: row.venue.trim().slice(0, 32) } : {}),
-      ...(typeof row.market === 'string' && row.market.trim()
-        ? { market: row.market.trim().slice(0, 32) }
-        : (row.pricingCluster === 'mainnet' ? { market: 'mainnet price' } : {})),
-      side: typeof row.side === 'string' && row.side.trim() ? row.side.trim().slice(0, 16) : 'supply',
-      mark: typeof row.priceUsd === 'string' ? row.priceUsd : null,
-      notionalMicroUsdc: mark && AMOUNT.test(mark) ? mark : null,
-      walletId: typeof row.walletId === 'string' ? row.walletId : null,
-    });
-  }
-  return out;
-}
-
 function livePayment(row) {
   return Boolean(row
     && typeof row.id === 'string'
@@ -145,6 +104,16 @@ async function getJson(url, headers, fetcher) {
   const response = await fetcher(url, { headers, cache: 'no-store' });
   const body = await response.json().catch(() => ({}));
   return { ok: response.ok, body };
+}
+
+export async function fetchPendingSwap(ownerId, botId, accessToken, signal) {
+  if (typeof botId !== 'string' || !BOT_ID.test(botId) || !OWNER.test(ownerId ?? '')) return null;
+  const response = await fetch(shellRuntimeUrl(`/bots/${encodeURIComponent(botId)}/status`), {
+    headers: ownerHeaders(ownerId, accessToken), cache: 'no-store', signal,
+  });
+  if (!response.ok) return null;
+  const { pendingSwap } = await response.json();
+  return pendingSwap?.botId === botId && pendingSwap.expiresAt > Date.now() ? pendingSwap : null;
 }
 
 export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
@@ -169,14 +138,14 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
     getJson(paymentsUrl, headers, fetcher),
   ]);
   const bots = botsRes.ok && Array.isArray(botsRes.body?.items) ? botsRes.body.items : [];
-  const positions = [];
   await Promise.all(bots.slice(0, 30).map(async (bot) => {
     if (!bot || !BOT_ID.test(bot.id)) return;
     const url = ownerApiUrl(`/bots/${encodeURIComponent(bot.id)}/status`, runtimeBase);
     if (!url) return;
     const status = await getJson(url, headers, fetcher);
     if (!status.ok) return;
-    positions.push(...positionsFromStatus(bot.id, status.body));
+    const loop = publicCardLoop(status.body?.cardLoop);
+    if (loop) bot.loop = loop;
   }));
   const source = botsRes.body?.source || walletsRes.body?.source || paymentsRes.body?.source || 'unknown';
   return {
@@ -191,7 +160,7 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
         && typeof row.walletId === 'string'
         && typeof row.excess === 'string')
       : [],
-    positions,
+    positions: [],
   };
 }
 
@@ -271,7 +240,7 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
         frozen: bot.frozen === true,
         cap: bot.cap && typeof bot.cap === 'object'
           ? bot.cap
-          : { mode: 'limited', asset: 'USDC', maxOutflow: '1000000', maxPerTransaction: '1000000' },
+          : DEFAULT_TRANSFER_CAP,
       }),
       cache: 'no-store',
     });
@@ -309,6 +278,82 @@ export function botChatUrl(_runtimeBase, botId) {
   return `/api/bots/${encodeURIComponent(botId)}/chat`;
 }
 
+function chatResult(body) {
+  const lasoPayment = parseLasoBrowserPayment(body.lasoPayment);
+  if (lasoPayment?.phase === 'prepared') return { ok: true, lasoPayment };
+  const spendAuthorization = parseSpendAuthorizationChallenge(body.spendAuthorization);
+  if (spendAuthorization) return { ok: true, spendAuthorization };
+  const hold = body.hold && (body.hold.kind === 'inline' || body.hold.kind === 'modal')
+    && typeof body.hold.name === 'string'
+    ? body.hold
+    : null;
+  const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
+  const replies = Array.isArray(body.replies)
+    ? body.replies.map(item => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
+    : [];
+  if (!reply && replies.length === 0 && !hold) return { ok: false, error: 'empty_reply' };
+  const reported = Number(body.usage?.total);
+  const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
+  const activity = sanitizeActivity(body.activity);
+  return {
+    ok: true,
+    reply: reply || replies.at(-1) || hold?.label || '',
+    replies: replies.length > 0 ? replies : undefined,
+    model: body.model || null,
+    tokens,
+    activity,
+    hold,
+    ...(typeof body.claimUrl === 'string' && /^https:\/\/laso\.finance\/agent\/dashboard\/auth\?/.test(body.claimUrl)
+      ? { claimUrl: body.claimUrl } : {}),
+  };
+}
+
+async function readChatStream(response, onReply, onReplyEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const replies = [];
+  let meta = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split('\n\n');
+    buffer = chunks.pop() || '';
+    for (const chunk of chunks) {
+      const line = chunk.split('\n').find(item => item.startsWith('data:'));
+      if (!line) continue;
+      let payload;
+      try {
+        payload = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue;
+      }
+      if (!payload || typeof payload !== 'object') continue;
+      if (payload.type === 'reply_delta' && typeof payload.text === 'string') onReplyEvent?.(payload);
+      if (payload.type === 'reply_retract') onReplyEvent?.(payload);
+      if (typeof payload.error === 'string' && payload.error) {
+        onReplyEvent?.({ type: 'reply_retract' });
+        if (replies.length > 0) return chatResult({ ...(meta || {}), reply: replies.at(-1), replies });
+        return { ok: false, error: payload.error };
+      }
+      if (typeof payload.message === 'string' && payload.message.trim()) {
+        const text = payload.message.trim();
+        replies.push(text);
+        if (typeof onReply === 'function') onReply(text);
+      }
+      if (payload.done === true) meta = payload;
+    }
+  }
+  if (!meta && replies.length === 0) {
+    onReplyEvent?.({ type: 'reply_retract' });
+    return { ok: false, error: 'empty_reply' };
+  }
+  const body = meta || { reply: replies.at(-1) || '', replies };
+  if (!Array.isArray(body.replies) || body.replies.length === 0) body.replies = replies;
+  return chatResult(body);
+}
+
 /**
  * Owner text chat with a bot via the Next OpenRouter path.
  * history: prior bubble lines ({ role, text }) — agent/assistant both map server-side.
@@ -322,19 +367,34 @@ export async function sendBotChat({
   goal,
   type,
   permission,
+  grants = null,
+  spendAuthorization,
+  lasoPayment,
   model,
+  modelProvider = null,
   effort,
   shellBots = null,
   shellWallets = null,
   shellBalanceLabel = null,
+  fileCatalog = null,
+  reviewCap = null,
+  situation = null,
+  accessToken = '',
+  deskGrant = '',
   runtimeBase = runtimeBaseUrl(),
+  signal,
+  onReply = null,
+  onReplyEvent = null,
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
   if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
     return { ok: false, error: 'invalid_request' };
   }
-  const text = typeof message === 'string' ? message.trim() : '';
-  if (!text) return { ok: false, error: 'message_required' };
+  const raw = typeof message === 'string' ? message.trim() : '';
+  if (!raw) return { ok: false, error: 'message_required' };
+  if (raw.length > MESSAGE_CHAR_CAP) return { ok: false, error: 'message_too_long' };
+  const text = clipOwnerMessage(raw);
+  const catalog = catalogPayload(fileCatalog);
   const prior = Array.isArray(history)
     ? history
       .filter(line => line && (line.role === 'user' || line.role === 'agent' || line.role === 'assistant'))
@@ -343,14 +403,21 @@ export async function sendBotChat({
         text: typeof line.text === 'string' ? line.text : '',
       }))
       .filter(line => line.text.trim())
-      .slice(-16)
+      .slice(-400)
     : [];
+  const grant = typeof deskGrant === 'string' && /^[0-9a-f]{64}$/.test(deskGrant) ? deskGrant : '';
+  const clock = situationBody(situation);
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
+        accept: 'text/event-stream, application/json',
         'content-type': 'application/json',
         'x-owner-id': ownerId,
+        ...(typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000
+          ? { authorization: `Bearer ${accessToken.trim()}` }
+          : {}),
+        ...(grant ? { 'x-desk-grant': grant } : {}),
       },
       body: JSON.stringify({
         message: text,
@@ -359,25 +426,34 @@ export async function sendBotChat({
         ...(typeof goal === 'string' && goal.trim() ? { goal: goal.trim().slice(0, 2000) } : {}),
         ...(typeof type === 'string' && type.trim() ? { type: type.trim().slice(0, 40) } : {}),
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
+        ...(Array.isArray(grants) ? { grants: grants.slice(0, 4) } : {}),
+        ...(spendAuthorization ? { spendAuthorization } : {}),
+        ...(lasoPayment ? { lasoPayment } : {}),
         ...(typeof model === 'string' && model.trim() ? { model: model.trim().slice(0, 80) } : {}),
+        ...(modelProvider ? { modelProvider } : {}),
         ...(typeof effort === 'string' && effort.trim() ? { effort: effort.trim().slice(0, 16) } : {}),
         ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),
         ...(Array.isArray(shellWallets) ? { shellWallets: shellWallets.slice(0, 40) } : {}),
         ...(typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
           ? { shellBalanceLabel: shellBalanceLabel.trim().slice(0, 64) }
           : {}),
+        ...(typeof reviewCap === 'string' && reviewCap ? { reviewCap } : {}),
+        ...(clock ? { situation: clock } : {}),
+        ...(catalog.length > 0 ? { fileCatalog: catalog } : {}),
       }),
       cache: 'no-store',
+      ...(signal ? { signal } : {}),
     });
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/event-stream') && response.body) {
+      return await readChatStream(response, onReply, onReplyEvent);
+    }
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
-    const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
-    if (!reply) return { ok: false, error: 'empty_reply' };
-    const reported = Number(body.usage?.total);
-    const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
-    const activity = sanitizeActivity(body.activity);
-    return { ok: true, reply, model: body.model || null, tokens, activity };
-  } catch {
+    return chatResult(body);
+  } catch (error) {
+    onReplyEvent?.({ type: 'reply_retract' });
+    if (error?.name === 'AbortError') return { ok: false, error: 'aborted' };
     return { ok: false, error: 'network' };
   }
 }

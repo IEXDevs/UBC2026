@@ -1,3 +1,4 @@
+import { EXECUTION_LABEL, SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Shared agent tool surface for text chat and voice.
  * Research/browser tools come from @ubc2026/browser-session.
@@ -37,7 +38,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
   dashboard('get_bot_status', 'Status for one bot.', ['botId'], { botId }, [call('GET', '/bots/:botId/status')]),
   dashboard(
     'get_wallets',
-    'List wallets and every non-zero balance found for this owner. Read balances.displayBalanceLabel / holdings[] aloud — whatever SOL or SPL tokens exist on Solana-devnet and Solana-testnet for those addresses.',
+    `List this owner’s SOL and SPL balances. Execution uses Solana ${SOLANA_CLUSTER}. Read balances.displayBalanceLabel and use holdings or tokens for network labels.`,
     [],
     {},
     [call('GET', '/api/wallets')],
@@ -68,37 +69,80 @@ export const DASHBOARD_TOOLS = Object.freeze([
     botId,
     goal: { type: 'string', description: 'Optional goal text' },
   }, [call('POST', '/bots/:botId/wake', { body: ['goal'] })]),
-  dashboard('start_task', 'Start the research / decide / approval loop for one bot.', ['botId'], {
+  dashboard('start_task', 'Start the checkpointed research and decision loop. A trade proposal waits for the owner to review and approve it in the desk.', ['botId'], {
     botId,
     goal: { type: 'string', description: 'Optional goal text' },
   }, [call('POST', '/bots/:botId/loop', { body: ['goal'] })]),
+  dashboard(
+    'create_loop',
+    'Start a loop that wakes this bot again after a cooldown so it can check positions or do the stored purpose. The purpose is stored with the loop. cooldownMinutes is minutes and the minimum is 15. A shorter cooldown is rejected. The wake still goes through the decision gate before any spend. Execution stays on configured Solana network.',
+    ['botId', 'purpose', 'cooldownMinutes'],
+    {
+      botId,
+      purpose: { type: 'string', description: 'Why this loop runs. Stored with the loop.' },
+      cooldownMinutes: { type: 'string', description: 'Cooldown in minutes. Minimum 15.' },
+    },
+    [call('POST', '/bots/:botId/card-loop', { body: ['purpose', 'cooldownMinutes'] })],
+  ),
+  dashboard(
+    'set_loop_cooldown',
+    'Change the cooldown on this bot\'s loop. cooldownMinutes is minutes. The minimum is 15. A shorter cooldown is rejected. This does not spend.',
+    ['botId', 'cooldownMinutes'],
+    {
+      botId,
+      cooldownMinutes: { type: 'string', description: 'Cooldown in minutes. Minimum 15.' },
+    },
+    [call('POST', '/bots/:botId/card-loop/cooldown', { body: ['cooldownMinutes'] })],
+  ),
+  dashboard(
+    'break_loop',
+    'Break this bot\'s loop. Call this only when the owner explicitly asks to break, stop, or cancel the loop. Do not call it on your own, and do not call it just because a wake finished.',
+    ['botId'],
+    { botId },
+    [call('POST', '/bots/:botId/card-loop/break')],
+  ),
   dashboard('list_browser_sessions', 'List open browser sessions for a bot.', ['botId'], { botId }, [
     call('GET', '/bots/:botId/browser/sessions'),
   ]),
-  dashboard('stop_all', 'Pause every listed bot. Say "Stopping all bots now" before calling.', [], {}, [
+  dashboard('stop_all', 'Pause every listed agent. Say "Stopping every agent now" before calling.', [], {}, [
     call('GET', '/api/bots'),
     call('POST', '/bots/:botId/pause'),
   ]),
-  dashboard('prepare_shopping', 'Prepare an x402 sandbox or Laso shopping purchase. Does not sign.', ['botId'], {
+  dashboard('prepare_shopping', 'Prepare a purchase, not a payment. For Laso pass the requested amountUsd ($5–$1000). Buy only with request_spend action x402 and the returned lasoTicket; NEVER send a plain transfer to Laso payTo.', ['botId'], {
     botId,
     provider: { type: 'string', description: 'sandbox or laso' },
-  }, [call('POST', '/bots/:botId/shopping/prepare', { body: ['provider'] })]),
+    amountUsd: { type: ['number', 'string'], description: 'Requested Laso card value in USD, $5–$1000. Defaults to 5 only when omitted.' },
+  }, [call('POST', '/bots/:botId/shopping/prepare', { body: ['provider', 'amountUsd'] })]),
   dashboard(
     'request_spend',
-    'Move funds through the shared permissioned spend API. Use it for a buy, sell, spend, or pay. When the owner set full permissions, do not ask which of those they mean. A mainnet price quote does not authorize the transaction. Execution is Solana devnet.',
-    ['botId', 'action', 'amount'],
+    'Use swap for a live Solana trade in the agent’s assigned wallet. Pass the input asset, exact input amount in base units, and outputAsset. The owner sees the quote and approves it in the desk. Use pay or spend with a destination for transfers. USD budgets account for SOL and routable token mints.',
+    ['botId', 'action', 'amount', 'asset'],
     {
       botId,
-      action: { type: 'string', description: 'buy, sell, spend, or pay' },
-      amount: { type: 'string', description: 'Base-unit USDC amount' },
+      action: { type: 'string', description: 'swap, spend, pay, or x402. Laso cards MUST use x402 with lasoTicket, never a plain spend/pay to payTo. Always requires owner confirmation.' },
+      lasoTicket: { type: 'string', description: 'Exact signed ticket returned by prepare_shopping for a Laso card. For x402 use USDC and its proposal outflow as amount; omit destination.' },
+      amount: { type: 'string', description: 'Integer base units of the asset. Use lamports for SOL (1 SOL = 1000000000). Use the verified mint decimals for an SPL token.' },
       destination: { type: 'string', description: 'Destination Solana address' },
       handle: { type: 'string', description: 'Maelstrom handle without @' },
-      asset: { type: 'string', description: 'USDC' },
-      quoteCluster: { type: 'string', description: 'mainnet or devnet. A mainnet quote never authorizes a transaction.' },
+      asset: { type: 'string', description: 'Input asset. Use USDC, SOL, or the exact Solana token mint address.' },
+      outputAsset: { type: 'string', description: 'For swaps only. Use USDC, SOL, or the exact output token mint.' },
+      quoteCluster: { type: 'string', description: 'mainnet or solana. A mainnet quote never authorizes a transaction.' },
     },
-    [call('POST', '/api/spend', { body: ['botId', 'action', 'amount', 'destination', 'handle', 'asset'] })],
+    [call('POST', '/api/spend', { body: ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'outputAsset', 'quoteCluster', 'idempotencyKey', 'lasoTicket'] })],
   ),
-  dashboard('sns_send', 'Resolve a .sol name and build a send intent. Does not sign unless an executor is injected.', ['botId'], {
+  dashboard(
+    'lookup_recipient',
+    'Resolve a wallet address, @handle, or .sol SNS name to a pubkey via the profiles lookup API. Use this for richclub.sol, @alex, or a base58 address. Never web_search for .sol names or handles. Read-only. Does not sign or spend.',
+    ['q'],
+    {
+      q: {
+        type: 'string',
+        description: 'A sentence or a spoken name. @Mommy Milkers is the handle mommymilkers. Letters and numbers only, lowercased. Or name.sol.',
+      },
+    },
+    [call('GET', '/api/profiles/lookup', { query: ['q'] })],
+  ),
+  dashboard('sns_send', 'Build a send intent to a .sol name after lookup_recipient (or with a known domain). Does not sign unless an executor is injected.', ['botId'], {
     botId,
     domain: { type: 'string', description: 'SNS domain like alex.sol' },
     amount: { type: 'string', description: 'Base-unit amount string' },
@@ -116,7 +160,7 @@ export const RESEARCH_TOOLS = agentTools;
 export const PRICE_TOOLS = Object.freeze([
   Object.freeze({
     name: 'get_price',
-    description: 'Look up a mainnet USD price for one Solana mint. DexScreener first; Jupiter Price API v3 only if DexScreener fails. Paper PnL. The quote is labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
+    description: `Look up a mainnet USD price for one Solana mint. DexScreener first; Jupiter Price API v3 only if DexScreener fails. Paper PnL. The quote is labeled ${EXECUTION_LABEL}. It does not sign, broadcast, or authorize a transaction. Execution stays on the configured Solana network.`,
     parameters: Object.freeze({
       type: 'object',
       additionalProperties: false,
@@ -155,16 +199,27 @@ export function toOpenAiTools(tools = SHARED_AGENT_TOOLS) {
 
 export function sharedToolsInstruction() {
   return [
-    'You have the same tools on text and voice: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, list_browser_sessions, stop_all, prepare_shopping, request_spend, sns_send).',
+    'Speak to the owner in simple English. These tool notes are for you. Do not read them back, and do not quote error codes, unless the owner asks how a tool works.',
+    'You have the following tools: web_search, web_scrape, browser_open, browser_navigate, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, create_loop, set_loop_cooldown, break_loop, list_browser_sessions, stop_all, prepare_shopping, request_spend, lookup_recipient, sns_send).',
+    'create_loop stores a purpose and a cooldown of at least 15 minutes, then starts this bot again after that cooldown. set_loop_cooldown changes that cooldown. A shorter cooldown is rejected. A loop wake still goes through the decision gate before any spend.',
+    'Call break_loop only when the owner explicitly asks to break, stop, or cancel the loop. Do not break a loop on your own.',
     'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
-    'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
-    'When the owner asks you to look something up: call web_search first, pick a real https result url, then browser_navigate (or browser_open with that url).',
-    'Do not invent balances, positions, or decisions — call get_wallets and use balances.displayBalanceLabel / holdings (whatever is non-zero on the address).',
+    `For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled ${EXECUTION_LABEL}. It does not sign, broadcast, or authorize a transaction. Execution stays on the configured Solana network.`,
+    'Use get_price to research an exact mint. For a specific live trade call request_spend with action swap, the input amount in base units, and both asset identifiers. Use start_task when the owner asks you to find a trade. The desk quotes and confirms those real swaps with the owner. Report a swap as submitted only if the spend API returned a transaction signature.',
+    'request_spend posts the shared spend route. A locked desk is not an approval hold and does not replace trust, verify, reserve, or the permission gate. Fully-automatic still runs those gates. 1000000 is 1 USDC in base units. For swaps the output goes to the assigned wallet. Do not pass a destination, handle, or price quote for a swap.',
+    'For a Laso prepaid card call prepare_shopping with provider laso and the requested amountUsd. Preparation is NOT a purchase. Buy only with request_spend action x402, asset USDC, the exact proposed amount and lasoTicket; the owner confirms the purchase. NEVER send a plain transfer to Laso payTo. Only report a purchase after a settlement signature is returned. A pending card is not ready yet; the owner can use the separate Laso dashboard link.',
+    'When the owner names a .sol SNS domain, an @handle, or a wallet address, call lookup_recipient with q set to that token. It hits GET /api/profiles/lookup (SNS resolve or handle directory). Never web_search for .sol names or handles. Speak the resolved address as first5...last5.',
+    'When the owner asks you to open or use a specific website: browser_open, then browser_navigate to that https URL. Prefer a direct URL over searching. The owner watches Live View for form entry.',
+    'For Laso pass the owner’s requested amountUsd unchanged; never reduce it to the wallet balance. Let spend simulation report insufficient funds. Preparation opens the ticket-bound purchase confirmation directly: do not ask for another yes or prepare again on approval. Never use payTo as a plain transfer destination. Do not open a browser for the card or its claim link.',
+    'When the owner asks for open-web research (not a .sol, handle, or wallet): call web_search first, pick a real https result url, then web_scrape. search_not_configured and client_missing mean FIRECRAWL_API_KEY or the research client is not configured. provider_failed means Firecrawl returned a server error. Do not invent search results.',
+    'When the prompt lists an owner situation, fold that place and local date into web_search queries and into search or map pages you open. Do that for weather, hours, events, local news, and "near me", "today", "tonight", or "this weekend". Leave the place off other searches. Do not invent a city when place is not set.',
+    'Do not invent balances, positions, or decisions — call get_wallets and read balances.balanceStatus / balances.ok / balances.displayBalanceLabel / holdings. If balanceStatus is failed or balances.ok is false, say balances could not be read (use the unavailable label). Never claim "no open positions" or "0 SOL" from a failed or partial read. Empty success means holdings is empty and balanceStatus is empty or ok with zero amounts.',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
-    'Fund movements use request_spend, the same permissioned spend API as the glass UI and Grok Bot. When the owner set full permissions, do not ask whether they are going to buy, sell, spend, or pay. A mainnet price quote never authorizes a transaction. Execution stays on Solana devnet.',
+    'Fund movements use request_spend. Execution stays on configured Solana network.',
+    'When request_spend or sns_send returns a signature, the next message includes the Solscan URL on solscanUrl. Send that message in the same turn. Do not wait for the owner to ask again.',
     'Do not raise limits or freeze wallets from tools.',
-    'If a tool returns not_configured or an error code, tell the owner which secret or Worker setting is missing.',
+    'If a tool is not set up, say which setting is missing in plain words. Otherwise leave the error code out of the reply.',
   ].join('\n');
 }
 
@@ -381,3 +436,21 @@ export const VOICE_RESEARCH_WEBHOOKS = Object.freeze([
     [call('POST', '/bots/:botId/browser/sessions/:sessionRecordId/release')],
   ),
 ]);
+
+export {
+  AGENT_SKILLS,
+  AVAILABLE_SKILLS,
+  parseSkillCommand,
+  skillById,
+  skillInstruction,
+  skillsCatalogInstruction,
+} from './skills.mjs';
+export { HARNESS_TOOLS, HARNESS_TOOL_NAMES, harnessInstruction } from './harness.mjs';
+export {
+  applySituation,
+  groundBrowseUrl,
+  groundSearchQuery,
+  normalizeSituation,
+  situationFromEdge,
+  situationInstruction,
+} from './situation.mjs';

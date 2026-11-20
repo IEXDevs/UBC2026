@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ShoppingError,
   rankCatalogItems,
   buildShoppingProposal,
   prepareSandboxPurchase,
   settleSandboxPurchase,
   prepareLasoTinyCardPurchase,
 } from './shopping.mjs';
-import { NETWORKS, buildPaymentRequired, DEVNET_USDC_MINT } from '@ubc2026/x402';
+import { NETWORKS, buildPaymentRequired, SOLANA_USDC_MINT } from '@ubc2026/x402';
 
 const bot = {
   id: 'bot_shop',
@@ -22,6 +23,44 @@ const bot = {
 const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 const recipient = 'So11111111111111111111111111111111111111112';
 
+test('Laso parses the real multi-network 402, preserves amounts and refuses incompatible terms', async () => {
+  const solana = {
+    scheme: 'exact', network: NETWORKS.mainnet, amount: '10000000',
+    asset: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    payTo: '3MZVk97x9SeRxbYpc3jhzRfU2fyA3emYutnqfn9kNfYX', maxTimeoutSeconds: 300,
+    extra: { feePayer: 'BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP' },
+  };
+  const evm = { scheme: 'exact', network: 'eip155:8453', amount: '10000000',
+    asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', payTo: '0x3291e96b3bff7ed56e3ca8364273c5b4654b2b37' };
+  for (const amountUsd of [10, '10']) for (const header of [true, false]) {
+    const body = { x402Version: 2, accepts: [evm, solana] };
+    const result = await prepareLasoTinyCardPurchase({ bot, amountUsd, fetcher: async (url, init) => {
+      assert.equal(url, 'https://laso.finance/get-card?amount=10');
+      assert.equal(init.method, 'GET');
+      return Response.json(body, { status: 402, headers: header ? { 'PAYMENT-REQUIRED': Buffer.from(JSON.stringify(body)).toString('base64') } : {} });
+    } });
+    assert.deepEqual(result.challenge.accepted, solana);
+    assert.equal(result.proposal.outflow, '10000000');
+  }
+  for (const bad of [null, [], [evm], [{ ...solana, scheme: 'other' }], [{ ...solana, network: NETWORKS.devnet }],
+    [{ ...solana, amount: '5000000' }], [{ ...solana, asset: recipient }], [{ ...solana, payTo: '1'.repeat(33) }],
+    [{ ...solana, extra: {} }], [{ ...solana, extra: { feePayer: 'not-a-key' } }], [{ ...solana, maxTimeoutSeconds: 0 }]]) {
+    await assert.rejects(prepareLasoTinyCardPurchase({ bot, amountUsd: 10, fetcher: async () => Response.json({ x402Version: 2, accepts: bad }, { status: 402 }) }), /no supported/);
+  }
+  for (const amountUsd of [null, '', 4, 1001, 'bad', 5.0000001]) {
+    await assert.rejects(prepareLasoTinyCardPurchase({ bot, amountUsd, fetcher: () => assert.fail('invalid amount fetched') }), /amount must/);
+  }
+  await assert.rejects(prepareLasoTinyCardPurchase({ bot, fetcher: async () => { throw new Error('network'); } }), /unavailable/);
+  await assert.rejects(prepareLasoTinyCardPurchase({ bot, fetcher: async () => Response.json({}) }), /expected 402/);
+});
+
+/**
+ * Achieves: Price-only ranking picks the cheapest item with a lowest-price reason; empty catalogs throw.
+ * Fails when: Higher price wins when quality is absent, or empty input is ranked.
+ * Oracle: Sandbox catalog ranking when no quality scores exist.
+ * Side effects: none
+ * Gaps: none meaningful
+ */
 test('ranks catalog by lowest price', () => {
   const { best, reason, comparison } = rankCatalogItems([
     { id: 'a', name: 'A', price: '5000' },
@@ -30,8 +69,16 @@ test('ranks catalog by lowest price', () => {
   assert.equal(best.id, 'b');
   assert.match(reason, /lowest/);
   assert.equal(comparison, 'price');
+  assert.throws(() => rankCatalogItems([]), ShoppingError);
 });
 
+/**
+ * Achieves: Quality/price ranking prefers best ratio; quality>1000 throws; unscored items sort last.
+ * Fails when: Cheapest always wins when quality exists, or invalid quality is accepted.
+ * Oracle: Quality 0–1000 sandbox scoring rules.
+ * Side effects: none
+ * Gaps: preferCheapest=false ranking path untested.
+ */
 test('quality per price can outrank a cheaper item and still only proposes', () => {
   const { best, ranked, reason, comparison } = rankCatalogItems([
     { id: 'cheap', name: 'Thin sticker', price: '1000', quality: '100' },
@@ -46,6 +93,13 @@ test('quality per price can outrank a cheaper item and still only proposes', () 
   assert.throws(() => rankCatalogItems([{ id: 'bad', name: 'Bad', price: '1000', quality: '1001' }]), /0 to 1000/);
 });
 
+/**
+ * Achieves: buildShoppingProposal emits outflow=price and a 64-char digest.
+ * Fails when: Outflow mismatches item price or digest length drifts.
+ * Oracle: proposalDigest from bot-policy.
+ * Side effects: none
+ * Gaps: Does not evaluate policy against a ledger here.
+ */
 test('builds a policy-bound shopping proposal', () => {
   const { proposal, digest } = buildShoppingProposal({
     bot,
@@ -57,6 +111,13 @@ test('builds a policy-bound shopping proposal', () => {
   assert.equal(digest.length, 64);
 });
 
+/**
+ * Achieves: End-to-end prep picks cheapest, returns payment-required challenge, and next=await-owner-approval; disabled bots block.
+ * Fails when: Settles without approval, picks wrong SKU, skips 402, or disabled bots still ready-for-payment.
+ * Oracle: x402 sandbox buy-without-signature → 402 challenge + bot-policy enabled gate.
+ * Side effects: Injected storeClient.
+ * Gaps: none meaningful
+ */
 test('prepareSandboxPurchase lists, picks, evaluates policy, and surfaces 402', async () => {
   const storeClient = {
     listCatalog: async () => [
@@ -81,8 +142,25 @@ test('prepareSandboxPurchase lists, picks, evaluates policy, and surfaces 402', 
   assert.equal(result.challenge.state, 'payment-required');
   assert.equal(result.next, 'await-owner-approval');
   assert.equal(result.policy.state, 'approval-needed');
+
+  const blocked = await prepareSandboxPurchase({
+    bot: { ...bot, enabled: false },
+    ledger,
+    recipient,
+    storeClient,
+    now: Date.now(),
+  });
+  assert.equal(blocked.policy.state, 'blocked');
+  assert.equal(blocked.next, 'blocked');
 });
 
+/**
+ * Achieves: Quality ranking drives the proposed outflow; buy is called without signature; next is not settled.
+ * Fails when: Settles inline, or cheap low-quality item is proposed when quality exists.
+ * Oracle: prepareSandboxPurchase next-state machine.
+ * Side effects: Injected storeClient.
+ * Gaps: Does not reserve budget in bot-policy.
+ */
 test('prepareSandboxPurchase proposes the quality pick and does not settle', async () => {
   let bought = false;
   const storeClient = {
@@ -106,6 +184,13 @@ test('prepareSandboxPurchase proposes the quality pick and does not settle', asy
   assert.notEqual(result.next, 'settled');
 });
 
+/**
+ * Achieves: After signPayment, sandbox buy receives PAYMENT-SIGNATURE and returns settled order; mainnet accepted terms throw.
+ * Fails when: Signs mainnet terms, skips signature, or order id missing still succeeds.
+ * Oracle: x402 PAYMENT-SIGNATURE settlement on configured Solana network.
+ * Side effects: Injected storeClient + signPayment.
+ * Gaps: none meaningful
+ */
 test('settleSandboxPurchase signs and confirms an order', async () => {
   const challenge = buildPaymentRequired({
     resourceUrl: 'https://sandbox.test/store/buy',
@@ -137,8 +222,26 @@ test('settleSandboxPurchase signs and confirms an order', async () => {
   assert.equal(settled.next, 'settled');
   assert.equal(settled.payment.transaction, 'sig_shop_1');
   assert.equal(settled.order.orderId, 'ord_1');
+
+  await assert.rejects(
+    () => settleSandboxPurchase({
+      bot,
+      itemId: 'sku_lo',
+      accepted: { ...accepted, network: NETWORKS.devnet },
+      storeClient,
+      signPayment: async () => 'sig',
+    }),
+    ShoppingError,
+  );
 });
 
+/**
+ * Achieves: Laso 402 on mainnet returns await-owner-mainnet-approval with proposal outflow from amount.
+ * Fails when: Auto-settles mainnet, or wrong payTo/outflow.
+ * Oracle: Laso mainnet owner-gate contract (not sandbox auto-pay).
+ * Side effects: Injected fetcher.
+ * Gaps: Does not perform a real Laso purchase.
+ */
 test('prepareLasoTinyCardPurchase surfaces a mainnet owner gate', async () => {
   const lasoBot = {
     ...bot,
@@ -171,5 +274,5 @@ test('prepareLasoTinyCardPurchase surfaces a mainnet owner gate', async () => {
   assert.equal(result.next, 'await-owner-mainnet-approval');
   assert.equal(result.proposal.outflow, '5000000');
   assert.equal(result.challenge.accepted.payTo, recipient);
-  assert.ok(DEVNET_USDC_MINT);
+  assert.ok(SOLANA_USDC_MINT);
 });

@@ -3,6 +3,23 @@
  * Never include secret values — only env names and safe error codes.
  */
 
+/**
+ * Shell wallet provision URLs after Privy login.
+ * Browser always hits same-origin Next `/api/wallets`. On Cloudflare that route
+ * proxies create through the AGENT_RUNTIME service binding (workerd fetch to
+ * Privy); local Next still calls Privy directly. Never call
+ * `/api/runtime/api/wallets` from the browser.
+ */
+export function walletProvisionPaths() {
+  return Object.freeze(['/api/wallets']);
+}
+
+/** True when a provision response has at least one usable wallet row. */
+export function walletProvisionSucceeded(responseOk, body = {}) {
+  if (responseOk !== true || !body || typeof body !== 'object') return false;
+  return Array.isArray(body.wallets) && body.wallets.length > 0;
+}
+
 // acceptLogin only needs Privy credentials. QuickNode is for later signing.
 const REQUIRED = Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET']);
 
@@ -18,6 +35,43 @@ export function missingWalletSecrets(env = {}) {
     if (pub) missing.splice(missing.indexOf('PRIVY_APP_ID'), 1);
   }
   return missing;
+}
+
+/**
+ * Safe Cloudflare / Privy config flags for GET /api/wallets.
+ * Never includes secret values or the raw app id.
+ */
+export function walletConfigFlags(env = {}) {
+  const serverId = typeof env.PRIVY_APP_ID === 'string' ? env.PRIVY_APP_ID.trim() : '';
+  const publicId = typeof env.NEXT_PUBLIC_PRIVY_APP_ID === 'string' ? env.NEXT_PUBLIC_PRIVY_APP_ID.trim() : '';
+  const runtimeUrl = typeof env.NEXT_PUBLIC_AGENT_RUNTIME_URL === 'string'
+    ? env.NEXT_PUBLIC_AGENT_RUNTIME_URL.trim()
+    : '';
+  let runtimeHostOk = false;
+  if (runtimeUrl) {
+    try {
+      const parsed = new URL(runtimeUrl);
+      runtimeHostOk = (parsed.protocol === 'https:' || parsed.protocol === 'http:')
+        && !parsed.username
+        && !parsed.password
+        && /maelstrom\.iexdevs\.com$/i.test(parsed.hostname);
+    } catch {
+      runtimeHostOk = false;
+    }
+  }
+  const bothIds = Boolean(serverId && publicId);
+  return {
+    hasAppId: Boolean(serverId || publicId),
+    hasPublicAppId: Boolean(publicId),
+    hasAppSecret: Boolean(typeof env.PRIVY_APP_SECRET === 'string' && env.PRIVY_APP_SECRET.trim()),
+    hasRpc: Boolean(typeof env.SOLANA_RPC_URL === 'string' && env.SOLANA_RPC_URL.trim()),
+    hasAuthorizationKey: Boolean(typeof env.PRIVY_AUTHORIZATION_KEY === 'string' && env.PRIVY_AUTHORIZATION_KEY.trim()),
+    hasRuntimeUrl: Boolean(runtimeUrl),
+    runtimeHostOk,
+    // When both server + public ids are set they must match the same Privy app.
+    appIdAligned: bothIds ? serverId === publicId : true,
+    missing: missingWalletSecrets(env),
+  };
 }
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -41,6 +95,33 @@ function clientLabel(client) {
  * Include every Solana linked wallet (embedded Privy + connected external).
  * createOnLogin often has an address before a server wallet id exists.
  */
+/** Privy embedded Solana wallets already on this login. External wallets do not count. */
+export function embeddedSolanaCount(user) {
+  if (!user || typeof user !== 'object') return 0;
+  const accounts = Array.isArray(user.linkedAccounts)
+    ? user.linkedAccounts
+    : (Array.isArray(user.linked_accounts) ? user.linked_accounts : []);
+  return accounts.filter((account) => {
+    if (!account || account.type !== 'wallet') return false;
+    const chain = account.chainType ?? account.chain_type;
+    if (typeof chain === 'string' && chain && chain !== 'solana') return false;
+    const client = account.walletClientType ?? account.wallet_client_type ?? '';
+    const connector = account.connectorType ?? account.connector_type ?? '';
+    return client === 'privy' || client === 'privy-v2' || connector === 'embedded';
+  }).length;
+}
+
+/**
+ * First embedded wallet uses Privy's default (HD index 0).
+ * The next call must name the following index or Privy refuses a second wallet.
+ */
+export function embeddedCreateOptions(count) {
+  const n = Number.isInteger(count) && count > 0 ? count : 0;
+  if (n <= 0) return undefined;
+  // Server-wallet mode rejects walletIndex. createAdditional asks Privy for the next wallet.
+  return { createAdditional: true };
+}
+
 /** Changes when the user links or unlinks a wallet. The positions book refetches on this. */
 export function linkedWalletKey(user) {
   const accounts = Array.isArray(user?.linkedAccounts)
@@ -69,7 +150,7 @@ export function walletsFromPrivyUser(user, ownerId) {
     const id = typeof idHint === 'string' && idHint.trim()
       ? idHint.trim()
       : `client_${addressText.slice(0, 8)}`;
-    const spendable = client === 'privy';
+    const spendable = client === 'privy' || client === 'privy-v2';
     out.push({
       id,
       ownerId: owner,
@@ -115,16 +196,41 @@ export function walletsFromPrivyUser(user, ownerId) {
  * Server agent wallets stay spendable. Linked external wallets are appended
  * for the portfolio and never replace the agent main wallet.
  */
+function realEmbeddedId(id) {
+  return typeof id === 'string' && !id.startsWith('linked_') && !id.startsWith('client_');
+}
+
 export function mergeObservedWallets(serverWallets, user, ownerId) {
   const server = Array.isArray(serverWallets)
     ? serverWallets.filter(wallet => wallet && typeof wallet.address === 'string' && wallet.address)
     : [];
-  const seen = new Set(server.map(wallet => wallet.address));
-  const observed = walletsFromPrivyUser(user, ownerId).filter(wallet => !seen.has(wallet.address));
-  return [
-    ...server.map(wallet => ({ ...wallet, spendable: wallet.spendable !== false })),
-    ...observed.map(wallet => ({ ...wallet, kind: 'additional' })),
-  ];
+  const observed = walletsFromPrivyUser(user, ownerId);
+  const byAddress = new Map();
+  for (const wallet of server) {
+    byAddress.set(wallet.address, { ...wallet, spendable: wallet.spendable !== false });
+  }
+  for (const wallet of observed) {
+    const current = byAddress.get(wallet.address);
+    if (!current) {
+      byAddress.set(wallet.address, { ...wallet, kind: byAddress.size > 0 ? 'additional' : wallet.kind });
+      continue;
+    }
+    const placeholder = current.spendable === false || String(current.id).startsWith('linked_');
+    if (placeholder && wallet.spendable === true && realEmbeddedId(wallet.id)) {
+      byAddress.set(wallet.address, {
+        ...wallet,
+        kind: current.kind === 'main' ? 'main' : 'additional',
+        label: current.kind === 'main' && current.label ? current.label : wallet.label,
+      });
+    }
+  }
+  const out = [];
+  for (const wallet of [...server, ...observed]) {
+    const chosen = byAddress.get(wallet.address);
+    if (!chosen || out.some(row => row.address === chosen.address)) continue;
+    out.push(chosen);
+  }
+  return out;
 }
 
 export function resolvePrivyAppId(env = {}) {
@@ -174,26 +280,43 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
     return 'Privy did not return an access token. Sign out and sign in again, then open Wallets.';
   }
   if (code === 'invalid_rpc') {
-    return 'QUICKNODE_DEVNET_RPC_URL must be an https QuickNode Solana devnet RPC URL.';
+    return 'SOLANA_RPC_URL must be an https QuickNode Solana mainnet-beta RPC URL.';
   }
   if (code === 'missing_origin' || (/must_specify_origin/i.test(typeof body.detail === 'string' ? body.detail : ''))) {
     return 'Privy users/me needs Origin. Sign in again so the shell can send your Privy user id, or allowlist this site under Privy → Domains.';
   }
+  if (code === 'worker_origin_forbidden') {
+    return 'Hosted Cloudflare cannot call Privy /users/me. Sign out and sign in again so the access token includes a user id, then retry wallet create.';
+  }
   if (code === 'privy_failed') {
     const detail = typeof body.detail === 'string' ? body.detail.trim() : '';
+    if (/Invalid redirect|redirect value/i.test(detail)) {
+      return 'Worker fetch used an unsupported redirect mode. Redeploy web and agent-runtime (redirect:manual fix), then sign out/in and retry.';
+    }
+    if (/TypeError/i.test(detail)) {
+      return 'Privy fetch failed inside the Worker (TypeError). Redeploy web and agent-runtime, confirm PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime, then sign out/in and retry.';
+    }
+    if (/forbidden_header|worker_origin/i.test(detail)) {
+      return 'Hosted Cloudflare blocked a Privy Origin header. Sign out and sign in again, then retry wallet create.';
+    }
+    if (/AUTHORIZATION_KEY|agent-runtime/i.test(detail)) {
+      return 'Agent-runtime Privy create failed. Put the same PRIVY_APP_SECRET and PRIVY_AUTHORIZATION_KEY on maelstrom-agent-runtime, redeploy runtime, then sign in again.';
+    }
     if (/403/i.test(detail) && /insufficient_app_secret_permissions/i.test(detail)) {
       return 'PRIVY_APP_SECRET is read-only. In Privy → App settings → API keys, create a full-access secret, put it in root .env.local, restart Next, and sign in again.';
     }
     if (/403/i.test(detail) && /PRIVY_AUTHORIZATION_KEY|authorization/i.test(detail)) {
       return 'Privy returned 403 without an authorization signature. Add PRIVY_AUTHORIZATION_KEY (wallet-auth private key from Privy → Authorization keys) to root .env.local, restart Next, and sign in again.';
     }
-    if (/must_specify_origin|invalid_origin/i.test(detail)) {
+    if (/must_specify_origin|invalid_origin|cannot set Origin/i.test(detail)) {
       return 'Privy rejected the Origin. Allowlist this site (and http://localhost:3000) under Privy → Domains, then sign in again.';
     }
     if (/403/i.test(detail)) {
       return 'Privy returned 403. If the app secret is full-access, set PRIVY_AUTHORIZATION_KEY from Privy → Authorization keys (or turn off required authorization signatures).';
     }
-    if (detail && detail.length <= 180 && !/[\r\n]/.test(detail)) {
+    // Never echo bearer tokens / API keys that may appear in upstream detail strings.
+    if (detail && detail.length <= 180 && !/[\r\n]/.test(detail)
+      && !/(sk_|Bearer\s|api[_-]?key|secret|password)/i.test(detail)) {
       return `Privy wallet create failed: ${detail}. Check PRIVY_APP_SECRET, Solana wallets in the dashboard, and optional PRIVY_AUTHORIZATION_KEY.`;
     }
     return 'Privy rejected wallet create. Confirm PRIVY_APP_SECRET matches this app, Solana embedded wallets are on, and retry.';

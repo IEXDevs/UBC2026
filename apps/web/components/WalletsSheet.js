@@ -1,66 +1,99 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { usePrivy } from '@privy-io/react-auth';
-import { X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { useConnectWallet, useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
+import { useCreateWallet, useImportWallet, useWallets } from '@privy-io/react-auth/solana';
+import { ChevronDown, Plus, Settings2, X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
+import GlideSelect from './GlideSelect';
+import JupiterSwap from './JupiterSwap';
 import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
 import TokenScreen from './TokenScreen';
 import SlideCommit from './bits/SlideCommit';
 import TxnLog from './TxnLog';
+import SendToField from './SendToField';
 import TxnPreview from './TxnPreview';
+import LinkedLogins from './LinkedLogins';
 import { usePresence } from './usePresence';
-import { DEV_PREVIEW_OWNER, samplePortfolio } from '../lib/dev-preview.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { partyFromToken } from '../lib/party-book.mjs';
+import { embeddedCreateOptions, embeddedSolanaCount } from '../lib/wallet-provision.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
-import { describeWallets, formatBaseUnits, walletGlance } from '../lib/money-views.mjs';
+import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
+import { describeWallets, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
   displayToUnits,
   emptyTokenPrefs,
   normalizeTokenPrefs,
+  parseImportKey,
   parseSendTarget,
-  readQuoteOut,
-  swapQuoteUrl,
+  swapDraft,
+  verifyRecoveryPhrase,
   tokenStorageKey,
   tradeableTokens,
 } from '../lib/wallet-desk.mjs';
-import { sendPreview, swapPreview } from '../lib/txn-preview.mjs';
+import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
+import { accountStorage } from '../lib/account-state.mjs';
+import { sendPreview } from '../lib/txn-preview.mjs';
+import { previewPortfolioFor } from '../lib/dev-preview.mjs';
+import { walletSendAssets, NATIVE_SOL_MINT } from '../lib/wallet-send-assets.mjs';
+import { swapReceipt } from '../lib/jupiter-plugin.mjs';
+import { walletConnectionOptions } from '../lib/wallet-signing.mjs';
 
-const PANES = [
-  { id: 'assets', label: 'Assets' },
-  { id: 'portfolio', label: 'Portfolio' },
+const TRANSFER = [
   { id: 'send', label: 'Send' },
   { id: 'receive', label: 'Receive' },
   { id: 'swap', label: 'Swap' },
-  { id: 'tokens', label: 'Tokens' },
-  { id: 'history', label: 'History' },
-  { id: 'keys', label: 'Keys' },
 ];
+const TRANSFER_EASE = [0.22, 1, 0.36, 1];
 
 export default function WalletsSheet({
   open,
   onClose,
   state,
-  note = '',
   transfers = [],
   bot = null,
   onParty,
   signedIn = false,
-  devPreview = false,
   ownerId = '',
   handle = '',
   sns = '',
   onSend,
   onReceipt,
+  focusId = '',
+  getAccessToken,
+  resolveRecipient = null,
+  solanaBalance = null,
+  onRetire = null,
+  onWalletCreated = null,
+  devPreview = false,
 }) {
   const { mounted, leaving } = usePresence(open);
-  const [pane, setPane] = useState('assets');
+  const [root, setRoot] = useState(null);
+  const [portfolioOpen, setPortfolioOpen] = useState(false);
+  const [balanceRevision, setBalanceRevision] = useState(0);
+  const [sendPortfolio, setSendPortfolio] = useState(null);
+  const [preferredAsset, setPreferredAsset] = useState(null);
+  const settingsRef = useRef(null);
+  const transferRef = useRef(null);
+  const bodyRef = useRef(null);
+  const [transfer, setTransfer] = useState('send');
+  const [transferDir, setTransferDir] = useState(1);
+  const reduceMotion = useReducedMotion();
   const [walletId, setWalletId] = useState('');
   const [prefs, setPrefs] = useState(emptyTokenPrefs);
+  const [retiring, setRetiring] = useState('');
+  const [retireNote, setRetireNote] = useState('');
+  const [swapMint, setSwapMint] = useState('');
+
+  useEffect(() => {
+    setRoot(document.body);
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -72,8 +105,8 @@ export default function WalletsSheet({
   }, [open, onClose]);
 
   useEffect(() => {
-    if (open) setPane('assets');
-  }, [open]);
+    if (open && focusId) setWalletId(focusId);
+  }, [open, focusId]);
 
   useEffect(() => {
     const key = tokenStorageKey(ownerId);
@@ -93,12 +126,49 @@ export default function WalletsSheet({
     const clean = normalizeTokenPrefs(next);
     setPrefs(clean);
     const key = tokenStorageKey(ownerId);
-    if (key) localStorage.setItem(key, JSON.stringify(clean));
+    if (key) accountStorage.setItem(key, JSON.stringify(clean));
   }
 
-  if (!mounted) return null;
+  function chooseTransfer(section) {
+    const next = TRANSFER.findIndex(item => item.id === section);
+    const current = TRANSFER.findIndex(item => item.id === transfer);
+    if (next >= 0 && current >= 0 && next !== current) setTransferDir(next > current ? 1 : -1);
+    setTransfer(section);
+  }
 
-  const wallets = state?.wallets || [];
+  function openTransfer(section) {
+    chooseTransfer(section);
+    scrollToSection(transferRef.current);
+  }
+
+  function scrollToSection(section) {
+    const body = bodyRef.current;
+    if (!body || !section) return;
+    body.scrollTo({
+      top: body.scrollTop + section.getBoundingClientRect().top - body.getBoundingClientRect().top - 16,
+      behavior: reduceMotion ? 'instant' : 'smooth',
+    });
+  }
+
+  function openParty(party) {
+    if (!onParty) return;
+    onClose();
+    onParty(party);
+  }
+
+  async function send(pending) {
+    const result = await onSend?.(pending);
+    if (result?.ok) setBalanceRevision(value => value + 1);
+    return result;
+  }
+
+  function swapped(signature) {
+    setBalanceRevision(value => value + 1);
+    const receipt = swapReceipt({ signature, walletLabel: active?.label || '' });
+    if (receipt) onReceipt?.(receipt);
+  }
+
+  const wallets = (state?.wallets || []).filter(wallet => wallet && !wallet.deletedAt && !wallet.deleted_at);
   const bots = state?.bots || [];
   const positions = state?.positions || [];
   const glance = walletGlance(wallets, positions, transfers);
@@ -106,10 +176,30 @@ export default function WalletsSheet({
   const active = rows.find(row => row.id === walletId) || rows[0] || null;
   const activeRaw = wallets.find(wallet => wallet.id === active?.id) || null;
   const observing = activeRaw?.spendable === false;
-  const tokens = deskTokens({ positions, transfers, prefs: { ...prefs, sns: prefs.sns || sns || '' } });
+  const ownDestinations = sendDestinations(wallets, bots, active?.id || '');
+  const destinations = [
+    ...ownDestinations,
+    ...recentCounterparties(transfers, state?.payments || []).filter(row => (
+      !ownDestinations.some(item => item.caption.toLowerCase() === row.caption.toLowerCase())
+    )),
+  ];
+  const heading = TRANSFER.find(item => item.id === transfer)?.label || 'Send';
+  const previewBook = useMemo(() => (
+    devPreview && activeRaw?.address
+      ? previewPortfolioFor([{ kind: 'main', address: activeRaw.address, label: activeRaw.label }])
+      : null
+  ), [devPreview, activeRaw?.address, activeRaw?.label]);
+  const tokens = deskTokens({
+    positions,
+    transfers,
+    prefs: { ...prefs, sns: prefs.sns || sns || '' },
+    solana: solanaBalance,
+  });
 
-  return (
-    <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
+  if (!mounted || !root) return null;
+
+  return createPortal(
+    <div className={`backdrop is-center wallet-backdrop ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section
         className="sheet wallets-sheet"
         role="dialog"
@@ -117,106 +207,203 @@ export default function WalletsSheet({
         aria-labelledby="wallets-title"
         onMouseDown={event => event.stopPropagation()}
       >
-        <nav className="wallet-nav" aria-label="Wallet sections">
-          <strong id="wallets-title">Wallet</strong>
-          {PANES.map(item => (
-            <button
-              key={item.id}
-              type="button"
-              className={pane === item.id ? 'is-on' : ''}
-              aria-current={pane === item.id ? 'page' : undefined}
-              onClick={() => setPane(item.id)}
-            >
-              {item.label}
+        <header className="wallet-header">
+          <div>
+            <h2 id="wallets-title">Wallet</h2>
+            <p className="quiet">Your assets, transfers, and activity. Together.</p>
+          </div>
+          <div className="wallet-header-actions">
+            <button type="button" className="ghost wallet-manage" onClick={() => {
+              if (!settingsRef.current) return;
+              settingsRef.current.open = true;
+              scrollToSection(settingsRef.current);
+            }}>
+              <Settings2 size={15} aria-hidden="true" />
+              Manage wallets
             </button>
-          ))}
-        </nav>
-        <div className="wallet-body">
-          <div className="sheet-head">
-            <h2>{PANES.find(item => item.id === pane)?.label}</h2>
             <button type="button" className="icon-btn" aria-label="Close wallets" onClick={onClose}>
               <X size={18} strokeWidth={1.75} />
             </button>
           </div>
-          {rows.length > 1 ? (
-            <div className="wallet-switch" role="tablist" aria-label="Wallets">
-              {rows.map(row => (
-                <button
-                  key={row.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active?.id === row.id}
-                  className={active?.id === row.id ? 'is-on' : ''}
-                  onClick={() => setWalletId(row.id)}
-                >
-                  {row.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {pane === 'assets' ? (
-            <>
-              {note ? <p className="quiet">{note}</p> : null}
-              {signedIn ? (
+        </header>
+        <div className="wallet-body" ref={bodyRef}>
+          <div className="wallet-overview">
+            <section className="wallet-card wallet-assets" aria-label="Wallet assets">
+              <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} />
+              {active?.address ? (
+                <div className="wallet-identity">
+                  <AddressCopy address={active.address} compact />
+                  <span className="wallet-status">{active.frozen ? 'Frozen' : observing ? 'Linked' : 'Ready'}</span>
+                </div>
+              ) : null}
+              {signedIn && observing ? <WalletConnection key={`connection:${active.id}`} wallet={activeRaw} /> : null}
+              {signedIn && active?.address ? (
                 <TokenScreen
+                  key={active.id}
+                  refreshKey={balanceRevision}
                   open={open}
-                  preview={devPreview}
-                  onSend={() => setPane('send')}
-                  onReceive={() => setPane('receive')}
-                  onSwap={() => setPane('swap')}
+                  address={active.address}
+                  previewPortfolio={previewBook}
+                  onPortfolio={setSendPortfolio}
+                  onSend={holding => {
+                    setPreferredAsset({ walletId: active.id, id: holding?.mint === NATIVE_SOL_MINT && holding.native !== false ? 'SOL' : holding?.mint });
+                    openTransfer('send');
+                  }}
+                  onReceive={() => openTransfer('receive')}
+                  onSwap={(symbol, mint) => {
+                    setSwapMint(mint || tokens.find(token => token.symbol === symbol)?.mint || '');
+                    openTransfer('swap');
+                  }}
                 />
-              ) : <p className="quiet">Sign in to see tokens, the chart, and send or receive.</p>}
-            </>
-          ) : null}
-          {pane === 'portfolio' ? (
-            signedIn ? <ConnectedPortfolio open={open} preview={devPreview} /> : <p className="quiet">Sign in to connect wallets and read balances.</p>
-          ) : null}
-          {pane === 'send' ? (
-            <SendPane
-              active={active}
-              tokens={tradeableTokens(tokens)}
-              frozen={Boolean(active?.frozen)}
-              observing={observing}
-              onSend={onSend}
-              onReceipt={onReceipt}
-            />
-          ) : null}
-          {pane === 'receive' ? (
-            <ReceivePane active={active} handle={handle} sns={prefs.sns} onSns={value => savePrefs({ ...prefs, sns: value })} />
-          ) : null}
-          {pane === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} onReceipt={onReceipt} /> : null}
-          {pane === 'tokens' ? <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} /> : null}
-          {pane === 'history' ? (
-            bot ? (
-              <BotHistory bot={bot} bots={bots} payments={state?.payments || []} transfers={transfers} onParty={onParty} />
-            ) : (
-              <TxnLog
-                rows={transfers.map(row => {
-                  const direction = row.direction === 'in' ? 'in' : 'out';
-                  return {
-                    id: row.id,
-                    direction,
-                    title: `${direction === 'in' ? 'From' : 'To'} @${row.handle}`,
-                    detail: 'Platform',
-                    amount: row.amount,
-                    asset: 'USDC',
-                    party: partyFromToken(`@${row.handle}`),
-                  };
-                })}
-                onParty={onParty}
-                empty="No history yet."
-              />
-            )
-          ) : null}
-          {pane === 'keys' ? (
-            <div className="wallet-keys">
-              <p>The private key stays in Privy. This screen never reads it, stores it, or shows it.</p>
-              <PrivyKeyButton signedIn={signedIn} address={active?.address || glance.address} />
+              ) : <p className="quiet">{signedIn ? 'Add a wallet to see its assets here.' : 'Sign in to read the assets in your wallets.'}</p>}
+              <details className="wallet-fold wallet-allocation" onToggle={event => setPortfolioOpen(event.currentTarget.open)}>
+                <summary>Portfolio breakdown<ChevronDown size={16} aria-hidden="true" /></summary>
+                <div className="wallet-fold-body">
+                  {signedIn ? <ConnectedPortfolio key={balanceRevision} open={open && portfolioOpen} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>}
+                </div>
+              </details>
+            </section>
+            <section className="wallet-card wallet-transfers" aria-label="Transfer" ref={transferRef}>
+              <div className="wallet-switch wallet-action-switch" role="group" aria-label="Transfer actions">
+                {TRANSFER.map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-pressed={transfer === item.id}
+                    className={transfer === item.id ? 'is-on' : ''}
+                    onClick={() => chooseTransfer(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <h3 className="wallet-action-title">
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={transfer}
+                    className="transfer-title"
+                    initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: reduceMotion ? 0 : -6 }}
+                    transition={{ duration: reduceMotion ? 0 : 0.32, ease: TRANSFER_EASE }}
+                  >{heading}</motion.span>
+                </AnimatePresence>
+              </h3>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={`${active?.id || 'empty'}:${transfer}`}
+                  className="transfer-stage"
+                  initial={{ opacity: 0, x: reduceMotion ? 0 : transferDir * 18 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: reduceMotion ? 0 : transferDir * -14 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.38, ease: TRANSFER_EASE }}
+                >
+                  {transfer === 'send' ? (
+                    <SendPane
+                      active={active}
+                      destinations={destinations}
+                      tokens={walletSendAssets(sendPortfolio, active?.address)}
+                      preferredAsset={preferredAsset?.walletId === active?.id ? preferredAsset?.id : ''}
+                      frozen={Boolean(active?.frozen)}
+                      observing={observing}
+                      onSend={send}
+                      onReceipt={onReceipt}
+                      resolveRecipient={resolveRecipient}
+                    />
+                  ) : null}
+                  {transfer === 'receive' ? <ReceivePane active={active} handle={handle} /> : null}
+                  {transfer === 'swap' ? (
+                    <JupiterSwap
+                      address={active?.address || ''}
+                      label={active?.label || ''}
+                      frozen={Boolean(active?.frozen)}
+                      inputMint={swapMint}
+                      onSwapped={swapped}
+                    />
+                  ) : null}
+                </motion.div>
+              </AnimatePresence>
+            </section>
+          </div>
+          <details className="wallet-fold" open>
+            <summary>Recent activity<ChevronDown size={16} aria-hidden="true" /></summary>
+            <div className="wallet-fold-body">
+              {bot ? (
+                <BotHistory bot={bot} bots={bots} payments={state?.payments || []} transfers={transfers} onParty={openParty} />
+              ) : (
+                <TxnLog
+                  rows={transfers.map(row => {
+                    const direction = row.direction === 'in' ? 'in' : 'out';
+                    return {
+                      id: row.id,
+                      direction,
+                      title: `${direction === 'in' ? 'From' : 'To'} @${row.handle}`,
+                      detail: 'Platform',
+                      amount: row.amount,
+                      asset: 'USDC',
+                      party: partyFromToken(`@${row.handle}`),
+                    };
+                  })}
+                  onParty={openParty}
+                  empty="No history yet."
+                />
+              )}
             </div>
-          ) : null}
+          </details>
+          <details className="wallet-fold wallet-settings" ref={settingsRef}>
+            <summary>Wallet settings<ChevronDown size={16} aria-hidden="true" /></summary>
+            <div className="wallet-fold-body wallet-settings-grid">
+              <section aria-label="Manage wallets">
+                <h3>Manage wallets</h3>
+                {signedIn ? (
+                <WalletAdd getAccessToken={getAccessToken} ownerId={ownerId} onCreated={onWalletCreated} />
+              ) : <p className="quiet">Sign in to create or import a wallet.</p>}
+                <WalletRoster
+                  rows={rows}
+                  handle={handle}
+                  activeId={active?.id || ''}
+                  onSelect={setWalletId}
+                  retiring={retiring}
+                  onRetire={async (row) => {
+                    setRetiring(row.id);
+                    setRetireNote('');
+                    try {
+                      const result = await onRetire?.(row);
+                      setRetireNote(result?.ok
+                        ? `${row.label} is no longer on this account.`
+                        : (result?.message || 'That wallet is still on the account.'));
+                    } catch {
+                      setRetireNote('That wallet is still on the account.');
+                    } finally {
+                      setRetiring('');
+                    }
+                  }}
+                />
+                {retireNote ? <p className="quiet" role="status">{retireNote}</p> : null}
+              </section>
+              <section aria-label="Sign-in and keys">
+                <h3>Sign-in methods</h3>
+                {signedIn ? <LinkedLogins /> : <p className="quiet">Sign in to link email, Google, GitHub, or Discord.</p>}
+                <h3>Recovery &amp; keys</h3>
+                <PrivyKeyButton
+                  key={active?.id || 'empty'}
+                  signedIn={signedIn}
+                  address={active?.address || glance.address}
+                  walletId={activeRaw?.privyWalletId || ''}
+                  ownerId={ownerId}
+                  getAccessToken={getAccessToken}
+                />
+              </section>
+              <section className="wallet-token-settings" aria-label="Token preferences">
+                <h3>Token preferences</h3>
+                <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} />
+              </section>
+            </div>
+          </details>
         </div>
       </section>
-    </div>
+    </div>,
+    root,
   );
 }
 
@@ -227,35 +414,45 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-function ConnectedPortfolio({ open, preview = false }) {
-  const { user, getAccessToken, linkWallet, unlinkWallet, ready, authenticated } = usePrivy();
+function ConnectedPortfolio({ open, previewPortfolio = null }) {
+  const { user, getAccessToken, unlinkWallet, ready, authenticated } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
+  const { linkWallet } = useLinkAccount({
+    onError: () => setError('That wallet could not be linked. If it already belongs to another account, sign in with it instead.'),
+  });
   const [loading, setLoading] = useState(false);
   const [removing, setRemoving] = useState('');
   const accounts = linkedKey(user);
 
   useEffect(() => {
     if (!open) return undefined;
-    let stopped = false;
-    setLoading(true);
-    setError('');
-    if (preview) {
-      (async () => {
-        try {
-          const enriched = await enrichPortfolio(samplePortfolio(), {
-            userId: DEV_PREVIEW_OWNER,
-            storage: window.localStorage,
-          });
-          if (!stopped) setPortfolio({ ...enriched.portfolio, note: samplePortfolio().note });
-        } catch {
-          if (!stopped) setError('DexScreener did not price the preview.');
-        } finally {
+    if (previewPortfolio) {
+      setPortfolio(previewPortfolio);
+      setError('');
+      setLoading(false);
+      let stopped = false;
+      enrichPortfolio(previewPortfolio, { storage: window.localStorage })
+        .then((enriched) => {
+          if (!stopped) setPortfolio(enriched.portfolio);
+        })
+        .catch(() => {})
+        .finally(() => {
           if (!stopped) setLoading(false);
-        }
-      })();
+        });
       return () => { stopped = true; };
     }
+    const cacheKey = user?.id || accounts || 'portfolio';
+    const cached = cachedPortfolio(cacheKey);
+    if (cached) {
+      setPortfolio(cached);
+      setError('');
+      setLoading(false);
+    } else {
+      setLoading(true);
+      setError('');
+    }
+    let stopped = false;
     (async () => {
       try {
         const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
@@ -280,12 +477,15 @@ function ConnectedPortfolio({ open, preview = false }) {
           setError(portfolioErrorNote(body));
           return;
         }
-        setPortfolio(body);
         const enriched = await enrichPortfolio(body, {
           userId: user?.id,
           storage: window.localStorage,
-        });
-        if (!stopped) setPortfolio(enriched.portfolio);
+        }).catch(() => ({ portfolio: body }));
+        if (!stopped) {
+          rememberPortfolio(cacheKey, enriched.portfolio);
+          setPortfolio(enriched.portfolio);
+          setLoading(false);
+        }
       } catch {
         if (!stopped) {
           setPortfolio(null);
@@ -296,7 +496,7 @@ function ConnectedPortfolio({ open, preview = false }) {
       }
     })();
     return () => { stopped = true; };
-  }, [open, preview, accounts, getAccessToken, user?.id]);
+  }, [open, accounts, getAccessToken, user?.id, previewPortfolio]);
 
   async function remove(address) {
     setRemoving(address);
@@ -317,25 +517,324 @@ function ConnectedPortfolio({ open, preview = false }) {
       loading={loading}
       removing={removing}
       onConnect={() => {
-        if (ready && authenticated) linkWallet({ walletChainType: 'solana-only' });
+        if (!ready || !authenticated) {
+          setError('Sign in again, then connect a wallet.');
+          return;
+        }
+        linkWallet({ walletChainType: 'solana-only' });
       }}
       onRemove={remove}
     />
   );
 }
 
-function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt }) {
+export function WalletAdd({ getAccessToken = null, ownerId = '', onCreated = null }) {
+  const { createWallet } = useCreateWallet();
+  const { importWallet } = useImportWallet();
+  const { importSeedPhrase } = useImportSeedPhrase();
+  const { user, ready, authenticated } = usePrivy();
+  const connecting = useRef(false);
+  const [mode, setMode] = useState('');
+  const [seed, setSeed] = useState('');
+  const [privkey, setPrivkey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [hint, setHint] = useState('');
+  const { linkWallet } = useLinkAccount({
+    onSuccess: () => {
+      if (!connecting.current) return;
+      connecting.current = false;
+      setNote('Wallet connected.');
+    },
+    onError: () => {
+      connecting.current = false;
+      setNote('That wallet could not be linked. If it already belongs to another account, sign in with it instead.');
+    },
+  });
+
+  function finish(message) {
+    setMode('');
+    setSeed('');
+    setPrivkey('');
+    setBusy(false);
+    setNote(message);
+  }
+
+  function showHint(text) {
+    return {
+      onMouseEnter: () => setHint(text),
+      onFocus: () => setHint(text),
+      onMouseLeave: () => setHint(''),
+      onBlur: () => setHint(''),
+    };
+  }
+
+  return (
+    <div className="wallet-add">
+      <button
+        type="button"
+        className="wallet-add-connect"
+        disabled={busy}
+        {...showHint('Opens Phantom, Solflare, Backpack, or another Solana wallet and links it to this account.')}
+        onClick={() => {
+          setMode('');
+          setNote('');
+          if (!ready || !authenticated) {
+            setNote('Sign in again, then connect a wallet.');
+            return;
+          }
+          connecting.current = true;
+          linkWallet({
+            walletChainType: 'solana-only',
+            description: 'Connect a Solana wallet to this account.',
+          });
+        }}
+      >
+        Connect a wallet
+      </button>
+      <div className="wallet-switch wallet-add-create" role="group" aria-label="Create or import a wallet">
+        <button
+          type="button"
+          disabled={busy}
+          {...showHint('Creates another Solana wallet on this account. The key stays in Privy. Maelstrom does not store it.')}
+          onClick={() => {
+            setMode('');
+            setBusy(true);
+            setNote('');
+            const count = embeddedSolanaCount(user);
+            const headersFor = (token) => ({
+              'content-type': 'application/json',
+              authorization: `Bearer ${token}`,
+              ...(ownerId ? { 'x-owner-id': ownerId } : {}),
+            });
+            const created = (wallet) => {
+              if (wallet) onCreated?.(wallet);
+              finish('New wallet created. Maelstrom does not store its key.');
+            };
+            (async () => {
+              const token = await getAccessToken?.();
+              if (!token) {
+                finish('Sign in again, then create a wallet.');
+                return;
+              }
+              const headers = headersFor(token);
+              const response = await fetch('/api/wallets/additional', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                  label: `Additional ${count + 1}`,
+                  idempotencyKey: `add${Date.now().toString(36)}`.slice(0, 80),
+                }),
+              });
+              const body = await response.json().catch(() => ({}));
+              if (response.ok && body.wallet?.address) {
+                created(body.wallet);
+                return;
+              }
+              if (body.error === 'main_wallet_required') {
+                const provision = await fetch('/api/wallets', { method: 'POST', headers });
+                const made = await provision.json().catch(() => ({}));
+                if (provision.ok && Array.isArray(made.wallets) && made.wallets[0]?.address) {
+                  created(made.wallets);
+                  return;
+                }
+              }
+              const options = embeddedCreateOptions(Math.max(count, 1));
+              await createWallet(options);
+              created(null);
+            })().catch(() => finish('That wallet was not created.'));
+          }}
+        >
+          <Plus size={14} strokeWidth={1.75} aria-hidden="true" />
+          New Wallet
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          aria-pressed={mode === 'seed'}
+          {...showHint('Bring in a wallet from a 12-word phrase. The phrase is not saved here.')}
+          onClick={() => { setMode(current => current === 'seed' ? '' : 'seed'); setPrivkey(''); setSeed(''); setNote(''); }}
+        >
+          Import seed
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          aria-pressed={mode === 'key'}
+          {...showHint('Bring in a wallet from a base58 private key. The key is not saved here.')}
+          onClick={() => { setMode(current => current === 'key' ? '' : 'key'); setSeed(''); setPrivkey(''); setNote(''); }}
+        >
+          Import key
+        </button>
+      </div>
+      <p className="quiet wallet-add-hint" aria-live="polite">{hint || 'The phrase and the private key are not stored here.'}</p>
+      {mode === 'seed' ? (
+        <form className="field" onSubmit={(event) => {
+          event.preventDefault();
+          const words = seed.trim().toLowerCase().split(/\s+/).filter(Boolean);
+          setMode('');
+          setSeed('');
+          setBusy(true);
+          verifyRecoveryPhrase(words).then(valid => {
+            if (!valid) {
+              setBusy(false);
+              setNote('Type a 12-word seed phrase.');
+              return null;
+            }
+            return importSeedPhrase({ mnemonic: words.join(' '), chainType: 'solana' })
+              .then(() => finish('Seed imported. Maelstrom does not keep the phrase.'));
+          }).catch(() => finish('That seed was not imported.'));
+        }}>
+          <label>
+            Seed phrase
+            <textarea value={seed} rows={3} spellCheck={false} autoCapitalize="none" autoComplete="off" onChange={event => setSeed(event.target.value)} />
+          </label>
+          <button type="submit" className="solid" disabled={busy}>Import seed</button>
+        </form>
+      ) : null}
+      {mode === 'key' ? (
+        <form className="field" onSubmit={(event) => {
+          event.preventDefault();
+          const key = parseImportKey(privkey);
+          setMode('');
+          setPrivkey('');
+          if (!key) {
+            setNote('Paste a base58 private key.');
+            return;
+          }
+          setBusy(true);
+          importWallet({ privateKey: key })
+            .then(() => finish('Key imported. The field is cleared. Maelstrom does not keep the key.'))
+            .catch(() => finish('That key was not imported.'))
+            .finally(() => setPrivkey(''));
+        }}>
+          <label>
+            Private key
+            <input type="password" value={privkey} autoComplete="off" spellCheck={false} onChange={event => setPrivkey(event.target.value)} />
+          </label>
+          <button type="submit" className="solid" disabled={busy}>Import key</button>
+        </form>
+      ) : null}
+      {note ? <p className="quiet" role="status">{note}</p> : null}
+    </div>
+  );
+}
+
+function WalletRoster({ rows, handle = '', activeId, onSelect, onRetire, retiring }) {
+  const name = typeof handle === 'string' ? handle.trim().replace(/^@/, '') : '';
+  if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one above, or generate a new one.</p>;
+  return (
+    <div className="wallet-roster" role="list" aria-label="Wallets">
+      {rows.map(row => (
+        <div key={row.id} className={`wallet-roster-row${activeId === row.id ? ' is-on' : ''}`}>
+          <button
+            type="button"
+            className="wallet-roster-pick"
+            aria-pressed={activeId === row.id}
+            onClick={() => onSelect(row.id)}
+          >
+            <strong>{row.label}</strong>
+            {name ? <span className="wallet-roster-handle">@{name}</span> : null}
+            <small>{row.kind === 'main' ? 'Main' : 'Additional'}{row.frozen ? ' · Frozen' : ''}</small>
+          </button>
+          <AddressCopy address={row.address} compact />
+          {row.kind === 'additional' ? (
+            <button
+              type="button"
+              className="wallet-retire"
+              disabled={retiring === row.id}
+              onClick={() => onRetire?.(row)}
+            >
+              {retiring === row.id ? 'Removing' : 'Remove'}
+            </button>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WalletPick({ rows, handle = '', activeId, onSelect }) {
+  const name = typeof handle === 'string' ? handle.trim().replace(/^@/, '') : '';
+  if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one in settings, or generate a new one.</p>;
+  return (
+    <label className="wallet-pick-label">
+      Wallet
+      <GlideSelect
+        className="wallet-pick"
+        ariaLabel="Wallet"
+        size="md"
+        menuWidth={420}
+        accentColor="#e4c27a"
+        surfaceColor="#1a2422"
+        highlightColor="#243833"
+        textColor="#f6f3ea"
+        value={activeId}
+        options={rows.map(row => ({
+          value: row.id,
+          label: `${row.label}${name ? ` · @${name}` : ''} · ${shortAddress(row.address)}`,
+          tag: row.kind === 'main' ? 'Main' : 'Added',
+        }))}
+        onChange={onSelect}
+      />
+    </label>
+  );
+}
+
+function WalletConnection({ wallet }) {
+  const { wallets } = useWallets();
+  const { connectWallet } = useConnectWallet();
+  const connected = wallets.some(item => item.address === wallet.address);
+  return (
+    <div className="wallet-form">
+      <p className="quiet">{wallet.label} approves sends and swaps in its own wallet prompt.</p>
+      {!connected ? (
+        <button type="button" className="ghost" disabled={wallet.frozen} onClick={() => connectWallet(walletConnectionOptions(wallet))}>
+          Connect {wallet.label}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function SendPane({
+  active,
+  destinations = [],
+  tokens,
+  preferredAsset = '',
+  frozen,
+  observing = false,
+  onSend,
+  onReceipt,
+  resolveRecipient = null,
+}) {
   const [to, setTo] = useState('');
+  const [pickedId, setPickedId] = useState('');
   const [amount, setAmount] = useState('');
-  const [symbol, setSymbol] = useState('USDC');
+  const [assetId, setAssetId] = useState(preferredAsset);
   const [status, setStatus] = useState('');
+  const [sendComplete, setSendComplete] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [folded, setFolded] = useState(false);
-  const asset = tokens.find(token => token.symbol === symbol) || tokens[0] || null;
-  const target = parseSendTarget(to);
+  useEffect(() => {
+    if (!tokens.some(token => token.id === assetId)) {
+      setAssetId(tokens[0]?.id || '');
+      setAmount('');
+    }
+  }, [tokens, assetId]);
+  useEffect(() => { if (preferredAsset) { setAssetId(preferredAsset); setAmount(''); } }, [preferredAsset]);
+  const asset = tokens.find(token => token.id === assetId) || tokens[0] || null;
+  const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
+  const target = picked?.kind === 'recent'
+    ? parseSendTarget(picked.caption)
+    : picked
+      ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, frozen: picked.frozen, walletKind: picked.walletKind }
+      : parseSendTarget(to);
   const units = asset ? displayToUnits(amount, asset.decimals) : null;
   const [snsAddress, setSnsAddress] = useState('');
   const [snsFailed, setSnsFailed] = useState(false);
+  const [handleRecipient, setHandleRecipient] = useState(null);
+  const [handleLooking, setHandleLooking] = useState(false);
   useEffect(() => {
     if (target?.kind !== 'sns') {
       setSnsAddress('');
@@ -356,15 +855,54 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
       .catch(() => { if (!stop) setSnsFailed(true); });
     return () => { stop = true; };
   }, [target?.kind, target?.domain]);
+  useEffect(() => {
+    if (target?.kind !== 'handle') {
+      setHandleRecipient(null);
+      setHandleLooking(false);
+      return undefined;
+    }
+    let stop = false;
+    setHandleRecipient(null);
+    setHandleLooking(true);
+    const token = `@${target.handle}`;
+    const lookup = typeof resolveRecipient === 'function'
+      ? resolveRecipient(token)
+      : Promise.resolve({ kind: 'handle', handle: target.handle, missing: true });
+    Promise.resolve(lookup)
+      .then((recipient) => {
+        if (stop) return;
+        if (recipient?.kind === 'handle') setHandleRecipient(recipient);
+        else setHandleRecipient({ kind: 'handle', handle: target.handle, missing: true });
+        setHandleLooking(false);
+      })
+      .catch(() => {
+        if (stop) return;
+        setHandleRecipient({ kind: 'handle', handle: target.handle, missing: true });
+        setHandleLooking(false);
+      });
+    return () => { stop = true; };
+  }, [target?.kind, target?.handle, resolveRecipient]);
+  const walletReady = target?.kind === 'wallet' && !target.frozen;
+  const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
+  const destinationAddress = target?.kind === 'wallet' || target?.kind === 'address'
+    ? target.address : target?.kind === 'sns' ? snsAddress : handleReady ? handleRecipient.address : '';
+  const enough = asset && units && BigInt(units) <= BigInt(asset.amount);
   const ready = Boolean(
-    active && !frozen && !observing && target && target.kind !== 'address' && units && asset?.symbol === 'USDC'
-    && (target.kind !== 'sns' || snsAddress),
+    active && !frozen && target && enough && destinationAddress && destinationAddress !== active.address
+    && (
+      walletReady
+      || handleReady
+      || (target.kind === 'sns' && snsAddress)
+      || target.kind === 'address'
+    )
   );
-  const destination = target?.kind === 'handle'
-    ? `@${target.handle}`
-    : target?.kind === 'sns'
-      ? (snsAddress || target.domain)
-      : '';
+  const destination = target?.kind === 'wallet'
+    ? target.caption
+    : target?.kind === 'handle'
+      ? `@${target.handle}`
+      : target?.kind === 'sns'
+        ? (snsAddress || target.domain)
+        : target?.kind === 'address' ? target.address : '';
   const preview = ready ? sendPreview({
     from: active?.label || 'Agent wallet',
     to: destination,
@@ -373,23 +911,33 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
 
   return (
     <form className="wallet-form field" onSubmit={event => event.preventDefault()}>
-      <p className="quiet">{active ? `From ${active.label}` : 'No wallet yet.'} A slide confirms the send. Nothing is signed before that.</p>
-      {observing ? <p className="quiet" role="status">This connected wallet is read-only. Platform sends use your agent wallet.</p> : null}
+      <p className="quiet">{active ? `From ${active.label}.` : 'No wallet yet.'} {observing ? 'A slide opens this wallet’s approval prompt. Nothing sends without its approval.' : 'A slide confirms the send. Nothing is signed before that.'}</p>
       {frozen ? <p className="quiet" role="status">This wallet is frozen.</p> : null}
       <label>
         To
-        <input
+        <SendToField
           value={to}
-          placeholder="@alex or name.sol"
-          autoCapitalize="none"
-          spellCheck={false}
-          onChange={event => { setTo(event.target.value); setStatus(''); setFolded(false); }}
+          destinations={destinations}
+          selectedId={picked?.id || ''}
+          onChange={(next) => { setTo(next); setStatus(''); setFolded(false); }}
+          onPick={(row) => setPickedId(row?.id || '')}
         />
       </label>
       {target?.kind === 'sns' && snsFailed ? (
         <p className="quiet" role="status">Failed.</p>
       ) : target?.kind === 'sns' && snsAddress ? (
         <AddressCopy address={snsAddress} prefix={target.domain} />
+      ) : target?.kind === 'handle' && sendHandleReady(handleRecipient) ? (
+        <AddressCopy
+          address={handleRecipient.address}
+          prefix={handleRecipient.displayName || `@${handleRecipient.handle}`}
+        />
+      ) : target?.kind === 'handle' ? (
+        <p className="quiet" role="status">
+          {sendHandleHint(handleRecipient, { looking: handleLooking, handle: target.handle })}
+        </p>
+      ) : target?.kind === 'invalid-address' || target?.kind === 'address' ? (
+        <p className="quiet" role="status">{targetHint(target)}</p>
       ) : (
         <p className="quiet">{targetHint(target)}</p>
       )}
@@ -402,33 +950,39 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
           onChange={event => { setAmount(event.target.value); setStatus(''); setFolded(false); }}
         />
       </label>
-      <div className="wallet-switch" role="group" aria-label="Asset">
-        {tokens.map(token => (
-          <button
-            key={token.symbol}
-            type="button"
-            className={asset?.symbol === token.symbol ? 'is-on' : ''}
-            aria-pressed={asset?.symbol === token.symbol}
-            onClick={() => { setSymbol(token.symbol); setStatus(''); setFolded(false); }}
-          >
-            {token.symbol}
-          </button>
-        ))}
-      </div>
-      {asset && asset.symbol !== 'USDC' ? (
-        <p className="quiet">Platform sends are USDC. Other assets wait for the swap executor.</p>
-      ) : null}
+      <label>
+        Asset
+        <GlideSelect
+          ariaLabel="Asset"
+          value={asset?.id || ''}
+          options={tokens.map(token => ({ value: token.id, label: `${token.symbol} · ${formatBaseUnits(token.amount, token.decimals)}`, tag: token.id === 'SOL' ? 'Native' : shortAddress(token.mint) }))}
+          onChange={id => { setAssetId(id); setAmount(''); setStatus(''); setFolded(false); }}
+        />
+      </label>
+      {!asset ? <p className="quiet" role="status">No sendable balance loaded for this wallet.</p> : <p className="quiet">Available: {formatBaseUnits(asset.amount, asset.decimals)} {asset.symbol}. Sends this asset directly, plus SOL network fees.</p>}
+      {asset && units && !enough ? <p className="quiet" role="status">Amount exceeds this wallet’s balance.</p> : null}
       <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
       <SlideCommit
         label="Slide to send"
-        doneLabel="Sending"
+        doneLabel={sendComplete ? 'Sent' : 'Sending'}
         disabled={!ready}
-        resetKey={`${resetKey}:${to}:${amount}:${asset?.symbol || ''}`}
+        resetKey={`${resetKey}:${to}:${amount}:${asset?.id || ''}`}
         onCommit={() => {
-          const pending = { target, amount: units, asset: asset.symbol };
+          setSendComplete(false);
+          const pending = {
+            target,
+            walletAsset: asset.id,
+            destination: destinationAddress,
+            decimals: asset.decimals,
+            fromWalletId: active.id,
+            amount: units,
+            asset: asset.symbol,
+            amountText: amount.trim(),
+          };
           Promise.resolve(onSend?.(pending)).then(result => {
             setStatus(result?.message || result?.error || 'The send did not post.');
             if (result?.ok) {
+              setSendComplete(true);
               setFolded(true);
               if (result.receipt) onReceipt?.(result.receipt);
             }
@@ -445,151 +999,19 @@ function SendPane({ active, tokens, frozen, observing = false, onSend, onReceipt
 }
 
 function targetHint(target) {
-  if (!target) return 'Use a Maelstrom @handle or a .sol name.';
-  if (target.kind === 'handle') return `Sends USDC to @${target.handle} on the platform ledger.`;
+  if (!target) return 'Type a @handle, .sol name, or Solana address, or pick a wallet.';
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
-  return 'Raw addresses are not on the platform ledger yet.';
+  if (target.kind === 'wallet') return `Sends the selected asset to ${target.caption}.`;
+  if (target.kind === 'invalid-address') return 'That address is not a valid Solana pubkey.';
+  return target.kind === 'address' ? 'Sends directly. Check the recipient address.' : '';
 }
 
-function ReceivePane({ active, handle, sns, onSns }) {
-  const [draft, setDraft] = useState(sns || '');
-  const [note, setNote] = useState('');
-  useEffect(() => { setDraft(sns || ''); }, [sns]);
-
+function ReceivePane({ active, handle }) {
   return (
     <div className="wallet-form">
-      <p className="quiet">Share the address, or your @handle. A .sol name is read from SNS when someone sends to it.</p>
+      <p className="quiet">Share the address, or your @handle.</p>
       {handle ? <p className="wallet-handle">@{handle}</p> : <p className="quiet">Claim a @handle to get paid by name.</p>}
       <AddressCopy address={active?.address || ''} />
-      {sns ? <p className="wallet-handle">{sns}</p> : null}
-      <form
-        className="field"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const next = normalizeTokenPrefs({ sns: draft }).sns;
-          if (draft.trim() && !next) {
-            setNote('Use a name like richclub.sol.');
-            return;
-          }
-          setNote(next ? `Showing ${next}.` : 'Cleared.');
-          onSns?.(draft);
-        }}
-      >
-        <label>
-          SNS name
-          <input
-            value={draft}
-            placeholder="name.sol"
-            autoCapitalize="none"
-            spellCheck={false}
-            onChange={event => setDraft(event.target.value.replace(/^@/, ''))}
-          />
-        </label>
-        <button type="submit" className="ghost">Save name</button>
-      </form>
-      {note ? <p className="quiet" role="status">{note}</p> : null}
-    </div>
-  );
-}
-
-function SwapPane({ tokens, onReceipt }) {
-  const [from, setFrom] = useState(tokens[0]?.symbol || 'USDC');
-  const [to, setTo] = useState(tokens[1]?.symbol || 'SOL');
-  const [amount, setAmount] = useState('');
-  const [status, setStatus] = useState('');
-  const [quote, setQuote] = useState('');
-  const [resetKey, setResetKey] = useState(0);
-  const [folded, setFolded] = useState(false);
-  const input = tokens.find(token => token.symbol === from) || null;
-  const output = tokens.find(token => token.symbol === to) || null;
-  const units = input ? displayToUnits(amount, input.decimals) : null;
-  const ready = Boolean(units && input && output && input.symbol !== output.symbol);
-  const receive = quote && output ? quote.replace(new RegExp(` ${output.symbol}$`), '') : '';
-  const preview = ready ? swapPreview({
-    pay: amount.trim(),
-    receive,
-    from: input.symbol,
-    to: output.symbol,
-  }) : null;
-
-  async function loadQuote() {
-    setQuote('');
-    const built = swapQuoteUrl('jupiter', tokens, {
-      inputSymbol: input?.symbol,
-      outputSymbol: output?.symbol,
-      amount: units,
-    });
-    if (!built.url) {
-      setStatus(built.error === 'not_tradeable'
-        ? 'That token is restricted.'
-        : 'Choose two different tradeable tokens and an amount.');
-      return;
-    }
-    const url = built.url;
-    setStatus('Quoting…');
-    try {
-      const response = await fetch(url);
-      const body = await response.json().catch(() => ({}));
-      const out = readQuoteOut(body);
-      if (!response.ok || !out) {
-        setStatus('No quote. Nothing was signed.');
-        return;
-      }
-      const shown = formatBaseUnits(out, output.decimals);
-      const next = swapPreview({
-        pay: amount.trim(),
-        receive: shown,
-        from: input.symbol,
-        to: output.symbol,
-      });
-      setQuote(`${shown} ${output.symbol}`);
-      setFolded(true);
-      onReceipt?.({
-        id: `quote_${input.symbol}_${output.symbol}_${units}_${shown}`,
-        at: new Date().toISOString(),
-        title: next.title,
-        lines: next.lines,
-        cluster: 'devnet',
-      });
-      setStatus('Jupiter quote. devnet execution, mainnet pricing. Nothing was signed.');
-    } catch {
-      setStatus('The quote did not load. Nothing was signed.');
-    }
-  }
-
-  return (
-    <div className="wallet-form field">
-      <p className="quiet">Jupiter aggregates the Solana routes. A slide confirms the quote. Nothing is signed before that.</p>
-      <div className="wallet-switch" role="group" aria-label="From token">
-        {tokens.map(token => (
-          <button key={token.symbol} type="button" className={from === token.symbol ? 'is-on' : ''} aria-pressed={from === token.symbol} onClick={() => { setFrom(token.symbol); setFolded(false); }}>
-            {token.symbol}
-          </button>
-        ))}
-      </div>
-      <div className="wallet-switch" role="group" aria-label="To token">
-        {tokens.map(token => (
-          <button key={`to-${token.symbol}`} type="button" className={to === token.symbol ? 'is-on' : ''} aria-pressed={to === token.symbol} onClick={() => { setTo(token.symbol); setFolded(false); }}>
-            {token.symbol}
-          </button>
-        ))}
-      </div>
-      <label>
-        Amount
-        <input value={amount} inputMode="decimal" placeholder="0.00" onChange={event => { setAmount(event.target.value); setQuote(''); setFolded(false); }} />
-      </label>
-      <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
-      <SlideCommit
-        label="Slide to swap"
-        doneLabel="Quoting"
-        disabled={!ready}
-        resetKey={`${resetKey}:${from}:${to}:${amount}`}
-        onCommit={() => {
-          loadQuote().finally(() => setResetKey(value => value + 1));
-        }}
-      />
-      {quote ? <p className="wallet-figure wallet-figure-sm">{quote}</p> : null}
-      {status ? <p className="quiet" role="status">{status}</p> : null}
     </div>
   );
 }
@@ -606,7 +1028,7 @@ function TokenPane({ tokens, prefs, onSave }) {
 
   return (
     <div className="wallet-form">
-      <p className="quiet">Hidden tokens leave the asset list. Restricted tokens stay visible and cannot be sent or swapped here. USDC stays on both.</p>
+      <p className="quiet">Hidden tokens leave the asset list. Restricted tokens stay visible and cannot be sent here. USDC stays on both.</p>
       <ul className="token-rows">
         {tokens.map(token => (
           <li key={token.symbol} className="token-settings">

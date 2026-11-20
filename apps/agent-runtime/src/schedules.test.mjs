@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { SOLANA_GENESIS_HASH, SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 import { BotStateMachine } from './bot-do.mjs';
 import {
   HOURLY_CRON,
@@ -10,17 +10,24 @@ import {
   isStreamDropped,
   listScheduledBotsFromSupabase,
   planScheduledWork,
-  readDevnetUsdcBalance,
-  readDevnetWalletBalances,
+  readSolanaUsdcBalance,
+  readSolanaWalletBalances,
   parseTokenAccountsByMint,
   readStreamHealthFromSupabase,
   SPL_TOKEN_PROGRAM_ID,
 } from './schedules.mjs';
 
-const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const now = 1_700_000_000_000;
 const secretUrl = 'https://example.invalid/quicknode-secret-path';
 
+/**
+ * Achieves: hourly plan includes trading bots and excludes shopping.
+ * Fails when: shopping included or trading skipped.
+ * Oracle: plan membership.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('the hourly plan checks trading bots and skips shopping', () => {
   const plan = planScheduledWork({
     cron: HOURLY_CRON,
@@ -38,6 +45,13 @@ test('the hourly plan checks trading bots and skips shopping', () => {
   assert.equal(plan.recheckBots.length, 0);
 });
 
+/**
+ * Achieves: stale stream schedules exactly one RPC re-check per wallet.
+ * Fails when: zero/many re-checks per wallet.
+ * Oracle: one re-check entry per wallet.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('a stream older than an hour schedules one RPC re-check per wallet', () => {
   const fresh = isStreamDropped({ lastEventAt: now - STREAM_DROP_AFTER_MS, status: 'up' }, now);
   const stale = isStreamDropped({ lastEventAt: now - STREAM_DROP_AFTER_MS - 1, status: 'up' }, now);
@@ -59,6 +73,13 @@ test('a stream older than an hour schedules one RPC re-check per wallet', () => 
   assert.deepEqual(plan.walletRechecks[0].botIds, ['trade', 'shop']);
 });
 
+/**
+ * Achieves: paper loss raises max-loss without retaining provider-only fields.
+ * Fails when: max-loss not flagged or extras retained.
+ * Oracle: flag present; extras absent.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('paper loss flags max-loss without keeping provider extras', () => {
   const check = assessPositions({
     bot: { id: 'desk', maxLoss: '400000' },
@@ -81,30 +102,46 @@ test('paper loss flags max-loss without keeping provider extras', () => {
     quotes: { [address]: { priceUsd: '1.50' } },
   });
   assert.equal(held.flag, 'within-cap');
+
+  const near = assessPositions({
+    bot: { id: 'desk', maxLoss: '500000' },
+    now,
+    positions: [{ mint: address, amount: '1000000', decimals: 6, entryPriceUsd: '1.90' }],
+    quotes: { [address]: { priceUsd: '1.50' } },
+  });
+  assert.equal(near.unrealizedLossMicroUsd, '400000');
+  assert.equal(near.flag, 'near-max-loss');
 });
 
-test('a devnet USDC read refuses other clusters and hides the RPC URL', async () => {
+/**
+ * Achieves: USDC read refuses non-mainnet-beta clusters and never echoes RPC URL.
+ * Fails when: other cluster accepted or RPC URL in output.
+ * Oracle: refusal + no URL leak.
+ * Side effects / state checked: RPC mocks.
+ * Gaps: none
+ */
+test('a mainnet-beta USDC read refuses other clusters and hides the RPC URL', async () => {
   const calls = [];
   const fetcher = async (url, init) => {
     calls.push(url);
     const body = JSON.parse(init.body);
     if (body.method === 'getGenesisHash') {
-      return Response.json({ jsonrpc: '2.0', id: 1, result: 'mainnet-genesis-not-devnet' });
+      return Response.json({ jsonrpc: '2.0', id: 1, result: 'mainnet-genesis-not-mainnet-beta' });
     }
     throw new Error('balance should not be read');
   };
-  const refused = await readDevnetUsdcBalance({ rpcUrl: secretUrl, address, fetcher });
+  const refused = await readSolanaUsdcBalance({ rpcUrl: secretUrl, address, fetcher });
   assert.equal(refused.code, 'wrong_cluster');
   assert.equal(JSON.stringify(refused).includes('quicknode-secret-path'), false);
   assert.equal(calls[0], secretUrl);
 
-  const ok = await readDevnetUsdcBalance({
+  const ok = await readSolanaUsdcBalance({
     rpcUrl: secretUrl,
     address,
     fetcher: async (url, init) => {
       const body = JSON.parse(init.body);
       if (body.method === 'getGenesisHash') {
-        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
       }
       if (body.method === 'getBalance') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 9 } });
@@ -117,7 +154,7 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
         result: {
           value: [{
             account: {
-              data: { parsed: { info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
+              data: { parsed: { info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
             },
           }],
         },
@@ -125,16 +162,16 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
     },
   });
   assert.equal(ok.amount, '42');
-  assert.equal(ok.mint, DEVNET_USDC_MINT);
+  assert.equal(ok.mint, SOLANA_USDC_MINT);
   assert.equal(JSON.stringify(ok).includes(secretUrl), false);
 
-  const both = await readDevnetWalletBalances({
+  const both = await readSolanaWalletBalances({
     rpcUrl: secretUrl,
     address,
     fetcher: async (_url, init) => {
       const body = JSON.parse(init.body);
       if (body.method === 'getGenesisHash') {
-        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
       }
       if (body.method === 'getBalance') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 2_000_000_000 } });
@@ -153,7 +190,7 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
       account: {
         data: {
           parsed: {
-            info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '10', decimals: 6 } },
+            info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '10', decimals: 6 } },
           },
         },
       },
@@ -183,10 +220,17 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
   assert.equal(parsed.tokens[0].amount, '10');
   assert.equal(parsed.tokens[1].amount, '5000000000');
 
-  const missing = await readDevnetUsdcBalance({ address, fetcher: async () => { throw new Error('no'); } });
+  const missing = await readSolanaUsdcBalance({ address, fetcher: async () => { throw new Error('no'); } });
   assert.equal(missing.code, 'rpc_not_configured');
 });
 
+/**
+ * Achieves: schedule Supabase reads return empty without service key.
+ * Fails when: invented rows without key.
+ * Oracle: empty result.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('supabase schedule reads stay empty without a service key', async () => {
   let called = false;
   const bots = await listScheduledBotsFromSupabase({ SUPABASE_URL: 'https://db.example' }, async () => {
@@ -202,6 +246,13 @@ test('supabase schedule reads stay empty without a service key', async () => {
   assert.equal(health.source, 'unconfigured');
 });
 
+/**
+ * Achieves: configured reads map bots and latest stream delivery fields.
+ * Fails when: mapping wrong or stale delivery chosen.
+ * Oracle: mapped bot/stream fields.
+ * Side effects / state checked: Supabase fixtures.
+ * Gaps: none
+ */
 test('supabase schedule reads map bots and the latest stream delivery', async () => {
   const key = 'service-role-test';
   const seen = [];
@@ -229,6 +280,13 @@ test('supabase schedule reads map bots and the latest stream delivery', async ()
   assert.equal(seen.every(call => !String(call.url).includes(key)), true);
 });
 
+/**
+ * Achieves: position check leaves paused runs unmoved.
+ * Fails when: paused run advances.
+ * Oracle: run state unchanged.
+ * Side effects / state checked: machine state.
+ * Gaps: none
+ */
 test('a position check does not move a paused run', async () => {
   const machine = new BotStateMachine();
   await machine.handle(new Request('https://bot/wake', {
@@ -243,13 +301,18 @@ test('a position check does not move a paused run', async () => {
   }));
   const checked = await machine.handle(new Request('https://bot/position-check', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-maelstrom-internal': 'position-check',
+      'x-owner-id': 'alice',
+    },
     body: JSON.stringify({
       botId: 'bot_1',
+      ownerId: 'alice',
       now,
       reason: 'stream-drop-recheck',
       maxLoss: '10',
-      balance: { ok: true, amount: '7', address, rpcUrl: secretUrl, cluster: 'devnet' },
+      balance: { ok: true, amount: '7', address, rpcUrl: secretUrl, cluster: 'mainnet-beta' },
     }),
   }));
   assert.equal(checked.status, 200);
@@ -257,7 +320,9 @@ test('a position check does not move a paused run', async () => {
   assert.equal(body.check.flag, 'stream-fallback');
   assert.equal(body.check.balance.amount, '7');
   assert.equal(JSON.stringify(body).includes(secretUrl), false);
-  const status = await machine.handle(new Request('https://bot/status'));
+  const status = await machine.handle(new Request('https://bot/status', {
+    headers: { 'x-owner-id': 'alice' },
+  }));
   const saved = await status.json();
   assert.equal(saved.run.paused, true);
   assert.equal(saved.run.step, 'research');

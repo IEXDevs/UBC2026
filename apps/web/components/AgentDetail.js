@@ -1,9 +1,58 @@
 'use client';
 
-import { Wallet } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { formatBaseUnits } from '../lib/money-views.mjs';
+import {
+  permissionById,
+  readReviewThreshold,
+  readStoredPermission,
+} from '../lib/spend-permission.mjs';
+import { signalOfferView } from '../lib/owner-actions.mjs';
+import BotMark from './BotMark';
 import FileLibrary from './FileLibrary';
+import LiveViewPanel from './LiveViewPanel';
 
-export default function AgentDetail({ bot, files = [], balanceLabel = '', ownerId = null, onResize, onWallet, onComputer, onEdit }) {
+function readPermitState() {
+  if (typeof localStorage === 'undefined') {
+    return { permission: 'ask', reviewCapLabel: '' };
+  }
+  const permission = readStoredPermission(localStorage);
+  const cap = readReviewThreshold(localStorage);
+  let reviewCapLabel = '';
+  if (cap) {
+    try { reviewCapLabel = formatBaseUnits(cap); } catch { reviewCapLabel = ''; }
+  }
+  return { permission, reviewCapLabel };
+}
+
+export default function AgentDetail({
+  bot,
+  files = [],
+  ownerId = null,
+  getAccessToken = null,
+  onResize,
+  onMissingFile,
+  onComputer,
+}) {
+  const [permitState, setPermitState] = useState(() => readPermitState());
+  const permit = permissionById(permitState.permission);
+  const offer = signalOfferView(bot);
+
+  useEffect(() => {
+    function refresh() {
+      setPermitState(readPermitState());
+    }
+    refresh();
+    window.addEventListener('storage', refresh);
+    window.addEventListener('focus', refresh);
+    const timer = setInterval(refresh, 1500);
+    return () => {
+      window.removeEventListener('storage', refresh);
+      window.removeEventListener('focus', refresh);
+      clearInterval(timer);
+    };
+  }, []);
+
   return (
     <aside className="agent-detail" aria-label={`${bot.name} details`}>
       <div
@@ -13,13 +62,47 @@ export default function AgentDetail({ bot, files = [], balanceLabel = '', ownerI
         aria-label="Resize details"
         onPointerDown={onResize}
       />
-      <div className="detail-tabs">
-        <button type="button" className="wallet-chip" onClick={onWallet}>
-          <Wallet size={16} strokeWidth={1.75} />
-          <span>{balanceLabel || 'Wallet'}</span>
-        </button>
-      </div>
-      <FileLibrary bot={bot} files={files} ownerId={ownerId} onComputer={onComputer} onEdit={onEdit} />
+      <header className="agent-detail-head is-agent">
+        <BotMark shape={bot.shape} color={bot.color} image={bot.image} name={bot.name} size={56} />
+        <div className="agent-detail-copy">
+          <strong>{bot.name}</strong>
+          <span className="agent-detail-meta">
+            <span className="agent-detail-perm-line">
+              <span className={`agent-detail-perm is-${permit.id}`} style={{ '--perm-color': permit.color }}>
+                {permit.label}
+              </span>
+              {permit.id === 'review' && permitState.reviewCapLabel ? (
+                <span className="agent-detail-cap">≤ {permitState.reviewCapLabel} USDC</span>
+              ) : null}
+            </span>
+          </span>
+        </div>
+      </header>
+
+      {bot.record && ownerId ? (
+        <LiveViewPanel
+          key={`${ownerId}:${bot.id}`}
+          botId={bot.id}
+          ownerId={ownerId}
+          getAccessToken={getAccessToken}
+          screen
+          onExpand={onComputer}
+        />
+      ) : null}
+      {offer ? (
+        <p className="hint">
+          <a href={offer.href} target="_blank" rel="noreferrer">
+            Signal {offer.signalId} · {offer.amountLabel} USDC
+          </a>
+        </p>
+      ) : null}
+
+      <FileLibrary
+        files={files}
+        ownerId={ownerId}
+        getAccessToken={getAccessToken}
+        onMissing={onMissingFile}
+      />
     </aside>
   );
 }

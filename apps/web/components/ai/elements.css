@@ -57,6 +57,13 @@
   white-space: nowrap;
 }
 
+.chat-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+
 .chat-note {
   margin: 6px 0;
   color: #a3a3a3;

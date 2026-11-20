@@ -1,10 +1,14 @@
 'use client';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 
 import { useEffect, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
-import { DEV_PREVIEW_OWNER, samplePortfolio } from '../lib/dev-preview.mjs';
-import { dexTokenView, enrichPortfolio, readDexTokens } from '../lib/dex-token.mjs';
+import AddressCopy from './AddressCopy';
+import { walletAssetName, walletAssetValue } from '../lib/wallet-send-assets.mjs';
+import { dexTokenView, enrichPortfolio, readDexCandles, readDexTokens } from '../lib/dex-token.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import { formatUsdMicro, portfolioErrorNote } from '../lib/portfolio.mjs';
 import {
@@ -13,6 +17,7 @@ import {
   formatCompactUsd,
   formatTokenPrice,
 } from '../lib/token-market.mjs';
+import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
 
 function linkedKey(user) {
   const accounts = Array.isArray(user?.linkedAccounts)
@@ -21,44 +26,40 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-export default function TokenScreen({ open, preview = false, onSend, onReceive, onSwap }) {
-  const { user, getAccessToken, linkWallet, ready, authenticated } = usePrivy();
+export default function TokenScreen({ open, address = '', onSend, onReceive, onSwap, onPortfolio, previewPortfolio = null, refreshKey = 0 }) {
+  const { user, getAccessToken } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [pricing, setPricing] = useState(false);
   const [selected, setSelected] = useState(null);
   const accounts = linkedKey(user);
 
   useEffect(() => {
     if (!open) return undefined;
-    let stopped = false;
-    setLoading(true);
-    if (preview) {
+    if (previewPortfolio) {
+      let stopped = false;
+      setPortfolio(null);
       setError('');
-      setPricing(true);
-      (async () => {
-        try {
-          const enriched = await enrichPortfolio(samplePortfolio(), {
-            userId: DEV_PREVIEW_OWNER,
-            storage: window.localStorage,
-          });
+      setLoading(true);
+      enrichPortfolio(previewPortfolio, { storage: window.localStorage })
+        .catch(() => ({ portfolio: previewPortfolio }))
+        .then((enriched) => {
           if (stopped) return;
-          setPortfolio({
-            ...enriched.portfolio,
-            note: samplePortfolio().note,
-          });
-        } catch {
-          if (!stopped) setError('DexScreener did not price the preview.');
-        } finally {
-          if (!stopped) {
-            setLoading(false);
-            setPricing(false);
-          }
-        }
-      })();
+          setPortfolio(enriched.portfolio);
+          setLoading(false);
+        });
       return () => { stopped = true; };
     }
+    const cacheKey = user?.id || 'portfolio';
+    const cached = cachedPortfolio(cacheKey);
+    if (cached) {
+      setPortfolio(cached);
+      setError('');
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    let stopped = false;
     (async () => {
       try {
         const { getPrivyAccessToken } = await import('../lib/privy-session.mjs');
@@ -82,82 +83,99 @@ export default function TokenScreen({ open, preview = false, onSend, onReceive, 
           setError(portfolioErrorNote(body));
           return;
         }
-        setPortfolio(body);
-        setError('');
-        setPricing(true);
         const enriched = await enrichPortfolio(body, {
           userId: user?.id,
           storage: window.localStorage,
-        });
-        if (!stopped) setPortfolio(enriched.portfolio);
+        }).catch(() => ({ portfolio: body }));
+        if (!stopped) {
+          rememberPortfolio(cacheKey, enriched.portfolio);
+          setPortfolio(enriched.portfolio);
+          setError('');
+          setLoading(false);
+        }
       } catch {
         if (!stopped) setError(portfolioErrorNote({ error: 'rpc_failed' }));
       } finally {
-        if (!stopped) {
-          setLoading(false);
-          setPricing(false);
-        }
+        if (!stopped) setLoading(false);
       }
     })();
     return () => { stopped = true; };
-  }, [open, preview, accounts, getAccessToken, user?.id]);
+  }, [open, accounts, getAccessToken, user?.id, previewPortfolio, refreshKey]);
 
-  const holdings = combineHoldings(portfolio);
-  if (selected) {
-    const holding = holdings.find(row => row.mint === selected) || null;
-    return (
-      <TokenDetail
-        mint={selected}
-        holding={holding}
-        cluster={portfolio?.cluster || 'mainnet'}
-        userId={preview ? DEV_PREVIEW_OWNER : user?.id}
-        onBack={() => setSelected(null)}
-        onSend={() => onSend?.(holding?.symbol)}
-        onReceive={onReceive}
-        onSwap={() => onSwap?.(holding?.symbol)}
-      />
-    );
-  }
+  const scoped = address && Array.isArray(portfolio?.wallets)
+    ? { ...portfolio, wallets: portfolio.wallets.filter(row => row?.address === address) }
+    : portfolio;
+  useEffect(() => {
+    onPortfolio?.(portfolio);
+  }, [portfolio, onPortfolio]);
+  const holdings = combineHoldings(scoped);
+  const total = holdings.reduce((sum, row) => sum + BigInt(row.usdMicro || '0'), 0n).toString();
+  const holdingKey = row => row.native === false ? `${row.mint}:wrapped` : row.mint;
+  const holding = selected ? holdings.find(row => holdingKey(row) === selected) || null : null;
+  const ease = [0.22, 1, 0.36, 1];
 
   return (
-    <div className="token-screen">
-      <p className="wallet-figure">{formatUsdMicro(portfolio?.totalUsdMicro || '0')}</p>
-      <p className="quiet">{portfolio?.note || 'Balances from QuickNode. Dollar values use mainnet prices.'}</p>
-      {loading ? <p className="quiet">Reading wallets from QuickNode…</p> : null}
-      {pricing ? <p className="quiet">Reading prices from DexScreener…</p> : null}
+    <AnimatePresence mode="wait" initial={false}>
+    {selected ? (
+      <motion.div
+        key={selected}
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 10 }}
+        transition={{ duration: 0.45, ease }}
+      >
+      <TokenDetail
+        mint={holding?.mint || selected}
+        holding={holding}
+        cluster={portfolio?.cluster || SOLANA_CLUSTER}
+        userId={user?.id}
+        onBack={() => setSelected(null)}
+        onSend={() => onSend?.(holding)}
+        onReceive={onReceive}
+        onSwap={() => onSwap?.(holding?.symbol, selected)}
+      />
+      </motion.div>
+    ) : (
+    <motion.div
+      key="token-list"
+      className="token-screen"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={{ duration: 0.4, ease }}
+    >
+      {holdings.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
+      {loading ? <p className="quiet">Reading balances.</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
       <ul className="token-rows">
         {holdings.map(row => (
-          <li key={row.mint}>
-            <button type="button" className="token-row" onClick={() => setSelected(row.mint)}>
+          <li key={holdingKey(row)}>
+            <button type="button" className="token-row" onClick={() => setSelected(holdingKey(row))}>
               <span>
-                <strong>{row.symbol}</strong>
-                <small>{formatBaseUnits(row.amount, row.decimals)} {row.symbol}</small>
+                <strong>{walletAssetName(row)}</strong>
+                <small>{formatBaseUnits(row.amount, row.decimals)} {walletAssetName(row)}</small>
               </span>
-              <b>{formatUsdMicro(row.usdMicro)}</b>
+              <b>{walletAssetValue(row)}</b>
             </button>
+            {walletAssetName(row) === 'Unknown token' || holdings.filter(item => walletAssetName(item) === walletAssetName(row)).length > 1 ? (
+              <div className="token-mint"><AddressCopy address={row.mint} compact inline /></div>
+            ) : null}
           </li>
         ))}
       </ul>
-      {holdings.length === 0 && !loading ? <p className="quiet">No priced tokens in the connected wallets yet.</p> : null}
-      <div className="portfolio-actions">
-        <button
-          type="button"
-          className="ghost"
-          disabled={!ready || !authenticated}
-          onClick={() => linkWallet({ walletChainType: 'solana-only' })}
-        >
-          Connect a wallet
-        </button>
-      </div>
-    </div>
+      {holdings.length === 0 && !loading && !error ? <p className="quiet">No assets in this wallet yet.</p> : null}
+    </motion.div>
+    )}
+    </AnimatePresence>
   );
 }
 
 function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive, onSwap }) {
   const [range, setRange] = useState('1D');
   const [token, setToken] = useState(null);
+  const [series, setSeries] = useState({ range: '1D', points: null });
   const [error, setError] = useState('');
+  const candles = series.range === range ? series.points : null;
 
   useEffect(() => {
     let stopped = false;
@@ -169,7 +187,7 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
         const row = book.tokens[0] || null;
         if (!row?.symbol && row?.priceUsd == null && !row?.fromCache) {
           setError(book.rateLimited
-            ? 'DexScreener is limiting this network. No saved details for this token yet.'
+            ? 'DexScreener is rate-limiting requests. No saved details for this token yet.'
             : 'DexScreener has no pair for this token.');
           return;
         }
@@ -181,31 +199,73 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
     return () => { stopped = true; };
   }, [mint, userId]);
 
-  const view = token ? dexTokenView({ mint, range, cluster, token }) : null;
-  const symbol = view?.symbol || holding?.symbol || 'Token';
+  useEffect(() => {
+    const pair = token?.pairAddress;
+    if (!pair) {
+      setSeries({ range, points: null });
+      return undefined;
+    }
+    let stopped = false;
+    readDexCandles({ pairAddress: pair, range })
+      .then(book => {
+        if (!stopped) setSeries({ range, points: book.points });
+      })
+      .catch(() => {
+        if (!stopped) setSeries({ range, points: [] });
+      });
+    return () => { stopped = true; };
+  }, [token?.pairAddress, range]);
+
+  const view = token ? dexTokenView({
+    mint,
+    range,
+    cluster,
+    token,
+    candles: token.pairAddress && candles == null
+      ? 'pending'
+      : (Array.isArray(candles) && candles.length >= 2 ? candles : null),
+  }) : null;
+  const symbol = walletAssetName({ ...holding, mint, symbol: view?.symbol || holding?.symbol });
   const price = typeof view?.price === 'number' ? formatTokenPrice(view.price) : '';
   const change = typeof view?.changePct === 'number' ? view.changePct : null;
   const down = change != null && change < 0;
   const liquidity = formatCompactUsd(view?.liquidityUsd);
   const marketCap = formatCompactUsd(view?.marketCap);
-
   return (
     <div className="token-detail">
-      <button type="button" className="token-back" onClick={onBack}>Back</button>
+      <button type="button" className="token-back" onClick={onBack}>
+        <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+        Back
+      </button>
       <div className="token-title">
         {view?.imageUrl ? <img className="token-mark" src={view.imageUrl} alt="" /> : null}
         <h3>{symbol}</h3>
         <span className="token-score">{view?.dexId || 'DEX'}</span>
       </div>
       {price ? <p className="wallet-figure wallet-figure-sm">{price}</p> : null}
-      {change != null ? (
-        <p className={down ? 'token-down' : 'token-up'}>
-          {down ? '' : '+'}{change.toFixed(2)}%
-          <span> {view?.changeLabel || range}</span>
-        </p>
-      ) : null}
+      <p className={down ? 'token-down' : 'token-up'} aria-live="polite">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={change == null ? `${range}:wait` : `${view?.changeLabel}:${change.toFixed(2)}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: change == null ? 0 : 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {change == null ? '\u00a0' : `${down ? '' : '+'}${change.toFixed(2)}%`}
+            {change == null ? null : <span> {view?.changeLabel || range}</span>}
+          </motion.span>
+        </AnimatePresence>
+      </p>
       <TokenChart points={view?.points || []} range={range} />
-      <div className="wallet-switch" role="group" aria-label="Chart range">
+      <p className="quiet token-range-note" role="status">
+        {token?.pairAddress && range !== '1H' && range !== '1D'
+          ? (candles == null
+            ? `Reading ${range} prices.`
+            : (candles.length < 2 ? `No ${range} prices for this token yet.` : ''))
+          : ''}
+      </p>
+      <div className="wallet-switch token-ranges" role="group" aria-label="Chart range">
         {CHART_RANGES.map(item => (
           <button
             key={item}
@@ -219,12 +279,11 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
         ))}
       </div>
       <div className="token-position">
-        <p><span>Value</span><strong>{holding ? formatUsdMicro(holding.usdMicro) : '—'}</strong></p>
+        <p><span>Value</span><strong>{holding ? walletAssetValue(holding) : '—'}</strong></p>
         <p><span>Amount</span><strong>{holding ? `${formatBaseUnits(holding.amount, holding.decimals)} ${symbol}` : '—'}</strong></p>
       </div>
       <dl className="token-info">
         <div><dt>Name</dt><dd>{view?.name || symbol}</dd></div>
-        <div><dt>Network</dt><dd>Solana</dd></div>
         {liquidity ? <div><dt>Liquidity</dt><dd>{liquidity}</dd></div> : null}
         {marketCap ? <div><dt>Market cap</dt><dd>{marketCap}</dd></div> : null}
       </dl>
@@ -240,7 +299,6 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
         <button type="button" onClick={onSwap}>Swap</button>
       </div>
       {error ? <p className="quiet" role="status">{error}</p> : null}
-      {view?.note ? <p className="quiet">{view.note}</p> : null}
     </div>
   );
 }

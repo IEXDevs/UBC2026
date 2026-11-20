@@ -1,4 +1,4 @@
-export const DOCK_EXPAND_MS = 280;
+export const DOCK_EXPAND_MS = 640;
 export const DOCK_SWITCH_MS = 2000;
 
 export function dockCollapseDelay(now, openedAt, duration = DOCK_EXPAND_MS) {

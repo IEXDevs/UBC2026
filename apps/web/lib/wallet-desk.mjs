@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, SOLANA_USDC_MINT, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Wallet desk view model. No signing, no seed storage, no network.
  * Mainnet mints here are for price quotes only.
@@ -13,7 +14,7 @@ const SNS = /^[a-z0-9][a-z0-9-]{0,62}\.sol$/;
 const UNITS = /^(0|[1-9][0-9]{0,39})$/;
 const WORD = /^[a-z]{3,8}$/;
 
-export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const USDC_MINT = SOLANA_USDC_MINT;
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 export const PRICE_PAIRS = Object.freeze({
@@ -82,18 +83,41 @@ export function recoveryStorageKey(ownerId) {
   return typeof ownerId === 'string' && ownerId.trim() ? `maelstrom.recovery.${ownerId.trim()}` : '';
 }
 
-/** Ack records store flags only. A phrase in the blob is rejected. */
-export function recoveryAcknowledged(raw) {
-  if (typeof raw !== 'string' || !raw) return false;
+const RECOVERY_STEPS = new Set(['tell', 'pass', 'save', 'confirm']);
+const RECOVERY_SECRET_KEYS = ['words', 'phrase', 'mnemonic', 'seed', 'passphrase', 'seedPhrase', 'password', 'privateKey', 'key'];
+
+function recoveryBody(raw) {
+  if (typeof raw !== 'string' || !raw) return null;
   try {
     const body = JSON.parse(raw);
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
-    const secret = ['words', 'phrase', 'mnemonic', 'seed', 'passphrase', 'seedPhrase'];
-    if (secret.some(key => key in body)) return false;
-    return body.downloaded === true && body.confirmed === true;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+    if (RECOVERY_SECRET_KEYS.some(key => key in body)) return { secret: true };
+    return body;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Ack records store flags only. A phrase in the blob is rejected. */
+export function recoveryAcknowledged(raw) {
+  const body = recoveryBody(raw);
+  if (!body || body.secret) return false;
+  return body.downloaded === true && body.confirmed === true;
+}
+
+/** The step name only. A saved phrase or key is rejected and the visit starts over. */
+export function recoveryResume(raw) {
+  const body = recoveryBody(raw);
+  if (!body || body.secret) return { step: 'tell', lost: true };
+  if (body.downloaded === true && body.confirmed === true) return { step: 'done', lost: false };
+  if (body.step === 'save' || body.step === 'confirm') return { step: 'pass', lost: true };
+  if (RECOVERY_STEPS.has(body.step)) return { step: body.step, lost: false };
+  return { step: 'tell', lost: false };
+}
+
+export function recoveryStepRecord(step) {
+  if (!RECOVERY_STEPS.has(step)) throw new Error('step');
+  return JSON.stringify({ step });
 }
 
 export function recoveryAckRecord() {
@@ -121,19 +145,74 @@ export function usdcUnits({ positions = [], transfers = [] } = {}) {
   return positionUnits(positions, 'USDC');
 }
 
-export function deskTokens({ positions = [], transfers = [], prefs } = {}) {
+export function deskTokens({ positions = [], transfers = [], prefs, solana = null } = {}) {
   const clean = normalizeTokenPrefs(prefs);
-  const book = usdcUnits({ positions, transfers });
+  const onchain = solana?.ok === true && solana?.cluster === SOLANA_CLUSTER;
+  const failed = Boolean(solana) && solana.ok !== true;
+  const stale = Boolean(solana?.stale === true && typeof solana?.asOf === 'string');
+  const knownUsdc = UNITS.test(solana?.usdcAmount) ? solana.usdcAmount : null;
+  const knownSol = UNITS.test(solana?.solLamports) ? solana.solLamports : null;
+  const book = onchain && knownUsdc != null
+    ? knownUsdc
+    : (failed ? knownUsdc : usdcUnits({ positions, transfers }));
+  const solUnits = (onchain || failed) ? knownSol : null;
   const rows = [
     ...CORE_TOKENS.map(token => ({ ...token })),
     ...clean.extra.map(token => ({ ...token, core: false })),
   ];
+  const seen = new Set(rows.map(token => token.mint));
+  if (onchain && Array.isArray(solana.tokens)) {
+    for (const token of solana.tokens) {
+      if (!token || typeof token.mint !== 'string' || !MINT.test(token.mint) || seen.has(token.mint)) continue;
+      if (token.symbol === 'USDC' || token.symbol === 'SOL' || token.mint === USDC_MINT || token.mint === SOL_MINT) continue;
+      if (!UNITS.test(token.amount) || token.amount === '0') continue;
+      if (!Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 18) continue;
+      const symbol = typeof token.symbol === 'string' ? token.symbol.trim() : '';
+      if (!symbol || symbol.length > 16 || /\s/.test(symbol)) continue;
+      seen.add(token.mint);
+      rows.push({
+        symbol,
+        mint: token.mint,
+        decimals: token.decimals,
+        core: false,
+        amount: token.amount,
+      });
+    }
+  }
   return rows.map(token => {
-    const amount = token.symbol === 'USDC' ? book : positionUnits(positions, token.symbol);
+    let amount = token.amount;
+    let amountKnown = true;
+    if (amount == null) {
+      if (token.symbol === 'USDC') {
+        amount = book;
+        amountKnown = book != null;
+      } else if (token.symbol === 'SOL') {
+        if (solUnits != null) {
+          amount = solUnits;
+          amountKnown = true;
+        } else if (failed) {
+          amount = null;
+          amountKnown = false;
+        } else {
+          amount = positionUnits(positions, token.symbol);
+        }
+      } else if (failed) {
+        amount = null;
+        amountKnown = false;
+      } else {
+        amount = positionUnits(positions, token.symbol);
+      }
+    }
+    const unavailable = !amountKnown || amount == null;
+    const amountLabel = unavailable
+      ? `${token.symbol} unavailable${solana?.code ? ` (${solana.code})` : ''}${stale ? ` · stale ${solana.asOf}` : ''}`
+      : `${formatBaseUnits(amount, token.decimals)} ${token.symbol}${stale ? ` · stale ${solana.asOf}` : ''}`;
     return {
       ...token,
-      amount,
-      amountLabel: `${formatBaseUnits(amount, token.decimals)} ${token.symbol}`,
+      amount: unavailable ? null : amount,
+      amountLabel,
+      amountKnown: !unavailable,
+      balanceStatus: failed ? (solana.code || 'rpc_failed') : (stale ? 'stale' : 'ok'),
       hidden: clean.hidden.includes(token.symbol),
       tradeable: !clean.restricted.includes(token.symbol),
     };
@@ -148,16 +227,25 @@ export function tradeableTokens(rows) {
   return rows.filter(row => row.tradeable && !row.hidden);
 }
 
+/** Long base58-ish text that is not a valid Solana pubkey (wrong length or 0/O/I/l). */
+function looksLikeInvalidAddress(token) {
+  if (typeof token !== 'string' || token.length < 20) return false;
+  if (token.includes('@') || /\s/.test(token) || token.toLowerCase().endsWith('.sol')) return false;
+  if (MINT.test(token)) return false;
+  return /^[1-9A-HJ-NP-Za-km-z0OIl]{20,88}$/.test(token) || /^[A-Za-z0-9]{32,88}$/.test(token);
+}
+
 export function parseSendTarget(value) {
   const parsed = parseRecipient(value);
   if (parsed) return parsed;
   const token = typeof value === 'string' ? value.trim() : '';
   if (MINT.test(token)) return { kind: 'address', address: token };
+  if (looksLikeInvalidAddress(token)) return { kind: 'invalid-address' };
   return null;
 }
 
 export function displayToUnits(text, decimals = 6) {
-  if (typeof text !== 'string' || !Number.isInteger(decimals) || decimals < 0 || decimals > 9) return null;
+  if (typeof text !== 'string' || !Number.isInteger(decimals) || decimals < 0 || decimals > 18) return null;
   const value = text.trim();
   if (!/^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(value)) return null;
   const [whole, fraction = ''] = value.split('.');
@@ -261,9 +349,101 @@ function bitsFromBytes(bytes, bitCount) {
   return bits;
 }
 
+function rotr(n, value) {
+  return (value >>> n) | (value << (32 - n));
+}
+
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+
+function sha256Software(bytes) {
+  const bitLen = bytes.length * 8;
+  const paddedLen = Math.ceil((bytes.length + 1 + 8) / 64) * 64;
+  const padded = new Uint8Array(paddedLen);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLen - 4, bitLen, false);
+  let h0 = 0x6a09e667;
+  let h1 = 0xbb67ae85;
+  let h2 = 0x3c6ef372;
+  let h3 = 0xa54ff53a;
+  let h4 = 0x510e527f;
+  let h5 = 0x9b05688c;
+  let h6 = 0x1f83d9ab;
+  let h7 = 0x5be0cd19;
+  const w = new Uint32Array(64);
+  for (let offset = 0; offset < paddedLen; offset += 64) {
+    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4, false);
+    for (let i = 16; i < 64; i += 1) {
+      const s0 = rotr(7, w[i - 15]) ^ rotr(18, w[i - 15]) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(17, w[i - 2]) ^ rotr(19, w[i - 2]) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    let f = h5;
+    let g = h6;
+    let h = h7;
+    for (let i = 0; i < 64; i += 1) {
+      const S1 = rotr(6, e) ^ rotr(11, e) ^ rotr(25, e);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+      const S0 = rotr(2, a) ^ rotr(13, a) ^ rotr(22, a);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (S0 + maj) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+    h0 = (h0 + a) >>> 0;
+    h1 = (h1 + b) >>> 0;
+    h2 = (h2 + c) >>> 0;
+    h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0;
+    h5 = (h5 + f) >>> 0;
+    h6 = (h6 + g) >>> 0;
+    h7 = (h7 + h) >>> 0;
+  }
+  const out = new Uint8Array(32);
+  const outView = new DataView(out.buffer);
+  outView.setUint32(0, h0, false);
+  outView.setUint32(4, h1, false);
+  outView.setUint32(8, h2, false);
+  outView.setUint32(12, h3, false);
+  outView.setUint32(16, h4, false);
+  outView.setUint32(20, h5, false);
+  outView.setUint32(24, h6, false);
+  outView.setUint32(28, h7, false);
+  return out;
+}
+
 async function sha256Bytes(bytes) {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return new Uint8Array(digest);
+  const digest = globalThis.crypto?.subtle?.digest;
+  if (typeof digest === 'function') {
+    try {
+      return new Uint8Array(await digest.call(globalThis.crypto.subtle, 'SHA-256', bytes));
+    } catch {
+      // Some hosted WebViews expose crypto.subtle but reject digest.
+    }
+  }
+  return sha256Software(bytes);
 }
 
 export function normalizePassphrase(value) {
@@ -331,6 +511,29 @@ export function writeRecoveryAck(storage, ownerId) {
   storage.setItem(key, recoveryAckRecord());
 }
 
+/** Write the ack, then read it back. Never stores the phrase. */
+export function persistRecoveryAck(storage, ownerId) {
+  try {
+    writeRecoveryAck(storage, ownerId);
+    return readRecoveryAck(storage, ownerId) === true;
+  } catch {
+    return false;
+  }
+}
+
+export function writeRecoveryStep(storage, ownerId, step) {
+  const key = recoveryStorageKey(ownerId);
+  if (!storage || !key) throw new Error('owner');
+  storage.setItem(key, recoveryStepRecord(step));
+}
+
+const IMPORT_KEY = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/;
+
+export function parseImportKey(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return IMPORT_KEY.test(text) ? text : null;
+}
+
 export function readTokenPrefs(storage, ownerId) {
   const key = tokenStorageKey(ownerId);
   if (!storage || !key) return emptyTokenPrefs();
@@ -356,7 +559,7 @@ export function swapQuoteUrl(venue, rows, { inputSymbol, outputSymbol, amount } 
   if (!input.tradeable || !output.tradeable || input.hidden || output.hidden) return { error: 'not_tradeable' };
   const url = quoteUrl(venue, { inputMint: input.mint, outputMint: output.mint, amount });
   if (!url) return { error: 'invalid_quote' };
-  return { url, broadcast: false, cluster: 'devnet', pricing: 'mainnet', label: 'devnet execution, mainnet pricing' };
+  return { url, broadcast: false, cluster: SOLANA_CLUSTER, pricing: 'mainnet', label: EXECUTION_LABEL };
 }
 
 export const SETUP_CARD_MS = 4000;
@@ -371,15 +574,65 @@ export function accountSetupStep({
   profileReady,
   handle,
   walletsReady,
-  walletCount,
+  acceptanceConfirmed,
   recoveryConfirmed,
+  stateReady,
 } = {}) {
   if (signedIn !== true) return null;
+  // Account state decides whether permissions were already accepted. Wait for it.
+  if (stateReady === false) return 'loading';
   if (profileReady !== true || walletsReady !== true) return 'loading';
   if (typeof handle !== 'string' || !handle.trim()) return 'handle';
-  if (!walletCount) return null;
+  if (acceptanceConfirmed !== true) return 'acceptance';
+  // A missing wallet is not a finished signup. Recovery still has to run.
   if (recoveryConfirmed !== true) return 'recovery';
   return null;
+}
+
+export function phraseMatches(typed, words) {
+  const expected = recoveryWords(words);
+  const given = recoveryWords(typeof typed === 'string' ? typed : '');
+  if (!expected || !given || expected.length !== given.length) return false;
+  return expected.every((word, index) => word === given[index]);
+}
+
+/**
+ * A non-USDC send is priced by the Jupiter quote, then settled as USDC.
+ * The quote stays paper: it cannot broadcast and it cannot authorize a transaction.
+ */
+export function swapSendSettlement({ inputSymbol, quoteOut, quote } = {}) {
+  if (!quote || quote.broadcast !== false) return { error: 'quote_not_authorization' };
+  if (quote.pricing !== 'mainnet' || quote.cluster !== SOLANA_CLUSTER) return { error: 'invalid_quote' };
+  if (quote.label !== EXECUTION_LABEL) return { error: 'invalid_quote' };
+  if (typeof inputSymbol !== 'string' || inputSymbol === 'USDC' || inputSymbol === quote.output?.symbol) {
+    return { error: 'invalid_quote' };
+  }
+  if (quote.output?.symbol !== 'USDC') return { error: 'usdc_settlement_only' };
+  if (typeof quoteOut !== 'string' || !/^[1-9][0-9]{0,39}$/.test(quoteOut)) return { error: 'invalid_amount' };
+  return {
+    asset: 'USDC',
+    amount: quoteOut,
+    inputSymbol,
+    broadcast: false,
+    executionCluster: SOLANA_CLUSTER,
+    pricingCluster: 'mainnet',
+    authorizesTransaction: false,
+    label: EXECUTION_LABEL,
+  };
+}
+
+export function swapDraft(rows, { from, to, amountText } = {}) {
+  const input = (rows || []).find(row => row.symbol === from) || null;
+  const output = (rows || []).find(row => row.symbol === to) || null;
+  if (!input || !output || input.symbol === output.symbol) return { error: 'invalid_quote' };
+  const amount = displayToUnits(typeof amountText === 'string' ? amountText : '', input.decimals);
+  if (!amount) return { error: 'invalid_amount' };
+  const quote = swapQuoteUrl('jupiter', rows, {
+    inputSymbol: input.symbol,
+    outputSymbol: output.symbol,
+    amount,
+  });
+  return { ...quote, amount, input, output };
 }
 
 export function phraseComplete(picked, length) {
@@ -390,15 +643,16 @@ export function phraseComplete(picked, length) {
 
 export function recoveryCard({ words, wallets = [], handle = '', passphrase = '', at = '' } = {}) {
   const phrase = recoveryWords(words);
-  const lines = ['Maelstrom recovery', 'devnet execution, mainnet pricing', ''];
+  const lines = ['Maelstrom recovery', ''];
   if (typeof handle === 'string' && handle.trim()) lines.push(`Handle: @${handle.trim().replace(/^@/, '')}`, '');
   if (phrase) {
-    lines.push('Seed phrase:', phrase.join(' '), '');
+    lines.push('Desk recovery words:', phrase.join(' '), '');
+    lines.push('These words reset your Maelstrom desk password. They are not a wallet seed or private key: importing them into a wallet app opens an unrelated empty wallet. Your wallets are Privy wallets and their keys never leave Privy.', '');
     const pass = normalizePassphrase(passphrase);
-    if (pass) lines.push('Passphrase:', pass, '');
-    lines.push('Maelstrom does not keep a copy of this phrase.', 'Privy still signs. This phrase is the backup you save on this device.', '');
+    if (pass) lines.push('Password:', pass, '');
+    lines.push('This file is the only copy. Maelstrom does not keep these words or the password.', '');
   } else {
-    lines.push('Signing keys stay in Privy. This card lists addresses. It is not a seed phrase.', '');
+    lines.push('Addresses only. Not a seed phrase.', '');
   }
   for (const wallet of wallets) {
     if (typeof wallet?.address !== 'string' || !wallet.address.trim()) continue;

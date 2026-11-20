@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { Check, X } from 'lucide-react';
-import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
+import { normalizeDisplayName, normalizeHandle, publicDisplayName } from '@ubc2026/contracts';
 import { claimLookupVerdict, claimSaveNote, handleAlreadyClaimed } from '../lib/profile.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
+import { blockCopy } from '../lib/block-copy.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 
 const BURST = [
   { c: '#7c5cff', w: 8, h: 14, dx: '-120px', dy: '-86px', spin: '-40deg' },
@@ -21,8 +23,8 @@ const BURST = [
   { c: '#f5f5f5', w: 8, h: 5, dx: '-20px', dy: '-150px', spin: '8deg' },
 ];
 
-export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, onContinue }) {
-  const [displayName, setDisplayName] = useState(accountLabel || '');
+export default function ClaimHandle({ accountLabel = '', ownerId = '', getAccessToken = null, onSave, onContinue }) {
+  const [displayName, setDisplayName] = useState(() => publicDisplayName(accountLabel) || '');
   const [handle, setHandle] = useState('');
   const [note, setNote] = useState('');
   const [pending, setPending] = useState(false);
@@ -46,7 +48,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
     const timer = setTimeout(async () => {
       try {
         const response = await fetch(shellRuntimeUrl(`/api/profiles/lookup?q=${encodeURIComponent(`@${typed}`)}`), {
-          headers: ownerId ? { 'x-owner-id': ownerId } : {},
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -64,7 +66,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
       controller.abort();
       clearTimeout(timer);
     };
-  }, [typed, ownerId]);
+  }, [typed, ownerId, getAccessToken]);
 
   async function submit(event) {
     event.preventDefault();
@@ -99,7 +101,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
 
   if (welcome) {
     return (
-      <div className="backdrop is-center is-claim">
+      <div className="backdrop is-center is-claim no-copy" onCopy={blockCopy} onCut={blockCopy}>
         <div className="claim-welcome" role="dialog" aria-modal="true" aria-labelledby="claim-welcome-title">
           <div className="claim-confetti" aria-hidden="true">
             {BURST.map((piece, index) => (
@@ -122,6 +124,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
             <span className="claim-plate__shine" aria-hidden="true" />
             <p className="claim-plate__handle">@{welcome.handle}</p>
           </div>
+          <p className="quiet">Next: set spend permissions, then save and confirm your seed. Lost seeds cannot be recovered.</p>
           <button type="button" className="solid" onClick={onContinue}>Continue</button>
         </div>
       </div>
@@ -133,7 +136,7 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
     : claimStatus(verdict, typed, checked);
 
   return (
-    <div className="backdrop is-center is-claim">
+    <div className="backdrop is-center is-claim no-copy" onCopy={blockCopy} onCut={blockCopy}>
       <form className="sheet wallet-gate claim-form" onSubmit={submit} aria-labelledby="claim-title">
         <h2 id="claim-title">Claim your handle to get paid{typed ? ` @${typed}` : ''}</h2>
         <label className="field">
@@ -146,7 +149,6 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
             value={handle}
             onChange={event => {
               setHandle(event.target.value.replace(/^@+/, ''));
-              setNote('');
             }}
             placeholder="@handle"
             autoComplete="off"
@@ -163,7 +165,14 @@ export default function ClaimHandle({ accountLabel = '', ownerId = '', onSave, o
             <span>{status.text}</span>
           </p>
         ) : null}
-        {note ? <p className="claim-status is-error" role="alert">{note}</p> : null}
+        {note ? (
+          <p className="claim-status is-error" role="alert">
+            <span>{note}</span>
+            <button type="button" className="gate-note-dismiss" aria-label="Dismiss" onClick={() => setNote('')}>
+              ×
+            </button>
+          </p>
+        ) : null}
         <button className="solid" type="submit" disabled={!ready}>{pending ? 'Claiming…' : 'Claim handle'}</button>
       </form>
     </div>

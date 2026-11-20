@@ -16,6 +16,19 @@ export function filterLibrary(files, kind = 'all') {
   return rows.filter(file => fileKind(file) === kind);
 }
 
+const IMAGE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+
+export function isLibraryImage(file) {
+  const type = typeof file?.type === 'string' ? file.type : '';
+  const name = typeof file?.name === 'string' ? file.name : '';
+  return type.startsWith('image/') || IMAGE.test(name);
+}
+
+/** Newest first. Missing times stay at the end. */
+export function byRecent(files) {
+  return [...(Array.isArray(files) ? files : [])].sort((a, b) => (Number(b?.addedAt) || 0) - (Number(a?.addedAt) || 0));
+}
+
 export function libraryGroups(files, now = Date.now()) {
   const fresh = [];
   const older = [];

@@ -1,27 +1,59 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Keypair, Transaction } from '@solana/web3.js';
+import { Keypair, Transaction, TransactionMessage, VersionedTransaction, ComputeBudgetInstruction } from '@solana/web3.js';
+import { decodeTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { assignBotWallet, createAdditionalWallet, createMainWallet } from '@ubc2026/wallets';
 import {
-  DEVNET_GENESIS_HASH,
+  SOLANA_GENESIS_HASH,
   WalletError,
   createPrivyWalletClient,
 } from '@ubc2026/wallets/privy';
-import { DEVNET_USDC_MINT } from '@ubc2026/x402';
+import { SOLANA_USDC_MINT } from '@ubc2026/x402';
 import {
   ASSOCIATED_TOKEN_PROGRAM,
-  DEVNET_USDC_DECIMALS,
+  SOLANA_USDC_DECIMALS,
   MAINNET_USDC_MINT,
   MEMO_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
   TransferError,
-  buildDevnetUsdcTransaction,
+  buildSolanaUsdcTransaction,
+  buildSolanaX402Transaction,
   depositFromWalletAdapter,
   grabBackToMain,
   moveBetweenWallets,
-  transferDevnetUsdc,
+  transferSolanaUsdc,
   withdrawToWalletAdapter,
 } from './transfers.mjs';
+
+test('x402 builds only bounded compute budget and exact USDC transfer with the sponsor fee payer', () => {
+  const owner = Keypair.generate().publicKey;
+  const payer = Keypair.generate().publicKey;
+  const payTo = Keypair.generate().publicKey;
+  const accepted = { scheme: 'exact', network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+    amount: '10000000', asset: SOLANA_USDC_MINT, payTo: payTo.toBase58(), extra: { feePayer: payer.toBase58() } };
+  const args = { sourceOwner: owner.toBase58(), accepted, recentBlockhash: Keypair.generate().publicKey.toBase58() };
+  const built = buildSolanaX402Transaction(args);
+  const tx = VersionedTransaction.deserialize(Buffer.from(built.transaction, 'base64'));
+  const message = TransactionMessage.decompile(tx.message);
+  assert.equal(tx.version, 0);
+  assert.equal(tx.message.header.numRequiredSignatures, 2);
+  assert.equal(message.payerKey.toBase58(), payer.toBase58());
+  assert.equal(message.instructions.length, 3);
+  assert.equal(ComputeBudgetInstruction.decodeSetComputeUnitLimit(message.instructions[0]).units, 40000);
+  assert.equal(ComputeBudgetInstruction.decodeSetComputeUnitPrice(message.instructions[1]).microLamports, 1n);
+  const transfer = decodeTransferCheckedInstruction(message.instructions[2]);
+  assert.equal(transfer.data.amount, 10000000n);
+  assert.equal(transfer.data.decimals, 6);
+  assert.equal(transfer.keys.owner.pubkey.toBase58(), owner.toBase58());
+  assert.equal(transfer.keys.source.pubkey.toBase58(), getAssociatedTokenAddressSync(transfer.keys.mint.pubkey, owner).toBase58());
+  assert.equal(transfer.keys.destination.pubkey.toBase58(), built.destinationTokenAccount);
+  assert.equal(built.destinationTokenAccount, getAssociatedTokenAddressSync(transfer.keys.mint.pubkey, payTo).toBase58());
+  for (const change of [{ asset: owner.toBase58() }, { network: 'solana:devnet' }, { scheme: 'other' }, { extra: { feePayer: owner.toBase58() } }]) {
+    assert.throws(() => buildSolanaX402Transaction({ ...args, accepted: { ...accepted, ...change } }));
+  }
+  assert.throws(() => buildSolanaX402Transaction());
+});
 
 const appId = 'app_test';
 const appSecret = 'app-secret-value';
@@ -90,9 +122,9 @@ function client(fetcher, routes) {
   };
 }
 
-function devnetRoutes({ sign = true } = {}) {
+function solanaRoutes({ sign = true } = {}) {
   const routes = [
-    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: DEVNET_GENESIS_HASH } },
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: SOLANA_GENESIS_HASH } },
     { match: (url, body) => url === rpcUrl && body?.method === 'sendTransaction', body: { result: txSignature } },
   ];
   if (sign) {
@@ -119,20 +151,27 @@ function assertMoveThenMemo(base64, { payer, amount, memo }) {
   assert.equal(transfer.programId.toBase58(), SPL_TOKEN_PROGRAM_ID);
   assert.equal(transfer.data[0], 12);
   assert.equal(transfer.data.readBigUInt64LE(1), BigInt(amount));
-  assert.equal(transfer.data[9], DEVNET_USDC_DECIMALS);
+  assert.equal(transfer.data[9], SOLANA_USDC_DECIMALS);
   assert.equal(note.programId.toBase58(), MEMO_PROGRAM_ID);
   assert.equal(note.data.toString('utf8'), memo);
   assert.equal(tx.instructions.some(ix => ix.programId.toBase58() === MAINNET_USDC_MINT), false);
   const mintKey = transfer.keys[1].pubkey.toBase58();
-  assert.equal(mintKey, DEVNET_USDC_MINT);
-  assert.notEqual(mintKey, MAINNET_USDC_MINT);
+  assert.equal(mintKey, SOLANA_USDC_MINT);
+  assert.equal(mintKey, MAINNET_USDC_MINT);
   return tx;
 }
 
-test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', async () => {
+/**
+ * Achieves: transferSolanaUsdc signs via Privy then broadcasts a create-ATA + transferChecked + memo tx for SOLANA_USDC only.
+ * Fails when: Mainnet mint appears, memo/order wrong, secrets leak, or sendTransaction skipped/duplicated wrongly.
+ * Oracle: SPL Token transferChecked + memo program layout + SOLANA_USDC_MINT.
+ * Side effects: Injected Privy/RPC mock fetch.
+ * Gaps: Does not cover ATA already-exists races.
+ */
+test('a bot transfer is Privy-signed, then a mainnet-beta USDC move, then a memo', async () => {
   const memo = 'decision:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-  const { client: signer, calls } = client(null, devnetRoutes());
-  const moved = await transferDevnetUsdc({
+  const { client: signer, calls } = client(null, solanaRoutes());
+  const moved = await transferSolanaUsdc({
     client: signer,
     bot,
     wallet: mainWallet,
@@ -142,9 +181,9 @@ test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', asy
     recentBlockhash: blockhash,
   });
   assert.equal(moved.kind, 'transfer');
-  assert.equal(moved.cluster, 'devnet');
+  assert.equal(moved.cluster, 'mainnet-beta');
   assert.equal(moved.signature, txSignature);
-  assert.equal(moved.mint, DEVNET_USDC_MINT);
+  assert.equal(moved.mint, SOLANA_USDC_MINT);
   const sign = calls.find(call => call.body?.method === 'signTransaction');
   assertMoveThenMemo(sign.body.params.transaction, {
     payer: mainWallet.address,
@@ -158,20 +197,27 @@ test('a bot transfer is Privy-signed, then a devnet USDC move, then a memo', asy
   assert.equal(JSON.stringify(sign.body).includes(appSecret), false);
 });
 
+/**
+ * Achieves: build/transfer refuse mainnet cluster, frozen wallets, and mainnet genesis before sendTransaction.
+ * Fails when: Any of those paths still broadcasts.
+ * Oracle: SOLANA_GENESIS_HASH gate + WalletError/TransferError codes.
+ * Side effects: Injected mocks; asserts no sign/send side effects.
+ * Gaps: Does not cover testnet genesis explicitly.
+ */
 test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', async () => {
   const calls = [];
   const signer = {
-    async signAndBroadcastDevnet() {
+    async signAndBroadcastSolana() {
       calls.push('sign');
       return { cluster: 'mainnet', signature: txSignature };
     },
-    async getDevnetBlockhash() {
+    async getSolanaBlockhash() {
       calls.push('hash');
-      return { cluster: 'devnet', blockhash };
+      return { cluster: 'mainnet-beta', blockhash };
     },
   };
   assert.throws(
-    () => buildDevnetUsdcTransaction({
+    () => buildSolanaUsdcTransaction({
       feePayer: mainWallet.address,
       sourceOwner: mainWallet.address,
       destinationOwner: recipient.publicKey.toBase58(),
@@ -183,7 +229,7 @@ test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', as
     error => error instanceof TransferError && error.code === 'wrong_cluster',
   );
   await assert.rejects(
-    () => transferDevnetUsdc({
+    () => transferSolanaUsdc({
       client: signer,
       bot,
       wallet: { ...mainWallet, frozen: true },
@@ -202,7 +248,7 @@ test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', as
     },
   ]);
   await assert.rejects(
-    () => transferDevnetUsdc({
+    () => transferSolanaUsdc({
       client: live,
       bot,
       wallet: mainWallet,
@@ -217,7 +263,14 @@ test('mainnet cluster, mainnet genesis, and a frozen wallet never broadcast', as
   assert.deepEqual(calls, []);
 });
 
-test('wallet adapter deposit signs locally and broadcasts only on devnet', async () => {
+/**
+ * Achieves: External adapter signs locally; runtime broadcasts on verified solana; adapter never sendTransaction; mainnet genesis blocks before sign.
+ * Fails when: Adapter broadcasts, Privy signs deposits, or mainnet still sends.
+ * Oracle: Deposit path ownership: adapter signs, QuickNode broadcasts.
+ * Side effects: Injected adapter + RPC mocks.
+ * Gaps: Does not cover adapter disconnect mid-sign.
+ */
+test('wallet adapter deposit signs locally and broadcasts only on mainnet-beta', async () => {
   let signed = 0;
   let adapterSent = 0;
   const adapter = {
@@ -232,7 +285,7 @@ test('wallet adapter deposit signs locally and broadcasts only on devnet', async
       return tx;
     },
   };
-  const { client: signer, calls } = client(null, devnetRoutes({ sign: false }));
+  const { client: signer, calls } = client(null, solanaRoutes({ sign: false }));
   const deposited = await depositFromWalletAdapter({
     client: signer,
     adapter,
@@ -275,6 +328,125 @@ test('wallet adapter deposit signs locally and broadcasts only on devnet', async
   assert.equal(blocked.calls.some(call => call.body?.method === 'sendTransaction'), false);
 });
 
+/**
+ * Achieves: Withdraw/move/grab-back are Privy-signed USDC moves with expected memos; frozen sleeves can still be grabbed.
+ * Fails when: Wrong destinations/memos, adapter signs withdraws, or frozen wallets are skipped for grab-back.
+ * Oracle: Owner wallet ops memos: withdraw / wallet.move / funds.grabbed.
+ * Side effects: Injected Privy/RPC mocks.
+ * Gaps: Does not cover zero-balance no-op grab across all sleeves in isolation.
+ */
+test('main wallet sponsors agent moves and retains both signatures', async () => {
+  for (const dropSourceSignature of [false, true]) {
+    const signers = [];
+    let broadcasts = 0;
+    const { client: signer } = client(async (url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.method === 'signTransaction') {
+        const payerSigns = url.endsWith(`/${walletId}/rpc`);
+        signers.push(payerSigns ? walletId : tradingId);
+        const tx = decode(body.params.transaction);
+        assert.equal(tx.feePayer.toBase58(), mainWallet.address);
+        assert.equal(tx.instructions[0].keys[0].pubkey.toBase58(), mainWallet.address);
+        const transfer = decodeTransferCheckedInstruction(tx.instructions[1]);
+        assert.equal(transfer.keys.owner.pubkey.toBase58(), tradingWallet.address);
+        if (payerSigns) {
+          assert.ok(tx.signatures.find(entry => entry.publicKey.equals(extra.publicKey)).signature);
+          if (dropSourceSignature) tx.signatures.forEach(entry => { entry.signature = null; });
+        }
+        tx.partialSign(payerSigns ? source : extra);
+        return Response.json({ data: { signed_transaction: tx.serialize({ requireAllSignatures: false }).toString('base64') } });
+      }
+      if (body.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+      assert.equal(body.method, 'sendTransaction');
+      const tx = decode(body.params[0]);
+      assert.equal(tx.signatures.length, 2);
+      assert.equal(tx.verifySignatures(), true);
+      broadcasts += 1;
+      return Response.json({ result: txSignature });
+    });
+    await moveBetweenWallets({ client: signer, ownerId: 'user_1', fromWallet: tradingWallet,
+      toWallet: mainWallet, feePayerWallet: mainWallet, amount: '500000', recentBlockhash: blockhash });
+    assert.deepEqual(signers, [tradingId, walletId]);
+    assert.equal(broadcasts, 1);
+  }
+});
+
+test('browser owner moves prepare and verify sponsored transactions before broadcast', async () => {
+  let broadcasts = 0;
+  const signer = {
+    async prepareSolanaTransfer({ transaction, requiredSignerAddresses }) {
+      const tx = decode(transaction);
+      assert.equal(tx.feePayer.toBase58(), mainWallet.address);
+      assert.deepEqual(requiredSignerAddresses, [tradingWallet.address, mainWallet.address]);
+    },
+    async broadcastSignedSolana() { broadcasts += 1; return { cluster: SOLANA_CLUSTER, signature: txSignature }; },
+  };
+  const args = { client: signer, ownerId: 'user_1', fromWallet: tradingWallet,
+    toWallet: mainWallet, feePayerWallet: mainWallet, amount: '1', recentBlockhash: blockhash };
+  const prepared = await moveBetweenWallets({ ...args, phase: 'prepare' });
+  assert.deepEqual(prepared.signerWallets.map(wallet => wallet.address), [tradingWallet.address, mainWallet.address]);
+  const tx = decode(prepared.transaction);
+  tx.partialSign(extra);
+  await assert.rejects(moveBetweenWallets({ ...args, phase: 'broadcast',
+    signedTransaction: tx.serialize({ requireAllSignatures: false }).toString('base64') }), { code: 'invalid_signature' });
+  tx.partialSign(source);
+  const signedTransaction = tx.serialize().toString('base64');
+  await assert.rejects(moveBetweenWallets({ ...args, amount: '2', phase: 'broadcast', signedTransaction }), { code: 'transaction_mismatch' });
+  await assert.rejects(moveBetweenWallets({ ...args, fromWallet: { ...tradingWallet, frozen: true }, phase: 'prepare' }), { code: 'wallet_frozen' });
+  await moveBetweenWallets({ ...args, phase: 'broadcast', signedTransaction });
+  assert.equal(broadcasts, 1);
+});
+
+test('Privy preparation simulates only the explicitly allowed move signers', async () => {
+  const { client: signer } = client(async (url, init) => {
+    assert.equal(url, rpcUrl);
+    const body = JSON.parse(init.body);
+    if (body.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+    if (body.method === 'getFeeForMessage') return Response.json({ result: { value: 10000 } });
+    assert.equal(body.method, 'simulateTransaction');
+    assert.equal(body.params[1].sigVerify, false);
+    return Response.json({ result: { value: { err: null } } });
+  });
+  const transaction = buildSolanaUsdcTransaction({ feePayer: mainWallet.address, sourceOwner: tradingWallet.address,
+    destinationOwner: mainWallet.address, amount: '1', memo: 'wallet.move', recentBlockhash: blockhash }).transactionBase64;
+  const prepared = await signer.prepareSolanaTransfer({ transaction,
+    requiredSignerAddresses: [tradingWallet.address, mainWallet.address] });
+  assert.equal(prepared.transaction, transaction);
+  await assert.rejects(signer.prepareSolanaTransfer({ transaction, requiredSignerAddresses: [] }), { code: 'invalid_transaction' });
+  await assert.rejects(signer.prepareSolanaTransfer({ transaction, requiredSignerAddresses: [mainWallet.address] }), { code: 'invalid_transaction' });
+});
+
+test('owner moves reject invalid fee payers before signing or broadcasting', async () => {
+  const { client: signer } = client(async () => { throw new Error('unexpected fetch'); });
+  const transaction = buildSolanaUsdcTransaction({ feePayer: mainWallet.address, sourceOwner: tradingWallet.address,
+    destinationOwner: mainWallet.address, amount: '1', memo: 'wallet.move', recentBlockhash: blockhash }).transactionBase64;
+  for (const [feePayerWallet, code] of [
+    [{ ...mainWallet, ownerId: 'another_owner' }, 'owner_mismatch'],
+    [{ ...mainWallet, frozen: true }, 'wallet_frozen'],
+    [{ ...mainWallet, spendable: false }, 'wallet_frozen'],
+    [{ ...mainWallet, id: `linked_${mainWallet.address}` }, 'wallet_frozen'],
+  ]) {
+    await assert.rejects(signer.signAndBroadcastOwnerSolana({ ownerId: 'user_1', wallet: tradingWallet,
+      transaction, feePayerWallet }), error => error.code === code);
+  }
+});
+
+test('owner moves do not broadcast without the fee payer signature', async () => {
+  let broadcasts = 0;
+  const { client: signer } = client(async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === 'sendTransaction') broadcasts += 1;
+    assert.equal(body.method, 'signTransaction');
+    const tx = decode(body.params.transaction);
+    if (url.endsWith(`/${tradingId}/rpc`)) tx.partialSign(extra);
+    return Response.json({ data: { signed_transaction: tx.serialize({ requireAllSignatures: false }).toString('base64') } });
+  });
+  await assert.rejects(moveBetweenWallets({ client: signer, ownerId: 'user_1', fromWallet: tradingWallet,
+    toWallet: mainWallet, feePayerWallet: mainWallet, amount: '1', recentBlockhash: blockhash }),
+  error => error.code === 'invalid_signature');
+  assert.equal(broadcasts, 0);
+});
+
 test('withdraw, wallet moves, and grab-back return USDC to the main wallet', async () => {
   let adapterSigned = 0;
   const adapter = {
@@ -282,7 +454,7 @@ test('withdraw, wallet moves, and grab-back return USDC to the main wallet', asy
     sendTransaction() { throw new Error('adapter must not broadcast'); },
     async signTransaction() { adapterSigned += 1; },
   };
-  const { client: signer, calls } = client(null, devnetRoutes());
+  const { client: signer, calls } = client(null, solanaRoutes());
   const withdrawn = await withdrawToWalletAdapter({
     client: signer,
     ownerId: 'user_1',
@@ -334,15 +506,22 @@ test('withdraw, wallet moves, and grab-back return USDC to the main wallet', asy
   assert.equal(calls.filter(call => call.body?.method === 'sendTransaction').length, 3);
 });
 
-test('grab-back can read devnet balances and keeps earlier sweeps when a later one fails', async () => {
-  const routes = devnetRoutes();
+/**
+ * Achieves: Missing balances are read via getTokenAccountsByOwner for SOLANA_USDC; partial grab failures retain completed moves.
+ * Fails when: Mainnet mint queried, or earlier successes discarded on later failure.
+ * Oracle: TransferError.completed partial-failure contract.
+ * Side effects: Injected RPC mocks.
+ * Gaps: Does not retry/resume remaining sleeves after failure.
+ */
+test('grab-back can read mainnet-beta balances and keeps earlier sweeps when a later one fails', async () => {
+  const routes = solanaRoutes();
   routes.push({
     match: (url, body) => url === rpcUrl && body?.method === 'getTokenAccountsByOwner',
     body: {
       result: {
         value: [{
           account: {
-            data: { parsed: { info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
+            data: { parsed: { info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
           },
         }],
       },
@@ -358,18 +537,18 @@ test('grab-back can read devnet balances and keeps earlier sweeps when a later o
   });
   assert.equal(grabbed.moves[0].amount, '42');
   const balanceCall = calls.find(call => call.body?.method === 'getTokenAccountsByOwner');
-  assert.deepEqual(balanceCall.body.params[1], { mint: DEVNET_USDC_MINT });
-  assert.notEqual(DEVNET_USDC_MINT, MAINNET_USDC_MINT);
+  assert.deepEqual(balanceCall.body.params[1], { mint: SOLANA_USDC_MINT });
+  assert.equal(SOLANA_USDC_MINT, MAINNET_USDC_MINT);
 
   let attempts = 0;
   const failing = {
-    async signAndBroadcastOwnerDevnet() {
+    async signAndBroadcastOwnerSolana() {
       attempts += 1;
       if (attempts === 2) {
-        const error = new WalletError('Devnet broadcast did not return a signature', 'rpc_rejected');
+        const error = new WalletError('Solana broadcast did not return a signature', 'rpc_rejected');
         throw error;
       }
-      return { cluster: 'devnet', signature: txSignature };
+      return { cluster: 'mainnet-beta', signature: txSignature };
     },
   };
   await assert.rejects(

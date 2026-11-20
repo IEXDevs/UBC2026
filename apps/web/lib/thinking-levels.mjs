@@ -2,7 +2,10 @@
  * Thinking stops come from the model catalog. Each model advertises its own
  * reasoning efforts. A missing field falls back to the published list for that id.
  */
+import { contextWindowFor, rememberContextWindow, reportedContextWindow } from './context-usage.mjs';
 
+export const META_SPARK_MODEL = 'muse-spark-1.3-contributor';
+export const META_SPARK_NAME = 'Muse Spark 1.3 Contributor';
 const ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 const LABELS = {
@@ -74,10 +77,13 @@ export function thinkingLevelsForModel(model) {
   return efforts;
 }
 
-export function reasoningEffortFor(modelId, requested) {
+export function reasoningEffortFor(modelId, requested, { allowUnknown = false } = {}) {
   const levels = thinkingLevelsForModel(modelId);
-  if (levels.length === 0) return '';
   const raw = typeof requested === 'string' ? requested.trim().toLowerCase() : '';
+  // Discovered models may advertise efforts before this built-in list knows
+  // their IDs. Honor an explicit, recognized selection without inventing one.
+  if (levels.length === 0) return allowUnknown
+    ? (cleanId(raw) || Object.keys(LABELS).find(id => LABELS[id].toLowerCase() === raw) || '') : '';
   const byId = levels.find(item => item.id === raw);
   if (byId) return byId.id;
   const byLabel = levels.find(item => item.label.toLowerCase() === raw);
@@ -91,8 +97,10 @@ function displayName(id, model) {
 }
 
 export function fallbackThinkingCatalog() {
-  const id = 'muse-spark-1.3-contributor';
-  return [{ id, name: 'Muse Spark', levels: thinkingLevelsForModel(id) }];
+  const id = META_SPARK_MODEL;
+  const contextWindow = contextWindowFor(id);
+  rememberContextWindow(id, contextWindow);
+  return [{ id, name: META_SPARK_NAME, levels: thinkingLevelsForModel(id), contextWindow }];
 }
 
 export async function loadThinkingCatalog({ apiKey = '', baseUrl = '', fetcher = fetch } = {}) {
@@ -122,10 +130,13 @@ export function parseThinkingCatalog(payload) {
     if (!/^[A-Za-z0-9_.:/-]{1,80}$/.test(id)) continue;
     const levels = thinkingLevelsForModel(row);
     if (levels.length === 0) continue;
+    const contextWindow = contextWindowFor(id, reportedContextWindow(row));
+    rememberContextWindow(id, contextWindow);
     models.push({
       id,
       name: displayName(id, row),
       levels,
+      contextWindow,
     });
   }
   return models;

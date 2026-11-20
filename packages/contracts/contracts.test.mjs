@@ -20,22 +20,58 @@ import {
   API_ROUTES,
   matchApiRoute,
   privyAvatarUrl,
+  httpsAvatarUrl,
+  normalizeDisplayName,
   normalizeHandle,
+  CLUSTERS,
   postgrestEq,
   directoryFailureCode,
+  lookupHandleFilter,
+  lookupHandleKey,
+  parseLookupQuery,
   parseRecipient,
   profileInitials,
   OPENROUTER_FREE_MODEL,
   isFreeOpenRouterModel,
   selectFreeOpenRouterModel,
+  parsePermissionedSpendBody,
+  parsePrivySigningFailure,
+  buildPermissionedSpendRequest,
+  PERMISSIONED_SPEND_PATH,
+  OWNER_SPEND_PERMISSIONS,
 } from './contracts.mjs';
+
+test('Privy signing diagnostics allow only known codes and HTTP error statuses', () => {
+  assert.deepEqual(parsePrivySigningFailure({
+    status: 403, code: 'insufficient_app_secret_permissions', message: 'private detail',
+  }), { status: 403, code: 'insufficient_app_secret_permissions' });
+  assert.deepEqual(parsePrivySigningFailure({ status: 500, code: 'unknown', transport: 'unknown' }), { status: 500 });
+  assert.deepEqual(parsePrivySigningFailure({ status: 401, walletLookupStatus: 200 }), { status: 401, walletLookupStatus: 200 });
+  assert.deepEqual(parsePrivySigningFailure({ status: 403, walletLookupStatus: 200 }), { status: 403 });
+  assert.equal(parsePrivySigningFailure({ status: 200, code: 'unknown' }), null);
+  assert.deepEqual(parsePrivySigningFailure({
+    status: 400,
+    requests: [
+      { stage: 'private URL', status: 401 },
+      {
+        stage: 'session-exchange', status: 400, requestId: 'Bearer private', edgeId: 'private',
+        code: 'private-code', detail: 'private message', mfaProof: false,
+      },
+    ],
+    session: { check: 'owner-matched', token: 'private token', audience: 'match', issuer: 'private issuer' },
+  }), {
+    status: 400,
+    requests: [{ stage: 'session-exchange', status: 400, mfaProof: false }],
+    session: { check: 'owner-matched', audience: 'match' },
+  });
+});
 
 const wallet = {
   id: 'w_main',
   ownerId: 'user_1',
   kind: 'main',
   label: 'Main',
-  address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   frozen: false,
   provider: 'privy',
 };
@@ -55,12 +91,26 @@ const bot = {
   cap: { mode: 'limited', asset: 'USDC', maxOutflow: '50000000', maxPerTransaction: '5000000' },
 };
 
+/**
+ * Achieves: Only Privy wallets with base58 addresses validate; foreign providers and bad keys fail.
+ * Fails when: phantom/other providers pass, or garbage addresses validate.
+ * Oracle: ContractError on non-privy provider; independent base58 address fixture vs 'not-a-key'.
+ * Side effects: none.
+ * Gaps: Does not cover additional/bot wallet kinds beyond kind:'main' fixture.
+ */
 test('validates Privy wallets and rejects non-privy providers', () => {
   assert.equal(validateWallet(wallet).kind, 'main');
   assert.throws(() => validateWallet({ ...wallet, provider: 'phantom' }), ContractError);
   assert.throws(() => validateWallet({ ...wallet, address: 'not-a-key' }), ContractError);
 });
 
+/**
+ * Achieves: Bot approval modes are enum-closed; capped-automatic requires autoApproveCap.
+ * Fails when: Unknown mode validates, or capped-automatic without cap is accepted.
+ * Oracle: APPROVAL_MODES contract — 'sometimes' is not in the enum; capped needs string cap.
+ * Side effects: none.
+ * Gaps: Does not exhaust every bot field nullability.
+ */
 test('validates bot records including approval modes and caps', () => {
   assert.equal(validateBotRecord(bot).approvalMode, 'ask');
   assert.throws(() => validateBotRecord({ ...bot, approvalMode: 'sometimes' }), ContractError);
@@ -74,6 +124,13 @@ test('validates bot records including approval modes and caps', () => {
   );
 });
 
+/**
+ * Achieves: Position-management bots require maxLoss and reject trading-style outflow caps.
+ * Fails when: Position bot accepts maxOutflow/maxPerTransaction without maxLoss.
+ * Oracle: Bot-type → cap-shape matrix from contracts (position ⇒ maxLoss).
+ * Side effects: none.
+ * Gaps: Shopping-specific cap edges deferred to bot-policy.
+ */
 test('position bots require maxLoss instead of outflow caps', () => {
   const position = {
     ...bot,
@@ -85,6 +142,13 @@ test('position bots require maxLoss instead of outflow caps', () => {
   assert.throws(() => validateBotRecord({ ...position, cap: bot.cap }), ContractError);
 });
 
+/**
+ * Achieves: Ledger/decision/timeline shapes validate; unknown event kinds are rejected.
+ * Fails when: secret.leak kind validates, or pending decision loses status.
+ * Oracle: EVENT_KINDS allowlist — 'secret.leak' is intentionally absent.
+ * Side effects: none.
+ * Gaps: Does not hash-chain timeline prevHash continuity (runtime concern).
+ */
 test('spend ledger, decisions, and timeline events validate tightly', () => {
   assert.equal(validateSpendLedger({ botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' }).spent, '0');
   const digest = 'a'.repeat(64);
@@ -93,7 +157,7 @@ test('spend ledger, decisions, and timeline events validate tightly', () => {
       id: 'dec_1',
       botId: 'bot_1',
       runId: 'run_1',
-      cluster: 'devnet',
+      cluster: 'mainnet-beta',
       factsDigest: digest,
       proposalDigest: digest,
       createdAt: Date.now(),
@@ -126,6 +190,13 @@ test('spend ledger, decisions, and timeline events validate tightly', () => {
   );
 });
 
+/**
+ * Achieves: x402 payments and metrics validate; non-x402 protocols are rejected.
+ * Fails when: protocol 'card' validates, or pnlMicroUsdc is dropped.
+ * Oracle: Payment protocol allowlist (x402 family only for this contract).
+ * Side effects: none.
+ * Gaps: Negative metric counters not exhaustively tested.
+ */
 test('payments and metrics validate, and reject bad shapes', () => {
   assert.equal(validatePayment({
     id: 'pay_1',
@@ -134,7 +205,7 @@ test('payments and metrics validate, and reject bad shapes', () => {
     protocol: 'x402',
     amount: '5000000',
     asset: 'USDC',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
   }).direction, 'paid');
   assert.throws(() => validatePayment({
     id: 'pay_1',
@@ -143,7 +214,7 @@ test('payments and metrics validate, and reject bad shapes', () => {
     protocol: 'card',
     amount: '1',
     asset: 'USDC',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
   }), ContractError);
   assert.equal(validateMetric({
     id: 'metric_1',
@@ -160,6 +231,13 @@ test('payments and metrics validate, and reject bad shapes', () => {
   }).pnlMicroUsdc, '-1000');
 });
 
+/**
+ * Achieves: Missing secrets surface by name; empty env values stay undefined; .env.example lists every name blank.
+ * Fails when: Reader invents secret values, or .env.example omits/fills a secret.
+ * Oracle: Independent filesystem read of ../../.env.example vs SECRET_NAMES/PUBLIC_CONFIG_NAMES.
+ * Side effects: reads .env.example only (no network, no writes).
+ * Gaps: Does not assert secret group completeness against Cloudflare bindings.
+ */
 test('config reader reports missing secret names and never invents values', () => {
   assert.throws(() => requireConfig({}, SECRET_GROUPS.serverSigning), ConfigError);
   const read = readConfig({ PRIVY_APP_ID: 'app', PRIVY_APP_SECRET: '' }, SECRET_GROUPS.privy);
@@ -172,6 +250,22 @@ test('config reader reports missing secret names and never invents values', () =
   }
   const assignments = example.replaceAll('\r', '').split('\n').filter(line => /^[A-Z0-9_]+=/.test(line));
   assert.ok(assignments.every(line => /= $/.test(line) === false && line.endsWith('=')));
+});
+
+/**
+ * Achieves: Concrete HTTP paths match declared route ids; CRON strings never match via HTTP matcher.
+ * Fails when: Route id collisions, wrong param capture, or CRON matches as HTTP.
+ * Oracle: Hand-built path strings vs API_ROUTES ids; CRON method must return null from matchApiRoute.
+ * Side effects: none.
+ * Gaps: Exhaustive live-route coverage is the next test.
+ */
+test('the configured Solana balance endpoint is guarded and has no legacy devnet route', () => {
+  assert.deepEqual(matchApiRoute('GET', '/api/solana-balance'), {
+    route: { id: 'solana.balance', method: 'GET', path: '/api/solana-balance', phase: 1, auth: 'privy', status: 'guarded' },
+    params: {},
+  });
+  assert.equal(matchApiRoute('POST', '/api/solana-balance'), null);
+  assert.equal(matchApiRoute('GET', '/api/devnet-balance'), null);
 });
 
 test('API route contracts match concrete paths and keep cron off the HTTP matcher', () => {
@@ -187,6 +281,9 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.equal(matchApiRoute('POST', '/bots/bot_1/wake').route.id, 'bots.wake');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/loop').route.id, 'bots.loop');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/loop').route.action, 'loop');
+  assert.equal(matchApiRoute('POST', '/bots/bot_1/card-loop').route.id, 'bots.cardLoop.create');
+  assert.equal(matchApiRoute('POST', '/bots/bot_1/card-loop/cooldown').route.action, 'card-loop/cooldown');
+  assert.equal(matchApiRoute('POST', '/bots/bot_1/card-loop/break').route.id, 'bots.cardLoop.break');
   const liveView = matchApiRoute('POST', '/bots/bot_1/browser/sessions/rec_1/live-view');
   assert.equal(liveView.route.id, 'bots.browser.liveView');
   assert.equal(liveView.params.sessionRecordId, 'rec_1');
@@ -203,6 +300,53 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.ok(API_ROUTES.some(route => route.id === 'cron.stream-fallback' && route.status === 'live' && route.path === '5,20,35,50 * * * *'));
 });
 
+/**
+ * Rigor audit — exhaustive live HTTP route matching
+ * Achieves: every live non-CRON API_ROUTES entry matches matchApiRoute for a
+ *   concrete sample path; wallet list/create/persist/export stay distinct by method.
+ * Fails when: a new live route param lacks a sample, matcher drifts, or PUT /api/wallets
+ *   silently matches another wallet route.
+ * Oracle: API_ROUTES table is the product contract; samples are independent fixtures.
+ * Side effects: none.
+ * Gaps: Auth/phase metadata not asserted here; does not execute handlers — only routing.
+ */
+test('every live HTTP API route matches a concrete sample path (and wallet routes stay distinct)', () => {
+  const samples = {
+    walletId: 'fmfdj6yqly31huorjqzq38zc',
+    botId: 'bot_1',
+    sessionRecordId: 'rec_1',
+    signalId: 'sig_1',
+    name: 'list_bots',
+  };
+  const httpLive = API_ROUTES.filter(route => route.status === 'live' && route.method !== 'CRON');
+  assert.ok(httpLive.length >= 20);
+  for (const route of httpLive) {
+    const pathname = route.path.replace(/:([A-Za-z]+)/g, (_, name) => {
+      assert.ok(samples[name], `missing sample for :${name} on ${route.id}`);
+      return samples[name];
+    });
+    const matched = matchApiRoute(route.method, pathname);
+    assert.ok(matched, `${route.method} ${pathname} should match ${route.id}`);
+    assert.equal(matched.route.id, route.id);
+  }
+  assert.equal(matchApiRoute('GET', '/api/wallets').route.id, 'wallets.list');
+  assert.equal(matchApiRoute('POST', '/api/wallets').route.id, 'wallets.create');
+  assert.equal(matchApiRoute('POST', '/api/wallets/persist').route.id, 'wallets.persist');
+  assert.equal(
+    matchApiRoute('POST', `/api/wallets/${samples.walletId}/export`).route.id,
+    'wallets.export',
+  );
+  // Wrong method must not silently match another wallet route.
+  assert.equal(matchApiRoute('PUT', '/api/wallets'), null);
+});
+
+/**
+ * Achieves: Only https avatars win; handles normalize; SNS vs handle parsing stays distinct; PostgREST eq encodes safely.
+ * Fails when: javascript: avatars win, richclub.sol normalizes as handle, or eq filter injects quotes.
+ * Oracle: Scheme allowlist (https only); parseRecipient kind matrix; postgrestEq encoding of ':'.
+ * Side effects: none.
+ * Gaps: Does not cover every Privy linked-account avatar field.
+ */
 test('profile pictures, handles, and SNS recipients stay separate', () => {
   const user = {
     twitter: { profilePictureUrl: 'https://images.example/alex.png' },
@@ -214,8 +358,9 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.equal(privyAvatarUrl({ wallet: { address: 'So11111111111111111111111111111111111111112' } }), null);
   assert.equal(normalizeHandle('@Alex'), 'alex');
   assert.equal(normalizeHandle('richclub.sol'), null);
-  assert.equal(postgrestEq('owner_id', 'did:privy:user_1'), 'owner_id=eq.%22did%3Aprivy%3Auser_1%22');
-  assert.equal(postgrestEq('handle', 'alex'), 'handle=eq.%22alex%22');
+  assert.equal(postgrestEq('owner_id', 'did:privy:user_1'), 'owner_id=eq.did%3Aprivy%3Auser_1');
+  assert.equal(postgrestEq('handle', 'alex'), 'handle=eq.alex');
+  assert.equal(postgrestEq('owner_id', 'did:privy:user_1').includes('%22'), false);
   assert.equal(postgrestEq('bad column', 'alex'), '');
   assert.equal(directoryFailureCode(409, { code: '23505', message: 'duplicate key' }), '23505');
   assert.equal(directoryFailureCode(401, { message: 'Invalid API key', hint: 'service-role-secret' }), 'supabase_http_401');
@@ -223,9 +368,29 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.deepEqual(parseRecipient('@Alex'), { kind: 'handle', handle: 'alex' });
   assert.deepEqual(parseRecipient('@richclub.sol'), { kind: 'sns', domain: 'richclub.sol' });
   assert.equal(parseRecipient('not a handle'), null);
+  assert.deepEqual(parseLookupQuery('can you look up @Alex_Smith please'), { kind: 'handle', handle: 'alexsmith' });
+  assert.deepEqual(parseLookupQuery("what's @BOB's wallet"), { kind: 'handle', handle: 'bob' });
+  assert.deepEqual(parseLookupQuery('@Mommy Milkers'), { kind: 'handle', handle: 'mommymilkers' });
+  assert.deepEqual(parseLookupQuery('look up @Mommy Milkers for me'), { kind: 'handle', handle: 'mommymilkers' });
+  assert.deepEqual(parseLookupQuery('at Mommy Milkers'), { kind: 'handle', handle: 'mommymilkers' });
+  assert.deepEqual(parseLookupQuery('can you find mommy milkers'), { kind: 'handle', handle: 'mommymilkers' });
+  assert.deepEqual(parseLookupQuery('@the rock'), { kind: 'handle', handle: 'therock' });
+  assert.deepEqual(parseLookupQuery('@Wallet'), { kind: 'handle', handle: 'wallet' });
+  assert.deepEqual(parseLookupQuery('find richclub.sol for me'), { kind: 'sns', domain: 'richclub.sol' });
+  assert.equal(parseLookupQuery('look up the wallet'), null);
+  assert.equal(lookupHandleKey('Alex_Smith'), 'alexsmith');
+  assert.match(lookupHandleFilter('alexsmith'), /handle\.eq\.alexsmith/);
+  assert.match(lookupHandleFilter('alexsmith'), /handle\.imatch\./);
   assert.equal(profileInitials('Alex Rivera'), 'AR');
 });
 
+/**
+ * Achieves: Free model selection accepts :free suffix or zero pricing; paid models fall back or null.
+ * Fails when: Paid gpt-4o is treated free, or zero-price vendor id is rejected.
+ * Oracle: OPENROUTER_FREE_MODEL constant + pricing zeros independent of catalog.mjs.
+ * Side effects: none.
+ * Gaps: Live OpenRouter API pricing not queried.
+ */
 test('OpenRouter accepts only :free ids or a zero price', () => {
   assert.equal(OPENROUTER_FREE_MODEL.endsWith(':free'), true);
   assert.equal(isFreeOpenRouterModel('meta-llama/llama-3.3-70b-instruct:free'), true);
@@ -243,9 +408,165 @@ test('OpenRouter accepts only :free ids or a zero price', () => {
   assert.equal(selectFreeOpenRouterModel('openai/gpt-4o', { fallback: 'openai/gpt-4o-mini' }), null);
 });
 
+/**
+ * Achieves: Exactly three builtin templates exist, all locked/non-deletable, covering the three bot types.
+ * Fails when: Count drifts, deletable flips true, or a type is missing.
+ * Oracle: BOT_TYPES / BUILTIN_TEMPLATES set equality via sorted type list.
+ * Side effects: none.
+ * Gaps: User template CRUD is owned by bot-creation tests.
+ */
 test('builtin templates are locked and non-deletable', () => {
   const templates = createBuiltinTemplates();
   assert.equal(templates.length, 3);
   assert.ok(templates.every(t => t.builtin && t.deletable === false));
   assert.deepEqual(templates.map(t => t.type).sort(), ['position-management', 'shopping', 'trading']);
+});
+
+/**
+ * Achieves: Permissioned spend bodies require a valid permission, bot, amount>0, and handle or destination.
+ * Fails when: Invalid permission/amount/asset/quote shapes parse as spend, or path drifts from /api/spend.
+ * Oracle: OWNER_SPEND_PERMISSIONS + FUND_ACTIONS allowlists; base58 destination fixture; PERMISSIONED_SPEND_PATH.
+ * Side effects: none.
+ * Gaps: Does not exercise voice/UI callers — only the shared body parser.
+ */
+test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes', () => {
+  const dest = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const ok = parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'spend',
+    amount: '1000',
+    destination: dest,
+    confirmed: true,
+  });
+  assert.equal(ok.permission, 'full');
+  assert.equal(ok.amount, '1000');
+  assert.equal(ok.destination, dest);
+  assert.equal(ok.confirmed, true);
+  assert.equal(ok.asset, 'USDC');
+
+  const viaHandle = parsePermissionedSpendBody({
+    permission: 'ask',
+    botId: 'bot_1',
+    amount: '5',
+    handle: '@Alex',
+  });
+  assert.equal(viaHandle.handle, 'alex');
+  assert.equal(viaHandle.destination, null);
+
+  assert.equal(parsePermissionedSpendBody(null), null);
+  assert.equal(parsePermissionedSpendBody({ permission: 'sudo', botId: 'bot_1', amount: '1', destination: dest }), null);
+  assert.equal(parsePermissionedSpendBody({ permission: 'full', botId: 'bot_1', amount: '0', destination: dest }), null);
+  assert.equal(parsePermissionedSpendBody({ permission: 'full', botId: 'bot_1', amount: '1' }), null);
+  const native = { permission: 'full', botId: 'bot_1', amount: '1', destination: dest, asset: 'SOL' };
+  assert.equal(parsePermissionedSpendBody(native).asset, 'SOL');
+  assert.equal(parsePermissionedSpendBody({ ...native, action: 'buy' }), null);
+  assert.equal(parsePermissionedSpendBody({ ...native, amount: '18446744073709551616' }), null);
+  assert.equal(parsePermissionedSpendBody({ ...native, asset: dest }).asset, dest);
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'full', botId: 'bot_1', amount: '1', destination: dest, quote: { pricingCluster: 'bogus' },
+  }), null);
+  assert.deepEqual(OWNER_SPEND_PERMISSIONS, ['ask', 'review', 'full']);
+
+  const req = buildPermissionedSpendRequest({
+    permission: 'review',
+    botId: 'bot_1',
+    amount: '42',
+    destination: dest,
+  });
+  assert.equal(req.method, 'POST');
+  assert.equal(req.path, PERMISSIONED_SPEND_PATH);
+  assert.equal(req.path, '/api/spend');
+  assert.equal(req.body.reviewCap, null);
+  const capped = parsePermissionedSpendBody({
+    permission: 'review',
+    botId: 'bot_1',
+    amount: '42',
+    destination: dest,
+    reviewCap: '25000000',
+  });
+  assert.equal(capped.reviewCap, '25000000');
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'review', botId: 'bot_1', amount: '42', destination: dest, reviewCap: '0',
+  }), null);
+
+  const buy = parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'buy',
+    amount: 1000000,
+    asset: 'USDC',
+    quoteCluster: 'mainnet-beta',
+  });
+  assert.equal(buy.amount, '1000000');
+  assert.equal(buy.asset, 'USDC');
+  assert.equal(buy.action, 'buy');
+  assert.equal(buy.selfCustody, true);
+  assert.equal(buy.destination, null);
+  assert.equal(buy.quote.pricingCluster, 'mainnet-beta');
+  assert.equal(buy.quote.cluster, 'mainnet-beta');
+  assert.equal(buy.quote.authorizesTransaction, false);
+  assert.equal(buy.quote.paperPnl, undefined);
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'spend',
+    amount: '1000000',
+    asset: 'USDC',
+    quoteCluster: 'mainnet-beta',
+  }), null);
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'buy',
+    amount: '1000000',
+    asset: 'SOL',
+    quoteCluster: 'mainnet-beta',
+  }), null);
+  assert.equal(parsePermissionedSpendBody({
+    permission: 'full',
+    botId: 'bot_e0madta8',
+    action: 'buy',
+    amount: '1000000',
+    asset: 'USDC',
+    quoteCluster: 'devnet',
+  }), null);
+  assert.throws(
+    () => buildPermissionedSpendRequest({ permission: 'full', botId: 'bot_1', amount: '1' }),
+    ContractError,
+  );
+});
+
+test('x402 spends require a bounded ticket and forbid transfer or swap overrides', () => {
+  const body = { permission: 'ask', botId: 'bot_laso', action: 'x402', amount: '10000000', asset: 'USDC', lasoTicket: `fixture.${'a'.repeat(64)}` };
+  assert.equal(parsePermissionedSpendBody(body).lasoTicket, body.lasoTicket);
+  for (const extra of [{ lasoTicket: '' }, { lasoTicket: 'bad' }, { lasoTicket: 'a'.repeat(5001) }, { asset: 'SOL' },
+    { destination: '11111111111111111111111111111111' }, { handle: 'hi' }, { quoteCluster: 'mainnet' }, { outputAsset: 'SOL' },
+    { action: 'spend', destination: '11111111111111111111111111111111' }]) {
+    assert.equal(parsePermissionedSpendBody({ ...body, ...extra }), null);
+  }
+});
+
+/**
+ * Achieves: httpsAvatarUrl / normalizeDisplayName / CLUSTERS enforce https-only, trim rules, and hackathon clusters.
+ * Fails when: http avatars accepted, newline names pass, or mainnet appears in CLUSTERS.
+ * Oracle: https-only URL gate; display-name length/whitespace rules; frozen ['mainnet-beta','testnet'].
+ * Side effects: none.
+ * Gaps: privyAvatarUrl composition already covered above.
+ */
+test('httpsAvatarUrl, normalizeDisplayName, and CLUSTERS enforce hackathon profile rules', () => {
+  assert.deepEqual(CLUSTERS, ['mainnet-beta']);
+  assert.equal(CLUSTERS.includes('devnet'), false);
+  assert.equal(httpsAvatarUrl('https://cdn.example/a.png'), 'https://cdn.example/a.png');
+  assert.equal(httpsAvatarUrl('http://cdn.example/a.png'), null);
+  assert.equal(httpsAvatarUrl('https://user:pass@cdn.example/a.png'), null);
+  assert.equal(httpsAvatarUrl('javascript:alert(1)'), null);
+  assert.equal(httpsAvatarUrl('a'.repeat(501)), null);
+  assert.equal(httpsAvatarUrl(null), null);
+  assert.equal(normalizeDisplayName('  Alex   Rivera  '), 'Alex Rivera');
+  assert.equal(normalizeDisplayName(''), null);
+  // Whitespace (including newlines) is collapsed before the newline reject check.
+  assert.equal(normalizeDisplayName('line\nbreak'), 'line break');
+  assert.equal(normalizeDisplayName('a'.repeat(65)), null);
+  assert.equal(normalizeDisplayName(42), null);
 });

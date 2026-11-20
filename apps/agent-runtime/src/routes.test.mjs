@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import { API_ROUTES, SECRET_NAMES } from '@ubc2026/contracts';
 
 function fakeEnv(extra = {}) {
   return {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     BOT: {
       idFromName: name => name,
       get: () => ({
@@ -17,6 +17,13 @@ function fakeEnv(extra = {}) {
   };
 }
 
+/**
+ * Achieves: catalog includes live data routes; ownerless data GETs are 401.
+ * Fails when: routes missing or ownerless allowed.
+ * Oracle: catalog membership + 401.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('route catalog lists live data routes and ownerless data calls require auth', async () => {
   const env = fakeEnv();
   const catalog = await worker.fetch(new Request('https://runtime/api/routes'), env);
@@ -32,6 +39,13 @@ test('route catalog lists live data routes and ownerless data calls require auth
   assert.equal(sign.status, 401);
 });
 
+/**
+ * Achieves: localhost Origin receives ACAO on OPTIONS and /api/events.
+ * Fails when: ACAO missing for localhost.
+ * Oracle: ACAO header === localhost origin.
+ * Side effects / state checked: N/A.
+ * Gaps: denied Origin withCors covered in cors.test.mjs
+ */
 test('localhost Origin gets CORS on preflight and /api/events', async () => {
   const env = fakeEnv();
   const preflight = await worker.fetch(new Request('https://runtime/api/events?botId=bot_meteora', {
@@ -52,6 +66,13 @@ test('localhost Origin gets CORS on preflight and /api/events', async () => {
   assert.equal(events.headers.get('Access-Control-Allow-Origin'), 'http://localhost:3000');
 });
 
+/**
+ * Achieves: browser routes forward to DO with bot id on object path.
+ * Fails when: bot id dropped from path.
+ * Oracle: forwarded pathname includes bot id.
+ * Side effects / state checked: BOT stub fetch.
+ * Gaps: none
+ */
 test('owner browser routes are forwarded with the bot id kept on the object path', async () => {
   const env = fakeEnv();
   const live = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions/rec_1/live-view', {
@@ -62,11 +83,21 @@ test('owner browser routes are forwarded with the bot id kept on the object path
   const body = await live.json();
   assert.equal(body.forwarded, '/id/bot_1/browser/sessions/rec_1/live-view');
 
-  const open = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions', { method: 'GET' }), env);
+  const open = await worker.fetch(new Request('https://runtime/bots/bot_1/browser/sessions', {
+    method: 'GET',
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
   const opened = await open.json();
   assert.equal(opened.forwarded, '/id/bot_1/browser/sessions');
 });
 
+/**
+ * Achieves: loop route is forwarded to the bot Durable Object.
+ * Fails when: loop not forwarded.
+ * Oracle: forwarded path assertion.
+ * Side effects / state checked: BOT stub.
+ * Gaps: none
+ */
 test('the loop route reaches the Durable Object', async () => {
   const env = fakeEnv();
   const loop = await worker.fetch(new Request('https://runtime/bots/bot_1/loop', {
@@ -78,17 +109,88 @@ test('the loop route reaches the Durable Object', async () => {
   assert.equal(body.forwarded, '/loop');
 });
 
+/**
+ * Achieves: start_task's loop post loads the bot, wallet, and ledger and keeps the goal.
+ * Fails when: the Durable Object is forwarded an empty body and later returns no_run.
+ * Oracle: forwarded JSON includes botId, goal, bot, wallet, and ledger.
+ * Side effects / state checked: loadLoopContext mock.
+ * Gaps: the Durable Object run itself is covered in loop-engine.test.mjs.
+ */
+test('the loop route attaches the assigned bot context for a goal-only start', async () => {
+  let seen = null;
+  const wallet = {
+    id: 'w_main',
+    ownerId: 'user_1',
+    address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    frozen: false,
+  };
+  const bot = {
+    id: 'bot_1',
+    ownerId: 'user_1',
+    goal: 'stored goal',
+    type: 'trading',
+    approvalMode: 'fully-automatic',
+    walletId: 'w_main',
+    cap: { asset: 'USDC' },
+  };
+  const ledger = { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
+  const env = fakeEnv({
+    BOT: {
+      idFromName: name => name,
+      get: () => ({
+        fetch: async request => {
+          seen = JSON.parse(await request.text());
+          return Response.json({ forwarded: new URL(request.url).pathname });
+        },
+      }),
+    },
+    loadLoopContext: async (wake) => {
+      assert.equal(wake.botId, 'bot_1');
+      assert.equal(wake.ownerId, 'user_1');
+      return { bot, wallet, ledger };
+    },
+  });
+  const goal = 'beat usd inflation in the long run with long term trading';
+  const loop = await worker.fetch(new Request('https://runtime/bots/bot_1/loop', {
+    method: 'POST',
+    headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+    body: JSON.stringify({ goal, permission: 'full' }),
+  }), env);
+  assert.equal(loop.status, 200);
+  assert.equal(seen.botId, 'bot_1');
+  assert.equal(seen.goal, goal);
+  assert.equal(seen.ownerPermission, 'full');
+  assert.equal(seen.bot.id, 'bot_1');
+  assert.equal(seen.bot.approvalMode, 'fully-automatic');
+  assert.equal(seen.wallet.address, wallet.address);
+  assert.equal(seen.ledger.botId, 'bot_1');
+});
+
+/**
+ * Achieves: bot control routes forward to DO.
+ * Fails when: routing miss/404.
+ * Oracle: forwarded pathname.
+ * Side effects / state checked: BOT stub.
+ * Gaps: none
+ */
 test('bot routes still reach the Durable Object', async () => {
   const env = fakeEnv();
-  const wake = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {
+  const denied = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {
     method: 'POST',
     body: JSON.stringify({ goal: 'watch' }),
+  }), env);
+  assert.equal(denied.status, 401);
+
+  const wake = await worker.fetch(new Request('https://runtime/bots/bot_1/wake', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ goal: 'watch', botId: 'bot_1' }),
   }), env);
   const body = await wake.json();
   assert.equal(body.forwarded, '/wake');
 });
 
-const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const wallet = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const now = 1_700_000_000_000;
 
 function cronCtx() {
@@ -102,6 +204,13 @@ async function posted(promise) {
   return { path: body.forwarded, payload: JSON.parse(body.body) };
 }
 
+/**
+ * Achieves: hourly cron records position check; empty fleet is a no-op.
+ * Fails when: empty fleet still mutates or check not recorded.
+ * Oracle: recorded check / no-op assertions.
+ * Side effects / state checked: schedule mocks.
+ * Gaps: none
+ */
 test('hourly cron records a position check and does nothing with an empty fleet', async () => {
   const empty = cronCtx();
   await worker.scheduled({}, fakeEnv(), empty.ctx);
@@ -119,7 +228,14 @@ test('hourly cron records a position check and does nothing with an empty fleet'
   assert.equal(check.payload.balance, null);
 });
 
-test('a fresh stream skips the RPC re-check, and a stale stream reads devnet balances', async () => {
+/**
+ * Achieves: fresh stream skips RPC; stale stream performs mainnet-beta balance read.
+ * Fails when: fresh still RPCs or stale skips.
+ * Oracle: RPC call counts per freshness.
+ * Side effects / state checked: stream age + RPC mocks.
+ * Gaps: none
+ */
+test('a fresh stream skips the RPC re-check, and a stale stream reads mainnet-beta balances', async () => {
   const calls = [];
   const fresh = cronCtx();
   await worker.scheduled({ cron: '0 * * * *', scheduledTime: now }, fakeEnv({
@@ -140,7 +256,7 @@ test('a fresh stream skips the RPC re-check, and a stale stream reads devnet bal
     readStreamHealth: async () => ({ lastEventAt: now - (61 * 60 * 1000), status: 'up' }),
     readWalletBalance: async ({ address }) => {
       calls.push(address);
-      return { ok: true, cluster: 'devnet', address, amount: '42', mint: wallet, rpcUrl: 'https://example.invalid/quicknode-secret-path' };
+      return { ok: true, cluster: 'mainnet-beta', address, amount: '42', mint: wallet, rpcUrl: 'https://example.invalid/quicknode-secret-path' };
     },
     fetch: async () => { throw new Error('network should not run'); },
   }), stale.ctx);
@@ -158,6 +274,13 @@ test('a fresh stream skips the RPC re-check, and a stale stream reads devnet bal
   assert.deepEqual(reasons.sort(), ['stream-drop-recheck', 'stream-drop-recheck']);
 });
 
+/**
+ * Achieves: shopping bots excluded from hourly position checks; unknown cron is no-op.
+ * Fails when: shopping included or unknown cron mutates state.
+ * Oracle: skip/no-op assertions.
+ * Side effects / state checked: cron handler mocks.
+ * Gaps: none
+ */
 test('shopping bots are not hourly position checks, and an unknown cron does no work', async () => {
   const shop = cronCtx();
   await worker.scheduled({ cron: '0 * * * *', scheduledTime: now }, fakeEnv({

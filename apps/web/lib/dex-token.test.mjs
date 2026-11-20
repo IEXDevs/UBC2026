@@ -6,10 +6,13 @@ import {
   dexTokenUrl,
   dexTokenView,
   enrichPortfolio,
+  geckoCandleUrl,
   indexDexPairs,
   memoryDexStorage,
+  pointsFromOhlcv,
   portfolioWithDex,
   rateLimitCopy,
+  readDexCandles,
   readDexTokens,
   requestUrl,
   toProfile,
@@ -19,7 +22,7 @@ const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL = 'So11111111111111111111111111111111111111112';
 const BONK = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263';
 const POOL = 'Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE';
-const DEVNET_USDC = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const SOLANA_USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 function pair(mint, extra = {}) {
   return {
@@ -37,6 +40,13 @@ function pair(mint, extra = {}) {
   };
 }
 
+/**
+ * Achieves: verifies profiles keep token details and drop the spot price.
+ * Fails when: profiles keep token details and drop the spot price breaks (e.g. expected 'BONK', undefined, undefined); failure/null paths flip.
+ * Oracle: assert.equal(profile.symbol, 'BONK'); assert.equal(profile.priceUsd, undefined); assert.equal(profile.priceNative, undefined); assert.equal(profile.imageUrl, undefined); assert.equal(profile.url, 'https://dexscreener.com/solana/pair'); assert.equal(JSON.stringify(profile).includes('9.87'), false)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('profiles keep token details and drop the spot price', () => {
   const profile = toProfile({
     symbol: 'BONK',
@@ -58,6 +68,13 @@ test('profiles keep token details and drop the spot price', () => {
   assert.equal(JSON.stringify(profile).includes('9.87'), false);
 });
 
+/**
+ * Achieves: verifies the highest-liquidity solana pair wins for each mint.
+ * Fails when: the highest-liquidity solana pair wins for each mint breaks (e.g. expected '9.87', 50, false).
+ * Oracle: assert.equal(indexed.get(BONK).priceUsd, '9.87'); assert.equal(indexed.get(BONK).liquiditySort, 50); assert.equal(indexed.has(SOL), false)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('the highest-liquidity solana pair wins for each mint', () => {
   const indexed = indexDexPairs([
     pair(BONK, { liquidity: 10, priceUsd: '1' }),
@@ -69,6 +86,13 @@ test('the highest-liquidity solana pair wins for each mint', () => {
   assert.equal(indexed.has(SOL), false);
 });
 
+/**
+ * Achieves: verifies a browser read caches details and leaves the price out of storage.
+ * Fails when: duplicate mints refetch, priceUsd is persisted, or rateLimited flips true on success.
+ * Oracle: one fetch to DEX_TOKEN_ORIGIN/BONK; book price 9.87 / symbol BONK; saved JSON omits priceUsd and 9.87.
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('a browser read caches details and leaves the price out of storage', async () => {
   const storage = memoryDexStorage();
   const calls = [];
@@ -92,6 +116,13 @@ test('a browser read caches details and leaves the price out of storage', async 
   assert.match(saved, /BONK/);
 });
 
+/**
+ * Achieves: verifies a rate limit keeps the saved profile and does not reuse a price.
+ * Fails when: a rate limit keeps the saved profile and does not reuse a price breaks (e.g. expected true, true, 'BONK'); failure/null paths flip.
+ * Oracle: assert.equal(book.rateLimited, true); assert.equal(book.tokens[0].fromCache, true); assert.equal(book.tokens[0].symbol, 'BONK'); assert.equal(book.tokens[0].priceUsd, null); assert.equal(storage.getItem(dexCacheKey('user-1')).includes('9.87'), false); assert.equal(view.price, null)
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('a rate limit keeps the saved profile and does not reuse a price', async () => {
   const storage = memoryDexStorage();
   storage.setItem(dexCacheKey('user-1'), JSON.stringify({
@@ -112,9 +143,17 @@ test('a rate limit keeps the saved profile and does not reuse a price', async ()
   assert.equal(view.price, null);
   assert.equal(view.points.length, 0);
   assert.match(view.note, /Saved token details/);
-  assert.match(view.note, /devnet execution, mainnet pricing/);
+  assert.doesNotMatch(view.note, /mainnet|devnet|testnet/i);
+  assert.match(view.note, /does not authorize a transaction/);
 });
 
+/**
+ * Achieves: verifies a live price draws the published window and batches thirty mints.
+ * Fails when: a live price draws the published window and batches thirty mints breaks (e.g. expected 2, '1H', 1); failure/null paths flip.
+ * Oracle: assert.equal(view.price, 2); assert.equal(view.changeLabel, '1H'); assert.equal(view.points[0].price, 1); assert.equal(view.points[1].price, 2); assert.equal(view.quoteSource, 'dexscreener'); assert.equal(dexTokenView({ mint: BONK, range: 'nope' })
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('a live price draws the published window and batches thirty mints', () => {
   const view = dexTokenView({
     mint: BONK,
@@ -132,6 +171,13 @@ test('a live price draws the published window and batches thirty mints', () => {
   assert.match(dexTokenUrl(many), new RegExp(`${SOL},${USDC},${BONK}$`));
 });
 
+/**
+ * Achieves: verifies more than thirty mints use a second browser request.
+ * Fails when: more than thirty mints use a second browser request breaks (e.g. expected 2, ', ').
+ * Oracle: assert.equal(calls.length, 2); assert.equal(calls[0].split(','); assert.equal(calls[1].split(',')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('more than thirty mints use a second browser request', async () => {
   const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   const mints = Array.from({ length: 31 }, (_, index) => `${alphabet[index]}${'1'.repeat(31)}`);
@@ -148,10 +194,17 @@ test('more than thirty mints use a second browser request', async () => {
   assert.equal(calls[1].split(',').length, 1);
 });
 
+/**
+ * Achieves: verifies portfolio dollars use the live dex price, then a peg, and the saved symbol.
+ * Fails when: portfolio dollars use the live dex price, then a peg, and the saved symbol breaks (e.g. expected 'BONK', '2000000000', '2000000').
+ * Oracle: assert.equal(bonk.symbol, 'BONK'); assert.equal(bonk.usdMicro, '2000000000'); assert.equal(usdc.usdMicro, '2000000'); assert.equal(enriched.rateLimited, true); assert.equal(enriched.portfolio.wallets[0].holdings.find(row => row.mint === BONK).usdMicro, '0'); assert.equal(rateLimitCopy('https://api.dexscreener.com/tokens/v1/solana/x').title, 'DexScreener rate limit')
+ * Side effects / state checked: in-memory storage double writes/reads.
+ * Gaps: none.
+ */
 test('portfolio dollars use the live dex price, then a peg, and the saved symbol', async () => {
   const wallet = SOL;
   const portfolio = {
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
     wallets: [{
       address: wallet,
       label: 'Desk',
@@ -159,13 +212,13 @@ test('portfolio dollars use the live dex price, then a peg, and the saved symbol
       spendable: false,
       holdings: [
         { mint: BONK, symbol: 'DezXA...B263', amount: '1000', decimals: 0, usdMicro: '0' },
-        { mint: DEVNET_USDC, symbol: 'USDC', amount: '2000000', decimals: 6, usdMicro: '0' },
+        { mint: SOLANA_USDC, symbol: 'USDC', amount: '2000000', decimals: 6, usdMicro: '0' },
       ],
     }],
   };
   const painted = portfolioWithDex(portfolio, [{ mint: BONK, symbol: 'BONK', priceUsd: '2' }]);
   const bonk = painted.wallets[0].holdings.find(row => row.mint === BONK);
-  const usdc = painted.wallets[0].holdings.find(row => row.mint === DEVNET_USDC);
+  const usdc = painted.wallets[0].holdings.find(row => row.mint === SOLANA_USDC);
   assert.equal(bonk.symbol, 'BONK');
   assert.equal(bonk.usdMicro, '2000000000');
   assert.equal(usdc.usdMicro, '2000000');
@@ -181,4 +234,82 @@ test('portfolio dollars use the live dex price, then a peg, and the saved symbol
   assert.equal(rateLimitCopy('https://api.dexscreener.com/tokens/v1/solana/x').title, 'DexScreener rate limit');
   assert.equal(rateLimitCopy('/api/portfolio').title, 'Rate limit');
   assert.equal(requestUrl(new URL('https://api.dexscreener.com/tokens/v1/solana')), DEX_TOKEN_ORIGIN);
+});
+
+/**
+ * Achieves: verifies ranges past 1D are not a copy of the 24h line.
+ * Fails when: 1W still draws the h24 window or candle closes stay newest-first.
+ * Oracle: assert.equal(week.points.length, 0); assert.deepEqual(drawn.points.map(point => point.price), [4, 8, 3]);
+ * Side effects / state checked: injected candle fetcher, no network.
+ * Gaps: none.
+ */
+test('ranges past one day draw that window, not the 24h move', async () => {
+  const token = { symbol: 'BONK', priceUsd: '2', priceChange: { h1: 100, h24: -50 } };
+  const day = dexTokenView({ mint: BONK, range: '1D', token, now: 1_700_000_000_000 });
+  const week = dexTokenView({ mint: BONK, range: '1W', token, now: 1_700_000_000_000 });
+  assert.equal(day.points.length, 2);
+  assert.equal(day.changeLabel, '24H');
+  assert.equal(dexTokenView({ mint: BONK, range: '1D', token, candles: 'pending' }).points.length, 0);
+  assert.equal(week.points.length, 0);
+  assert.equal(week.changeLabel, '1W');
+  assert.equal(dexTokenView({ mint: BONK, range: 'All', token }).points.length, 0);
+
+  const candles = [
+    { t: 10, price: 4 },
+    { t: 20, price: 8 },
+    { t: 30, price: 3 },
+  ];
+  const drawn = dexTokenView({ mint: BONK, range: '1W', token, candles });
+  assert.deepEqual(drawn.points, candles);
+  assert.equal(drawn.changeLabel, '1W');
+  assert.equal(drawn.points.length, 3);
+  assert.notEqual(drawn.points[1].price, day.points[1].price);
+  assert.match(drawn.note, /GeckoTerminal history/);
+  assert.doesNotMatch(drawn.note, /mainnet|devnet|testnet/i);
+
+  const now = Date.UTC(2026, 10, 19);
+  assert.match(geckoCandleUrl(POOL, '1H', now), /\/ohlcv\/minute\?aggregate=5&limit=12&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, '1D', now), /\/ohlcv\/hour\?aggregate=1&limit=24&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, '1W', now), /\/ohlcv\/hour\?aggregate=4&limit=42&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, '1M', now), /\/ohlcv\/day\?aggregate=1&limit=30&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, '1Y', now), /\/ohlcv\/day\?aggregate=1&limit=365&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, 'All', now), /\/ohlcv\/day\?aggregate=1&limit=1000&currency=usd$/);
+  const ytd = geckoCandleUrl(POOL, 'YTD', now);
+  const ytdLimit = Number(new URL(ytd).searchParams.get('limit'));
+  assert.ok(ytdLimit > 30 && ytdLimit < 365);
+  assert.equal(geckoCandleUrl('not-a-pool', '1W', now), null);
+
+  const calls = [];
+  const book = await readDexCandles({
+    pairAddress: POOL,
+    range: '1M',
+    now,
+    fetcher: async (url) => {
+      calls.push(url);
+      return Response.json({
+        data: {
+          attributes: {
+            ohlcv_list: [
+              [1_700_000_300, 1, 9, 1, 3, 0],
+              [1_700_000_100, 1, 9, 1, 4, 0],
+              [1_700_000_200_000, 1, 9, 1, 8, 0],
+            ],
+          },
+        },
+      });
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/ohlcv\/day\?/);
+  assert.deepEqual(book.points.map(point => point.price), [4, 8, 3]);
+  assert.equal(book.points[1].t, 1_700_000_200);
+  assert.deepEqual(pointsFromOhlcv({}), []);
+
+  const limited = await readDexCandles({
+    pairAddress: POOL,
+    range: '1Y',
+    fetcher: async () => new Response('limited', { status: 429 }),
+  });
+  assert.equal(limited.rateLimited, true);
+  assert.deepEqual(limited.points, []);
 });

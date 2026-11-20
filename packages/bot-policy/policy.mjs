@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createHash } from 'node:crypto';
 
 export class PolicyError extends Error {}
@@ -21,7 +22,7 @@ export function validateBot(bot) {
 }
 function proposalFields(p) {
   if (!p || ![p.id, p.botId, p.asset, p.recipient, p.quoteId, p.expectedReceiveAsset].every(required)) fail('Incomplete transaction preview');
-  if (!['devnet', 'testnet'].includes(p.cluster)) fail('Hackathon execution must use devnet or testnet');
+  if (![SOLANA_CLUSTER].includes(p.cluster)) fail('Execution must use the configured Solana cluster');
   amount(p.outflow); amount(p.expectedReceive); amount(p.maxFee);
   if (!Number.isSafeInteger(p.expiresAt) || p.expiresAt <= 0) fail('Invalid quote expiry');
   return { id: p.id, botId: p.botId, cluster: p.cluster, asset: p.asset, recipient: p.recipient, quoteId: p.quoteId, outflow: p.outflow, expectedReceive: p.expectedReceive, expectedReceiveAsset: p.expectedReceiveAsset, maxFee: p.maxFee, expiresAt: p.expiresAt };
@@ -41,10 +42,13 @@ export function evaluateProposal(bot, proposal, ledger, now) {
   const debit = amount(p.outflow) + amount(p.maxFee);
   const violations = [];
   if (bot.cap.mode === 'limited') {
-    if (bot.type === 'position-management') {
-      // Loss is already measured by a trusted valuation service, not supplied by the model.
-      if (loss >= amount(bot.cap.maxLoss)) return { state: 'blocked', reason: 'max-loss-reached' };
-    } else {
+    const lossCap = typeof bot.cap.maxLoss === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(bot.cap.maxLoss)
+      ? amount(bot.cap.maxLoss)
+      : null;
+    if (bot.type === 'position-management' && lossCap == null) amount(bot.cap.maxLoss);
+    // Loss is measured by the ledger, not the model. No approval can override it.
+    if (lossCap != null && loss >= lossCap) return { state: 'blocked', reason: 'max-loss-reached' };
+    if (bot.type !== 'position-management') {
       if (debit > amount(bot.cap.maxPerTransaction)) violations.push('per-transaction');
       if (spent + reserved + debit > amount(bot.cap.maxOutflow)) violations.push('total-outflow');
     }

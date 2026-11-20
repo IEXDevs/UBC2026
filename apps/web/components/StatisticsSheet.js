@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import ModalClose from './ModalClose';
 import AccountStats from './AccountStats';
 import { pickOwnerRollup } from '../lib/overview.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { profileStats, statisticsView } from '../lib/statistics.mjs';
 import BranchedMenu from './BranchedMenu';
@@ -34,7 +36,17 @@ function leafLabel(row) {
   );
 }
 
-export default function StatisticsSheet({ open, onClose, bots = [], ownerId = null, voiceMs = 0, talks = {}, payments = [], transfers = [] }) {
+export default function StatisticsSheet({
+  open,
+  onClose,
+  bots = [],
+  ownerId = null,
+  getAccessToken = null,
+  voiceMs = 0,
+  talks = {},
+  payments = [],
+  transfers = [],
+}) {
   const { mounted, leaving } = usePresence(open);
   const [remoteMetric, setRemoteMetric] = useState(null);
 
@@ -55,7 +67,7 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json();
@@ -72,9 +84,9 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
       stop = true;
       clearInterval(timer);
     };
-  }, [open, ownerId]);
+  }, [open, ownerId, getAccessToken]);
 
-  if (!mounted) return null;
+  if (!mounted || typeof document === 'undefined') return null;
 
   const view = statisticsView({
     bots,
@@ -101,7 +113,7 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
     })),
   ];
 
-  return (
+  return createPortal(
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section
         className="stats-modal"
@@ -112,9 +124,7 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
       >
         <div className="stats-head">
           <h2 id="statistics-title">Statistics</h2>
-          <button type="button" className="icon-btn" aria-label="Close statistics" onClick={onClose}>
-            <X size={18} strokeWidth={1.75} />
-          </button>
+          <ModalClose label="Close statistics" onClick={onClose} />
         </div>
         <p className="stats-note">{view.note}</p>
         <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
@@ -132,6 +142,6 @@ export default function StatisticsSheet({ open, onClose, bots = [], ownerId = nu
         </div>
         <p className="quiet">{bots.length} agents on this account.</p>
       </section>
-    </div>
+    </div>, document.body,
   );
 }

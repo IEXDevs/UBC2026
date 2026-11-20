@@ -33,6 +33,7 @@ export function profileAfterDirectoryRead(local, body) {
  */
 export function profileSaveResult(status, body, claimedHandle = '') {
   const code = typeof body?.error === 'string' && ERROR_CODE.test(body.error) ? body.error : '';
+  if (code === 'profile_not_registered') return { ok: false, error: code, status };
   if (status === 409 || code === 'handle_taken') return { ok: false, error: 'handle_taken', status };
   if (!Number.isInteger(status) || status < 200 || status >= 300) {
     return { ok: false, error: code || 'profile_save_failed', status: Number.isInteger(status) ? status : 502 };
@@ -88,6 +89,19 @@ export function profileRailLabel({ handle, displayName, fallback = 'You' } = {})
   return 'You';
 }
 
+/** Profile edits keep their draft on failure; never claim an unconfirmed save. */
+export function profileSaveNote(error) {
+  const raw = error?.code || error?.error || '';
+  if (error?.status === 401 || raw === 'owner_required' || raw === 'login_required') return 'Your session expired. Sign in again to save your profile.';
+  if (raw === 'handle_taken') return 'This handle is already registered to another account. Your changes were not saved.';
+  if (raw === 'profile_not_registered') return 'No profile is registered to this sign-in. Claim an available handle here, or sign in with your original account.';
+  if (raw === 'photo_storage_failed') return 'Your name was saved, but the photo could not be stored. Allow browser storage and try again.';
+  if (raw === 'account_changed') return 'The signed-in account changed. Reopen your profile to try again.';
+  const code = typeof raw === 'string' && ERROR_CODE.test(raw) ? raw : '';
+  const detail = [Number.isInteger(error?.status) ? error.status : '', code].filter(Boolean).join(' ');
+  return detail ? `Your changes were not saved (${detail}). Try again.` : 'Could not reach the profile directory. Your changes were not saved. Try again.';
+}
+
 export function mentionIn(text) {
   if (typeof text !== 'string') return null;
   const match = text.match(/(?:^|\s)(@[A-Za-z0-9][A-Za-z0-9_.-]{0,80})/);
@@ -98,7 +112,7 @@ export function recipientHint(recipient) {
   if (!recipient || typeof recipient !== 'object') return '';
   if (recipient.kind === 'sns') {
     const where = shortAddress(recipient.address);
-    if (where) return `${recipient.domain}(${where})`;
+    if (where) return `${recipient.domain} (${where})`;
     if (recipient.error) return 'Failed.';
     return recipient.domain;
   }
@@ -106,5 +120,24 @@ export function recipientHint(recipient) {
   if (!recipient.address && recipient.self !== true) return `@${recipient.handle} does not have a wallet yet.`;
   const who = recipient.displayName || `@${recipient.handle}`;
   const where = shortAddress(recipient.address);
-  return where ? `${who}(${where})` : who;
+  return where ? `${who} (${where})` : who;
+}
+
+/** Platform ledger sends need a found handle with a wallet address. */
+export function sendHandleReady(recipient) {
+  if (!recipient || recipient.kind !== 'handle' || recipient.missing) return false;
+  return typeof recipient.address === 'string' && recipient.address.length > 0;
+}
+
+/** Status line under Send To while a handle is resolved. */
+export function sendHandleHint(recipient, { looking = false, handle = '' } = {}) {
+  const name = typeof handle === 'string' && handle
+    ? handle.replace(/^@/, '')
+    : (typeof recipient?.handle === 'string' ? recipient.handle : '');
+  if (looking) return name ? `Looking up @${name}.` : 'Looking up that handle.';
+  if (!recipient) return name ? `@${name} is not on Maelstrom` : '';
+  if (recipient.missing === false && !recipient.address) {
+    return `@${recipient.handle || name} does not have a wallet yet.`;
+  }
+  return recipientHint(recipient);
 }

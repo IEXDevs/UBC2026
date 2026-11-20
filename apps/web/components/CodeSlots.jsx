@@ -52,6 +52,8 @@ export default function CodeSlots({
   rise = 8,
   cascade = 20,
   ariaLabel = 'One-time code',
+  message = '',
+  onDismissError = null,
   className = ''
 }) {
   const uid = useId();
@@ -387,14 +389,18 @@ export default function CodeSlots({
           ref={inputRef}
           className="code-slots__input"
           type="text"
+          name="one-time-code"
           inputMode="numeric"
           autoComplete="one-time-code"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           pattern="[0-9]*"
           value=""
           maxLength={length}
           aria-label={ariaLabel}
           aria-invalid={status === 'error'}
-          aria-describedby={`${uid}-count`}
+          aria-describedby={`${uid}-count${message ? ` ${uid}-message` : ''}`}
           disabled={disabled}
           readOnly={status === 'success'}
           onKeyDown={onKeyDown}
@@ -431,6 +437,21 @@ export default function CodeSlots({
       <span id={`${uid}-count`} className="code-slots__sr" aria-live="polite">
         {status === 'success' ? 'Code accepted' : `${view.filter(Boolean).length} of ${length} digits entered`}
       </span>
+      {message ? (
+        <p
+          id={`${uid}-message`}
+          className={`code-slots__message${status === 'error' ? ' is-error' : ''}${status === 'success' ? ' is-ok' : ''}`}
+          role={status === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+        >
+          <span>{message}</span>
+          {status === 'error' && onDismissError ? (
+            <button type="button" className="code-slots__dismiss" aria-label="Dismiss" onClick={onDismissError}>
+              ×
+            </button>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   );
 }

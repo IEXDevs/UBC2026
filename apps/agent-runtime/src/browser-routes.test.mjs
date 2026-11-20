@@ -1,6 +1,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BotStateMachine, createDurableStore } from './bot-do.mjs';
+import { ProviderError } from '@ubc2026/browser-session';
+
+for (const action of ['live-view', 'navigate', 'release']) {
+  test(`expired browser ${action} closes the stored session and frees capacity`, async () => {
+    const { machine, env } = machineWithBrowsers();
+    env.MAX_BROWSER_SESSIONS_PER_BOT = 1;
+    const call = (suffix = '', method = 'POST', body = {}) => machine.handle(new Request(`https://bot/id/bot_1/browser/sessions${suffix}`, {
+      method, headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+      ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
+    }), env);
+    const opened = await (await call()).json();
+    const fail = async () => { throw new ProviderError('browser_session_expired', 410); };
+    const method = action === 'live-view' ? 'readonlyView' : action === 'navigate' ? 'openTab' : 'closeSession';
+    const original = env.browsers[method];
+    env.browsers[method] = fail;
+    const result = await call(`/${opened.sessionRecordId}/${action}`, 'POST', { url: 'https://example.com' });
+    assert.equal(result.status, action === 'release' ? 200 : 410);
+    const body = await result.json();
+    if (action !== 'release') assert.equal(body.error, 'browser_session_expired');
+    else assert.equal(body.status, 'closed');
+    assert.deepEqual((await (await call('', 'GET')).json()).sessions, []);
+    env.browsers[method] = original;
+    const replacement = await (await call()).json();
+    assert.equal(replacement.status, 'open');
+    assert.notEqual(replacement.sessionRecordId, opened.sessionRecordId);
+    assert.notEqual(replacement.reused, true);
+  });
+}
 
 function browsers() {
   const closed = [];
@@ -33,6 +61,29 @@ function machineWithBrowsers() {
   return { machine: new BotStateMachine(), closed, tabs, env: { browsers: provider } };
 }
 
+test('owner browser failures include safe provider diagnostics and no-store', async () => {
+  const { machine, env } = machineWithBrowsers();
+  env.browsers.createSession = async () => {
+    const error = new ProviderError('browser_not_configured', 503);
+    error.providerStatus = 403;
+    error.providerReason = 'https://live.browser.run/ui/view?token=private';
+    throw error;
+  };
+  const response = await machine.handle(new Request('https://bot/id/bot_1/browser/sessions', {
+    method: 'POST', headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' }, body: '{}',
+  }), env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await response.json(), { error: 'browser_not_configured', providerStatus: 403 });
+});
+
+/**
+ * Achieves: browser create/list are owner-scoped and omit provider session ids from responses.
+ * Fails when: other owners see sessions, or provider id leaks in JSON.
+ * Oracle: owner-bound status/items; no provider id substring.
+ * Side effects / state checked: browser provider mock.
+ * Gaps: cross-owner isolation if not fully asserted — check test body
+ */
 test('browser sessions are owner-bound and hide the provider id', async () => {
   const { machine, env, closed, tabs } = machineWithBrowsers();
   const opened = await machine.handle(new Request('https://bot/id/bot_1/browser/sessions', {
@@ -102,6 +153,13 @@ test('browser sessions are owner-bound and hide the provider id', async () => {
   assert.deepEqual((await listed.json()).sessions, []);
 });
 
+/**
+ * Achieves: session page history persists beyond first page in durable store.
+ * Fails when: second page lost or overwritten incorrectly.
+ * Oracle: stored pages include later navigation.
+ * Side effects / state checked: durable store state.
+ * Gaps: none
+ */
 test('durable store pages session records past the first page', async () => {
   const rows = new Map();
   for (let i = 0; i < 101; i += 1) rows.set(`browser:user_1:bot_1:rec_${String(i).padStart(3, '0')}`, { n: i });

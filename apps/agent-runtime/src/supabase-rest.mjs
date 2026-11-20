@@ -37,7 +37,7 @@ export async function supabaseGet(env, path, fetcher = fetch) {
       signal: AbortSignal.timeout(15000),
     });
   } catch {
-    return { configured: true, rows: null, status: 0 };
+    return { configured: true, rows: null, status: 0, code: 'profile_directory_unreachable' };
   }
   if (!response.ok) {
     let parsed = null;
@@ -75,7 +75,7 @@ export async function supabaseWrite(env, {
       signal: AbortSignal.timeout(15000),
     });
   } catch {
-    return { configured: true, rows: null, status: 0, ok: false };
+    return { configured: true, rows: null, status: 0, ok: false, code: 'profile_directory_unreachable' };
   }
   let parsed = null;
   try { parsed = await response.json(); } catch { parsed = null; }
@@ -116,6 +116,7 @@ export function amountText(value) {
 
 export function mapWalletRow(row) {
   if (!row || typeof row.id !== 'string') return null;
+  if (row.deleted_at) return null;
   return {
     id: row.id,
     ownerId: row.owner_id,

@@ -128,3 +128,5 @@
   .swipe-toast.is-leaving .swipe-toast__lift,
   .swipe-toast__fuse { animation: none; opacity: 1; transform: none; }
 }
+
+.swipe-toast.is-sticky .swipe-toast__fuse { display: none; }

@@ -22,12 +22,12 @@ permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: maelstrom-web-dev
-  cancel-in-progress: true
-
 jobs:
   deploy:
+    # Job-level, so a skipped comment run never cancels a deploy in progress.
+    concurrency:
+      group: maelstrom-web-dev
+      cancel-in-progress: true
     if: >
       github.event_name == 'workflow_dispatch' ||
       (
@@ -83,8 +83,7 @@ jobs:
         run: npm ci
 
       - name: Deploy the dev Worker
-        working-directory: apps/web
-        run: npx opennextjs-cloudflare build && npx opennextjs-cloudflare deploy --env dev
+        run: npm run deploy:web:dev
 
       - name: Comment on the pull request
         if: steps.target.outputs.pr != ''

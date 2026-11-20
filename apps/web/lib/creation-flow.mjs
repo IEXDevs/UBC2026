@@ -9,7 +9,7 @@ import {
 import { createAdditionalWallet, createMainWallet, freezeWallet } from '@ubc2026/wallets';
 
 const ADDRESSES = Object.freeze({
-  main: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  main: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   extra: 'So11111111111111111111111111111111111111112',
   frozen: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
 });

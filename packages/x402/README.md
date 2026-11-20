@@ -1,6 +1,6 @@
 # x402 v2 (Solana)
 
-Server-side helpers for the Agentic Payments track's recommended x402 payment loop on Solana. Builds HTTP 402 `PAYMENT-REQUIRED` challenges, parses `PAYMENT-SIGNATURE` payloads, and shapes `PAYMENT-RESPONSE` / payment-feed rows. Hackathon policy is hard-coded: only Solana **devnet** challenges and settlements are accepted.
+Server-side helpers for the Agentic Payments track's recommended x402 payment loop on Solana. Builds HTTP 402 `PAYMENT-REQUIRED` challenges, parses `PAYMENT-SIGNATURE` payloads, and shapes `PAYMENT-RESPONSE` / payment-feed rows. Hackathon policy is hard-coded: only Solana **mainnet-beta** challenges and settlements are accepted.
 
 ```js
 import { buildPaymentRequired, parsePaymentSignature, paymentFeedEntry } from '@ubc2026/x402';
@@ -13,9 +13,9 @@ const challenge = buildPaymentRequired({
 });
 ```
 
-`buildPaymentSignature` turns those accepted terms plus a devnet transaction signature into a `PAYMENT-SIGNATURE` header.
+`buildPaymentSignature` turns those accepted terms plus a mainnet-beta transaction signature into a `PAYMENT-SIGNATURE` header.
 
-This package does not sign, broadcast, or verify on-chain transfers. Pair it with `@ubc2026/bot-policy` (budgets / approvals) and `@ubc2026/verify-consensus` before creating a challenge the user can approve. The devnet price/trust Worker and the bot-wallet payer live in `apps/x402-service`. Facilitator RPC confirmation stays outside this package.
+This package does not sign, broadcast, or verify on-chain transfers. Pair it with `@ubc2026/bot-policy` (budgets / approvals) and `@ubc2026/verify-consensus` before creating a challenge the user can approve. The mainnet-beta price/trust Worker and the bot-wallet payer live in `apps/x402-service`. Facilitator RPC confirmation stays outside this package.
 
 Protocol references:
 - https://solana.com/docs/payments/agentic-payments/x402

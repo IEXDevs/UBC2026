@@ -4,7 +4,9 @@
  * expiry, so a refresh stays open until that time, then the wallet locks.
  */
 
-export const DESK_LOCK_ITERATIONS = 120000;
+// Workers reject PBKDF2 above 100000 iterations. A higher count saves, then
+// every unlock throws and the desk says the password was not accepted.
+export const DESK_LOCK_ITERATIONS = 100000;
 export const DESK_LOCK_IDLE_MS = 30 * 60 * 1000;
 export const DESK_LOCK_MIN_LENGTH = 8;
 
@@ -52,6 +54,13 @@ export function deskOpenStorageKey(ownerId) {
   const lockKey = deskLockStorageKey(ownerId);
   if (!lockKey) return '';
   return lockKey.replace('maelstrom.desk-lock.', 'maelstrom.desk-open.');
+}
+
+/** Shown when an account has no desk password yet: it is a new account, not a reset. */
+export function newAccountNote(accountLabel) {
+  const label = typeof accountLabel === 'string' ? accountLabel.trim() : '';
+  const who = label && label !== 'Signed in' ? ` for ${label}` : '';
+  return `This is a new Maelstrom account${who}. If you already have one, sign out and sign in the same way you did before. A sign-in method not linked to your account opens a separate account with its own wallets and seed.`;
 }
 
 export function normalizePassword(password) {
@@ -179,6 +188,67 @@ export function writeDeskSession(storage, ownerId, until) {
   }
 }
 
+export function deskGrantStorageKey(ownerId) {
+  const lockKey = deskLockStorageKey(ownerId);
+  if (!lockKey) return '';
+  return lockKey.replace('maelstrom.desk-lock.', 'maelstrom.desk-grant.');
+}
+
+export function parseDeskGrant(value, now) {
+  let record = value;
+  if (typeof value === 'string') {
+    try {
+      record = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!record || typeof record !== 'object' || record.v !== 1) return null;
+  if (typeof record.grant !== 'string' || !/^[0-9a-f]{64}$/.test(record.grant)) return null;
+  if (!Number.isFinite(record.until) || !Number.isFinite(now) || now >= record.until) return null;
+  return {
+    v: 1,
+    grant: record.grant,
+    until: record.until,
+    ...(typeof record.sessionId === 'string' && /^[^\s]{1,256}$/.test(record.sessionId)
+      ? { sessionId: record.sessionId } : {}),
+  };
+}
+
+export function readDeskGrant(storage, ownerId, now) {
+  const key = deskGrantStorageKey(ownerId);
+  if (!key || !storage || typeof storage.getItem !== 'function') return null;
+  try {
+    return parseDeskGrant(storage.getItem(key), now);
+  } catch {
+    return null;
+  }
+}
+
+export function writeDeskGrant(storage, ownerId, grant, until, sessionId) {
+  const key = deskGrantStorageKey(ownerId);
+  if (!key || typeof grant !== 'string' || !/^[0-9a-f]{64}$/.test(grant)) return false;
+  if (!Number.isFinite(until) || until <= 0 || !storage || typeof storage.setItem !== 'function') return false;
+  const body = JSON.stringify({ v: 1, grant, until, sessionId });
+  try {
+    storage.setItem(key, body);
+    return storage.getItem?.(key) === body;
+  } catch {
+    return false;
+  }
+}
+
+export function clearDeskGrant(storage, ownerId) {
+  const key = deskGrantStorageKey(ownerId);
+  if (!key || !storage || typeof storage.removeItem !== 'function') return false;
+  try {
+    storage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function clearDeskSession(storage, ownerId) {
   const key = deskOpenStorageKey(ownerId);
   if (!key || !storage || typeof storage.removeItem !== 'function') return false;
@@ -188,6 +258,29 @@ export function clearDeskSession(storage, ownerId) {
   } catch {
     return false;
   }
+}
+
+const OPEN_WALLET_KEY = /^maelstrom\.desk-(?:open|grant)\./;
+
+/** Drop unlock and spend-grant windows. The password verifier stays. */
+export function lockOpenWallets(storage) {
+  if (!storage || typeof storage.removeItem !== 'function') return 0;
+  if (typeof storage.length !== 'number' || typeof storage.key !== 'function') return 0;
+  const keys = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (OPEN_WALLET_KEY.test(String(key || ''))) keys.push(String(key));
+  }
+  let removed = 0;
+  for (const key of keys) {
+    try {
+      storage.removeItem(key);
+      removed += 1;
+    } catch {
+      /* one stuck key still leaves the others locked */
+    }
+  }
+  return removed;
 }
 
 /** Shift+L locks the wallet. Shift+U opens the unlock prompt. */

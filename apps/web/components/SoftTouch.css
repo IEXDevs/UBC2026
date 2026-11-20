@@ -1,0 +1,54 @@
+button:where(:not(
+  :disabled,
+  .dock button,
+  .dock-item,
+  .hold-button,
+  .glide-select__trigger,
+  .specular-button,
+  .prompt-bar__tool,
+  .prompt-bar__pick,
+  .prompt-bar__row,
+  .prompt-bar__send,
+  .permit-menu button,
+  .stepper__button,
+  .call-chip,
+  .sling-button__pad,
+  .wake-slider__track,
+  .ledger-hit,
+  .library-panes button
+)) {
+  transition: transform 440ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+button:where(:not(
+  :disabled,
+  .dock button,
+  .dock-item,
+  .hold-button,
+  .glide-select__trigger,
+  .specular-button,
+  .prompt-bar__tool,
+  .prompt-bar__pick,
+  .prompt-bar__row,
+  .prompt-bar__send,
+  .permit-menu button,
+  .stepper__button,
+  .call-chip,
+  .sling-button__pad,
+  .wake-slider__track,
+  .ledger-hit,
+  .library-panes button
+)):active,
+button[data-press]:where(:not(:disabled)) {
+  transform: scale(0.96);
+  transition-duration: 90ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:where(:not(:disabled)):active,
+  button[data-press] {
+    transform: none;
+    transition: none;
+  }
+}

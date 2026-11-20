@@ -13,7 +13,7 @@ const events = [{
   botId: 'bot_1',
   botName: 'APY hunter',
   kind: 'tx.confirmed',
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   signature: SIG,
   summary: `Landed with ${SECRET}`,
   at: 1_700_000_000_000,
@@ -31,6 +31,13 @@ const chat = {
   ],
 };
 
+/**
+ * Achieves: runGrokBotCli draft/export redact secrets; invalid commands/JSON throw GrokBotCliError.
+ * Fails when: Secrets survive draft/export, or bad input exits successfully.
+ * Oracle: scripts/grok-bot.mjs CLI over package helpers.
+ * Side effects: none
+ * Gaps: none meaningful
+ */
 test('cli drafts an offline post payload and exports markdown without the secret', () => {
   const drafted = runGrokBotCli(['draft'], JSON.stringify(events));
   const payload = JSON.parse(drafted);
@@ -45,6 +52,13 @@ test('cli drafts an offline post payload and exports markdown without the secret
   assert.throws(() => runGrokBotCli(['export'], '{'), GrokBotCliError);
 });
 
+/**
+ * Achieves: Spawned draft with X_BEARER_TOKEN still offline/undelivered and never prints the token; empty export exits 1.
+ * Fails when: Token appears in stdout/stderr or posts marked delivered.
+ * Oracle: Process-level offline + redaction invariant.
+ * Side effects: Spawns child process with env token.
+ * Gaps: none meaningful
+ */
 test('cli process does not echo an X token from the environment', () => {
   const result = spawnSync(process.execPath, ['scripts/grok-bot.mjs', 'draft'], {
     cwd: root,

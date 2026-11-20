@@ -3,6 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowDown01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { glideRowAt } from '../lib/glide-select.mjs';
 
 import './GlideSelect.css';
 
@@ -50,6 +51,8 @@ export default function GlideSelect({
   ariaLabel = 'Select',
   className = '',
   menuAction = null,
+  closeSignal = 0,
+  onOpenChange = null,
 }) {
   const items = options.map(norm);
   const [inner, setInner] = useState(defaultValue ?? '');
@@ -118,6 +121,7 @@ export default function GlideSelect({
     instant.current = true;
     setActive(selected >= 0 ? selected : viaKey ? 0 : null);
     setPhase('open');
+    onOpenChange?.(true);
   };
   const close = (mode) => {
     setActive(null);
@@ -125,11 +129,13 @@ export default function GlideSelect({
     const menu = menuRef.current;
     if (mode === 'instant' || !menu) {
       setPhase('closed');
+      onOpenChange?.(false);
       return;
     }
     menu.style.transitionDuration = '';
     menu.dataset.state = 'closed';
     setPhase('closing');
+    onOpenChange?.(false);
     closeTimer.current = setTimeout(() => setPhase('closed'), popOut + 20);
   };
   const pick = (index, viaKey) => {
@@ -189,13 +195,21 @@ export default function GlideSelect({
     if (disabled && phase !== 'closed') close('instant');
   }, [disabled, phase]);
 
+  useEffect(() => {
+    if (!closeSignal) return;
+    setActive(null);
+    setPhase('closed');
+  }, [closeSignal]);
+
   useEffect(() => () => clearTimeout(closeTimer.current), []);
 
-  const rowAt = (y) => {
+  const rowAt = (event) => {
     const drag = scrub.current;
     if (!drag) return null;
-    const index = Math.floor((y - drag.top - PAD) / step);
-    return index >= 0 && index < items.length ? index : null;
+    const { top, bottom, left, right } = drag.list.getBoundingClientRect();
+    return glideRowAt({ x: event.clientX, y: event.clientY }, {
+      top, bottom, left, right, scrollTop: drag.list.scrollTop, step, count: items.length,
+    });
   };
   const onListDown = (event) => {
     if (scrub.current) return;
@@ -204,18 +218,18 @@ export default function GlideSelect({
     } catch {
       /* pointer capture is optional */
     }
-    scrub.current = { id: event.pointerId, top: event.currentTarget.getBoundingClientRect().top };
+    scrub.current = { id: event.pointerId, list: event.currentTarget };
     instant.current = true;
-    setActive(rowAt(event.clientY));
+    setActive(rowAt(event));
   };
   const onListMove = (event) => {
     if (!scrub.current || scrub.current.id !== event.pointerId) return;
-    const index = rowAt(event.clientY);
+    const index = rowAt(event);
     if (index !== active) setActive(index);
   };
   const onListUp = (event) => {
     if (!scrub.current || scrub.current.id !== event.pointerId) return;
-    const index = event.type === 'pointerup' ? rowAt(event.clientY) : null;
+    const index = event.type === 'pointerup' ? rowAt(event) : null;
     scrub.current = null;
     if (index !== null) pick(index, false);
     else if (!rememberPosition) setActive(null);

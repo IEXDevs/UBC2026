@@ -7,16 +7,31 @@ import { permissionInstruction } from '../../web/lib/spend-permission.mjs';
 import {
   GROK_VOICE_MODEL,
   OPENROUTER_CHAT_COMPLETIONS,
+  VOICE_FIRST_MESSAGE,
+  VOICE_PIPE_LINE,
+  VOICE_SPEAK_BEFORE_TOOLS,
   VOICE_SPEAK_PROMPT,
+  VOICE_TOOL_FILLER,
   VOICE_TOOLS,
+  ensureSpokenToolSse,
+  filterVoiceLlmTools,
   handleVoiceRequest,
   ownerPermissionNote,
   provisionVoiceAgent,
+  syncVoiceAgent,
+  voiceCustomLlmBase,
   voiceDecisionMessages,
 } from './voice.mjs';
 import { eventsUrl } from '../../web/lib/bot-experience.mjs';
 import { browserSessionUrl } from '../../web/lib/live-view.mjs';
 
+/**
+ * Achieves: permission note mirrors owner chip modes and ignores unknown modes.
+ * Fails when: unknown mode accepted or note mismatches chip.
+ * Oracle: note text per known mode; unknown ignored.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('voice permission note follows the owner chip and ignores unknown modes', () => {
   assert.match(ownerPermissionNote('ask'), /ask every time/);
   assert.match(ownerPermissionNote('review'), /review by AI/);
@@ -24,6 +39,34 @@ test('voice permission note follows the owner chip and ignores unknown modes', (
   assert.match(ownerPermissionNote('full'), /Do not ask whether they are going to buy, sell, spend, or pay/);
   assert.match(ownerPermissionNote('ask'), /buy, sell, spend, or pay/);
   assert.equal(ownerPermissionNote('sometimes'), '');
+});
+
+/**
+ * Achieves: tool-only SSE gets a spoken filler so ElevenLabs does not drop the call.
+ * Fails when: filler missing on tool-only streams, or spoken streams are rewritten.
+ * Oracle: ensureSpokenToolSse prepends VOICE_TOOL_FILLER only when content is absent.
+ * Side effects / state checked: pure string transform.
+ * Gaps: does not run a live ElevenLabs session.
+ */
+test('ensureSpokenToolSse prepends filler when the model returns tools only', () => {
+  const toolOnly = [
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_wallets","arguments":"{}"}}],"role":"assistant"},"finish_reason":null}]}',
+    'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+  const fixed = ensureSpokenToolSse(toolOnly);
+  assert.match(fixed, new RegExp(VOICE_TOOL_FILLER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.ok(fixed.indexOf(VOICE_TOOL_FILLER) < fixed.indexOf('tool_calls'));
+
+  const spoken = [
+    'data: {"choices":[{"delta":{"content":"Checking now.","role":"assistant"},"finish_reason":null}]}',
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_wallets","arguments":"{}"}}]},"finish_reason":null}]}',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+  assert.equal(ensureSpokenToolSse(spoken), spoken);
+  assert.match(VOICE_SPEAK_BEFORE_TOOLS, /speak one short sentence/i);
 });
 
 const SECRET = 'test-elevenlabs-webhook-secret';
@@ -34,7 +77,7 @@ const ORIGIN = 'https://runtime.example';
 function env(extra = {}) {
   return {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ELEVENLABS_WEBHOOK_SECRET: SECRET,
     BOT: {
       idFromName: name => name,
@@ -62,6 +105,13 @@ function toolRequest(name, { headers = {}, body = {} } = {}) {
   });
 }
 
+/**
+ * Achieves: ElevenLabs agent spec points at Muse Spark custom LLM without secrets.
+ * Fails when: secret values in spec or wrong LLM.
+ * Oracle: model/LLM fields; no secret substrings.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('the agent spec uses Muse Spark as the custom LLM and includes no secret values', async () => {
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/agent`), env({
     META_MODEL_API_KEY: 'LLM_test_secret_value_here',
@@ -76,203 +126,63 @@ test('the agent spec uses Muse Spark as the custom LLM and includes no secret va
   assert.equal(spec.llm.upstream, 'https://api.meta.ai/v1/chat/completions');
   assert.equal(spec.llm.streaming, true);
   assert.equal(spec.llm.apiKeyIncluded, false);
-  const prompt = spec.elevenlabs.conversation_config.agent.prompt;
+  const conversation = spec.elevenlabs.conversation_config;
+  assert.equal(conversation.agent.first_message, VOICE_FIRST_MESSAGE);
+  assert.equal(conversation.turn.silence_end_call_timeout, -1);
+  assert.deepEqual(conversation.agent.prompt.built_in_tools, { end_call: null });
+  const prompt = conversation.agent.prompt;
   assert.equal(prompt.llm, 'custom-llm');
   assert.equal(prompt.custom_llm.model_id, GROK_VOICE_MODEL);
   assert.equal(prompt.custom_llm.api_type, 'chat_completions');
-  assert.equal(prompt.custom_llm.url, `${ORIGIN}/voice/llm/chat/completions`);
+  assert.equal(prompt.custom_llm.url, voiceCustomLlmBase(ORIGIN));
   assert.equal(prompt.custom_llm.api_key, undefined);
-  assert.equal(prompt.tools.some(item => item.name === 'browser_live_view'), true);
-  assert.equal(prompt.tools.some(item => item.name === 'web_search'), true);
-  assert.equal(prompt.tools.some(item => item.name === 'get_price'), true);
+  assert.deepEqual(prompt.tools, []);
+  assert.deepEqual(spec.tools, []);
   assert.equal(prompt.prompt, VOICE_SPEAK_PROMPT);
+  assert.match(prompt.prompt, /Never end the call/);
+  assert.match(prompt.prompt, /do not call tools/);
   assert.doesNotMatch(prompt.prompt, /platform rules are locked/);
   assert.doesNotMatch(prompt.prompt, /request_spend/);
-  assert.equal(prompt.tools.some(item => item.name === 'browser_navigate'), true);
   const text = JSON.stringify(spec);
   assert.equal(text.includes(SECRET), false);
   assert.equal(text.includes(OPENROUTER), false);
   assert.equal(text.includes(ELEVEN), false);
-  assert.match(text, /Stopping all bots now/);
+  assert.equal(text.includes('/voice/tools/'), false);
 });
 
-test('get_price quotes DexScreener then Jupiter and does not authorize a transfer', async () => {
-  const mint = 'So11111111111111111111111111111111111111112';
-  const seen = [];
-  const response = await handleVoiceRequest(toolRequest('get_price', {
-    body: { tool_name: 'get_price', parameters: { mint } },
-  }), env({
-    JUPITER_API_KEY: 'jupiter-test-key',
-    fetch: async (url, options) => {
-      seen.push(String(url));
-      if (String(url).includes('jup.ag')) assert.equal(options.headers['x-api-key'], 'jupiter-test-key');
-      else assert.equal(options.headers['x-api-key'], undefined);
-      if (String(url).includes('dexscreener')) return Response.json([]);
-      return Response.json({ [mint]: { usdPrice: 2.25, liquidity: 3, blockId: 8 } });
-    },
-  }), { fetchApi: async () => { throw new Error('price tool must not call bot routes'); } });
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  assert.equal(body.result.tool, 'get_price');
-  assert.equal(body.result.quote.quoteSource, 'jupiter-price-v3');
-  assert.equal(body.result.quote.fallbackFrom, 'dexscreener');
-  assert.equal(body.result.quote.label, 'devnet execution, mainnet pricing');
-  assert.equal(body.result.quote.authorizesTransaction, false);
-  assert.equal(body.result.quote.executionCluster, 'devnet');
-  assert.equal(JSON.stringify(body).includes('jupiter-test-key'), false);
-  assert.equal(seen.length, 2);
-});
-
-test('webhook tools call the same routes as the bot page and Live View panel', async () => {
-  const seen = [];
-  const fetchApi = async request => {
-    seen.push({
-      method: request.method,
-      url: request.url,
-      owner: request.headers.get('x-owner-id'),
-      body: await request.text(),
-    });
-    return Response.json({
-      ok: true,
-      items: [],
-      viewerUrl: 'https://live.browser.run/ui/view?token=abc',
-      note: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.aaa.bbb',
-    });
+/**
+ * Achieves: webhook tools no longer call wallet, browser, or spend routes.
+ * Fails when: a tool posts to the worker or returns a tool result.
+ * Oracle: 410 voice_tools_retired; fetchApi is not called. Missing secret stays 503.
+ * Side effects: none.
+ * Gaps: the desk text agent covers those tools.
+ */
+test('voice webhook tools are retired and do not call worker routes', async () => {
+  let called = false;
+  const fetchApi = async () => {
+    called = true;
+    return Response.json({ ok: true });
   };
-  const activity = await handleVoiceRequest(toolRequest('get_activity', {
-    body: { tool_name: 'get_activity', parameters: { botId: 'bot_1' }, conversation_id: 'conv_1' },
-  }), env(), { fetchApi });
-  const activityBody = await activity.json();
-  const activityUrl = new URL(seen[0].url);
-  const expectedActivity = new URL(eventsUrl(ORIGIN, 'bot_1'));
-  assert.equal(activityUrl.pathname, expectedActivity.pathname);
-  assert.equal(activityUrl.searchParams.get('botId'), expectedActivity.searchParams.get('botId'));
-  assert.equal(seen[0].owner, 'user_1');
-  assert.equal(activityBody.result.conversationId, 'conv_1');
-  assert.equal(JSON.stringify(activityBody).includes('live.browser.run'), false);
-  assert.equal(JSON.stringify(activityBody).includes('eyJhbGci'), false);
+  const names = ['get_price', 'web_search', 'browser_live_view', 'request_spend', 'break_loop', 'list_bots'];
+  for (const name of names) {
+    const response = await handleVoiceRequest(toolRequest(name, {
+      body: { parameters: { mint: 'So11111111111111111111111111111111111111112', q: 'richclub.sol' } },
+    }), env(), { fetchApi });
+    assert.equal(response.status, 410);
+    assert.equal((await response.json()).error, 'voice_tools_retired');
+  }
+  assert.equal(called, false);
 
-  seen.length = 0;
-  await handleVoiceRequest(toolRequest('open_browser_session', {
-    body: { parameters: { botId: 'bot_1' } },
-  }), env(), { fetchApi });
-  const opened = new URL(seen[0].url);
-  assert.equal(opened.pathname, new URL(browserSessionUrl(ORIGIN, 'bot_1')).pathname);
-  assert.deepEqual(JSON.parse(seen[0].body), { purpose: 'browse' });
+  const missing = await handleVoiceRequest(toolRequest('list_bots', {
+    headers: { 'x-elevenlabs-webhook-secret': '' },
+  }), env({ ELEVENLABS_WEBHOOK_SECRET: '' }), { fetchApi });
+  assert.equal(missing.status, 503);
+  assert.equal((await missing.json()).error, 'elevenlabs_webhook_not_configured');
 
-  seen.length = 0;
-  await handleVoiceRequest(toolRequest('release_browser_session', {
-    body: { parameters: { botId: 'bot_1', sessionRecordId: 'rec_1' } },
-  }), env(), { fetchApi });
-  const released = new URL(seen[0].url);
-  const expectedRelease = new URL(browserSessionUrl(ORIGIN, 'bot_1', { sessionRecordId: 'rec_1', action: 'release' }));
-  assert.equal(released.pathname, expectedRelease.pathname);
-  assert.equal(expectedRelease.pathname.includes('live-view'), false);
-});
+  const unknown = await handleVoiceRequest(toolRequest('not_a_tool'), env(), { fetchApi });
+  assert.equal(unknown.status, 404);
+  assert.equal(called, false);
 
-test('what happened while away speaks stored timeline events and does not spend', async () => {
-  const seen = [];
-  const fetchApi = async request => {
-    seen.push({ method: request.method, url: request.url, owner: request.headers.get('x-owner-id') });
-    return Response.json({
-      ok: true,
-      source: 'supabase',
-      items: [
-        {
-          id: 'stream:sig1',
-          botId: 'bot_1',
-          ownerId: 'user_1',
-          kind: 'tx.confirmed',
-          summary: 'Stream deposit · AbCdEf12… https://live.browser.run/ui/view?token=abc',
-          at: '2026-11-15T12:00:00.000Z',
-        },
-        {
-          id: 'evt_old',
-          botId: 'bot_1',
-          kind: 'bot.paused',
-          summary: 'Paused earlier',
-          at: '2026-11-01T00:00:00.000Z',
-        },
-      ],
-    });
-  };
-  const response = await handleVoiceRequest(toolRequest('what_happened_while_away', {
-    body: {
-      parameters: { since: '2026-11-15T00:00:00.000Z' },
-      conversation_id: 'conv_away',
-    },
-  }), env(), { fetchApi });
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  const url = new URL(seen[0].url);
-  assert.equal(seen[0].method, 'GET');
-  assert.equal(url.pathname, '/api/events');
-  assert.equal(url.search, '');
-  assert.equal(seen[0].owner, 'user_1');
-  assert.equal(seen.length, 1);
-  assert.match(body.result.briefing.spoken, /from Streams/);
-  assert.match(body.result.briefing.spoken, /1 timeline event was stored/);
-  assert.equal(body.result.briefing.spends, false);
-  assert.equal(body.result.briefing.signs, false);
-  assert.equal(JSON.stringify(body).includes('live.browser.run'), false);
-  assert.equal(JSON.stringify(body).includes('/api/spend'), false);
-
-  const bad = await handleVoiceRequest(toolRequest('what_happened_while_away', {
-    body: { parameters: { since: 'yesterday' } },
-  }), env(), { fetchApi });
-  assert.equal(bad.status, 400);
-  assert.equal(seen.length, 1);
-});
-
-test('pause, loop, and stop_all go through the worker routes', async () => {
-  const paused = await worker.fetch(toolRequest('pause_bot', {
-    body: { tool_name: 'pause_bot', parameters: { botId: 'bot_1' } },
-  }), env());
-  const pauseBody = await paused.json();
-  assert.equal(paused.status, 200);
-  assert.equal(pauseBody.result.calls[0].path, '/bots/:botId/pause');
-  assert.equal(pauseBody.result.calls[0].body.forwarded, '/pause');
-  assert.equal(pauseBody.result.calls[0].body.owner, 'user_1');
-
-  const loop = await worker.fetch(toolRequest('start_task', {
-    body: { parameters: { botId: 'bot_1', goal: 'compare prices' } },
-  }), env());
-  const loopBody = await loop.json();
-  assert.equal(loopBody.result.calls[0].body.forwarded, '/loop');
-
-  const activity = await worker.fetch(toolRequest('get_activity', {
-    body: { parameters: { botId: 'bot_meteora' } },
-  }), env());
-  const activityBody = await activity.json();
-  assert.equal(activityBody.result.calls[0].body.source, 'unconfigured');
-  assert.deepEqual(activityBody.result.calls[0].body.items, []);
-
-  const stopped = await handleVoiceRequest(toolRequest('stop_all', { body: { parameters: {} } }), env(), {
-    fetchApi: async request => {
-      const url = new URL(request.url);
-      if (url.pathname === '/api/bots') {
-        return Response.json({
-          items: [{ id: 'bot_1' }, { id: 'bot_2' }, { id: '../etc' }],
-          viewerUrl: 'https://live.browser.run/ui/inspector',
-        });
-      }
-      return Response.json({ forwarded: url.pathname });
-    },
-  });
-  const stopBody = await stopped.json();
-  assert.deepEqual(stopBody.result.paused, [
-    { botId: 'bot_1', status: 200 },
-    { botId: 'bot_2', status: 200 },
-  ]);
-  assert.equal(JSON.stringify(stopBody).includes('live.browser.run'), false);
-});
-
-test('voice session-owner bind lets tools resolve owner without x-owner-id header', async () => {
-  const seen = [];
-  const fetchApi = async (request) => {
-    seen.push(request.headers.get('x-owner-id'));
-    return Response.json({ ok: true, source: 'supabase', items: [{ id: 'bot_1' }] });
-  };
   const bind = await handleVoiceRequest(new Request(`${ORIGIN}/voice/session-owner`, {
     method: 'POST',
     headers: {
@@ -282,55 +192,16 @@ test('voice session-owner bind lets tools resolve owner without x-owner-id heade
     body: JSON.stringify({ conversationId: 'conv_abc', ownerId: 'did:privy:owner1' }),
   }), env());
   assert.equal(bind.status, 200);
-
-  const listed = await handleVoiceRequest(toolRequest('list_bots', {
-    headers: { 'x-owner-id': '{{owner_id}}' },
-    body: { conversation_id: 'conv_abc', parameters: {} },
-  }), env(), { fetchApi });
-  assert.equal(listed.status, 200);
-  assert.equal(seen[0], 'did:privy:owner1');
-  const body = await listed.json();
-  assert.equal(body.result.calls[0].body.items[0].id, 'bot_1');
+  assert.equal((await bind.json()).ownerId, 'did:privy:owner1');
 });
 
-test('tool calls fail closed without a webhook secret, owner, or known tool', async () => {
-  let called = false;
-  const fetchApi = async () => {
-    called = true;
-    return Response.json({ ok: true });
-  };
-  const missing = await handleVoiceRequest(toolRequest('list_bots', {
-    headers: { 'x-elevenlabs-webhook-secret': '' },
-  }), env({ ELEVENLABS_WEBHOOK_SECRET: '' }), { fetchApi });
-  assert.equal(missing.status, 503);
-  assert.equal((await missing.json()).error, 'elevenlabs_webhook_not_configured');
-
-  const wrong = await worker.fetch(toolRequest('list_bots', {
-    headers: { authorization: 'Bearer wrong-secret-value', 'x-elevenlabs-webhook-secret': '' },
-  }), env());
-  assert.equal(wrong.status, 401);
-
-  const bearer = await worker.fetch(toolRequest('get_wallets', {
-    headers: { 'x-elevenlabs-webhook-secret': '', authorization: `Bearer ${SECRET}` },
-  }), env());
-  assert.equal(bearer.status, 200);
-  const walletsBody = await bearer.json();
-  assert.equal(walletsBody.result.calls[0].body.source, 'unconfigured');
-  assert.deepEqual(walletsBody.result.calls[0].body.items, []);
-
-  const owner = await worker.fetch(toolRequest('list_bots', { headers: { 'x-owner-id': '' } }), env());
-  assert.equal(owner.status, 400);
-  const mismatch = await worker.fetch(toolRequest('list_bots', {
-    body: { tool_name: 'pause_bot', parameters: {} },
-  }), env());
-  assert.equal(mismatch.status, 400);
-  const missingLive = await worker.fetch(toolRequest('browser_live_view', { body: { parameters: {} } }), env());
-  assert.equal(missingLive.status, 400);
-  assert.equal(called, false);
-  assert.equal(VOICE_TOOLS.some(item => item.calls.some(call => call.path.includes('live-view'))), true);
-  assert.equal(VOICE_TOOLS.some(item => item.name === 'web_search'), true);
-});
-
+/**
+ * Achieves: voice decide uses text-chat prompt and strips ElevenLabs policy text.
+ * Fails when: ElevenLabs policy retained or wrong prompt.
+ * Oracle: prompt contents assertions.
+ * Side effects / state checked: N/A.
+ * Gaps: none
+ */
 test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', () => {
   const text = buildTextChatMessages({
     botName: 'Nova',
@@ -357,12 +228,16 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
   });
   assert.equal(voice[0].role, text[0].role);
   assert.equal(voice[0].content, text[0].content);
-  assert.equal(voice[1].content, text[1].content);
+  assert.equal(voice[1].content.startsWith(text[1].content), true);
+  assert.match(voice[1].content, /When this call is handed to the agent/);
+  assert.match(voice[1].content, /Local time:/);
+  assert.match(voice[1].content, /Place is not set/);
+  assert.match(voice[1].content, /\/goal/);
   assert.match(voice[0].content, /You do not sign, broadcast, reserve budget, or approve spends/);
   assert.match(voice[1].content, /Nova/);
   assert.match(voice[1].content, /trading/);
   assert.match(voice[1].content, /Watch SOL/);
-  assert.match(voice[1].content, /Permission is full/);
+  assert.match(voice[1].content, /Permissions are fully granted/);
   assert.match(voice[1].content, /trust, verify, wallet freeze, bot policy, approval, then sign/);
   assert.equal(voice.some(item => String(item.content).includes('voice remote')), false);
   assert.equal(voice.some(item => String(item.content).includes('Use mainnet')), false);
@@ -370,13 +245,18 @@ test('voice decisions use the text-chat prompt and drop an ElevenLabs policy', (
   assert.equal(voice.at(-1).role, 'tool');
 });
 
-test('the custom LLM streams Grok through OpenRouter and does not call out without a key', async () => {
-  const calls = [];
-  const fetcher = async (url, init) => {
-    calls.push({ url, init, body: JSON.parse(init.body) });
-    return Response.json({
-      choices: [{ message: { content: `hello ${OPENROUTER}` } }],
-    });
+/**
+ * Achieves: the custom LLM speaks the pipe line and does not call a model or forward tools.
+ * Fails when: a model URL is fetched, or the SSE contains tool_calls.
+ * Oracle: spoken SSE is VOICE_PIPE_LINE; fetcher is not called. Doubled completions path still answers.
+ * Side effects: none.
+ * Gaps: does not open a live ElevenLabs session.
+ */
+test('the custom LLM only speaks and does not call a model', async () => {
+  let called = false;
+  const fetcher = async () => {
+    called = true;
+    return Response.json({ choices: [{ message: { content: 'nope' } }] });
   };
   const response = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
     method: 'POST',
@@ -386,63 +266,115 @@ test('the custom LLM streams Grok through OpenRouter and does not call out witho
     },
     body: JSON.stringify({
       model: 'gpt-4o',
-      messages: [{ role: 'user', content: `key ${OPENROUTER}` }, { role: 'assistant', content: 'ok' }],
+      messages: [{ role: 'user', content: 'what is the SOL price' }],
+      tools: [{ type: 'function', function: { name: 'get_price' } }],
     }),
-  }), env({ OPENROUTER_API_KEY: OPENROUTER, voiceFetcher: fetcher }));
+  }), env({
+    OPENROUTER_API_KEY: OPENROUTER,
+    META_MODEL_API_KEY: 'LLM_test_secret_value_here',
+    voiceFetcher: fetcher,
+  }));
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type'), /text\/event-stream/);
   const sse = await response.text();
   assert.match(sse, /data: \[DONE\]/);
+  assert.match(sse, new RegExp(VOICE_PIPE_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(sse.includes('tool_calls'), false);
   assert.equal(sse.includes(OPENROUTER), false);
-  assert.match(sse, /hello \[hidden\]/);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
-  assert.equal(calls[0].init.headers.Authorization, `Bearer ${OPENROUTER}`);
-  assert.equal(calls[0].body.model.endsWith(':free'), true);
-  assert.notEqual(calls[0].body.model, 'gpt-4o');
-  assert.notEqual(calls[0].body.model, 'meta/muse-spark-1.3-contributor');
-  assert.equal(calls[0].body.stream, true);
-  assert.equal(calls[0].body.messages[0].content.includes(OPENROUTER), false);
-  assert.match(calls[0].body.messages[0].content, /platform rules are locked/);
-  assert.match(calls[0].body.messages[1].content, /same tools on text and voice/);
-  assert.equal(calls[0].body.messages.some(item => /voice remote/.test(String(item.content))), false);
-  assert.equal(calls[0].body.tools.some(tool => tool.function.name === 'request_spend'), true);
-  assert.equal(calls[0].body.tools.some(tool => tool.function.name === 'web_search'), true);
+  assert.equal(called, false);
 
-  calls.length = 0;
-  const stream = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
+  const appended = await handleVoiceRequest(new Request(`${ORIGIN}/voice/llm/chat/completions/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
-    body: JSON.stringify({
-      ownerPermission: 'ask',
-      messages: [{ role: 'user', content: 'hi' }],
-    }),
-  }), env({ META_MODEL_API_KEY: 'LLM_test_secret_value_here', OPENROUTER_MODEL_VOICE: 'muse-spark-1.3' }), {
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'check my wallets' }] }),
+  }), env(), { fetcher });
+  assert.equal(appended.status, 200);
+  assert.match(await appended.text(), new RegExp(VOICE_PIPE_LINE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(called, false);
+});
+
+/**
+ * Achieves: provision no-ops without ElevenLabs API key.
+ * Fails when: network called without key.
+ * Oracle: no fetch; benign result.
+ * Side effects / state checked: fetch guard.
+ * Gaps: none
+ */
+test('syncVoiceAgent writes custom LLM URL and webhook secret into the agent', async () => {
+  const calls = [];
+  const result = await syncVoiceAgent({
+    env: {
+      ELEVENLABS_API_KEY: ELEVEN,
+      ELEVENLABS_AGENT_ID: 'agent_live',
+      ELEVENLABS_WEBHOOK_SECRET: SECRET,
+    },
+    origin: ORIGIN,
     fetcher: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) });
-      return new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
-        headers: { 'content-type': 'text/event-stream' },
-      });
+      calls.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : null });
+      if (String(url).endsWith('/secrets') && init.method === 'GET') {
+        return Response.json({ secrets: [] });
+      }
+      if (String(url).endsWith('/secrets') && init.method === 'POST') {
+        return Response.json({ secret_id: 'sec_1' });
+      }
+      if (String(url).includes('/agents/agent_live')) {
+        return Response.json({ agent_id: 'agent_live' });
+      }
+      return new Response('nope', { status: 404 });
     },
   });
-  assert.equal(await stream.text(), 'data: {"ok":true}\n\ndata: [DONE]\n\n');
-  assert.equal(calls[0].url, 'https://api.meta.ai/v1/chat/completions');
-  assert.equal(calls[0].body.messages[0].role, 'developer');
-  assert.match(calls[0].body.messages[0].content, /platform rules are locked/);
-  assert.match(calls[0].body.messages[0].content, /You do not sign, broadcast, reserve budget, or approve spends/);
-  assert.match(calls[0].body.messages[1].content, /Permission is ask every time/);
-  assert.match(calls[0].body.messages[1].content, /trust, verify, wallet freeze, bot policy, approval, then sign/);
-  assert.equal(calls[0].body.messages.some(item => /voice remote/.test(String(item.content))), false);
-  assert.equal(calls[0].body.model, 'muse-spark-1.3');
+  assert.equal(result.ok, true);
+  assert.equal(result.agentId, 'agent_live');
+  assert.equal(result.secretId, 'sec_1');
+  assert.equal(result.customLlmUrl, voiceCustomLlmBase(ORIGIN));
+  const patch = calls.find((call) => call.method === 'PATCH' && String(call.url).includes('/agents/'));
+  assert.equal(patch.body.platform_settings.overrides.custom_llm_extra_body, true);
+  assert.equal(patch.body.conversation_config.agent.first_message, VOICE_FIRST_MESSAGE);
+  assert.equal(patch.body.conversation_config.turn.silence_end_call_timeout, -1);
+  assert.deepEqual(patch.body.conversation_config.agent.prompt.built_in_tools, { end_call: null });
+  assert.equal(patch.body.conversation_config.agent.prompt.custom_llm.url, voiceCustomLlmBase(ORIGIN));
+  assert.deepEqual(patch.body.conversation_config.agent.prompt.custom_llm.api_key, { secret_id: 'sec_1' });
+  assert.deepEqual(
+    patch.body.conversation_config.agent.prompt.custom_llm.request_headers['x-elevenlabs-webhook-secret'],
+    { secret_id: 'sec_1' },
+  );
 
-  const blocked = await worker.fetch(new Request(`${ORIGIN}/voice/llm/chat/completions`, {
+  assert.equal(filterVoiceLlmTools(null), null);
+  assert.equal(filterVoiceLlmTools([{ type: 'function', function: { name: 'end_call' } }]), null);
+  assert.deepEqual(
+    filterVoiceLlmTools([
+      { type: 'function', function: { name: 'end_call' } },
+      { type: 'function', function: { name: 'get_wallets' } },
+    ]),
+    [{ type: 'function', function: { name: 'get_wallets' } }],
+  );
+
+  const denied = await handleVoiceRequest(new Request(`${ORIGIN}/voice/agent/sync`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-elevenlabs-webhook-secret': SECRET },
-    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
   }), env());
-  assert.equal(blocked.status, 503);
-  assert.equal((await blocked.json()).error, 'openrouter_not_configured');
-  assert.equal(calls.length, 1);
+  assert.equal(denied.status, 401);
+
+  const viaApiKey = await handleVoiceRequest(new Request(`${ORIGIN}/voice/agent/sync`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${ELEVEN}` },
+  }), env({
+    ELEVENLABS_API_KEY: ELEVEN,
+    ELEVENLABS_AGENT_ID: 'agent_live',
+    ELEVENLABS_WEBHOOK_SECRET: SECRET,
+  }), {
+    fetcher: async (url, init) => {
+      if (String(url).endsWith('/secrets') && init.method === 'GET') {
+        return Response.json({ secrets: [{ name: 'ELEVENLABS_WEBHOOK_SECRET', secret_id: 'sec_1' }] });
+      }
+      if (String(url).includes('/secrets/sec_1') && init.method === 'PATCH') {
+        return Response.json({ secret_id: 'sec_1' });
+      }
+      if (String(url).includes('/agents/agent_live')) return Response.json({ agent_id: 'agent_live' });
+      return new Response('nope', { status: 404 });
+    },
+  });
+  assert.equal(viaApiKey.status, 200);
+  assert.equal((await viaApiKey.json()).ok, true);
 });
 
 test('provisioning the ElevenLabs agent does nothing without a key', async () => {
@@ -477,3 +409,4 @@ test('provisioning the ElevenLabs agent does nothing without a key', async () =>
   assert.equal(JSON.stringify(outbound.body).includes(OPENROUTER), false);
   assert.equal(outbound.body.conversation_config.agent.prompt.llm, 'custom-llm');
 });
+

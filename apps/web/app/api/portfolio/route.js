@@ -1,8 +1,12 @@
 export const runtime = 'nodejs';
 
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { choosePortfolioRpc, loadPortfolio, PortfolioError } from '../../../lib/portfolio.mjs';
+import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
+import { verifyPrivyAccessToken } from '../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
+import { cloudflareWorkerEnv } from '../../../lib/wallets-cloudflare.mjs';
 import { missingWalletSecrets, resolvePrivyAppId, walletsFromPrivyUser } from '../../../lib/wallet-provision.mjs';
 
 function requestOrigin(request) {
@@ -15,15 +19,36 @@ function requestOrigin(request) {
   return 'http://localhost:3000';
 }
 
-function rootEnv() {
+function secretFrom(cfEnv, name) {
+  const fromCf = typeof cfEnv?.[name] === 'string' ? cfEnv[name].trim() : '';
+  if (fromCf) return fromCf;
+  return readRootEnv(name);
+}
+
+async function portfolioEnv() {
+  const cfEnv = await cloudflareWorkerEnv();
   return {
-    PRIVY_APP_ID: readRootEnv('PRIVY_APP_ID'),
-    PRIVY_APP_SECRET: readRootEnv('PRIVY_APP_SECRET'),
-    PRIVY_AUTHORIZATION_KEY: readRootEnv('PRIVY_AUTHORIZATION_KEY'),
-    NEXT_PUBLIC_PRIVY_APP_ID: readRootEnv('NEXT_PUBLIC_PRIVY_APP_ID'),
-    QUICKNODE_DEVNET_RPC_URL: readRootEnv('QUICKNODE_DEVNET_RPC_URL'),
-    QUICKNODE_MAINNET_RPC_URL: readRootEnv('QUICKNODE_MAINNET_RPC_URL'),
+    onCloudflareWorker: Boolean(cfEnv),
+    env: {
+      PRIVY_APP_ID: secretFrom(cfEnv, 'PRIVY_APP_ID'),
+      PRIVY_APP_SECRET: secretFrom(cfEnv, 'PRIVY_APP_SECRET'),
+      PRIVY_AUTHORIZATION_KEY: secretFrom(cfEnv, 'PRIVY_AUTHORIZATION_KEY'),
+      NEXT_PUBLIC_PRIVY_APP_ID: secretFrom(cfEnv, 'NEXT_PUBLIC_PRIVY_APP_ID'),
+      SOLANA_RPC_URL: secretFrom(cfEnv, 'SOLANA_RPC_URL'),
+      QUICKNODE_MAINNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_MAINNET_RPC_URL'),
+    },
   };
+}
+
+function safePortfolioDetail(error) {
+  const message = typeof error?.message === 'string' ? error.message.replace(/[\r\n]+/g, ' ').trim() : '';
+  if (!message) return '';
+  const clipped = message
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .replace(/(Bearer\s+)\S+/gi, '$1[redacted]')
+    .slice(0, 160);
+  if (/secret|api[_-]?key|quicknode|authorization/i.test(clipped)) return '';
+  return clipped;
 }
 
 function walletErrorCode(error) {
@@ -36,13 +61,12 @@ function walletErrorCode(error) {
 }
 
 export async function GET(request) {
-  const header = request.headers.get('authorization') ?? '';
-  const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const accessToken = accessTokenFromRequest(request);
   if (!accessToken) {
     return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
 
-  const env = rootEnv();
+  const { env, onCloudflareWorker } = await portfolioEnv();
   const missingPrivy = missingWalletSecrets(env);
   if (missingPrivy.length > 0) {
     return Response.json(
@@ -50,7 +74,8 @@ export async function GET(request) {
       { status: 503, headers: { 'Cache-Control': 'no-store' } },
     );
   }
-  const rpc = choosePortfolioRpc(env);
+  const requestedCluster = new URL(request.url).searchParams.get('cluster') || '';
+  const rpc = choosePortfolioRpc(env, requestedCluster);
   if (!rpc.rpcUrl) {
     return Response.json(
       { error: 'missing_config', missing: rpc.missing },
@@ -58,33 +83,53 @@ export async function GET(request) {
     );
   }
 
+  const appId = resolvePrivyAppId(env);
+  let ownerId;
+  try {
+    ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
+  } catch {
+    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
+  const ownerHeader = request.headers.get('x-owner-id');
+  if (ownerHeader !== null && ownerHeader !== ownerId) {
+    return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+  }
   try {
     const client = createPrivyWalletClient({
-      appId: resolvePrivyAppId(env),
+      appId,
       appSecret: env.PRIVY_APP_SECRET,
       rpcUrl: null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
+      // Workers cannot set Origin on /users/me. Identity comes from the JWT sub.
+      allowUsersMeFallback: !onCloudflareWorker,
     });
-    const ownerHeader = request.headers.get('x-owner-id');
     const user = await client.readLoginUser({
       accessToken,
-      origin: requestOrigin(request),
-      ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
+      origin: onCloudflareWorker ? undefined : requestOrigin(request),
+      ownerId,
     });
-    const ownerId = typeof user?.id === 'string' && user.id.trim()
-      ? user.id.trim()
-      : (typeof ownerHeader === 'string' ? ownerHeader.trim() : '');
     const wallets = walletsFromPrivyUser(user, ownerId);
     // DexScreener prices are read in the browser so the limit applies to the visitor IP.
     const portfolio = await loadPortfolio({
       wallets,
       rpcUrl: rpc.rpcUrl,
+      // Public HTTPS only. A service-binding fetch turns QuickNode into a Worker 404.
+      fetcher: globalThis.fetch.bind(globalThis),
     });
+    if (requestedCluster === SOLANA_CLUSTER && portfolio.cluster !== (SOLANA_CLUSTER === 'mainnet-beta' ? 'mainnet' : SOLANA_CLUSTER)) throw new PortfolioError('unsupported_cluster');
     return Response.json(portfolio, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = error instanceof PortfolioError ? error.code : walletErrorCode(error);
-    const status = code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin' ? 503 : 502;
+    const status = code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin'
+      ? 503
+      : code === 'login_required' || code === 'owner_mismatch'
+        ? 401
+        : 502;
+    const detail = safePortfolioDetail(error);
     console.error('[api/portfolio]', code);
-    return Response.json({ error: code }, { status, headers: { 'Cache-Control': 'no-store' } });
+    return Response.json(
+      detail ? { error: code, detail } : { error: code },
+      { status, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 }

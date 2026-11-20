@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Shopping bot helpers (Isaac / chunk 6B).
  * Sandbox catalog → proposal → approval → settle 402 buy.
@@ -5,7 +6,7 @@
  */
 import {
   createSandboxStoreClient,
-  DEVNET_USDC_MINT,
+  SOLANA_USDC_MINT,
   MAINNET_USDC_MINT,
   NETWORKS,
   buildPaymentSignature,
@@ -90,7 +91,7 @@ export function buildShoppingProposal({
   maxFee = '0',
   expiresInMs = 120_000,
   now = Date.now(),
-  cluster = 'devnet',
+  cluster = SOLANA_CLUSTER,
 }) {
   if (!bot?.id) fail('Bot is required');
   if (!item?.id || !item?.price) fail('Catalog item is required');
@@ -99,7 +100,7 @@ export function buildShoppingProposal({
     id: `prop_${bot.id}_${item.id}`,
     botId: bot.id,
     cluster,
-    asset: bot.cap?.asset === 'USDC' ? 'USDC' : (bot.cap?.asset ?? DEVNET_USDC_MINT),
+    asset: bot.cap?.asset === 'USDC' ? 'USDC' : (bot.cap?.asset ?? SOLANA_USDC_MINT),
     recipient,
     quoteId,
     outflow: String(item.price),
@@ -148,7 +149,7 @@ export async function prepareSandboxPurchase({
 
 /**
  * After owner approval + bot-policy reserve, settle the sandbox 402 with a PAYMENT-SIGNATURE.
- * `signPayment` must return a Solana tx signature string (Privy/devnet transfer outside this package).
+ * `signPayment` must return a Solana tx signature string (Privy/mainnet-beta transfer outside this package).
  */
 export async function settleSandboxPurchase({
   bot,
@@ -164,13 +165,13 @@ export async function settleSandboxPurchase({
   if (!bot?.id) fail('Bot is required');
   if (!itemId) fail('itemId is required');
   if (!accepted || accepted.scheme !== 'exact') fail('Accepted sandbox payment terms are required');
-  if (accepted.network && accepted.network !== NETWORKS.devnet) fail('Sandbox settlement must stay on Solana devnet');
+  if (accepted.network && accepted.network !== NETWORKS.solana) fail('Sandbox settlement must stay on Solana mainnet-beta');
   if (typeof signPayment !== 'function') fail('signPayment is required');
 
   const signature = await signPayment({
     amount: String(accepted.amount),
     payTo: accepted.payTo,
-    asset: accepted.asset || DEVNET_USDC_MINT,
+    asset: accepted.asset || SOLANA_USDC_MINT,
     memo: `maelstrom:shop:${itemId}`,
   });
   if (typeof signature !== 'string' || !signature) fail('Payment signature is required');
@@ -187,7 +188,7 @@ export async function settleSandboxPurchase({
       botId: bot.id,
       recipient: accepted.payTo,
       amount: String(accepted.amount),
-      asset: accepted.asset || DEVNET_USDC_MINT,
+      asset: accepted.asset || SOLANA_USDC_MINT,
       resourceUrl: `sandbox:buy:${itemId}`,
       transaction: signature,
       status: 'paid',
@@ -221,10 +222,12 @@ export async function prepareLasoTinyCardPurchase({
 } = {}) {
   if (!bot?.id) fail('Bot is required');
   const usd = Number(amountUsd);
-  if (!Number.isFinite(usd) || usd < 5 || usd > 1000) fail('Laso card amount must be $5–$1000');
+  const units = Math.round(usd * 1_000_000);
+  if (!['number', 'string'].includes(typeof amountUsd) || !Number.isFinite(usd) || usd < 5 || usd > 1000
+      || Math.abs(units / 1_000_000 - usd) > Number.EPSILON * usd) fail('Laso card amount must be $5–$1000 with at most 6 decimals');
 
   const url = new URL('/get-card', baseUrl);
-  url.searchParams.set('amount', String(Math.floor(usd)));
+  url.searchParams.set('amount', String(usd));
 
   let response;
   try {
@@ -245,25 +248,35 @@ export async function prepareLasoTinyCardPurchase({
     ?? response.headers.get('payment-required');
   const body = await response.json().catch(() => null);
   const decoded = decodePaymentRequiredHeader(header) || body;
-  const accepts = decoded?.accepts || decoded?.body?.accepts || [];
-  const solana = accepts.find((a) => String(a.network || '').includes('solana') || a.network === NETWORKS.mainnet)
-    || accepts[0];
-  if (!solana) fail('Laso 402 missing payment accepts');
+  const accepts = decoded?.accepts;
+  const validPubkey = value => {
+    const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    if (typeof value !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value)) return false;
+    let n = 0n;
+    for (const c of value) n = n * 58n + BigInt(alphabet.indexOf(c));
+    const bytes = n === 0n ? 0 : Math.ceil(n.toString(16).length / 2);
+    return bytes + (value.match(/^1*/)?.[0].length ?? 0) === 32;
+  };
+  const solana = Array.isArray(accepts) && accepts.find(a => a?.scheme === 'exact'
+    && a.network === NETWORKS.mainnet && a.asset === MAINNET_USDC_MINT && a.amount === String(units)
+    && validPubkey(a.payTo) && validPubkey(a.extra?.feePayer)
+    && Number.isSafeInteger(a.maxTimeoutSeconds) && a.maxTimeoutSeconds > 0
+    && a.extra?.memo == null);
+  if (decoded?.x402Version !== 2 || !solana) fail('Laso 402 has no supported exact mainnet USDC payment terms');
 
-  const outflow = String(solana.amount ?? Math.floor(usd * 1_000_000));
-  const recipient = solana.payTo || solana.pay_to;
-  if (!recipient) fail('Laso 402 missing payTo');
+  const outflow = solana.amount;
+  const recipient = solana.payTo;
 
   const proposal = {
-    id: `prop_${bot.id}_laso_${Math.floor(usd)}`,
+    id: `prop_${bot.id}_laso_${units}`,
     botId: bot.id,
     cluster: 'mainnet-read',
     asset: 'USDC',
     recipient,
-    quoteId: `laso:get-card:${Math.floor(usd)}`,
+    quoteId: `laso:get-card:${usd}`,
     outflow,
     expectedReceive: '1',
-    expectedReceiveAsset: `laso:card:${Math.floor(usd)}`,
+    expectedReceiveAsset: `laso:card:${usd}`,
     maxFee: '0',
     expiresAt: now + 120_000,
     network: NETWORKS.mainnet,
@@ -298,11 +311,12 @@ export async function prepareLasoTinyCardPurchase({
 
   return {
     provider: 'laso',
-    amountUsd: Math.floor(usd),
+    amountUsd: usd,
+    resource: { url: url.href, description: 'Laso USA prepaid card', mimeType: 'application/json' },
     proposal,
     digest: proposalDigest({
       ...proposal,
-      cluster: 'devnet',
+      cluster: SOLANA_CLUSTER,
       expectedReceiveAsset: proposal.expectedReceiveAsset,
     }),
     policy,

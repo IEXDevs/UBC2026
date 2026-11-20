@@ -4,8 +4,10 @@
   "main": "src/index.mjs",
   "workers_dev": true,
   "preview_urls": false,
+  "observability": { "enabled": true },
   "compatibility_date": "2026-11-13",
   "compatibility_flags": ["nodejs_compat"],
+  "browser": { "binding": "BROWSER" },
   "durable_objects": {
     "bindings": [
       { "name": "BOT", "class_name": "BotDurableObject" }
@@ -19,7 +21,7 @@
     "crons": ["0 * * * *", "5,20,35,50 * * * *"]
   },
   "vars": {
-    "CLUSTER": "devnet",
+    "SOLANA_CLUSTER": "mainnet-beta",
     "PRODUCT": "Maelstrom"
   },
   "routes": [
@@ -28,6 +30,12 @@
       "custom_domain": true
     }
   ],
+  // Workspace package: resolve even when node_modules/@ubc2026/agent-tools
+  // is missing (fresh pull before npm install). Same pattern Cloudflare
+  // recommends for monorepo bundling issues.
+  "alias": {
+    "@ubc2026/agent-tools": "../../packages/agent-tools/catalog.mjs"
+  },
   // Optional Streams dedupe cache when Supabase stream_events is unavailable.
   // Create the namespace once: wrangler kv namespace create STREAM_DEDUPE
   // "kv_namespaces": [{ "binding": "STREAM_DEDUPE", "id": "<namespace-id>" }]
@@ -35,7 +43,8 @@
   // PRIVY_APP_ID, PRIVY_APP_SECRET, PRIVY_AUTHORIZATION_KEY (optional),
   // SUPABASE_URL, SUPABASE_ANON_KEY,
   // SUPABASE_SERVICE_ROLE_KEY, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN,
-  // META_MODEL_API_KEY, OPENROUTER_API_KEY, FIRECRAWL_API_KEY, QUICKNODE_DEVNET_RPC_URL,
+  // META_MODEL_API_KEY, OPENROUTER_API_KEY, FIRECRAWL_API_KEY,
+  // SOLANA_RPC_URL (or QUICKNODE_MAINNET_RPC_URL on mainnet),
   // QUICKNODE_WEBHOOK_SECRET, QUICKNODE_API_KEY, QUICKNODE_WALLET_LIST_KEY,
   // ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID, ELEVENLABS_WEBHOOK_SECRET
 }

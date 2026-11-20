@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { parsePermissionedSpendBody } from '@ubc2026/contracts';
+import { createChatToolInvoker } from './chat-tools.mjs';
+import { stampSpendPermission } from './harness-run.mjs';
+import { toolAccessRequest } from './spend-permission.mjs';
 import {
   META_SPARK_MODEL,
   OPENROUTER_FREE_MODEL,
@@ -13,6 +17,579 @@ import {
 const META_KEY = 'LLM_1607358788850350_testsecretvalue';
 const OR_KEY = 'sk-or-v1-test-openrouter-key-value';
 
+function streamedCompletion(deltas, finish = 'stop') {
+  const frames = deltas.map(delta => ({ choices: [{ index: 0, delta }] }));
+  frames.push({ choices: [{ index: 0, delta: {}, finish_reason: finish }] });
+  const text = frames.map(frame => `data: ${JSON.stringify(frame)}\r\n\r\n`).join('') + 'data: [DONE]\r\n\r\n';
+  const bytes = new TextEncoder().encode(text);
+  return new Response(new ReadableStream({ start(controller) {
+    for (let offset = 0; offset < bytes.length; offset += 7) controller.enqueue(bytes.slice(offset, offset + 7));
+    controller.close();
+  } }), { headers: { 'content-type': 'text/event-stream' } });
+}
+
+test('reply deltas arrive before completion and full reply verification', async () => {
+  let input;
+  let firstDelta;
+  const received = new Promise(resolve => { firstDelta = resolve; });
+  const events = [];
+  let verified = false;
+  const job = completeTextChat({
+    modelApiKey: META_KEY, message: 'hello',
+    onReplyEvent: event => { events.push(event); firstDelta(); },
+    onMessage: text => { assert.equal(verified, true); events.push({ message: text }); },
+    fetcher: async (_url, options) => {
+      assert.equal(JSON.parse(options.body).stream, true);
+      if (isTurnVerify(options)) { verified = true; return turnAllowed(); }
+      return new Response(new ReadableStream({ start(controller) { input = controller; } }), { headers: { 'content-type': 'text/event-stream' } });
+    },
+  });
+  const send = payload => input.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
+  send({ choices: [{ delta: { content: 'Hello from the agent. ' } }] });
+  await received;
+  assert.equal(verified, false);
+  assert.deepEqual(events, [{ type: 'reply_delta', text: 'Hello from the agent. ' }]);
+  send({ choices: [{ delta: { content: 'Welcome!' }, finish_reason: 'stop' }] });
+  input.close();
+  assert.equal((await job).text, 'Hello from the agent. Welcome!');
+  assert.equal(events.at(-1).message, 'Hello from the agent. Welcome!');
+});
+
+test('a tool delta retracts its preamble and a fund proposal disables all later deltas', async () => {
+  const order = [];
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'send it', permissionMode: 'full',
+    tools: [{ type: 'function', function: { name: 'request_spend' } }],
+    onReplyEvent: event => order.push(event.type),
+    onMessage: text => order.push(`publish:${text}`),
+    invokeTool: async name => { order.push(`invoke:${name}`); return { ok: false }; },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        order.push(JSON.parse(options.body).messages[0].content.includes('Kind: tool') ? 'verify:tool' : 'verify:reply');
+        return turnAllowed();
+      }
+      if (++round === 1) return streamedCompletion([
+        { content: 'I will check the requested transfer. ' },
+        { tool_calls: [{ index: 0, id: 'c1', function: { name: 'request_', arguments: '' } }], content: 'Not for speech.' },
+        { tool_calls: [{ index: 0, function: { name: 'spend', arguments: '{"amount":"1","handle":"bob"}' } }] },
+      ], 'tool_calls');
+      return streamedCompletion([{ content: 'The transfer was not executed.' }]);
+    },
+  });
+  assert.deepEqual(order, ['reply_delta', 'reply_retract', 'verify:tool', 'invoke:request_spend', 'verify:reply', 'publish:The transfer was not executed.']);
+  assert.equal(result.text, 'The transfer was not executed.');
+});
+
+test('non-fund tools retract the preamble but the next round can stream', async () => {
+  const events = [];
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'look up the rate',
+    tools: [{ type: 'function', function: { name: 'web_search' } }],
+    invokeTool: async () => ({ items: [] }), onReplyEvent: event => events.push(event),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      if (++round === 1) return streamedCompletion([
+        { content: 'Looking up the current rate. ' },
+        { tool_calls: [{ index: 0, id: 'c1', function: { name: 'web_search', arguments: '{"query":"rate"}' } }] },
+      ], 'tool_calls');
+      return streamedCompletion([{ content: 'No rate was found.' }]);
+    },
+  });
+  assert.equal(result.text, 'No rate was found.');
+  assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract', 'reply_delta']);
+  assert.equal(events.at(-1).text, result.text);
+});
+
+test('a streamed fund proposal cannot execute before approval from the existing tool verifier', async () => {
+  const events = [];
+  let checked = false;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'send', permissionMode: 'full',
+    tools: [{ type: 'function', function: { name: 'request_spend' } }],
+    onReplyEvent: event => events.push(event),
+    invokeTool: async () => assert.fail('rejected spend must not execute'),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        checked = true;
+        assert.match(JSON.parse(options.body).messages[0].content, /Kind: tool/);
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      return streamedCompletion([
+        { tool_calls: [{ index: 0, id: 'c1', function: { name: 'request_spend', arguments: '{"amount":"1","handle":"bob"}' } }] },
+        { content: 'Do not speak this tool preamble.' },
+      ], 'tool_calls');
+    },
+  });
+  assert.equal(checked, true);
+  assert.equal(result.hold.name, 'request_spend');
+  assert.deepEqual(events, [{ type: 'reply_retract' }]);
+});
+
+test('reply rejection retracts streamed speech before publishing the existing failure', async () => {
+  const order = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'hello',
+    onReplyEvent: event => order.push(event.type), onMessage: text => order.push(text),
+    fetcher: async (_url, options) => isTurnVerify(options)
+      ? Response.json({ choices: [{ message: { content: '{"allow":false}' } }] })
+      : streamedCompletion([{ content: 'An answer that is not allowed.' }]),
+  });
+  assert.deepEqual(order, ['reply_delta', 'reply_retract', 'That step did not pass the check.']);
+  assert.equal(result.text, 'That step did not pass the check.');
+});
+
+test('JSON-only providers and explicitly unsupported streaming retain the non-stream path', async () => {
+  const requested = [];
+  const events = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'hello', onReplyEvent: event => events.push(event),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      const body = JSON.parse(options.body);
+      requested.push(body.stream);
+      return body.stream
+        ? Response.json({ error: { message: 'Streaming is not supported' } }, { status: 400 })
+        : Response.json({ choices: [{ message: { content: 'Hello.' } }] });
+    },
+  });
+  assert.equal(result.text, 'Hello.');
+  assert.deepEqual(requested, [true, false]);
+  assert.deepEqual(events, []);
+});
+
+test('streaming strips thinking and redacts a key split across provider chunks', async () => {
+  const events = [];
+  await completeTextChat({
+    modelApiKey: META_KEY, message: 'hello', onReplyEvent: event => events.push(event),
+    fetcher: async (_url, options) => isTurnVerify(options) ? turnAllowed() : streamedCompletion([
+      { content: '<thi' }, { content: 'nk>private thought' }, { content: '</think>Hello. ' },
+      { content: META_KEY.slice(0, 12) }, { content: `${META_KEY.slice(12)} End.` },
+    ]),
+  });
+  const speech = events.filter(event => event.type === 'reply_delta').map(event => event.text).join('');
+  assert.equal(speech.includes('private thought'), false);
+  assert.equal(speech.includes(META_KEY), false);
+  assert.match(speech, /Hello/);
+});
+
+test('broken and empty provider streams fail closed and retract provisional speech', async () => {
+  for (const content of ['', 'data: {"choices":[{"delta":{"content":"Partial reply."}}]}\n\n']) {
+    const events = [];
+    await assert.rejects(completeTextChat({
+      modelApiKey: META_KEY, message: 'hello', onReplyEvent: event => events.push(event),
+      fetcher: async () => new Response(content, { headers: { 'content-type': 'text/event-stream' } }),
+    }), error => error.code === 'openrouter_invalid_response');
+    if (content) assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract']);
+  }
+});
+
+test('fund proposals from a delegated turn disable outer reply deltas too', async () => {
+  const turnState = { fundProposed: false };
+  const events = [];
+  await completeTextChat({
+    modelApiKey: META_KEY, message: 'send', turnState,
+    tools: [{ type: 'function', function: { name: 'request_spend' } }], invokeTool: async () => { assert.fail('approval required'); },
+    fetcher: async () => streamedCompletion([{ tool_calls: [{ index: 0, id: 'c1', function: { name: 'request_spend', arguments: '{"amount":"1"}' } }] }], 'tool_calls'),
+  });
+  assert.equal(turnState.fundProposed, true);
+  let verified = false;
+  await completeTextChat({
+    modelApiKey: META_KEY, message: 'report', turnState, onReplyEvent: event => events.push(event),
+    onMessage: () => assert.equal(verified, true),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) { verified = true; return turnAllowed(); }
+      return streamedCompletion([{ content: 'Approval is still required.' }]);
+    },
+  });
+  assert.deepEqual(events, []);
+});
+
+function isTurnVerify(options) {
+  try {
+    return JSON.stringify(JSON.parse(options.body).messages || []).includes('Role: turn-verify');
+  } catch {
+    return false;
+  }
+}
+
+function turnAllowed() {
+  return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
+}
+
+test('browser and research replies bypass final verification for successful, empty and failed results', async () => {
+  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+    for (const result of [{ ok: true }, { items: [] }, { error: 'provider_unavailable' }]) {
+      let round = 0;
+      let verified = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'Check example.com',
+        tools: [{ type: 'function', function: { name, parameters: { type: 'object' } } }],
+        invokeTool: async () => result,
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) { verified++; return Response.json({}, { status: 503 }); }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'browse', type: 'function', function: { name, arguments: '{"url":"https://example.com"}' },
+          }] } }] });
+          return streamedCompletion([{ content: 'Here is what the service returned.' }]);
+        },
+      });
+      assert.equal(verified, 0, name);
+      assert.equal(reply.text, 'Here is what the service returned.');
+    }
+  }
+});
+
+test('a completed spend keeps its authoritative receipt when final verification refuses or fails', async () => {
+  const signature = '5'.repeat(64);
+  const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
+  for (const verdict of ['refuse', 'http', 'network']) {
+    for (const result of [
+      { signed: true, signature, cluster: 'mainnet-beta' },
+      JSON.stringify({ signature, cluster: 'mainnet-beta' }),
+      { signed: true, signature, cluster: 'mainnet-beta', card: { card_id: 'card_1', usd_amount: 1, status: 'pending' } },
+    ]) {
+      const messages = [];
+      let round = 0;
+      let verified = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'send 1 USDC', permissionMode: 'ask',
+        grants: [toolAccessRequest('ask', 'request_spend', args)],
+        tools: [{ type: 'function', function: { name: 'request_spend', parameters: { type: 'object' } } }],
+        invokeTool: async () => result, onMessage: text => messages.push(text),
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) {
+            assert.match(JSON.parse(options.body).messages[0].content, /Kind: reply/);
+            verified++;
+            if (verdict === 'network') throw new Error('offline verifier');
+            return verdict === 'http' ? Response.json({}, { status: 503 })
+              : Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+          }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'spend', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify(args) },
+          }] } }] });
+          return Response.json({ choices: [{ message: { content: 'An unverified summary of the payment.' } }] });
+        },
+      });
+      assert.equal(verified, 1);
+      assert.equal(reply.text, `${typeof result === 'object' && result.card ? 'Laso card card_1: $1, pending.' : 'Sent.'} https://solscan.io/tx/${signature}`);
+      assert.deepEqual(messages, [reply.text]);
+      assert.deepEqual(reply.messages, messages);
+    }
+  }
+});
+
+test('only successful non-spend turns retain replies during verifier outages; explicit refusals still block mutations', async () => {
+  for (const verdict of ['allow', 'refuse', 'outage']) {
+    for (const result of [{ ok: true }, JSON.stringify({ status: 'paused' }), {}, null, { error: 'pause_failed' }, { ok: false }, { success: false }]) {
+      let round = 0;
+      let verified = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'pause the agent',
+        tools: [{ type: 'function', function: { name: 'pause_bot', parameters: { type: 'object' } } }],
+        invokeTool: async () => result,
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) {
+            verified++;
+            return verdict === 'outage' ? Response.json({}, { status: 503 })
+              : Response.json({ choices: [{ message: { content: JSON.stringify({ allow: verdict === 'allow' }) } }] });
+          }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'pause', type: 'function', function: { name: 'pause_bot', arguments: '{}' },
+          }] } }] });
+          return Response.json({ choices: [{ message: { content: 'The pause request finished.' } }] });
+        },
+      });
+      const succeeded = typeof result === 'string' || result?.ok === true;
+      assert.equal(verified, 1);
+      assert.equal(reply.text, verdict === 'allow' || (verdict === 'outage' && succeeded)
+        ? 'The pause request finished.' : 'That step did not pass the check.');
+    }
+  }
+});
+
+test('spends without receipts still verify replies and pre-action verifier outages still require approval', async () => {
+  const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
+  for (const approved of [false, true]) {
+    for (const result of [{ ok: true }, {}, { error: 'simulation_failed' }, { signed: false, signature: '5'.repeat(64), cluster: 'mainnet-beta' }]) {
+      let round = 0;
+      let invoked = 0;
+      const verified = [];
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'send 1 USDC', permissionMode: 'full',
+        grants: approved ? [toolAccessRequest('ask', 'request_spend', args)] : [],
+        tools: [{ type: 'function', function: { name: 'request_spend', parameters: { type: 'object' } } }],
+        invokeTool: async () => { invoked++; return result; },
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) {
+            verified.push(JSON.parse(options.body).messages[0].content.match(/Kind: (\w+)/)[1]);
+            return Response.json({}, { status: 503 });
+          }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'spend', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify(args) },
+          }] } }] });
+          return Response.json({ choices: [{ message: { content: 'The payment is complete.' } }] });
+        },
+      });
+      assert.equal(invoked, approved ? 1 : 0);
+      assert.deepEqual(verified, approved ? ['reply'] : ['tool']);
+      if (approved) assert.equal(reply.text, 'That step did not pass the check.');
+      else assert.equal(reply.hold.name, 'request_spend');
+    }
+  }
+});
+
+test('current-bot defaults produce bound holds and approved sends do not re-ask when either turn omits botId', async () => {
+  const botId = 'bot_current';
+  const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
+  for (const grantHasBot of [false, true]) {
+    for (const callHasBot of [false, true]) {
+      for (const outcome of ['success', 'error', 'unapproved']) {
+        const grant = toolAccessRequest('ask', 'request_spend', { ...args, ...(grantHasBot ? { botId } : {}) });
+        const grants = outcome === 'unapproved' ? [] : [grant];
+        let modelCalls = 0;
+        let backendCalls = 0;
+        const invoke = createChatToolInvoker({
+          ownerId: 'owner_1', botId, runtimeBase: 'https://runtime.invalid',
+          fetcher: async (url, init) => {
+            backendCalls++;
+            assert.equal(String(url), 'https://runtime.invalid/api/spend');
+            const body = JSON.parse(init.body);
+            assert.deepEqual(body, { ...args, botId, confirmed: true, permission: 'ask', reviewCap: '30000000' });
+            return Response.json(outcome === 'error'
+              ? { error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' }
+              : { signed: true, cluster: 'mainnet-beta', signature: '5'.repeat(64) });
+          },
+        });
+        const reply = await completeTextChat({
+          modelApiKey: META_KEY, botId, message: 'yes', permissionMode: 'ask', grants,
+          tools: [{ type: 'function', function: { name: 'request_spend', parameters: { type: 'object' } } }],
+          invokeTool: (name, inputs) => invoke(name, stampSpendPermission(name, inputs, { botId, permissionMode: 'ask', confirmSpend: true, grants })),
+          fetcher: async (_url, options) => {
+            if (isTurnVerify(options)) return turnAllowed();
+            if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+              id: 'send', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify({ ...args, ...(callHasBot ? { botId } : {}) }) },
+            }] } }] });
+            return Response.json({ choices: [{ message: { content: 'The spend request finished.' } }] });
+          },
+        });
+        if (outcome === 'unapproved') {
+          assert.deepEqual(reply.hold.args, { ...args, botId });
+          assert.equal(backendCalls, 0);
+          assert.equal(modelCalls, 1);
+        } else {
+          assert.equal(reply.hold, undefined);
+          assert.equal(backendCalls, 1);
+          assert.equal(modelCalls, 2);
+        }
+      }
+    }
+  }
+});
+
+test('a failed streamed follow-up retracts its preview before publishing the sanitized tool error', async () => {
+  const events = [];
+  let round = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: 'Find alice',
+    tools: [{ type: 'function', function: { name: 'lookup_recipient', parameters: { type: 'object' } } }],
+    invokeTool: async () => ({ error: 'recipient_not_found' }),
+    onReplyEvent: event => events.push(event.type),
+    onMessage: text => events.push(text),
+    fetcher: async () => {
+      if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+        id: 'lookup', type: 'function', function: { name: 'lookup_recipient', arguments: '{"q":"alice"}' },
+      }] } }] });
+      return new Response('data: {"choices":[{"delta":{"content":"An incomplete answer."}}]}\n\ndata: {"error":{"message":"private provider details"}}\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    },
+  });
+  assert.deepEqual(events.slice(-3), ['reply_delta', 'reply_retract', 'The recipient lookup failed (recipient not found). Please check the request and try again.']);
+  assert.equal(reply.text, events.at(-1));
+});
+
+test('tool errors remain owner-visible when follow-up model calls fail, without raw error details', async () => {
+  for (const failure of ['http', 'network', 'invalid_json']) {
+    for (const result of [
+      { error: 'recipient_not_found', detail: `secret ${META_KEY}` },
+      JSON.stringify({ error: 'recipient_not_found', hint: 'https://live.browser.run/ui/view?token=private' }),
+      { error: `private ${META_KEY}`, hint: 'raw provider credentials' },
+      { ok: false, detail: 'private provider message' },
+    ]) {
+      let calls = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'Find the recipient',
+        tools: [{ type: 'function', function: { name: 'lookup_recipient', parameters: { type: 'object' } } }],
+        invokeTool: async () => result,
+        fetcher: async (_url, options) => {
+          assert.equal(isTurnVerify(options), false);
+          if (++calls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'lookup', type: 'function', function: { name: 'lookup_recipient', arguments: '{"q":"alice"}' },
+          }] } }] });
+          if (failure === 'network') throw new Error('private network error');
+          if (failure === 'invalid_json') return new Response('not json');
+          return Response.json({ error: { message: 'private model error' } }, { status: 503 });
+        },
+      });
+      const known = typeof result === 'string' || result.error === 'recipient_not_found';
+      assert.equal(reply.text, `The recipient lookup failed${known ? ' (recipient not found)' : ''}. Please check the request and try again.`);
+      assert.deepEqual(reply.messages, [reply.text]);
+      assert.equal(reply.hold, undefined);
+      assert.equal(calls, 2);
+    }
+  }
+});
+
+test('multiple failed tools survive a follow-up outage without claiming that a successful tool failed', async () => {
+  const names = ['browser_navigate', 'get_price', 'get_wallets'];
+  let calls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: 'Check the page and my prices',
+    tools: names.map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+    invokeTool: async name => {
+      if (name === 'get_wallets') return { ok: true, items: [] };
+      if (name === 'get_price') throw new Error('private provider details');
+      return { error: 'browser_session_missing', viewerUrl: 'private viewer URL' };
+    },
+    fetcher: async (_url, options) => {
+      assert.equal(isTurnVerify(options), false);
+      if (++calls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: names.map(name => ({
+        id: name, type: 'function', function: { name, arguments: '{"url":"https://example.com"}' },
+      })) } }] });
+      return Response.json({}, { status: 503 });
+    },
+  });
+  assert.equal(reply.text, 'The browser navigation failed (no open browser session). Please check the request and try again. The price lookup failed. Please check the request and try again.');
+  assert.deepEqual(reply.messages, [reply.text]);
+  assert.equal(calls, 2);
+});
+
+test('model failures without a tool error still propagate and successful follow-ups still summarize errors', async () => {
+  for (const result of [{ ok: true }, {}, { error: 'recipient_not_found' }]) {
+    for (const modelFails of [false, true]) {
+      let calls = 0;
+      const request = completeTextChat({
+        modelApiKey: META_KEY, message: 'Find the recipient',
+        tools: [{ type: 'function', function: { name: 'lookup_recipient', parameters: { type: 'object' } } }],
+        invokeTool: async () => result,
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) return turnAllowed();
+          if (++calls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'lookup', type: 'function', function: { name: 'lookup_recipient', arguments: '{"q":"alice"}' },
+          }] } }] });
+          if (modelFails) return Response.json({}, { status: 503 });
+          return Response.json({ choices: [{ message: { content: 'Here is the lookup result.' } }] });
+        },
+      });
+      if (modelFails && !result.error) await assert.rejects(request, { code: 'openrouter_failed' });
+      else {
+        const reply = await request;
+        assert.equal(reply.text, modelFails ? 'The recipient lookup failed (recipient not found). Please check the request and try again.' : 'Here is the lookup result.');
+      }
+    }
+  }
+});
+
+test('Laso browser and research restrictions follow the current request or an unexpired pending hold, not past chat', async () => {
+  const pending = {
+    name: 'request_spend', kind: 'modal', args: { action: 'x402', lasoTicket: 'offline-ticket' },
+    proof: 'a'.repeat(64), expiresAt: Date.now() + 60_000,
+  };
+  const cases = [
+    { message: 'Open example.com', blocked: false },
+    { message: 'Search the web for weather', blocked: false },
+    { message: 'Get me a Laso card for 10 USDC', blocked: true },
+    { message: 'Complete this x402 purchase', blocked: true },
+    { message: 'yes', grants: [pending], blocked: true },
+    { message: 'yes', grants: [{ ...pending, expiresAt: 1 }], blocked: false },
+    { message: 'yes', grants: [{ ...pending, proof: '' }], blocked: false },
+    { message: 'yes', grants: [{ ...pending, args: { action: 'swap' } }], blocked: false },
+    { message: 'yes', blocked: false },
+  ];
+  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+    for (const scenario of cases) {
+      let modelCalls = 0;
+      const invoked = [];
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: scenario.message, grants: scenario.grants ?? [],
+        history: [{ role: 'assistant', text: 'Your Laso x402 purchase was cancelled.' }],
+        tools: [{ type: 'function', function: { name, parameters: { type: 'object' } } }],
+        invokeTool: async tool => { invoked.push(tool); return { ok: true }; },
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) return turnAllowed();
+          const body = JSON.parse(options.body);
+          if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'browse', type: 'function', function: { name, arguments: JSON.stringify({ url: 'https://example.com', query: 'weather', sessionRecordId: 'session_1' }) },
+          }] } }] });
+          const result = JSON.parse(body.messages.findLast(item => item.role === 'tool').content);
+          assert.equal(result.error, scenario.blocked ? 'use_api' : undefined, `${name}: ${scenario.message}`);
+          return Response.json({ choices: [{ message: { content: scenario.blocked ? 'The purchase stays on the API.' : 'The requested tool completed.' } }] });
+        },
+      });
+      assert.deepEqual(invoked, scenario.blocked ? [] : [name], `${name}: ${scenario.message}`);
+      assert.equal(reply.hold, undefined);
+      assert.equal(modelCalls, 2);
+    }
+  }
+});
+
+test('every assistant tool call gets a result, including calls beyond the execution limit and tool failures', async () => {
+  for (const count of [0, 1, 4, 6]) {
+    for (const failTool of [false, true]) {
+      const calls = Array.from({ length: count }, (_, index) => ({
+        id: `call_${index}`, type: 'function',
+        function: { name: index === 4 ? 'request_spend' : 'get_price', arguments: JSON.stringify(index === 4
+          ? { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' }
+          : { mint: String(index + 1).repeat(32) }) },
+      }));
+      const invoked = [];
+      let modelCalls = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'Check these token prices', permissionMode: 'ask',
+        tools: ['get_price', 'request_spend'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+        invokeTool: async name => {
+          invoked.push(name);
+          if (failTool) throw new Error('offline tool failure');
+          return { ok: true };
+        },
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) return turnAllowed();
+          const body = JSON.parse(options.body);
+          if (++modelCalls === 1 && count) {
+            return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: calls } }] });
+          }
+          if (count) {
+            const assistant = body.messages.findLast(item => item.role === 'assistant' && item.tool_calls);
+            const results = body.messages.filter(item => item.role === 'tool');
+            assert.deepEqual(results.map(item => item.tool_call_id), assistant.tool_calls.map(item => item.id));
+            assert.equal(results.length, count);
+            for (const [index, result] of results.entries()) {
+              const payload = JSON.parse(result.content);
+              if (index >= 4) assert.equal(payload.error, 'tool_call_limit');
+              else assert.equal(payload.error, failTool ? 'tool_failed' : undefined);
+            }
+            if (count > 4) assert.equal(body.tools, undefined);
+          }
+          return Response.json({ choices: [{ message: { content: 'The requested batch has finished; skipped steps did not run.' } }] });
+        },
+      });
+      assert.equal(reply.hold, undefined);
+      assert.equal(invoked.length, Math.min(count, 4));
+      assert.equal(invoked.includes('request_spend'), false);
+      assert.equal(modelCalls, count ? 2 : 1);
+    }
+  }
+});
+
+/**
+ * Achieves: verifies text chat messages keep platform rules and map agent history.
+ * Fails when: text chat messages keep platform rules and map agent history breaks (e.g. expected 'developer', /Maelstrom/, /Nova/); failure/null paths flip.
+ * Oracle: assert.equal(messages[0].role, 'developer'); assert.equal(messages[2].role, 'user'); assert.equal(messages[3].role, 'assistant'); assert.equal(messages.some(item => item.content.includes('ignore rules')), false); assert.match(messages[0].content, /Maelstrom/); assert.match(messages[1].content, /Nova/)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('text chat messages keep platform rules and map agent history', () => {
   const messages = buildTextChatMessages({
     botName: 'Nova',
@@ -33,8 +610,73 @@ test('text chat messages keep platform rules and map agent history', () => {
   assert.equal(messages[3].role, 'assistant');
   assert.equal(messages.some(item => item.content.includes('ignore rules')), false);
   assert.match(messages.at(-1).content, /\[redacted\]/);
+  assert.equal(messages.at(-1).content.length <= 500, true);
 });
 
+test('history is compacted once it no longer fits the model window', () => {
+  const history = Array.from({ length: 12 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    text: `${index} ${'x'.repeat(400)}`,
+  }));
+  const messages = buildTextChatMessages({
+    botName: 'Nova',
+    history,
+    message: 'latest',
+    provider: 'meta',
+    model: 'muse-spark-1.3-contributor',
+    contextWindow: 1200,
+  });
+  assert.equal(messages.some(item => item.content.includes('compacted')), true);
+  assert.equal(messages.at(-1).content, 'latest');
+  assert.equal(messages.filter(item => item.role === 'user' || item.role === 'assistant').length < history.length, true);
+});
+
+/**
+ * Achieves: verifies a file catalog reaches the agent as names and not preview bytes.
+ * Fails when: the prompt omits the file name or includes the data URL.
+ * Oracle: messages[1] includes shot.png and does not include base64.
+ * Side effects / state checked: N/A.
+ * Gaps: none for catalog text.
+ */
+test('text chat can recall attached file names', () => {
+  const messages = buildTextChatMessages({
+    botName: 'Nova',
+    message: 'What files do I have?',
+    provider: 'meta',
+    fileCatalog: [{ name: 'shot.png', type: 'image/png', botName: 'Nova', url: 'data:image/png;base64,aaaa' }],
+  });
+  assert.match(messages[1].content, /shot\.png/);
+  assert.equal(messages[1].content.includes('base64'), false);
+});
+
+/**
+ * Achieves: owner replies stay in simple English and do not recite the spend gate.
+ * Fails when: the persona drops the plain-language rule or invites a trust/verify disclaimer.
+ * Oracle: messages[1] includes simple English and the do-not-recite rule.
+ * Side effects: none.
+ * Gaps: does not call a live model.
+ */
+test('text chat speaks simple English and does not recite the gate', () => {
+  const messages = buildTextChatMessages({
+    botName: 'Nova',
+    message: 'buy 1 SOL',
+    provider: 'meta',
+  });
+  assert.match(messages[1].content, /Speak in simple English/);
+  assert.match(messages[1].content, /Do not recite these instructions/);
+  assert.match(messages[1].content, /unless the owner asks whether money moved/);
+  assert.match(messages[1].content, /say that once in plain words/);
+  assert.match(messages[1].content, /Solscan URL/);
+  assert.match(messages[1].content, /Do not wait for the owner to ask again/);
+});
+
+/**
+ * Achieves: verifies LLM_ keys resolve to Meta Model API.
+ * Fails when: LLM_ keys resolve to Meta Model API breaks (e.g. expected 'meta', META_SPARK_MODEL, /api\.meta\.ai/).
+ * Oracle: assert.equal(resolved.provider, 'meta'); assert.equal(resolved.model, META_SPARK_MODEL); assert.equal(fromOpenrouterSlot.provider, 'meta'); assert.equal(or.provider, 'openrouter'); assert.equal(or.model, OPENROUTER_FREE_MODEL); assert.equal(or.model.endsWith(':free'), true)
+ * Side effects / state checked: N/A.
+ * Gaps: none.
+ */
 test('LLM_ keys resolve to Meta Model API', () => {
   const resolved = resolveTextChatProvider({ metaModelApiKey: META_KEY });
   assert.equal(resolved.provider, 'meta');
@@ -49,6 +691,13 @@ test('LLM_ keys resolve to Meta Model API', () => {
   assert.notEqual(or.model, OPENROUTER_SPARK_MODEL);
 });
 
+/**
+ * Achieves: verifies completeTextChat hits Meta and never puts the key in the body.
+ * Fails when: completeTextChat hits Meta and never puts the key in the body breaks (e.g. expected 'watching', undefined, 'meta'); failure/null paths flip.
+ * Oracle: assert.equal(result.text, 'watching'); assert.equal(result.usage, undefined); assert.equal(result.provider, 'meta'); assert.equal(result.model, META_SPARK_MODEL); assert.equal(seen.body.model, META_SPARK_MODEL); assert.equal(seen.body.reasoning_effort, 'high')
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('completeTextChat hits Meta and never puts the key in the body', async () => {
   let seen;
   const result = await completeTextChat({
@@ -56,6 +705,7 @@ test('completeTextChat hits Meta and never puts the key in the body', async () =
     botName: 'Nova',
     message: 'status?',
     fetcher: async (url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       seen = { url, body: JSON.parse(options.body) };
       return Response.json({ choices: [{ message: { content: 'watching' } }] });
     },
@@ -73,6 +723,7 @@ test('completeTextChat hits Meta and never puts the key in the body', async () =
     message: 'status?',
     reasoningEffort: 'Low',
     fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       low = JSON.parse(options.body);
       return Response.json({ choices: [{ message: { content: 'watching' } }] });
     },
@@ -81,18 +732,35 @@ test('completeTextChat hits Meta and never puts the key in the body', async () =
   assert.equal(JSON.stringify(seen.body).includes(META_KEY), false);
 });
 
+/**
+ * Achieves: verifies completeTextChat keeps the provider token total.
+ * Fails when: structured result drifts from expected shape.
+ * Oracle: assert.deepEqual(result.usage, { prompt: 11, completion: 4, total: 15 })
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('completeTextChat keeps the provider token total', async () => {
   const result = await completeTextChat({
     metaModelApiKey: META_KEY,
     message: 'status?',
-    fetcher: async () => Response.json({
-      usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
-      choices: [{ message: { content: 'watching' } }],
-    }),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      return Response.json({
+        usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 },
+        choices: [{ message: { content: 'watching' } }],
+      });
+    },
   });
   assert.deepEqual(result.usage, { prompt: 11, completion: 4, total: 15 });
 });
 
+/**
+ * Achieves: verifies OpenRouter text chat skips a paid model id.
+ * Fails when: OpenRouter text chat skips a paid model id breaks (e.g. expected OPENROUTER_FREE_MODEL, OPENROUTER_FREE_MODEL, true).
+ * Oracle: assert.equal(result.model, OPENROUTER_FREE_MODEL); assert.equal(seen.model, OPENROUTER_FREE_MODEL); assert.equal(seen.model.endsWith(':free'), true)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('OpenRouter text chat skips a paid model id', async () => {
   let seen;
   const result = await completeTextChat({
@@ -100,6 +768,7 @@ test('OpenRouter text chat skips a paid model id', async () => {
     model: 'openai/gpt-4o',
     message: 'status?',
     fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       seen = JSON.parse(options.body);
       return Response.json({ choices: [{ message: { content: 'free reply' } }] });
     },
@@ -109,6 +778,13 @@ test('OpenRouter text chat skips a paid model id', async () => {
   assert.equal(seen.model.endsWith(':free'), true);
 });
 
+/**
+ * Achieves: verifies missing model key does not call the network.
+ * Fails when: missing model key does not call the network no longer holds.
+ * Oracle: assert.rejects( () => completeTextChat({ message: 'hi', fetcher: () => { throw new Error('network'); }, })
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('missing model key does not call the network', async () => {
   await assert.rejects(
     () => completeTextChat({
@@ -119,6 +795,13 @@ test('missing model key does not call the network', async () => {
   );
 });
 
+/**
+ * Achieves: verifies completeTextChat runs a tool round then answers.
+ * Fails when: completeTextChat runs a tool round then answers breaks (e.g. expected /Use web_search/, 'USDC looks stable.', 1).
+ * Oracle: assert.equal(result.text, 'USDC looks stable.'); assert.equal(result.toolRounds, 1); assert.equal(result.activity[0].kind, 'search'); assert.equal(result.activity[0].sites[0].host, 'example.com'); assert.equal(result.activity[1].kind, 'think'); assert.deepEqual(seen, [{ name: 'web_search', args: { query: 'USDC rates' } }])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
 test('completeTextChat runs a tool round then answers', async () => {
   let round = 0;
   const seen = [];
@@ -139,6 +822,7 @@ test('completeTextChat runs a tool round then answers', async () => {
       return { results: [{ title: 'USDC', url: 'https://example.com' }] };
     },
     fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
       const body = JSON.parse(options.body);
       round += 1;
       if (round === 1) {
@@ -177,4 +861,574 @@ test('completeTextChat runs a tool round then answers', async () => {
   assert.equal(result.activity[0].sites[0].host, 'example.com');
   assert.equal(result.activity[1].kind, 'think');
   assert.match(result.activity[1].text, /published rate/);
+});
+
+/**
+ * Achieves: verifies a repeated tool and a blocked browser stop the spin and still answer.
+ * Fails when: a repeated tool and a blocked browser stop the spin and still answer breaks (e.g. expected undefined, ['web_search'], 'Rates are on example.com. X blocks this browser.').
+ * Oracle: assert.equal(body.tools, undefined); assert.equal(result.text, 'Rates are on example.com. X blocks this browser.'); assert.equal(result.activity.some(step => step.label === 'Skipped a blocked site'), true); assert.deepEqual(seen, ['web_search'])
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
+test('a Laso card turn shows the API result and does not open a browser', async () => {
+  const seen = [];
+  const heard = [];
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'use x402 to get the laso card',
+    permissionMode: 'full',
+    onMessage: (text) => heard.push(text),
+    tools: [{
+      type: 'function',
+      function: { name: 'prepare_shopping', description: 'Prepare', parameters: { type: 'object' } },
+    }, {
+      type: 'function',
+      function: { name: 'browser_open', description: 'Open', parameters: { type: 'object', properties: { url: { type: 'string' } } } },
+    }],
+    invokeTool: async (name) => {
+      seen.push(name);
+      return {
+        provider: 'laso',
+        amountUsd: 5,
+        next: 'await-owner-mainnet-approval',
+        proposal: { outflow: '5000000', recipient: '3MZVk97x9SeRxbYpc3jhzRfU2fyA3emYutnqfn9kNfYX' },
+        claimUrl: 'https://laso.finance/claim/card-1',
+      };
+    },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      const body = JSON.parse(options.body);
+      round += 1;
+      if (round === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [
+                { id: 'c1', type: 'function', function: { name: 'prepare_shopping', arguments: '{"provider":"laso"}' } },
+                { id: 'c2', type: 'function', function: { name: 'browser_open', arguments: '{"url":"https://laso.finance/get-card"}' } },
+              ],
+            },
+          }],
+        });
+      }
+      assert.equal(body.tools, undefined);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: 'The API returned the claim link.' } }],
+      });
+    },
+  });
+  assert.deepEqual(seen, ['prepare_shopping']);
+  assert.match(heard.join('\n'), /https:\/\/laso\.finance\/claim\/card-1/);
+  assert.match(result.messages.join('\n'), /claim\/card-1/);
+  assert.equal(result.activity.some(step => step.label === 'Laso API' && step.output.includes('claim/card-1')), true);
+});
+
+test('a repeated tool and a blocked browser stop the spin and still answer', async () => {
+  const seen = [];
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'open x and search it again',
+    tools: [{
+      type: 'function',
+      function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: { query: { type: 'string' } } } },
+    }, {
+      type: 'function',
+      function: { name: 'browser_open', description: 'Open', parameters: { type: 'object', properties: { url: { type: 'string' } } } },
+    }],
+    invokeTool: async (name, args) => {
+      seen.push(name);
+      return name === 'web_search' ? { results: [{ title: 'Note', url: 'https://example.com' }] } : { ok: true };
+    },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      const body = JSON.parse(options.body);
+      round += 1;
+      if (round === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [
+                { id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{"query":"rates"}' } },
+                { id: 'c2', type: 'function', function: { name: 'web_search', arguments: '{"query":"rates"}' } },
+                { id: 'c3', type: 'function', function: { name: 'browser_open', arguments: '{"url":"https://x.com/explore"}' } },
+              ],
+            },
+          }],
+        });
+      }
+      assert.equal(body.tools, undefined);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: 'Rates are on example.com. X blocks this browser.' } }],
+      });
+    },
+  });
+  assert.deepEqual(seen, ['web_search']);
+  assert.equal(result.text, 'Rates are on example.com. X blocks this browser.');
+  assert.equal(result.activity.some(step => step.label === 'Skipped a blocked site'), true);
+});
+
+/**
+ * Achieves: verifies an empty tool finish still returns an answer instead of stopping.
+ * Fails when: an empty tool finish still returns an answer instead of stopping breaks (e.g. expected /published rate/, /stopped so this request would not keep spinning|Answer the ).
+ * Oracle: assert.match(result.activity.find(step => step.kind === 'think')?.text || '', /published rate/); assert.match(result.text, /stopped so this request would not keep spinning|Answer the owner/)
+ * Side effects / state checked: fetch/test-double request shapes and responses.
+ * Gaps: none.
+ */
+test('an empty tool finish still returns an answer instead of stopping', async () => {
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'what is the rate',
+    tools: [{
+      type: 'function',
+      function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: {} } },
+    }],
+    invokeTool: async () => ({ results: [] }),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      round += 1;
+      if (round === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: '<think>Check the published rate.</think>',
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{}' } }],
+            },
+          }],
+        });
+      }
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content: '' } }] });
+    },
+  });
+  assert.match(result.activity.find(step => step.kind === 'think')?.text || '', /published rate/);
+  assert.match(result.text, /stopped so this request would not keep spinning|Answer the owner/);
+});
+
+test('the hidden verifier asks to confirm a spend instead of blocking it', async () => {
+  const seen = [];
+  let calls = 0;
+  const verifyRoles = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send funds',
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object', properties: {} } },
+    }],
+    invokeTool: async (name) => {
+      seen.push(name);
+      return { results: [] };
+    },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        const body = JSON.parse(options.body);
+        verifyRoles.push(...body.messages.map(item => item.role));
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      calls += 1;
+      if (calls === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1000000","handle":"bob"}' } }],
+            },
+          }],
+        });
+      }
+      return Response.json({ choices: [{ message: { content: 'should not ship' } }] });
+    },
+  });
+  assert.deepEqual(seen, []);
+  assert.equal(result.hold.kind, 'modal');
+  assert.equal(result.hold.name, 'request_spend');
+  assert.match(result.hold.prompt, /Slide to confirm/);
+  assert.ok(verifyRoles.includes('developer'));
+  assert.ok(verifyRoles.includes('user'));
+});
+
+test('verifier API failures fail closed instead of failing the chat', async () => {
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'hello',
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        return Response.json({ error: { message: '`messages` must contain at least one message with role `user` or `tool`' } }, { status: 400 });
+      }
+      return Response.json({ choices: [{ message: { content: 'Hello from the agent.' } }] });
+    },
+  });
+  assert.equal(result.text, 'That step did not pass the check.');
+});
+
+test('read-only fleet and wallet replies do not pass through the spend-step verifier', async () => {
+  for (const wallets of [{ holdings: [{ asset: 'USDC', amount: '5000000' }] }, { holdings: [] }, { error: 'balances_unavailable' }]) {
+    const seen = [];
+    let modelCalls = 0;
+    let verifierCalls = 0;
+    const reply = await completeTextChat({
+      modelApiKey: META_KEY, message: 'ill send you more USDC',
+      tools: ['list_bots', 'get_wallets'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+      fetcher: async (_url, options) => {
+        if (isTurnVerify(options)) {
+          verifierCalls++;
+          return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+        }
+        if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: ['list_bots', 'get_wallets'].map(name => ({
+          id: name, type: 'function', function: { name, arguments: '{}' },
+        })) } }] });
+        return Response.json({ choices: [{ message: { content: 'I checked your wallet. Send more USDC when you are ready.' } }] });
+      },
+      invokeTool: async name => { seen.push(name); return name === 'get_wallets' ? wallets : { bots: [] }; },
+    });
+    assert.deepEqual(seen, ['list_bots', 'get_wallets']);
+    assert.equal(reply.text, 'I checked your wallet. Send more USDC when you are ready.');
+    assert.equal(verifierCalls, 0);
+    assert.equal(modelCalls, 2);
+  }
+});
+
+test('reading wallets first does not bypass the verifier or confirmation for a subsequent spend', async () => {
+  const seen = [];
+  let verifierCalls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: 'check my wallet then send 1 USDC', permissionMode: 'full', reviewCap: '10000000',
+    tools: ['get_wallets', 'request_spend'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        verifierCalls++;
+        assert.match(JSON.parse(options.body).messages[0].content, /Kind: tool/);
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [
+        { id: 'wallet', type: 'function', function: { name: 'get_wallets', arguments: '{}' } },
+        { id: 'spend', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify({ action: 'spend', asset: 'USDC', amount: '1000000', destination: '11111111111111111111111111111111' }) } },
+      ] } }] });
+    },
+    invokeTool: async name => { seen.push(name); return { holdings: [] }; },
+  });
+  assert.deepEqual(seen, ['get_wallets']);
+  assert.equal(verifierCalls, 1);
+  assert.equal(reply.hold.name, 'request_spend');
+  assert.equal(reply.hold.kind, 'modal');
+});
+
+test('a mutating tool after a read-only lookup keeps final reply verification', async () => {
+  let modelCalls = 0;
+  let verifierCalls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: 'list then pause my bot',
+    tools: ['list_bots', 'pause_bot'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        verifierCalls++;
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: ['list_bots', 'pause_bot'].map(name => ({
+        id: name, type: 'function', function: { name, arguments: '{"botId":"bot_1"}' },
+      })) } }] });
+      return Response.json({ choices: [{ message: { content: 'The bot is paused.' } }] });
+    },
+    invokeTool: async () => ({ ok: true }),
+  });
+  assert.equal(verifierCalls, 1);
+  assert.equal(reply.text, 'That step did not pass the check.');
+});
+
+test('an approved spend is not cancelled when the turn verifier refuses it', async () => {
+  const seen = [];
+  const verifierChecks = [];
+  const toolCalls = [
+    ['web_search', { query: 'SOL price' }],
+    ['lookup_recipient', { q: '@hi' }],
+    ['lookup_recipient', { q: '@hi', amount: '1000000000' }],
+    ['request_spend', { amount: '1000000000', asset: 'SOL', handle: 'hi' }],
+  ];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'Pay 1 SOL to @hi',
+    permissionMode: 'ask',
+    grants: [toolAccessRequest('ask', ...toolCalls[3])],
+    tools: [...new Set(toolCalls.map(([name]) => name))].map(name => ({
+      type: 'function', function: { name, parameters: { type: 'object' } },
+    })),
+    invokeTool: async (name, args) => {
+      seen.push([name, args]);
+      return { ok: true };
+    },
+    fetcher: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (isTurnVerify(options)) {
+        const prompt = body.messages[0].content;
+        if (prompt.includes('Kind: reply')) return turnAllowed();
+        verifierChecks.push(prompt);
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      const results = body.messages.filter(item => item.role === 'tool');
+      if (results.length) {
+        assert.equal(JSON.parse(results[2].content).error, 'invalid_recipient');
+        assert.equal(JSON.parse(results[3].content).ok, true);
+        return Response.json({ choices: [{ message: { content: 'I found the recipient. The payment is in.' } }] });
+      }
+      return Response.json({ choices: [{
+        finish_reason: 'tool_calls',
+        message: { tool_calls: toolCalls.map(([name, args], index) => ({
+          id: `c${index}`, type: 'function', function: { name, arguments: JSON.stringify(args) },
+        })) },
+      }] });
+    },
+  });
+  assert.deepEqual(seen.map(item => item[0]), ['web_search', 'lookup_recipient', 'request_spend']);
+  assert.equal(verifierChecks.length, 0);
+  assert.equal(result.hold, undefined);
+  assert.equal(result.text, 'I found the recipient. The payment is in.');
+});
+
+test('a full-permission send over the review maximum asks for the confirm slide', async () => {
+  const seen = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send 40 USDC',
+    permissionMode: 'full',
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object' } },
+    }],
+    invokeTool: async (name) => { seen.push(name); return { ok: true }; },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      return Response.json({
+        choices: [{
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"40000000","handle":"hi"}' } }],
+          },
+        }],
+      });
+    },
+  });
+  assert.equal(result.hold.kind, 'modal');
+  assert.match(result.hold.label, /30 USD/);
+  assert.deepEqual(seen, []);
+});
+
+test('a verifier refusal on an unconfirmed send asks instead of blocking', async () => {
+  const seen = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send 1 USDC',
+    permissionMode: 'full',
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object' } },
+    }],
+    invokeTool: async (name) => { seen.push(name); return { ok: true }; },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      return Response.json({
+        choices: [{
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1000000","handle":"hi"}' } }],
+          },
+        }],
+      });
+    },
+  });
+  assert.equal(result.hold.kind, 'modal');
+  assert.equal(result.hold.name, 'request_spend');
+  assert.deepEqual(seen, []);
+});
+
+test('ask mode requires the confirmation slide before invoking a spend', async () => {
+  const seen = [];
+  const tools = [{
+    type: 'function',
+    function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object' } },
+  }];
+  const fetcher = async (_url, options) => {
+    if (isTurnVerify(options)) return turnAllowed();
+    const body = JSON.parse(options.body);
+    const calls = body.messages.some(item => item.role === 'tool');
+    if (!calls) {
+      return Response.json({
+        choices: [{
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1000000","handle":"bob"}' } }],
+          },
+        }],
+      });
+    }
+    return Response.json({ choices: [{ message: { content: 'Submitted the payment request.' } }] });
+  };
+  const held = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'pay bob',
+    tools,
+    permissionMode: 'ask',
+    invokeTool: async (name) => { seen.push(name); return { results: [] }; },
+    fetcher,
+  });
+  assert.equal(held.hold.kind, 'modal');
+  assert.equal(held.hold.name, 'request_spend');
+  assert.deepEqual(seen, []);
+  const next = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'pay bob',
+    tools,
+    permissionMode: 'ask',
+    grants: [held.hold],
+    invokeTool: async (name) => { seen.push(name); return { results: [] }; },
+    fetcher,
+  });
+  assert.equal(next.hold, undefined);
+  assert.equal(next.text, 'Submitted the payment request.');
+  assert.deepEqual(seen, ['request_spend']);
+});
+
+test('SOL chat asks again for an incomplete approval and forwards a complete approval intact', async () => {
+  const args = { action: 'pay', amount: '1000000000', asset: 'SOL', botId: 'bot_1', handle: 'hi' };
+  const calls = [];
+  const invoke = createChatToolInvoker({
+    ownerId: 'did:privy:owner1',
+    botId: args.botId,
+    runtimeBase: 'https://runtime.example',
+    fetcher: async (_url, options) => {
+      calls.push(parsePermissionedSpendBody(JSON.parse(options.body)));
+      return Response.json({ ok: true, signed: true });
+    },
+  });
+  function chat(grants) {
+    return completeTextChat({
+      modelApiKey: META_KEY,
+      message: 'Send 1 SOL to @hi',
+      permissionMode: 'full',
+      grants,
+      tools: [{ type: 'function', function: { name: 'request_spend', parameters: { type: 'object' } } }],
+      invokeTool: (name, parameters) => invoke(name, stampSpendPermission(name, parameters, {
+        permissionMode: 'full', confirmSpend: true, grants,
+      })),
+      fetcher: async (_url, options) => {
+        if (isTurnVerify(options)) return turnAllowed();
+        if (JSON.parse(options.body).messages.some(item => item.role === 'tool')) {
+          return Response.json({ choices: [{ message: { content: 'Payment submitted.' } }] });
+        }
+        return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+          id: 'c1', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify(args) },
+        }] } }] });
+      },
+    });
+  }
+
+  const held = await chat([{ name: 'request_spend', args }]);
+  assert.equal(held.hold.kind, 'modal');
+  assert.deepEqual(calls, []);
+
+  const sent = await chat([held.hold]);
+  assert.equal(sent.hold, undefined);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.confirmed, true);
+  assert.equal(calls[0].idempotencyKey, held.hold.idempotencyKey);
+  assert.equal(calls[0].amount, args.amount);
+  assert.equal(calls[0].asset, args.asset);
+  assert.equal(calls[0].handle, args.handle);
+});
+
+test('full permissions call a fund tool without asking the owner', async () => {
+  const seen = [];
+  let rounds = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send it',
+    permissionMode: 'full',
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object', properties: {} } },
+    }],
+    invokeTool: async (name) => { seen.push(name); return { ok: true, signed: false, state: 'trust-confirmation-required' }; },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      rounds += 1;
+      if (rounds === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1","handle":"bob"}' } }],
+            },
+          }],
+        });
+      }
+      return Response.json({ choices: [{ message: { content: 'The gate blocked the trade.' } }] });
+    },
+  });
+  assert.equal(result.hold, undefined);
+  assert.deepEqual(seen, ['request_spend']);
+  assert.equal(result.text, 'The gate blocked the trade.');
+});
+
+/**
+ * Achieves: a broadcast signature is its own message before the model writes a follow-up.
+ * Fails when: the Solscan line waits for the next completion, or a missing signature still links.
+ * Oracle: onMessage order is the Solscan URL, then the later model call, then the closing sentence.
+ */
+test('a send posts the Solscan URL before the model is asked to close the turn', async () => {
+  const signature = '5'.repeat(64);
+  const order = [];
+  let rounds = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send 1 SOL to @hi',
+    permissionMode: 'full',
+    grants: [{
+      name: 'request_spend',
+      args: { amount: '1000000000', destination: 'Hi11111111111111111111111111111111111111111' },
+    }],
+    onMessage: (text) => order.push(text),
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object', properties: {} } },
+    }],
+    invokeTool: async () => ({ signed: true, signature, cluster: 'mainnet-beta' }),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      rounds += 1;
+      if (rounds === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1000000000","destination":"Hi11111111111111111111111111111111111111111"}' } }],
+            },
+          }],
+        });
+      }
+      order.push('model-again');
+      const tool = JSON.parse(options.body).messages.find(item => item.role === 'tool');
+      assert.match(tool.content, /solscanUrl/);
+      return Response.json({ choices: [{ message: { content: '1 SOL is on the way to @hi.' } }] });
+    },
+  });
+  const url = `https://solscan.io/tx/${signature}`;
+  assert.equal(order[0], `Sent. ${url}`);
+  assert.equal(order[1], 'model-again');
+  assert.equal(order[2], '1 SOL is on the way to @hi.');
+  assert.deepEqual(result.messages, [`Sent. ${url}`, '1 SOL is on the way to @hi.']);
+  assert.equal(result.text, '1 SOL is on the way to @hi.');
 });

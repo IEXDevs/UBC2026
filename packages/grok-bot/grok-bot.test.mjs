@@ -22,9 +22,9 @@ function event(overrides = {}) {
     botId: 'bot_1',
     botName: 'APY hunter',
     kind: 'tx.confirmed',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
     signature: SIG_A,
-    summary: 'Devnet USDC transfer landed in the bot wallet.',
+    summary: 'Solana USDC transfer landed in the bot wallet.',
     at: 1_700_000_000_000,
     asset: 'USDC',
     amount: '5000000',
@@ -32,7 +32,14 @@ function event(overrides = {}) {
   };
 }
 
-test('notable on-chain events are confirmed moves with a devnet signature', () => {
+/**
+ * Achieves: Only confirmed/funds.grabbed events with a base58 signature on an execution cluster are selected, newest-first, deduped by signature.
+ * Fails when: Quiet checkpoints, pending submits, mainnet rows, unsigned rows, or duplicate signatures are treated as notable.
+ * Oracle: EVENT_KINDS + cluster/signature rules from the Grok Bot posting contract, not UI copy.
+ * Side effects: none
+ * Gaps: Does not cover production stream store ordering under concurrent writers.
+ */
+test('notable on-chain events are confirmed moves with a mainnet-beta signature', () => {
   const quiet = event({
     id: 'evt_quiet',
     kind: 'run.checkpoint',
@@ -49,6 +56,13 @@ test('notable on-chain events are confirmed moves with a devnet signature', () =
   assert.equal(EVENT_KINDS.includes('tx.confirmed'), true);
 });
 
+/**
+ * Achieves: prepareNotablePosts drafts offline X text with redacted secrets and zero network calls even when X_BEARER_TOKEN is present.
+ * Fails when: fetch is invoked, live delivery is claimed, or secrets/token leak into the serialized payload.
+ * Oracle: Offline withholding policy (live_x_withheld) and redactSecrets patterns.
+ * Side effects: Temporarily sets process.env.X_BEARER_TOKEN and stubs global fetch.
+ * Gaps: Does not prove a future live X client would redact equivalently.
+ */
 test('post payload stays offline and omits secrets even if an X token is set', () => {
   const calls = [];
   const previous = globalThis.fetch;
@@ -68,7 +82,7 @@ test('post payload stays offline and omits secrets even if an X token is set', (
     assert.equal(payload.posts.length, 1);
     assert.equal(payload.posts[0].delivered, false);
     assert.equal(payload.posts[0].text.length <= 280, true);
-    assert.match(payload.posts[0].text, new RegExp(`explorer\\.solana\\.com/tx/${SIG_A}\\?cluster=devnet`));
+    assert.match(payload.posts[0].text, new RegExp(`explorer\\.solana\\.com/tx/${SIG_A}`));
     assert.match(payload.posts[0].text, /APY hunter — transaction confirmed \(5 USDC\)/);
     const encoded = JSON.stringify(payload);
     assert.equal(encoded.includes(SECRET), false);
@@ -81,6 +95,13 @@ test('post payload stays offline and omits secrets even if an X token is set', (
   }
 });
 
+/**
+ * Achieves: Post text stays ≤280 chars with ellipsis; bursts keep the newest 20 event posts.
+ * Fails when: Oversized fields exceed 280, drop the signature, or keep more than 20 posts.
+ * Oracle: X character limit + newest-20 burst cap from the posting contract.
+ * Side effects: none
+ * Gaps: Does not measure Unicode grapheme width vs code units.
+ */
 test('long summaries are trimmed to the X character limit and bursts keep the newest 20', () => {
   const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   const long = prepareNotablePosts([event({ summary: `${'word '.repeat(99)}end` })]);
@@ -91,7 +112,7 @@ test('long summaries are trimmed to the X character limit and bursts keep the ne
     signature: '9'.repeat(128),
     amount: '9'.repeat(40),
     summary: 'S'.repeat(500),
-    cluster: 'testnet',
+    cluster: 'mainnet-beta',
   })]);
   assert.equal(wide.posts[0].text.length <= 280, true);
   assert.match(wide.posts[0].text, /9{128}/);
@@ -109,8 +130,15 @@ test('long summaries are trimmed to the X character limit and bursts keep the ne
   assert.equal(posts.at(-1).eventId, 'evt_20');
 });
 
+/**
+ * Achieves: Compact stream rows with deposit type draft offline posts; unknown rows are skipped; bad signatures throw.
+ * Fails when: Unknown types produce posts, deposits hit the network, or invalid signatures are accepted.
+ * Oracle: Stream event shape used by QuickNode webhook normalization.
+ * Side effects: none
+ * Gaps: Does not exercise live QuickNode webhook → prepareNotablePosts wiring.
+ */
 test('QuickNode stream rows draft the same offline payload', () => {
-  const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const wallet = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const payload = prepareNotablePosts([
     {
       signature: '6'.repeat(88),
@@ -135,10 +163,17 @@ test('QuickNode stream rows draft the same offline payload', () => {
   assert.equal(payload.posts[0].kind, 'deposit');
   assert.equal(payload.posts[0].botId, 'bot_1');
   assert.match(payload.posts[0].text, /deposit landed \(2\.5 USDC\)/);
-  assert.match(payload.posts[0].text, /cluster=devnet/);
+  assert.equal(payload.posts[0].text.includes("?cluster="), false);
   assert.throws(() => prepareNotablePosts([{ signature: 'nope', wallet, type: 'deposit' }]), GrokBotError);
 });
 
+/**
+ * Achieves: Unknown kinds and bad signatures throw; empty input and non-notable kinds yield no posts.
+ * Fails when: Malformed events are silently dropped as posts, or kill.stop-all is drafted as a tweet.
+ * Oracle: GrokBotError validation + notable-kind filter.
+ * Side effects: none
+ * Gaps: Does not enumerate every EVENT_KINDS negative.
+ */
 test('malformed events are refused and non-execution clusters are not drafted', () => {
   assert.throws(() => prepareNotablePosts([event({ kind: 'secret.leak' })]), GrokBotError);
   assert.throws(() => prepareNotablePosts([event({ signature: 'not-a-signature' })]), GrokBotError);
@@ -146,13 +181,20 @@ test('malformed events are refused and non-execution clusters are not drafted', 
   assert.equal(prepareNotablePosts([event({ kind: 'kill.stop-all', signature: undefined, summary: 'Switch flipped locally.' })]).posts.length, 0);
 });
 
+/**
+ * Achieves: exportGrokChat emits v1 schema with redacted message text and markdown headings; redactSecrets covers Bearer tokens.
+ * Fails when: Secrets or wallet-auth material survive JSON/markdown, or schema/role drift.
+ * Oracle: maelstrom.grok-chat-export.v1 + GROK_BOT_ROLE contract.
+ * Side effects: none
+ * Gaps: Does not cover every secret regex edge case.
+ */
 test('chat export redacts secrets and can render markdown', () => {
   const exported = exportGrokChat({
     id: 'chat_1',
     title: 'Watch the APY hunter wallet',
     exportedAt: 1_700_000_100_000,
     messages: [
-      { id: 'm1', role: 'user', at: 1_700_000_000_000, text: 'What landed on devnet?' },
+      { id: 'm1', role: 'user', at: 1_700_000_000_000, text: 'What landed on solana?' },
       { id: 'm2', role: 'assistant', at: 1_700_000_050_000, text: `Confirmed 5 USDC. Drop this key: ${SECRET}` },
       { id: 'm3', role: 'tool', at: 1_700_000_060_000, text: 'Draft withheld. wallet-auth:abcdef0123456789' },
     ],
@@ -170,6 +212,13 @@ test('chat export redacts secrets and can render markdown', () => {
   assert.match(redactSecrets(`Authorization: Bearer ${SECRET} more`), /Bearer \[redacted\]/);
 });
 
+/**
+ * Achieves: grokSpendRequest builds an unconfirmed POST /api/spend body with permission/action and no signature field.
+ * Fails when: Path/method diverge from the app spend route, or a signature is embedded.
+ * Oracle: Shared spend permission request shape used by the web/runtime spend path.
+ * Side effects: none
+ * Gaps: Does not call the live /api/spend handler.
+ */
 test('Grok Bot spend uses the same permissioned spend request as the app', () => {
   const request = grokSpendRequest({
     permission: 'full',
@@ -186,6 +235,13 @@ test('Grok Bot spend uses the same permissioned spend request as the app', () =>
   assert.equal(JSON.stringify(request).includes('signature'), false);
 });
 
+/**
+ * Achieves: grok-bot.mjs contains no fetch/X/Twitter client; empty chat export throws.
+ * Fails when: A network client or X API host appears in source, or empty export succeeds.
+ * Oracle: Source-level offline invariant for the package.
+ * Side effects: Reads grok-bot.mjs from disk.
+ * Gaps: Static string scan only; does not catch dynamic import of an X SDK.
+ */
 test('the module source has no X client', () => {
   const source = readFileSync(new URL('./grok-bot.mjs', import.meta.url), 'utf8');
   assert.equal(source.includes('fetch('), false);

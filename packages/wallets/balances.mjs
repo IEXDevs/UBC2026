@@ -1,8 +1,9 @@
+import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_RPC_URL } from '@ubc2026/contracts/solana';
 /**
- * Solana wallet balance reads across hackathon clusters (devnet + testnet).
+ * Solana wallet balance reads across hackathon clusters (mainnet-beta + testnet).
  * Native SOL + every non-zero SPL / Token-2022 account. Never returns RPC URLs.
  */
-import { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } from './privy.mjs';
+import { SOLANA_GENESIS_HASH, SOLANA_USDC_MINT } from './privy.mjs';
 
 export const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 export const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
@@ -11,7 +12,7 @@ export const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuE
 export const TESTNET_GENESIS_HASH = '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY';
 
 /** Public HTTPS fallbacks when QuickNode secrets are unset or unreachable. */
-export const PUBLIC_DEVNET_RPC_URL = 'https://api.devnet.solana.com';
+export const PUBLIC_SOLANA_RPC_URL = SOLANA_RPC_URL;
 export const PUBLIC_TESTNET_RPC_URL = 'https://api.testnet.solana.com';
 
 /** Cap RPC rows scanned / returned so a whale wallet cannot blow the response. */
@@ -19,18 +20,18 @@ const TOKEN_ACCOUNT_CAP = 96;
 const TOKEN_RESULT_CAP = 48;
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const integerAmount = /^(0|[1-9][0-9]{0,39})$/;
-const CLUSTERS = Object.freeze(['devnet', 'testnet']);
+const CLUSTERS = Object.freeze([SOLANA_CLUSTER, 'testnet']);
 
 const CLUSTER_GENESIS = Object.freeze({
-  devnet: DEVNET_GENESIS_HASH,
+  [SOLANA_CLUSTER]: SOLANA_GENESIS_HASH,
   testnet: TESTNET_GENESIS_HASH,
 });
 
 const KNOWN_MINTS = Object.freeze({
-  [DEVNET_USDC_MINT]: Object.freeze({ symbol: 'USDC', clusters: Object.freeze(['devnet']) }),
+  [SOLANA_USDC_MINT]: Object.freeze({ symbol: 'USDC', clusters: Object.freeze([SOLANA_CLUSTER]) }),
 });
 
-function rejectBalance(code, address = null, cluster = 'devnet') {
+function rejectBalance(code, address = null, cluster = SOLANA_CLUSTER) {
   return {
     ok: false,
     code,
@@ -41,6 +42,139 @@ function rejectBalance(code, address = null, cluster = 'devnet') {
     usdcAmount: null,
     tokens: [],
     holdings: [],
+  };
+}
+
+/** Distinct read outcomes — never collapse rpc_failed into a zero balance. */
+export const BALANCE_READ_OK = 'ok';
+export const BALANCE_READ_EMPTY = 'empty';
+export const BALANCE_READ_FAILED = 'failed';
+export const BALANCE_READ_PARTIAL = 'partial';
+export const BALANCE_READ_STALE = 'stale';
+
+export function unavailableBalanceLabel(code = 'rpc_failed') {
+  const safe = typeof code === 'string' && /^[a-z0-9_]{1,64}$/i.test(code.trim())
+    ? code.trim()
+    : 'rpc_failed';
+  return `balance unavailable (${safe})`;
+}
+
+/**
+ * Classify a wallet list (or single balance) for agents and UI.
+ * Failed / partial reads keep amounts null where unknown and never invent "0 SOL".
+ */
+export function classifyBalanceRead(input = {}) {
+  const items = Array.isArray(input?.items)
+    ? input.items
+    : (input && typeof input === 'object' && (input.ok === true || input.ok === false || input.balanceStatus)
+      ? [input]
+      : []);
+  if (items.length === 0) {
+    return {
+      status: BALANCE_READ_EMPTY,
+      code: null,
+      ok: true,
+      displayBalanceLabel: '0 SOL',
+      asOf: typeof input?.asOf === 'string' ? input.asOf : null,
+    };
+  }
+  let okCount = 0;
+  let emptyCount = 0;
+  let failedCount = 0;
+  let partialCount = 0;
+  let staleCount = 0;
+  let failCode = null;
+  const labels = [];
+  for (const item of items) {
+    const status = typeof item?.balanceStatus === 'string' && item.balanceStatus
+      ? item.balanceStatus
+      : (item?.ok === false
+        ? (item.code || BALANCE_READ_FAILED)
+        : (item?.status || null));
+    const holdings = Array.isArray(item?.holdings) ? item.holdings.filter((row) => row?.label) : [];
+    const sol = item?.solLamports;
+    const usdc = item?.usdcAmount ?? item?.usdcBalance;
+    const solKnown = typeof sol === 'string' && integerAmount.test(sol);
+    const usdcKnown = typeof usdc === 'string' && integerAmount.test(usdc);
+    const hasFunds = holdings.length > 0
+      || (solKnown && sol !== '0')
+      || (usdcKnown && usdc !== '0');
+    if (status === BALANCE_READ_STALE || item?.stale === true) {
+      staleCount += 1;
+      if (typeof item?.displayBalanceLabel === 'string' && item.displayBalanceLabel) {
+        labels.push(item.displayBalanceLabel);
+      }
+      continue;
+    }
+    if (status && status !== 'ok' && status !== 'empty' && status !== BALANCE_READ_PARTIAL) {
+      failedCount += 1;
+      if (!failCode) failCode = status === BALANCE_READ_FAILED ? (item.code || 'rpc_failed') : status;
+      if (solKnown || usdcKnown || holdings.length > 0) partialCount += 1;
+      continue;
+    }
+    if (item?.ok === false) {
+      failedCount += 1;
+      if (!failCode) failCode = item.code || 'rpc_failed';
+      if (solKnown || usdcKnown || holdings.length > 0) partialCount += 1;
+      continue;
+    }
+    if (hasFunds) {
+      okCount += 1;
+      if (typeof item?.displayBalanceLabel === 'string' && item.displayBalanceLabel) {
+        labels.push(item.displayBalanceLabel);
+      } else {
+        for (const row of holdings) labels.push(row.label);
+      }
+    } else {
+      emptyCount += 1;
+    }
+  }
+  const asOf = typeof input?.asOf === 'string' ? input.asOf : null;
+  if (staleCount > 0 && okCount === 0 && failedCount === 0) {
+    return {
+      status: BALANCE_READ_STALE,
+      code: null,
+      ok: true,
+      displayBalanceLabel: labels.filter(Boolean).join(' · ') || 'balance stale',
+      asOf,
+    };
+  }
+  if (failedCount > 0 && okCount === 0 && partialCount === 0) {
+    return {
+      status: BALANCE_READ_FAILED,
+      code: failCode || 'rpc_failed',
+      ok: false,
+      displayBalanceLabel: unavailableBalanceLabel(failCode || 'rpc_failed'),
+      asOf,
+    };
+  }
+  if (failedCount > 0 && (okCount > 0 || partialCount > 0)) {
+    return {
+      status: BALANCE_READ_PARTIAL,
+      code: failCode || 'rpc_failed',
+      ok: false,
+      displayBalanceLabel: [
+        ...labels.filter(Boolean),
+        unavailableBalanceLabel(failCode || 'rpc_failed'),
+      ].join(' · '),
+      asOf,
+    };
+  }
+  if (okCount > 0) {
+    return {
+      status: BALANCE_READ_OK,
+      code: null,
+      ok: true,
+      displayBalanceLabel: labels.filter(Boolean).join(' · ') || null,
+      asOf,
+    };
+  }
+  return {
+    status: BALANCE_READ_EMPTY,
+    code: null,
+    ok: true,
+    displayBalanceLabel: '0 SOL',
+    asOf,
   };
 }
 
@@ -56,29 +190,81 @@ function knownSymbol(mint, cluster) {
   return known.symbol;
 }
 
-async function rpcCall(fetcher, rpcUrl, method, params) {
+/** OpenNext / workerd may lack AbortSignal.timeout — same guard as privy.mjs. */
+function abortAfter(ms) {
+  if (typeof AbortSignal === 'function' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms);
+  }
+  if (typeof AbortController !== 'function') return undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  if (typeof timer?.unref === 'function') timer.unref();
+  return controller.signal;
+}
+
+function rpcFailureCode(error) {
+  const name = String(error?.name || '');
+  const message = String(error?.message || '').toLowerCase();
+  if (name === 'AbortError' || /aborted|timeout|timed out/.test(message)) return 'rpc_timeout';
+  if (/429|rate.?limit|too many/.test(message)) return 'rpc_rate_limited';
+  return 'rpc_failed';
+}
+
+async function rpcCallOnce(fetcher, rpcUrl, method, params) {
   let response;
   try {
     response = await fetcher(rpcUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      redirect: 'error',
-      signal: AbortSignal.timeout(15000),
+      // Prefer follow so QuickNode/CDN 3xx still yields a JSON body. Workers
+      // reject redirect:"error"; "manual" left 302 as !ok → rpc_failed.
+      redirect: 'follow',
+      signal: abortAfter(15_000),
     });
-  } catch {
-    const error = new Error('rpc_failed');
-    error.code = 'rpc_failed';
-    throw error;
+  } catch (error) {
+    const failed = new Error(rpcFailureCode(error));
+    failed.code = rpcFailureCode(error);
+    throw failed;
+  }
+  if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+    const failed = new Error('rpc_failed');
+    failed.code = 'rpc_failed';
+    throw failed;
   }
   let payload = null;
   try { payload = await response.json(); } catch { payload = null; }
+  if (response.status === 429) {
+    const failed = new Error('rpc_rate_limited');
+    failed.code = 'rpc_rate_limited';
+    throw failed;
+  }
   if (!response.ok || !payload || payload.error) {
-    const error = new Error('rpc_failed');
-    error.code = 'rpc_failed';
-    throw error;
+    const failed = new Error('rpc_failed');
+    failed.code = 'rpc_failed';
+    throw failed;
   }
   return payload.result;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function rpcCall(fetcher, rpcUrl, method, params) {
+  try {
+    return await rpcCallOnce(fetcher, rpcUrl, method, params);
+  } catch (first) {
+    // Brief backoff before retry — public Solana RPC rate-limits CF egress.
+    await sleep(first?.code === 'rpc_rate_limited' ? 400 : 120);
+    try {
+      return await rpcCallOnce(fetcher, rpcUrl, method, params);
+    } catch (second) {
+      throw second?.code ? second : first;
+    }
+  }
 }
 
 function assertHttpsRpc(rpcUrl) {
@@ -92,7 +278,7 @@ function assertHttpsRpc(rpcUrl) {
 /**
  * Aggregate parsed SPL token accounts by mint. Skips zero balances and bad rows.
  */
-export function parseTokenAccountsByMint(accounts, { cap = TOKEN_RESULT_CAP, cluster = 'devnet' } = {}) {
+export function parseTokenAccountsByMint(accounts, { cap = TOKEN_RESULT_CAP, cluster = SOLANA_CLUSTER } = {}) {
   if (!Array.isArray(accounts)) return { ok: false, code: 'rpc_rejected', tokens: [] };
   const byMint = new Map();
   for (const account of accounts.slice(0, TOKEN_ACCOUNT_CAP)) {
@@ -172,16 +358,16 @@ function holdingsFromClusterResult(result) {
 }
 
 /**
- * Read one cluster (devnet or testnet): SOL + every non-zero SPL / Token-2022 balance.
+ * Read one cluster (mainnet-beta or testnet): SOL + every non-zero SPL / Token-2022 balance.
  */
 export async function readClusterWalletBalances({
-  cluster = 'devnet',
+  cluster = SOLANA_CLUSTER,
   rpcUrl,
   address,
   fetcher = fetch,
 } = {}) {
-  if (cluster !== 'devnet' && cluster !== 'testnet') {
-    return rejectBalance('invalid_cluster', null, 'devnet');
+  if (cluster !== SOLANA_CLUSTER && cluster !== 'testnet') {
+    return rejectBalance('invalid_cluster', null, SOLANA_CLUSTER);
   }
   if (typeof address !== 'string' || !base58.test(address)) {
     return rejectBalance('invalid_address', null, cluster);
@@ -194,9 +380,9 @@ export async function readClusterWalletBalances({
     if (genesis !== expectedGenesis) {
       return rejectBalance('wrong_cluster', address, cluster);
     }
-    const encoding = { encoding: 'jsonParsed' };
+    const encoding = { encoding: 'jsonParsed', commitment: 'confirmed' };
     const [lamportsRaw, classic, token2022] = await Promise.all([
-      rpcCall(fetcher, target, 'getBalance', [address]),
+      rpcCall(fetcher, target, 'getBalance', [address, { commitment: 'confirmed' }]),
       rpcCall(fetcher, target, 'getTokenAccountsByOwner', [
         address,
         { programId: SPL_TOKEN_PROGRAM_ID },
@@ -229,14 +415,14 @@ export async function readClusterWalletBalances({
         solLamports: String(lamportsValue),
       };
     }
-    const usdcAmount = cluster === 'devnet'
-      ? (parsed.tokens.find((token) => token.mint === DEVNET_USDC_MINT)?.amount || '0')
+    const usdcAmount = cluster === SOLANA_CLUSTER
+      ? (parsed.tokens.find((token) => token.mint === SOLANA_USDC_MINT)?.amount || '0')
       : '0';
     const result = {
       ok: true,
       code: null,
       cluster,
-      mint: cluster === 'devnet' ? DEVNET_USDC_MINT : null,
+      mint: cluster === SOLANA_CLUSTER ? SOLANA_USDC_MINT : null,
       address,
       amount: usdcAmount,
       solLamports: String(lamportsValue),
@@ -244,8 +430,9 @@ export async function readClusterWalletBalances({
       tokens: parsed.tokens,
     };
     return { ...result, holdings: holdingsFromClusterResult(result) };
-  } catch {
-    return rejectBalance('rpc_failed', address, cluster);
+  } catch (error) {
+    const code = typeof error?.code === 'string' && error.code ? error.code : 'rpc_failed';
+    return rejectBalance(code, address, cluster);
   }
 }
 
@@ -254,24 +441,24 @@ export async function readClusterWalletBalances({
  * Testnet falls back to the public Solana HTTPS endpoint when the secret is empty.
  */
 export function resolveClusterRpcUrls(env = {}) {
-  const devnet = assertHttpsRpc(
-    env.QUICKNODE_DEVNET_RPC_URL
-    || env.devnetRpcUrl
-    || PUBLIC_DEVNET_RPC_URL,
+  const solana = assertHttpsRpc(
+    configuredSolanaRpc(env)
+    || env.solanaRpcUrl
+    || PUBLIC_SOLANA_RPC_URL,
   );
-  const testnet = assertHttpsRpc(
+  const testnet = SOLANA_CLUSTER === 'devnet' ? assertHttpsRpc(
     env.QUICKNODE_TESTNET_RPC_URL
     || env.testnetRpcUrl
     || PUBLIC_TESTNET_RPC_URL,
-  );
+  ) : null;
   return {
-    devnet,
+    solana,
     testnet,
   };
 }
 
 /**
- * Read both Solana-devnet and Solana-testnet holdings for one address.
+ * Read both Solana-mainnet-beta and Solana-testnet holdings for one address.
  */
 export async function readWalletBalancesAcrossClusters({
   address,
@@ -280,62 +467,61 @@ export async function readWalletBalancesAcrossClusters({
   fetcher = fetch,
 } = {}) {
   const urls = rpcUrls || resolveClusterRpcUrls(env);
-  const [devnet, testnet] = await Promise.all([
-    urls.devnet
-      ? readClusterWalletBalances({ cluster: 'devnet', rpcUrl: urls.devnet, address, fetcher })
-      : rejectBalance('rpc_not_configured', address, 'devnet'),
-    urls.testnet
-      ? readClusterWalletBalances({ cluster: 'testnet', rpcUrl: urls.testnet, address, fetcher })
-      : rejectBalance('rpc_not_configured', address, 'testnet'),
-  ]);
+  // Sequential clusters cut public-RPC burst rate from Workers (parallel was
+  // ~8 methods at once per wallet and often 429'd into rpc_failed).
+  const solana = urls.solana
+    ? await readClusterWalletBalances({ cluster: SOLANA_CLUSTER, rpcUrl: urls.solana, address, fetcher })
+    : rejectBalance('rpc_not_configured', address, SOLANA_CLUSTER);
+  const testnet = urls.testnet
+    ? await readClusterWalletBalances({ cluster: 'testnet', rpcUrl: urls.testnet, address, fetcher })
+    : rejectBalance('rpc_not_configured', address, 'testnet');
   const holdings = [
-    ...holdingsFromClusterResult(devnet),
+    ...holdingsFromClusterResult(solana),
     ...holdingsFromClusterResult(testnet),
   ];
   const tokens = [
-    ...(Array.isArray(devnet.tokens) ? devnet.tokens : []),
+    ...(Array.isArray(solana.tokens) ? solana.tokens : []),
     ...(Array.isArray(testnet.tokens) ? testnet.tokens : []),
   ];
-  const anyOk = devnet.ok === true || testnet.ok === true;
+  const anyOk = solana.ok === true || testnet.ok === true;
   const solLamports = (() => {
     if (!anyOk) return null;
-    const a = devnet.ok ? BigInt(devnet.solLamports || '0') : 0n;
-    const b = testnet.ok ? BigInt(testnet.solLamports || '0') : 0n;
-    return (a + b).toString();
+    const a = solana.ok ? BigInt(solana.solLamports || '0') : 0n;
+    return a.toString();
   })();
   return {
     ok: anyOk,
-    code: anyOk ? null : (devnet.code || testnet.code || 'rpc_failed'),
+    code: anyOk ? null : (solana.code || testnet.code || 'rpc_failed'),
     address: typeof address === 'string' ? address : null,
-    clusters: { devnet, testnet },
+    clusters: { solana, testnet },
     holdings,
-    // Compat fields — prefer the cluster that actually has SOL, else devnet.
-    cluster: testnet.ok && testnet.solLamports !== '0' && (!devnet.ok || devnet.solLamports === '0')
-      ? 'testnet'
-      : 'devnet',
+    cluster: SOLANA_CLUSTER,
     solLamports,
-    usdcAmount: devnet.ok ? (devnet.usdcAmount || '0') : null,
-    amount: devnet.ok ? (devnet.usdcAmount || '0') : null,
-    mint: DEVNET_USDC_MINT,
+    usdcAmount: solana.ok ? (solana.usdcAmount || '0') : null,
+    amount: solana.ok ? (solana.usdcAmount || '0') : null,
+    mint: SOLANA_USDC_MINT,
     tokens,
     displayBalanceLabel: holdings.map((row) => row.label).filter(Boolean).join(' · ')
-      || (anyOk ? null : `balance unavailable (${devnet.code || testnet.code || 'rpc_failed'})`),
+      || (anyOk ? null : unavailableBalanceLabel(solana.code || testnet.code || 'rpc_failed')),
+    balanceStatus: anyOk
+      ? ((holdings.length > 0 || solLamports !== '0') ? BALANCE_READ_OK : BALANCE_READ_EMPTY)
+      : BALANCE_READ_FAILED,
   };
 }
 
-/** Compat: Solana-devnet only. */
-export async function readDevnetWalletBalances({ rpcUrl, address, fetcher = fetch } = {}) {
-  return readClusterWalletBalances({ cluster: 'devnet', rpcUrl, address, fetcher });
+/** Compat: Solana-mainnet-beta only. */
+export async function readSolanaWalletBalances({ rpcUrl, address, fetcher = fetch } = {}) {
+  return readClusterWalletBalances({ cluster: SOLANA_CLUSTER, rpcUrl, address, fetcher });
 }
 
-/** Compat: Circle USDC on Solana-devnet only. */
-export async function readDevnetUsdcBalance({ rpcUrl, address, fetcher = fetch } = {}) {
-  const bal = await readDevnetWalletBalances({ rpcUrl, address, fetcher });
+/** Compat: Circle USDC on Solana-mainnet-beta only. */
+export async function readSolanaUsdcBalance({ rpcUrl, address, fetcher = fetch } = {}) {
+  const bal = await readSolanaWalletBalances({ rpcUrl, address, fetcher });
   return {
     ok: bal.ok === true && bal.usdcAmount != null,
     code: bal.ok === true ? null : bal.code,
-    cluster: 'devnet',
-    mint: DEVNET_USDC_MINT,
+    cluster: SOLANA_CLUSTER,
+    mint: SOLANA_USDC_MINT,
     address: bal.address,
     amount: bal.usdcAmount,
   };

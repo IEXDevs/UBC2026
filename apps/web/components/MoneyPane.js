@@ -1,17 +1,19 @@
 'use client';
 
+
 import { useEffect, useMemo, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { ExternalLink } from 'lucide-react';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { filterBotHistory } from '../lib/bot-history.mjs';
 import {
   describeHistory,
   describeSpendAlerts,
   describeWallets,
-  SOLSCAN_DEVNET,
+  SOLSCAN_SOLANA,
 } from '../lib/money-views.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
-import { buildEarningsSeries, mergeConnectedPositions } from '../lib/earnings-chart.mjs';
+import { buildEarningsSeries, mergeWalletPositions } from '../lib/earnings-chart.mjs';
 import { linkedWalletKey } from '../lib/wallet-provision.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
 import AddressCopy from './AddressCopy';
@@ -32,10 +34,10 @@ const VALUES = [
   { id: '10000000', label: '≥ 10 USDC' },
 ];
 
-export default function MoneyPane({ pane, state, onParty, ownerId, getAccessToken }) {
+export default function MoneyPane({ pane, state, onParty, ownerId, getAccessToken, onWallet }) {
   if (pane === 'history') return <History state={state} onParty={onParty} />;
   if (pane === 'wallets') return <Wallets state={state} />;
-  return <Positions state={state} ownerId={ownerId} getAccessToken={getAccessToken} />;
+  return <Positions state={state} ownerId={ownerId} getAccessToken={getAccessToken} onWallet={onWallet} />;
 }
 
 function historyRows(state) {
@@ -44,7 +46,7 @@ function historyRows(state) {
     botId: state.payments?.[index]?.botId ?? null,
     direction: row.flow,
     title: row.counterparty,
-    detail: `${row.botName} · ${row.protocol} · ${row.cluster}`,
+    detail: `${row.botName} · ${row.protocol}`,
     amount: row.baseUnits,
     asset: row.asset,
     party: partyFromToken(row.counterparty),
@@ -86,13 +88,13 @@ function History({ state, onParty }) {
       ))}
       <div className="history-filters">
         <label>
-          Bot
+          Agent
           <GlideSelect
-            ariaLabel="Bot"
+            ariaLabel="Agent"
             size="sm"
             menuWidth={180}
             value={botId}
-            options={[{ value: '', label: 'All bots' }, ...bots.map(item => ({ value: item.id, label: item.name }))]}
+            options={[{ value: '', label: 'All agents' }, ...bots.map(item => ({ value: item.id, label: item.name }))]}
             onChange={setBotId}
           />
         </label>
@@ -141,7 +143,6 @@ function HistoryDetail({ row }) {
       <Detail label="Where" value={row.counterparty} />
       <Detail label="Agent" value={row.botName} />
       <Detail label="Protocol" value={row.protocol} />
-      <Detail label="Cluster" value={row.cluster} />
       <Detail label="Amount" value={row.signedFigure} flow={row.flow} />
       <Detail label="Base units" value={`${row.baseUnits} ${row.asset}`} />
       <Detail label="Payment" value={row.id} />
@@ -150,8 +151,8 @@ function HistoryDetail({ row }) {
       <div className="ledger-meta ledger-meta-link">
         <dt>Explorer</dt>
         <dd>
-          <a href={row.explorerUrl ?? row.solscanUrl ?? SOLSCAN_DEVNET} target="_blank" rel="noreferrer">
-            {row.explorerUrl || row.solscanUrl ? 'Open in Solana Explorer' : 'Open devnet explorer'}
+          <a href={row.explorerUrl ?? row.solscanUrl ?? SOLSCAN_SOLANA} target="_blank" rel="noreferrer">
+            Open in Solana Explorer
             <ExternalLink size={14} strokeWidth={1.75} />
           </a>
         </dd>
@@ -179,20 +180,21 @@ function Wallets({ state }) {
           {rows.map(row => (
             <li key={row.id} className="token-settings">
               <strong>{row.label}</strong>
-              <AddressCopy address={row.address} />
+              <AddressCopy address={row.address} dotted />
               <small>{row.frozen ? 'Frozen' : row.kind}{row.bots.length ? ` · ${row.bots.join(', ')}` : ' · No agents assigned'}</small>
             </li>
           ))}
         </ul>
       )}
-      <p className="quiet">devnet execution, mainnet pricing. Freeze calls the policy API when that route is live.</p>
+      <p className="quiet">Freeze calls the policy API when that route is live.</p>
     </section>
   );
 }
 
-function Positions({ state, ownerId, getAccessToken }) {
+function Positions({ state, ownerId, getAccessToken, onWallet }) {
   const { user } = usePrivy();
   const walletsKey = linkedWalletKey(user);
+  const balancesKey = JSON.stringify((state.wallets || []).map(wallet => [wallet.address, wallet.holdings]));
   const [portfolio, setPortfolio] = useState(null);
   useEffect(() => {
     if (typeof getAccessToken !== 'function') return undefined;
@@ -201,7 +203,7 @@ function Positions({ state, ownerId, getAccessToken }) {
       try {
         const token = await getAccessToken();
         if (stopped || !token) return;
-        const response = await fetch('/api/portfolio', {
+        const response = await fetch(`/api/portfolio?cluster=${SOLANA_CLUSTER}`, {
           headers: {
             Authorization: `Bearer ${token}`,
             ...(ownerId ? { 'x-owner-id': ownerId } : {}),
@@ -210,29 +212,26 @@ function Positions({ state, ownerId, getAccessToken }) {
         });
         const body = await response.json().catch(() => null);
         if (stopped || !response.ok || !body || typeof body !== 'object') return;
-        setPortfolio(body);
+        setPortfolio({ ownerId, data: body });
         const enriched = await enrichPortfolio(body, {
           userId: user?.id || ownerId,
           storage: window.localStorage,
         });
-        if (!stopped) setPortfolio(enriched.portfolio);
+        if (!stopped) setPortfolio({ ownerId, data: enriched.portfolio });
       } catch {
-        // Paper lots stay on the book when the balance read fails.
+        // Owner-scoped wallet results are also available through the runtime.
       }
     })();
     return () => { stopped = true; };
-  }, [getAccessToken, ownerId, user?.id, walletsKey]);
+  }, [balancesKey, getAccessToken, ownerId, user?.id, walletsKey]);
 
-  const merged = useMemo(() => mergeConnectedPositions({
-    positions: state.positions,
+  const merged = useMemo(() => mergeWalletPositions({
     wallets: state.wallets,
-    portfolio,
-  }), [state.positions, state.wallets, portfolio]);
+    portfolio: portfolio?.ownerId === ownerId ? portfolio.data : null,
+  }), [ownerId, state.wallets, portfolio]);
   const earnings = useMemo(() => buildEarningsSeries({
-    positions: state.positions,
     payments: state.payments,
-    transfers: state.transfers,
-  }), [state.positions, state.payments, state.transfers]);
+  }), [state.payments]);
 
   return (
     <PositionBook
@@ -240,6 +239,7 @@ function Positions({ state, ownerId, getAccessToken }) {
       bots={state.bots}
       wallets={merged.wallets}
       earnings={earnings}
+      onWallet={onWallet}
     />
   );
 }

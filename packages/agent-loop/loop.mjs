@@ -1,13 +1,14 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Pure decision-loop orchestration.
  * Permissioned spend order: trust gate, verify-consensus, wallet freeze,
  * bot-policy, approval mode, then sign. A refusal stops at that step.
- * Signing is an injected devnet call into @ubc2026/wallets. This module
+ * Signing is an injected mainnet-beta call into @ubc2026/wallets. This module
  * does not hold keys and does not broadcast.
  */
 import { evaluateTrust } from '@ubc2026/trust-score';
 import { reachConsensus, factsDigest, memoFromDecision } from '@ubc2026/verify-consensus';
-import { evaluateProposal, proposalDigest } from '@ubc2026/bot-policy';
+import { evaluateProposal, proposalDigest, validateApproval } from '@ubc2026/bot-policy';
 import { assertSpendAllowed } from '@ubc2026/wallets';
 
 export class LoopError extends Error {}
@@ -26,15 +27,40 @@ function needsHumanApproval(bot, policyDecision) {
 }
 
 const OWNER_PERMISSIONS = new Set(['ask', 'review', 'full']);
+const SIGN_FAILURE_REASONS = new Set([
+  'invalid_wallet', 'privy_failed', 'rpc_failed', 'rpc_rejected', 'simulation_required',
+  'transaction_mismatch', 'wallet_authorization_failed', 'wallet_owner_session_required',
+  'wallet_policy_rejected', 'wrong_cluster',
+]);
+
+const REVIEW_CAP = /^(?:[1-9][0-9]{0,39})$/;
+/** 30 USD. Applies when Review by AI is off and the owner has no stored maximum. */
+const DEFAULT_REVIEW_CAP = '30000000';
+
+function reviewCapOf(value) {
+  return REVIEW_CAP.test(value ?? '') ? value : DEFAULT_REVIEW_CAP;
+}
+
+function withinReviewCap(policyDecision, reviewCap) {
+  const debit = policyDecision?.debit;
+  return typeof debit === 'string' && REVIEW_CAP.test(debit) && BigInt(debit) <= BigInt(reviewCap);
+}
 
 /** Whether this policy result still needs a person. Over-budget always does.
- * Every permission, including full, waits until the owner has confirmed.
- * That confirm is the slide. Ask and review use the same check. */
+ * Ask waits until the owner has confirmed. That confirm is the slide.
+ * Full and Review by AI continue when the debit is within the review maximum.
+ * Above that maximum the owner confirms, including when Review by AI is off.
+ * The verify step has already agreed before this function runs.
+ * A missing or failed earlier gate is not waived by full permission. */
 export function approvalRequirement(bot, policyDecision, options = {}) {
   if (!policyDecision || typeof policyDecision.state !== 'string') fail('Policy decision is required');
   if (policyDecision.state === 'blocked') return false;
   if (policyDecision.state === 'over-budget') return true;
-  if (options?.ownerPermission === 'full' || options?.ownerPermission === 'ask' || options?.ownerPermission === 'review') {
+  if (options?.ownerPermission === 'full' || options?.ownerPermission === 'review') {
+    if (withinReviewCap(policyDecision, reviewCapOf(options.reviewCap))) return false;
+    return options?.confirmed !== true;
+  }
+  if (options?.ownerPermission === 'ask' || options?.ownerPermission === 'review') {
     return options?.confirmed !== true;
   }
   if (options?.ownerPermission != null && !OWNER_PERMISSIONS.has(options.ownerPermission)) {
@@ -159,6 +185,7 @@ export async function runPermissionedSpend({
   ledger,
   proposal,
   trustScore,
+  trustUnavailable = false,
   trustConfirmed = false,
   trustThreshold = '400',
   mainFn,
@@ -166,8 +193,11 @@ export async function runPermissionedSpend({
   now,
   ownerPermission,
   confirmed = false,
+  reviewCap = null,
   quote = null,
-  signDevnet,
+  signSolana,
+  beforeSign,
+  budgetApproval,
 } = {}) {
   const steps = [];
   if (!bot || !wallet || !ledger || !proposal) fail('bot, wallet, ledger, and proposal are required');
@@ -175,8 +205,17 @@ export async function runPermissionedSpend({
   if (!Number.isSafeInteger(now)) fail('Explicit server time is required');
 
   steps.push('trust-gate');
-  const trust = evaluateTrust({ score: trustScore, threshold: trustThreshold, confirmed: trustConfirmed });
-  if (trust.state === 'confirmation-required') {
+  if (trustUnavailable === true && trustScore != null && trustScore !== '') {
+    fail('An unavailable trust score cannot be invented');
+  }
+  const trust = trustUnavailable === true
+    ? evaluateTrust({
+      unavailable: true,
+      threshold: trustThreshold,
+      confirmed: trustConfirmed === true || confirmed === true,
+    })
+    : evaluateTrust({ score: trustScore, threshold: trustThreshold, confirmed: trustConfirmed });
+  if (trust.state === 'confirmation-required' && trust.unavailable !== true) {
     return { state: 'trust-confirmation-required', steps, signed: false, trust };
   }
 
@@ -184,6 +223,9 @@ export async function runPermissionedSpend({
   const consensus = await reachConsensus({ mainFn, verifyFn });
   if (consensus.state !== 'consensus') {
     return { state: 'verify-mismatch', steps, signed: false, trust, consensus };
+  }
+  if (trust.unavailable === true && consensus.facts?.trustScore != null) {
+    return { state: 'blocked', reason: 'trust-unavailable', steps, signed: false, trust };
   }
 
   steps.push('wallet-freeze');
@@ -200,29 +242,74 @@ export async function runPermissionedSpend({
   }
 
   steps.push('approval-mode');
-  const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed });
-  if (approvalNeeded) {
-    return { state: 'approval-needed', steps, signed: false, policy };
+  const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed, reviewCap });
+  const approvedOnce = approvalNeeded && policy.state === 'over-budget' && confirmed
+    && typeof beforeSign === 'function' && typeof signSolana === 'function'
+    && validateApproval({
+      bot, proposal, ledger, now, approval: budgetApproval,
+    }).state === 'ready-to-reserve';
+  if (approvalNeeded && !approvedOnce) {
+    const capReason = policy.state === 'over-budget'
+      ? (policy.violations?.includes('per-transaction')
+        ? 'per-transaction'
+        : (policy.violations?.[0] || 'over-budget'))
+      : null;
+    return {
+      state: 'approval-needed',
+      steps,
+      signed: false,
+      policy,
+      ...(capReason ? { reason: capReason } : {}),
+    };
   }
-  if (proposal.cluster !== 'devnet') {
+  if (proposal.cluster !== SOLANA_CLUSTER) {
     return { state: 'wrong-cluster', steps, signed: false };
   }
   if (mainnetQuoteBlocksSpend(quote)) {
     return { state: 'quote-not-authorization', steps, signed: false };
   }
-  if (typeof signDevnet !== 'function') {
-    return { state: 'signer-not-configured', steps, signed: false };
+  if (trust.unavailable === true && trust.state === 'confirmation-required') {
+    return { state: 'trust-confirmation-required', steps, signed: false, trust };
+  }
+
+  const memo = memoFromDecision(consensus.decisionRecord);
+  let reservedOk = false;
+  if (typeof beforeSign === 'function') {
+    steps.push('reserve');
+    let reserved;
+    try {
+      reserved = await beforeSign({ bot, wallet, ledger, proposal, policy, memo, approvedOnce });
+    } catch (error) {
+      return { state: 'blocked', reason: error?.code || 'reserve-failed', steps, signed: false };
+    }
+    const reservedState = reserved?.state;
+    if (reservedState !== 'reserved' && (approvedOnce || reservedState !== 'ready-to-reserve')) {
+      return {
+        state: 'blocked',
+        reason: reserved?.reason || reservedState || 'reserve-blocked',
+        steps,
+        signed: false,
+      };
+    }
+    reservedOk = true;
+  }
+  if (typeof signSolana !== 'function') {
+    return {
+      state: reservedOk ? 'reserved' : 'signer-not-configured',
+      steps,
+      signed: false,
+    };
   }
 
   steps.push('sign');
-  const memo = memoFromDecision(consensus.decisionRecord);
   let signed;
   try {
-    signed = await signDevnet({ bot, wallet, proposal, memo, cluster: 'devnet' });
-  } catch {
-    return { state: 'sign-rejected', steps, signed: false };
+    signed = await signSolana({ bot, wallet, proposal, memo, cluster: SOLANA_CLUSTER });
+  } catch (error) {
+    const reason = SIGN_FAILURE_REASONS.has(error?.code) ? error.code : null;
+    return { state: 'sign-rejected', steps, signed: false, ...(reason ? { reason } : {}) };
   }
-  if (!signed || signed.cluster !== 'devnet' || typeof signed.signature !== 'string' || signed.signature.length < 1) {
+  if (!signed || signed.cluster !== SOLANA_CLUSTER || typeof signed.signature !== 'string' || signed.signature.length < 1) {
     return { state: 'sign-rejected', steps, signed: false };
   }
   return {
@@ -230,7 +317,7 @@ export async function runPermissionedSpend({
     steps,
     signed: true,
     signature: signed.signature,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     memo,
   };
 }

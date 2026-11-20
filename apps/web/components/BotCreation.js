@@ -53,11 +53,11 @@ export default function BotCreation({ ownerId, userTemplates, onTemplatesChange,
   const showOutflow = form.type === 'trading' || form.type === 'shopping';
 
   return (
-    <section className="panel create-panel" aria-label="Create bot">
-      <h2>Create bot</h2>
+    <section className="panel create-panel" aria-label="Create agent">
+      <h2>Create agent</h2>
       <p className="hint">
         Pick a type, a wallet, caps, and an approval mode. Create saves a draft. Enable is separate,
-        so a template is not a live bot.
+        so a template is not a live agent.
       </p>
 
       <div className="template-list" role="list" aria-label="Templates">
@@ -216,5 +216,5 @@ export default function BotCreation({ ownerId, userTemplates, onTemplatesChange,
 function draftReady(form, wallets) {
   const input = draftInputFromForm(form, wallets);
   const ready = input.type && input.walletId && input.cap && input.approvalMode;
-  return ready ? 'Required steps are filled. Create draft does not enable the bot.' : 'Type, wallet, caps, and approval mode are required.';
+  return ready ? 'Required steps are filled. Create draft does not enable the agent.' : 'Type, wallet, caps, and approval mode are required.';
 }

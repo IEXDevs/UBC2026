@@ -1,115 +1,92 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { FileText, Film, Globe, Image as ImageIcon, Music } from 'lucide-react';
-import { fileKind, filterLibrary, libraryGroups } from '../lib/file-library.mjs';
-import BotMark from './BotMark';
-import LiveViewPanel from './LiveViewPanel';
-
-const FILTERS = [
-  { id: 'all', label: 'All' },
-  { id: 'pages', label: 'Pages' },
-  { id: 'media', label: 'Media' },
-  { id: 'files', label: 'Files' },
-  { id: 'settings', label: 'Settings' },
-];
-
-const PREVIEW_COUNT = 4;
+import { useState } from 'react';
+import { FileText, Film, Image as ImageIcon, Music } from 'lucide-react';
+import { formatFileSize } from './Attachments';
+import { byRecent, isLibraryImage } from '../lib/file-library.mjs';
+import { displayFileName } from '../lib/file-name.mjs';
+import FileScroll from './FileScroll';
+import FileStage from './FileStage';
+import ImageCollage from './ImageCollage';
 
 function FileGlyph({ file }) {
-  const kind = fileKind(file);
-  const type = file.type || '';
-  const Icon = kind === 'pages' ? Globe
-    : type.startsWith('video/') ? Film
-      : type.startsWith('audio/') ? Music
-        : type.startsWith('image/') ? ImageIcon
-          : FileText;
-  return (
-    <span className="library-glyph" aria-hidden="true">
-      <Icon size={16} strokeWidth={1.75} />
-    </span>
-  );
+  const type = file?.type || '';
+  const Icon = type.startsWith('video/') ? Film
+    : type.startsWith('audio/') ? Music
+      : type.startsWith('image/') ? ImageIcon
+        : FileText;
+  return <Icon size={16} strokeWidth={1.75} />;
 }
 
-function FileGroup({ label, files, onOpen }) {
-  const [more, setMore] = useState(false);
-  if (files.length === 0) return null;
-  const shown = more ? files : files.slice(0, PREVIEW_COUNT);
-  return (
-    <section className="library-group">
-      <h3>{label}</h3>
-      <ul>
-        {shown.map(file => (
-          <li key={file.id}>
-            <button type="button" onClick={() => onOpen(file)}>
-              <FileGlyph file={file} />
-              <span>{file.name}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {files.length > PREVIEW_COUNT && !more ? (
-        <button type="button" className="library-more" onClick={() => setMore(true)}>Show more</button>
-      ) : null}
-    </section>
-  );
-}
-
-export default function FileLibrary({ bot, files = [], ownerId = null, onComputer, onEdit }) {
-  const [filter, setFilter] = useState('all');
+export default function FileLibrary({ files = [], ownerId = null, getAccessToken = null, onMissing = null }) {
+  const [pane, setPane] = useState('files');
   const [preview, setPreview] = useState(null);
-  const rows = filterLibrary(files, filter);
-  const { fresh, older } = libraryGroups(rows);
-  const settingsOpen = filter === 'settings';
-
-  useEffect(() => {
-    if (!settingsOpen) return undefined;
-    const node = document.getElementById('detail-settings');
-    window.dispatchEvent(new CustomEvent('detail-settings', { detail: node }));
-    return () => window.dispatchEvent(new CustomEvent('detail-settings', { detail: null }));
-  }, [settingsOpen]);
+  const ordered = byRecent(files);
+  const images = ordered.filter(isLibraryImage);
+  const docs = ordered.filter(file => !isLibraryImage(file));
+  const shown = pane === 'images' ? images : docs;
 
   return (
     <div className="file-library">
-      <header onContextMenu={(event) => { event.preventDefault(); onEdit?.(event); }}>
-        <BotMark shape={bot.shape} color={bot.color} image={bot.image} size={72} />
-        <strong>{bot.name}</strong>
-      </header>
-      <section className="side-computer">
-        <h3>Computer</h3>
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} screen onExpand={() => onComputer?.()} />
-      </section>
-      <div className="library-filters" role="tablist" aria-label="Library">
-        {FILTERS.map(item => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={filter === item.id}
-            className={filter === item.id ? 'is-on' : ''}
-            onClick={() => setFilter(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className="library-panes" role="tablist" aria-label="Files" data-pane={pane}>
+        <span className="library-panes__pill" aria-hidden="true" />
+        <button
+          type="button"
+          role="tab"
+          aria-selected={pane === 'files'}
+          className={pane === 'files' ? 'is-on' : ''}
+          onClick={() => setPane('files')}
+        >
+          Files
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={pane === 'images'}
+          className={pane === 'images' ? 'is-on' : ''}
+          onClick={() => setPane('images')}
+        >
+          Images
+        </button>
       </div>
-      {settingsOpen ? (
-        <div className="side-options">
-          <section>
-            <h3>Voice chat</h3>
-            <div className="side-option-card" id="detail-settings" />
-          </section>
-        </div>
-      ) : null}
-      {!settingsOpen && rows.length === 0 ? <p className="library-empty">No files yet.</p> : null}
-      {settingsOpen ? null : <FileGroup label="This week" files={fresh} onOpen={setPreview} />}
-      {settingsOpen ? null : <FileGroup label="Older" files={older} onOpen={setPreview} />}
+      {shown.length === 0 ? (
+        <p className="library-empty">{pane === 'images' ? 'No images yet.' : 'No files yet.'}</p>
+      ) : pane === 'images' ? (
+        <ImageCollage items={images} onOpen={setPreview} />
+      ) : (
+        <FileScroll
+          className="file-scroll"
+          items={docs.map(file => ({
+            id: file.id,
+            title: displayFileName(file.name) || file.name || 'File',
+            description: formatFileSize(file.size),
+            file: { ...file, name: displayFileName(file.name) || file.name },
+          }))}
+          selectOnScroll
+          radius={6}
+          gap={2}
+          onItemSelect={item => setPreview(item.file)}
+          renderItem={item => (
+            <>
+              <span className="file-rows__lead" aria-hidden="true">
+                <FileGlyph file={item.file} />
+              </span>
+              <span className="file-rows__text">
+                <span className="file-rows__title">{item.title}</span>
+                {item.description ? <span className="file-rows__description">{item.description}</span> : null}
+              </span>
+            </>
+          )}
+        />
+      )}
       {preview ? (
-        <div className="library-preview" role="dialog" aria-label={preview.name}>
-          <button type="button" onClick={() => setPreview(null)}>Close</button>
-          {preview.url ? <img src={preview.url} alt="" /> : <strong>{preview.name}</strong>}
-          <small>{preview.type || 'file'} · {Math.max(1, Math.round((preview.size || 0) / 1024))} KB</small>
-        </div>
+        <FileStage
+          file={preview}
+          ownerId={ownerId}
+          getAccessToken={getAccessToken}
+          onMissing={onMissing}
+          onClose={() => setPreview(null)}
+        />
       ) : null}
     </div>
   );

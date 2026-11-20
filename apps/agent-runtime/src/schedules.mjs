@@ -1,16 +1,17 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Chunk 5B schedules.
- * Hourly Cron marks paper positions. A second Cron re-checks devnet USDC
+ * Hourly Cron reads wallet holdings. A second Cron re-checks mainnet-beta USDC
  * over RPC when QuickNode Streams has gone quiet, so a dropped stream is
  * not the only way a wallet is observed. This module does not sign or spend.
  */
-import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 export {
   SPL_TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   parseTokenAccountsByMint,
-  readDevnetWalletBalances,
-  readDevnetUsdcBalance,
+  readSolanaWalletBalances,
+  readSolanaUsdcBalance,
 } from '@ubc2026/wallets/balances';
 
 export const HOURLY_CRON = '0 * * * *';
@@ -31,7 +32,7 @@ export function walletAddress(bot) {
 
 export function botEligibleForPositionCheck(bot) {
   if (!bot || typeof bot.id !== 'string' || bot.id.length < 1 || bot.id.length > 128) return false;
-  if (bot.enabled === false) return false;
+  if (bot.enabled === false || bot.frozen === true) return false;
   if (bot.type == null) return true;
   return POSITION_TYPES.has(bot.type);
 }
@@ -103,8 +104,8 @@ function publicBalance(balance) {
   return {
     ok,
     code: ok ? null : (typeof balance.code === 'string' ? balance.code.slice(0, 64) : 'rpc_rejected'),
-    cluster: 'devnet',
-    mint: ok ? DEVNET_USDC_MINT : null,
+    cluster: SOLANA_CLUSTER,
+    mint: ok ? SOLANA_USDC_MINT : null,
     address,
     amount: ok ? amount : null,
   };
@@ -118,11 +119,9 @@ function quotePrice(quote) {
 }
 
 /**
- * Paper mark for one hourly check. Loss is micro-USD (6 decimals).
- * maxLoss is the position bot's cap in the same micro-USD units when the
- * held asset is USDC-priced. No spend is proposed here.
+ * Mark wallet holdings in USD. A mark without a cost basis has no known loss.
  */
-export function assessPositions({ bot, positions, quotes, balance, reason, now } = {}) {
+export function assessPositions({ bot, positions, quotes, balance, reason, now, available = true } = {}) {
   const at = Number.isSafeInteger(now) ? now : 0;
   const botId = typeof bot?.id === 'string' ? bot.id : '';
   const maxLoss = typeof bot?.maxLoss === 'string' && integerAmount.test(bot.maxLoss) ? BigInt(bot.maxLoss) : null;
@@ -154,11 +153,19 @@ export function assessPositions({ bot, positions, quotes, balance, reason, now }
     });
   }
 
-  let flag = 'clear';
-  let status = 'no-positions';
+  let flag = available ? 'clear' : 'unpriced';
+  let status = available ? 'no-positions' : 'unavailable';
   if (rows.length > 0) {
     status = lossKnown ? 'checked' : 'partial';
     if (maxLoss != null && lossKnown && loss > maxLoss) flag = 'max-loss';
+    else if (
+      maxLoss != null
+      && maxLoss > 0n
+      && lossKnown
+      && loss > 0n
+      && loss < maxLoss
+      && loss * 5n >= maxLoss * 4n
+    ) flag = 'near-max-loss';
     else if (!lossKnown) flag = 'unpriced';
     else flag = 'within-cap';
   }
@@ -171,11 +178,11 @@ export function assessPositions({ bot, positions, quotes, balance, reason, now }
     botId,
     at,
     reason: reason === 'stream-drop-recheck' ? 'stream-drop-recheck' : 'cron-hourly',
-    paper: true,
-    label: 'devnet execution, mainnet pricing',
+    paper: false,
+    label: EXECUTION_LABEL,
     status,
     flag,
-    unrealizedLossMicroUsd: loss.toString(),
+    unrealizedLossMicroUsd: available && lossKnown ? loss.toString() : null,
     maxLoss: maxLoss == null ? null : maxLoss.toString(),
     positions: rows,
     balance: publicBalance(balance),
@@ -209,7 +216,7 @@ async function supabaseGet(env, path, fetcher) {
     response = await fetcher(`${config.origin}/rest/v1/${path}`, {
       method: 'GET',
       headers: supabaseHeaders(config.key),
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(15000),
     });
   } catch {

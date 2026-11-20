@@ -4,11 +4,11 @@ import { readFileSync } from 'node:fs';
 import { Keypair, Transaction } from '@solana/web3.js';
 import { proposalDigest } from '@ubc2026/bot-policy';
 import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
-import { DEVNET_USDC_MINT, NETWORKS } from '@ubc2026/x402';
+import { SOLANA_USDC_MINT, NETWORKS } from '@ubc2026/x402';
 import { assignBotWallet, createMainWallet } from '@ubc2026/wallets';
-import { DEVNET_USDC_DECIMALS, MEMO_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID } from '@ubc2026/transfers';
+import { SOLANA_USDC_DECIMALS, MEMO_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID } from '@ubc2026/transfers';
 import { SOL_MINT, createPriceTrustHandler } from './worker.mjs';
-import { createX402BotClient } from './client.mjs';
+import { buildX402Proposal, createX402BotClient } from './client.mjs';
 
 const payTo = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const feePayer = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
@@ -48,9 +48,9 @@ function signer() {
   const signed = [];
   return {
     signed,
-    async signAndBroadcastDevnet({ transaction, bot, wallet: spendWallet }) {
+    async signAndBroadcastSolana({ transaction, bot, wallet: spendWallet }) {
       signed.push({ transaction, bot, wallet: spendWallet });
-      return { signature: String(signed.length).padStart(88, '2'), cluster: 'devnet' };
+      return { signature: String(signed.length).padStart(88, '2'), cluster: 'mainnet-beta' };
     },
   };
 }
@@ -63,8 +63,8 @@ async function buyer({ bot = botRecord(), ledgerWallet, confirm, payMerchant = p
   const spend = client;
   const wrapped = {
     signed: spend.signed,
-    async signAndBroadcastDevnet(input) {
-      const sent = await spend.signAndBroadcastDevnet(input);
+    async signAndBroadcastSolana(input) {
+      const sent = await spend.signAndBroadcastSolana(input);
       receipts.add(sent.signature);
       return sent;
     },
@@ -76,7 +76,7 @@ async function buyer({ bot = botRecord(), ledgerWallet, confirm, payMerchant = p
       receipts.has(signature) ? { ok: true } : { ok: false, reason: 'unknown_transaction' }
     )),
   });
-  const service = fetcher ?? ((url, init) => handle(new Request(url, init), { CLUSTER: 'devnet' }));
+  const service = fetcher ?? ((url, init) => handle(new Request(url, init), { SOLANA_CLUSTER: 'mainnet-beta' }));
   return {
     ledger,
     spend: wrapped,
@@ -95,7 +95,14 @@ async function buyer({ bot = botRecord(), ledgerWallet, confirm, payMerchant = p
   };
 }
 
-test('a fully automatic bot pays devnet USDC and receives the quote', async () => {
+/**
+ * Achieves: automatic bot pays exact USDC on solana, receives quote, and replays with same attemptId without re-signing.
+ * Fails when: mainnet used, wrong amount/mint, or replay signs again.
+ * Oracle: paid state; transfer amount 10000; signed.length 1 then replay keeps 1; reserved 15000 after trust.
+ * Side effects / state checked: ledger reserved; signed txs; global fetch thrower.
+ * Gaps: none for happy/replay
+ */
+test('a fully automatic bot pays mainnet-beta USDC and receives the quote', async () => {
   const original = globalThis.fetch;
   globalThis.fetch = () => { throw new Error('live network'); };
   try {
@@ -103,13 +110,13 @@ test('a fully automatic bot pays devnet USDC and receives the quote', async () =
     const paid = await client.price(SOL_MINT);
     assert.equal(paid.state, 'paid');
     assert.equal(paid.body.priceUsd, '150.25');
-    assert.equal(paid.body.executionCluster, 'devnet');
-    assert.equal(paid.transfer.cluster, 'devnet');
+    assert.equal(paid.body.executionCluster, 'mainnet-beta');
+    assert.equal(paid.transfer.cluster, 'mainnet-beta');
     assert.equal(paid.transfer.destination, payTo);
     assert.equal(paid.transfer.amount, '10000');
-    assert.equal(paid.transfer.mint, DEVNET_USDC_MINT);
+    assert.equal(paid.transfer.mint, SOLANA_USDC_MINT);
     assert.equal(paid.payment.protocol, 'x402-v2');
-    assert.equal(paid.payment.network, NETWORKS.devnet);
+    assert.equal(paid.payment.network, NETWORKS.solana);
     assert.equal(paid.payment.status, 'verified');
     assert.equal(spend.signed.length, 1);
     const tx = Transaction.from(Buffer.from(spend.signed[0].transaction, 'base64'));
@@ -118,8 +125,8 @@ test('a fully automatic bot pays devnet USDC and receives the quote', async () =
     const transfer = tx.instructions[1];
     assert.equal(transfer.programId.toBase58(), SPL_TOKEN_PROGRAM_ID);
     assert.equal(transfer.data.readBigUInt64LE(1), 10000n);
-    assert.equal(transfer.data[9], DEVNET_USDC_DECIMALS);
-    assert.equal(transfer.keys[1].pubkey.toBase58(), DEVNET_USDC_MINT);
+    assert.equal(transfer.data[9], SOLANA_USDC_DECIMALS);
+    assert.equal(transfer.keys[1].pubkey.toBase58(), SOLANA_USDC_MINT);
     assert.equal(tx.instructions[2].programId.toBase58(), MEMO_PROGRAM_ID);
     assert.equal(tx.instructions[2].data.toString('utf8'), `x402:price:${SOL_MINT}`);
     assert.equal((await ledger.snapshot()).ledgers[0].reserved, '10000');
@@ -139,6 +146,13 @@ test('a fully automatic bot pays devnet USDC and receives the quote', async () =
   }
 });
 
+/**
+ * Achieves: over-budget/frozen/ask-without-approval block before sign; approve-once then pays.
+ * Fails when: sign occurs while blocked, or approve path fails to pay.
+ * Oracle: over-budget/blocked/approval-needed then paid with signed.length 1.
+ * Side effects / state checked: ledger reserved 0 while blocked; signer count.
+ * Gaps: none
+ */
 test('policy blocks spending before the bot wallet signs', async () => {
   const tight = botRecord({
     cap: { maxOutflow: '1000', maxPerTransaction: '1000' },
@@ -194,18 +208,25 @@ test('policy blocks spending before the bot wallet signs', async () => {
   const paid = await ask.client.price(SOL_MINT, { attemptId: needed.attemptId, approvalId: 'appr_1' });
   assert.equal(paid.state, 'paid');
   assert.equal(ask.spend.signed.length, 1);
-  assert.equal(paid.body.executionCluster, 'devnet');
+  assert.equal(paid.body.executionCluster, 'mainnet-beta');
 });
 
-test('mainnet challenges and a rejected settlement never skip bot-policy', async () => {
+/**
+ * Achieves: mainnet challenge and merchant mismatch block without sign; failed settlement keeps reserved and marks failed.
+ * Fails when: mainnet still signs, or failed settlement clears reserve incorrectly.
+ * Oracle: wrong-cluster/merchant-mismatch signed 0; settlement-failed signed 1 reserved 10000.
+ * Side effects / state checked: ledger + signer.
+ * Gaps: none
+ */
+test('inactive-network challenges and a rejected settlement never skip bot-policy', async () => {
   const hostile = await buyer({
     fetcher: async (url) => Response.json({
       resource: { url },
       accepts: [{
         scheme: 'exact',
-        network: NETWORKS.mainnet,
+        network: NETWORKS.devnet,
         amount: '10000',
-        asset: DEVNET_USDC_MINT,
+        asset: SOLANA_USDC_MINT,
         payTo,
         maxTimeoutSeconds: 60,
       }],
@@ -229,13 +250,77 @@ test('mainnet challenges and a rejected settlement never skip bot-policy', async
   assert.equal(failed.state, 'settlement-failed');
   assert.equal(failed.paid, false);
   assert.equal(failed.payment.status, 'failed');
-  assert.equal(failed.transfer.cluster, 'devnet');
+  assert.equal(failed.transfer.cluster, 'mainnet-beta');
   assert.equal(denied.spend.signed.length, 1);
   assert.equal((await denied.ledger.snapshot()).ledgers[0].reserved, '10000');
 });
 
+/**
+ * Achieves: client.mjs source excludes mainnet USDC mint and mainnet CAIP id.
+ * Fails when: mainnet identifiers appear in source.
+ * Oracle: readFileSync excludes known mainnet strings.
+ * Side effects / state checked: N/A.
+ * Gaps: none — static source scan only
+ */
 test('client source does not name a mainnet USDC mint or mainnet CAIP network', () => {
   const source = readFileSync(new URL('./client.mjs', import.meta.url), 'utf8');
   assert.equal(source.includes('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'), false);
   assert.equal(source.includes('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'), false);
+});
+
+/**
+ * Achieves: buildX402Proposal maps accepted terms into a bot-policy proposal with capped timeout.
+ * Fails when: cluster leaves solana, wrong expectedReceiveAsset, or timeout uncapped above 600s.
+ * Oracle: Independent accepted fixture → expiresAt = now + min(timeout, 600); asset USDC.
+ * Side effects / state checked: none (pure).
+ * Gaps: reserveBudget integration covered in pay path tests above.
+ */
+test('buildX402Proposal maps accepted x402 terms into a policy proposal', () => {
+  const bot = botRecord();
+  const accepted = {
+    scheme: 'exact',
+    network: NETWORKS.solana,
+    amount: '10000',
+    asset: SOLANA_USDC_MINT,
+    payTo,
+    maxTimeoutSeconds: 120,
+  };
+  const price = buildX402Proposal({
+    bot,
+    accepted,
+    kind: 'price',
+    mint: SOL_MINT,
+    now: 1000,
+    attemptId: 'x402_attempt_1',
+  });
+  assert.equal(price.id, 'x402_attempt_1');
+  assert.equal(price.botId, bot.id);
+  assert.equal(price.cluster, 'mainnet-beta');
+  assert.equal(price.asset, 'USDC');
+  assert.equal(price.recipient, payTo);
+  assert.equal(price.quoteId, `price:${SOL_MINT}`);
+  assert.equal(price.outflow, '10000');
+  assert.equal(price.expectedReceiveAsset, 'price-quote');
+  assert.equal(price.expiresAt, 1120);
+
+  const trust = buildX402Proposal({
+    bot,
+    accepted: { ...accepted, maxTimeoutSeconds: 9999 },
+    kind: 'trust',
+    mint: SOL_MINT,
+    now: 500,
+    attemptId: 'x402_attempt_2',
+  });
+  assert.equal(trust.expectedReceiveAsset, 'trust-score');
+  assert.equal(trust.expiresAt, 1100);
+
+  const fallback = buildX402Proposal({
+    bot,
+    accepted: { ...accepted, maxTimeoutSeconds: 0 },
+    kind: 'price',
+    mint: SOL_MINT,
+    now: 10,
+    attemptId: 'x402_attempt_3',
+  });
+  assert.equal(fallback.expiresAt, 70);
 });

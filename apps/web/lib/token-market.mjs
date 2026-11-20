@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, explorerClusterQuery } from '@ubc2026/contracts/solana';
 /**
  * Token page chart math. Prices and token details come from DexScreener
  * in the browser (`dex-token.mjs`). This module does not sign or fetch.
@@ -10,7 +11,7 @@ export const CHART_RANGES = Object.freeze(['1H', '1D', '1W', '1M', 'YTD', '1Y', 
 export function solscanTokenUrl(mint, cluster = 'mainnet') {
   if (typeof mint !== 'string' || !MINT.test(mint)) return null;
   if (cluster === 'mainnet') return `https://solscan.io/token/${mint}`;
-  if (cluster === 'devnet' || cluster === 'testnet') return `https://solscan.io/token/${mint}?cluster=${cluster}`;
+  if (['mainnet-beta', 'mainnet', 'devnet', 'testnet'].includes(cluster)) return `https://solscan.io/token/${mint}${explorerClusterQuery(cluster)}`;
   return null;
 }
 
@@ -58,13 +59,14 @@ export function formatCandleTime(unixSeconds, range) {
 
 export function chartLayout(points, width, height, pad = 8) {
   if (!Array.isArray(points) || points.length < 2 || width < 32 || height < 32) return null;
+  const inset = Number.isFinite(pad) ? Math.max(0, pad) : 0;
   const prices = points.map(point => point.price);
   const min = Math.min(...prices);
   const max = Math.max(...prices);
   const span = max - min || Math.abs(max) || 1;
   const coords = points.map((point, index) => ({
-    x: pad + (index / (points.length - 1)) * (width - pad * 2),
-    y: pad + (1 - (point.price - min) / span) * (height - pad * 2),
+    x: inset + (index / (points.length - 1)) * (width - inset * 2),
+    y: inset + (1 - (point.price - min) / span) * (height - inset * 2),
     price: point.price,
     t: point.t,
   }));
@@ -103,14 +105,16 @@ export function combineHoldings(portfolio) {
       const amount = typeof row.amount === 'string' ? row.amount : '0';
       const usd = typeof row.usdMicro === 'string' ? row.usdMicro : '0';
       if (!/^(0|[1-9][0-9]*)$/.test(amount) || !/^(0|[1-9][0-9]*)$/.test(usd)) continue;
-      const current = map.get(row.mint);
+      const key = row.native === false ? `${row.mint}:wrapped` : row.mint;
+      const current = map.get(key);
       if (!current) {
-        map.set(row.mint, {
+        map.set(key, {
           mint: row.mint,
           symbol: row.symbol || 'Token',
           decimals: Number.isInteger(row.decimals) ? row.decimals : 0,
           amount,
           usdMicro: usd,
+          ...(row.native === undefined ? {} : { native: row.native }),
         });
         continue;
       }

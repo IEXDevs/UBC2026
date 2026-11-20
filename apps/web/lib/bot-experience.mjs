@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Bot page model: approval preview, live timeline, and the public "why" record.
  * Presentation only. Does not sign, reserve budget, or read secrets.
@@ -27,7 +28,7 @@ export function actionLabel(action) {
 
 export function formatBaseUnits(amount, asset) {
   if (typeof amount !== 'string' || !INT.test(amount) || typeof asset !== 'string' || asset === '') return null;
-  const decimals = asset === 'USDC' ? 6 : 0;
+  const decimals = asset === 'SOL' ? 9 : asset === 'USDC' ? 6 : 0;
   if (decimals === 0) return `${amount} ${asset}`;
   const whole = BigInt(amount);
   const scale = 10n ** BigInt(decimals);
@@ -43,6 +44,15 @@ export function shortDigest(digest) {
 
 function redact(summary) {
   return summary.replace(SECRETISH, '[hidden]').replace(/\s+/g, ' ').trim();
+}
+
+export function timelineSummary({ kind, summary }) {
+  const clean = redact(summary);
+  if (kind === 'verify.settled') return clean.replace(/(?:^| )(?:mainnet(?:-beta)?|devnet|testnet) execution, mainnet pricing\.$/i, '');
+  if (kind !== 'budget.reserved') return clean;
+  const reservation = /^Reserved (0|[1-9][0-9]{0,39}) (SOL|USDC)$/.exec(clean);
+  if (!reservation) return clean;
+  return `Reserved ${formatBaseUnits(reservation[1], reservation[2])} in the agent budget`;
 }
 
 export function logsUrl(runtimeBase) {
@@ -84,7 +94,7 @@ export function timelineEntries(events, botId) {
   for (const event of events) {
     if (!event || event.botId !== botId || !EVENT_KINDS.includes(event.kind)) continue;
     if (typeof event.summary !== 'string') continue;
-    const summary = redact(event.summary);
+    const summary = timelineSummary(event);
     if (!summary || summary.length > 500) continue;
     try {
       validateTimelineEvent({ ...event, summary });
@@ -188,11 +198,38 @@ function memoMatches(decision) {
  * Public explanation from the decision record and tool timeline.
  * Hidden reasoning fields are dropped.
  */
+const DECISION_STATUS = new Set(['pending', 'approved', 'executed', 'rejected', 'mismatch']);
+
+/**
+ * Why-view model from GET /api/decisions. The list row has digests and a status.
+ * It does not include a decision digest, so a row that fails those checks stays hidden.
+ */
+export function whyFromListedDecision(row) {
+  if (!row || typeof row !== 'object') return null;
+  if (!HEX64.test(row.factsDigest || '') || !HEX64.test(row.proposalDigest || '')) return null;
+  if (!DECISION_STATUS.has(row.status)) return null;
+  if (row.cluster !== SOLANA_CLUSTER) return null;
+  const lines = [
+    row.status === 'mismatch'
+      ? 'Verification did not settle. The spend stays unsigned.'
+      : `Status is ${row.status} on ${row.cluster}.`,
+    `Facts digest ${shortDigest(row.factsDigest)}. Proposal digest ${shortDigest(row.proposalDigest)}.`,
+  ];
+  return {
+    title: 'Why did it do this?',
+    showsChainOfThought: false,
+    lines,
+    digests: null,
+    memo: null,
+    focus: null,
+  };
+}
+
 export function whyExplanation(decision, events = []) {
   const empty = {
     title: 'Why did it do this?',
     showsChainOfThought: false,
-    lines: ['No decision record is stored for this bot yet.'],
+    lines: ['No decision record is stored for this agent yet.'],
     digests: null,
     memo: null,
     reasonSummary: null,
@@ -290,7 +327,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'preview_meteora',
         botId: 'bot_meteora',
         state: 'approval-needed',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         asset: 'USDC',
         recipient: 'alex.sol',
         outflow: '5000000',
@@ -311,7 +348,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'dec_meteora',
         botId: 'bot_meteora',
         runId: 'run_meteora',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         factsDigest: DIGEST.meteoraFacts,
         proposalDigest: DIGEST.meteoraProposal,
         decisionDigest: DIGEST.meteoraDecision,
@@ -325,7 +362,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'preview_shop',
         botId: 'bot_shop',
         state: 'over-budget',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         asset: 'USDC',
         recipient: 'sandbox-store',
         outflow: '12000000',
@@ -345,7 +382,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
         id: 'dec_shop',
         botId: 'bot_shop',
         runId: 'run_shop',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         factsDigest: DIGEST.shopFacts,
         proposalDigest: DIGEST.shopProposal,
         decisionDigest: DIGEST.shopDecision,
@@ -357,14 +394,14 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
     bot_positions: {
       preview: null,
       events: [
-        event('evt_guard_check', 'bot_positions', owner, 'tool.call', 'Hourly paper PnL check on mainnet prices', 1763080000000),
+        event('evt_guard_check', 'bot_positions', owner, 'tool.call', 'Hourly paper PnL check', 1763080000000),
         event('evt_guard_mismatch', 'bot_positions', owner, 'verify.mismatch', 'Verifier still disagrees on price after five attempts', 1763080300000),
       ],
       decision: decision({
         id: 'dec_guard',
         botId: 'bot_positions',
         runId: 'run_guard',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         factsDigest: DIGEST.guardFacts,
         proposalDigest: DIGEST.guardProposal,
         decisionDigest: DIGEST.guardDecision,

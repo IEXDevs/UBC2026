@@ -1,6 +1,76 @@
-/** Local transcript usage. The runtime does not report a model window yet. */
+/** Fallback when a model id is unknown and the endpoint did not report a window. */
 export const CONTEXT_LIMIT = 128000;
 export const COMPACT_AT = 80;
+export const MESSAGE_CHAR_CAP = 500;
+export const COMPLETION_RESERVE = 8192;
+const MAX_WINDOW = 2_000_000;
+
+/** Published windows. A positive number from the models endpoint replaces these. */
+const WINDOWS = {
+  'muse-spark-1.3': 1_048_576,
+  'muse-spark-1.3-contributor': 1_048_576,
+  'muse-spark-1.2': 1_048_576,
+  'muse-spark-1.2-contributor': 1_048_576,
+  'muse-spark-1.1': 1_048_576,
+  'meta-llama/llama-3.3-70b-instruct': 131_072,
+};
+
+const rememberedWindows = new Map();
+
+export function rememberedContextWindow(modelId) {
+  const id = typeof modelId === 'string' ? modelId.trim() : '';
+  const value = rememberedWindows.get(id);
+  return Number.isSafeInteger(value) ? value : 0;
+}
+
+export function rememberContextWindow(modelId, window) {
+  const id = typeof modelId === 'string' ? modelId.trim() : '';
+  const size = Number(window);
+  if (!id || !Number.isSafeInteger(size) || size < 1024 || size > MAX_WINDOW) return;
+  rememberedWindows.set(id, size);
+}
+
+export function reportedContextWindow(model) {
+  if (!model || typeof model !== 'object') return 0;
+  const candidates = [
+    model.context_window,
+    model.contextWindow,
+    model.context_length,
+    model.max_context_length,
+    model.context_length_tokens,
+    model.top_provider?.context_length,
+  ];
+  for (const value of candidates) {
+    const size = Number(value);
+    if (Number.isSafeInteger(size) && size >= 1024 && size <= MAX_WINDOW) return size;
+  }
+  return 0;
+}
+
+export function contextWindowFor(model, reported = 0) {
+  const fromCall = Number(reported);
+  if (Number.isSafeInteger(fromCall) && fromCall >= 1024 && fromCall <= MAX_WINDOW) return fromCall;
+  const id = typeof model === 'string' ? model.trim() : '';
+  const remembered = rememberedWindows.get(id);
+  if (Number.isSafeInteger(remembered)) return remembered;
+  if (WINDOWS[id]) return WINDOWS[id];
+  const bare = id.replace(/:free$/, '');
+  if (WINDOWS[bare]) return WINDOWS[bare];
+  if (id.startsWith('muse-spark-')) return 1_048_576;
+  return CONTEXT_LIMIT;
+}
+
+/** Leave room for the reply. A small window reserves a quarter instead of 8192. */
+export function inputBudget(window) {
+  const size = Number.isFinite(window) && window > 0 ? Math.floor(window) : CONTEXT_LIMIT;
+  const reserve = Math.min(COMPLETION_RESERVE, Math.floor(size / 4));
+  return Math.max(256, size - reserve);
+}
+
+export function clipOwnerMessage(text) {
+  const value = typeof text === 'string' ? text.trim() : '';
+  return value.length > MESSAGE_CHAR_CAP ? value.slice(0, MESSAGE_CHAR_CAP) : value;
+}
 
 export function contextTone(percent) {
   const value = Number(percent) || 0;
@@ -8,6 +78,14 @@ export function contextTone(percent) {
   if (value >= 75) return '#f59e0b';
   if (value >= 50) return '#eab308';
   return '#a3a3a3';
+}
+
+/** Keep a sliver on screen when tokens are used but round to 0% of a large window. */
+export function meterWidth(percent, used) {
+  const value = Number(percent) || 0;
+  if (value > 0) return `max(${value}%, 8px)`;
+  if (Number(used) > 0) return '8px';
+  return '0%';
 }
 
 export function estimateTokens(text) {

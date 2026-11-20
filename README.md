@@ -1,23 +1,25 @@
 # UBC2026
 
+**Mainnet cutover:** defaults now spend real mainnet funds. Follow the [owner deployment checklist](docs/mainnet-switch.md) before deploying or funding wallets. This commit does not update hosted deployments/data. Optional devnet requires matching configuration and separate state.
+
 Hackathon project for **UBC 2026 — Agentic Payments and AI** (Solana chain award; ElevenLabs, Grok Bot, and QuickNode Streams bounties).
 
-**Maelstrom** is a budget-aware Solana agent. It researches a goal, checks trust, re-derives the spend with a separate verifier, and pays in **devnet USDC** only inside the bot's caps. Copy-paste answers for the Devpost form are in [DEVPOST.md](DEVPOST.md).
+**Maelstrom** is a budget-aware Solana agent. It researches a goal, checks trust, re-derives the spend with a separate verifier, and pays in **mainnet-beta USDC** only inside the bot's caps. Copy-paste answers for the Devpost form are in [DEVPOST.md](DEVPOST.md).
 
-Agents hold budgets and guardrails, pay for APIs/data over **x402** on Solana **devnet**, and only execute after independent verification plus the bot's approval mode.
+Agents hold budgets and guardrails, pay for APIs/data over **x402** on Solana **mainnet-beta**, and only execute after independent verification plus the bot's approval mode.
 
 ## Prize / compliance targets
 
 | Target | Plan |
 | --- | --- |
 | Main track | Agentic Payments and AI |
-| Chain award | Best use of Solana (devnet execution; mainnet read-only prices) |
+| Chain award | Best use of Solana (mainnet-beta execution; mainnet read-only prices) |
 | Bounties | ElevenLabs Agents (voice), Grok Bot on X (drafts + chat export), QuickNode Streams |
 | Originality | Fresh repo; code written during hackathon week |
 
 Official guide: [Hackathon Guide UBC 26](https://docs.google.com/document/d/1QaySCo7u3VxMVNdk3C5Ab3ewc2E46AuLntti-Uzx5EY/edit?usp=sharing)
 
-Backend routes are live when local secrets are set (Privy signing, Supabase data APIs, ledger reserve, shopping/SNS/grab-back). The agent-runtime Worker is hosted at `https://maelstrom-agent-runtime.sidchevvan-f3a.workers.dev` (health + CORS live; `/api/*` returns `source: supabase`). Hosted Supabase is up. Still open for a complete submission: OpenNext web deploy, a live ElevenLabs agent id in the web app, posting Grok Bot drafts to X, and the 2–3 minute demo video. This repo does not deploy its own Solana program. The program IDs below are the existing programs the transfer builder calls.
+Backend routes are live when local secrets are set (Privy signing, Supabase data APIs, ledger reserve, shopping/SNS/grab-back). The agent-runtime Worker is hosted at `https://runtime.maelstrom.iexdevs.com`. The desk is hosted at `https://dev.maelstrom.iexdevs.com`. Hosted Supabase has `platform_transfers`, `platform_post_transfer`, and `desk_locks`. Still open for a complete submission: a recorded live mainnet-beta USDC send, a recorded Streams wake, posting Grok Bot drafts to X, and the 2–3 minute demo video. This repo does not deploy its own Solana program, and the Worker does not bind a Cloudflare Queue. The program IDs below are the existing programs the transfer builder calls.
 
 ## Architecture
 
@@ -36,9 +38,9 @@ packages: contracts, wallets, transfers, bot-policy, bot-creation,
   x402, browser-search, browser-session, quicknode-streams, grok-bot
   shopping, sns, agent-commerce (Worker-mounted; settle when Privy secrets exist)
         │
-apps/x402-service — devnet price/trust HTTP 402 Worker
+apps/x402-service — mainnet-beta price/trust HTTP 402 Worker
         │
-Solana devnet USDC + memo · mainnet prices over HTTP (DexScreener, Jupiter)
+Solana mainnet-beta USDC + memo · mainnet prices over HTTP (DexScreener, Jupiter)
 Supabase migrations checked in (users, ledger, approvals, stream events)
 ```
 
@@ -53,12 +55,12 @@ goal → research (Firecrawl search/scrape, browser tools)
      → verify-consensus (independent re-derive, at most 5 attempts)
      → bot-policy (caps, kill switch, approval mode)
      → preview / approve when the mode requires it
-     → execute on Solana devnet (USDC transfer + memo) when a signer is configured
+     → execute on Solana mainnet-beta (USDC transfer + memo) when a signer is configured
      → memo must match the verifier digest
      → monitor note
 ```
 
-`POST /bots/:id/loop` checkpoints each step on the bot Durable Object. Without `META_MODEL_API_KEY` (or the `OPENROUTER_API_KEY` fallback) the model step returns `openrouter_not_configured` and does not call the network. Without an injected devnet transfer client, execute waits at `signer-not-configured`. It does not broadcast.
+`POST /bots/:id/loop` checkpoints each step on the bot Durable Object. Without `META_MODEL_API_KEY` (or the `OPENROUTER_API_KEY` fallback) the model step returns `openrouter_not_configured` and does not call the network. Without an injected mainnet-beta transfer client, execute waits at `signer-not-configured`. It does not broadcast.
 
 ### Safety limits
 
@@ -74,34 +76,34 @@ Amounts are unsigned integer strings in one accounting asset's base units. The d
 | Kill switch | Pause or resume one bot, Stop All (pause every bot that owner has), freeze or unfreeze a bot, freeze or unfreeze a wallet. A frozen wallet blocks spend for every bot assigned to it. These calls do not sign. |
 | Trust gate | Scores are integers 0–1000. Below 400 the gate is `confirmation-required` ("This has a low trust score, are you sure you want to buy?"). |
 | Verifier | A second function re-derives the spend. Mismatches retry in the backend. The cap is 5 attempts (`packages/verify-consensus`). |
-| Cluster | Proposals must be `devnet` or `testnet`. x402 refuses to emit a mainnet `PAYMENT-REQUIRED` challenge. Broadcast checks the devnet genesis hash. |
+| Cluster | Proposals, facts and x402 must match `SOLANA_CLUSTER` (default `mainnet-beta`, optional `devnet`). Broadcast checks the full configured genesis hash. |
 | Quote | An expired quote, a disabled bot, or an accounting-asset mismatch blocks. |
 | Voice | The agent prompt refuses sends, approvals, limit raises, and wallet freezes. Those stay on the approval screen. |
-| Paper trading | Fills are devnet or testnet and do not broadcast a swap. The priced set is SOL, mainnet USDC, and USDT. A close before one hour returns `hold_period`. |
+| Live swaps | A trading run queues a swap for owner review. The desk prices the debit in USD and shows the minimum output. Privy signs the approved Jupiter transaction and submits it to Solana mainnet. |
 
 Funding and top-ups from the main wallet are specified as always needing the owner. Grab-back to main is built in `packages/transfers` and is still an intent on the security page until the wallet route signs.
 
 ## Solana usage and program IDs
 
-Execution is Solana devnet. This repo does not deploy a program. `packages/transfers` builds a devnet USDC `transferChecked`, an idempotent associated-token account when needed, and a Memo instruction. Privy signs bot spends and owner moves. A Wallet Adapter signs deposits. Nothing in that package opens a connection. The caller broadcasts only when the QuickNode genesis hash is devnet (`EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`).
+Execution is Solana mainnet-beta. This repo does not deploy a program. `packages/transfers` builds a mainnet-beta USDC `transferChecked`, an idempotent associated-token account when needed, and a Memo instruction. Privy signs bot spends and owner moves. A Wallet Adapter signs deposits. Nothing in that package opens a connection. The caller broadcasts only when the QuickNode genesis hash is mainnet-beta (`5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d`).
 
 | Program | ID | Use |
 | --- | --- | --- |
-| SPL Token | `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA` | `transferChecked` of devnet USDC |
+| SPL Token | `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA` | `transferChecked` of mainnet-beta USDC |
 | Associated Token Account | `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` | Idempotent destination ATA (`ASSOCIATED_TOKEN_PROGRAM` in `packages/transfers`) |
 | Memo | `MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr` | Decision memo, 1–566 bytes, must match the verifier digest |
 
-Devnet USDC mint (Circle, 6 decimals, not a program): `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`.
+Solana USDC mint (Circle, 6 decimals, not a program): `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
 
-x402 v2 (`packages/x402`, `apps/x402-service`) uses the exact scheme on CAIP-2 `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` and that mint. Mainnet challenges (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`) are rejected. The price/trust Worker returns HTTP 402 and settles only when `confirmDevnetPayment` accepts a devnet transfer. It does not broadcast by itself.
+x402 v2 (`packages/x402`, `apps/x402-service`) uses the exact scheme on CAIP-2 `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` and that mint. Challenges on the inactive network are rejected. The unbound payment confirmer fails closed. The price/trust Worker returns HTTP 402 and settles only when `confirmSolanaPayment` accepts a mainnet-beta transfer. It does not broadcast by itself.
 
-Mainnet is for price identity only. `packages/paper-positions` prices SOL `So11111111111111111111111111111111111111112`, USDC `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, and USDT `Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB`. DexScreener and the Jupiter Price and Tokens HTTP APIs are not on-chain programs. `packages/sns` resolves a `.sol` name through an injected function and builds an unsigned intent. It does not call a name-service program (that send path is still open).
+Live swaps use Jupiter's router with the exact Solana mint addresses. The wallet holdings view reads actual SOL and token balances. DexScreener and the Jupiter Price and Tokens HTTP APIs are not on-chain programs. `packages/sns` resolves a `.sol` name through an injected function and builds an unsigned intent. It does not call a name-service program (that send path is still open).
 
 ## QuickNode Streams
 
 Stream 1 is the wake path for wallet activity. Create the Stream and the Key-Value list in the QuickNode dashboard at deploy time. The repo does not contain a live stream id.
 
-- **Network:** `solana-devnet`
+- **Network:** `solana-mainnet` (or the configured devnet network in a separate test deployment)
 - **Dataset:** Block (or Programs + Logs) filtered to Privy bot wallets
 - **Filter logic:** Keep transactions touching addresses in the QuickNode Key-Value Store wallet set. Emit compact `{signature, wallet, type, amount, token, slot}`.
 - **Destination:** Cloudflare Worker `POST /webhooks/quicknode`. HMAC is `X-QN-Nonce`, `X-QN-Timestamp`, and `X-QN-Signature` over the raw body, keyed by `QUICKNODE_WEBHOOK_SECRET`.
@@ -113,8 +115,9 @@ Helpers live in `packages/quicknode-streams`. The Worker wires verify → dedupe
 
 ### Schedules
 
-- **Hourly position check:** Cloudflare Cron `0 * * * *` records a paper mark for each enabled trading or position-management bot. It does not wake the spend loop.
-- **Stream-drop fallback:** Cron `5,20,35,50 * * * *` (and the hourly run, when the same condition holds) re-reads devnet USDC over `QUICKNODE_DEVNET_RPC_URL` if the newest `stream_events` row is older than one hour, or if that table cannot be read. A non-devnet genesis hash is refused. The RPC URL is not stored on the check.
+- **Hourly position check:** Cloudflare Cron `0 * * * *` records on-chain balances and available USD marks for enabled trading and position-management agents.
+- **Scheduled trades:** The agent's loop prepares an intent. The owner selects **Review pending swap** to fetch a current quote and approve the real transaction.
+- **Stream-drop fallback:** Cron `5,20,35,50 * * * *` (and the hourly run, when the same condition holds) re-reads mainnet-beta USDC over `SOLANA_RPC_URL` if the newest `stream_events` row is older than one hour, or if that table cannot be read. A non-mainnet-beta genesis hash is refused. The RPC URL is not stored on the check.
 
 ## ElevenLabs
 
@@ -129,7 +132,7 @@ The product in this repo is **ElevenLabs Agents**, not ElevenCreative. `@elevenl
 
 ## Grok Bot
 
-Grok Bot on X watches Maelstrom's notable Solana devnet activity: confirmed transactions, settled x402 payments, fund grab-backs, and stop-all memos. Each notable event becomes a post draft with an explorer link, and that draft stays off the network because this build does not read an X credential or send a request. The chat that reviewed those drafts exports to JSON and Markdown, and secret-shaped strings are removed before the file is written. Grok Bot is the part of Maelstrom that surfaces on-chain activity and keeps the chat record for the bounty.
+Grok Bot on X watches Maelstrom's notable Solana mainnet-beta activity: confirmed transactions, settled x402 payments, fund grab-backs, and stop-all memos. Each notable event becomes a post draft with an explorer link, and that draft stays off the network because this build does not read an X credential or send a request. The chat that reviewed those drafts exports to JSON and Markdown, and secret-shaped strings are removed before the file is written. Grok Bot is the part of Maelstrom that surfaces on-chain activity and keeps the chat record for the bounty.
 
 `packages/grok-bot` returns `delivery: "offline"` and `networkCalls: 0`. Export with `node scripts/grok-bot.mjs export --markdown < chat.json`.
 
@@ -138,8 +141,8 @@ Grok Bot on X watches Maelstrom's notable Solana devnet activity: confirmed tran
 | Package / app | Role |
 | --- | --- |
 | `packages/contracts` | Shared bot / wallet / event / payment / metric validators and API route list |
-| `packages/wallets` | Privy login provisioning, wallet assignment, freeze gates, and devnet server signing |
-| `packages/transfers` | Devnet USDC transfer with memo, wallet-adapter deposit, withdraw, wallet moves, and grab-back to main |
+| `packages/wallets` | Privy login provisioning, wallet assignment, freeze gates, and mainnet-beta server signing |
+| `packages/transfers` | Solana USDC transfer with memo, wallet-adapter deposit, withdraw, wallet moves, and grab-back to main |
 | `packages/agent-loop` | Trust → verify → policy decision gate orchestrator |
 | `packages/browser-search` | Firecrawl search + scrape + Cloudflare Browser Run adapters |
 | `packages/browser-session` | Owner-bound Cloudflare browser sessions, per-bot concurrency, Live View URLs |
@@ -148,17 +151,17 @@ Grok Bot on X watches Maelstrom's notable Solana devnet activity: confirmed tran
 | `packages/verify-consensus` | Independent verify-agent loop + decision digests |
 | `packages/trust-score` | Low trust-score confirmation gate + Jupiter Tokens adapter |
 | `packages/prices` | DexScreener mainnet price reads, Jupiter Price API fallback |
-| `packages/grok-bot` | Offline Grok Bot post drafts for notable devnet events, plus chat export |
-| `packages/paper-positions` | Trading-bot paper lots and position-bot mark-to-market. Mainnet prices, devnet execution, no live trades |
-| `packages/x402` | x402 v2 Solana devnet helpers |
+| `packages/grok-bot` | Offline Grok Bot post drafts for notable mainnet-beta events, plus chat export |
+| `packages/paper-positions` | Historical paper position helpers |
+| `packages/x402` | x402 v2 Solana mainnet-beta helpers |
 | `packages/quicknode-streams` | Streams HMAC verify, dedupe, wallet KV sync / backfill plans |
 | `packages/shopping` | x402 sandbox catalog → proposal → policy → 402 buy (scaffold; not an end-to-end checkout) |
 | `packages/sns` | SNS `.sol` resolve + unsigned transfer intents (scaffold) |
-| `packages/agent-commerce` | Builders for bots selling signals over x402 on devnet (scaffold; Worker routes not mounted) |
-| `apps/x402-service` | Devnet x402 price/trust Worker and bot-policy payer |
+| `packages/agent-commerce` | Builders for bots selling signals over x402 on mainnet-beta (scaffold; Worker routes not mounted) |
+| `apps/x402-service` | Solana x402 price/trust Worker and bot-policy payer |
 | `apps/agent-runtime` | Cloudflare Worker + per-bot Durable Object described above |
 | `apps/web` | Next.js glass UI (OpenNext on Cloudflare). Payments, wallets, and positions panes are not built |
-| `supabase/schema.sql` | Foundations, policy ledger, and bot templates. Later migrations: `supabase/migrations/20261114050000_stream_events.sql` and `supabase/migrations/20261114180000_activity_logs.sql` (owner activity log, RLS, secret redaction). Neither is folded into `schema.sql` |
+| `supabase/schema.sql` | Foundations, policy ledger, bot templates, and wallet soft delete. Later migrations: `supabase/migrations/20261114050000_stream_events.sql` and `supabase/migrations/20261114180000_activity_logs.sql` (owner activity log, RLS, secret redaction). Neither is folded into `schema.sql` |
 
 `/api/*` data routes and wallet create/sign are live against Supabase + Privy when those secrets are set; otherwise they return empty `source: unconfigured`. Persist sessions, approvals, and budgets in the Durable Object or in Supabase. Do not treat a queue as the source of truth.
 
@@ -194,13 +197,20 @@ Apply SQL to the **hosted** project (`npx supabase db push --remote`, or the fil
 node scripts/accounts-and-funds.mjs --address <SOLANA_PUBKEY>
 ```
 
-Devnet SOL: [faucet.solana.com](https://faucet.solana.com/). Devnet USDC: [Circle faucet](https://faucet.circle.com/?chain=SOL), mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`.
+Mainnet has no faucet or airdrop. Fund controlled wallets with real SOL for fees/rent and canonical mainnet USDC (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`), starting with a small owner-approved transfer. Sandbox shopping is disabled on mainnet; see the cutover runbook.
 
 Worker config: `apps/agent-runtime/wrangler.jsonc`. UI config: `apps/web/wrangler.jsonc`.
+
+Local web deploys (build on your machine, upload with Wrangler — no Cloudflare Builds minutes):
+
+```bash
+npm run deploy:web:dev    # maelstrom-web-dev → https://dev.maelstrom.iexdevs.com
+npm run deploy:web:prod   # maelstrom-web → https://maelstrom.iexdevs.com
+```
 
 ```bash
 npm run dev -w @ubc2026/web
 npm test -w @ubc2026/agent-runtime
 ```
 
-Web needs `NEXT_PUBLIC_PRIVY_APP_ID` in the **root** `.env.local` (Next loads root `NEXT_PUBLIC_*` via `apps/web/next.config.mjs`), `NEXT_PUBLIC_AGENT_RUNTIME_URL` pointing at the **agent-runtime** Worker URL (not `localhost:3000`), and optionally `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`. Leave `NEXT_PUBLIC_PRIVY_CLIENT_ID` empty unless you use a Privy App client. Allowlist `http://localhost:3000` (and the hosted **web** origin such as `https://maelstrom.iexdevs.com`) under Privy → Domains — not the agent-runtime `*.workers.dev` URL. Enable Email, Google, GitHub, Discord; keep require-terms and HttpOnly cookies off while using localhost on this app ID — see `apps/web/README.md`. After login, main-wallet create also needs `PRIVY_APP_SECRET` and `QUICKNODE_DEVNET_RPC_URL` in that same root file (an empty wallet list means that call failed). Leave every secret value in `.env.example` empty.
+Web needs `NEXT_PUBLIC_PRIVY_APP_ID` in the **root** `.env.local` (Next loads root `NEXT_PUBLIC_*` via `apps/web/next.config.mjs`), `NEXT_PUBLIC_AGENT_RUNTIME_URL` pointing at the **agent-runtime** Worker URL (not `localhost:3000`), and optionally `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`. Leave `NEXT_PUBLIC_PRIVY_CLIENT_ID` empty unless you use a Privy App client. Allowlist `http://localhost:3000` (and the hosted **web** origin such as `https://maelstrom.iexdevs.com`) under Privy → Domains — not the agent-runtime `*.workers.dev` URL. Enable Email, Google, GitHub, Discord; keep require-terms off. Leave Privy HttpOnly cookies off. The web app stores the refresh token in its own HttpOnly cookie — see `apps/web/README.md`. After login, main-wallet create also needs `PRIVY_APP_SECRET` and `SOLANA_RPC_URL` in that same root file (an empty wallet list means that call failed). Leave every secret value in `.env.example` empty.

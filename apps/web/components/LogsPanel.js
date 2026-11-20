@@ -2,78 +2,43 @@
 
 import { useEffect, useState } from 'react';
 import MentionText from './MentionText';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { formatLogTime, logRows } from '../lib/txn-preview.mjs';
 
-export default function LogsPanel({
-  bots,
-  ownerId = null,
-  onParty,
-  receipts = [],
-  payments = [],
-  transfers = [],
-}) {
-  const [remote, setRemote] = useState(null);
-
+export default function LogsPanel({ ownerId, getAccessToken, onParty, receipts, payments, transfers }) {
+  const [events, setEvents] = useState([]);
   useEffect(() => {
-    const url = shellRuntimeUrl('/api/logs');
-    if (!url || !ownerId) {
-      setRemote(null);
-      return undefined;
-    }
+    const url = shellRuntimeUrl('/api/events');
+    if (!url || !ownerId) return undefined;
     let stop = false;
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
+        if (!response.ok) return;
         const data = await response.json();
-        if (stop || !response.ok || !Array.isArray(data.items)) return;
-        setRemote(data.items);
+        if (!stop && Array.isArray(data.items)) setEvents(data.items);
       } catch {
-        if (!stop) setRemote(null);
+        // Keep the most recent timeline if a refresh fails.
       }
     }
-    load();
+    void load();
     const timer = setInterval(load, 4000);
     return () => {
       stop = true;
       clearInterval(timer);
     };
-  }, [ownerId]);
+  }, [ownerId, getAccessToken]);
 
-  const moneyRows = logRows({
-    receipts,
-    payments,
-    transfers,
-    activity: Array.isArray(remote) ? remote : [],
-  });
-  const seen = new Set(moneyRows.map(row => row.id));
-  const localRows = Array.isArray(remote) ? [] : (Array.isArray(bots) ? bots : [])
-    .flatMap(bot => (bot.experience?.events ?? []).map(event => ({
-      id: event.id,
-      at: event.at,
-      title: event.kind || bot.name,
-      lines: [
-        event.summary ? { label: 'Event', value: event.summary } : null,
-        bot.name ? { label: 'Bot', value: bot.name } : null,
-      ].filter(Boolean),
-      solscanUrl: null,
-    })))
-    .filter(row => row.id && row.lines.length > 0 && !seen.has(row.id))
-    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-  const rows = [...moneyRows, ...localRows];
+  const rows = logRows({ receipts, payments, transfers, events });
 
   return (
     <section className="panel logs-page" aria-label="Logs">
       <h2>Logs</h2>
-      <p className="hint">
-        {remote
-          ? 'Each line keeps the time, the transfer, and a Solscan link when a signature exists. Private keys stay out.'
-          : 'Recent sends, quotes, and tool events. A Solscan link appears when a signature exists.'}
-      </p>
-      {rows.length === 0 ? <p>No log lines yet.</p> : (
+      {rows.length === 0 ? <p>No transactions, transfers, or payments yet.</p> : (
         <ul className="quiet-list">
           {rows.map(row => (
             <li key={row.id}>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { slideConfirmed, slideOffset, slideReady } from './slide-gesture.mjs';
 import './SlideCommit.css';
 
 export default function SlideCommit({
@@ -15,7 +16,7 @@ export default function SlideCommit({
   const dragRef = useRef(null);
   const committed = useRef(false);
   const [offset, setOffset] = useState(0);
-  const [dragging, setDragging] = useState(false);
+  const [dragMax, setDragMax] = useState(0);
   const [done, setDone] = useState(false);
 
   function paint(value) {
@@ -24,10 +25,19 @@ export default function SlideCommit({
   }
 
   useEffect(() => {
+    dragRef.current = null;
+    setDragMax(0);
     paint(0);
     setDone(false);
     committed.current = false;
   }, [resetKey]);
+
+  useEffect(() => {
+    if (!disabled || !dragRef.current) return;
+    dragRef.current = null;
+    setDragMax(0);
+    paint(0);
+  }, [disabled]);
 
   function maxTravel() {
     const track = trackRef.current;
@@ -36,39 +46,48 @@ export default function SlideCommit({
   }
 
   function commit() {
-    const max = maxTravel();
-    paint(max);
+    if (committed.current) return;
+    committed.current = true;
+    paint(maxTravel());
     setDone(true);
-    if (!committed.current) {
-      committed.current = true;
-      onCommit?.();
-    }
+    onCommit?.();
   }
 
   function pointerDown(event) {
-    if (disabled || done) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (disabled || committed.current || dragRef.current || !event.isPrimary || event.button !== 0) return;
+    const track = trackRef.current;
+    const max = maxTravel();
+    if (!track || max <= 0) return;
+    const scale = track.getBoundingClientRect().width / track.clientWidth;
+    if (scale <= 0) return;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      return;
+    }
     dragRef.current = {
+      id: event.pointerId,
       x: event.clientX,
       origin: offsetRef.current,
-      max: maxTravel(),
+      max,
+      scale,
+      resetKey,
     };
-    setDragging(true);
+    setDragMax(max);
   }
 
   function pointerMove(event) {
     const drag = dragRef.current;
-    if (!drag || disabled || done) return;
-    const next = Math.min(drag.max, Math.max(0, drag.origin + event.clientX - drag.x));
-    paint(next);
+    if (!drag || event.pointerId !== drag.id || disabled || drag.resetKey !== resetKey) return;
+    paint(slideOffset(drag, event.clientX));
   }
 
-  function pointerUp() {
+  function pointerEnd(event) {
     const drag = dragRef.current;
-    if (!drag) return;
+    if (!drag || event.pointerId !== drag.id) return;
     dragRef.current = null;
-    setDragging(false);
-    if (drag.max > 0 && offsetRef.current >= drag.max * 0.92) {
+    setDragMax(0);
+    if (!disabled && drag.resetKey === resetKey && slideConfirmed(drag, event)) {
       commit();
       return;
     }
@@ -76,7 +95,7 @@ export default function SlideCommit({
   }
 
   function onKey(event) {
-    if (disabled || done) return;
+    if (disabled || committed.current || dragRef.current) return;
     const max = maxTravel();
     if (event.key === 'ArrowRight') {
       event.preventDefault();
@@ -90,12 +109,15 @@ export default function SlideCommit({
     }
   }
 
+  const dragging = dragMax > 0;
+  const ready = slideReady(offset, dragMax);
+
   return (
     <div
       ref={trackRef}
       className={`slide-commit${dragging ? ' is-dragging' : ''}${done ? ' is-done' : ''}${disabled ? ' is-disabled' : ''}`}
     >
-      <span className="slide-commit-label">{done ? doneLabel : label}</span>
+      <span className="slide-commit-label">{done ? doneLabel : ready ? 'Release to confirm' : label}</span>
       <button
         type="button"
         className="slide-commit-thumb"
@@ -104,8 +126,9 @@ export default function SlideCommit({
         disabled={disabled || done}
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
-        onPointerUp={pointerUp}
-        onPointerCancel={pointerUp}
+        onPointerUp={pointerEnd}
+        onPointerCancel={pointerEnd}
+        onLostPointerCapture={pointerEnd}
         onKeyDown={onKey}
       >
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">

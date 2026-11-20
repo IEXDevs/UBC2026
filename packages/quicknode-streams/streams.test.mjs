@@ -9,26 +9,35 @@ import {
   planBackfill,
   handleQuickNodeWebhook,
   createMemoryDedupeStore,
+  createKvDedupeStore,
   createMemoryWalletKv,
   createQuickNodeKvClient,
   createSupabaseStreamStore,
   syncWalletsToKv,
   runStreamBackfill,
   streamsReadmeSection,
+  streamAsset,
   streamConfirmedPayments,
   walletLedgerCrossCheck,
   spendLedgerCrossCheck,
-  DEVNET_USDC_MINT,
+  SOLANA_USDC_MINT,
   StreamsError,
 } from './streams.mjs';
 
 const secret = 'qn_test_secret';
-const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const wallet = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 function sign(nonce, timestamp, body) {
   return createHmac('sha256', secret).update(nonce + timestamp + body).digest('hex');
 }
 
+/**
+ * Achieves: Valid HMAC verifies; wrong signature and timestamp skew throw StreamsError.
+ * Fails when: Bad signatures or skewed timestamps are accepted.
+ * Oracle: QuickNode webhook HMAC(nonce+timestamp+body) + skew window.
+ * Side effects: none
+ * Gaps: Does not cover empty secret or truncated hex length edges.
+ */
 test('verifies QuickNode HMAC and rejects skew or bad signatures', () => {
   const nonce = 'n1';
   const timestamp = '1700000000';
@@ -45,6 +54,13 @@ test('verifies QuickNode HMAC and rejects skew or bad signatures', () => {
   }), (error) => error.code === 'timestamp_skew');
 });
 
+/**
+ * Achieves: normalizeStreamEvent defaults cluster=solana; planWalletKvSync/planBackfill produce add lists and slot ranges.
+ * Fails when: Cluster flips to mainnet, duplicate wallets double-add, or destination path drifts.
+ * Oracle: Compact stream event + wallet KV sync plan contract.
+ * Side effects: none
+ * Gaps: Does not call live QuickNode KV HTTP here.
+ */
 test('normalizes compact stream events and plans KV sync', () => {
   const event = normalizeStreamEvent({
     signature: '5'.repeat(64),
@@ -55,7 +71,7 @@ test('normalizes compact stream events and plans KV sync', () => {
     slot: 12,
     botId: 'bot_1',
   });
-  assert.equal(event.cluster, 'devnet');
+  assert.equal(event.cluster, 'mainnet-beta');
   const plan = planWalletKvSync({ wallets: [wallet, { address: wallet }], existing: [] });
   assert.deepEqual(plan.add, [wallet]);
   assert.equal(plan.destination, 'POST /webhooks/quicknode');
@@ -63,6 +79,13 @@ test('normalizes compact stream events and plans KV sync', () => {
   assert.equal(backfill.toSlot, 9);
 });
 
+/**
+ * Achieves: First webhook persists+wakes; replay is duplicate-only; bad HMAC never persists; README mentions solana-solana.
+ * Fails when: Duplicates re-persist/re-wake, or signature verification is skipped before persist.
+ * Oracle: Dedupe store + wake queue semantics for QuickNode webhooks.
+ * Side effects: In-memory dedupe + persist callbacks.
+ * Gaps: none meaningful
+ */
 test('webhook handler dedupes by signature and queues bot wakes', async () => {
   const bodyObj = {
     signature: 'abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd',
@@ -77,6 +100,19 @@ test('webhook handler dedupes by signature and queues bot wakes', async () => {
   const signature = sign(nonce, timestamp, rawBody);
   const dedupeStore = createMemoryDedupeStore();
   const persisted = [];
+
+  await assert.rejects(
+    () => handleQuickNodeWebhook({
+      secret,
+      headers: { 'x-qn-nonce': nonce, 'x-qn-timestamp': timestamp, 'x-qn-signature': '00'.repeat(32) },
+      rawBody,
+      dedupeStore,
+      persistEvent: async event => { persisted.push(event); },
+      nowSeconds: 1700000100,
+    }),
+    StreamsError,
+  );
+  assert.equal(persisted.length, 0);
 
   const first = await handleQuickNodeWebhook({
     secret,
@@ -101,10 +137,17 @@ test('webhook handler dedupes by signature and queues bot wakes', async () => {
   assert.deepEqual(second.duplicates, [bodyObj.signature]);
   assert.equal(second.accepted.length, 0);
   assert.equal(persisted.length, 1);
-  assert.match(streamsReadmeSection(), /solana-devnet/);
+  assert.match(streamsReadmeSection(), /solana-mainnet/);
   assert.equal(parseStreamPayload(JSON.stringify([bodyObj])).length, 1);
 });
 
+/**
+ * Achieves: Memory KV adds wallets; QuickNode client PATCHes add/remove diffs from GET list.
+ * Fails when: No PATCH on diffs, or memory list does not retain adds.
+ * Oracle: QuickNode list key CRUD vs planWalletKvSync.
+ * Side effects: Injected fetchImpl + memory KV.
+ * Gaps: Does not cover auth failures from QuickNode API.
+ */
 test('syncWalletsToKv applies plan against memory and QuickNode list client', async () => {
   const kv = createMemoryWalletKv();
   const first = await syncWalletsToKv({ wallets: [wallet], walletKv: kv });
@@ -128,6 +171,39 @@ test('syncWalletsToKv applies plan against memory and QuickNode list client', as
   assert.equal(calls.some((c) => c.method === 'PATCH'), true);
 });
 
+/**
+ * Achieves: GET {data:{items:[wallet]}} is treated as already synced so PATCH is skipped.
+ * Fails when: Wrapped list shape is misread as empty and re-PATCHed.
+ * Oracle: Documented QuickNode data.items list envelope.
+ * Side effects: Injected fetchImpl.
+ * Gaps: Does not cover pagination beyond a single items page.
+ */
+test('a QuickNode list wrapped as data.items is not added again', async () => {
+  const calls = [];
+  const qn = createQuickNodeKvClient({
+    apiKey: 'qn_key',
+    listKey: 'maelstrom-wallets',
+    fetchImpl: async (url, init) => {
+      calls.push(init.method);
+      if (init.method === 'GET') {
+        return new Response(JSON.stringify({ data: { items: [wallet] } }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    },
+  });
+  const synced = await syncWalletsToKv({ wallets: [wallet], walletKv: qn });
+  assert.deepEqual(synced.add, []);
+  assert.deepEqual(synced.remove, []);
+  assert.equal(calls.includes('PATCH'), false);
+});
+
+/**
+ * Achieves: Supabase store maps wallet→bot, POSTs stream_events, and backfill invokes afterWake.
+ * Fails when: Wrong bot mapping, missing persist POST, or afterWake not called.
+ * Oracle: Supabase REST paths used by createSupabaseStreamStore.
+ * Side effects: Injected fetchImpl + memory dedupe.
+ * Gaps: Does not hit a real Supabase project.
+ */
 test('supabase store resolves bots, persists, and backfill wakes with afterWake', async () => {
   const rest = [];
   const store = createSupabaseStreamStore({
@@ -155,7 +231,7 @@ test('supabase store resolves bots, persists, and backfill wakes with afterWake'
   assert.equal(bots[0].botId, 'bot_1');
   await store.persistEvent({
     signature: 'abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd',
-    wallet, type: 'deposit', amount: '1', token: null, slot: 1, cluster: 'devnet',
+    wallet, type: 'deposit', amount: '1', token: null, slot: 1, cluster: 'mainnet-beta',
   });
   assert.equal(rest.some((r) => r.url.includes('stream_events') && r.method === 'POST'), true);
 
@@ -174,19 +250,26 @@ test('supabase store resolves bots, persists, and backfill wakes with afterWake'
   assert.deepEqual(after, ['bot_1']);
 });
 
+/**
+ * Achieves: Only x402-in/out with amounts on execution clusters become confirmed feed rows; deposits/mainnet/missing amounts stay hidden.
+ * Fails when: Deposits appear as confirmed payments, or mainnet x402 is shown.
+ * Oracle: streamConfirmedPayments filter rules + SOLANA_USDC_MINT asset labeling.
+ * Side effects: none
+ * Gaps: Does not cover bot roster edge cases beyond walletAddress match.
+ */
 test('payment feed stays empty until a stream posts an x402 amount', () => {
   assert.deepEqual(streamConfirmedPayments([]), []);
   assert.deepEqual(streamConfirmedPayments(null), []);
   const signature = '5'.repeat(64);
   const hidden = streamConfirmedPayments([
-    { signature, wallet, type: 'deposit', amount: '10', token: 'USDC', cluster: 'devnet', botId: 'bot_1' },
-    { signature: '6'.repeat(64), wallet, type: 'x402-out', token: 'USDC', cluster: 'devnet', botId: 'bot_1' },
+    { signature, wallet, type: 'deposit', amount: '10', token: 'USDC', cluster: 'mainnet-beta', botId: 'bot_1' },
+    { signature: '6'.repeat(64), wallet, type: 'x402-out', token: 'USDC', cluster: 'mainnet-beta', botId: 'bot_1' },
     { signature: '7'.repeat(64), wallet, type: 'x402-in', amount: '4', token: 'USDC', cluster: 'mainnet', botId: 'bot_1' },
   ]);
   assert.deepEqual(hidden, []);
   const rows = streamConfirmedPayments([
-    { signature, wallet, type: 'x402-out', amount: '25', token: 'USDC', cluster: 'devnet', botId: 'bot_shop' },
-    { signature: '8'.repeat(64), wallet, event_type: 'x402-in', amount: '9', token: DEVNET_USDC_MINT, cluster: 'devnet' },
+    { signature, wallet, type: 'x402-out', amount: '25', token: 'USDC', cluster: 'mainnet-beta', botId: 'bot_shop' },
+    { signature: '8'.repeat(64), wallet, event_type: 'x402-in', amount: '9', token: SOLANA_USDC_MINT, cluster: 'mainnet-beta' },
   ], { bots: [{ id: 'bot_only', walletAddress: wallet }] });
   assert.equal(rows.length, 2);
   assert.equal(rows[0].direction, 'paid');
@@ -198,6 +281,13 @@ test('payment feed stays empty until a stream posts an x402 amount', () => {
   assert.equal(rows[1].asset, 'USDC');
 });
 
+/**
+ * Achieves: Covered outflows are ok; excess x402-out freezes; unreadable ledgers do not freeze; spendLedgerCrossCheck alerts per wallet.
+ * Fails when: Covered ledgers freeze, or excess outflows are ignored.
+ * Oracle: walletLedgerCrossCheck / spendLedgerCrossCheck freeze policy.
+ * Side effects: none
+ * Gaps: Does not apply freeze to a live wallet row in Postgres.
+ */
 test('spend ledger cross-check freezes only unapproved outflows', () => {
   const covered = walletLedgerCrossCheck({
     events: [{ signature: 'a'.repeat(32), type: 'x402-out', amount: '5', token: 'USDC' }],
@@ -235,4 +325,51 @@ test('spend ledger cross-check freezes only unapproved outflows', () => {
   assert.equal(alerts[0].walletId, 'w1');
   assert.equal(alerts[0].excess, '10');
   assert.deepEqual(spendLedgerCrossCheck({ events: [], wallets: [{ id: 'w1', address: wallet, botIds: ['bot_1'] }], ledgers: [] }), []);
+});
+
+/**
+ * Achieves: streamAsset maps USDC mint/symbol to USDC; drops empty/overlong; passes other tokens through.
+ * Fails when: Circle mint stays raw, or blank/oversize tokens return truthy.
+ * Oracle: SOLANA_USDC_MINT + 'USDC' → 'USDC'; null/''/>64 → null.
+ * Side effects: none.
+ * Gaps: mainnet USDC mint is intentionally not remapped here.
+ */
+test('streamAsset maps Circle USDC and rejects empty or overlong tokens', () => {
+  assert.equal(streamAsset('USDC'), 'USDC');
+  assert.equal(streamAsset(SOLANA_USDC_MINT), 'USDC');
+  assert.equal(streamAsset(' SOL '), 'SOL');
+  assert.equal(streamAsset(null), null);
+  assert.equal(streamAsset(''), null);
+  assert.equal(streamAsset('   '), null);
+  assert.equal(streamAsset('x'.repeat(65)), null);
+});
+
+/**
+ * Achieves: createKvDedupeStore prefixes signatures, sets TTL, and rejects missing KV.
+ * Fails when: Wrong key prefix, TTL omitted, or null ns succeeds.
+ * Oracle: Spy KV get/put args; StreamsError on null ns.
+ * Side effects: none beyond spy.
+ * Gaps: does not call live Cloudflare KV.
+ */
+test('createKvDedupeStore prefixes signatures with TTL and rejects missing KV', async () => {
+  const calls = [];
+  const ns = {
+    async get(key) {
+      calls.push(['get', key]);
+      return key.endsWith('seen') ? '{"at":1}' : null;
+    },
+    async put(key, value, opts) {
+      calls.push(['put', key, value, opts]);
+    },
+  };
+  const store = createKvDedupeStore(ns, { ttlSeconds: 99, prefix: 'sig:' });
+  assert.equal(await store.has('seen'), true);
+  assert.equal(await store.has('fresh'), false);
+  await store.put('fresh', { at: 2 });
+  assert.deepEqual(calls[0], ['get', 'sig:seen']);
+  assert.deepEqual(calls[1], ['get', 'sig:fresh']);
+  assert.equal(calls[2][0], 'put');
+  assert.equal(calls[2][1], 'sig:fresh');
+  assert.equal(calls[2][3].expirationTtl, 99);
+  assert.throws(() => createKvDedupeStore(null), StreamsError);
 });

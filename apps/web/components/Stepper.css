@@ -333,7 +333,7 @@
   cursor: pointer;
   transition:
     filter 0.2s ease,
-    transform 0.2s ease,
+    transform 440ms cubic-bezier(0.34, 1.5, 0.64, 1),
     opacity 0.2s ease;
 }
 
@@ -418,7 +418,8 @@
 .stepper__button:not(:disabled):active {
   filter: var(--stepper-press);
   transform: scale(0.96);
-  transition-duration: 0s;
+  transition-duration: 0.2s, 80ms, 0.2s;
+  transition-timing-function: ease, cubic-bezier(0.4, 0, 1, 1), ease;
 }
 
 @media (prefers-reduced-motion: reduce) {

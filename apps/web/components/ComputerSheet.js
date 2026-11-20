@@ -2,15 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import ModalClose from './ModalClose';
 import { loopStepsFromRun } from '../lib/loop-steps.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import LiveViewPanel from './LiveViewPanel';
 import LoopSteps from './LoopSteps';
 import { usePresence } from './usePresence';
 
-export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
+export default function ComputerSheet({ open, onClose, bot, ownerId = null, getAccessToken = null }) {
   const { mounted, leaving } = usePresence(open, 180);
+  const syncedBotId = bot?.record ? bot.id : null;
   const [shown, setShown] = useState(false);
   const [steps, setSteps] = useState(() => loopStepsFromRun(null));
   const [loopNote, setLoopNote] = useState('');
@@ -33,18 +35,18 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
   }, [mounted, onClose]);
 
   useEffect(() => {
-    if (!mounted || !bot?.id) return undefined;
-    const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/status`);
+    if (!mounted || !syncedBotId) return undefined;
+    const url = shellRuntimeUrl(`/bots/${encodeURIComponent(syncedBotId)}/status`);
     if (!ownerId || !url) {
       setSteps(loopStepsFromRun(null));
-      setLoopNote(ownerId ? 'This bot id cannot be loaded from the runtime.' : 'Sign in to load this bot’s loop.');
+      setLoopNote(ownerId ? 'This agent cannot be loaded from the runtime.' : 'Sign in to load this agent’s loop.');
       return undefined;
     }
     let stop = false;
     async function load() {
       try {
         const response = await fetch(url, {
-          headers: { 'x-owner-id': ownerId },
+          headers: await ownerAuthHeaders(ownerId, getAccessToken),
           cache: 'no-store',
         });
         const data = await response.json().catch(() => ({}));
@@ -67,7 +69,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
       stop = true;
       clearInterval(timer);
     };
-  }, [mounted, bot?.id, ownerId]);
+  }, [mounted, syncedBotId, ownerId, getAccessToken]);
 
   if (!mounted || !bot || typeof document === 'undefined') return null;
 
@@ -79,12 +81,16 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null }) {
       aria-label={`${bot.name} computer`}
       onMouseDown={onClose}
     >
-      <button type="button" className="browser-preview-close" aria-label="Close computer" onMouseDown={event => event.stopPropagation()} onClick={onClose}>
-        <X size={18} strokeWidth={1.75} />
-      </button>
+      <ModalClose label="Close computer" onMouseDown={event => event.stopPropagation()} onClick={onClose} />
       <div className="browser-preview-stage" onMouseDown={event => event.stopPropagation()}>
-        {hasRun ? <LoopSteps steps={steps} note={loopNote} /> : null}
-        <LiveViewPanel botId={bot.id} ownerId={ownerId} fill autoStart />
+        {syncedBotId ? (
+          <>
+            {hasRun ? <LoopSteps steps={steps} note={loopNote} /> : null}
+            <LiveViewPanel key={`${ownerId}:${syncedBotId}`} botId={syncedBotId} ownerId={ownerId} getAccessToken={getAccessToken} fill autoStart />
+          </>
+        ) : (
+          <p className="preview-note" role="status">The browser will be available when this agent syncs to your account.</p>
+        )}
       </div>
     </div>,
     document.body,

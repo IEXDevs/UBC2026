@@ -1,5 +1,8 @@
+
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Browser DexScreener reads for token details and USD prices.
+ * Longer chart ranges use GeckoTerminal candle closes for that window.
  * Profiles are cached per user. The spot price is never stored.
  * Calls stay on the visitor IP because DexScreener limits by IP.
  * This module does not sign.
@@ -18,16 +21,74 @@ const BATCH = 30;
 const MAX_MINTS = 60;
 
 export const DEX_TOKEN_ORIGIN = 'https://api.dexscreener.com/tokens/v1/solana';
+export const GECKO_OHLCV_ORIGIN = 'https://api.geckoterminal.com/api/v2/networks/solana/pools';
 
 const CHANGE_WINDOW = Object.freeze({
   '1H': { key: 'h1', ms: 3_600_000, label: '1H' },
   '1D': { key: 'h24', ms: 86_400_000, label: '24H' },
-  '1W': { key: 'h24', ms: 86_400_000, label: '24H' },
-  '1M': { key: 'h24', ms: 86_400_000, label: '24H' },
-  YTD: { key: 'h24', ms: 86_400_000, label: '24H' },
-  '1Y': { key: 'h24', ms: 86_400_000, label: '24H' },
-  All: { key: 'h24', ms: 86_400_000, label: '24H' },
 });
+
+/** One request per range. DexScreener only publishes 1H and 24H moves. */
+export function candleRequest(range, now = Date.now()) {
+  if (range === '1H') return { timeframe: 'minute', aggregate: 5, limit: 12 };
+  if (range === '1D') return { timeframe: 'hour', aggregate: 1, limit: 24 };
+  if (range === '1W') return { timeframe: 'hour', aggregate: 4, limit: 42 };
+  if (range === '1M') return { timeframe: 'day', aggregate: 1, limit: 30 };
+  if (range === '1Y') return { timeframe: 'day', aggregate: 1, limit: 365 };
+  if (range === 'All') return { timeframe: 'day', aggregate: 1, limit: 1000 };
+  if (range === 'YTD') {
+    const start = Date.UTC(new Date(now).getUTCFullYear(), 0, 1);
+    const days = Math.ceil((now - start) / 86_400_000) + 1;
+    return { timeframe: 'day', aggregate: 1, limit: Math.min(1000, Math.max(2, days)) };
+  }
+  return null;
+}
+
+export function geckoCandleUrl(pairAddress, range, now = Date.now()) {
+  const spec = candleRequest(range, now);
+  if (!MINT.test(pairAddress) || !spec) return null;
+  const params = new URLSearchParams({
+    aggregate: String(spec.aggregate),
+    limit: String(spec.limit),
+    currency: 'usd',
+  });
+  return `${GECKO_OHLCV_ORIGIN}/${encodeURIComponent(pairAddress)}/ohlcv/${spec.timeframe}?${params}`;
+}
+
+export function pointsFromOhlcv(body) {
+  const list = body?.data?.attributes?.ohlcv_list;
+  if (!Array.isArray(list)) return [];
+  const points = [];
+  for (const row of list) {
+    if (!Array.isArray(row) || row.length < 5) continue;
+    const raw = Number(row[0]);
+    const t = raw > 1e12 ? Math.floor(raw / 1000) : raw;
+    const price = Number(row[4]);
+    if (!Number.isFinite(t) || t < 0 || !Number.isFinite(price) || price < 0) continue;
+    points.push({ t, price });
+  }
+  points.sort((a, b) => a.t - b.t);
+  return points;
+}
+
+export async function readDexCandles({ pairAddress, range, fetcher = fetch, now = Date.now() } = {}) {
+  const url = geckoCandleUrl(pairAddress, range, now);
+  if (!url) return { points: [], rateLimited: false };
+  let response;
+  try {
+    response = await fetcher(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    return { points: [], rateLimited: false };
+  }
+  if (response?.status === 429) return { points: [], rateLimited: true };
+  if (!response?.ok) return { points: [], rateLimited: false };
+  let body = null;
+  try { body = await response.json(); } catch { body = null; }
+  return { points: pointsFromOhlcv(body), rateLimited: false };
+}
 
 export function dexCacheKey(userId) {
   const raw = typeof userId === 'string' ? userId.trim() : '';
@@ -268,13 +329,15 @@ export function windowPoints(price, pct, windowMs, now) {
   ];
 }
 
-export function dexTokenView({ mint, range = '1D', cluster = 'mainnet', token = null, now = Date.now() } = {}) {
+export function dexTokenView({ mint, range = '1D', cluster = 'mainnet', token = null, candles = null, now = Date.now() } = {}) {
   if (!MINT.test(mint) || !CHART_RANGES.includes(range)) return null;
   const spec = CHANGE_WINDOW[range];
   const priceUsd = livePrice(token?.priceUsd);
   const price = priceUsd == null ? null : Number(priceUsd);
-  const pct = finiteNumber(token?.priceChange?.[spec.key]);
-  const points = price == null ? [] : windowPoints(price, pct, spec.ms, now);
+  const pending = candles === 'pending';
+  const drawn = Array.isArray(candles) && candles.length >= 2 ? candles : null;
+  const pct = spec ? finiteNumber(token?.priceChange?.[spec.key]) : null;
+  const points = pending ? [] : (drawn || (spec && price != null ? windowPoints(price, pct, spec.ms, now) : []));
   const move = rangeMove(points);
   const symbol = token?.symbol || mint.slice(0, 4);
   const cached = token?.fromCache === true;
@@ -291,18 +354,20 @@ export function dexTokenView({ mint, range = '1D', cluster = 'mainnet', token = 
     points,
     price,
     changePct: move?.pct ?? null,
-    changeLabel: spec.label,
+    changeLabel: drawn ? range : (spec?.label || range),
     range,
     quoteSource: 'dexscreener',
     fromCache: cached,
-    note: cached
-      ? 'Saved token details. The price waits on DexScreener. devnet execution, mainnet pricing. This does not authorize a transaction.'
-      : 'DexScreener price. devnet execution, mainnet pricing. This does not authorize a transaction.',
+    note: drawn
+      ? 'GeckoTerminal history. DexScreener price. This does not authorize a transaction.'
+      : cached
+        ? 'Saved token details. The price waits on DexScreener. This does not authorize a transaction.'
+        : 'DexScreener price. This does not authorize a transaction.',
   };
 }
 
 export function portfolioWithDex(portfolio, tokens = []) {
-  if (!portfolio || (portfolio.cluster !== 'mainnet' && portfolio.cluster !== 'devnet' && portfolio.cluster !== 'testnet')) {
+  if (!portfolio || (portfolio.cluster !== 'mainnet' && portfolio.cluster !== SOLANA_CLUSTER && portfolio.cluster !== 'testnet')) {
     return portfolio;
   }
   const prices = {};
@@ -324,11 +389,12 @@ export function portfolioWithDex(portfolio, tokens = []) {
         mint: row.mint,
         amount: row.amount,
         decimals: row.decimals,
+        ...(row.native === undefined ? {} : { native: row.native }),
       })),
     })),
     prices: withKnownPegs(portfolio.cluster, prices),
   });
-  const paint = row => (symbols[row.mint] ? { ...row, symbol: symbols[row.mint] } : row);
+  const paint = row => (symbols[row.mint] ? { ...row, symbol: row.native === false && row.mint === 'So11111111111111111111111111111111111111112' ? 'wSOL' : symbols[row.mint] } : row);
   return {
     ...rebuilt,
     truncated: portfolio.truncated === true,

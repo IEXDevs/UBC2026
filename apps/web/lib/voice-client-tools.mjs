@@ -168,18 +168,18 @@ export function createVoiceClientTools({
       if (topic === 'approval' && approvalSummary) {
         text = approvalSummary;
       } else if (topic === 'security') {
-        text = 'Security pane: pause every bot, freeze, or request grab-back. Keys stay in Privy.';
+        text = 'Security pane: pause every agent, freeze, or request grab-back. Keys stay in Privy.';
       } else if (topic === 'timeline') {
-        text = 'Timeline shows recent tool and trust events for the active bot.';
+        text = 'Timeline shows recent tool and trust events for the active agent.';
       } else if (topic === 'conversation' && conversation?.recentText) {
         text = conversation.recentText() || 'Conversation is empty.';
       } else if (topic === 'overview') {
-        text = `Overview across ${bots.length} bots. Open a bot for approvals and Live View.`;
+        text = `Overview across ${bots.length} agents. Open an agent for approvals and Live View.`;
       } else {
         const bot = findBot(bots, { botId: activeBotId }) || bots[0];
         text = bot
           ? `${bot.name} is ${bot.status}. Goal: ${bot.goal}`
-          : 'No bots yet. Create one from the sidebar.';
+          : 'No agents yet. Create one from the sidebar.';
       }
       if (conversation?.recentText && topic !== 'conversation') {
         const recent = conversation.recentText(3);

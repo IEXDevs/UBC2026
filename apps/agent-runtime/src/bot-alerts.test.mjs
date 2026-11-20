@@ -2,19 +2,30 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EVENT_KINDS } from '@ubc2026/contracts';
 import { BotStateMachine } from './bot-do.mjs';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import {
   alertFromSpend,
   botAlertEvent,
   rememberBotAlert,
+  readBotAlerts,
+  BOT_LOCATION_HINT,
 } from './bot-alerts.mjs';
 
 const at = 1_700_000_000_000;
-const mint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
+/**
+ * Achieves: alert builders emit EVENT_KINDS events scoped to the given botId only.
+ * Fails when: unknown kind or wrong botId in payload.
+ * Oracle: kinds ⊆ EVENT_KINDS; botId matches input.
+ * Side effects / state checked: N/A.
+ * Gaps: none for builder shape
+ */
 test('each bot alert stays inside EVENT_KINDS and names only that bot', () => {
   const cases = [
     ['max-loss', 'bot.paused'],
+    ['near-max-loss', 'run.checkpoint'],
+    ['price-down', 'run.checkpoint'],
     ['verify-mismatch', 'verify.mismatch'],
     ['unapproved-spend', 'approval.requested'],
   ];
@@ -41,6 +52,13 @@ test('each bot alert stays inside EVENT_KINDS and names only that bot', () => {
   ), null);
 });
 
+/**
+ * Achieves: timeline write posts one row when configured and no-ops without service key.
+ * Fails when: writes without key, or multiple rows for one alert.
+ * Oracle: configured: one write; unconfigured: zero writes.
+ * Side effects / state checked: fetch call count/body.
+ * Gaps: none
+ */
 test('timeline writes one row for that bot and stays quiet without a service key', async () => {
   const input = {
     alert: 'verify-mismatch',
@@ -82,12 +100,23 @@ test('timeline writes one row for that bot and stays quiet without a service key
   assert.equal(seen[0].body.kind, 'bot.paused');
 });
 
+/**
+ * Achieves: max-loss and verify-mismatch alerts write only to the subject bot timeline.
+ * Fails when: alerts fan out to other bots or wrong kinds.
+ * Oracle: timeline rows for subject bot only with expected kinds.
+ * Side effects / state checked: timeline writes captured.
+ * Gaps: none
+ */
 test('a max-loss check and a verify mismatch land on that bot timeline only', async () => {
   const desk = new BotStateMachine();
   const other = new BotStateMachine();
   const checked = await desk.handle(new Request('https://bot/position-check', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-maelstrom-internal': 'position-check',
+      'x-owner-id': 'user_1',
+    },
     body: JSON.stringify({
       botId: 'bot_desk',
       ownerId: 'user_1',
@@ -154,7 +183,7 @@ test('a max-loss check and a verify mismatch land on that bot timeline only', as
       proposal: {
         id: 'p1',
         botId: 'bot_1',
-        cluster: 'devnet',
+        cluster: 'mainnet-beta',
         asset: 'USDC',
         recipient: 'Alex111111111111111111111111111111111111111',
         quoteId: 'q1',
@@ -167,20 +196,11 @@ test('a max-loss check and a verify mismatch land on that bot timeline only', as
       facts: {
         asset: 'USDC',
         mint,
-        cluster: 'devnet',
+        cluster: 'mainnet-beta',
         price: '1000000',
-        amount: '1000',
+        amount: '1001',
         trustScore: '800',
         reasonSummary: 'Transfer under cap',
-      },
-      verifyFacts: {
-        asset: 'USDC',
-        mint,
-        cluster: 'devnet',
-        price: '1000001',
-        amount: '1000',
-        trustScore: '800',
-        reasonSummary: 'Verifier disagrees on price',
       },
       trustScore: '800',
     }),
@@ -197,12 +217,20 @@ test('a max-loss check and a verify mismatch land on that bot timeline only', as
   assert.equal(verifyItems[0].botId, 'bot_1');
 });
 
+/**
+ * Achieves: over-cap spend produces unapproved_spend alert for that bot.
+ * Fails when: wrong kind or other botId.
+ * Oracle: alert kind/botId assertions in file.
+ * Side effects / state checked: timeline write.
+ * Gaps: none
+ */
 test('an over-cap spend attempt is an unapproved alert on that bot', async () => {
   const machines = new Map();
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     spendNow: at,
+    trustLookup: null,
     loadSpendContext: async () => ({
       bot: {
         id: 'bot_1',
@@ -229,7 +257,7 @@ test('an over-cap spend attempt is an unapproved alert on that bot', async () =>
       ledger: { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },
     }),
     transferClient: {
-      async signAndBroadcastDevnet() {
+      async signAndBroadcastSolana() {
         throw new Error('should not sign');
       },
     },
@@ -270,4 +298,20 @@ test('an over-cap spend attempt is an unapproved alert on that bot', async () =>
     headers: { 'x-owner-id': 'user_1' },
   }), env);
   assert.deepEqual((await other.json()).items, []);
+});
+
+test('bot Durable Objects are created with a Western North America location hint', async () => {
+  const calls = [];
+  const env = {
+    BOT: {
+      idFromName: name => `id:${name}`,
+      get: (id, options) => {
+        calls.push({ id, options });
+        return { fetch: async () => Response.json({ alerts: [] }) };
+      },
+    },
+  };
+  await readBotAlerts(env, 'bot-1', 'owner-1');
+  assert.deepEqual(calls, [{ id: 'id:bot-1', options: { locationHint: 'wnam' } }]);
+  assert.equal(BOT_LOCATION_HINT, 'wnam');
 });

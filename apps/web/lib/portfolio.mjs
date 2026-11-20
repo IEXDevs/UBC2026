@@ -1,3 +1,4 @@
+import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_USDC_MINT, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Read-only portfolio of linked Solana wallets.
  * Balances come from QuickNode. Dollar values use mainnet prices.
@@ -19,7 +20,7 @@ const PRICE = /^(0|[1-9]\d*)(\.\d+)?$/;
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 export const MAINNET_USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
-export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+export { SOLANA_USDC_MINT };
 
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
@@ -39,16 +40,16 @@ const SYMBOLS = Object.freeze({
   [SOL_MINT]: 'SOL',
   [MAINNET_USDC_MINT]: 'USDC',
   [MAINNET_USDT_MINT]: 'USDT',
-  [DEVNET_USDC_MINT]: 'USDC',
+  [SOLANA_USDC_MINT]: 'USDC',
 });
 
 const PEGS = Object.freeze({
   [MAINNET_USDC_MINT]: '1',
   [MAINNET_USDT_MINT]: '1',
-  [DEVNET_USDC_MINT]: '1',
+  [SOLANA_USDC_MINT]: '1',
 });
 
-export const PRICE_LABEL = 'devnet execution, mainnet pricing';
+export const PRICE_LABEL = EXECUTION_LABEL;
 const MAX_WALLETS = 24;
 const MAX_TOKENS = 40;
 
@@ -70,12 +71,13 @@ export function assertPortfolioRpc(url) {
   return parsed.toString();
 }
 
-export function choosePortfolioRpc(env = {}) {
+export function choosePortfolioRpc(env = {}, cluster = '') {
   const mainnet = typeof env.QUICKNODE_MAINNET_RPC_URL === 'string' ? env.QUICKNODE_MAINNET_RPC_URL.trim() : '';
-  const devnet = typeof env.QUICKNODE_DEVNET_RPC_URL === 'string' ? env.QUICKNODE_DEVNET_RPC_URL.trim() : '';
+  const solana = configuredSolanaRpc(env);
+  if (cluster === SOLANA_CLUSTER) return { rpcUrl: solana, missing: solana ? [] : ['SOLANA_RPC_URL'] };
   if (mainnet) return { rpcUrl: mainnet, missing: [] };
-  if (devnet) return { rpcUrl: devnet, missing: [] };
-  return { rpcUrl: '', missing: ['QUICKNODE_MAINNET_RPC_URL', 'QUICKNODE_DEVNET_RPC_URL'] };
+  if (solana) return { rpcUrl: solana, missing: [] };
+  return { rpcUrl: '', missing: ['QUICKNODE_MAINNET_RPC_URL', 'SOLANA_RPC_URL'] };
 }
 
 export function usdMicro(amount, decimals, priceUsd) {
@@ -110,7 +112,7 @@ function symbolFor(mint) {
 }
 
 function pegFor(mint, cluster) {
-  if (mint === DEVNET_USDC_MINT && cluster === 'mainnet') return null;
+  if (mint === SOLANA_USDC_MINT && SOLANA_CLUSTER !== 'mainnet-beta' && cluster === 'mainnet') return null;
   return PEGS[mint] ?? null;
 }
 
@@ -125,9 +127,10 @@ export function withKnownPegs(cluster, prices = {}) {
 }
 
 function addToken(bucket, token) {
-  const existing = bucket.get(token.mint);
+  const key = token.native === false ? `${token.mint}:wrapped` : token.mint;
+  const existing = bucket.get(key);
   if (!existing) {
-    bucket.set(token.mint, { ...token });
+    bucket.set(key, { ...token });
     return;
   }
   existing.amount = (BigInt(existing.amount) + BigInt(token.amount)).toString();
@@ -151,29 +154,29 @@ function sharesOf(slices) {
 export function portfolioErrorNote(body = {}) {
   const code = typeof body?.error === 'string' ? body.error : '';
   if (code === 'missing_config') {
-    return 'Portfolio needs QUICKNODE_MAINNET_RPC_URL or QUICKNODE_DEVNET_RPC_URL in the repo root .env.local, then restart Next.';
+    return 'Portfolio needs QUICKNODE_MAINNET_RPC_URL or SOLANA_RPC_URL in the repo root .env.local, then restart Next.';
   }
   if (code === 'invalid_rpc') return 'The QuickNode portfolio URL must be https.';
   if (code === 'wrong_cluster') return 'QuickNode returned a cluster this portfolio does not read.';
-  if (code === 'login_required') return 'Sign in again to read the portfolio.';
-  if (code === 'rpc_failed') return 'QuickNode did not return balances. Try again in a moment.';
+  if (code === 'login_required' || code === 'worker_origin_forbidden') {
+    return 'Sign in again to read the portfolio.';
+  }
+  if (code === 'privy_failed') return 'Privy did not return this account. Sign out and sign in again.';
+  if (code === 'rpc_failed' || code === 'rpc_timeout' || code === 'rpc_rate_limited') {
+    return 'QuickNode did not return balances. Try again in a moment.';
+  }
   return 'The portfolio could not be read.';
 }
 
-export function portfolioNote(cluster) {
-  const where = cluster === 'mainnet'
-    ? 'Read-only mainnet balances from QuickNode.'
-    : cluster === 'testnet'
-      ? 'Testnet balances from QuickNode.'
-      : 'Devnet balances from QuickNode. Set QUICKNODE_MAINNET_RPC_URL to graph mainnet holdings.';
-  return `${where} Dollar values use mainnet prices and do not authorize a transaction. ${PRICE_LABEL}.`;
+function portfolioNote() {
+  return 'Read-only balances from QuickNode. Dollar values are estimates and do not authorize a transaction.';
 }
 
 /**
  * @param {{ cluster: string, wallets: Array<{ address: string, label?: string, walletClientType?: string, spendable?: boolean, tokens: Array<{ mint: string, amount: string, decimals: number }> }>, prices: Record<string, string> }} input
  */
 export function buildPortfolio({ cluster, wallets, prices = {} }) {
-  if (cluster !== 'mainnet' && cluster !== 'devnet' && cluster !== 'testnet') fail('wrong_cluster');
+  if (cluster !== 'mainnet' && cluster !== SOLANA_CLUSTER) fail('wrong_cluster');
   const walletRows = [];
   const combined = new Map();
   let unpriced = 0;
@@ -185,7 +188,7 @@ export function buildPortfolio({ cluster, wallets, prices = {} }) {
       if (!token || !BASE58.test(token.mint) || !AMOUNT.test(token.amount) || token.amount === '0') continue;
       if (!Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 18) continue;
       if (token.decimals === 0 && token.amount === '1') continue;
-      addToken(local, { mint: token.mint, amount: token.amount, decimals: token.decimals });
+      addToken(local, { mint: token.mint, amount: token.amount, decimals: token.decimals, ...(token.native === undefined ? {} : { native: token.native }) });
     }
     let walletUsd = 0n;
     for (const token of local.values()) {
@@ -195,10 +198,11 @@ export function buildPortfolio({ cluster, wallets, prices = {} }) {
       if (!priced) unpriced += 1;
       const row = {
         mint: token.mint,
-        symbol: symbolFor(token.mint),
+        symbol: token.native === false && token.mint === SOL_MINT ? 'wSOL' : symbolFor(token.mint),
         amount: token.amount,
         decimals: token.decimals,
         usdMicro: priced ? micro : '0',
+        ...(token.native === undefined ? {} : { native: token.native }),
       };
       holdings.push(row);
       if (priced) {
@@ -242,7 +246,7 @@ export function buildPortfolio({ cluster, wallets, prices = {} }) {
     slices,
     wallets: walletRows,
     unpriced,
-    note: portfolioNote(cluster),
+    note: portfolioNote(),
   };
 }
 
@@ -270,7 +274,7 @@ async function rpcBatch(fetcher, rpcUrl, calls) {
         method: call.method,
         params: call.params,
       }))),
-      redirect: 'error',
+      redirect: 'follow',
       signal: abortAfter(20000),
     });
   } catch (error) {
@@ -309,7 +313,7 @@ function parseTokenAccounts(result) {
     if (!BASE58.test(mint) || typeof amount !== 'string' || !AMOUNT.test(amount)) continue;
     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) continue;
     if (amount === '0' || (decimals === 0 && amount === '1')) continue;
-    out.push({ mint, amount, decimals });
+    out.push({ mint, amount, decimals, ...(mint === SOL_MINT ? { native: false } : {}) });
     if (out.length >= MAX_TOKENS) break;
   }
   return out;
@@ -357,7 +361,7 @@ export async function readChainBalances({ rpcUrl, wallets, fetcher = fetch }) {
       ...parseTokenAccounts(rpcResult(rows[base + 2])),
     ];
     if (lamports && lamports !== '0') {
-      tokens.unshift({ mint: SOL_MINT, amount: lamports, decimals: 9 });
+      tokens.unshift({ mint: SOL_MINT, amount: lamports, decimals: 9, native: true });
     }
     return {
       address: wallet.address,

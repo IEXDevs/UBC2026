@@ -193,11 +193,15 @@ async function wakeAndMaybeLoop(env, botStub, wake) {
   const stub = botStub(env, wake.botId);
   const wakeRes = await stub.fetch(new Request('https://bot/wake', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(wake.ownerId ? { 'x-owner-id': wake.ownerId } : {}),
+    },
     body: JSON.stringify({
       botId: wake.botId,
       reason: wake.reason || 'quicknode-stream',
       goal: wake.bot?.goal || '',
+      ...(wake.ownerId ? { ownerId: wake.ownerId } : {}),
       streamEvent: {
         signature: wake.event.signature,
         wallet: wake.event.wallet,
@@ -223,7 +227,7 @@ async function wakeAndMaybeLoop(env, botStub, wake) {
       'Content-Type': 'application/json',
       'x-owner-id': wake.ownerId,
     },
-    body: JSON.stringify(context),
+    body: JSON.stringify({ ...context, scheduled: true }),
   }));
   const text = await loopRes.text();
   let body;

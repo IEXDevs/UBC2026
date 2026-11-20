@@ -13,6 +13,6 @@ if (result.state === 'consensus') {
 }
 ```
 
-Amounts and trust scores are unsigned integer strings. Only `devnet` and `testnet` clusters are accepted. `memoFromDecision` recomputes the SHA-256 of the canonical decision record — asset, mint, cluster, price, amount, trust score, reasoning summary, and attempt history — and places that digest in the memo string. A caller-supplied digest that does not match is rejected. A digest is not a signature or authorization credential, and this package does not submit the memo on chain. It never signs, broadcasts, or reserves budget. Pair settled consensus facts with `@ubc2026/bot-policy` before creating an approval-bound preview.
+Amounts and trust scores are unsigned integer strings. Only `mainnet-beta` and `testnet` clusters are accepted. `memoFromDecision` recomputes the SHA-256 of the canonical decision record — asset, mint, cluster, price, amount, trust score, reasoning summary, and attempt history — and places that digest in the memo string. A caller-supplied digest that does not match is rejected. A digest is not a signature or authorization credential, and this package does not submit the memo on chain. It never signs, broadcasts, or reserves budget. Pair settled consensus facts with `@ubc2026/bot-policy` before creating an approval-bound preview.
 
 Run `npm test` here or at the repository root. No secrets or external services required.

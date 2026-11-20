@@ -1,187 +1,171 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
-import AccountStats from './AccountStats';
-import { profileStats } from '../lib/statistics.mjs';
+import AddressText from './AddressText';
+
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Check, Copy, LockKeyhole, Pencil, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
-import AddressCopy from './AddressCopy';
+import AccountStats from './AccountStats';
+import { readAgentImage } from './AgentEdit';
+import ModalClose from './ModalClose';
 import ProfileMark from './ProfileMark';
-import LinkedLogins from './LinkedLogins';
+import { copyText } from '../lib/copy-text.mjs';
+import { claimLookupVerdict, profileSaveNote } from '../lib/profile.mjs';
+import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
+import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
+import { profileStats } from '../lib/statistics.mjs';
+import { profilePhoto, PROFILE_LOOK_KEY } from '../lib/profile-photo.mjs';
 import { usePresence } from './usePresence';
-import ProviderAdd from './ProviderAdd';
-import { readProviderViews, removeProvider } from '../lib/provider-tokens.mjs';
 
 export default function ProfileSheet({
-  open,
-  onClose,
-  accountLabel,
-  avatarUrl = null,
-  profile = null,
-  glance,
-  wallets,
-  voiceMs = 0,
-  talks = {},
-  payments = [],
-  transfers = [],
-  signedIn,
-  loginDisabled,
-  onLogin,
-  onLogout,
-  onSave,
+  open, onClose, accountLabel, accountAddress = '', avatarUrl = null, profile = null,
+  voiceMs = 0, talks = {}, payments = [], transfers = [],
+  signedIn, loginDisabled, onLogin, onLogout, onSave,
+  ownerId, getAccessToken, connections,
 }) {
   const { mounted, leaving } = usePresence(open);
-  const [displayName, setDisplayName] = useState(profile?.displayName || accountLabel || '');
-  const [handle, setHandle] = useState(profile?.handle || '');
+  const [displayName, setDisplayName] = useState('');
+  const [photo, setPhoto] = useState(null);
+  const [editingName, setEditingName] = useState(false);
   const [note, setNote] = useState('');
-  const [providers, setProviders] = useState([]);
-  const [providerOpen, setProviderOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [copyNote, setCopyNote] = useState('');
+  const [claiming, setClaiming] = useState(false);
+  const [handleDraft, setHandleDraft] = useState('');
+  const [availability, setAvailability] = useState({ handle: '', verdict: 'idle' });
+  const photoInput = useRef(null);
+  const copyTimer = useRef(null);
+  const handle = profile?.handle || '';
+  const initialName = profile?.displayName || accountLabel || '';
+  const dirty = displayName.trim() !== initialName || photo !== avatarUrl || claiming;
+  const typedHandle = normalizeHandle(handleDraft);
 
+  // Do not erase an unsaved draft when a background profile read completes.
   useEffect(() => {
     if (!open) return;
-    setDisplayName(profile?.displayName || accountLabel || '');
-    setHandle(profile?.handle || '');
+    setDisplayName(initialName);
+    setPhoto(avatarUrl);
+    setEditingName(false);
     setNote('');
-    setProviders(readProviderViews(localStorage));
-    setProviderOpen(false);
-  }, [open, profile, accountLabel]);
+    setCopyNote('');
+    setClaiming(false);
+    setHandleDraft('');
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !claiming || !typedHandle) return undefined;
+    const controller = new AbortController();
+    setAvailability({ handle: typedHandle, verdict: 'checking' });
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(shellRuntimeUrl(`/api/profiles/lookup?q=${encodeURIComponent(`@${typedHandle}`)}`), {
+          headers: await ownerAuthHeaders(ownerId, getAccessToken), cache: 'no-store', signal: controller.signal,
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!controller.signal.aborted) setAvailability({ handle: typedHandle, verdict: claimLookupVerdict(response.status, body) });
+      } catch { if (!controller.signal.aborted) setAvailability({ handle: typedHandle, verdict: 'error' }); }
+    }, 420);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [open, claiming, typedHandle, ownerId, getAccessToken]);
 
   useEffect(() => {
     if (!open) return undefined;
-    function onKey(event) {
-      if (event.key === 'Escape') onClose();
-    }
+    function onKey(event) { if (event.key === 'Escape') onClose(); }
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); clearTimeout(copyTimer.current); };
   }, [open, onClose]);
 
-  if (!mounted) return null;
+  async function save(event) {
+    event.preventDefault();
+    if (saving || !dirty) return;
+    const name = normalizeDisplayName(displayName);
+    if (!name) { setNote('Use a display name between 1 and 64 characters.'); return; }
+    if (claiming && (!typedHandle || availability.handle !== typedHandle || availability.verdict !== 'open')) { setNote('Choose an available handle first.'); return; }
+    setSaving(true);
+    setNote('');
+    try {
+      const saved = await onSave({ editOnly: !claiming, displayName: name, handle: claiming ? typedHandle : handle, ...(photo !== avatarUrl ? { photo } : {}) });
+      if (saved?.ok !== true) throw saved || new Error('profile_save_failed');
+      setDisplayName(saved.profile?.displayName || name);
+      setEditingName(false);
+      setClaiming(false);
+      setNote(saved.photoSync === 'failed' ? 'Your name was saved, but the photo could not be saved. Try again.' : 'Profile saved.');
+    } catch (error) {
+      if (claiming && error?.code === 'handle_taken') setAvailability({ handle: typedHandle, verdict: 'taken' });
+      setNote(profileSaveNote(error));
+    }
+    finally { setSaving(false); }
+  }
 
-  return (
+  async function choosePhoto(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) { setNote('Choose an image smaller than 5 MB.'); return; }
+    const image = await readAgentImage(file).catch(() => '');
+    if (!profilePhoto({ [PROFILE_LOOK_KEY]: { image } })) { setNote('That image could not be used. Try another photo.'); return; }
+    setPhoto(image);
+    setNote('');
+  }
+
+  async function copyHandle() {
+    const copied = await copyText(`@${handle}`).catch(() => false);
+    setCopyNote(copied ? 'Copied' : 'Copy failed');
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopyNote(''), 1600);
+  }
+
+  if (!mounted) return null;
+  return createPortal(
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
-      <motion.section
-        className="profile-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="profile-title"
-        onMouseDown={event => event.stopPropagation()}
-        initial={leaving ? false : { opacity: 0, y: 36, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <div className="profile-identity">
-          <div className="sheet-head">
-            <p className="plugin-kicker">Account</p>
-            <button type="button" className="icon-btn" aria-label="Close settings" onClick={onClose}>
-              <X size={18} strokeWidth={1.75} />
-            </button>
+      <motion.section className="profile-modal" role="dialog" aria-modal="true" aria-label="Profile" onMouseDown={event => event.stopPropagation()}
+        initial={leaving ? false : { opacity: 0, y: 36, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
+        <ModalClose label="Close profile" onClick={onClose} />
+        <form className="profile-identity profile-form" onSubmit={save}>
+          <p className="plugin-kicker">Profile</p>
+          <div className="agent-photo profile-photo">
+            <ProfileMark src={photo} label={displayName || accountLabel} />
+            {signedIn ? <>
+              <button type="button" className="agent-pencil" aria-label="Change profile photo" disabled={saving} onClick={() => photoInput.current?.click()}><Pencil size={15} /></button>
+              <input ref={photoInput} className="agent-file" type="file" accept="image/*" aria-label="Profile photo" tabIndex={-1} disabled={saving} onChange={choosePhoto} />
+            </> : null}
           </div>
-          <ProfileMark src={avatarUrl || profile?.avatarUrl} label={displayName || accountLabel} className="you-mark is-huge" />
-          <h2 id="profile-title">{displayName || accountLabel}</h2>
-          <p className="profile-handle">{handle ? `@${handle}` : 'No handle yet'}</p>
-          {signedIn ? (
-            <form
-              className="field profile-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const nextName = normalizeDisplayName(displayName);
-                const nextHandle = normalizeHandle(handle);
-                if (!nextName || !nextHandle) {
-                  setNote('Use a display name and a handle. Letters, numbers, and underscores.');
-                  return;
-                }
-                Promise.resolve(onSave?.({
-                  displayName: nextName,
-                  handle: nextHandle,
-                  avatarUrl: avatarUrl || profile?.avatarUrl || null,
-                })).then((saved) => {
-                  setNote(saved?.error === 'handle_taken' ? 'That handle is already taken.' : 'Saved.');
-                }).catch(() => {
-                  setNote('Saved on this device. The directory did not update.');
-                });
-              }}
-            >
-              <label>
-                Display name
-                <input value={displayName} maxLength={64} onChange={event => setDisplayName(event.target.value)} />
-              </label>
-              <label>
-                Handle
-                <input
-                  value={handle}
-                  maxLength={32}
-                  spellCheck={false}
-                  autoCapitalize="none"
-                  placeholder="@handle"
-                  onChange={event => setHandle(event.target.value.replace(/^@/, ''))}
-                />
-              </label>
-              <p className="quiet">@{handle || 'alex'} pays this account. @richclub.sol goes through SNS, not this directory.</p>
-              {note ? <p className="voice-note" role="status">{note}</p> : null}
-              <button type="submit" className="solid">Save profile</button>
-            </form>
-          ) : (
-            <button type="button" className="solid" disabled={loginDisabled} onClick={onLogin}>Connect</button>
-          )}
-        </div>
+          <div className="profile-name-row">
+            {editingName ? <>
+              <input className="profile-name-input" aria-label="Display name" value={displayName} maxLength={64} autoFocus disabled={saving} onChange={event => setDisplayName(event.target.value)} />
+              <button type="submit" className="icon-btn" aria-label="Save display name" disabled={saving || !dirty}><Check size={18} /></button>
+              <button type="button" className="icon-btn" aria-label="Cancel name edit" disabled={saving} onClick={() => { setDisplayName(initialName); setEditingName(false); setNote(''); }}><X size={17} /></button>
+            </> : <>
+              <h2><AddressText text={displayName || accountLabel} addresses={[accountAddress]} /></h2>
+              {signedIn ? <button type="button" className="icon-btn" aria-label="Edit display name" disabled={saving} onClick={() => setEditingName(true)}><Pencil size={16} /></button> : null}
+            </>}
+          </div>
+          <div className="profile-handle">
+            {claiming ? <>
+              <label className="profile-claim-input">@<input aria-label="Choose handle" value={handleDraft} maxLength={32} autoFocus disabled={saving} onChange={event => setHandleDraft(event.target.value.replace(/^@+/, ''))} autoComplete="off" spellCheck={false} /></label>
+              <button type="button" className="icon-btn" aria-label="Cancel handle claim" disabled={saving} onClick={() => setClaiming(false)}><X size={16} /></button>
+            </> : <span>{handle ? `@${handle}` : 'No handle yet'}</span>}
+            {handle ? <>
+              <LockKeyhole size={13} aria-label="Handle cannot be changed" />
+              <button type="button" className={`icon-btn handle-copy${copyNote === 'Copied' ? ' is-copied' : ''}`} aria-label="Copy handle" title="Copy handle" onClick={copyHandle}>{copyNote === 'Copied' ? <Check size={16} /> : <Copy size={16} />}</button>
+              <small role="status">{copyNote}</small>
+            </> : null}
+            {!handle && signedIn && !claiming ? <button type="button" className="ghost profile-claim" onClick={() => { setClaiming(true); setNote(''); }}><Pencil size={13} />Claim handle</button> : null}
+          </div>
+          {claiming && typedHandle ? <p className="voice-note" role="status">{availability.handle !== typedHandle || availability.verdict === 'checking' ? 'Checking availability…' : availability.verdict === 'open' ? 'Available — your handle cannot be changed once claimed.' : availability.verdict === 'taken' ? 'That handle is taken.' : 'Could not check availability. Try again.'}</p> : null}
+          {signedIn && dirty && !editingName ? <button type="submit" className="solid profile-save" disabled={saving || (claiming && (!typedHandle || availability.handle !== typedHandle || availability.verdict !== 'open'))}>{saving ? 'Saving…' : claiming ? 'Claim handle' : 'Save changes'}</button> : null}
+          {note ? <p className="voice-note profile-note" role="status">{note}</p> : null}
+          {!signedIn ? <button type="button" className="solid" disabled={loginDisabled} onClick={() => onLogin?.()}>Connect</button> : null}
+          {signedIn ? connections : null}
+        </form>
         <div className="profile-settings">
-          <p className="plugin-kicker">Stats</p>
+          <p className="plugin-kicker">Activity</p>
           <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
-          <p className="quiet">Talk time is seconds on this device. Net PnL is inflows minus outflows. devnet execution, mainnet pricing.</p>
-          <p className="plugin-kicker">Wallet</p>
-          {signedIn ? (
-            <>
-              <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>
-              <p className="quiet">{wallets?.length ? glance.label : 'Sign-in provisions the main Privy wallet'}</p>
-              <AddressCopy address={glance.address} />
-              <p className="quiet">Balance is from live positions when bots open them. devnet execution, mainnet pricing.</p>
-              <ul className="profile-wallets">
-                {(wallets || []).map(wallet => (
-                  <li key={wallet.id}>
-                    <strong>{wallet.label}</strong>
-                    <AddressCopy address={wallet.address} />
-                  </li>
-                ))}
-              </ul>
-              <LinkedLogins />
-            </>
-          ) : (
-            <>
-              <p className="profile-balance">Not signed in</p>
-              <p className="quiet">Connect to see your Privy wallets. No preview rows are shown while signed out.</p>
-            </>
-          )}
-          {signedIn ? (
-            <button type="button" className="ghost" onClick={onLogout}>Log out</button>
-          ) : null}
-          <p className="plugin-kicker">Providers</p>
-          {providers.length ? (
-            <ul className="provider-list">
-              {providers.map(item => (
-                <li key={item.id}>
-                  <span>
-                    <strong>{item.name}</strong>
-                    <span className="quiet">{item.hint ? `Token ${item.hint}` : 'Custom provider'}</span>
-                  </span>
-                  <button type="button" className="provider-remove" onClick={() => {
-                    removeProvider(localStorage, item.id);
-                    setProviders(readProviderViews(localStorage));
-                  }}>Remove</button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="quiet">No custom providers on this device.</p>
-          )}
-          <button type="button" className="ghost" onClick={() => setProviderOpen(true)}>Add Provider</button>
+          {signedIn ? <button type="button" className="ghost" onClick={onLogout}>Log out</button> : null}
         </div>
-        <ProviderAdd
-          open={providerOpen}
-          onClose={() => setProviderOpen(false)}
-          onSaved={() => setProviders(readProviderViews(localStorage))}
-        />
       </motion.section>
-    </div>
+    </div>, document.body,
   );
 }

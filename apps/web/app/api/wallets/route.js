@@ -1,34 +1,24 @@
 export const runtime = 'nodejs';
 
 import { accountWriteBodies } from '@ubc2026/wallets';
-import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
+import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
+import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
+import { verifyPrivyAccessToken } from '../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { fetchAgentRuntime } from '../../../lib/runtime-fetch.mjs';
-import { missingWalletSecrets, resolvePrivyAppId } from '../../../lib/wallet-provision.mjs';
-
-function requestOrigin(request) {
-  const fromOrigin = sanitizeOrigin(request.headers.get('origin'));
-  if (fromOrigin) return fromOrigin;
-  const referer = request.headers.get('referer');
-  if (typeof referer === 'string' && referer.trim()) {
-    try { return sanitizeOrigin(new URL(referer.trim()).origin); } catch { /* ignore */ }
-  }
-  return 'http://localhost:3000';
-}
-
-function publicWallet(wallet) {
-  return {
-    id: wallet.id,
-    ownerId: wallet.ownerId,
-    kind: wallet.kind,
-    label: wallet.label,
-    address: wallet.address,
-    frozen: wallet.frozen,
-    provider: wallet.provider,
-    spendable: wallet.spendable !== false && !String(wallet.id).startsWith('linked_'),
-    walletClientType: wallet.walletClientType || null,
-  };
-}
+import { missingWalletSecrets, resolvePrivyAppId, walletConfigFlags } from '../../../lib/wallet-provision.mjs';
+import {
+  cloudflareWorkerEnv,
+  hasAgentRuntimeBinding,
+  mapRuntimeWalletCreate,
+  safeFetchErrorDetail,
+} from '../../../lib/wallets-cloudflare.mjs';
+import {
+  publicWallet,
+  requestOrigin,
+  walletErrorFields,
+  walletErrorStatus,
+} from '../../../lib/wallets-route.mjs';
 
 async function persistAccount(login, ownerId) {
   const url = readRootEnv('SUPABASE_URL');
@@ -51,11 +41,11 @@ async function persistAccount(login, ownerId) {
     prefer: 'resolution=merge-duplicates,return=minimal',
   };
   async function write(path, body) {
-    const response = await fetch(`${origin}/rest/v1/${path}`, {
+      const response = await fetch(`${origin}/rest/v1/${path}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      redirect: 'error',
+      redirect: 'manual',
     });
     return response.ok;
   }
@@ -76,38 +66,115 @@ function rootWalletEnv() {
   return {
     PRIVY_APP_ID: readRootEnv('PRIVY_APP_ID'),
     PRIVY_APP_SECRET: readRootEnv('PRIVY_APP_SECRET'),
-    QUICKNODE_DEVNET_RPC_URL: readRootEnv('QUICKNODE_DEVNET_RPC_URL'),
+    SOLANA_RPC_URL: readRootEnv('SOLANA_RPC_URL'),
     PRIVY_AUTHORIZATION_KEY: readRootEnv('PRIVY_AUTHORIZATION_KEY'),
     NEXT_PUBLIC_PRIVY_APP_ID: readRootEnv('NEXT_PUBLIC_PRIVY_APP_ID'),
   };
 }
 
-/** Prefer duck-typing — `instanceof` fails when the wallets package is duplicated. */
-function walletErrorFields(error) {
-  if (!error || typeof error !== 'object') return null;
-  if (error.name !== 'WalletError' && error.constructor?.name !== 'WalletError') return null;
-  const code = typeof error.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code) ? error.code : 'wallet_failed';
-  const detail = typeof error.message === 'string'
-    ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
-    : undefined;
-  return { code, detail };
+/**
+ * Hosted OpenNext often TypeErrors on outbound Privy fetch. Prefer the
+ * AGENT_RUNTIME service binding (native workerd fetch) when available.
+ */
+async function provisionViaAgentRuntime(request, accessToken) {
+  const runtime = readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL');
+  if (!runtime || typeof runtime !== 'string' || !runtime.trim()) {
+    return null;
+  }
+  let base;
+  try {
+    base = new URL(runtime.trim());
+  } catch {
+    return null;
+  }
+  if (base.protocol !== 'https:' && base.protocol !== 'http:') return null;
+
+  const ownerHeader = request.headers.get('x-owner-id');
+  const upstream = await fetchAgentRuntime(new URL('/api/wallets', base), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...(typeof ownerHeader === 'string' && ownerHeader.trim()
+        ? { 'x-owner-id': ownerHeader.trim() }
+        : {}),
+    },
+    body: '{}',
+    cache: 'no-store',
+  });
+  const body = await upstream.json().catch(() => ({}));
+  const mapped = mapRuntimeWalletCreate(body);
+  if (mapped.error) {
+    return Response.json(mapped, {
+      status: upstream.status >= 400 ? upstream.status : walletErrorStatus(mapped.error),
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  }
+  return Response.json({
+    created: mapped.created === true,
+    wallets: mapped.wallets,
+    loginMethods: mapped.loginMethods,
+    via: 'agent-runtime',
+  }, {
+    status: upstream.ok ? 200 : (upstream.status || 502),
+    headers: { 'Cache-Control': 'no-store' },
+  });
 }
 
-/** Config presence only — no secret values. */
-export async function GET() {
-  const env = rootWalletEnv();
-  return Response.json({
-    hasAppId: Boolean(resolvePrivyAppId(env)),
-    hasAppSecret: Boolean(env.PRIVY_APP_SECRET),
-    hasRpc: Boolean(env.QUICKNODE_DEVNET_RPC_URL),
-    hasAuthorizationKey: Boolean(env.PRIVY_AUTHORIZATION_KEY),
-    missing: missingWalletSecrets(env),
-  }, { headers: { 'Cache-Control': 'no-store' } });
+/** Config presence only — no secret values. Optional ?probe=1 hits Privy. */
+export async function GET(request) {
+  const env = {
+    ...rootWalletEnv(),
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL'),
+  };
+  const flags = walletConfigFlags(env);
+  let probeRequested = false;
+  try {
+    const href = typeof request?.url === 'string' ? request.url : '';
+    if (href) probeRequested = new URL(href).searchParams.get('probe') === '1';
+  } catch {
+    probeRequested = false;
+  }
+  if (!probeRequested) {
+    return Response.json(flags, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  const cfEnv = await cloudflareWorkerEnv();
+  const probe = {
+    onCloudflare: Boolean(cfEnv),
+    hasRuntimeBinding: hasAgentRuntimeBinding(cfEnv),
+    privyReachable: false,
+    privyStatus: null,
+    privyError: null,
+  };
+  const appId = resolvePrivyAppId(env);
+  const secret = env.PRIVY_APP_SECRET;
+  if (appId && secret) {
+    try {
+      const auth = Buffer.from(`${appId}:${secret}`, 'utf8').toString('base64');
+      const response = await fetch('https://api.privy.io/v1/users/did:privy:probe_connectivity_check', {
+        method: 'GET',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          'privy-app-id': appId,
+          accept: 'application/json',
+        },
+        redirect: 'manual',
+        signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+      });
+      probe.privyStatus = response.status;
+      // 401/404 from Privy still means TCP/TLS/HTTP to api.privy.io worked.
+      probe.privyReachable = response.status > 0;
+    } catch (error) {
+      probe.privyError = safeFetchErrorDetail(error).slice(0, 160);
+    }
+  }
+  return Response.json({ ...flags, probe }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 export async function POST(request) {
-  const header = request.headers.get('authorization') ?? '';
-  const accessToken = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const accessToken = accessTokenFromRequest(request);
   if (!accessToken) {
     return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
@@ -121,23 +188,46 @@ export async function POST(request) {
     );
   }
 
+  const cfEnv = await cloudflareWorkerEnv();
+  const onCloudflareWorker = Boolean(cfEnv);
+  if (onCloudflareWorker && hasAgentRuntimeBinding(cfEnv)) {
+    try {
+      const proxied = await provisionViaAgentRuntime(request, accessToken);
+      if (proxied) return proxied;
+    } catch (error) {
+      console.error('[api/wallets]', {
+        error: 'runtime_proxy_failed',
+        detail: safeFetchErrorDetail(error, { label: 'Agent runtime' }),
+      });
+      // Fall through to local Privy path so localhost-shaped errors still surface.
+    }
+  }
+
+  const appId = resolvePrivyAppId(env);
+  let ownerId;
+  try {
+    ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
+  } catch {
+    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
+  const ownerHeader = request.headers.get('x-owner-id');
+  if (ownerHeader !== null && ownerHeader !== ownerId) {
+    return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+  }
   try {
     const client = createPrivyWalletClient({
-      appId: resolvePrivyAppId(env),
+      appId,
       appSecret: env.PRIVY_APP_SECRET,
       // acceptLogin does not call RPC; allow empty and require it only for signing routes.
-      rpcUrl: env.QUICKNODE_DEVNET_RPC_URL || null,
+      rpcUrl: env.SOLANA_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
+      allowUsersMeFallback: !onCloudflareWorker,
     });
-    const ownerHeader = request.headers.get('x-owner-id');
     const result = await client.acceptLogin({
       accessToken,
-      origin: requestOrigin(request),
-      ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
+      origin: onCloudflareWorker ? undefined : requestOrigin(request),
+      ownerId,
     });
-    const ownerId = typeof ownerHeader === 'string' && ownerHeader.trim()
-      ? ownerHeader.trim()
-      : result.main?.ownerId;
     try {
       await persistAccount(result, ownerId);
     } catch {
@@ -154,9 +244,7 @@ export async function POST(request) {
             headers: {
               Authorization: `Bearer ${accessToken}`,
               'content-type': 'application/json',
-              ...(typeof ownerHeader === 'string' && ownerHeader.trim()
-                ? { 'x-owner-id': ownerHeader.trim() }
-                : {}),
+              'x-owner-id': ownerId,
             },
             body: JSON.stringify({ wallets }),
             cache: 'no-store',
@@ -174,9 +262,12 @@ export async function POST(request) {
   } catch (error) {
     const fields = walletErrorFields(error);
     const code = fields?.code || 'wallet_failed';
-    const status = code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin' ? 503 : 502;
-    const detail = fields?.detail
+    const status = walletErrorStatus(code);
+    let detail = fields?.detail
       || (typeof error?.message === 'string' ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180) : undefined);
+    if (!fields && error?.name === 'TypeError') {
+      detail = safeFetchErrorDetail(error);
+    }
     const payload = detail ? { error: code, detail } : { error: code };
     console.error('[api/wallets]', payload);
     return Response.json(payload, { status, headers: { 'Cache-Control': 'no-store' } });

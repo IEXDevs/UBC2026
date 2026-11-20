@@ -1,11 +1,21 @@
 /**
- * Helpers for Privy Solana private-key export in the wallets sheet.
- * Client exportWallet only works for Privy-embedded Solana wallets on the user.
+ * Helpers for Solana private-key export in the wallets sheet.
+ * Privy's export iframe sends an empty user_jwt to
+ * POST /v1/wallets/authenticate, so a server wallet's copy control stays blank.
+ * Those wallets are exported through our API instead.
  */
+
+const SERVER_WALLET_ID = /^[A-Za-z0-9_-]{10,128}$/;
+
+function serverWalletId(value) {
+  if (typeof value !== 'string') return '';
+  const id = value.trim();
+  return SERVER_WALLET_ID.test(id) ? id : '';
+}
 
 /**
  * Find a Privy-embedded Solana wallet on the signed-in user.
- * @returns {{ address: string } | null}
+ * @returns {{ address: string, id?: string } | null}
  */
 export function privyEmbeddedSolanaWallet(user) {
   if (!user) return null;
@@ -21,9 +31,21 @@ export function privyEmbeddedSolanaWallet(user) {
     if (chain && chain !== 'solana') continue;
     const address = typeof account.address === 'string' ? account.address.trim() : '';
     if (!address || address.startsWith('0x')) continue;
-    return { address };
+    const id = serverWalletId(account.id ?? account.walletId ?? account.wallet_id);
+    return id ? { address, id } : { address };
   }
   return null;
+}
+
+/**
+ * Server wallets copy through our export API. A client wallet with no server id
+ * still opens Privy's screen.
+ */
+export function keyExportAction({ walletId = '', embedded = null } = {}) {
+  const serverId = serverWalletId(walletId) || serverWalletId(embedded?.id);
+  if (serverId) return { mode: 'server', walletId: serverId };
+  if (typeof embedded?.address === 'string' && embedded.address) return { mode: 'client' };
+  return { mode: 'none' };
 }
 
 /**

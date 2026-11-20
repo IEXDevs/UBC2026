@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import { getDemoShellState } from './demo-state.mjs';
 import { profileStats, statisticsView, voiceMinutes } from './statistics.mjs';
 
+/**
+ * Achieves: verifies owner statistics rollup includes voice minutes and local demo agent rows.
+ * Fails when: ms→minutes wrong, Mins on voice missing, or source is not local for demo bots.
+ * Oracle: 90_000ms→1.5; 120_000ms→2 mins; first agent Meteora with decisions=2.
+ * Side effects / state checked: N/A.
+ * Gaps: none for view builder.
+ */
 test('statistics keeps voice minutes with the owner rollup', () => {
   assert.equal(voiceMinutes(0), 0);
   assert.equal(voiceMinutes(90_000), 1.5);
@@ -11,10 +18,17 @@ test('statistics keeps voice minutes with the owner rollup', () => {
   assert.equal(view.ownerRows[0].value, 2);
   assert.equal(view.agents[0].label, 'Meteora');
   assert.equal(view.agents[0].rows.find(row => row.key === 'decisions').value, 2);
-  assert.match(view.note, /devnet execution, mainnet pricing/);
+  assert.equal(view.note, 'Counted from activity stored for these agents.');
   assert.equal(view.source, 'local');
 });
 
+/**
+ * Achieves: verifies profile stats count voice, messages, tokens, spend, and net flow.
+ * Fails when: voice formatting wrong, user-only messages miscounted, or spend/pnl ignore demo payments.
+ * Oracle: 12400ms→12s; 1 user message; token estimate 4 or explicit 128; spent/pnl from demo payments.
+ * Side effects / state checked: N/A.
+ * Gaps: none for profileStats arithmetic against demo fixtures.
+ */
 test('profile stats count talk seconds, messages, tokens, spend, and net flow', () => {
   const rows = profileStats({
     voiceMs: 12_400,

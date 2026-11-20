@@ -7,7 +7,7 @@ import { BIP39_ENGLISH } from './bip39-english.mjs';
 import { supabaseConfig, supabaseWrite } from './supabase-rest.mjs';
 
 const BIP39 = new Set(BIP39_ENGLISH);
-const SECRET_KEY = /^(privatekey|privkey|secretkey|seed|seedphrase|mnemonic|mnemonicphrase|authorizationkey|password|apikey|accesstoken|refreshtoken|servicerole|servicerolekey|authorization|cookie|viewerurl|liveview|liveviewurl)$/;
+const SECRET_KEY = /^(privatekey|privkey|secretkey|seed|seedphrase|mnemonic|mnemonicphrase|authorizationkey|password|apikey|accesstoken|refreshtoken|servicerole|servicerolekey|authorization|cookie|viewerurl|liveview|liveviewurl|grant|granthash|salt|hash|ciphertext|encapsulatedkey|recipientpublickey)$/;
 const PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 const WALLET_AUTH = /wallet-auth:[A-Za-z0-9+/=_-]+/gi;
 const LIVE_VIEW = /https:\/\/live\.browser\.run\S*/gi;
@@ -21,7 +21,8 @@ const BYTE_ARRAY = /\[(?:\s*(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\s*,){63}\s*(?:25
 const OWNER_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 
 function secretKey(key) {
-  return SECRET_KEY.test(String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase());
+  const normalized = String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+  return normalized === 'swapticket' || normalized === 'spendauthorization' || SECRET_KEY.test(normalized);
 }
 
 function redactSeeds(text) {
@@ -132,7 +133,6 @@ export async function captureRequest(request) {
     method: request.method,
     path: url.pathname,
     query: redactLogText(url.search.startsWith('?') ? url.search.slice(1) : url.search) || '',
-    ownerId: ownerIdOf(request.headers.get('x-owner-id')),
     botId: botIdFromPath(url.pathname),
     contentType: request.headers.get('content-type')?.slice(0, 80) ?? null,
     body: redactForLog(body),
@@ -165,6 +165,38 @@ export async function persistActivity(env, row, fetcher = env?.fetch ?? fetch) {
   }
 }
 
+function isSensitiveBotPath(path) {
+  if (typeof path !== 'string') return false;
+  if (path.includes('/api/positions')) return true;
+  return /\/bots\/[^/]+(?:\/(?:status|wake|pause|resume|advance|decide|loop))?$/.test(path)
+    || /\/bots\/[^/]+\/(?:status|wake|pause|resume|advance|decide|loop)$/.test(path);
+}
+
+function slimLoggedResponse(path, body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  // Status / control / position endpoints: keep flags, drop full run + paper books.
+  if (isSensitiveBotPath(path)) {
+    const check = body.positionCheck && typeof body.positionCheck === 'object'
+      ? {
+        flag: body.positionCheck.flag ?? null,
+        status: body.positionCheck.status ?? null,
+        positionCount: Array.isArray(body.positionCheck.positions) ? body.positionCheck.positions.length : 0,
+      }
+      : null;
+    return {
+      ok: body.ok === true,
+      error: typeof body.error === 'string' ? body.error.slice(0, 64) : null,
+      auth: body.auth ?? null,
+      itemCount: Array.isArray(body.items) ? body.items.length : undefined,
+      positionCheck: check,
+      // Never persist checkpoint / gate payloads in activity_logs.
+      run: body.run ? { present: true } : undefined,
+      gate: body.gate ? { decision: body.gate?.decision ?? null } : undefined,
+    };
+  }
+  return body;
+}
+
 export async function persistHttpActivity(env, { captured, response, started } = {}) {
   if (!supabaseConfig(env)) return { configured: false };
   let responseBody = null;
@@ -188,7 +220,7 @@ export async function persistHttpActivity(env, { captured, response, started } =
       ms: Math.max(0, Date.now() - (Number.isFinite(started) ? started : Date.now())),
       contentType: captured?.contentType ?? null,
       request: captured?.body ?? null,
-      response: responseBody,
+      response: slimLoggedResponse(captured?.path, responseBody),
     },
   }, env?.fetch ?? fetch);
 }

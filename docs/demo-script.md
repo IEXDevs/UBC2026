@@ -1,3 +1,5 @@
+> Historical sandbox demo outline: run only in an explicitly configured devnet environment with test funds. Sandbox shopping is disabled on mainnet; see [the cutover checklist](mainnet-switch.md).
+
 # Maelstrom demo script (Isaac / 10B)
 
 **Headline demo (picked):** Voice-driven shopping bot on Solana — catalog compare → approval preview → x402 sandbox settle, with QuickNode Streams waking the loop and Live View open beside Talk.
@@ -25,7 +27,7 @@
 
 **Likely Q&A**
 - Keys? Privy server signing; model never sees keys.
-- Mainnet Laso? Owner-gated challenge only; hackathon settle stays devnet sandbox unless owner signs mainnet.
+- Mainnet Laso? Owner-gated challenge only; sandbox settlement is disabled on mainnet; Laso remains an owner-gated challenge only.
 - Why Streams? Wallet/position events wake the bot; cron is fallback.
 
 ## Blockers before recording

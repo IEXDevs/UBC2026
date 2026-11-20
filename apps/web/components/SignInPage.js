@@ -2,11 +2,21 @@
 
 import Topography from './Topography';
 import SpecularButton from './SpecularButton';
+import { blockCopy } from '../lib/block-copy.mjs';
+import EmailSignIn from './EmailSignIn';
+import { usePrivyPublic } from './PrivyRoot';
 import './SignInPage.css';
 
-export default function SignInPage({ disabled = false, onLogin, onDeveloperPreview = null }) {
+export default function SignInPage({
+  disabled = false,
+  onLogin,
+  onDeveloperPreview = null,
+  onHoldChange = null,
+}) {
+  const { configured } = usePrivyPublic();
+
   return (
-    <div className="sign-in">
+    <div className="sign-in no-copy" onCopy={blockCopy} onCut={blockCopy}>
       <div className="sign-in-field" aria-hidden="true">
         <Topography
           color="#ff7a62"
@@ -24,25 +34,31 @@ export default function SignInPage({ disabled = false, onLogin, onDeveloperPrevi
       <main className="sign-in-stage">
         <div className="sign-in-copy">
           <h1 className="sign-in-mark">Maelstrom</h1>
-          <p className="sign-in-slogan">Your agent. Your call.</p>
-          <div className="sign-in-actions">
-            <SpecularButton
-              size="lg"
-              radius={20}
-              tint="#f4f1fb"
-              tintOpacity={0.94}
-              textColor="#120f17"
-              disabled={disabled || !onLogin}
-              onClick={onLogin}
-            >
-              Continue
-            </SpecularButton>
+          <div className="sign-in-card">
+            {configured ? <EmailSignIn disabled={disabled} onHoldChange={onHoldChange} /> : null}
+            <div className="sign-in-actions">
+              <SpecularButton
+                size="lg"
+                radius={20}
+                tint="#f4f1fb"
+                tintOpacity={0.94}
+                textColor="#120f17"
+                disabled={disabled || !onLogin}
+                onClick={onLogin}
+              >
+                {configured ? 'More ways to continue' : 'Continue'}
+              </SpecularButton>
+            </div>
+            {onDeveloperPreview ? (
+              <button type="button" className="sign-in-dev" onClick={onDeveloperPreview}>
+                Developer preview
+              </button>
+            ) : null}
+            <p className="sign-in-legal">
+              <a href="/privacy">Privacy</a>
+              <a href="/tos">Terms</a>
+            </p>
           </div>
-          {onDeveloperPreview ? (
-            <button type="button" className="sign-in-dev" onClick={onDeveloperPreview}>
-              Developer preview
-            </button>
-          ) : null}
         </div>
       </main>
     </div>

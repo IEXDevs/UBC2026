@@ -3,6 +3,7 @@ const LOGO_ROOT = 'https://logos.composio.dev/api/';
 /** Composio toolkit slugs with a real logo on logos.composio.dev. */
 export const COMPOSIO_APPS = Object.freeze([
   { id: 'github', name: 'GitHub', detail: 'Repositories, issues, and pull requests.', category: 'Code', popular: true },
+  { id: 'vercel', name: 'Vercel', detail: 'Projects and previews the owner connects.', category: 'Code', popular: true },
   { id: 'gmail', name: 'Gmail', detail: 'Read and draft mail for the agent.', category: 'Mail', popular: true },
   { id: 'slack', name: 'Slack', detail: 'Post into the channels the owner allows.', category: 'Chat', popular: true },
   { id: 'notion', name: 'Notion', detail: 'Read pages the owner has shared.', category: 'Docs', popular: true },
