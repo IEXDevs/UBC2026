@@ -368,7 +368,7 @@ test('Google pages open in English / US unless the url already sets hl or gl', (
   assert.equal(pin('https://google.com.evil.example/'), 'https://google.com.evil.example/');
 });
 
-test('the Browser Run binding opens, views and closes sessions without an API token', async () => {
+test('the Browser Run binding opens, interactively views and closes sessions without an API token', async () => {
   const calls = [];
   const binding = {
     acquire: async options => { calls.push(['acquire', options]); return { sessionId: 'abc' }; },
@@ -379,16 +379,68 @@ test('the Browser Run binding opens, views and closes sessions without an API to
   const provider = createBrowserProvider({ binding, fetcher: async () => assert.fail('REST must not be called') });
   assert.deepEqual(await provider.createSession(), { sessionId: 'abc' });
   assert.deepEqual(await provider.openTab('abc', 'https://www.google.com/'), { targetId: 'TAB123', url: 'https://www.google.com/?hl=en&gl=us', title: 'Google' });
-  const view = await provider.readonlyView('abc', { targetId: 'TAB123' });
+  const view = await provider.readonlyView('abc', { targetId: 'TAB123', interactive: true });
   assert.equal(view.viewerUrl, 'https://live.browser.run/ui/view?token=t');
-  assert.equal(view.mode, 'readonly');
+  assert.equal(view.mode, 'interactive');
   assert.deepEqual(await provider.closeSession('abc'), { status: 'closing' });
-  assert.deepEqual(calls[2][2], { mode: 'tab', expiresInMs: calls[2][2].expiresInMs, guardrails: { mode: 'readonly' }, targetId: 'TAB123' });
+  assert.deepEqual(calls[2][2], { mode: 'tab', expiresInMs: 300000, targetId: 'TAB123' });
+  await assert.rejects(provider.readonlyView('abc'), { code: 'browser_readonly_not_configured', status: 503 });
+  await assert.rejects(provider.readonlyView('../abc'), { code: 'invalid_session' });
   await assert.rejects(provider.openTab('abc', 'javascript:alert(1)'), { code: 'invalid_navigate' });
   const failing = createBrowserProvider({ binding: { ...binding, acquire: async () => { throw new Error('boom'); } } });
   await assert.rejects(failing.createSession(), { code: 'provider_failed' });
   const throttled = createBrowserProvider({ binding: { ...binding, acquire: async () => { throw new Error('429 Too Many Requests'); } } });
   await assert.rejects(throttled.createSession(), { code: 'provider_rate_limited', status: 429 });
   const bad = createBrowserProvider({ binding: { ...binding, getLiveView: async () => ({ devtoolsFrontendUrl: 'https://evil.example/ui/view' }) } });
-  await assert.rejects(bad.readonlyView('abc'), { code: 'invalid_provider_response' });
+  await assert.rejects(bad.readonlyView('abc', { interactive: true }), { code: 'invalid_provider_response' });
+});
+
+test('binding read-only views reuse REST guardrails while interactive views stay on the binding', async () => {
+  const bodies = [];
+  const binding = {
+    acquire: async () => assert.fail('not acquiring'),
+    devtools: { newTarget: async () => assert.fail('not navigating') },
+    getLiveView: async (id, options) => {
+      assert.equal(id, 'abc');
+      assert.deepEqual(options, { mode: 'tab', expiresInMs: 300000 });
+      return { devtoolsFrontendUrl: 'https://live.browser.run/ui/view' };
+    },
+  };
+  const provider = createBrowserProvider({
+    binding, accountId: 'account', apiToken: 'test-token',
+    fetcher: async (url, options) => {
+      assert.equal(url, 'https://api.cloudflare.com/client/v4/accounts/account/browser-run/devtools/browser/abc/live_view');
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers.Authorization, 'Bearer test-token');
+      bodies.push(JSON.parse(options.body));
+      return Response.json({ result: { devtoolsFrontendUrl: 'https://live.browser.run/ui/view' } });
+    },
+  });
+  assert.equal((await provider.readonlyView('abc', { targetId: 'TAB123' })).mode, 'readonly');
+  assert.equal((await provider.readonlyView('abc')).mode, 'readonly');
+  assert.deepEqual(bodies, [
+    { mode: 'tab', expiresInMs: 300000, guardrails: { mode: 'readonly' }, targetId: 'TAB123' },
+    { mode: 'tab', expiresInMs: 300000, guardrails: { mode: 'readonly' } },
+  ]);
+  assert.equal((await provider.readonlyView('abc', { interactive: true })).mode, 'interactive');
+  assert.equal(bodies.length, 2);
+  for (const credentials of [{}, { accountId: 'account' }, { apiToken: 'test-token' }]) {
+    const unconfigured = createBrowserProvider({ binding, ...credentials, fetcher: async () => assert.fail('no REST credentials') });
+    await assert.rejects(unconfigured.readonlyView('abc'), { code: 'browser_readonly_not_configured' });
+  }
+  const failed = createBrowserProvider({ binding, accountId: 'account', apiToken: 'test-token', fetcher: async () => new Response('', { status: 403 }) });
+  await assert.rejects(failed.readonlyView('abc'), { code: 'browser_not_configured' });
+});
+
+test('binding diagnostics redact viewer URLs and tokens before mapping errors', async t => {
+  const lines = [];
+  t.mock.method(console, 'error', line => lines.push(line));
+  const provider = createBrowserProvider({ binding: {
+    acquire: async () => { throw new TypeError('failed https://live.browser.run/ui/view?token=private token=short Bearer credential abcdefghijklmnopqrstuvwxyz\nretry'); },
+    devtools: { newTarget: async () => {} },
+  } });
+  await assert.rejects(provider.createSession(), { code: 'provider_failed' });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /Browser binding acquire: TypeError: failed/);
+  assert.doesNotMatch(lines[0], /https|browser\.run|private|short|credential|abcdefghijklmnopqrstuvwxyz|\n/);
 });

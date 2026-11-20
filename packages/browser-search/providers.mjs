@@ -173,10 +173,21 @@ async function browserRequest(fetcher, url, options) {
   try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
 }
 
-async function viaBinding(work) {
+function sanitizedBindingError(value) {
+  return String(value ?? '')
+    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S+/gi, '[redacted]')
+    .replace(/\b[\w.-]+\.[a-z]{2,}(?:[/:?]\S*)?/gi, '[redacted]')
+    .replace(/\b(?:bearer\s+\S+|[\w-]*(?:token|secret|password|key)[\w-]*\s*[:=]\s*\S+)/gi, '[redacted]')
+    .replace(/\b[a-zA-Z0-9_+/=-]{20,}\b/g, '[redacted]')
+    .replace(/[\r\n\t]/g, ' ')
+    .slice(0, 240);
+}
+
+async function viaBinding(method, work) {
   try { return await work(); }
   catch (error) {
     if (error instanceof ProviderError) throw error;
+    console.error(`Browser binding ${method}: ${sanitizedBindingError(error?.name)}: ${sanitizedBindingError(error?.message)}`);
     if (/429|rate limit/i.test(String(error?.message))) throw new ProviderError('provider_rate_limited', 429);
     throw new ProviderError('provider_failed', 502);
   }
@@ -216,25 +227,29 @@ function assertSessionId(sessionId) {
 }
 
 /** Workers Browser Run binding (`env.BROWSER`): no API token, runs from the calling Worker. */
-function createBindingBrowserProvider(binding) {
+function createBindingBrowserProvider(binding, restProvider) {
   return {
     async createSession() {
-      const result = await viaBinding(() => binding.acquire({ keepAlive: 600000 }));
+      const result = await viaBinding('acquire', () => binding.acquire({ keepAlive: 600000 }));
       if (typeof result?.sessionId !== 'string' || !result.sessionId) throw new ProviderError('invalid_provider_response');
       return { sessionId: result.sessionId };
     },
     async openTab(sessionId, url) {
       assertSessionId(sessionId);
       const target = withEnglishGoogle(assertPublicHttpUrl(url));
-      return checkedTab(await viaBinding(() => binding.devtools.newTarget(sessionId, target.href)), target.href);
+      return checkedTab(await viaBinding('devtools.newTarget', () => binding.devtools.newTarget(sessionId, target.href)), target.href);
     },
     async readonlyView(sessionId, { targetId, interactive = false } = {}) {
       assertSessionId(sessionId);
-      return checkedViewer(await viaBinding(() => binding.getLiveView(sessionId, liveViewOptions({ targetId, interactive }))), interactive);
+      if (!interactive) {
+        if (!restProvider) throw new ProviderError('browser_readonly_not_configured', 503);
+        return restProvider.readonlyView(sessionId, { targetId });
+      }
+      return checkedViewer(await viaBinding('getLiveView', () => binding.getLiveView(sessionId, liveViewOptions({ targetId, interactive: true }))), true);
     },
     async closeSession(sessionId) {
       assertSessionId(sessionId);
-      const result = await viaBinding(() => binding.closeSession(sessionId));
+      const result = await viaBinding('closeSession', () => binding.closeSession(sessionId));
       const status = typeof result === 'string' ? result : result?.status;
       return { status: typeof status === 'string' ? status : 'closing' };
     },
@@ -243,7 +258,8 @@ function createBindingBrowserProvider(binding) {
 
 export function createBrowserProvider({ accountId, apiToken, fetcher = fetch, binding } = {}) {
   if (binding && typeof binding.acquire === 'function' && typeof binding.devtools?.newTarget === 'function') {
-    return createBindingBrowserProvider(binding);
+    const restProvider = accountId && apiToken ? createBrowserProvider({ accountId, apiToken, fetcher }) : null;
+    return createBindingBrowserProvider(binding, restProvider);
   }
   // Live View is served from browser-run. Accounts that still publish the
   // session API under browser-rendering get that path when browser-run 404s.
@@ -304,9 +320,7 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch, bi
     },
     async readonlyView(sessionId, { targetId, interactive = false } = {}) {
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
-      const body = { mode: 'tab', expiresInMs: LIVE_VIEW_TTL_MS };
-      if (!interactive) body.guardrails = { mode: 'readonly' };
-      if (typeof targetId === 'string' && TARGET_ID.test(targetId)) body.targetId = targetId;
+      const body = liveViewOptions({ targetId, interactive });
       const result = await call(`/${encodeURIComponent(sessionId)}/live_view`, { body });
       let url;
       try { url = new URL(result.devtoolsFrontendUrl); } catch { throw new ProviderError('invalid_provider_response'); }
