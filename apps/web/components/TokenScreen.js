@@ -5,7 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
-import { dexTokenView, enrichPortfolio, readDexTokens } from '../lib/dex-token.mjs';
+import { dexTokenView, enrichPortfolio, readDexCandles, readDexTokens } from '../lib/dex-token.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import { formatUsdMicro, portfolioErrorNote } from '../lib/portfolio.mjs';
 import {
@@ -157,7 +157,9 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
 function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive, onSwap }) {
   const [range, setRange] = useState('1D');
   const [token, setToken] = useState(null);
+  const [series, setSeries] = useState({ range: '1D', points: null });
   const [error, setError] = useState('');
+  const candles = series.range === range ? series.points : null;
 
   useEffect(() => {
     let stopped = false;
@@ -181,7 +183,32 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
     return () => { stopped = true; };
   }, [mint, userId]);
 
-  const view = token ? dexTokenView({ mint, range, cluster, token }) : null;
+  useEffect(() => {
+    const pair = token?.pairAddress;
+    if (!pair) {
+      setSeries({ range, points: null });
+      return undefined;
+    }
+    let stopped = false;
+    readDexCandles({ pairAddress: pair, range })
+      .then(book => {
+        if (!stopped) setSeries({ range, points: book.points });
+      })
+      .catch(() => {
+        if (!stopped) setSeries({ range, points: [] });
+      });
+    return () => { stopped = true; };
+  }, [token?.pairAddress, range]);
+
+  const view = token ? dexTokenView({
+    mint,
+    range,
+    cluster,
+    token,
+    candles: token.pairAddress && candles == null
+      ? 'pending'
+      : (Array.isArray(candles) && candles.length >= 2 ? candles : null),
+  }) : null;
   const symbol = view?.symbol || holding?.symbol || 'Token';
   const price = typeof view?.price === 'number' ? formatTokenPrice(view.price) : '';
   const change = typeof view?.changePct === 'number' ? view.changePct : null;
@@ -200,14 +227,29 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
         <span className="token-score">{view?.dexId || 'DEX'}</span>
       </div>
       {price ? <p className="wallet-figure wallet-figure-sm">{price}</p> : null}
-      {change != null ? (
-        <p className={down ? 'token-down' : 'token-up'}>
-          {down ? '' : '+'}{change.toFixed(2)}%
-          <span> {view?.changeLabel || range}</span>
-        </p>
-      ) : null}
+      <p className={down ? 'token-down' : 'token-up'} aria-live="polite">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={change == null ? `${range}:wait` : `${view?.changeLabel}:${change.toFixed(2)}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: change == null ? 0 : 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {change == null ? '\u00a0' : `${down ? '' : '+'}${change.toFixed(2)}%`}
+            {change == null ? null : <span> {view?.changeLabel || range}</span>}
+          </motion.span>
+        </AnimatePresence>
+      </p>
       <TokenChart points={view?.points || []} range={range} />
-      <div className="wallet-switch" role="group" aria-label="Chart range">
+      <p className="quiet token-range-note" role="status">
+        {token?.pairAddress && range !== '1H' && range !== '1D'
+          ? (candles == null
+            ? `Reading ${range} prices.`
+            : (candles.length < 2 ? `No ${range} prices for this token yet.` : ''))
+          : ''}
+      </p>
+      <div className="wallet-switch token-ranges" role="group" aria-label="Chart range">
         {CHART_RANGES.map(item => (
           <button
             key={item}

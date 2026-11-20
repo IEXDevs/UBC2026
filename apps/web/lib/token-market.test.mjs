@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   CHART_RANGES,
   chartLayout,
@@ -66,4 +67,19 @@ test('holdings from several wallets add by mint', () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].amount, '15');
   assert.equal(rows[0].usdMicro, '150');
+});
+
+/**
+ * Achieves: verifies a new chart range draws in instead of snapping.
+ * Fails when: the line no longer uses pathLength or the site ease.
+ * Oracle: TokenChart.js contains pathLength and [0.22, 1, 0.36, 1].
+ * Side effects / state checked: source of the chart component.
+ * Gaps: no browser frame timing.
+ */
+test('a new chart range draws the line in', () => {
+  const chart = readFileSync(new URL('../components/TokenChart.js', import.meta.url), 'utf8');
+  assert.match(chart, /pathLength: 0/);
+  assert.match(chart, /pathLength: 1/);
+  assert.match(chart, /\[0\.22, 1, 0\.36, 1\]/);
+  assert.match(chart, /mode="wait"/);
 });
