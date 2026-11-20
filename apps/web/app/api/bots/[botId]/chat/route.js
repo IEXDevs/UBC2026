@@ -23,6 +23,11 @@ import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
 import { ensureOwnerTradeLoop } from '../../../../../lib/owner-trade.mjs';
 import { cloudflareWorkerEnv } from '../../../../../lib/wallets-cloudflare.mjs';
 import { parseSolHandleSend, runSolHandleSend } from '../../../../../lib/sol-handle-send.mjs';
+import {
+  isAssetSpendHold,
+  resumeAssetSpend,
+  sealAssetSpendHold,
+} from '../../../../../lib/chat-spend-confirmation.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -80,9 +85,14 @@ export async function POST(request, context) {
 
   const permissionMode = parsePermission(body.permission);
   const reviewCap = ownerReviewCap(body.reviewCap);
-  const solSend = parseSolHandleSend(message);
-  const connectors = solSend ? [] : linkedConnectorIds(body.connectors);
-  const situation = solSend ? null : situationFromEdge(body.situation, await visitorGeo(request));
+  const grants = Array.isArray(body.grants)
+    ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
+    : [];
+  const assetConfirmation = grants.find(isAssetSpendHold);
+  const solSend = assetConfirmation ? null : parseSolHandleSend(message);
+  const noModel = solSend || assetConfirmation;
+  const connectors = noModel ? [] : linkedConnectorIds(body.connectors);
+  const situation = noModel ? null : situationFromEdge(body.situation, await visitorGeo(request));
   const prepared = situation ? prepareOwnerTurn(message, connectors, situation, new Date(situation.at)) : null;
   if (prepared?.reply) {
     return Response.json(
@@ -90,9 +100,6 @@ export async function POST(request, context) {
       { headers: { 'Cache-Control': 'no-store' } },
     );
   }
-  const grants = Array.isArray(body.grants)
-    ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
-    : [];
   const accessToken = accessTokenFromRequest(request)
     || (typeof body.accessToken === 'string' ? body.accessToken.trim() : '');
   const env = await chatToolEnv();
@@ -110,7 +117,7 @@ export async function POST(request, context) {
       ? request.headers.get('x-desk-grant')
       : '',
     fetcher: async (url, init) => {
-      if (solSend) {
+      if (noModel) {
         const options = init?.method === 'GET' ? { ...init, signal: AbortSignal.timeout(8000) } : init;
         return fetchAgentRuntime(url, options);
       }
@@ -132,8 +139,21 @@ export async function POST(request, context) {
     situation,
   });
   const spend = { permissionMode, reviewCap, confirmSpend: true, grants };
+  const metaModelApiKey = readRootEnv('META_MODEL_API_KEY');
+  const openrouterApiKey = readRootEnv('OPENROUTER_API_KEY');
+  const approvalContext = {
+    ownerId,
+    botId,
+    secret: metaModelApiKey || openrouterApiKey,
+  };
   if (solSend) {
-    const reply = await runSolHandleSend(solSend, { botId, invoke: invokeRaw, spend });
+    const proposal = await runSolHandleSend(solSend, { botId, invoke: invokeRaw, spend });
+    const reply = proposal.hold && !approvalContext.secret
+      ? { reply: 'SOL confirmation is not available right now.' }
+      : {
+          reply: proposal.reply,
+          ...(proposal.hold ? { hold: sealAssetSpendHold(proposal.hold, approvalContext) } : {}),
+        };
     return Response.json(
       { ok: true, botId, provider: 'desk', toolRounds: 0, ...reply },
       { headers: { 'Cache-Control': 'no-store' } },
@@ -143,8 +163,8 @@ export async function POST(request, context) {
     ? body.model.trim()
     : (readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined);
   const chatKeys = {
-    metaModelApiKey: readRootEnv('META_MODEL_API_KEY'),
-    openrouterApiKey: readRootEnv('OPENROUTER_API_KEY'),
+    metaModelApiKey,
+    openrouterApiKey,
     botName: typeof body.name === 'string' ? body.name : 'Agent',
     botGoal: typeof body.goal === 'string' ? body.goal : '',
     botType: typeof body.type === 'string' ? body.type : 'trading',
@@ -171,17 +191,17 @@ export async function POST(request, context) {
   };
 
   const turnArgs = {
-    metaModelApiKey: readRootEnv('META_MODEL_API_KEY'),
-    openrouterApiKey: readRootEnv('OPENROUTER_API_KEY'),
+    metaModelApiKey: chatKeys.metaModelApiKey,
+    openrouterApiKey: chatKeys.openrouterApiKey,
     botName: typeof body.name === 'string' ? body.name : 'Agent',
     botGoal: typeof body.goal === 'string' ? body.goal : '',
     botType: typeof body.type === 'string' ? body.type : 'trading',
     history: Array.isArray(body.history) ? body.history.slice(-400) : [],
-    message: prepared.message,
+    message: prepared?.message ?? message,
     model: chatModel,
     reasoningEffort: chatKeys.reasoningEffort,
     tools: agentToolSchemas(),
-    toolsInstruction: [chatToolsInstruction(), prepared.instruction].join('\n'),
+    toolsInstruction: [chatToolsInstruction(), prepared?.instruction].filter(Boolean).join('\n'),
     permission: chatKeys.permission,
     fileCatalog: Array.isArray(body.fileCatalog) ? body.fileCatalog.slice(0, 40) : [],
     permissionMode,
@@ -194,8 +214,19 @@ export async function POST(request, context) {
     },
   };
 
+  function runTurn(onMessage) {
+    if (assetConfirmation) {
+      return resumeAssetSpend(assetConfirmation, approvalContext, turnArgs.invokeTool);
+    }
+    return completeTextChat({ ...turnArgs, onMessage });
+  }
+
   async function finishTurn(reply) {
-    const trade = await ensureOwnerTradeLoop({
+    const assetHold = isAssetSpendHold(reply.hold);
+    const hold = assetHold
+      ? sealAssetSpendHold(reply.hold, approvalContext)
+      : reply.hold;
+    const trade = assetConfirmation || assetHold ? null : await ensureOwnerTradeLoop({
       message,
       goal: typeof body.goal === 'string' ? body.goal : '',
       permission: permissionMode,
@@ -211,7 +242,7 @@ export async function POST(request, context) {
       botId,
       reply: reply.text,
       ...(replies.length > 0 ? { replies } : {}),
-      ...(reply.hold ? { hold: reply.hold } : {}),
+      ...(hold ? { hold } : {}),
       model: reply.model,
       provider: reply.provider,
       toolRounds: reply.toolRounds ?? 0,
@@ -241,10 +272,7 @@ export async function POST(request, context) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         };
         try {
-          const reply = await completeTextChat({
-            ...turnArgs,
-            onMessage: (text) => send({ message: text }),
-          });
+          const reply = await runTurn(text => send({ message: text }));
           send({ done: true, ...(await finishTurn(reply)) });
         } catch (error) {
           const code = error instanceof TextChatError ? error.code : 'chat_failed';
@@ -263,7 +291,7 @@ export async function POST(request, context) {
   }
 
   try {
-    const reply = await completeTextChat(turnArgs);
+    const reply = await runTurn();
     return Response.json(await finishTurn(reply), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = error instanceof TextChatError ? error.code : 'chat_failed';

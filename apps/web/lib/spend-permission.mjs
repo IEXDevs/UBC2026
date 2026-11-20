@@ -228,10 +228,18 @@ export function toolAccessRequest(mode, name, args = {}, reviewCap = null) {
   };
 }
 
-export function grantCovers(grants, name, args) {
-  if (!Array.isArray(grants)) return false;
+export function matchingToolGrant(grants, name, args) {
+  if (!Array.isArray(grants)) return undefined;
   const want = JSON.stringify(stable(plainArgs(args)));
-  return grants.some(grant => grant?.name === name && JSON.stringify(stable(plainArgs(grant.args))) === want);
+  const needsSpendId = isNonUsdcSpend(name, args);
+  return grants.find(grant => grant?.name === name
+    && (!needsSpendId || (typeof grant.idempotencyKey === 'string'
+      && /^spend_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(grant.idempotencyKey)))
+    && JSON.stringify(stable(plainArgs(grant.args))) === want);
+}
+
+export function grantCovers(grants, name, args) {
+  return Boolean(matchingToolGrant(grants, name, args));
 }
 
 export function permissionInstruction(id) {

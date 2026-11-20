@@ -48,11 +48,14 @@ test('profile claims and handle lookup share the configured runtime directory', 
 
 test('chat sends SOL to a handle without a model call and binds approval to the resolved wallet', async (t) => {
   const runtime = 'https://runtime.test.example';
-  const previous = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
+  const previous = { runtime: process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL, modelKey: process.env.META_MODEL_API_KEY };
   process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = runtime;
+  process.env.META_MODEL_API_KEY = 'test-only-approval-signing-key';
   t.after(() => {
-    if (previous === undefined) delete process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
-    else process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = previous;
+    if (previous.runtime === undefined) delete process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
+    else process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = previous.runtime;
+    if (previous.modelKey === undefined) delete process.env.META_MODEL_API_KEY;
+    else process.env.META_MODEL_API_KEY = previous.modelKey;
   });
 
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
@@ -73,7 +76,11 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     assert.equal(target.pathname, '/api/spend');
     assert.equal(init.method, 'POST');
     assert.equal(init.headers['x-desk-grant'], deskGrant);
-    sends.push(JSON.parse(init.body));
+    const payload = JSON.parse(init.body);
+    sends.push(payload);
+    if (payload.destination !== recipient.address) {
+      return Response.json({ signed: false, error: 'recipient_address_missing' }, { status: 400 });
+    }
     return Response.json({ signed: true, cluster: 'devnet', signature });
   });
 
@@ -91,26 +98,35 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     }), { params: { botId: 'bot_1' } });
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('cache-control'), 'no-store');
-    const body = await res.json();
+    const body = res.headers.get('content-type')?.includes('text/event-stream')
+      ? JSON.parse((await res.text()).split('\n').find(line => line.startsWith('data: ')).slice(6))
+      : await res.json();
     assert.equal(body.provider, 'desk');
-    assert.equal(body.toolRounds, 0);
     return body;
   };
-  const { hold } = await chat();
+  const { hold, toolRounds } = await chat();
+  assert.equal(toolRounds, 0);
   assert.equal(hold.kind, 'modal');
+  assert.match(hold.proof, /^[0-9a-f]{64}$/);
   assert.match(hold.prompt, /1 SOL to @hi \(4zMMC\.\.\.DncDU\) on Solana devnet/);
   assert.deepEqual(sends, []);
 
   recipient = { ...recipient, address: 'So11111111111111111111111111111111111111112' };
-  const changed = await chat([hold]);
-  assert.equal(changed.hold.args.destination, recipient.address);
+  const tampered = await chat([{ ...hold, args: { ...hold.args, destination: recipient.address } }]);
+  assert.match(tampered.reply, /invalid or expired/);
   assert.deepEqual(sends, []);
+
+  const changed = await chat([hold]);
+  assert.match(changed.activity[0].error, /recipient_address_missing/);
+  assert.equal(changed.hold, undefined);
+  assert.equal(sends[0].destination, address);
 
   recipient = { ...recipient, address };
   const sent = await chat([hold]);
-  assert.match(sent.reply, /Sent 1 SOL to @hi on Solana devnet\./);
+  assert.equal(sent.toolRounds, 1);
+  assert.match(sent.reply, /Sent\./);
   assert.ok(sent.reply.includes(`https://solscan.io/tx/${signature}?cluster=devnet`));
-  assert.deepEqual(sends, [{
+  assert.deepEqual(sends[1], {
     botId: 'bot_1',
     action: 'spend',
     amount: '1000000000',
@@ -121,12 +137,12 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     confirmed: true,
     permission: 'full',
     reviewCap: '30000000',
-  }]);
+  });
 
   recipient = { kind: 'handle', handle: 'hi', missing: true };
   assert.match((await chat()).reply, /couldn’t find @hi/);
-  assert.equal(checks.mock.callCount(), 5);
-  assert.equal(sends.length, 1);
+  assert.equal(checks.mock.callCount(), 4);
+  assert.equal(sends.length, 2);
 });
 
 /**
