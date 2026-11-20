@@ -81,3 +81,12 @@ test('a blocked SOL send shows the runtime reason in the reply and the trace', a
   assert.match(reply.text, /does not match the agent's spending asset/);
   assert.match(reply.activity[0].error, /^blocked\nThe payment asset/);
 });
+
+test('a signing rejection explains the wallet authorization failure', async () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
+  const reply = await resumeAssetSpend(hold, context, async () => ({
+    state: 'sign-rejected', ok: false, reason: 'wallet_owner_session_required', signed: false,
+  }), 2000);
+  assert.match(reply.text, /Sign in again as the wallet owner/);
+  assert.match(reply.activity[0].error, /^sign-rejected\nSign in again/);
+});
