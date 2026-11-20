@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Mic, MicOff, Minimize2, Maximize2, Square } from 'lucide-react';
 import { Attachment01Icon } from '@hugeicons/core-free-icons';
@@ -15,6 +15,7 @@ import WakeSlider from './WakeSlider';
 import GlideSelect from './GlideSelect';
 import PromptBar from './PromptBar';
 import AIProvidersSheet from './AIProvidersSheet';
+import { providerStorage } from '../lib/provider-storage.mjs';
 import {
   ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
   selectedModelRequest, visibleModelOptions,
@@ -144,6 +145,7 @@ export default function Composer({
   onBindAccess = null,
   onContextWindow = null,
 }) {
+  const modelStorage = useMemo(() => providerStorage(typeof window === 'undefined' ? null : localStorage, ownerId), [ownerId]);
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
   const [note, setNote] = useState('');
@@ -283,7 +285,7 @@ export default function Composer({
   useEffect(() => {
     let stop = false;
     function refresh() {
-      const next = visibleModelOptions(localStorage);
+      const next = visibleModelOptions(modelStorage);
       setModels(next);
       setChatModel(current => (next.some(item => item.key === current) ? current : next[0]?.key || ''));
       if (!next.some(item => item.key === modelRef.current)) {
@@ -298,7 +300,7 @@ export default function Composer({
       .then(response => (response.ok ? response.json() : null))
       .then(data => {
         if (stop || !data?.checked || !Array.isArray(data.models)) return;
-        saveModelCatalog(localStorage, ACCOUNT_PROVIDER, data.models);
+        saveModelCatalog(modelStorage, ACCOUNT_PROVIDER, data.models);
         announceModelSettings();
       })
       .catch(() => {});
@@ -307,7 +309,7 @@ export default function Composer({
       window.removeEventListener(MODEL_SETTINGS_EVENT, refresh);
       window.removeEventListener('storage', refresh);
     };
-  }, []);
+  }, [modelStorage]);
 
   useEffect(() => {
     const model = models.find(item => item.key === chatModel) ?? models[0];
@@ -552,7 +554,7 @@ export default function Composer({
   async function sendMessage(text) {
     const spoken = spokenFrom(text);
     if (!spoken) return;
-    if (!selectedModelRequest(localStorage, modelRef.current)) {
+    if (!selectedModelRequest(modelStorage, modelRef.current)) {
       pushLine('note', 'Show a model in AI Providers before sending a message.');
       setAIProvidersOpen(true);
       return;
@@ -662,7 +664,7 @@ export default function Composer({
   }
 
   async function runChat(spoken, prior, grants) {
-    const selection = selectedModelRequest(localStorage, modelRef.current);
+    const selection = selectedModelRequest(modelStorage, modelRef.current);
     if (!selection) {
       sendingRef.current = false;
       pushLine('note', 'Show a model in AI Providers before sending a message.');
@@ -1062,7 +1064,7 @@ export default function Composer({
       {stageNode}
       {floatNode}
       {settingsNode}
-      <AIProvidersSheet open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
+      <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mentionCopy ? (
         <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} /></p>

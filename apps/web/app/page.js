@@ -2093,7 +2093,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         resolve={resolveMention}
       />
       <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={CONNECTORS} />
-      <AIProvidersSheet open={aiProvidersOpen} onClose={closeAIProviders} />
+      <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={closeAIProviders} />
       <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
       {viewFile ? <FileStage file={viewFile} ownerId={ownerId} getAccessToken={getAccessToken} onMissing={onMissingFile} onClose={() => setViewFile(null)} /> : null}
       <StatisticsSheet

@@ -14,7 +14,7 @@ function noteFor(reason) {
   return 'Use a token of at least 8 characters.';
 }
 
-export default function ProviderAdd({ open, onClose, onSaved }) {
+export default function ProviderAdd({ open, onClose, onSaved, storage }) {
   const [draft, setDraft] = useState(EMPTY);
   const [note, setNote] = useState('');
   const [root, setRoot] = useState(null);
@@ -41,13 +41,13 @@ export default function ProviderAdd({ open, onClose, onSaved }) {
   function submit(event) {
     event.preventDefault();
     let result;
-    try { result = saveProvider(localStorage, draft); }
+    try { result = saveProvider(storage, draft); }
     catch { setNote('Browser storage is unavailable. Allow storage and try again.'); return; }
     if (!result.ok) {
       setNote(noteFor(result.reason));
       return;
     }
-    try { forgetProviderModels(localStorage, result.provider.id); } catch { /* credentials were saved; a check can refresh models */ }
+    try { forgetProviderModels(storage, result.provider.id); } catch { /* credentials were saved; a check can refresh models */ }
     announceModelSettings();
     onSaved?.(result.provider);
     onClose?.();

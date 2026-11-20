@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BrainCircuit, KeyRound, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import ProviderAdd from './ProviderAdd';
+import { providerStorage } from '../lib/provider-storage.mjs';
 import { readProviderCredentials, removeProvider } from '../lib/provider-tokens.mjs';
 import {
   ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, forgetProviderModels,
@@ -15,7 +16,8 @@ function checkError(code) {
   return 'Could not check models. Your saved list is unchanged; try again.';
 }
 
-export default function ModelProviders() {
+export default function ModelProviders({ ownerId }) {
+  const modelStorage = useMemo(() => providerStorage(typeof window === 'undefined' ? null : localStorage, ownerId), [ownerId]);
   const [groups, setGroups] = useState([]);
   const [hidden, setHidden] = useState(new Set());
   const [adding, setAdding] = useState(false);
@@ -25,8 +27,8 @@ export default function ModelProviders() {
   const pending = useRef(new Set());
 
   function refresh() {
-    setGroups(providerModelGroups(localStorage));
-    setHidden(readHiddenModels(localStorage));
+    setGroups(providerModelGroups(modelStorage));
+    setHidden(readHiddenModels(modelStorage));
   }
 
   useEffect(() => {
@@ -37,14 +39,14 @@ export default function ModelProviders() {
       window.removeEventListener(MODEL_SETTINGS_EVENT, refresh);
       window.removeEventListener('storage', refresh);
     };
-  }, []);
+  }, [modelStorage]);
 
   async function checkModels(provider) {
     if (pending.current.has(provider.id)) return;
     pending.current.add(provider.id);
     setChecks(current => ({ ...current, [provider.id]: { busy: true } }));
     try {
-      const credentials = provider.id === ACCOUNT_PROVIDER ? null : readProviderCredentials(localStorage, provider.id);
+      const credentials = provider.id === ACCOUNT_PROVIDER ? null : readProviderCredentials(modelStorage, provider.id);
       if (provider.id !== ACCOUNT_PROVIDER && !credentials) throw new Error('provider_not_supported');
       const response = await fetch('/api/models', {
         ...(credentials ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) } : {}),
@@ -53,8 +55,8 @@ export default function ModelProviders() {
       });
       const data = await response.json();
       if (!response.ok || data.checked === false || data.ok === false || !Array.isArray(data.models)) throw new Error(data.error || 'provider_unavailable');
-      if (provider.id !== ACCOUNT_PROVIDER && JSON.stringify(readProviderCredentials(localStorage, provider.id)) !== JSON.stringify(credentials)) return;
-      saveModelCatalog(localStorage, provider.id, data.models);
+      if (provider.id !== ACCOUNT_PROVIDER && JSON.stringify(readProviderCredentials(modelStorage, provider.id)) !== JSON.stringify(credentials)) return;
+      saveModelCatalog(modelStorage, provider.id, data.models);
       announceModelSettings();
       setChecks(current => ({ ...current, [provider.id]: { message: `${data.models.length} chat models available. New models are shown automatically.` } }));
     } catch (error) {
@@ -66,7 +68,7 @@ export default function ModelProviders() {
 
   function toggle(key, visible) {
     try {
-      setModelVisible(localStorage, key, visible);
+      setModelVisible(modelStorage, key, visible);
       announceModelSettings();
       setNote('');
     } catch { setNote('Could not save this choice. Allow browser storage and try again.'); }
@@ -88,7 +90,7 @@ export default function ModelProviders() {
       </header>
       <div className="provider-storage-note">
         <KeyRound size={18} />
-        <p>Keys and model preferences are saved in this browser. Keys are used only for model checks and chat requests, never added to messages.</p>
+        <p>Keys and model preferences are saved for this account in this browser. Keys are used only for model checks and chat requests, never added to messages.</p>
       </div>
       <div className="ai-model-toolbar">
         <label className="ai-model-search"><Search size={16} /><input type="search" aria-label="Search AI models" placeholder="Search models" value={search} onChange={event => setSearch(event.target.value)} /></label>
@@ -108,8 +110,8 @@ export default function ModelProviders() {
                   <button type="button" className="ghost" disabled={status.busy} onClick={() => checkModels(provider)}><RefreshCw size={14} className={status.busy ? 'ai-model-checking' : ''} />{status.busy ? 'Checking…' : 'Check models'}</button>
                   {provider.id !== ACCOUNT_PROVIDER ? <button type="button" className="provider-remove" aria-label={`Remove ${provider.name}`} onClick={() => {
                     try {
-                      removeProvider(localStorage, provider.id);
-                      forgetProviderModels(localStorage, provider.id);
+                      removeProvider(modelStorage, provider.id);
+                      forgetProviderModels(modelStorage, provider.id);
                       announceModelSettings();
                       setNote(`${provider.name} removed.`);
                     } catch { setNote('Could not remove this provider. Try again.'); }
@@ -127,7 +129,7 @@ export default function ModelProviders() {
         })}
       </div>
       {note ? <p className="quiet" role="status">{note}</p> : null}
-      <ProviderAdd open={adding} onClose={() => setAdding(false)} onSaved={provider => { refresh(); void checkModels(provider); }} />
+      <ProviderAdd storage={modelStorage} open={adding} onClose={() => setAdding(false)} onSaved={provider => { refresh(); void checkModels(provider); }} />
     </section>
   );
 }

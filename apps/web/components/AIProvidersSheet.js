@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 import ModelProviders from './ModelProviders';
 import { usePresence } from './usePresence';
 
-export default function AIProvidersSheet({ open, onClose }) {
+export default function AIProvidersSheet({ open, onClose, ownerId }) {
   const { mounted, leaving } = usePresence(open);
   const [root, setRoot] = useState(null);
   const dialog = useRef(null);
@@ -36,7 +36,7 @@ export default function AIProvidersSheet({ open, onClose }) {
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section className="ai-providers-modal" ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="ai-providers-title" onMouseDown={event => event.stopPropagation()}>
         <button type="button" className="plugins-close" aria-label="Close AI Providers" onClick={onClose}><X size={18} /></button>
-        <ModelProviders />
+        <ModelProviders key={ownerId || 'signed-out'} ownerId={ownerId} />
       </section>
     </div>, root,
   );

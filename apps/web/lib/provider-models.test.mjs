@@ -7,6 +7,7 @@ import {
   saveModelCatalog, selectedModelRequest, setModelVisible, visibleModelOptions,
 } from './provider-models.mjs';
 import { completeTextChat } from './text-chat.mjs';
+import { providerStorage } from './provider-storage.mjs';
 
 const token = 'synthetic-test-key-not-a-credential';
 const baseUrl = 'https://api.openai.com/v1';
@@ -15,6 +16,27 @@ function memory() {
   const rows = new Map();
   return { getItem: key => rows.get(key) ?? null, setItem: (key, value) => rows.set(key, value) };
 }
+
+test('account switches isolate provider credentials and model choices without adopting unowned keys', () => {
+  const browser = memory();
+  const ownerA = providerStorage(browser, 'did:privy:owner-a');
+  const ownerB = providerStorage(browser, 'did:privy:owner-b');
+  const draft = { name: 'Work', token, baseUrl };
+  saveProvider(browser, draft); // Old browser-wide data has no trustworthy owner.
+  assert.equal(visibleModelOptions(ownerA).some(row => row.providerId !== ACCOUNT_PROVIDER), false);
+  const provider = saveProvider(ownerA, draft).provider;
+  saveModelCatalog(ownerA, provider.id, models);
+  const key = modelOptionKey(provider.id, models[0].id);
+  assert.equal(selectedModelRequest(ownerA, key).modelProvider.token, token);
+  assert.equal(selectedModelRequest(ownerB, key), null);
+  setModelVisible(ownerA, key, false);
+  saveProvider(ownerB, { ...draft, token: 'synthetic-other-owner-key' });
+  saveModelCatalog(ownerB, provider.id, models);
+  assert.equal(selectedModelRequest(ownerB, key).modelProvider.token, 'synthetic-other-owner-key');
+  assert.equal(selectedModelRequest(ownerA, key), null);
+  assert.equal(selectedModelRequest(providerStorage(browser, null), key), null);
+  assert.throws(() => saveProvider(providerStorage(browser, null), draft), /provider_owner_required/);
+});
 
 test('model choices default on, hidden choices persist across discovery, and provider IDs stay separate', () => {
   const storage = memory();
