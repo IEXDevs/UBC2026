@@ -1,4 +1,5 @@
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { parsePrivySigningFailure } from '@ubc2026/contracts';
 export const runtime = 'nodejs';
 
 import { resolveSnsOwner, SnsError } from '@ubc2026/sns';
@@ -30,8 +31,9 @@ export async function POST(request) {
   let ownerId;
   try {
     ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
-  } catch {
-    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    const privy = parsePrivySigningFailure(error?.privyFailure);
+    return Response.json({ error: 'login_required', ...(privy ? { privy } : {}) }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
   const ownerHeader = request.headers.get('x-owner-id');
   if (ownerHeader !== null && ownerHeader !== ownerId) {
@@ -43,7 +45,8 @@ export async function POST(request) {
     resolved = await resolveSnsOwner(body.domain);
   } catch (error) {
     const code = error instanceof SnsError ? 'sns_not_found' : 'sns_failed';
-    return Response.json({ error: code }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+    const privy = parsePrivySigningFailure(error?.privyFailure);
+    return Response.json({ error: code, ...(privy ? { privy } : {}) }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
   }
   const plan = planSnsSend({
     domain: resolved.domain,
@@ -86,9 +89,11 @@ export async function POST(request) {
       cluster: SOLANA_CLUSTER,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
-    const code = typeof error?.code === 'string' ? error.code : 'sns_send_failed';
+    const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code) ? error.code : 'sns_send_failed';
+    const privy = parsePrivySigningFailure(error?.privyFailure);
     return Response.json({
       error: code,
+      ...(privy ? { privy } : {}),
       domain: plan.domain,
       address: plan.address,
     }, { status: 502, headers: { 'Cache-Control': 'no-store' } });

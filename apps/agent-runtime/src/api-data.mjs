@@ -7,6 +7,7 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { ownerAuthStatus, resolveOwner } from './owner-auth.mjs';
 import {
   ConfigError,
+  parsePrivySigningFailure,
   solanaSpendAsset,
   httpsAvatarUrl,
   normalizeDisplayName,
@@ -1367,7 +1368,8 @@ export async function handleApiData(request, env, matched) {
             }),
           });
         } catch (err) {
-          return json({ error: 'policy_failed' }, 502);
+          const privy = parsePrivySigningFailure(err?.privyFailure);
+          return json({ error: 'policy_failed', ...(privy ? { privy } : {}) }, 502);
         }
         if (decision?.state !== 'reserved') {
           return json({
@@ -1393,7 +1395,8 @@ export async function handleApiData(request, env, matched) {
       if (!transfer) return json({ error: 'transfer_failed' }, 502);
       return json({ ok: true, source: 'supabase', replay: posted.replay === true, transfer });
     } catch (err) {
-      return json({ error: transferErrorCode(err) }, 409);
+      const privy = parsePrivySigningFailure(err?.privyFailure);
+      return json({ error: transferErrorCode(err), ...(privy ? { privy } : {}) }, 409);
     }
   }
 
