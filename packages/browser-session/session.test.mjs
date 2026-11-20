@@ -26,6 +26,21 @@ function service(overrides = {}) {
   });
 }
 
+test('expired views persist closed records while unrelated failures keep sessions open', async () => {
+  for (const code of ['browser_session_expired', 'provider_failed']) {
+    const store = createMemoryStore();
+    const svc = service({ store, browsers: {
+      createSession: async () => ({ sessionId: 'prov-1' }),
+      readonlyView: async () => { throw new ProviderError(code, code === 'browser_session_expired' ? 410 : 502); },
+    } });
+    const opened = await svc.openSession({ ownerId: 'u1', botId: 'b1' });
+    await assert.rejects(svc.liveView({ ownerId: 'u1', botId: 'b1', sessionRecordId: opened.sessionRecordId }), { code });
+    const record = await store.get(`browser:u1:b1:${opened.sessionRecordId}`);
+    assert.equal(record.status, code === 'browser_session_expired' ? 'closed' : 'open');
+    if (code === 'browser_session_expired') assert.equal(record.closedAt, 1000);
+  }
+});
+
 /**
  * Achieves: agentTools exposes exactly the six research/browser lifecycle names in order.
  * Fails when: Name set drifts or order changes silently.

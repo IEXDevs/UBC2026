@@ -149,6 +149,18 @@ export function createBrowserSessionService({
     return record;
   }
 
+  async function withSession(record, work) {
+    try { return await work(); }
+    catch (error) {
+      if (error?.code === 'browser_session_expired') {
+        await store.put(keyFor(record.ownerId, record.botId, record.sessionRecordId), {
+          ...record, status: 'closed', updatedAt: clock(), closedAt: clock(),
+        });
+      }
+      throw error;
+    }
+  }
+
   return {
     tools: agentTools,
 
@@ -304,7 +316,7 @@ export function createBrowserSessionService({
       }
       const record = await requireOwned(ownerId, botId, recordId);
       if (record.control === 'owner') fail('owner_has_control', 409);
-      const tab = await browsers.openTab(record.providerSessionId, url);
+      const tab = await withSession(record, () => browsers.openTab(record.providerSessionId, url));
       const updated = {
         ...record,
         url: tab.url,
@@ -340,10 +352,10 @@ export function createBrowserSessionService({
           updatedAt: clock(),
         });
       }
-      const view = await browsers.readonlyView(record.providerSessionId, {
+      const view = await withSession(record, () => browsers.readonlyView(record.providerSessionId, {
         targetId: typeof record.targetId === 'string' ? record.targetId : undefined,
         interactive: nextControl === 'owner',
-      });
+      }));
       const embed = describeLiveViewEmbed(view.viewerUrl);
       // Viewer URLs contain bearer credentials: return only to the authorized owner with no-store.
       // Do not put the URL on the tool event.
@@ -364,7 +376,10 @@ export function createBrowserSessionService({
     async releaseSession({ ownerId, botId, sessionRecordId }) {
       const record = await requireOwned(ownerId, botId, sessionRecordId);
       if (browsers && typeof browsers.closeSession === 'function') {
-        await browsers.closeSession(record.providerSessionId);
+        try { await browsers.closeSession(record.providerSessionId); }
+        catch (error) {
+          if (error?.code !== 'browser_session_expired') throw error;
+        }
       }
       const closed = { ...record, status: 'closed', updatedAt: clock(), closedAt: clock() };
       await store.put(keyFor(ownerId, botId, sessionRecordId), closed);

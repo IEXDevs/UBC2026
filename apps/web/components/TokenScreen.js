@@ -124,7 +124,7 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
         onBack={() => setSelected(null)}
         onSend={() => onSend?.(holding)}
         onReceive={onReceive}
-        onSwap={() => onSwap?.(holding?.symbol)}
+        onSwap={() => onSwap?.(holding?.symbol, selected)}
       />
       </motion.div>
     ) : (
