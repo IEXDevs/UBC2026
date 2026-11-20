@@ -72,6 +72,54 @@ test('Laso browser and research restrictions follow the current request or an un
   }
 });
 
+test('every assistant tool call gets a result, including calls beyond the execution limit and tool failures', async () => {
+  for (const count of [0, 1, 4, 6]) {
+    for (const failTool of [false, true]) {
+      const calls = Array.from({ length: count }, (_, index) => ({
+        id: `call_${index}`, type: 'function',
+        function: { name: index === 4 ? 'request_spend' : 'get_price', arguments: JSON.stringify(index === 4
+          ? { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' }
+          : { mint: String(index + 1).repeat(32) }) },
+      }));
+      const invoked = [];
+      let modelCalls = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'Check these token prices', permissionMode: 'ask',
+        tools: ['get_price', 'request_spend'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+        invokeTool: async name => {
+          invoked.push(name);
+          if (failTool) throw new Error('offline tool failure');
+          return { ok: true };
+        },
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) return turnAllowed();
+          const body = JSON.parse(options.body);
+          if (++modelCalls === 1 && count) {
+            return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: calls } }] });
+          }
+          if (count) {
+            const assistant = body.messages.findLast(item => item.role === 'assistant' && item.tool_calls);
+            const results = body.messages.filter(item => item.role === 'tool');
+            assert.deepEqual(results.map(item => item.tool_call_id), assistant.tool_calls.map(item => item.id));
+            assert.equal(results.length, count);
+            for (const [index, result] of results.entries()) {
+              const payload = JSON.parse(result.content);
+              if (index >= 4) assert.equal(payload.error, 'tool_call_limit');
+              else assert.equal(payload.error, failTool ? 'tool_failed' : undefined);
+            }
+            if (count > 4) assert.equal(body.tools, undefined);
+          }
+          return Response.json({ choices: [{ message: { content: 'The requested batch has finished; skipped steps did not run.' } }] });
+        },
+      });
+      assert.equal(reply.hold, undefined);
+      assert.equal(invoked.length, Math.min(count, 4));
+      assert.equal(invoked.includes('request_spend'), false);
+      assert.equal(modelCalls, count ? 2 : 1);
+    }
+  }
+});
+
 /**
  * Achieves: verifies text chat messages keep platform rules and map agent history.
  * Fails when: text chat messages keep platform rules and map agent history breaks (e.g. expected 'developer', /Maelstrom/, /Nova/); failure/null paths flip.

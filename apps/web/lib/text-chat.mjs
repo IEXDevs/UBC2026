@@ -537,7 +537,7 @@ export async function completeTextChat({
 
   async function runCalls(calls) {
     let repeated = false;
-    for (const call of calls.slice(0, 4)) {
+    for (const [index, call] of calls.entries()) {
       const name = typeof call?.function?.name === 'string' ? call.function.name : '';
       if (!READ_ONLY_TOOLS.has(name)) readOnlyTurn = false;
       const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
@@ -548,7 +548,10 @@ export async function completeTextChat({
       const stayOnApi = activeCardCheckout(latest, grants) && BROWSER_TOOLS.has(name);
       const access = toolAccessRequest(permissionMode, name, args, reviewCap);
       let result;
-      if (!name || seenTools.has(signature)) {
+      if (index >= 4) {
+        repeated = true;
+        result = { error: 'tool_call_limit', hint: 'Only four tool calls can run in one batch. This call did not run. Tell the owner which steps remain incomplete.' };
+      } else if (!name || seenTools.has(signature)) {
         repeated = true;
         result = { error: 'repeated_tool', hint: 'Already called. Answer the owner now.' };
       } else if (blocked) {

@@ -1,4 +1,5 @@
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { parsePrivySigningFailure } from '@ubc2026/contracts';
 /**
  * Connected-wallet deposit onto the owner's main wallet.
  * Prepare builds the unsigned mainnet-beta USDC transfer.
@@ -56,8 +57,11 @@ function statusFor(code) {
 }
 
 function errorBody(code, extra) {
-  if (code === 'missing_config' && Array.isArray(extra?.missing)) return { error: code, missing: extra.missing };
-  return { error: code };
+  const privy = parsePrivySigningFailure(extra?.privyFailure);
+  return { error: code,
+    ...(code === 'missing_config' && Array.isArray(extra?.missing) ? { missing: extra.missing } : {}),
+    ...(privy ? { privy } : {}),
+  };
 }
 
 export function storedWalletRow(row, ownerId) {
@@ -226,7 +230,7 @@ export async function postConnectedDeposit(request, deps = {}) {
     const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code)
       ? error.code
       : 'wallet_move_failed';
-    return json({ error: code }, statusFor(code));
+    return json(errorBody(code, error), statusFor(code));
   }
   const wallets = Array.isArray(loaded?.wallets) ? loaded.wallets : (Array.isArray(loaded) ? loaded : []);
   const plan = planConnectedDeposit({
@@ -263,6 +267,6 @@ export async function postConnectedDeposit(request, deps = {}) {
     const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code)
       ? error.code
       : 'wallet_move_failed';
-    return json({ error: code }, statusFor(code));
+    return json(errorBody(code, error), statusFor(code));
   }
 }
