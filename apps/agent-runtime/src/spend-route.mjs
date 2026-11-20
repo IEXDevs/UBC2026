@@ -2,7 +2,7 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * POST /api/spend — the permissioned spend voice, the glass UI, and Grok Bot share.
  * Order is trust, verify, freeze, policy, approval, then sign.
- * Signing goes through the Privy mainnet-beta client from @ubc2026/wallets.
+ * Swaps are browser-signed; broadcasts go through @ubc2026/wallets.
  * Responses carry a signature and a state, never a key or a signed payload.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -25,6 +25,7 @@ import { valueUsdSpend } from './usd-budget.mjs';
 import { prepareLasoPayment, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
 import { swapFailure } from './swap-failure.mjs';
 import { parseLasoBrowserPayment } from './laso-browser-payment.mjs';
+import { parseSwapAuthorization, swapAuthorizationProof, validSwapSignature } from './swap-client-sign.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
 const WALLET_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -141,7 +142,7 @@ export async function handleSpend(request, env = {}) {
     response = json({ error: 'swap_failed', signed: false }, 502);
   }
   const body = await response.json();
-  if (body.signed !== true && !body.swapPreview && !body.spendAuthorization) {
+  if (body.signed !== true && !body.swapPreview && !body.spendAuthorization && !body.swapAuthorization) {
     body.failure = swapFailure(body);
   }
   return json(body, response.status);
@@ -172,6 +173,11 @@ async function handleSpendRequest(request, env = {}) {
   const assetTransfer = laso || swap || parsed.asset !== 'USDC';
   const overrideToken = request.headers.get('x-spend-approve-once');
   const approvalKey = supabaseConfig(env)?.key;
+  const prepareSwap = swap && raw.swapAuthorization === 'prepare';
+  const signedSwap = swap ? parseSwapAuthorization(raw.swapAuthorization) : null;
+  if (raw.swapAuthorization !== undefined && (!swap || !parsed.confirmed || (!prepareSwap && !signedSwap))) {
+    return json({ error: 'invalid_spend_authorization', signed: false }, 400);
+  }
   const prepareAuthorization = raw.spendAuthorization === 'prepare';
   const ownerAuthorization = parseSpendAuthorizationSignature(raw.spendAuthorization);
   if (browserPayment && (!approvalKey || !desk.ok || desk.via !== 'grant')) {
@@ -243,7 +249,7 @@ async function handleSpendRequest(request, env = {}) {
     }
     if (!parsed.idempotencyKey) return json({ error: 'idempotency_key_required', signed: false }, 400);
     if (!approvalKey || !env.JUPITER_API_KEY || !env.transferClient?.prepareSolanaSwap
-        || !env.transferClient?.signPreparedSolanaTransfer || !env.ledgerApi?.reserveBudget) {
+        || !env.transferClient?.broadcastSignedSolana || !env.ledgerApi?.reserveBudget) {
       return json({ error: 'swap_unavailable', signed: false }, 503);
     }
     if (!parsed.confirmed && !autoSwap) {
@@ -255,7 +261,7 @@ async function handleSpendRequest(request, env = {}) {
         return json({ error: failure.code === 'swap_failed' ? 'swap_quote_unavailable' : failure.code, signed: false }, 409);
       }
     }
-    if (!autoSwap && desk.ok && (desk.via !== 'grant' || (!prepareAuthorization && !ownerAuthorization))) {
+    if (!autoSwap && desk.ok && (desk.via !== 'grant' || (!prepareSwap && !signedSwap))) {
       return json({ error: 'swap_owner_authorization_required', signed: false }, 403);
     }
   }
@@ -265,6 +271,10 @@ async function handleSpendRequest(request, env = {}) {
   }
   const swapOffer = swap ? readSwapTicket(raw.swapTicket, context, parsed, approvalKey, now) : null;
   if (swap && !swapOffer) return json({ error: 'swap_quote_expired', signed: false }, 409);
+  if (signedSwap && (signedSwap.expiresAt <= now || signedSwap.expiresAt > swapOffer.expiresAt
+      || signedSwap.blockhash !== swapOffer.blockhash)) {
+    return json({ error: 'spend_authorization_expired', signed: false }, 409);
+  }
   if (ownerAuthorization && (ownerAuthorization.expiresAt <= now
     || ownerAuthorization.expiresAt > now + SPEND_AUTHORIZATION_TTL_MS)) {
     return json({ error: 'spend_authorization_expired', signed: false }, 409);
@@ -359,6 +369,7 @@ async function handleSpendRequest(request, env = {}) {
   let beforeSign;
   let privyFailure;
   let authorizationChallenge;
+  let clientSwapFailure;
   let lasoReceipt;
   let lasoFailure;
   let lasoChallenge;
@@ -367,6 +378,16 @@ async function handleSpendRequest(request, env = {}) {
     const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
     signSolana = async ({ bot, wallet }) => {
       try {
+        if (swap) {
+          try {
+            const sent = await env.transferClient.broadcastSignedSolana({ signedTransaction: signedSwap.signedTransaction });
+            if (sent?.cluster !== SOLANA_CLUSTER || typeof sent.signature !== 'string' || !sent.signature) throw new Error('broadcast_failed');
+            return sent;
+          } catch {
+            clientSwapFailure = 'broadcast_failed';
+            throw new Error('broadcast_failed');
+          }
+        }
         if (laso) {
           if (lasoOffer.expiresAt <= Date.now() && !Number.isSafeInteger(env.spendNow)) throw new Error('laso_ticket_invalid');
           const partial = browserPayment ? browserPartial : await env.transferClient.signPreparedSolanaX402Payment({
@@ -404,6 +425,21 @@ async function handleSpendRequest(request, env = {}) {
         browserPartial = await env.transferClient.verifyPreparedSolanaX402Payment({
           bot, wallet, prepared, signedTransaction: browserPayment.transaction,
         });
+      }
+      if (swap) {
+        if (!prepareSwap && !signedSwap) return { state: 'blocked', reason: 'client_sign_required' };
+        if (signedSwap && signedSwap.expiresAt <= (Number.isSafeInteger(env.spendNow) ? now : Date.now())) {
+          return { state: 'blocked', reason: 'spend_authorization_expired' };
+        }
+        const expiresAt = signedSwap?.expiresAt ?? Math.min(proposal.expiresAt, swapOffer.expiresAt);
+        const proof = swapAuthorizationProof({ key: approvalKey, ownerId, bot, wallet, id, prepared, blockhash, expiresAt });
+        if (prepareSwap) {
+          authorizationChallenge = { transaction: prepared.transaction, walletAddress: wallet.address, blockhash, expiresAt, proof };
+          return { state: 'awaiting-wallet-authorization' };
+        }
+        if (!validSwapSignature(signedSwap, proof, prepared.transaction, wallet.address)) {
+          return { state: 'blocked', reason: 'spend_authorization_changed' };
+        }
       }
       if (prepareAuthorization || ownerAuthorization) {
         const expiresAt = ownerAuthorization?.expiresAt ?? Math.min(proposal.expiresAt, now + SPEND_AUTHORIZATION_TTL_MS);
@@ -478,7 +514,7 @@ async function handleSpendRequest(request, env = {}) {
   }
 
   if (authorizationChallenge && result.reason === 'awaiting-wallet-authorization') {
-    return json({ signed: false, spendAuthorization: authorizationChallenge });
+    return json({ signed: false, [swap ? 'swapAuthorization' : 'spendAuthorization']: authorizationChallenge });
   }
   if (lasoChallenge && result.reason === 'awaiting-wallet-authorization') {
     return json({ signed: false, lasoPayment: lasoChallenge });
@@ -495,9 +531,10 @@ async function handleSpendRequest(request, env = {}) {
     signed: result.signed === true,
     ...(laso ? { provider: 'laso' } : {}),
     cluster: SOLANA_CLUSTER,
-    reason: result.reason || null,
+    reason: clientSwapFailure || result.reason || null,
     ...(privyFailure ? { privyFailure } : {}),
     ...(lasoFailure ? { error: lasoFailure } : {}),
+    ...(clientSwapFailure ? { error: clientSwapFailure } : {}),
     ...(prepared ? { feeLamports: prepared.feeLamports } : {}),
     ...(overrideToken === null && approvalTerms && perTransferLimit ? { approvalTerms } : {}),
   };

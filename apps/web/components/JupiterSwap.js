@@ -2,8 +2,9 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
-import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
+import { SOLANA_CLUSTER, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 import { swapFailure } from '../lib/swap-failure.mjs';
+import { signSelectedWalletTransaction } from '../lib/wallet-signing.mjs';
 import {
   JUPITER_STATUS_NOTE,
   jupiterSwapStatus,
@@ -35,17 +36,15 @@ export default function JupiterSwap({ address = '', label = '', frozen = false, 
         signingFailure.current = '';
         setResult('');
         try {
-          const signed = await signTransaction({ transaction, wallet: signer, chain: SOLANA_PRIVY_CHAIN });
-          if (!signed?.signedTransaction) throw new Error('empty_signature');
-          return signed.signedTransaction;
+          return await signSelectedWalletTransaction({ from: { address, frozen }, transaction, signer: { wallets: [signer], signTransaction } });
         } catch (error) {
-          signingFailure.current = swapFailure({ code: error?.code === 4001 ? 'wallet_rejected' : 'privy_failed' }).message;
+          signingFailure.current = swapFailure({ code: error?.code === 'wallet_approval_cancelled' ? 'client_sign_rejected' : error?.code }).message;
           setResult(signingFailure.current);
           throw error;
         }
       }
       : null,
-  }), [address, label, status, signer, signTransaction]);
+  }), [address, label, frozen, status, signer, signTransaction]);
   const contextRef = useRef(context);
   const swappedRef = useRef(onSwapped);
   contextRef.current = context;
