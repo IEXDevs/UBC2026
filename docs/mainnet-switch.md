@@ -75,12 +75,12 @@ Trust → verify-consensus → wallet freeze → bot-policy caps/max-loss → ap
 - The old sandbox shopping path trusts request/demo ledger data and has an injected/dry-run signer path rather than the complete permissioned spend gate. Its demo recipient was a mint address, not a controlled merchant. **Runtime sandbox prepare/settle and UI purchase controls are disabled on mainnet**, rather than upgrading fake-money shortcuts into real spending. Laso remains a separate owner-gated challenge, not automatic settlement.
 - Preview/demo wallet addresses and balances remain synthetic/offline. Production preview is already disabled. Do not fund addresses copied from fixtures or historical Devpost/demo notes. Those notes are not evidence of mainnet assets or a completed deployment.
 
-### Existing legacy routes requiring a separate security review before exposure
+### Legacy routes and mainnet guards
 
 These are not newly permissioned spend APIs. Keep them inaccessible to bots/untrusted callers during the cutover; freezing bots alone does not protect an owner sweep route.
 
-- Runtime `/bots/:botId/sns/send` verifies the Privy owner and loads authoritative bot/wallet context from Supabase before an optional injected executor. It does not itself run trust/verify/policy/reservation/approval. The normal permissioned spend route retains all gates, but that does not make this legacy executor safe. Require a separately reviewed permissioned-spend integration before allowing `execute: true` on this route.
-- Runtime signal `/bots/:botId/commerce/signals/:signalId/settle` parses an x402 signature header and matches offer fields; it assumes the buyer already paid rather than querying chain confirmation. Its returned `paid` feed entry is not evidence of confirmed mainnet funds. Keep it unavailable for paid mainnet services until on-chain verification and replay protection are added. This differs from the dedicated x402-service, whose unbound confirmer fails closed.
-- Owner SNS withdrawals, grab-back and wallet moves deliberately use owner-authorized sweep paths rather than bot caps. Audit their owner authentication, authoritative wallet lookup and Privy policy restrictions before exposure; never treat request-supplied wallet ownership or test ledger credits as proof of mainnet authority.
+- Runtime `/bots/:botId/sns/send` supports unsigned recipient and transfer previews. On mainnet it rejects `execute: true`. The raw signing route rejects bot signing on mainnet. Agents must use the permissioned spend route.
+- Runtime signal offers and settlement return `signal_payments_unavailable` on mainnet. Enable them only after adding on-chain confirmation and replay protection. The dedicated x402 service requires a configured payment confirmer.
+- Owner SNS withdrawals, grab-back, and wallet moves use owner-authorized sweep paths. Wallet moves verify the Privy session and load both wallets from owner-scoped storage. Review Privy signing policies before exposure.
 
 No live security audit, transfer, deployment, hosted migration or dashboard change is asserted here.

@@ -3,9 +3,11 @@ export const runtime = 'nodejs';
 
 import { moveBetweenWallets } from '@ubc2026/transfers';
 import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
+import { readStoredWallets, storedWalletRow } from '../../../../lib/connected-deposit.mjs';
 import { accessTokenFromRequest } from '../../../../lib/privy-cookie-session.mjs';
+import { verifyPrivyAccessToken } from '../../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../../lib/root-env.mjs';
-import { planWalletMove } from '../../../../lib/wallet-move.mjs';
+import { planWalletMove, selectOwnedMoveWallet } from '../../../../lib/wallet-move.mjs';
 import { resolvePrivyAppId } from '../../../../lib/wallet-provision.mjs';
 
 function env() {
@@ -15,6 +17,8 @@ function env() {
     SOLANA_RPC_URL: readRootEnv('SOLANA_RPC_URL'),
     PRIVY_AUTHORIZATION_KEY: readRootEnv('PRIVY_AUTHORIZATION_KEY'),
     NEXT_PUBLIC_PRIVY_APP_ID: readRootEnv('NEXT_PUBLIC_PRIVY_APP_ID'),
+    SUPABASE_URL: readRootEnv('SUPABASE_URL'),
+    SUPABASE_SERVICE_ROLE_KEY: readRootEnv('SUPABASE_SERVICE_ROLE_KEY'),
   };
 }
 
@@ -23,27 +27,38 @@ export async function POST(request) {
   if (!accessToken) {
     return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
-  const body = await request.json().catch(() => ({}));
-  const ownerHeader = request.headers.get('x-owner-id');
-  const ownerId = typeof ownerHeader === 'string' ? ownerHeader.trim() : '';
-  const plan = planWalletMove({
-    from: body.from,
-    to: body.to,
-    amount: body.amount,
-    ownerId,
-    env: env(),
-  });
-  if (plan.error) {
-    const status = plan.error === 'missing_config' ? 503 : plan.error === 'owner_mismatch' ? 403 : 400;
-    return Response.json(
-      plan.error === 'missing_config' ? { error: plan.error, missing: plan.missing } : { error: plan.error },
-      { status, headers: { 'Cache-Control': 'no-store' } },
-    );
-  }
+  const secrets = env();
+  const appId = resolvePrivyAppId(secrets);
+  let ownerId;
   try {
-    const secrets = env();
+    ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
+  } catch {
+    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
+  const ownerHeader = request.headers.get('x-owner-id');
+  if (ownerHeader !== null && ownerHeader !== ownerId) {
+    return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+  }
+  const body = await request.json().catch(() => ({}));
+  try {
+    const rows = await readStoredWallets(ownerId, secrets, fetch);
+    const wallets = rows.map(row => storedWalletRow(row, ownerId));
+    const plan = planWalletMove({
+      from: selectOwnedMoveWallet(wallets, body?.from),
+      to: selectOwnedMoveWallet(wallets, body?.to),
+      amount: body?.amount,
+      ownerId,
+      env: secrets,
+    });
+    if (plan.error) {
+      const status = plan.error === 'missing_config' ? 503 : plan.error === 'owner_mismatch' ? 403 : 400;
+      return Response.json(
+        plan.error === 'missing_config' ? { error: plan.error, missing: plan.missing } : { error: plan.error },
+        { status, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
     const client = createPrivyWalletClient({
-      appId: resolvePrivyAppId(secrets),
+      appId,
       appSecret: secrets.PRIVY_APP_SECRET,
       rpcUrl: secrets.SOLANA_RPC_URL,
       authorizationKey: secrets.PRIVY_AUTHORIZATION_KEY || null,

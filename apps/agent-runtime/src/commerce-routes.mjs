@@ -264,6 +264,9 @@ export async function handleSignalSettle(request, env, botId, signalId) {
 /** POST /bots/:botId/sns/send */
 async function handleSnsSend(request, env, botId, owner) {
   const body = await readBody(request);
+  if (SOLANA_CLUSTER === 'mainnet-beta' && body.execute === true) {
+    return json({ error: 'use_permissioned_spend' }, 409);
+  }
   try {
     const resolver = defaultResolver(env);
     const context = await commerceContext(env, owner, botId, { bot: body.bot || null, wallet: body.wallet || null });
@@ -356,6 +359,9 @@ export function matchCommerceRoute(method, pathname) {
 }
 
 export async function dispatchCommerceRoute(request, env, matched) {
+  if (SOLANA_CLUSTER === 'mainnet-beta' && (matched.kind === 'signal-offer' || matched.kind === 'signal-settle')) {
+    return json({ error: 'signal_payments_unavailable' }, 503);
+  }
   if (matched.kind === 'signal-offer') return handleSignalOffer(request, env, matched.botId, matched.signalId);
   if (matched.kind === 'signal-settle') return handleSignalSettle(request, env, matched.botId, matched.signalId);
   const { ownerId, error } = await resolveOwner(request, env);

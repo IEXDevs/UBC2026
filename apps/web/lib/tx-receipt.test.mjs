@@ -6,8 +6,7 @@ const signature = '5'.repeat(64);
 
 /**
  * Achieves: a mainnet-beta signature becomes one Solscan line the owner can open.
- * Fails when: the URL drops the cluster, a failed spend still links, or mainnet is linked.
- * Oracle: text includes solscan.io/tx and cluster=solana; signed false and mainnet return null.
+ * Fails when: the URL drops a test network, a failed spend still links, or the network is guessed.
  */
 test('a mainnet-beta signature is a Solscan message and a failed spend is not', () => {
   const receipt = txReceiptFromResult({ signed: true, signature, cluster: 'mainnet-beta' });
@@ -16,7 +15,9 @@ test('a mainnet-beta signature is a Solscan message and a failed spend is not', 
   assert.equal(txReceiptFromResult(JSON.stringify({ ok: true, signature, cluster: 'testnet' })).cluster, 'testnet');
   assert.equal(txReceiptFromResult({ signed: false, signature, cluster: 'mainnet-beta' }), null);
   assert.equal(txReceiptFromResult({ error: 'desk_locked', signature, cluster: 'mainnet-beta' }), null);
-  assert.equal(txReceiptFromResult({ signed: true, signature, cluster: 'mainnet' }), null);
+  assert.equal(txReceiptFromResult({ signed: true, signature, cluster: 'mainnet' }).url, receipt.url);
+  assert.equal(txReceiptFromResult({ signed: true, signature, cluster: 'devnet' }).url, `${receipt.url}?cluster=devnet`);
+  assert.equal(txReceiptFromResult({ signed: true, signature }), null);
   assert.equal(txReceiptFromResult({ ok: true, cluster: 'mainnet-beta' }), null);
 });
 

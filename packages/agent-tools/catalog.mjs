@@ -1,4 +1,4 @@
-import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+import { EXECUTION_LABEL, SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Shared agent tool surface for text chat and voice.
  * Research/browser tools come from @ubc2026/browser-session.
@@ -38,7 +38,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
   dashboard('get_bot_status', 'Status for one bot.', ['botId'], { botId }, [call('GET', '/bots/:botId/status')]),
   dashboard(
     'get_wallets',
-    'List wallets and every non-zero balance found for this owner. Read balances.displayBalanceLabel / holdings[] aloud — whatever SOL or SPL tokens exist on Solana-mainnet-beta and Solana-testnet for those addresses.',
+    `List this owner’s SOL and SPL balances. Execution uses Solana ${SOLANA_CLUSTER}. Read balances.displayBalanceLabel and use holdings or tokens for network labels.`,
     [],
     {},
     [call('GET', '/api/wallets')],

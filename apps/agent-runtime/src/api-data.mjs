@@ -3,6 +3,7 @@
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
 import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { ownerAuthStatus, resolveOwner } from './owner-auth.mjs';
 import {
   ConfigError,
@@ -593,12 +594,15 @@ export async function handleApiData(request, env, matched) {
     const { ownerId, error } = await resolveOwner(request, env);
     if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
+    const body = await request.json().catch(() => ({}));
+    if (SOLANA_CLUSTER === 'mainnet-beta' && body?.bot) {
+      return json({ error: 'use_permissioned_spend' }, 409);
+    }
     const denied = await deskDenied(request, env, ownerId, fetcher);
     if (denied) return denied;
     const client = privyClient(env);
     if (!client) return json({ error: 'signer_not_configured' }, 503);
     const walletId = matched.params?.walletId;
-    const body = await request.json().catch(() => ({}));
     if (!body?.transaction || typeof body.transaction !== 'string') {
       return json({ error: 'transaction_required' }, 400);
     }

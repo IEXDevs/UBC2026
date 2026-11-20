@@ -136,7 +136,7 @@ export function signedDepositMatches(signedBase64, plan) {
   }
 }
 
-async function readStoredWallets(ownerId, secrets, fetcher) {
+export async function readStoredWallets(ownerId, secrets, fetcher) {
   const url = typeof secrets.SUPABASE_URL === 'string' ? secrets.SUPABASE_URL.trim() : '';
   const key = typeof secrets.SUPABASE_SERVICE_ROLE_KEY === 'string' ? secrets.SUPABASE_SERVICE_ROLE_KEY.trim() : '';
   if (!url || !key) return [];

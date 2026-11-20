@@ -1,4 +1,3 @@
-import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { solscanTxUrl } from './money-views.mjs';
 
 const SIG = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
@@ -17,7 +16,7 @@ function asObject(result) {
 
 /**
  * A broadcast signature is enough to link. Confirmation on Solana is seconds.
- * Mainnet signatures are not linked from chat.
+ * Use the recorded cluster so older receipts keep their original explorer links.
  */
 export function txReceiptFromResult(result) {
   const parsed = asObject(result);
@@ -26,8 +25,8 @@ export function txReceiptFromResult(result) {
   if (parsed.signed === false || parsed.ok === false) return null;
   const signature = typeof parsed.signature === 'string' ? parsed.signature : '';
   if (!SIG.test(signature)) return null;
-  if (parsed.cluster != null && parsed.cluster !== SOLANA_CLUSTER && parsed.cluster !== 'testnet') return null;
-  const cluster = parsed.cluster === 'testnet' ? 'testnet' : SOLANA_CLUSTER;
+  const cluster = parsed.cluster;
+  if (!['mainnet-beta', 'mainnet', 'devnet', 'testnet'].includes(cluster)) return null;
   const url = solscanTxUrl(signature, cluster);
   if (!url) return null;
   return {
