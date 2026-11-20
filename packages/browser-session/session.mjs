@@ -202,7 +202,7 @@ export function createBrowserSessionService({
       if (![ownerId, botId].every(idOk)) fail('invalid_identity');
       if (typeof purpose !== 'string' || purpose.length > 256) fail('invalid_purpose');
       if (!browsers) throw new ProviderError('browser_not_configured', 503);
-      const open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
+      let open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
       // At capacity: reuse the newest open session (navigate when url is set) instead of
       // failing with concurrency_limit — chat kept calling open and getting stuck.
       if (open.length >= maxSessionsPerBot) {
@@ -212,13 +212,23 @@ export function createBrowserSessionService({
           return bAt - aAt;
         })[0];
         if (!newest?.sessionRecordId) fail('concurrency_limit', 429);
+        let navigated = null;
         if (url != null && url !== '') {
-          const navigated = await this.navigateSession({
-            ownerId,
-            botId,
-            sessionRecordId: newest.sessionRecordId,
-            url,
-          });
+          try {
+            navigated = await this.navigateSession({
+              ownerId,
+              botId,
+              sessionRecordId: newest.sessionRecordId,
+              url,
+              recover: false,
+            });
+          } catch (error) {
+            // Cloudflare expired the reused session; its record is now closed, so open a fresh one below.
+            if (error?.code !== 'browser_session_expired') throw error;
+            open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
+          }
+        }
+        if (navigated) {
           return {
             sessionRecordId: navigated.sessionRecordId,
             purpose: newest.purpose || purpose,
@@ -238,7 +248,7 @@ export function createBrowserSessionService({
             },
           };
         }
-        return {
+        if (open.length >= maxSessionsPerBot) return {
           sessionRecordId: newest.sessionRecordId,
           purpose: newest.purpose || purpose,
           status: 'open',
@@ -304,7 +314,7 @@ export function createBrowserSessionService({
       };
     },
 
-    async navigateSession({ ownerId, botId, sessionRecordId, url }) {
+    async navigateSession({ ownerId, botId, sessionRecordId, url, recover = true }) {
       if (!browsers) throw new ProviderError('browser_not_configured', 503);
       if (typeof browsers.openTab !== 'function') throw new ProviderError('browser_not_configured', 503);
       let recordId = sessionRecordId;
@@ -317,7 +327,31 @@ export function createBrowserSessionService({
       }
       const record = await requireOwned(ownerId, botId, recordId);
       if (record.control === 'owner') fail('owner_has_control', 409);
-      const tab = await withSession(record, () => browsers.openTab(record.providerSessionId, url));
+      let tab;
+      try {
+        tab = await withSession(record, () => browsers.openTab(record.providerSessionId, url));
+      } catch (error) {
+        if (!recover || error?.code !== 'browser_session_expired') throw error;
+        // Cloudflare ended the session (keepAlive lapsed). Continue in a fresh one so the agent
+        // and the Computer panel keep following the page instead of failing the step.
+        const reopened = await this.openSession({ ownerId, botId, purpose: record.purpose || 'browse', url });
+        return {
+          sessionRecordId: reopened.sessionRecordId,
+          url: reopened.url,
+          title: reopened.title,
+          recovered: true,
+          note: 'The previous browser session had expired, so a new session was opened at this url.',
+          event: {
+            type: 'tool',
+            name: 'browser_navigate',
+            status: 'ok',
+            sessionRecordId: reopened.sessionRecordId,
+            url: reopened.url,
+            recovered: true,
+            at: clock(),
+          },
+        };
+      }
       const updated = {
         ...record,
         url: tab.url,

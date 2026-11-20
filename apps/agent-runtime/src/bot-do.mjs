@@ -780,6 +780,8 @@ export class BotStateMachine {
           sessionRecordId: navigated.sessionRecordId,
           url: navigated.url,
           title: navigated.title,
+          recovered: navigated.recovered === true,
+          note: navigated.note,
           event: navigated.event,
         });
       }

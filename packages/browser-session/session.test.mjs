@@ -393,3 +393,72 @@ test('createDefaultBrowserSessionService wires env and fails closed without cred
   );
   assert.equal(calls.length, 0);
 });
+
+test('navigating an expired session closes it and continues in a fresh session', async () => {
+  let created = 0;
+  let ids = 0;
+  const svc = service({
+    idFactory: () => `rec-${++ids}`,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${++created}` }),
+      openTab: async (sessionId, url) => {
+        if (sessionId === 'prov-1' && url.endsWith('/b')) throw new ProviderError('browser_session_expired', 410);
+        return { targetId: `t-${sessionId}`, url, title: 'B' };
+      },
+      readonlyView: async () => ({ viewerUrl: 'https://live.browser.run/ui/view?jwt=x' }),
+    },
+  });
+  const identity = { ownerId: 'u1', botId: 'b1' };
+  const opened = await svc.openSession({ ...identity, url: 'https://example.com/a' });
+  const result = await svc.navigateSession({ ...identity, sessionRecordId: opened.sessionRecordId, url: 'https://example.com/b' });
+  assert.equal(result.recovered, true);
+  assert.notEqual(result.sessionRecordId, opened.sessionRecordId);
+  assert.equal(result.url, 'https://example.com/b');
+  const { sessions } = await svc.listOpenSessions(identity);
+  assert.deepEqual(sessions.map(s => s.sessionRecordId), [result.sessionRecordId]);
+  assert.doesNotMatch(JSON.stringify(result), /prov-/);
+});
+
+test('reuse at the session limit opens a fresh session when the newest one expired', async () => {
+  let created = 0;
+  let ids = 0;
+  let at = 1000;
+  const svc = service({
+    clock: () => ++at,
+    idFactory: () => `rec-${++ids}`,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${++created}` }),
+      openTab: async (sessionId, url) => {
+        if (sessionId === 'prov-2' && url.endsWith('/c')) throw new ProviderError('browser_session_expired', 410);
+        return { targetId: `t-${sessionId}`, url, title: '' };
+      },
+    },
+  });
+  const identity = { ownerId: 'u1', botId: 'b1' };
+  await svc.openSession({ ...identity, url: 'https://example.com/a' });
+  const second = await svc.openSession({ ...identity, url: 'https://example.com/b' });
+  const third = await svc.openSession({ ...identity, url: 'https://example.com/c' });
+  assert.notEqual(third.sessionRecordId, second.sessionRecordId);
+  assert.equal(third.url, 'https://example.com/c');
+  assert.equal(created, 3);
+  const { sessions } = await svc.listOpenSessions(identity);
+  assert.equal(sessions.length, 2);
+  assert.ok(!sessions.some(s => s.sessionRecordId === second.sessionRecordId));
+});
+
+test('a navigation failure other than expiry does not open a new session', async () => {
+  let created = 0;
+  const svc = service({
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${++created}` }),
+      openTab: async (_, url) => {
+        if (url.endsWith('/b')) throw new ProviderError('provider_failed', 502);
+        return { targetId: 't', url };
+      },
+    },
+  });
+  const identity = { ownerId: 'u1', botId: 'b1' };
+  const opened = await svc.openSession({ ...identity, url: 'https://example.com/a' });
+  await assert.rejects(svc.navigateSession({ ...identity, sessionRecordId: opened.sessionRecordId, url: 'https://example.com/b' }), ProviderError);
+  assert.equal(created, 1);
+});
