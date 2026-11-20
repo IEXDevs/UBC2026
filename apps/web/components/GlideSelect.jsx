@@ -3,6 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowDown01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { glideRowAt } from '../lib/glide-select.mjs';
 
 import './GlideSelect.css';
 
@@ -205,8 +206,7 @@ export default function GlideSelect({
   const rowAt = (y) => {
     const drag = scrub.current;
     if (!drag) return null;
-    const index = Math.floor((y - drag.top - PAD) / step);
-    return index >= 0 && index < items.length ? index : null;
+    return glideRowAt(y, { top: drag.list.getBoundingClientRect().top, scrollTop: drag.list.scrollTop, padding: PAD, step, count: items.length });
   };
   const onListDown = (event) => {
     if (scrub.current) return;
@@ -215,7 +215,7 @@ export default function GlideSelect({
     } catch {
       /* pointer capture is optional */
     }
-    scrub.current = { id: event.pointerId, top: event.currentTarget.getBoundingClientRect().top };
+    scrub.current = { id: event.pointerId, list: event.currentTarget };
     instant.current = true;
     setActive(rowAt(event.clientY));
   };
