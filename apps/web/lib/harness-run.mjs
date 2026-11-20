@@ -15,7 +15,7 @@ import {
 } from '@ubc2026/agent-tools';
 import { chatToolsInstruction, createChatToolInvoker } from './chat-tools.mjs';
 import { connectorInstruction, planConnectorUse, resolveDeskConnectors } from './connector-access.mjs';
-import { permissionInstruction, toolAccessKind } from './spend-permission.mjs';
+import { isFundTool, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
 import { readSubagentResults, recordSubagentResult } from './subagent-board.mjs';
 import { completeTextChat } from './text-chat.mjs';
 
@@ -54,7 +54,7 @@ export function stampSpendPermission(name, args, { permissionMode = 'ask', revie
     if (permissionMode === 'full') next.ownerPermission = 'full';
     else delete next.ownerPermission;
   }
-  if (name === 'request_spend' || name === 'sns_send' || name === 'prepare_shopping') {
+  if (isFundTool(name)) {
     next.permission = permissionMode === 'review' || permissionMode === 'full' ? permissionMode : 'ask';
     if (next.permission === 'review' && reviewCap) next.reviewCap = reviewCap;
     else delete next.reviewCap;

@@ -395,16 +395,16 @@ test('an empty tool finish still returns an answer instead of stopping', async (
   assert.match(result.text, /stopped so this request would not keep spinning|Answer the owner/);
 });
 
-test('the hidden verifier blocks a tool and a reply that it does not allow', async () => {
+test('the hidden verifier blocks a spend and a reply that it does not allow', async () => {
   const seen = [];
   let calls = 0;
   const verifyRoles = [];
   const result = await completeTextChat({
     modelApiKey: META_KEY,
-    message: 'search',
+    message: 'send funds',
     tools: [{
       type: 'function',
-      function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: {} } },
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object', properties: {} } },
     }],
     invokeTool: async (name) => {
       seen.push(name);
@@ -423,7 +423,7 @@ test('the hidden verifier blocks a tool and a reply that it does not allow', asy
             finish_reason: 'tool_calls',
             message: {
               content: null,
-              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{}' } }],
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1000000","handle":"bob"}' } }],
             },
           }],
         });
@@ -451,11 +451,60 @@ test('verifier API failures fail closed instead of failing the chat', async () =
   assert.equal(result.text, 'That step did not pass the check.');
 });
 
-test('ask mode holds a tool for an inline access request until it is granted', async () => {
+test('ordinary tools run in Ask mode while an approved spend still needs the model verifier', async () => {
+  const seen = [];
+  const verifierChecks = [];
+  const toolCalls = [
+    ['web_search', { query: 'SOL price' }],
+    ['lookup_recipient', { q: '@hi' }],
+    ['lookup_recipient', { q: '@hi', amount: '1000000000' }],
+    ['request_spend', { amount: '1000000000', asset: 'SOL', handle: 'hi' }],
+  ];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'Pay 1 SOL to @hi',
+    permissionMode: 'ask',
+    grants: [{ name: toolCalls[3][0], args: toolCalls[3][1] }],
+    tools: [...new Set(toolCalls.map(([name]) => name))].map(name => ({
+      type: 'function', function: { name, parameters: { type: 'object' } },
+    })),
+    invokeTool: async (name, args) => {
+      seen.push([name, args]);
+      return { ok: true };
+    },
+    fetcher: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (isTurnVerify(options)) {
+        const prompt = body.messages[0].content;
+        if (prompt.includes('Kind: reply')) return turnAllowed();
+        verifierChecks.push(prompt);
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      const results = body.messages.filter(item => item.role === 'tool');
+      if (results.length) {
+        assert.equal(JSON.parse(results[2].content).error, 'invalid_recipient');
+        assert.equal(JSON.parse(results[3].content).error, 'verifier_blocked');
+        return Response.json({ choices: [{ message: { content: 'I found the recipient. The payment is blocked.' } }] });
+      }
+      return Response.json({ choices: [{
+        finish_reason: 'tool_calls',
+        message: { tool_calls: toolCalls.map(([name, args], index) => ({
+          id: `c${index}`, type: 'function', function: { name, arguments: JSON.stringify(args) },
+        })) },
+      }] });
+    },
+  });
+  assert.deepEqual(seen, toolCalls.slice(0, 2));
+  assert.equal(verifierChecks.length, 1);
+  assert.match(verifierChecks[0], /request_spend/);
+  assert.equal(result.text, 'I found the recipient. The payment is blocked.');
+});
+
+test('ask mode requires the confirmation slide before invoking a spend', async () => {
   const seen = [];
   const tools = [{
     type: 'function',
-    function: { name: 'web_search', description: 'Search', parameters: { type: 'object', properties: { query: { type: 'string' } } } },
+    function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object' } },
   }];
   const fetcher = async (_url, options) => {
     if (isTurnVerify(options)) return turnAllowed();
@@ -467,27 +516,27 @@ test('ask mode holds a tool for an inline access request until it is granted', a
           finish_reason: 'tool_calls',
           message: {
             content: null,
-            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'web_search', arguments: '{"query":"USDC"}' } }],
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1000000","handle":"bob"}' } }],
           },
         }],
       });
     }
-    return Response.json({ choices: [{ message: { content: 'USDC is flat.' } }] });
+    return Response.json({ choices: [{ message: { content: 'Submitted the payment request.' } }] });
   };
   const held = await completeTextChat({
     modelApiKey: META_KEY,
-    message: 'search',
+    message: 'pay bob',
     tools,
     permissionMode: 'ask',
     invokeTool: async (name) => { seen.push(name); return { results: [] }; },
     fetcher,
   });
-  assert.equal(held.hold.kind, 'inline');
-  assert.equal(held.hold.name, 'web_search');
+  assert.equal(held.hold.kind, 'modal');
+  assert.equal(held.hold.name, 'request_spend');
   assert.deepEqual(seen, []);
   const next = await completeTextChat({
     modelApiKey: META_KEY,
-    message: 'search',
+    message: 'pay bob',
     tools,
     permissionMode: 'ask',
     grants: [held.hold],
@@ -495,8 +544,8 @@ test('ask mode holds a tool for an inline access request until it is granted', a
     fetcher,
   });
   assert.equal(next.hold, undefined);
-  assert.equal(next.text, 'USDC is flat.');
-  assert.deepEqual(seen, ['web_search']);
+  assert.equal(next.text, 'Submitted the payment request.');
+  assert.deepEqual(seen, ['request_spend']);
 });
 
 test('full permissions call a fund tool without asking the owner', async () => {
