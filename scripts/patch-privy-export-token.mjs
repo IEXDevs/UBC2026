@@ -1,19 +1,41 @@
 /**
- * Privy’s key-export iframe sends the access token in the URL hash to
- * auth.privy.io POST /v1/wallets/authenticate. The public getAccessToken()
- * is the customer token. Agent wallets are user-owned server wallets, and
- * that endpoint rejects the customer token ("Invalid JWT token"). The Privy
- * session token is what the exchange accepts.
+ * Privy’s key-export iframe sends the hash token as Authorization on
+ * auth.privy.io POST /v1/wallets/authenticate. That call rejects an access
+ * token with "Invalid JWT token". Agent wallets are user-owned server
+ * wallets, and the exchange accepts the identity token.
+ *
+ * The export screen’s client is the legacy client. Its getAccessToken()
+ * returns the Privy session token first, and it has no _privyInternal.
+ * Refresh the user and send the identity token from that response.
  */
+
+const IDENTITY = 'y.updateUserAndIdToken().then(()=>y.maelstromIdentityToken||y.getCustomerAccessToken()).then(r)';
+const IDENTITY_CJS = 'u.updateUserAndIdToken().then(()=>u.maelstromIdentityToken||u.getCustomerAccessToken()).then(i)';
 
 const REPLACEMENTS = Object.freeze([
   [
-    'y.getAccessToken().then(r)',
     '(y._privyInternal?.getAccessTokenInternal?.()??y.getAccessToken()).then(r)',
+    IDENTITY,
+  ],
+  [
+    'y.getAccessToken().then(r)',
+    IDENTITY,
+  ],
+  [
+    '(u._privyInternal?.getAccessTokenInternal?.()??u.getAccessToken()).then(i)',
+    IDENTITY_CJS,
   ],
   [
     'u.getAccessToken().then(i)',
-    '(u._privyInternal?.getAccessTokenInternal?.()??u.getAccessToken()).then(i)',
+    IDENTITY_CJS,
+  ],
+  [
+    'return this.session.updateIdentityToken(e.identity_token),A(e.user)',
+    'return this.session.updateIdentityToken(e.identity_token),this.maelstromIdentityToken=e.identity_token,A(e.user)',
+  ],
+  [
+    'return this.session.updateIdentityToken(e.identity_token),i.convertUserResponseToUser(e.user)',
+    'return this.session.updateIdentityToken(e.identity_token),this.maelstromIdentityToken=e.identity_token,i.convertUserResponseToUser(e.user)',
   ],
 ]);
 
