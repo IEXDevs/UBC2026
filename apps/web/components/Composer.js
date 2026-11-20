@@ -1165,7 +1165,7 @@ export default function Composer({
               const saved = writeReviewCap(accountStorage, next);
               setReviewCap(saved);
               window.dispatchEvent(new Event('storage'));
-              pushLine('note', `Review by AI maximum set to ${reviewCapToDollars(saved)} USDC`);
+              pushLine('note', `Review by AI maximum set to ${reviewCapToDollars(saved)} USD`);
             } catch {
               /* keep the prior threshold when the amount is invalid */
             }

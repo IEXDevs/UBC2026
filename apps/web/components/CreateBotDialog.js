@@ -4,22 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ModalClose from './ModalClose';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
-import { formatBaseUnits } from '../lib/money-views.mjs';
-import { DEFAULT_TRANSFER_CAP, draftBot, draftTransferCap, isTransferLimit } from '../lib/roster.mjs';
+import { draftBot, draftTransferCap } from '../lib/roster.mjs';
+import { dollarsToBaseUnits } from '../lib/spend-permission.mjs';
 import { AgentPhoto } from './AgentEdit';
 import { usePresence } from './usePresence';
 
-const STEPS = ['name', 'look', 'asset', 'limits'];
+const STEPS = ['name', 'look', 'limits'];
 const STEP_TITLES = {
   name: 'Create new agent',
   look: 'Choose a color',
-  asset: 'Choose a spending asset',
   limits: 'Set spending limits',
 };
-const SPEND_ASSETS = [
-  { value: 'USDC', decimals: 6, unit: 'micro-USDC', unitsPerCoin: '1,000,000' },
-  { value: 'SOL', decimals: 9, unit: 'lamports', unitsPerCoin: '1,000,000,000' },
-];
 
 const SPLASH = [
   { kind: 'circle', color: '#7c5cff', size: 196, side: 'left', y: '16%', gap: 28, rot: -8 },
@@ -52,26 +47,22 @@ const CONFETTI = Array.from({ length: 42 }, (_, i) => {
   };
 });
 
-function LimitField({ id, label, asset, value, onChange, autoFocus, exceedsTotal = false }) {
-  const units = value.trim();
-  const valid = isTransferLimit(units);
+function LimitField({ id, label, value, onChange, autoFocus, exceedsTotal = false }) {
+  const invalid = Boolean(value.trim()) && !dollarsToBaseUnits(value);
   return (
     <div className="field">
-      <label htmlFor={id}>{label} ({asset.unit})</label>
+      <label htmlFor={id}>{label} (USD)</label>
       <input
         id={id}
         value={value}
-        inputMode="numeric"
+        inputMode="decimal"
+        placeholder="0.00"
         autoFocus={autoFocus}
-        aria-describedby={`${id}-conversion${exceedsTotal ? ' agent-limit-error' : ''}`}
-        aria-invalid={exceedsTotal || (Boolean(units) && !valid)}
+        aria-describedby={exceedsTotal ? 'agent-limit-error' : invalid ? `${id}-error` : undefined}
+        aria-invalid={exceedsTotal || invalid}
         onChange={event => onChange(event.target.value)}
       />
-      <p id={`${id}-conversion`} className="hint create-conversion">
-        {valid
-          ? `= ${formatBaseUnits(units, asset.decimals)} ${asset.value}`
-          : units.length > 40 ? 'Enter up to 40 digits.' : 'Enter a positive whole number.'}
-      </p>
+      {invalid && <p id={`${id}-error`} className="hint">Enter a dollar amount above zero.</p>}
     </div>
   );
 }
@@ -82,7 +73,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
   const [color, setColor] = useState('#7c5cff');
   const [image, setImage] = useState('');
   const [shape, setShape] = useState('circle');
-  const [asset, setAsset] = useState('');
   const [maxOutflow, setMaxOutflow] = useState('');
   const [maxPerTransaction, setMaxPerTransaction] = useState('');
   const [celebrate, setCelebrate] = useState(false);
@@ -100,7 +90,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     setColor('#7c5cff');
     setImage('');
     setShape(randomShape());
-    setAsset('');
     setMaxOutflow('');
     setMaxPerTransaction('');
     setStep('name');
@@ -112,28 +101,20 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
   }, [open, onClose]);
 
   useEffect(() => {
-    if (open && (step === 'look' || step === 'asset')) stepTitle.current?.focus();
+    if (open && step === 'look') stepTitle.current?.focus();
   }, [open, step]);
 
   if (!mounted || typeof document === 'undefined') return null;
   const stepIndex = STEPS.indexOf(step);
-  const selectedAsset = SPEND_ASSETS.find(option => option.value === asset);
-  const cap = draftTransferCap(asset, maxOutflow.trim(), maxPerTransaction.trim());
-  const perTransferTooHigh = !cap && isTransferLimit(maxOutflow.trim()) && isTransferLimit(maxPerTransaction.trim());
+  const total = dollarsToBaseUnits(maxOutflow);
+  const perTransfer = dollarsToBaseUnits(maxPerTransaction);
+  const cap = draftTransferCap('USD', total, perTransfer);
+  const perTransferTooHigh = Boolean(total && perTransfer && !cap);
   const canContinue = {
     name: Boolean(name.trim()),
     look: true,
-    asset: Boolean(selectedAsset),
     limits: Boolean(cap),
   }[step];
-
-  function selectAsset(value) {
-    if (asset === value) return;
-    setAsset(value);
-    const defaults = value === DEFAULT_TRANSFER_CAP.asset ? DEFAULT_TRANSFER_CAP : null;
-    setMaxOutflow(defaults?.maxOutflow ?? '');
-    setMaxPerTransaction(defaults?.maxPerTransaction ?? '');
-  }
 
   function submit(event) {
     event.preventDefault();
@@ -241,38 +222,18 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
               </div>
             </div>
           )}
-          {step === 'asset' && (
-            <fieldset className="create-assets" aria-label="Spending asset">
-              {SPEND_ASSETS.map(option => (
-                <label key={option.value}>
-                  <span>
-                    <strong>{option.value}</strong>
-                    <span>Limits in {option.unit}</span>
-                  </span>
-                  <input
-                    type="radio"
-                    name="spending-asset"
-                    value={option.value}
-                    checked={asset === option.value}
-                    onChange={() => selectAsset(option.value)}
-                  />
-                </label>
-              ))}
-            </fieldset>
-          )}
-          {step === 'limits' && selectedAsset && (
+          {step === 'limits' && (
             <div className="create-limits">
               <p className="hint">
-                1 {selectedAsset.value} = {selectedAsset.unitsPerCoin} {selectedAsset.unit}.
-                {asset === 'SOL' && ' SOL limits include network fees.'}
+                These limits cover all tokens and network fees.
               </p>
-              <LimitField id="agent-total-limit" label="Total limit" asset={selectedAsset}
+              <LimitField id="agent-total-limit" label="Total limit"
                 value={maxOutflow} onChange={setMaxOutflow} autoFocus />
-              <LimitField id="agent-transfer-limit" label="Per-transfer limit" asset={selectedAsset}
+              <LimitField id="agent-transfer-limit" label="Per-transaction limit"
                 value={maxPerTransaction} onChange={setMaxPerTransaction} exceedsTotal={perTransferTooHigh} />
               {perTransferTooHigh && (
                 <p id="agent-limit-error" className="hint create-limit-error" role="status">
-                  The per-transfer limit must be at or below the total limit.
+                  The per-transaction limit must be at or below the total limit.
                 </p>
               )}
             </div>

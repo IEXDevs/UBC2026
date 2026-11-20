@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sanitizeActivity } from './chat-activity.mjs';
 import { createChatToolInvoker } from './chat-tools.mjs';
-import { resumeAssetSpend, sealAssetSpendHold } from './chat-spend-confirmation.mjs';
+import { resumeAssetSpend, sealAssetSpendHold, swapHoldFromPreview } from './chat-spend-confirmation.mjs';
 import { stampSpendPermission } from './harness-run.mjs';
 import { toolAccessRequest } from './spend-permission.mjs';
 
@@ -14,6 +14,25 @@ const args = {
   destination: '11111111111111111111111111111111', handle: 'hi', quoteCluster: 'mainnet-beta',
 };
 const signature = '5'.repeat(64);
+
+test('USDC swaps display confirmed minimum output and bind the quote ticket to the slide', async () => {
+  const args = { botId, action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000' };
+  const hold = toolAccessRequest('full', 'request_spend', args);
+  assert.match(hold.idempotencyKey, /^spend_/);
+  const quoted = swapHoldFromPreview(hold, {
+    inputDecimals: 6, outputDecimals: 9, minOutput: '9950000',
+    usdMicros: '1015000', expiresAt: 2500, ticket: 'fixture-swap-ticket',
+  });
+  assert.match(quoted.label, /Swap 1 USDC for at least 0\.00995 SOL/);
+  assert.match(quoted.label, /\$1\.015/);
+  const sealed = sealAssetSpendHold(quoted, context, 1000);
+  assert.equal(sealed.expiresAt, 2500);
+  const changed = await resumeAssetSpend({ ...sealed, swapTicket: 'changed' }, context, () => assert.fail('unexpected spend'), 2000);
+  assert.match(changed.text, /invalid or expired/);
+  const confirmed = stampSpendPermission('request_spend', args, { permissionMode: 'full', confirmSpend: true, grants: [sealed] });
+  assert.equal(confirmed.confirmed, true);
+  assert.equal(confirmed.idempotencyKey, sealed.idempotencyKey);
+});
 
 test('a slide submits the original SOL payment directly and returns its Solscan receipt', async () => {
   const hold = sealAssetSpendHold(toolAccessRequest('full', 'request_spend', args), context, 1000);

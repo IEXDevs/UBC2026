@@ -24,6 +24,7 @@ if (SOLANA_USDC_MINT !== X402_SOLANA_USDC_MINT) {
 }
 
 export { SOLANA_USDC_MINT };
+export { buildJupiterSwap } from './jupiter-swap.mjs';
 
 export const SPL_TOKEN_PROGRAM_ID = TOKEN_PROGRAM_ID.toBase58();
 export const MEMO_PROGRAM_ID = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';

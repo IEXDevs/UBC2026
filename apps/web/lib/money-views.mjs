@@ -23,6 +23,7 @@ export function formatBaseUnits(value, decimals = USDC_DECIMALS) {
   }
   const negative = value.startsWith('-');
   const digits = negative ? value.slice(1) : value;
+  if (decimals === 0) return value;
   const padded = digits.padStart(decimals + 1, '0');
   const whole = padded.slice(0, -decimals);
   const fraction = padded.slice(-decimals).replace(/0+$/, '');

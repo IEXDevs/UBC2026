@@ -1,14 +1,15 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { solanaSpendAsset, parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
+import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { spendFailureCode, spendFailureMessage, toolStep } from './chat-activity.mjs';
-import { matchingToolGrant } from './spend-permission.mjs';
+import { matchingToolGrant, needsBoundSpend } from './spend-permission.mjs';
+import { formatBaseUnits } from './money-views.mjs';
 import { TextChatError } from './text-chat.mjs';
 import { txReceiptFromResult } from './tx-receipt.mjs';
 
 const HOLD_LIFETIME_MS = 5 * 60 * 1000;
 
 export function isAssetSpendHold(hold) {
-  return hold?.name === 'request_spend' && solanaSpendAsset(hold.args?.asset ?? 'USDC') !== 'USDC';
+  return needsBoundSpend(hold?.name, hold?.args);
 }
 
 function holdMac(hold, { ownerId, botId, secret }) {
@@ -16,13 +17,27 @@ function holdMac(hold, { ownerId, botId, secret }) {
   const data = JSON.stringify([
     'maelstrom:chat-spend:v1', ownerId, botId, hold.name, hold.idempotencyKey, hold.expiresAt, args,
     ...(hold.budgetOverride == null ? [] : [hold.budgetOverride]),
+    ...(hold.swapTicket == null ? [] : [hold.swapTicket]),
   ]);
   return createHmac('sha256', secret).update(data).digest();
 }
 
 export function sealAssetSpendHold(hold, context, now = Date.now()) {
-  const sealed = { ...hold, expiresAt: hold.budgetOverride ? hold.expiresAt : now + HOLD_LIFETIME_MS };
+  const sealed = { ...hold, expiresAt: hold.budgetOverride || hold.swapTicket ? hold.expiresAt : now + HOLD_LIFETIME_MS };
   return { ...sealed, proof: holdMac(sealed, context).toString('hex') };
+}
+
+export function swapHoldFromPreview(hold, preview) {
+  const units = /^[1-9][0-9]{0,39}$/;
+  const decimals = value => Number.isInteger(value) && value >= 0 && value <= 255;
+  if (hold?.args?.action !== 'swap' || !preview || !units.test(hold.args.amount) || !units.test(preview.minOutput)
+      || !units.test(preview.usdMicros) || !decimals(preview.inputDecimals) || !decimals(preview.outputDecimals)
+      || !Number.isSafeInteger(preview.expiresAt) || typeof preview.ticket !== 'string' || preview.ticket.length > 5000) return null;
+  const input = formatBaseUnits(hold.args.amount, preview.inputDecimals);
+  const output = formatBaseUnits(preview.minOutput, preview.outputDecimals);
+  const debit = formatBaseUnits(preview.usdMicros, 6);
+  const label = `Swap ${input} ${hold.args.asset} for at least ${output} ${hold.args.outputAsset}. Budget charge including fees is $${debit}.`;
+  return { ...hold, label, prompt: `${label} Slide to confirm.`, expiresAt: preview.expiresAt, swapTicket: preview.ticket };
 }
 
 export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now()) {
@@ -39,7 +54,9 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
   ) {
     return {
       provider: 'desk',
-      text: 'This confirmation is invalid or expired. Ask for the payment again.',
+      text: hold?.args?.action === 'swap'
+        ? 'This confirmation is invalid or expired. Ask for a fresh swap quote.'
+        : 'This confirmation is invalid or expired. Ask for the payment again.',
     };
   }
 
@@ -53,8 +70,11 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
   }
   const receipt = txReceiptFromResult(result);
   const step = toolStep(hold.name, hold.args, result);
-  const text = receipt?.text || spendFailureMessage(result)
-    || 'The send returned no receipt. Check the spend details before trying again.';
+  const receiptText = receipt && (hold.args.action === 'swap' ? `Swap submitted. ${receipt.url}` : receipt.text);
+  const text = receiptText || spendFailureMessage(result)
+    || (hold.args.action === 'swap'
+      ? 'The swap returned no receipt. Check the trade details before trying again.'
+      : 'The send returned no receipt. Check the spend details before trying again.');
   return {
     provider: 'desk',
     toolRounds: 1,
