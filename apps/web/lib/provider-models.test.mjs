@@ -86,7 +86,7 @@ test('model checks only contact supported exact HTTPS roots and never echo raw e
   const success = await checkProviderModels({ baseUrl, apiKey: token, fetcher: async (url, init) => {
     assert.equal(url, `${baseUrl}/models`);
     assert.equal(init.headers.Authorization, `Bearer ${token}`);
-    assert.equal(init.redirect, 'error');
+    assert.equal(init.redirect, 'manual');
     return Response.json({ data: models });
   } });
   assert.equal(success.models.length, 2);
@@ -103,7 +103,7 @@ test('a selected custom model uses its key and endpoint with the existing turn v
     fetcher: async (url, init) => {
       calls++;
       assert.equal(url, `${baseUrl}/chat/completions`);
-      assert.equal(init.redirect, 'error');
+      assert.equal(init.redirect, 'manual');
       assert.equal(init.headers.Authorization, `Bearer ${token}`);
       assert.equal(init.body.includes(token), false);
       const body = JSON.parse(init.body);
@@ -150,4 +150,22 @@ test('advertised thinking choices for newly discovered models reach inference', 
     },
   });
   assert.equal(inference.reasoning_effort, 'high');
+});
+
+test('model calls use a redirect mode Cloudflare Workers accepts and treat a 3xx as a failure', async () => {
+  // workerd throws a TypeError for redirect 'error' before sending (every chat turn failed on dev).
+  const workerdFetch = handler => async (url, init) => {
+    if (init?.redirect !== undefined && !['follow', 'manual'].includes(init.redirect)) throw new TypeError('Invalid redirect value');
+    return handler(url, init);
+  };
+  const ok = workerdFetch(async (_url, init) => Response.json({ choices: [{ message: { content: init.body.includes('Role: turn-verify') ? '{"allow":true}' : 'Hello' } }] }));
+  const reply = await completeTextChat({ metaModelApiKey: 'LLM_synthetic-test-key', message: 'Hello', fetcher: ok });
+  assert.equal(reply.text, 'Hello');
+  const custom = await completeTextChat({ modelProvider: { token, baseUrl }, model: 'gpt-test-a', message: 'Hello', fetcher: ok });
+  assert.equal(custom.text, 'Hello');
+  const catalog = await checkProviderModels({ baseUrl, apiKey: token, fetcher: workerdFetch(async () => Response.json({ data: models })) });
+  assert.equal(catalog.ok, true);
+  const redirect = workerdFetch(async () => new Response(null, { status: 302, headers: { Location: 'https://evil.example/v1' } }));
+  await assert.rejects(completeTextChat({ metaModelApiKey: 'LLM_synthetic-test-key', message: 'Hello', fetcher: redirect }), error => error.code === 'openrouter_failed');
+  assert.equal((await checkProviderModels({ baseUrl, apiKey: token, fetcher: redirect })).error, 'provider_unavailable');
 });

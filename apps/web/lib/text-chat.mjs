@@ -285,7 +285,8 @@ async function postCompletion({
         'X-Title': 'Maelstrom',
       },
       body: JSON.stringify(payload),
-      redirect: 'error',
+      // Workers rejects redirect 'error'; a 3xx is !ok and fails below.
+      redirect: 'manual',
       signal: AbortSignal.timeout(60000),
     });
   } catch {
