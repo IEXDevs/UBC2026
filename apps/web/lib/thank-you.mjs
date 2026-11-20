@@ -7,4 +7,5 @@ export const THANK_YOU = Object.freeze([
   { name: 'QuickNode', href: 'https://www.quicknode.com', src: '/sponsors/quicknode.svg' },
   { name: 'Supabase', href: 'https://supabase.com', src: '/sponsors/supabase.svg' },
   { name: 'Cloudflare', href: 'https://www.cloudflare.com', src: '/sponsors/cloudflare.svg' },
+  { name: 'Devin', href: 'https://devin.ai', src: '/sponsors/devin.svg' },
 ]);
