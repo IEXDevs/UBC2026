@@ -22,6 +22,30 @@ const SPEND_LIMIT_MESSAGES = new Map([
   ['total-outflow', "This payment exceeds the agent's remaining spending budget."],
   ['over-budget', "This payment exceeds the agent's spending budget."],
 ]);
+const SPEND_BLOCK_MESSAGES = new Map([
+  ...SPEND_LIMIT_MESSAGES,
+  ['accounting-asset-mismatch', "The payment asset does not match the agent's spending asset."],
+  ['approval-needed', 'The budget reservation needs a valid approval.'],
+  ['approval-save-failed', 'The spend service could not save the approval.'],
+  ['bot-disabled', 'The agent is disabled.'],
+  ['bot-frozen', 'The agent is frozen.'],
+  ['bot-missing', 'The agent is no longer available.'],
+  ['budget-override-required', "This payment needs a separate approval to exceed the agent's spending budget."],
+  ['duplicate-spend', 'This confirmation was already used to attempt a payment. Check the wallet before trying again.'],
+  ['invalid-approval', 'The budget reservation rejected this approval.'],
+  ['invalid-approval-action', 'The budget reservation rejected this approval.'],
+  ['ledger-missing', "The agent's spending ledger is missing."],
+  ['max-loss-reached', 'The agent reached its loss limit.'],
+  ['quote-expired', 'The payment quote expired.'],
+  ['reserve-failed', "The spend service could not reserve funds from the agent's budget."],
+  ['rpc_policy_reserve_budget_failed', "The spend service could not reserve funds from the agent's budget."],
+  ['spend-frozen', 'The agent or its wallet is frozen.'],
+  ['trust-unavailable', 'The spend service could not verify the trust score.'],
+  ['wallet-frozen', 'The wallet is frozen.'],
+  ['wallet-missing', "The agent's wallet is missing."],
+  ['wallet-owner-mismatch', 'The wallet belongs to a different account.'],
+  ['wrong-owner', 'The agent belongs to a different account.'],
+]);
 const SECRET_KEY = /key|token|secret|password|authorization|cookie|seed|phrase/i;
 const SECRET_VALUE = /eyJ[A-Za-z0-9_-]{8,}|live\.browser\.run/i;
 
@@ -93,13 +117,25 @@ function commandLine(name, args) {
   return parts.join(' ').slice(0, 240);
 }
 
+export function spendFailureMessage(result) {
+  const parsed = parseResult(result);
+  switch (parsed?.error || parsed?.state) {
+    case 'approval-needed':
+      return SPEND_LIMIT_MESSAGES.get(parsed.reason)
+        || (!parsed.reason ? 'The spend request reached the server without an accepted confirmation.' : '');
+    case 'blocked':
+      return SPEND_BLOCK_MESSAGES.get(parsed.reason) || 'The spend service blocked this payment without a recognized reason.';
+    default:
+      return '';
+  }
+}
+
 function failureText(name, parsed) {
-  const error = clip(parsed?.error, 80).replace(SECRET_VALUE, '[hidden]');
+  const spend = name === 'request_spend';
+  const error = clip(parsed?.error || (spend ? parsed?.state : ''), 80).replace(SECRET_VALUE, '[hidden]');
   const hint = clip(parsed?.hint, 180).replace(SECRET_VALUE, '[hidden]');
   const extra = clip(typeof parsed?.detail === 'string' ? parsed.detail : '', 180).replace(SECRET_VALUE, '[hidden]');
-  const spendReason = name === 'request_spend' && error === 'approval-needed'
-    ? SPEND_LIMIT_MESSAGES.get(parsed.reason) || (!parsed.reason ? 'The spend request reached the server without an accepted confirmation.' : '')
-    : '';
+  const spendReason = spend ? spendFailureMessage(parsed) : '';
   return [...new Set([error, hint, extra, spendReason].filter(Boolean))]
     .join('\n')
     .slice(0, 400);

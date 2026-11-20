@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { devnetSpendAsset } from '@ubc2026/contracts';
-import { toolStep } from './chat-activity.mjs';
+import { spendFailureMessage, toolStep } from './chat-activity.mjs';
 import { matchingToolGrant } from './spend-permission.mjs';
 import { txReceiptFromResult } from './tx-receipt.mjs';
 
@@ -44,10 +44,12 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
   const result = await invokeTool(hold.name, hold.args);
   const receipt = txReceiptFromResult(result);
   const step = toolStep(hold.name, hold.args, result);
+  const text = receipt?.text || spendFailureMessage(result)
+    || 'The send returned no receipt. Check the spend details before trying again.';
   return {
     provider: 'desk',
     toolRounds: 1,
-    text: receipt?.text || 'The send returned no receipt. Check the spend details before trying again.',
+    text,
     ...(step ? { activity: [step] } : {}),
   };
 }
