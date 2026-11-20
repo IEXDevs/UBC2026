@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { profilePhoto, PROFILE_LOOK_KEY, withProfilePhoto } from './profile-photo.mjs';
+import { profilePhoto, PROFILE_LOOK_KEY, withProfilePhoto, saveProfilePhoto } from './profile-photo.mjs';
 import { createAccountMirror } from './account-state.mjs';
-import { readLooks, writeLooks } from './roster.mjs';
+import { readLooks } from './roster.mjs';
 
 const IMAGE = 'data:image/jpeg;base64,/9j/AAAA';
 
@@ -33,10 +33,19 @@ test('profile photos hydrate on another browser through existing owner-scoped ap
   const looks = readLooks(mirror.storage, 'alice');
   assert.equal(profilePhoto(looks), IMAGE);
   assert.equal(profilePhoto(readLooks(mirror.storage, 'bob')), '');
-  assert.equal(writeLooks(mirror.storage, 'alice', withProfilePhoto(looks, IMAGE + 'AAAA')), true);
-  await mirror.flush();
-  assert.equal(posts[0].items[0].name, 'looks');
-  const uploaded = JSON.parse(posts[0].items[0].value);
-  assert.deepEqual(uploaded.bot_one, { color: '#ffffff' });
-  assert.equal(profilePhoto(uploaded), IMAGE + 'AAAA');
+  assert.equal(posts.length, 0);
+});
+
+test('photo saves send only the photo and require a positive server acknowledgement', async () => {
+  let sent;
+  const fetchImpl = async (_url, init) => {
+    sent = JSON.parse(init.body);
+    return Response.json({ ok: true, saved: ['looks'] });
+  };
+  assert.equal(await saveProfilePhoto({ ownerId: 'alice', image: IMAGE, fetchImpl }), true);
+  assert.deepEqual(sent.items, [{ name: 'looks', value: JSON.stringify({ [PROFILE_LOOK_KEY]: { image: IMAGE } }), profilePhoto: true }]);
+  for (const response of [Response.json({ error: 'state_failed' }, { status: 502 }), Response.json({ ok: true, saved: [] })]) {
+    assert.equal(await saveProfilePhoto({ ownerId: 'alice', image: IMAGE, fetchImpl: async () => response }), false);
+  }
+  assert.equal(await saveProfilePhoto({ ownerId: 'alice', image: IMAGE, fetchImpl: async () => { throw Error('offline'); } }), false);
 });

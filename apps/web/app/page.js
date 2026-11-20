@@ -49,7 +49,7 @@ import {
 } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '../lib/profile.mjs';
-import { profilePhoto, withProfilePhoto } from '../lib/profile-photo.mjs';
+import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile-photo.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
@@ -460,6 +460,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const toast = useToast();
   const depositSignerRef = useRef(null);
   const [looks, setLooks] = useState({});
+  const [savedPhoto, setSavedPhoto] = useState(null);
   const [roster, setRoster] = useState({ order: [], extra: [] });
   const [ready, setReady] = useState(false);
   const [sideWidth, setSideWidth] = useState(300);
@@ -529,7 +530,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const [viewFile, setViewFile] = useState(null);
   const [voiceMs, setVoiceMs] = useState(0);
   const [voiceLive, setVoiceLive] = useState(false);
-  const avatarUrl = profilePhoto(looks) || profile?.avatarUrl || privyAvatarUrl(user);
+  const avatarUrl = (savedPhoto?.ownerId === ownerId ? savedPhoto.image : '') || profilePhoto(looks) || profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
   const closeProfile = useCallback(() => {
     setProfileOpen(false);
@@ -859,18 +860,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       setConfirmedHandle(confirmed.handle);
       try { if (key) localStorage.setItem(key, JSON.stringify(confirmed)); } catch { /* The directory confirmed the save. */ }
       let photoSync = null;
-      const nextLooks = photo === undefined ? null : withProfilePhoto(readLooks(accountStorage, ownerId), photo);
-      if (nextLooks) {
-        if (!writeLooks(accountStorage, ownerId, nextLooks)) throw Object.assign(new Error('photo_storage_failed'), { code: 'photo_storage_failed' });
-        setLooks(nextLooks);
-        let syncTimer;
-        try {
-          const synced = await Promise.race([
-            flushAccountState().catch(() => false),
-            new Promise(resolve => { syncTimer = setTimeout(() => resolve(false), 5000); }),
-          ]);
-          photoSync = synced ? 'synced' : 'pending';
-        } finally { clearTimeout(syncTimer); }
+      if (photo !== undefined) {
+        const synced = await saveProfilePhoto({ ownerId, getAccessToken, image: photo });
+        if (currentOwner.current !== ownerId) throw Object.assign(new Error('account_changed'), { code: 'account_changed' });
+        photoSync = synced ? 'synced' : 'failed';
+        if (synced) {
+          writeLooks(localStorage, ownerId, withProfilePhoto(readLooks(localStorage, ownerId), photo));
+          setSavedPhoto({ ownerId, image: photo });
+        }
       }
       return { ok: true, source: body.source || 'supabase', profile: confirmed, photoSync };
     }
