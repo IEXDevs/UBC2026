@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { spendFailureCode, spendFailureMessage, toolStep } from './chat-activity.mjs';
-import { matchingToolGrant, needsBoundSpend } from './spend-permission.mjs';
+import { matchingToolGrant, needsBoundSpend, withDefaultBotId } from './spend-permission.mjs';
 import { formatBaseUnits } from './money-views.mjs';
 import { TextChatError } from './text-chat.mjs';
 import { txReceiptFromResult } from './tx-receipt.mjs';
@@ -24,7 +24,7 @@ function holdMac(hold, { ownerId, botId, secret }) {
 }
 
 export function sealAssetSpendHold(hold, context, now = Date.now()) {
-  const sealed = { ...hold, expiresAt: hold.budgetOverride || hold.swapTicket ? hold.expiresAt : now + HOLD_LIFETIME_MS };
+  const sealed = { ...hold, args: withDefaultBotId(hold.name, hold.args, context.botId), expiresAt: hold.budgetOverride || hold.swapTicket ? hold.expiresAt : now + HOLD_LIFETIME_MS };
   return { ...sealed, proof: holdMac(sealed, context).toString('hex') };
 }
 

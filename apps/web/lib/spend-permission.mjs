@@ -160,6 +160,11 @@ export function isFundTool(name) {
   return FUND_TOOLS.has(name);
 }
 
+export function withDefaultBotId(name, args, botId) {
+  if (!isFundTool(name) || args?.botId !== undefined || typeof botId !== 'string' || !botId) return args;
+  return { ...args, botId };
+}
+
 const FUND_ARGUMENTS = ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'outputAsset', 'quoteCluster', 'provider', 'domain', 'from', 'amountUsd', 'lasoTicket'];
 
 function plainArgs(args) {
@@ -233,18 +238,18 @@ export function toolAccessRequest(mode, name, args = {}, reviewCap = null) {
   };
 }
 
-export function matchingToolGrant(grants, name, args) {
+export function matchingToolGrant(grants, name, args, botId) {
   if (!Array.isArray(grants)) return undefined;
-  const want = JSON.stringify(stable(plainArgs(args)));
+  const want = JSON.stringify(stable(plainArgs(withDefaultBotId(name, args, botId))));
   const needsSpendId = needsBoundSpend(name, args);
   return grants.find(grant => grant?.name === name
     && (!needsSpendId || (typeof grant.idempotencyKey === 'string'
       && /^(?:spend|loop_swap)_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(grant.idempotencyKey)))
-    && JSON.stringify(stable(plainArgs(grant.args))) === want);
+    && JSON.stringify(stable(plainArgs(withDefaultBotId(name, grant.args, botId)))) === want);
 }
 
-export function grantCovers(grants, name, args) {
-  return Boolean(matchingToolGrant(grants, name, args));
+export function grantCovers(grants, name, args, botId) {
+  return Boolean(matchingToolGrant(grants, name, args, botId));
 }
 
 export function permissionInstruction(id) {

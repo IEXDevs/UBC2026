@@ -15,6 +15,19 @@ const args = {
 };
 const signature = '5'.repeat(64);
 
+test('sealing binds an omitted bot ID to the current bot without accepting its later removal', async () => {
+  const { botId: _botId, ...omitted } = args;
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', omitted), context, 1000);
+  assert.equal(hold.args.botId, botId);
+  const reply = await resumeAssetSpend(hold, context, async (_name, inputs) => {
+    assert.deepEqual(inputs, args);
+    return { error: 'simulation_failed', signed: false };
+  }, 2000);
+  assert.equal(reply.hold, undefined);
+  const tampered = await resumeAssetSpend({ ...hold, args: omitted }, context, () => assert.fail('removed bot ID must invalidate the proof'), 2000);
+  assert.match(tampered.text, /invalid or expired/);
+});
+
 test('Laso preparation needs no slide; its ticket-bound purchase does, and returns only the owner login link separately', async () => {
   assert.equal(toolAccessRequest('ask', 'prepare_shopping', { provider: 'laso', amountUsd: 10 }), null);
   const ticket = `payload.${'a'.repeat(64)}`;
