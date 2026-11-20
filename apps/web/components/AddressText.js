@@ -8,5 +8,5 @@ export default function AddressText({ text, addresses = [], renderText = value =
     ? part.punctuation
       ? <span key={index} className="address-copy-token"><AddressCopy address={part.address} inline />{part.punctuation}</span>
       : <AddressCopy key={index} address={part.address} inline />
-    : <span key={index}>{renderText(part.text)}</span>);
+    : <span key={index} className={part.punctuation ? 'address-copy-token' : undefined}>{renderText(part.text)}{part.punctuation}</span>);
 }

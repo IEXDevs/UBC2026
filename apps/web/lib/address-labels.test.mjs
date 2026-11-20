@@ -32,6 +32,9 @@ test('unknown, malformed, and colliding addresses are never guessed', () => {
   for (const addresses of [[], ['not-an-address'], [address, other]]) {
     assert.equal(addressForLabel(short, addresses), null);
     assert.deepEqual(addressTextParts(short, addresses), [{ text: short }]);
+    assert.deepEqual(addressTextParts(`Unknown ${short}.`, addresses), [
+      { text: 'Unknown ' }, { text: short, punctuation: '.' },
+    ]);
   }
   assert.deepEqual(addressTextParts(`x${short}x`, [address]), [{ text: `x${short}x` }]);
   assert.deepEqual(addressTextParts('@alice and ordinary text', [address]), [{ text: '@alice and ordinary text' }]);

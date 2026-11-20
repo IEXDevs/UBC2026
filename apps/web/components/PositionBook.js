@@ -58,7 +58,14 @@ function metric(parent, label, value, extra) {
 function addressText(node, text, address) {
   for (const part of addressTextParts(text, [address])) {
     if (!part.address) {
-      node.append(document.createTextNode(part.text));
+      if (part.punctuation) {
+        const token = document.createElement('span');
+        token.className = 'address-copy-token';
+        token.textContent = part.text + part.punctuation;
+        node.append(token);
+      } else {
+        node.append(document.createTextNode(part.text));
+      }
       continue;
     }
     const button = document.createElement('button');

@@ -16,12 +16,12 @@ export function addressTextParts(text, addresses = []) {
   let end = 0;
   for (const match of value.matchAll(/\b[1-9A-HJ-NP-Za-km-z]{5}\.\.\.[1-9A-HJ-NP-Za-km-z]{5}\b/g)) {
     const address = addressForLabel(match[0], addresses);
-    if (!address) continue;
+    const labelEnd = match.index + match[0].length;
+    const punctuation = value.slice(labelEnd).match(/^[\p{Pe}\p{Pf}.,!?;:…'"]+/u)?.[0] || '';
+    if (!address && !punctuation) continue;
     if (match.index > end) parts.push({ text: value.slice(end, match.index) });
-    end = match.index + match[0].length;
-    const punctuation = value.slice(end).match(/^[\p{Pe}\p{Pf}.,!?;:…'"]+/u)?.[0] || '';
-    parts.push({ text: match[0], address, ...(punctuation ? { punctuation } : {}) });
-    end += punctuation.length;
+    parts.push({ text: match[0], ...(address ? { address } : {}), ...(punctuation ? { punctuation } : {}) });
+    end = labelEnd + punctuation.length;
   }
   if (end < value.length) parts.push({ text: value.slice(end) });
   return parts;
