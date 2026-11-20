@@ -39,8 +39,9 @@ export async function POST(request) {
   let ownerId;
   try {
     ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
-  } catch {
-    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    const privy = parsePrivySigningFailure(error?.privyFailure);
+    return Response.json({ error: 'login_required', ...(privy ? { privy } : {}) }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
   const ownerHeader = request.headers.get('x-owner-id');
   if (ownerHeader !== null && ownerHeader !== ownerId) {
@@ -116,6 +117,7 @@ export async function POST(request) {
       ? error.code
       : 'wallet_move_failed';
     console.error('wallet_move_failed', { code, privy: parsePrivySigningFailure(error?.privyFailure) });
-    return Response.json({ error: code }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
+    const privy = parsePrivySigningFailure(error?.privyFailure);
+    return Response.json({ error: code, ...(privy ? { privy } : {}) }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
   }
 }
