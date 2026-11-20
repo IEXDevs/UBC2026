@@ -7,7 +7,9 @@ export function appendQueued(queue, item) {
   const text = typeof item.text === 'string' ? item.text.trim() : '';
   if (!text) return rows;
   const mention = typeof item.mention === 'string' ? item.mention : '';
-  return [...rows, { id: item.id, text, mention }];
+  const row = { id: item.id, text, mention };
+  if (typeof item.mentionAddress === 'string' && item.mentionAddress) row.mentionAddress = item.mentionAddress;
+  return [...rows, row];
 }
 
 export function takeQueued(queue, id) {

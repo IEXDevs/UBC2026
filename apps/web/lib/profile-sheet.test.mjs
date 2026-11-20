@@ -38,7 +38,17 @@ test('profile shows the wallet name and address once', () => {
   assert.match(dialog, /value: 'USDC'/);
   assert.match(dialog, /value: 'SOL'/);
   assert.equal(dialog.includes('Asset (USDC, SOL, or token mint address)'), false);
-  for (const pane of ['assets', 'portfolio', 'send', 'receive', 'swap', 'tokens', 'history', 'keys']) {
+  for (const pane of ['assets', 'signin', 'portfolio', 'transfer', 'history', 'keys']) {
     assert.match(sheet, new RegExp(`id: '${pane}'`));
   }
+  for (const section of ['send', 'receive', 'swap', 'tokens']) {
+    assert.match(sheet, new RegExp(`id: '${section}'`));
+  }
+  const assets = sheet.slice(sheet.indexOf("pane === 'assets'"), sheet.indexOf("pane === 'signin'"));
+  const signin = sheet.slice(sheet.indexOf("pane === 'signin'"), sheet.indexOf("pane === 'portfolio'"));
+  assert.equal(assets.includes('LinkedLogins'), false);
+  assert.match(signin, /<LinkedLogins/);
+  assert.match(sheet, /function ReceivePane\(\{ active, handle \}\)/);
+  assert.equal(sheet.includes('SNS name'), false);
+  assert.match(sheet, /aria-label="Transfer"/);
 });

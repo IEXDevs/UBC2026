@@ -1580,6 +1580,7 @@ button.add-agent:not(:disabled):hover {
   flex-wrap: wrap;
   gap: 6px;
 }
+.wallet-body > .wallet-switch { margin: 0 0 16px; }
 .wallet-switch button {
   border: 0;
   border-radius: 8px;
@@ -2361,6 +2362,43 @@ button.wallet-export:not(:disabled):hover {
 }
 
 .party-link:hover { color: #fff; }
+
+[data-slot='bubble'].has-mention-address {
+  width: min(100%, 520px);
+}
+
+[data-slot='bubble-content'].has-mention-address {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
+.chat-address {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.chat-address small {
+  font-weight: 500;
+  font-size: 11px;
+  text-decoration: none;
+  color: #a3a3a3;
+}
 
 .slash-token { color: #f0c36a; }
 
