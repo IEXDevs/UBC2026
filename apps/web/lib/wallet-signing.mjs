@@ -68,7 +68,9 @@ export async function signSelectedWalletTransaction({ from, transaction, signer 
   }
   let signed;
   try {
-    signed = await signer.signTransaction({ transaction, wallet, chain: SOLANA_PRIVY_CHAIN });
+    signed = wallet.standardWallet && typeof wallet.signTransaction === 'function'
+      ? await wallet.signTransaction({ transaction, chain: SOLANA_PRIVY_CHAIN })
+      : await signer.signTransaction({ transaction, wallet, chain: SOLANA_PRIVY_CHAIN });
   } catch { fail('wallet_approval_cancelled'); }
   if (!(signed?.signedTransaction instanceof Uint8Array) || signed.signedTransaction.length <= 64) fail('invalid_signature');
   return signed.signedTransaction;
