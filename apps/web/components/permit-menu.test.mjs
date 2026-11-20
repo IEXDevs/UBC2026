@@ -9,9 +9,12 @@ function menuContaining(...nodes) {
 
 const css = readFileSync(new URL('./PromptBar.css', import.meta.url), 'utf8');
 const bar = readFileSync(new URL('./PromptBar.jsx', import.meta.url), 'utf8');
+const shellCss = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
 
 test('composer setting buttons share the model selector height and keep the permission trigger neutral', () => {
   assert.match(css, /\.prompt-bar__glide \.glide-select__trigger,\s*\.prompt-bar__pick\s*\{\s*height: var\(--pb-control-height\)/);
+  assert.match(shellCss, /\.composer \.prompt-bar\s*\{[^}]*--pb-control-height: 36px;/);
+  assert.doesNotMatch(shellCss, /\.composer \.prompt-bar__pick\b[^{]*\{[^}]*\bheight\s*:/);
   assert.match(bar, /surfaceColor="var\(--pb-control-bg\)"/);
   assert.match(bar, /className="prompt-bar__pick"\s+aria-label=\{`Permissions,/);
   assert.match(css, /\.permit-option\[aria-pressed='true'\][^}]*var\(--pb-control-highlight\)/);
