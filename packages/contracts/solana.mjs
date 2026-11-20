@@ -39,11 +39,11 @@ export const SOLANA_PRIVY_CHAIN = SOLANA_CONFIG.privyChain;
 export const EXECUTION_LABEL = `${SOLANA_CLUSTER} execution, mainnet pricing`;
 
 export function configuredSolanaRpc(env, cluster = SOLANA_CLUSTER) {
-  const explicit = typeof env?.SOLANA_RPC_URL === 'string' ? env.SOLANA_RPC_URL.trim() : '';
-  if (explicit) return explicit;
-  return cluster === 'mainnet-beta' && typeof env?.QUICKNODE_MAINNET_RPC_URL === 'string'
-    ? env.QUICKNODE_MAINNET_RPC_URL.trim()
-    : '';
+  if ((cluster === 'mainnet-beta' || cluster === 'mainnet') && typeof env?.QUICKNODE_MAINNET_RPC_URL === 'string') {
+    const quickNode = env.QUICKNODE_MAINNET_RPC_URL.trim();
+    if (quickNode) return quickNode;
+  }
+  return typeof env?.SOLANA_RPC_URL === 'string' ? env.SOLANA_RPC_URL.trim() : '';
 }
 
 export function explorerClusterQuery(cluster = SOLANA_CLUSTER) {
