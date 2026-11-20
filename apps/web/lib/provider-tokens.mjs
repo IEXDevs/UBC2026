@@ -66,6 +66,13 @@ export function readProviderViews(storage) {
   return readRaw(storage).map(publicProvider).filter(Boolean);
 }
 
+// Used only for explicit model checks/chat requests, never rendered or mirrored.
+export function readProviderCredentials(storage, id) {
+  const record = readRaw(storage).find(row => row?.id === id);
+  return record && typeof record.token === 'string'
+    ? { token: record.token, baseUrl: record.baseUrl || '' } : null;
+}
+
 export function saveProvider(storage, draft) {
   const parsed = parseProviderDraft(draft);
   if (!parsed.ok) return parsed;

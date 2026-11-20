@@ -20,6 +20,7 @@ import RecoveryCeremony from '../components/RecoveryCeremony';
 import SlideCommit from '../components/bits/SlideCommit';
 import PartySheet from '../components/PartySheet';
 import PluginsSheet from '../components/PluginsSheet';
+import AIProvidersSheet from '../components/AIProvidersSheet';
 import StatisticsSheet from '../components/StatisticsSheet';
 import AgentDetail from '../components/AgentDetail';
 import HoldButton from '../components/HoldButton';
@@ -425,6 +426,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [walletFocus, setWalletFocus] = useState('');
   const [retiredIds, setRetiredIds] = useState([]);
   const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [aiProvidersOpen, setAIProvidersOpen] = useState(false);
   const [talks, setTalks] = useState({});
   const talksRef = useRef(talks);
   talksRef.current = talks;
@@ -477,6 +479,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   }, []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
   const closePlugins = useCallback(() => setPluginsOpen(false), []);
+  const closeAIProviders = useCallback(() => setAIProvidersOpen(false), []);
   const closeStats = useCallback(() => setStatsOpen(false), []);
   const closeComputer = useCallback(() => setComputerOpen(false), []);
   const addVoice = useCallback((delta) => {
@@ -1075,6 +1078,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     }
   }, [getAccessToken, onRetireWallet, ownerId]);
   const openWallet = useCallback((walletId) => {
+    setAIProvidersOpen(false);
     setCreateOpen(false);
     setProfileOpen(false);
     setPluginsOpen(false);
@@ -1477,6 +1481,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     };
   }, [unlocked, ownerId, lockWallet]);
   function choosePane(next, direction) {
+    setAIProvidersOpen(false);
     if (next === pane) return;
     setPluginsOpen(false);
     setSlide(direction);
@@ -1485,6 +1490,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   }
 
   function openChat(id) {
+    setAIProvidersOpen(false);
     setCreateOpen(false);
     setWalletsOpen(false);
     setPluginsOpen(false);
@@ -1604,6 +1610,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   }
 
   function onAccount(id) {
+    setAIProvidersOpen(id === 'ai-providers');
     if (id === 'logout') {
       void logOut();
       return;
@@ -1644,11 +1651,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       setLockOpen(true);
       return;
     }
-    if (id === 'plugins') {
+    if (id === 'plugins' || id === 'ai-providers') {
       setProfileOpen(false);
       setWalletsOpen(false);
       setStatsOpen(false);
-      setPluginsOpen(true);
+      setPluginsOpen(id === 'plugins');
       return;
     }
     setProfileOpen(false);
@@ -2133,6 +2140,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         resolve={resolveMention}
       />
       <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={CONNECTORS} />
+      <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={closeAIProviders} />
       <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
       {viewFile ? <FileStage file={viewFile} ownerId={ownerId} getAccessToken={getAccessToken} onMissing={onMissingFile} onClose={() => setViewFile(null)} /> : null}
       <StatisticsSheet

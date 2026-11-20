@@ -154,6 +154,7 @@ export default function PromptBar({
   defaultEffort = '',
   onEffortChange,
   busy = false,
+  sendDisabled = false,
   onSend,
   onStop,
   draftSeed = null,
@@ -275,7 +276,8 @@ export default function PromptBar({
   }, [open, query, handles, sources, commands]);
   const menuOpen = open && (open !== 'handle' || list.length > 0);
   const cursor = Math.min(active, Math.max(0, list.length - 1));
-  const canSend = draft.trim().length > 0 || attachments.length > 0 || extraReady;
+  const blocked = typeof sendDisabled === 'function' ? sendDisabled(draft) : sendDisabled;
+  const canSend = !blocked && (draft.trim().length > 0 || attachments.length > 0 || extraReady);
   const armed = busy || canSend;
   const level = efforts[effortIndex] ?? '';
   const maxed = efforts.length > 1 && effortIndex === efforts.length - 1;
@@ -475,7 +477,8 @@ export default function PromptBar({
 
   const send = () => {
     if (!canSend) return;
-    latest.current.onSend?.(draft.trim(), { attachments, model, effort: level });
+    const accepted = latest.current.onSend?.(draft.trim(), { attachments, model, effort: level });
+    if (accepted === false) return;
     setDraft('');
     latest.current.onDraftChange?.('');
     setAttachments([]);
@@ -784,7 +787,7 @@ export default function PromptBar({
                 menuAction={onAddProvider ? { label: 'Add Provider', onSelect: onAddProvider } : null}
               />
             </span>
-          ) : null}
+          ) : onAddProvider ? <button type="button" className="prompt-bar__pick" onClick={onAddProvider}>No models shown</button> : null}
           {efforts.length > 0 ? (
             <button
               ref={effortAnchor}

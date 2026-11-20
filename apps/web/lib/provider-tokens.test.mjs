@@ -45,20 +45,23 @@ test('a saved provider keeps the token out of the catalog view', () => {
  * Side effects / state checked: component source text.
  * Gaps: source snapshot only — click/open not executed.
  */
-test('provider management lives in Plugins, not profile or wallet settings', () => {
+test('provider management has its own account entry, separate from connectors and wallets', () => {
   const prompt = readFileSync(join(web, 'components/PromptBar.jsx'), 'utf8');
   const profile = readFileSync(join(web, 'components/ProfileSheet.js'), 'utf8');
   const wallets = readFileSync(join(web, 'components/WalletsSheet.js'), 'utf8');
   const plugins = readFileSync(join(web, 'components/PluginsSheet.js'), 'utf8');
+  const account = readFileSync(join(web, 'components/AccountMenu.js'), 'utf8');
+  const sheet = readFileSync(join(web, 'components/AIProvidersSheet.js'), 'utf8');
   const providers = readFileSync(join(web, 'components/ModelProviders.js'), 'utf8');
   const dialog = readFileSync(join(web, 'components/ProviderAdd.js'), 'utf8');
   assert.match(prompt, /label: 'Add Provider'/);
   assert.doesNotMatch(profile, /ProviderAdd|provider-tokens/);
   assert.doesNotMatch(wallets, /ProviderAdd|provider-tokens/);
-  assert.match(plugins, />Model providers</);
-  assert.match(plugins, /<ModelProviders/);
+  assert.match(account, /id: 'ai-providers', label: 'AI Providers'/);
+  assert.doesNotMatch(plugins, /ModelProviders|models-tab/);
+  assert.match(sheet, /<ModelProviders/);
   assert.match(providers, /<ProviderAdd/);
-  assert.match(providers, /readProviderViews/);
+  assert.match(providers, /providerModelGroups/);
   assert.match(providers, /removeProvider/);
   assert.match(dialog, /saveProvider/);
   assert.match(dialog, /aria-labelledby="provider-add-title"/);
