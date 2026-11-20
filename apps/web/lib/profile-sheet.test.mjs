@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 /**
- * Achieves: verifies connect, import, and the wallet sections stay on the wallet sheet, not the profile sheet.
- * Fails when: ProfileSheet grows a wallets fold again, or WalletsSheet drops connect, import, or a section.
- * Oracle: ProfileSheet has no WalletAdd; WalletsSheet keeps Connect, Import seed, Import key, and every section id.
+ * Achieves: keeps wallet management together without restoring the section sidebar.
+ * Fails when: ProfileSheet grows wallet management, or the unified wallet drops an existing capability.
+ * Oracle: WalletsSheet retains assets, animated transfers, activity, portfolio, sign-in, tokens, and keys.
  * Side effects / state checked: source snapshot.
  * Gaps: does not render the dialog.
  */
@@ -25,16 +25,18 @@ test('profile shows the wallet name and address once', () => {
   assert.equal(logins.includes('Add a wallet'), false);
   assert.equal(logins.includes('linkWallet'), false);
   assert.equal(logins.includes('described.wallets'), false);
-  for (const pane of ['assets', 'signin', 'portfolio', 'transfer', 'history', 'keys']) {
-    assert.match(sheet, new RegExp(`id: '${pane}'`));
-  }
-  for (const section of ['send', 'receive', 'swap', 'tokens']) {
+  for (const section of ['send', 'receive', 'swap']) {
     assert.match(sheet, new RegExp(`id: '${section}'`));
   }
-  const assets = sheet.slice(sheet.indexOf("pane === 'assets'"), sheet.indexOf("pane === 'signin'"));
-  const signin = sheet.slice(sheet.indexOf("pane === 'signin'"), sheet.indexOf("pane === 'portfolio'"));
-  assert.equal(assets.includes('LinkedLogins'), false);
-  assert.match(signin, /<LinkedLogins/);
+  assert.doesNotMatch(sheet, /const PANES|wallet-nav|pane ===|role="tablist"/);
+  for (const component of ['TokenScreen', 'ConnectedPortfolio', 'SendPane', 'ReceivePane', 'SwapPane', 'TxnLog', 'TokenPane', 'LinkedLogins', 'PrivyKeyButton']) {
+    assert.match(sheet, new RegExp(`<${component}[\\s>]`));
+  }
+  assert.match(sheet, /className="wallet-overview"/);
+  assert.match(sheet, /<summary>Recent activity/);
+  assert.match(sheet, /<summary>Wallet settings/);
+  assert.match(sheet, /settingsRef\.current\.open = true/);
+  assert.match(sheet, /open=\{open && portfolioOpen\}/);
   assert.match(sheet, /function ReceivePane\(\{ active, handle \}\)/);
   assert.equal(sheet.includes('SNS name'), false);
   assert.match(sheet, /aria-label="Transfer"/);
@@ -44,6 +46,36 @@ test('profile shows the wallet name and address once', () => {
   assert.match(sheet, /ease: TRANSFER_EASE/);
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.wallet-switch button \{[^}]*transition:/);
+});
+
+test('unified wallet stays viewport-mounted and resets transfer drafts when the wallet changes', () => {
+  const sheet = readFileSync(new URL('../components/WalletsSheet.js', import.meta.url), 'utf8');
+  assert.match(sheet, /setRoot\(document\.body\)/);
+  assert.match(sheet, /if \(!mounted \|\| !root\) return null/);
+  assert.match(sheet, /return createPortal\(/);
+  assert.match(sheet, /key=\{`\$\{active\?\.id \|\| 'empty'\}:\$\{transfer\}`\}/);
+  assert.match(sheet, /key=\{active\.id\}\s+refreshKey=\{balanceRevision\}/);
+  assert.match(sheet, /key=\{balanceRevision\} open=\{open && portfolioOpen\}/);
+  assert.match(sheet, /const result = await onSend\?\.\(pending\);\s+if \(result\?\.ok\) setBalanceRevision\(value => value \+ 1\);\s+return result/);
+  assert.match(sheet, /onSend=\{send\}/);
+  assert.match(sheet, /reduceMotion \? 0 : transferDir/);
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.wallet-overview, \.wallet-settings-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /\.wallet-body \{[^}]*min-height: 0;[^}]*overflow-y: auto/s);
+  assert.equal((css.match(/\.sheet\.wallets-sheet \{/g) || []).length, 3);
+  assert.match(css, /\.backdrop\.is-center > \.sheet\.wallets-sheet \{ overflow: hidden/);
+  assert.match(css, /\.backdrop\.is-center\.wallet-backdrop \{ overflow: hidden/);
+  assert.match(css, /\.wallet-settings \.wallet-add-create \{ flex-wrap: wrap/);
+  assert.match(css, /\.wallets-sheet \.field \{ min-width: 0; grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(sheet, /body\.scrollTo\(/);
+  assert.doesNotMatch(sheet, /scrollIntoView/);
+  assert.match(css, /width: calc\(100vw - 32px\);\s+height: calc\(100dvh - 32px\)/);
+  assert.doesNotMatch(css, /\.wallet-nav/);
+  assert.match(sheet, /function openParty\(party\) \{\s+if \(!onParty\) return;\s+onClose\(\);\s+onParty\(party\)/);
+  assert.equal((sheet.match(/onParty=\{openParty\}/g) || []).length, 2);
+  const tokenScreen = readFileSync(new URL('../components/TokenScreen.js', import.meta.url), 'utf8');
+  assert.match(tokenScreen, /previewPortfolio = null, refreshKey = 0/);
+  assert.match(tokenScreen, /\[open, accounts, getAccessToken, user\?\.id, previewPortfolio, refreshKey\]/);
 });
 
 test('agent creation shows asset and limits on their own steps after color', () => {
