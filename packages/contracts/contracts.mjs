@@ -454,8 +454,38 @@ const PRIVY_SIGN_CODES = new Set([
   'insufficient_app_secret_permissions',
 ]);
 const PRIVY_SIGN_TRANSPORT = new Set(['network', 'timeout', 'redirect', 'invalid-response']);
+const PRIVY_SIGN_STAGES = new Set(['app-sign', 'wallet-lookup', 'session-exchange', 'owner-sign']);
+const PRIVY_REQUEST_CODES = new Set([
+  ...PRIVY_SIGN_CODES, 'invalid_data', 'invalid_auth_token', 'mfa_required', 'missing_mfa_enrollment',
+]);
+const PRIVY_SIGN_DETAILS = new Set([
+  'wallet-matched', 'wallet-mismatch', 'missing-signed-transaction',
+  'mfa-required', 'mfa-enrollment-required', 'token-expired', 'token-invalid',
+  'jwt-configuration', 'no-wallets', 'invalid-encryption', 'invalid-data',
+  'provider-detail', 'local-failure',
+]);
+const PRIVY_SESSION_CHECKS = new Set(['missing', 'unreadable', 'owner-mismatch', 'owner-matched']);
+const PRIVY_CLAIM_CHECKS = new Set(['missing', 'match', 'mismatch']);
+const PRIVY_EXPIRY_CHECKS = new Set(['missing', 'expired', 'current']);
 
-/** Public diagnostics contain only fixed codes and the provider's HTTP status. */
+function parsePrivySigningRequest(value) {
+  if (!PRIVY_SIGN_STAGES.has(value?.stage)) return null;
+  const { stage, status, code, transport, detail, requestId, edgeId, mfaProof } = value;
+  return {
+    stage,
+    ...(Number.isInteger(status) && status >= 200 && status <= 599 ? { status } : {}),
+    ...(PRIVY_REQUEST_CODES.has(code) ? { code } : {}),
+    ...(PRIVY_SIGN_TRANSPORT.has(transport) ? { transport } : {}),
+    ...(PRIVY_SIGN_DETAILS.has(detail) ? { detail } : {}),
+    ...(typeof requestId === 'string'
+      && /^(?:req[_-][a-z0-9_-]{6,64}|[a-f0-9]{16,64}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i.test(requestId)
+      ? { requestId } : {}),
+    ...(typeof edgeId === 'string' && /^[a-f0-9]{16,32}-[a-z]{3}$/i.test(edgeId) ? { edgeId } : {}),
+    ...(stage === 'session-exchange' && typeof mfaProof === 'boolean' ? { mfaProof } : {}),
+  };
+}
+
+/** Carry provider diagnostics without response bodies, URLs, or credentials. */
 export function parsePrivySigningFailure(value) {
   const status = Number.isInteger(value?.status) && value.status >= 400 && value.status <= 599
     ? value.status
@@ -467,12 +497,26 @@ export function parsePrivySigningFailure(value) {
     || Number.isInteger(lookup) && lookup >= 400 && lookup <= 599)
     ? lookup
     : null;
-  if (!status && !code && !transport) return null;
+  const requests = Array.isArray(value?.requests)
+    ? value.requests.slice(0, 4).map(parsePrivySigningRequest).filter(Boolean)
+    : [];
+  const { session, appSignature, at } = value ?? {};
+  const sessionCheck = PRIVY_SESSION_CHECKS.has(session?.check) ? {
+    check: session.check,
+    ...(PRIVY_CLAIM_CHECKS.has(session.audience) ? { audience: session.audience } : {}),
+    ...(PRIVY_CLAIM_CHECKS.has(session.issuer) ? { issuer: session.issuer } : {}),
+    ...(PRIVY_EXPIRY_CHECKS.has(session.expiry) ? { expiry: session.expiry } : {}),
+  } : null;
+  if (!status && !code && !transport && !requests.length) return null;
   return {
     ...(status ? { status } : {}),
     ...(code ? { code } : {}),
     ...(transport ? { transport } : {}),
     ...(walletLookupStatus ? { walletLookupStatus } : {}),
+    ...(requests.length ? { requests } : {}),
+    ...(sessionCheck ? { session: sessionCheck } : {}),
+    ...(typeof appSignature === 'boolean' ? { appSignature } : {}),
+    ...(Number.isSafeInteger(at) && at > 0 && at <= 8.64e15 ? { at } : {}),
   };
 }
 
