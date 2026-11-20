@@ -1,6 +1,6 @@
 'use client';
 
-import { formatBaseUnits } from '../lib/money-views.mjs';
+import { formatAmount } from '../lib/money-views.mjs';
 import AddressCopy from './AddressCopy';
 import { formatShare, formatUsdMicro } from '../lib/portfolio.mjs';
 import { portfolioEmptyMessage, unpricedHoldingLabels } from '../lib/portfolio-display.mjs';
@@ -124,7 +124,7 @@ export default function PortfolioGraph({
                 </div>
                 {wallet.holdings?.length ? (
                   <small>
-                    {wallet.holdings.filter(row => row.usdMicro !== '0').map(row => `${formatBaseUnits(row.amount, row.decimals)} ${row.symbol}`).join(' · ')
+                    {wallet.holdings.filter(row => row.usdMicro !== '0').map(row => `${formatAmount(row.amount, row.decimals)} ${row.symbol}`).join(' · ')
                       || 'No priced balance'}
                   </small>
                 ) : <small>{wallet.spendable ? 'Agent wallet' : 'Connected'}</small>}

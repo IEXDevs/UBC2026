@@ -351,7 +351,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
                 <li key={wallet.id || wallet.address}>
                   <Spotlight className="recovery-wallet">
                     <span>{wallet.label || 'Wallet'}</span>
-                    <AddressCopy address={wallet.address} compact dotted />
+                    <AddressCopy address={wallet.address} compact />
                   </Spotlight>
                 </li>
               ))}

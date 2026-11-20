@@ -35,7 +35,7 @@ test('profile shows the wallet name and address once', () => {
   assert.match(sheet, /Import key/);
   assert.match(sheet, /New Wallet/);
   assert.match(sheet, /<WalletRoster[\s\S]*handle=\{handle\}/);
-  assert.match(sheet, /<WalletPick rows=\{rows\} handle=\{handle\}/);
+  assert.match(sheet, /<WalletPick rows=\{rows\} wallets=\{wallets\} handle=\{handle\}/);
   assert.match(sheet, /className="wallet-roster-handle">@\{name\}/);
   const logins = readFileSync(new URL('../components/LinkedLogins.js', import.meta.url), 'utf8');
   assert.equal(logins.includes('Add a wallet'), false);

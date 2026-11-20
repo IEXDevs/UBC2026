@@ -180,7 +180,7 @@ function Wallets({ state }) {
           {rows.map(row => (
             <li key={row.id} className="token-settings">
               <strong>{row.label}</strong>
-              <AddressCopy address={row.address} dotted />
+              <AddressCopy address={row.address} />
               <small>{row.frozen ? 'Frozen' : row.kind}{row.bots.length ? ` · ${row.bots.join(', ')}` : ' · No agents assigned'}</small>
             </li>
           ))}

@@ -24,7 +24,8 @@ import { partyFromToken } from '../lib/party-book.mjs';
 import { embeddedCreateOptions, embeddedSolanaCount } from '../lib/wallet-provision.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
 import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
-import { describeWallets, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
+import { walletPickLabel, walletPickTag } from '../lib/wallet-pick.mjs';
+import { describeWallets, formatAmount, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
   displayToUnits,
@@ -229,7 +230,7 @@ export default function WalletsSheet({
         <div className="wallet-body" ref={bodyRef}>
           <div className="wallet-overview">
             <section className="wallet-card wallet-assets" aria-label="Wallet assets">
-              <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} />
+              <WalletPick rows={rows} wallets={wallets} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} />
               {active?.address ? (
                 <div className="wallet-identity">
                   <AddressCopy address={active.address} compact />
@@ -754,7 +755,7 @@ function WalletRoster({ rows, handle = '', activeId, onSelect, onRetire, retirin
   );
 }
 
-function WalletPick({ rows, handle = '', activeId, onSelect }) {
+function WalletPick({ rows, wallets = [], handle = '', activeId, onSelect }) {
   const name = typeof handle === 'string' ? handle.trim().replace(/^@/, '') : '';
   if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one in settings, or generate a new one.</p>;
   return (
@@ -772,8 +773,8 @@ function WalletPick({ rows, handle = '', activeId, onSelect }) {
         value={activeId}
         options={rows.map(row => ({
           value: row.id,
-          label: `${row.label}${name ? ` · @${name}` : ''} · ${shortAddress(row.address)}`,
-          tag: row.kind === 'main' ? 'Main' : 'Added',
+          label: walletPickLabel(row, name),
+          tag: walletPickTag(row, wallets.find(wallet => wallet.id === row.id)),
         }))}
         onChange={onSelect}
       />
@@ -955,11 +956,11 @@ function SendPane({
         <GlideSelect
           ariaLabel="Asset"
           value={asset?.id || ''}
-          options={tokens.map(token => ({ value: token.id, label: `${token.symbol} · ${formatBaseUnits(token.amount, token.decimals)}`, tag: token.id === 'SOL' ? 'Native' : shortAddress(token.mint) }))}
+          options={tokens.map(token => ({ value: token.id, label: `${token.symbol} · ${formatAmount(token.amount, token.decimals)}`, tag: token.id === 'SOL' ? 'Native' : shortAddress(token.mint) }))}
           onChange={id => { setAssetId(id); setAmount(''); setStatus(''); setFolded(false); }}
         />
       </label>
-      {!asset ? <p className="quiet" role="status">No sendable balance loaded for this wallet.</p> : <p className="quiet">Available: {formatBaseUnits(asset.amount, asset.decimals)} {asset.symbol}. Sends this asset directly, plus SOL network fees.</p>}
+      {!asset ? <p className="quiet" role="status">No sendable balance loaded for this wallet.</p> : <p className="quiet">Available: {formatAmount(asset.amount, asset.decimals)} {asset.symbol}. Sends this asset directly, plus SOL network fees.</p>}
       {asset && units && !enough ? <p className="quiet" role="status">Amount exceeds this wallet’s balance.</p> : null}
       <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
       <SlideCommit

@@ -31,6 +31,14 @@ export function formatBaseUnits(value, decimals = USDC_DECIMALS) {
   return negative ? `-${shown}` : shown;
 }
 
+/** Display-only base-unit amount with thousands separators; never feed it back into an input. */
+export function formatAmount(value, decimals = USDC_DECIMALS) {
+  const text = formatBaseUnits(value, decimals);
+  const [whole, fraction] = text.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return fraction ? `${grouped}.${fraction}` : grouped;
+}
+
 function botName(bots, botId) {
   return bots.find(bot => bot.id === botId)?.name ?? botId;
 }

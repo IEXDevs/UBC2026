@@ -1052,12 +1052,12 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           >
             <p>{detail.kicker}</p>
             <h2><AddressText text={detail.title} addresses={detail.copyAddresses} /></h2>
-            {detail.address ? <AddressCopy address={detail.address} dotted /> : null}
+            {detail.address ? <AddressCopy address={detail.address} /> : null}
             <dl>
               {detail.rows.map(([label, value]) => (
                 <div key={label}>
                   <dt>{label}</dt>
-                  <dd>{label === 'Address' || label === 'Mint' ? <AddressCopy address={value} dotted /> : <AddressText text={value} addresses={detail.copyAddresses} />}</dd>
+                  <dd>{label === 'Address' || label === 'Mint' ? <AddressCopy address={value} /> : <AddressText text={value} addresses={detail.copyAddresses} />}</dd>
                 </div>
               ))}
             </dl>

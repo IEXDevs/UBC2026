@@ -4,12 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { copyText } from '../lib/copy-text.mjs';
 import { shortAddress } from '../lib/money-views.mjs';
 
-export default function AddressCopy({ address, prefix = '', className = '', compact = false, dotted = false, inline = false }) {
+export default function AddressCopy({ address, prefix = '', className = '', compact = false, inline = false }) {
   const [note, setNote] = useState('');
   const [copied, setCopied] = useState(0);
   const timer = useRef(null);
   const request = useRef(0);
-  const discoverable = dotted || inline;
   const clipped = shortAddress(address);
   const shown = prefix ? `${prefix} (${clipped})` : clipped;
 
@@ -22,7 +21,7 @@ export default function AddressCopy({ address, prefix = '', className = '', comp
   }, [address]);
 
   async function copy(event) {
-    if (discoverable) event.stopPropagation();
+    event.stopPropagation();
     if (!address) return;
     const current = ++request.current;
     window.clearTimeout(timer.current);
@@ -42,14 +41,11 @@ export default function AddressCopy({ address, prefix = '', className = '', comp
   if (!address) return <span className={`address-copy is-empty ${className}`.trim()}>No address</span>;
 
   return (
-    <button type="button" className={`address-copy${compact ? ' is-compact' : ''}${discoverable ? ' is-dotted' : ''}${inline ? ' is-inline' : ''} ${className}`.trim()} onClick={copy} aria-label={`Copy ${address}`} title={discoverable ? 'Copy address' : undefined}>
+    <button type="button" className={`address-copy is-dotted${compact ? ' is-compact' : ''}${inline ? ' is-inline' : ''} ${className}`.trim()} onClick={copy} aria-label={`Copy ${address}`} title="Copy address">
       <span className="address-copy-label">{shown}</span>
-      {discoverable ? <>
-        {compact || inline ? null : <small>Copy</small>}
-        <span className="address-copy-status" role="status" aria-live="polite" aria-atomic="true">
-          {note ? <small key={copied} className="address-copy-feedback">{note}</small> : null}
-        </span>
-      </> : compact ? (note ? <small>{note}</small> : null) : <small>{note || 'Copy'}</small>}
+      <span className="address-copy-status" role="status" aria-live="polite" aria-atomic="true">
+        {note ? <small key={copied} className="address-copy-feedback">{note}</small> : null}
+      </span>
     </button>
   );
 }

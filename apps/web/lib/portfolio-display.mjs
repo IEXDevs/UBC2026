@@ -1,9 +1,9 @@
-import { formatBaseUnits } from './money-views.mjs';
+import { formatAmount } from './money-views.mjs';
 
 export function unpricedHoldingLabels(holdings = []) {
   return holdings.filter(row => row.usdMicro === '0').map(row => {
     const symbol = row.symbol?.trim() || `${row.mint.slice(0, 5)}...${row.mint.slice(-5)}`;
-    return `${formatBaseUnits(row.amount, row.decimals)} ${symbol} · Not priced`;
+    return `${formatAmount(row.amount, row.decimals)} ${symbol} · Not priced`;
   });
 }
 

@@ -1184,7 +1184,7 @@ export default function Composer({
       <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mentionCopy ? (
-        <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} dotted /></p>
+        <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} /></p>
       ) : mention ? <p className="mention-hint" role="status">{mention}</p> : null}
       {pendingSwap?.botId === botId ? (
         <div className="entry-suggestions">

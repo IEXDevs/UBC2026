@@ -9,7 +9,7 @@ import TokenChart from './TokenChart';
 import AddressCopy from './AddressCopy';
 import { walletAssetName, walletAssetValue } from '../lib/wallet-send-assets.mjs';
 import { dexTokenView, enrichPortfolio, readDexCandles, readDexTokens } from '../lib/dex-token.mjs';
-import { formatBaseUnits } from '../lib/money-views.mjs';
+import { formatAmount } from '../lib/money-views.mjs';
 import { formatUsdMicro, portfolioErrorNote } from '../lib/portfolio.mjs';
 import {
   CHART_RANGES,
@@ -153,7 +153,7 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
             <button type="button" className="token-row" onClick={() => setSelected(holdingKey(row))}>
               <span>
                 <strong>{walletAssetName(row)}</strong>
-                <small>{formatBaseUnits(row.amount, row.decimals)} {walletAssetName(row)}</small>
+                <small>{formatAmount(row.amount, row.decimals)} {walletAssetName(row)}</small>
               </span>
               <b>{walletAssetValue(row)}</b>
             </button>
@@ -280,7 +280,7 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
       </div>
       <div className="token-position">
         <p><span>Value</span><strong>{holding ? walletAssetValue(holding) : '—'}</strong></p>
-        <p><span>Amount</span><strong>{holding ? `${formatBaseUnits(holding.amount, holding.decimals)} ${symbol}` : '—'}</strong></p>
+        <p><span>Amount</span><strong>{holding ? `${formatAmount(holding.amount, holding.decimals)} ${symbol}` : '—'}</strong></p>
       </div>
       <dl className="token-info">
         <div><dt>Name</dt><dd>{view?.name || symbol}</dd></div>
