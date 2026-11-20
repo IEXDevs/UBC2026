@@ -515,6 +515,80 @@ test('verifier API failures fail closed instead of failing the chat', async () =
   assert.equal(result.text, 'That step did not pass the check.');
 });
 
+test('read-only fleet and wallet replies do not pass through the spend-step verifier', async () => {
+  for (const wallets of [{ holdings: [{ asset: 'USDC', amount: '5000000' }] }, { holdings: [] }, { error: 'balances_unavailable' }]) {
+    const seen = [];
+    let modelCalls = 0;
+    let verifierCalls = 0;
+    const reply = await completeTextChat({
+      modelApiKey: META_KEY, message: 'ill send you more USDC',
+      tools: ['list_bots', 'get_wallets'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+      fetcher: async (_url, options) => {
+        if (isTurnVerify(options)) {
+          verifierCalls++;
+          return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+        }
+        if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: ['list_bots', 'get_wallets'].map(name => ({
+          id: name, type: 'function', function: { name, arguments: '{}' },
+        })) } }] });
+        return Response.json({ choices: [{ message: { content: 'I checked your wallet. Send more USDC when you are ready.' } }] });
+      },
+      invokeTool: async name => { seen.push(name); return name === 'get_wallets' ? wallets : { bots: [] }; },
+    });
+    assert.deepEqual(seen, ['list_bots', 'get_wallets']);
+    assert.equal(reply.text, 'I checked your wallet. Send more USDC when you are ready.');
+    assert.equal(verifierCalls, 0);
+    assert.equal(modelCalls, 2);
+  }
+});
+
+test('reading wallets first does not bypass the verifier or confirmation for a subsequent spend', async () => {
+  const seen = [];
+  let verifierCalls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: 'check my wallet then send 1 USDC', permissionMode: 'full', reviewCap: '10000000',
+    tools: ['get_wallets', 'request_spend'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        verifierCalls++;
+        assert.match(JSON.parse(options.body).messages[0].content, /Kind: tool/);
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [
+        { id: 'wallet', type: 'function', function: { name: 'get_wallets', arguments: '{}' } },
+        { id: 'spend', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify({ action: 'spend', asset: 'USDC', amount: '1000000', destination: '11111111111111111111111111111111' }) } },
+      ] } }] });
+    },
+    invokeTool: async name => { seen.push(name); return { holdings: [] }; },
+  });
+  assert.deepEqual(seen, ['get_wallets']);
+  assert.equal(verifierCalls, 1);
+  assert.equal(reply.hold.name, 'request_spend');
+  assert.equal(reply.hold.kind, 'modal');
+});
+
+test('a mutating tool after a read-only lookup keeps final reply verification', async () => {
+  let modelCalls = 0;
+  let verifierCalls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: 'list then pause my bot',
+    tools: ['list_bots', 'pause_bot'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        verifierCalls++;
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: ['list_bots', 'pause_bot'].map(name => ({
+        id: name, type: 'function', function: { name, arguments: '{"botId":"bot_1"}' },
+      })) } }] });
+      return Response.json({ choices: [{ message: { content: 'The bot is paused.' } }] });
+    },
+    invokeTool: async () => ({ ok: true }),
+  });
+  assert.equal(verifierCalls, 1);
+  assert.equal(reply.text, 'That step did not pass the check.');
+});
+
 test('an approved spend is not cancelled when the turn verifier refuses it', async () => {
   const seen = [];
   const verifierChecks = [];

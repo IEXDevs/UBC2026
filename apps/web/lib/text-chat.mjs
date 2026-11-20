@@ -246,6 +246,12 @@ const BROWSER_TOOLS = new Set([
   'web_scrape',
 ]);
 
+const READ_ONLY_TOOLS = new Set([
+  'list_bots', 'get_bot_status', 'get_wallets', 'get_overview', 'get_activity',
+  'what_happened_while_away', 'why_decision', 'get_payment_feed', 'list_browser_sessions',
+  'get_price', 'lookup_recipient',
+]);
+
 function cardCheckout(message, history) {
   const bits = [typeof message === 'string' ? message : ''];
   const prior = Array.isArray(history) ? history.slice(-8) : [];
@@ -466,6 +472,8 @@ export async function completeTextChat({
   const spoken = [];
   let forceAnswer = false;
   let nudged = false;
+  let readOnlyTurn = true;
+  let readOnlyToolRan = false;
   const effort = reasoningEffortFor(modelId, reasoningEffort, { allowUnknown: true });
 
   function publish(text) {
@@ -523,6 +531,7 @@ export async function completeTextChat({
     let repeated = false;
     for (const call of calls.slice(0, 4)) {
       const name = typeof call?.function?.name === 'string' ? call.function.name : '';
+      if (!READ_ONLY_TOOLS.has(name)) readOnlyTurn = false;
       const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
       const rawArgs = parseToolArgs(call?.function?.arguments);
       const args = name === 'prepare_shopping' && cardCheckout(latest, history) ? lasoPreparationArgs(rawArgs, latest) : rawArgs;
@@ -563,6 +572,7 @@ export async function completeTextChat({
         return toolAccessRequest('ask', name, args, reviewCap);
       } else {
         seenTools.add(signature);
+        if (READ_ONLY_TOOLS.has(name)) readOnlyToolRan = true;
         try {
           result = await invokeTool(name, args);
         } catch (error) {
@@ -647,7 +657,7 @@ export async function completeTextChat({
         }
         text = 'I stopped so this request would not keep spinning. I do not have a finished answer from the last step.';
       }
-      if (!(await allowStep('reply', text))) text = BLOCKED_TURN;
+      if (!(readOnlyTurn && readOnlyToolRan) && !(await allowStep('reply', text))) text = BLOCKED_TURN;
       publish(text);
       return finish(text);
     }
