@@ -9,6 +9,7 @@ import {
   openDeskGrant,
   readDeskLockState,
   registerDeskVerifier,
+  saveDeskVerifier,
   submitChatSpend,
 } from './desk-grant-client.mjs';
 
@@ -63,6 +64,21 @@ test('a grant returned after dismissal is not stored', async () => {
   });
   assert.deepEqual(result, { ok: false, error: 'unlock_cancelled' });
   assert.equal(writes, 0);
+});
+
+test('a completed password reset synchronizes the verifier even after the dialog is dismissed', async () => {
+  const ownerId = 'did:privy:u1';
+  const verifier = await createDeskLock('new-test-password');
+  const map = new Map();
+  const localStorage = { setItem: (key, value) => map.set(key, value), getItem: key => map.get(key) ?? null };
+  let complete;
+  const pending = saveDeskVerifier(() => new Promise(resolve => { complete = resolve; }), {
+    ownerId, localStorage, verifier, replace: true, proof: 'b'.repeat(64),
+  });
+  assert.equal(readDeskLock(localStorage, ownerId), null);
+  complete(Response.json({ ok: true }));
+  assert.deepEqual(await pending, { ok: true });
+  assert.equal(await unlockDesk('new-test-password', readDeskLock(localStorage, ownerId)), true);
 });
 
 /**

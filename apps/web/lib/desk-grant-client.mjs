@@ -5,6 +5,7 @@
 import {
   unlockDesk,
   writeDeskGrant,
+  writeDeskLock,
 } from './desk-lock.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
 
@@ -50,6 +51,12 @@ export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier
   if (response.status === 409) return { ok: true, exists: true };
   if (!response.ok) return { ok: false, error: 'desk_lock_failed' };
   return { ok: true };
+}
+
+export async function saveDeskVerifier(fetchImpl, { localStorage, ...input }) {
+  const registered = await registerDeskVerifier(fetchImpl, input);
+  if (!registered.ok || registered.exists) return registered;
+  return { ok: writeDeskLock(localStorage, input.ownerId, input.verifier) };
 }
 
 export async function openDeskGrant(fetchImpl, { ownerId, token, password } = {}) {

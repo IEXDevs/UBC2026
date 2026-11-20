@@ -10,9 +10,8 @@ import {
   passwordProblem,
   readDeskLock,
   writeDeskGrant,
-  writeDeskLock,
 } from '../lib/desk-lock.mjs';
-import { acceptEnteredPassword, openDeskGrant, readDeskLockState, registerDeskVerifier } from '../lib/desk-grant-client.mjs';
+import { acceptEnteredPassword, openDeskGrant, readDeskLockState, saveDeskVerifier } from '../lib/desk-grant-client.mjs';
 import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
 import { PhraseEntry } from './RecoveryCeremony';
@@ -159,7 +158,8 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           setPending(false);
           return;
         }
-        const registered = await registerDeskVerifier(fetch, {
+        const registered = await saveDeskVerifier(fetch, {
+          localStorage: window.localStorage,
           ownerId,
           token,
           verifier: created,
@@ -173,7 +173,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           setPending(false);
           return;
         }
-        if (!registered.ok || !writeDeskLock(window.localStorage, ownerId, created)) {
+        if (!registered.ok) {
           setNote('The password could not be saved for spends.');
           setPending(false);
           return;
