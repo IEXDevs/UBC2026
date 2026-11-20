@@ -1323,6 +1323,8 @@ button.add-agent:not(:disabled):hover {
 .wallet-action-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .wallet-action-switch button { min-width: 0; padding-inline: 10px; }
 .wallet-action-title { margin: 20px 0 14px; font-size: 20px; letter-spacing: -0.03em; }
+.wallets-sheet .field { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.wallets-sheet .field > * { min-width: 0; }
 .wallet-fold { margin-top: 16px; border: 1px solid #2b2b2b; border-radius: 16px; background: #161616; }
 .wallet-fold > summary {
   display: flex;
