@@ -42,6 +42,15 @@
   transform-origin: bottom left;
 }
 
+/* In flow under the starter prompts. An absolute menu is clipped by the stage
+   and, on an empty thread, paints on top of those prompts. */
+.prompt-bar__menu[data-kind='handle'] {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  margin: 0 0 8px;
+}
+
 @keyframes prompt-bar-pop {
   0% {
     opacity: 0;

@@ -21,6 +21,7 @@ import GlideSelect from './GlideSelect';
 import { PERMISSIONS, dollarsToBaseUnits, permissionById } from '../lib/spend-permission.mjs';
 import { shouldClosePermitMenu } from './permit-menu.mjs';
 import { exclusiveBarMenu } from '../lib/bar-menu.mjs';
+import { filterMentionSuggestions } from '../lib/mention-handles.mjs';
 
 const ARROW_UP = [12, 4.5, 18.5, 11, 14.25, 11, 14.25, 19.5, 9.75, 19.5, 9.75, 11, 5.5, 11];
 const SQUARE = [12, 6, 18, 6, 18, 12, 18, 18, 6, 18, 6, 12, 6, 6];
@@ -145,6 +146,7 @@ function SendGlyph({ busy, morphDuration, squash, tilt }) {
 export default function PromptBar({
   placeholder = 'Ask anything',
   sources = DEFAULT_SOURCES,
+  handles = [],
   commands = DEFAULT_COMMANDS,
   models = DEFAULT_MODELS,
   defaultModel = '',
@@ -262,13 +264,16 @@ export default function PromptBar({
   const token = dismissed || bar === 'plus' || bar === 'effort' || bar === 'permit' || bar === 'model' || bar === 'context'
     ? null
     : parseToken(draft);
-  const open = plusOpen ? 'at' : effortOpen ? 'effort' : (token?.kind ?? null);
+  const handleMenu = token?.kind === 'at';
+  const open = plusOpen ? 'at' : effortOpen ? 'effort' : handleMenu ? 'handle' : (token?.kind ?? null);
   const query = plusOpen ? '' : (token?.query ?? '');
   const list = useMemo(() => {
+    if (open === 'handle') return filterMentionSuggestions(handles, query);
     if (open === 'at') return sources.filter((s) => s.name.toLowerCase().includes(query));
     if (open === 'slash') return commands.filter((c) => c.name.replace(/^\//, '').toLowerCase().startsWith(query));
     return [];
-  }, [open, query, sources, commands]);
+  }, [open, query, handles, sources, commands]);
+  const menuOpen = open && (open !== 'handle' || list.length > 0);
   const cursor = Math.min(active, Math.max(0, list.length - 1));
   const canSend = draft.trim().length > 0 || attachments.length > 0 || extraReady;
   const armed = busy || canSend;
@@ -436,7 +441,7 @@ export default function PromptBar({
         if (!files) return;
         setAttachments((a) => [...a, ...(Array.isArray(files) ? files : [files])]);
       });
-    } else if (open === 'at') {
+    } else if (open === 'at' || open === 'handle') {
       const next = `${head}@${row.name} `;
       setDraft(next);
       latest.current.onDraftChange?.(next);
@@ -573,11 +578,11 @@ export default function PromptBar({
         '--pb-press': pressScale,
       }}
     >
-      {open ? (
+      {menuOpen ? (
         <div
           className="prompt-bar__menu"
           role={open === 'effort' ? 'dialog' : 'listbox'}
-          aria-label={open === 'at' ? 'Sources' : open === 'slash' ? 'Commands' : open === 'model' ? 'Models' : 'Effort'}
+          aria-label={open === 'handle' ? 'Handles' : open === 'at' ? 'Sources' : open === 'slash' ? 'Commands' : open === 'model' ? 'Models' : 'Effort'}
           data-kind={open}
           style={open === 'effort' ? { left: effortLeft } : undefined}
         >
@@ -664,7 +669,7 @@ export default function PromptBar({
                   onClick={() => pick(row)}
                 >
                   {open === 'at' ? <span className="prompt-bar__row-icon">{renderIcon(row.icon, 16)}</span> : null}
-                  <span className="prompt-bar__row-name">{row.name}</span>
+                  <span className="prompt-bar__row-name">{open === 'handle' ? `@${row.name}` : row.name}</span>
                   {row.description ? <span className="prompt-bar__row-desc">{row.description}</span> : null}
                 </button>
               ))}
