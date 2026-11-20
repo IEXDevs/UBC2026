@@ -23,6 +23,9 @@ function cleanLine(line) {
   const text = typeof line.text === 'string' ? line.text.slice(0, 8000) : '';
   if (!id || !role || !text.trim()) return null;
   const next = { id, role, text };
+  if (typeof line.mentionAddress === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(line.mentionAddress)) {
+    next.mentionAddress = line.mentionAddress;
+  }
   if (line.compacted === true) next.compacted = true;
   const activity = sanitizeActivity(line.activity);
   if (activity.length > 0) next.activity = activity;

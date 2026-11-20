@@ -39,3 +39,14 @@ test('reviseThread rejects blank text and non-user lines', () => {
   assert.equal(reviseThread(thread, 'missing', 'hello'), null);
   assert.equal(reviseThread(null, 'u1', 'hello'), null);
 });
+
+test('editing text drops a resolved mention address without mutating the original', () => {
+  const line = { id: 'u1', role: 'user', text: 'Hello @ada', mentionAddress: 'So11111111111111111111111111111111111111112' };
+  for (const text of ['Hello @bob', 'Hello', 'Hello @ada!']) {
+    const revised = reviseThread([line], 'u1', text);
+    assert.equal(Object.hasOwn(revised.lines[0], 'mentionAddress'), false);
+    assert.equal(line.mentionAddress, 'So11111111111111111111111111111111111111112');
+  }
+  assert.equal(reviseThread([line], 'u1', '  Hello @ada  ').lines[0].mentionAddress, line.mentionAddress);
+  assert.equal(reviseThread([line], 'u1', ''), null);
+});
