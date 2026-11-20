@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEV_PREVIEW_OWNER, previewBot, previewPortfolioFor, previewWallets } from './dev-preview.mjs';
+import { applySecurityActionLocal, buildSecurityPage } from './security.mjs';
 
 /**
  * Achieves: verifies the preview wallet is owner-scoped, read-only, and non-spendable.
@@ -24,4 +25,16 @@ test('the preview wallet is visible and cannot spend', () => {
   const book = previewPortfolioFor(wallets);
   assert.equal(book.wallets[0].address, wallets[0].address);
   assert.equal(book.authorizesTransaction, false);
+});
+
+test('developer preview preserves security controls on its fallback agent', () => {
+  const frozen = applySecurityActionLocal([previewBot()], 'freeze-all-bots');
+  const page = buildSecurityPage({ bots: [previewBot(frozen)] });
+  assert.equal(page.summary.frozen, 1);
+  assert.equal(page.summary.paused, 1);
+  const unfrozen = applySecurityActionLocal(frozen, 'unfreeze-all-bots');
+  assert.equal(previewBot(unfrozen).frozen, false);
+  assert.equal(previewBot(unfrozen).status, 'paused');
+  assert.equal(previewBot().frozen, undefined);
+  assert.equal(previewBot([{ id: 'unrelated', frozen: true }]).frozen, undefined);
 });
