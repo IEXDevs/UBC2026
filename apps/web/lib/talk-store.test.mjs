@@ -104,3 +104,22 @@ test('corrupt storage and overlong owner ids fail closed', () => {
   assert.equal(talkStorageKey(long), '');
   assert.equal(writeTalks(storage, long, { bot_1: [{ id: '1', role: 'user', text: 'x' }] }), false);
 });
+
+test('resolved mention addresses survive saving and reloading a chat', () => {
+  const storage = memory();
+  const talks = { bot_1: [{ id: '1', role: 'user', text: 'Hello @ada', mentionAddress: 'So11111111111111111111111111111111111111112' }] };
+  assert.equal(writeTalks(storage, 'owner', talks), true);
+  assert.deepEqual(readTalks(storage, 'owner'), talks);
+});
+
+test('invalid and empty mention addresses are discarded on save and load', () => {
+  for (const mentionAddress of [undefined, null, '', 123, {}, 'bad address', '0'.repeat(32), '1'.repeat(31), '1'.repeat(45), ' So11111111111111111111111111111111111111112']) {
+    const storage = memory();
+    const talks = { bot_1: [{ id: '1', role: 'user', text: 'Hello', mentionAddress }] };
+    const expected = { bot_1: [{ id: '1', role: 'user', text: 'Hello' }] };
+    assert.equal(writeTalks(storage, 'owner', talks), true);
+    assert.deepEqual(JSON.parse(storage.getItem(talkStorageKey('owner'))), expected);
+    storage.setItem(talkStorageKey('owner'), JSON.stringify(talks));
+    assert.deepEqual(readTalks(storage, 'owner'), expected);
+  }
+});

@@ -14,6 +14,7 @@ export function reviseThread(lines, lineId, text) {
     text: spoken,
     editToken: `${lineId}:${Date.now()}`,
   };
+  if (spoken !== rows[index].text) delete edited.mentionAddress;
   return {
     prior: rows.slice(0, index),
     lines: [...rows.slice(0, index), edited],

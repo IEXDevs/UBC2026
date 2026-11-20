@@ -1,8 +1,7 @@
-import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { configuredSolanaRpc, SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Confirmed Solana mainnet-beta SOL + USDC for one address.
- * QuickNode mainnet-beta is used when that URL is https. Otherwise the public
- * mainnet-beta RPC. Mainnet URLs are ignored. The result never includes an RPC URL.
+ * Use the configured HTTPS endpoint or the public RPC for the selected network.
  */
 import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 import { accessTokenFromRequest } from './privy-cookie-session.mjs';
@@ -11,7 +10,7 @@ import { PUBLIC_SOLANA_RPC_URL, readClusterWalletBalances } from '@ubc2026/walle
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export function solanaBalanceRpcUrl(env = {}) {
-  const raw = typeof env.SOLANA_RPC_URL === 'string' ? env.SOLANA_RPC_URL.trim() : '';
+  const raw = configuredSolanaRpc(env);
   if (raw) {
     try {
       const url = new URL(raw);
@@ -70,15 +69,15 @@ export async function readAssignedSolanaBalance({ address, env = {}, fetcher = f
 
 function solanaEnv(options) {
   const fromCaller = options.env && typeof options.env === 'object' ? options.env : null;
-  const raw = fromCaller
-    ? fromCaller.SOLANA_RPC_URL
-    : (typeof options.readEnv === 'function' ? options.readEnv('SOLANA_RPC_URL') : '');
+  if (fromCaller) return fromCaller;
+  const readEnv = typeof options.readEnv === 'function' ? options.readEnv : () => '';
   return {
-    SOLANA_RPC_URL: typeof raw === 'string' ? raw : '',
+    SOLANA_RPC_URL: readEnv('SOLANA_RPC_URL'),
+    QUICKNODE_MAINNET_RPC_URL: readEnv('QUICKNODE_MAINNET_RPC_URL'),
   };
 }
 
-/** HTTP shape for GET /api/solana-balance. Does not read mainnet or the agent runtime. */
+/** HTTP shape for GET /api/solana-balance. Reads the selected network directly. */
 export async function handleSolanaBalanceRequest(request, options = {}) {
   const accessToken = accessTokenFromRequest(request);
   if (!accessToken) {

@@ -7,7 +7,7 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 test('the account value uses configured execution balances even when another read endpoint exists', () => {
   const env = { QUICKNODE_MAINNET_RPC_URL: 'https://portfolio.example', SOLANA_RPC_URL: 'https://execution.example' };
   assert.equal(choosePortfolioRpc(env, SOLANA_CLUSTER).rpcUrl, 'https://execution.example');
-  assert.equal(choosePortfolioRpc({ QUICKNODE_MAINNET_RPC_URL: env.QUICKNODE_MAINNET_RPC_URL }, SOLANA_CLUSTER).rpcUrl, '');
+  assert.equal(choosePortfolioRpc({ QUICKNODE_MAINNET_RPC_URL: env.QUICKNODE_MAINNET_RPC_URL }, SOLANA_CLUSTER).rpcUrl, env.QUICKNODE_MAINNET_RPC_URL);
   assert.equal(choosePortfolioRpc(env).rpcUrl, env.QUICKNODE_MAINNET_RPC_URL);
 });
 

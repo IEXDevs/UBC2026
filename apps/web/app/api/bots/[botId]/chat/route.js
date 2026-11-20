@@ -67,6 +67,7 @@ async function chatToolEnv() {
     // Supabase rows are missing — same secret the Worker uses. Prefer the
     // Cloudflare binding over root .env so hosted OpenNext sees the secret.
     SOLANA_RPC_URL: secretFrom(cfEnv, 'SOLANA_RPC_URL'),
+    QUICKNODE_MAINNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_MAINNET_RPC_URL'),
     QUICKNODE_TESTNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_TESTNET_RPC_URL'),
     JUPITER_API_KEY: secretFrom(cfEnv, 'JUPITER_API_KEY'),
     NEXT_PUBLIC_AGENT_RUNTIME_URL: secretFrom(cfEnv, 'NEXT_PUBLIC_AGENT_RUNTIME_URL'),

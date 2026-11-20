@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { resolveSolanaConfig, explorerClusterQuery, SOLANA_CONFIG } from './solana.mjs';
+import { configuredSolanaRpc, resolveSolanaConfig, explorerClusterQuery, SOLANA_CONFIG } from './solana.mjs';
+
+test('the existing QuickNode secret works for mainnet only, after the explicit RPC', () => {
+  const alias = { SOLANA_RPC_URL: ' ', QUICKNODE_MAINNET_RPC_URL: ' https://example.invalid/mainnet ' };
+  assert.equal(configuredSolanaRpc(alias, 'mainnet-beta'), 'https://example.invalid/mainnet');
+  assert.equal(configuredSolanaRpc(alias, 'devnet'), '');
+  assert.equal(configuredSolanaRpc({ ...alias, SOLANA_RPC_URL: 'https://example.invalid/explicit' }), 'https://example.invalid/explicit');
+});
 
 test('mainnet is the empty/default configuration with canonical chain identifiers', () => {
   assert.equal(SOLANA_CONFIG.cluster, 'mainnet-beta');

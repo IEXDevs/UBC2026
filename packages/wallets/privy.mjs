@@ -1,4 +1,4 @@
-import { SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
+import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 /**
  * Privy Solana wallet path for Maelstrom.
  * Login provisioning (main wallet at sign-up, additional wallets) and
@@ -1311,7 +1311,7 @@ export function createPrivyWalletClient({
 }
 
 export function createPrivyWalletClientFromEnv(env = process.env, options = {}) {
-  const values = requireConfig(env, SECRET_GROUPS.serverSigning);
+  const values = requireConfig({ ...env, SOLANA_RPC_URL: configuredSolanaRpc(env) }, SECRET_GROUPS.serverSigning);
   const authorizationKey = typeof env?.PRIVY_AUTHORIZATION_KEY === 'string' ? env.PRIVY_AUTHORIZATION_KEY.trim() : '';
   return createPrivyWalletClient({
     ...options,
