@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
 import { dexTokenView, enrichPortfolio, readDexTokens } from '../lib/dex-token.mjs';
@@ -96,9 +98,19 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
     : portfolio;
   const holdings = combineHoldings(scoped);
   const total = holdings.reduce((sum, row) => sum + BigInt(row.usdMicro || '0'), 0n).toString();
-  if (selected) {
-    const holding = holdings.find(row => row.mint === selected) || null;
-    return (
+  const holding = selected ? holdings.find(row => row.mint === selected) || null : null;
+  const ease = [0.22, 1, 0.36, 1];
+
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+    {selected ? (
+      <motion.div
+        key={selected}
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 10 }}
+        transition={{ duration: 0.45, ease }}
+      >
       <TokenDetail
         mint={selected}
         holding={holding}
@@ -109,11 +121,16 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
         onReceive={onReceive}
         onSwap={() => onSwap?.(holding?.symbol)}
       />
-    );
-  }
-
-  return (
-    <div className="token-screen">
+      </motion.div>
+    ) : (
+    <motion.div
+      key="token-list"
+      className="token-screen"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={{ duration: 0.4, ease }}
+    >
       {holdings.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
       {loading ? <p className="quiet">Reading devnet balances.</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
@@ -131,7 +148,9 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
         ))}
       </ul>
       {holdings.length === 0 && !loading && !error ? <p className="quiet">No assets in this wallet yet.</p> : null}
-    </div>
+    </motion.div>
+    )}
+    </AnimatePresence>
   );
 }
 
@@ -169,10 +188,12 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
   const down = change != null && change < 0;
   const liquidity = formatCompactUsd(view?.liquidityUsd);
   const marketCap = formatCompactUsd(view?.marketCap);
-
   return (
     <div className="token-detail">
-      <button type="button" className="token-back" onClick={onBack}>Back</button>
+      <button type="button" className="token-back" onClick={onBack}>
+        <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+        Back
+      </button>
       <div className="token-title">
         {view?.imageUrl ? <img className="token-mark" src={view.imageUrl} alt="" /> : null}
         <h3>{symbol}</h3>

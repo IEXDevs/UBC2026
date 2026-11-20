@@ -59,7 +59,7 @@ export default function LinkedLogins() {
 
   return (
     <div className="linked-logins">
-      <p className="plugin-kicker">Sign-in</p>
+      <h2 className="linked-logins-title">Sign-in</h2>
       <p className="quiet">
         Email, Google, GitHub, Discord, and every wallet you add all sign into this same account.
         Add as many Solana wallets as you need.

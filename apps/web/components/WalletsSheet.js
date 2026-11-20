@@ -509,8 +509,7 @@ export function WalletAdd() {
           Import key
         </button>
       </div>
-      {hint ? <p className="quiet wallet-add-hint">{hint}</p> : null}
-      <p className="quiet">The phrase and the private key are not stored here.</p>
+      <p className="quiet wallet-add-hint" aria-live="polite">{hint || 'The phrase and the private key are not stored here.'}</p>
       {mode === 'seed' ? (
         <form className="field" onSubmit={(event) => {
           event.preventDefault();
