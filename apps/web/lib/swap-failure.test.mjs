@@ -7,6 +7,8 @@ import { createChatToolInvoker } from './chat-tools.mjs';
 test('swap failures identify each failed step without exposing raw errors', () => {
   for (const [code, step] of [
     ['swap_quote_expired', 'quote'], ['trust-confirmation-required', 'trust'],
+    ['jupiter_quote_timeout', 'quote'], ['jupiter_quote_transport', 'quote'],
+    ['jupiter_redirect_refused', 'quote'], ['jupiter_quote_invalid_response', 'quote'],
     ['invalid_auto_swap', 'permission'], ['approval-needed', 'approval'], ['desk_locked', 'desk lock'],
     ['per-transaction', 'budget'], ['privy_failed', 'Privy signing'], ['simulation_failed', 'simulation'],
     ['rpc_rejected', 'broadcast'], ['confirmation_failed', 'confirmation'], ['plugin_load_failed', 'Jupiter plugin'],
