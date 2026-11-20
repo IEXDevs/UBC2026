@@ -1339,9 +1339,11 @@ button.add-agent:not(:disabled):hover {
   .wallet-nav strong { width: 100%; }
 }
 .wallet-body {
+  --wallet-pad-x: 22px;
   min-width: 0;
-  overflow: auto;
-  padding: 18px 22px 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 18px var(--wallet-pad-x) 22px;
   scrollbar-width: none;
 }
 .wallet-body::-webkit-scrollbar { display: none; }
@@ -1416,7 +1418,11 @@ button.add-agent:not(:disabled):hover {
 .token-up > span { color: inherit; }
 .token-down > span { color: inherit; }
 .token-up span span, .token-down span span { color: #a3a3a3; }
-.token-chart { position: relative; height: 180px; }
+.token-chart {
+  position: relative;
+  height: 180px;
+  margin-inline: calc(var(--wallet-pad-x, 22px) * -1);
+}
 .token-chart svg { width: 100%; height: 180px; display: block; }
 .token-chart .price-graph-empty { height: 180px; }
 .token-range-note { min-height: 1.25em; margin: 4px 0 0; }

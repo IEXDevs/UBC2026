@@ -18,7 +18,7 @@ export default function TokenChart({ points = [], range = '1D' }) {
   const [hover, setHover] = useState(null);
   const width = 640;
   const height = 180;
-  const layout = chartLayout(points, width, height);
+  const layout = chartLayout(points, width, height, 0);
   const stroke = layout?.up ? '#3dbe6a' : '#e10600';
   const fill = layout?.up ? 'rgba(61, 190, 106, 0.16)' : 'rgba(225, 6, 0, 0.12)';
   const key = seriesKey(points, range);
@@ -46,6 +46,7 @@ export default function TokenChart({ points = [], range = '1D' }) {
           <motion.svg
             key={key}
             viewBox={`0 0 ${width} ${height}`}
+            preserveAspectRatio="none"
             role="img"
             aria-label="Token price"
             initial={{ opacity: 0 }}
@@ -66,14 +67,15 @@ export default function TokenChart({ points = [], range = '1D' }) {
               stroke={stroke}
               strokeWidth="2"
               strokeLinejoin="round"
-              strokeLinecap="round"
+              strokeLinecap="butt"
+              vectorEffect="non-scaling-stroke"
               initial={{ pathLength: 0 }}
               animate={{ pathLength: 1 }}
               transition={{ duration: 0.5, ease: EASE }}
             />
             {hover ? (
               <>
-                <line x1={hover.x} x2={hover.x} y1="8" y2={height - 8} stroke="#3a3a3a" />
+                <line x1={hover.x} x2={hover.x} y1="0" y2={height} stroke="#3a3a3a" />
                 <circle cx={hover.x} cy={hover.y} r="4" fill={stroke} />
               </>
             ) : null}
