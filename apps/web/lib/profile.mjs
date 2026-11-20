@@ -94,7 +94,7 @@ export function profileSaveNote(error) {
   const raw = error?.code || error?.error || '';
   if (error?.status === 401 || raw === 'owner_required' || raw === 'login_required') return 'Your session expired. Sign in again to save your profile.';
   if (raw === 'handle_taken') return 'This handle is already registered to another account. Your changes were not saved.';
-  if (raw === 'profile_not_registered') return 'No profile is registered to this sign-in. Sign in with the account that claimed your handle.';
+  if (raw === 'profile_not_registered') return 'No profile is registered to this sign-in. Claim an available handle here, or sign in with your original account.';
   if (raw === 'photo_storage_failed') return 'Your name was saved, but the photo could not be stored. Allow browser storage and try again.';
   if (raw === 'account_changed') return 'The signed-in account changed. Reopen your profile to try again.';
   const code = typeof raw === 'string' && ERROR_CODE.test(raw) ? raw : '';

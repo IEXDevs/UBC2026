@@ -1274,16 +1274,16 @@ export async function handleApiData(request, env, matched) {
       handle = existing.rows[0].handle;
     }
     if (!editOnly) {
-    const userWrite = await supabaseWrite(env, {
-      path: 'users?on_conflict=id',
-      method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=minimal',
-      body: { id: ownerId, privy_user_id: ownerId },
-      fetcher,
-    });
-    if (userWrite?.ok !== true) {
-      return json({ error: userWrite?.code || 'profile_save_failed' }, 502);
-    }
+      const userWrite = await supabaseWrite(env, {
+        path: 'users?on_conflict=id',
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=minimal',
+        body: { id: ownerId, privy_user_id: ownerId },
+        fetcher,
+      });
+      if (userWrite?.ok !== true) {
+        return json({ error: userWrite?.code || 'profile_save_failed' }, 502);
+      }
     }
     const saved = await supabaseWrite(env, {
       path: editOnly ? `profiles?${postgrestEq('owner_id', ownerId)}` : 'profiles?on_conflict=owner_id',

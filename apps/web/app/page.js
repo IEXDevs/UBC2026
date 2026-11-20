@@ -829,14 +829,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const saveProfile = useCallback(async (next) => {
     const { photo, editOnly, ...details } = next;
     const stored = { ...details, handle: editOnly ? (profile?.handle || details.handle) : details.handle, avatarUrl: profile?.avatarUrl || details.avatarUrl || privyAvatarUrl(user) || null };
-    const nextLooks = photo === undefined ? null : withProfilePhoto(looks, photo);
-    if (photo !== undefined && !nextLooks) throw Object.assign(new Error('invalid_photo'), { code: 'invalid_photo' });
+    if (photo !== undefined && !withProfilePhoto({}, photo)) throw Object.assign(new Error('invalid_photo'), { code: 'invalid_photo' });
     const key = profileKey(ownerId);
     const profileUrl = ownerId ? shellRuntimeUrl('/api/profiles/me') : null;
     if (profileUrl && ownerId) {
       const response = await fetch(profileUrl, {
         method: 'PUT',
         headers: await ownerAuthHeaders(ownerId, getAccessToken, { 'content-type': 'application/json' }),
+        signal: AbortSignal.timeout(15000),
         body: JSON.stringify({ ...stored, ...(editOnly ? { editOnly: true } : {}) }),
       });
       const body = await response.json().catch(() => ({}));
@@ -859,17 +859,25 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       setConfirmedHandle(confirmed.handle);
       try { if (key) localStorage.setItem(key, JSON.stringify(confirmed)); } catch { /* The directory confirmed the save. */ }
       let photoSync = null;
+      const nextLooks = photo === undefined ? null : withProfilePhoto(readLooks(accountStorage, ownerId), photo);
       if (nextLooks) {
         if (!writeLooks(accountStorage, ownerId, nextLooks)) throw Object.assign(new Error('photo_storage_failed'), { code: 'photo_storage_failed' });
         setLooks(nextLooks);
-        photoSync = await flushAccountState() ? 'synced' : 'pending';
+        let syncTimer;
+        try {
+          const synced = await Promise.race([
+            flushAccountState().catch(() => false),
+            new Promise(resolve => { syncTimer = setTimeout(() => resolve(false), 5000); }),
+          ]);
+          photoSync = synced ? 'synced' : 'pending';
+        } finally { clearTimeout(syncTimer); }
       }
       return { ok: true, source: body.source || 'supabase', profile: confirmed, photoSync };
     }
     setProfile(stored);
     if (key) localStorage.setItem(key, JSON.stringify(stored));
     return { ok: true, source: 'local' };
-  }, [ownerId, user, getAccessToken, profile, looks]);
+  }, [ownerId, user, getAccessToken, profile]);
 
   const resolveMention = useCallback(async (token) => {
     const parsed = parseLookupQuery(token);
@@ -1922,7 +1930,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         <footer className="you">
           <AccountMenu
             accountLabel={profileRailLabel({
-              handle: profile?.handle,
+              handle: confirmedHandle === undefined ? profile?.handle : confirmedHandle,
               displayName: profile?.displayName,
               fallback: accountLabel,
             })}

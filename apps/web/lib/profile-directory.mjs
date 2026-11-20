@@ -158,12 +158,12 @@ export async function localProfileResponse(request, { env = {}, fetcher = fetch 
       handle = canonical;
     }
     if (!editOnly) {
-    const userWrite = await rest(fetcher, origin, key, 'users?on_conflict=id', {
-      method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=minimal',
-      body: { id: ownerId, privy_user_id: ownerId },
-    });
-    if (!userWrite.ok) return json({ error: (await failureCode(userWrite)) || 'profile_save_failed' }, 502);
+      const userWrite = await rest(fetcher, origin, key, 'users?on_conflict=id', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=minimal',
+        body: { id: ownerId, privy_user_id: ownerId },
+      });
+      if (!userWrite.ok) return json({ error: (await failureCode(userWrite)) || 'profile_save_failed' }, 502);
     }
     const saved = await rest(fetcher, origin, key, editOnly ? `profiles?${postgrestEq('owner_id', ownerId)}` : 'profiles?on_conflict=owner_id', {
       method: editOnly ? 'PATCH' : 'POST',
