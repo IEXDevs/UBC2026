@@ -14,6 +14,8 @@ test('Send recipients do not require signing access and sender copy ends with a 
   assert.match(sheet, /import \{[^}]*\bformatBaseUnits\b[^}]*\} from '\.\.\/lib\/money-views\.mjs'/);
   assert.doesNotMatch(sheet, /fundingMain|!observing &&|A connected wallet sends the selected asset to the main wallet/);
   assert.match(sheet, /connectWallet\(walletConnectionOptions\(wallet\)\)/);
+  assert.match(sheet, /WalletConnection key=\{`connection:\$\{active\.id\}`\}/);
+  assert.match(sheet, /observing \? 'Linked' : 'Ready'/);
 });
 
 /**

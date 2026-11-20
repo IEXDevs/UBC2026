@@ -232,10 +232,10 @@ export default function WalletsSheet({
               {active?.address ? (
                 <div className="wallet-identity">
                   <AddressCopy address={active.address} compact />
-                  <span className="wallet-status">{active.frozen ? 'Frozen' : observing ? 'Connected' : 'Ready'}</span>
+                  <span className="wallet-status">{active.frozen ? 'Frozen' : observing ? 'Linked' : 'Ready'}</span>
                 </div>
               ) : null}
-              {signedIn && observing ? <WalletConnection key={active.id} wallet={activeRaw} /> : null}
+              {signedIn && observing ? <WalletConnection key={`connection:${active.id}`} wallet={activeRaw} /> : null}
               {signedIn && active?.address ? (
                 <TokenScreen
                   key={active.id}
