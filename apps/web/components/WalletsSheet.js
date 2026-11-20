@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
-import { Plus, X } from 'lucide-react';
+import { ChevronDown, Plus, Settings2, X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
 import GlideSelect from './GlideSelect';
@@ -41,20 +42,10 @@ import { accountStorage } from '../lib/account-state.mjs';
 import { sendPreview } from '../lib/txn-preview.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
 
-const PANES = [
-  { id: 'assets', label: 'Assets' },
-  { id: 'signin', label: 'Sign-in' },
-  { id: 'portfolio', label: 'Portfolio' },
-  { id: 'transfer', label: 'Transfer' },
-  { id: 'history', label: 'History' },
-  { id: 'keys', label: 'Keys' },
-];
-
 const TRANSFER = [
   { id: 'send', label: 'Send' },
   { id: 'receive', label: 'Receive' },
   { id: 'swap', label: 'Swap' },
-  { id: 'tokens', label: 'Tokens' },
 ];
 const TRANSFER_EASE = [0.22, 1, 0.36, 1];
 
@@ -79,7 +70,10 @@ export default function WalletsSheet({
   devPreview = false,
 }) {
   const { mounted, leaving } = usePresence(open);
-  const [pane, setPane] = useState('assets');
+  const [root, setRoot] = useState(null);
+  const [portfolioOpen, setPortfolioOpen] = useState(false);
+  const settingsRef = useRef(null);
+  const transferRef = useRef(null);
   const [transfer, setTransfer] = useState('send');
   const [transferDir, setTransferDir] = useState(1);
   const reduceMotion = useReducedMotion();
@@ -89,6 +83,10 @@ export default function WalletsSheet({
   const [retireNote, setRetireNote] = useState('');
 
   useEffect(() => {
+    setRoot(document.body);
+  }, []);
+
+  useEffect(() => {
     if (!open) return undefined;
     function onKey(event) {
       if (event.key === 'Escape') onClose();
@@ -96,10 +94,6 @@ export default function WalletsSheet({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
-
-  useEffect(() => {
-    if (open) setPane('assets');
-  }, [open]);
 
   useEffect(() => {
     if (open && focusId) setWalletId(focusId);
@@ -135,7 +129,7 @@ export default function WalletsSheet({
 
   function openTransfer(section) {
     chooseTransfer(section);
-    setPane('transfer');
+    transferRef.current?.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'nearest' });
   }
 
   const wallets = (state?.wallets || []).filter(wallet => wallet && !wallet.deletedAt && !wallet.deleted_at);
@@ -153,10 +147,7 @@ export default function WalletsSheet({
       !ownDestinations.some(item => item.caption.toLowerCase() === row.caption.toLowerCase())
     )),
   ];
-  const needsWallet = pane === 'transfer' && (transfer === 'send' || transfer === 'receive' || transfer === 'swap');
-  const heading = pane === 'transfer'
-    ? (TRANSFER.find(item => item.id === transfer)?.label || 'Transfer')
-    : (PANES.find(item => item.id === pane)?.label);
+  const heading = TRANSFER.find(item => item.id === transfer)?.label || 'Send';
   const previewBook = useMemo(() => (
     devPreview && activeRaw?.address
       ? previewPortfolioFor([{ kind: 'main', address: activeRaw.address, label: activeRaw.label }])
@@ -169,9 +160,9 @@ export default function WalletsSheet({
     solana: solanaBalance,
   });
 
-  if (!mounted) return null;
+  if (!mounted || !root) return null;
 
-  return (
+  return createPortal(
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section
         className="sheet wallets-sheet"
@@ -180,24 +171,68 @@ export default function WalletsSheet({
         aria-labelledby="wallets-title"
         onMouseDown={event => event.stopPropagation()}
       >
-        <nav className="wallet-nav" aria-label="Wallet sections">
-          <strong id="wallets-title">Wallet</strong>
-          {PANES.map(item => (
-            <button
-              key={item.id}
-              type="button"
-              className={pane === item.id ? 'is-on' : ''}
-              aria-current={pane === item.id ? 'page' : undefined}
-              onClick={() => setPane(item.id)}
-            >
-              {item.label}
+        <header className="wallet-header">
+          <div>
+            <h2 id="wallets-title">Wallet</h2>
+            <p className="quiet">Your assets, transfers, and activity. Together.</p>
+          </div>
+          <div className="wallet-header-actions">
+            <button type="button" className="ghost wallet-manage" onClick={() => {
+              if (!settingsRef.current) return;
+              settingsRef.current.open = true;
+              settingsRef.current.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'start' });
+            }}>
+              <Settings2 size={15} aria-hidden="true" />
+              Manage wallets
             </button>
-          ))}
-        </nav>
+            <button type="button" className="icon-btn" aria-label="Close wallets" onClick={onClose}>
+              <X size={18} strokeWidth={1.75} />
+            </button>
+          </div>
+        </header>
         <div className="wallet-body">
-          <div className="sheet-head">
-            <h2>
-              {pane === 'transfer' ? (
+          <div className="wallet-overview">
+            <section className="wallet-card wallet-assets" aria-label="Wallet assets">
+              <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} />
+              {active?.address ? (
+                <div className="wallet-identity">
+                  <AddressCopy address={active.address} compact />
+                  <span className="wallet-status">{active.frozen ? 'Frozen' : observing ? 'Connected' : 'Ready'}</span>
+                </div>
+              ) : null}
+              {signedIn && active?.address ? (
+                <TokenScreen
+                  key={active.id}
+                  open={open}
+                  address={active.address}
+                  previewPortfolio={previewBook}
+                  onSend={() => openTransfer('send')}
+                  onReceive={() => openTransfer('receive')}
+                  onSwap={() => openTransfer('swap')}
+                />
+              ) : <p className="quiet">{signedIn ? 'Add a wallet to see its assets here.' : 'Sign in to read the assets in your wallets.'}</p>}
+              <details className="wallet-fold wallet-allocation" onToggle={event => setPortfolioOpen(event.currentTarget.open)}>
+                <summary>Portfolio breakdown<ChevronDown size={16} aria-hidden="true" /></summary>
+                <div className="wallet-fold-body">
+                  {signedIn ? <ConnectedPortfolio open={open && portfolioOpen} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>}
+                </div>
+              </details>
+            </section>
+            <section className="wallet-card wallet-transfers" aria-label="Transfer" ref={transferRef}>
+              <div className="wallet-switch wallet-action-switch" role="group" aria-label="Transfer actions">
+                {TRANSFER.map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-pressed={transfer === item.id}
+                    className={transfer === item.id ? 'is-on' : ''}
+                    onClick={() => chooseTransfer(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <h3 className="wallet-action-title">
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.span
                     key={transfer}
@@ -206,86 +241,18 @@ export default function WalletsSheet({
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: reduceMotion ? 0 : -6 }}
                     transition={{ duration: reduceMotion ? 0 : 0.32, ease: TRANSFER_EASE }}
-                  >
-                    {heading}
-                  </motion.span>
+                  >{heading}</motion.span>
                 </AnimatePresence>
-              ) : heading}
-            </h2>
-            <button type="button" className="icon-btn" aria-label="Close wallets" onClick={onClose}>
-              <X size={18} strokeWidth={1.75} />
-            </button>
-          </div>
-          {pane === 'assets' ? (
-            <>
-              {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
-              <WalletRoster
-                rows={rows}
-                handle={handle}
-                activeId={active?.id || ''}
-                onSelect={setWalletId}
-                retiring={retiring}
-                onRetire={async (row) => {
-                  setRetiring(row.id);
-                  setRetireNote('');
-                  try {
-                    const result = await onRetire?.(row);
-                    setRetireNote(result?.ok
-                      ? `${row.label} is no longer on this account.`
-                      : (result?.message || 'That wallet is still on the account.'));
-                  } catch {
-                    setRetireNote('That wallet is still on the account.');
-                  } finally {
-                    setRetiring('');
-                  }
-                }}
-              />
-              {retireNote ? <p className="quiet" role="status">{retireNote}</p> : null}
-              {signedIn && active?.address ? (
-                <TokenScreen
-                  open={open}
-                  address={active.address}
-                  previewPortfolio={previewBook}
-                  onSend={() => openTransfer('send')}
-                  onReceive={() => openTransfer('receive')}
-                  onSwap={() => openTransfer('swap')}
-                />
-              ) : null}
-              {!signedIn ? <p className="quiet">Sign in to read the assets in your wallets.</p> : null}
-            </>
-          ) : null}
-          {pane === 'signin' ? (
-            signedIn ? <LinkedLogins /> : <p className="quiet">Sign in to link email, Google, GitHub, or Discord.</p>
-          ) : null}
-          {pane === 'portfolio' ? (
-            signedIn ? <ConnectedPortfolio open={open} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>
-          ) : null}
-          {pane === 'transfer' ? (
-            <>
-              <div className="wallet-switch" role="tablist" aria-label="Transfer">
-                {TRANSFER.map(item => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={transfer === item.id}
-                    className={transfer === item.id ? 'is-on' : ''}
-                    onClick={() => chooseTransfer(item.id)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
+              </h3>
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
-                  key={transfer}
+                  key={`${active?.id || 'empty'}:${transfer}`}
                   className="transfer-stage"
                   initial={{ opacity: 0, x: reduceMotion ? 0 : transferDir * 18 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: reduceMotion ? 0 : transferDir * -14 }}
                   transition={{ duration: reduceMotion ? 0 : 0.38, ease: TRANSFER_EASE }}
                 >
-                  {needsWallet ? <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
                   {transfer === 'send' ? (
                     <SendPane
                       active={active}
@@ -300,48 +267,87 @@ export default function WalletsSheet({
                   ) : null}
                   {transfer === 'receive' ? <ReceivePane active={active} handle={handle} /> : null}
                   {transfer === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} /> : null}
-                  {transfer === 'tokens' ? <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} /> : null}
                 </motion.div>
               </AnimatePresence>
-            </>
-          ) : null}
-          {pane === 'history' ? (
-            bot ? (
-              <BotHistory bot={bot} bots={bots} payments={state?.payments || []} transfers={transfers} onParty={onParty} />
-            ) : (
-              <TxnLog
-                rows={transfers.map(row => {
-                  const direction = row.direction === 'in' ? 'in' : 'out';
-                  return {
-                    id: row.id,
-                    direction,
-                    title: `${direction === 'in' ? 'From' : 'To'} @${row.handle}`,
-                    detail: 'Platform',
-                    amount: row.amount,
-                    asset: 'USDC',
-                    party: partyFromToken(`@${row.handle}`),
-                  };
-                })}
-                onParty={onParty}
-                empty="No history yet."
-              />
-            )
-          ) : null}
-          {pane === 'keys' ? (
-            <div className="wallet-keys">
-              {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to create or import a wallet.</p>}
-              <PrivyKeyButton
-                signedIn={signedIn}
-                address={active?.address || glance.address}
-                walletId={activeRaw?.privyWalletId || ''}
-                ownerId={ownerId}
-                getAccessToken={getAccessToken}
-              />
+            </section>
+          </div>
+          <details className="wallet-fold" open>
+            <summary>Recent activity<ChevronDown size={16} aria-hidden="true" /></summary>
+            <div className="wallet-fold-body">
+              {bot ? (
+                <BotHistory bot={bot} bots={bots} payments={state?.payments || []} transfers={transfers} onParty={onParty} />
+              ) : (
+                <TxnLog
+                  rows={transfers.map(row => {
+                    const direction = row.direction === 'in' ? 'in' : 'out';
+                    return {
+                      id: row.id,
+                      direction,
+                      title: `${direction === 'in' ? 'From' : 'To'} @${row.handle}`,
+                      detail: 'Platform',
+                      amount: row.amount,
+                      asset: 'USDC',
+                      party: partyFromToken(`@${row.handle}`),
+                    };
+                  })}
+                  onParty={onParty}
+                  empty="No history yet."
+                />
+              )}
             </div>
-          ) : null}
+          </details>
+          <details className="wallet-fold wallet-settings" ref={settingsRef}>
+            <summary>Wallet settings<ChevronDown size={16} aria-hidden="true" /></summary>
+            <div className="wallet-fold-body wallet-settings-grid">
+              <section aria-label="Manage wallets">
+                <h3>Manage wallets</h3>
+                {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to create or import a wallet.</p>}
+                <WalletRoster
+                  rows={rows}
+                  handle={handle}
+                  activeId={active?.id || ''}
+                  onSelect={setWalletId}
+                  retiring={retiring}
+                  onRetire={async (row) => {
+                    setRetiring(row.id);
+                    setRetireNote('');
+                    try {
+                      const result = await onRetire?.(row);
+                      setRetireNote(result?.ok
+                        ? `${row.label} is no longer on this account.`
+                        : (result?.message || 'That wallet is still on the account.'));
+                    } catch {
+                      setRetireNote('That wallet is still on the account.');
+                    } finally {
+                      setRetiring('');
+                    }
+                  }}
+                />
+                {retireNote ? <p className="quiet" role="status">{retireNote}</p> : null}
+              </section>
+              <section aria-label="Sign-in and keys">
+                <h3>Sign-in methods</h3>
+                {signedIn ? <LinkedLogins /> : <p className="quiet">Sign in to link email, Google, GitHub, or Discord.</p>}
+                <h3>Recovery &amp; keys</h3>
+                <PrivyKeyButton
+                  key={active?.id || 'empty'}
+                  signedIn={signedIn}
+                  address={active?.address || glance.address}
+                  walletId={activeRaw?.privyWalletId || ''}
+                  ownerId={ownerId}
+                  getAccessToken={getAccessToken}
+                />
+              </section>
+              <section className="wallet-token-settings" aria-label="Token preferences">
+                <h3>Token preferences</h3>
+                <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} />
+              </section>
+            </div>
+          </details>
         </div>
       </section>
-    </div>
+    </div>,
+    root,
   );
 }
 
