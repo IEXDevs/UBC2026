@@ -1,4 +1,5 @@
 import { accessTokenFromRequest } from '../../../../../lib/privy-cookie-session.mjs';
+import { parseLasoBrowserPayment } from '../../../../../../agent-runtime/src/laso-browser-payment.mjs';
 import { swapFailure } from '../../../../../lib/swap-failure.mjs';
 import { createHmac } from 'node:crypto';
 import {
@@ -111,6 +112,14 @@ export async function POST(request, context) {
     ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
     : [];
   const assetConfirmation = grants.find(isAssetSpendHold);
+  const lasoPayment = parseLasoBrowserPayment(body.lasoPayment);
+  if (body.lasoPayment !== undefined && (assetConfirmation?.args?.action !== 'x402'
+      || !lasoPayment || lasoPayment.phase === 'prepared' || body.spendAuthorization !== undefined)) {
+    return Response.json({ error: 'invalid_laso_payment' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+  }
+  if (assetConfirmation?.args?.action === 'x402' && !lasoPayment) {
+    return Response.json({ error: 'browser_wallet_required' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+  }
   const spendAuthorization = body.spendAuthorization === 'prepare'
     ? 'prepare' : parseSpendAuthorizationSignature(body.spendAuthorization);
   if (body.spendAuthorization !== undefined && (!assetConfirmation || !spendAuthorization)) {
@@ -281,7 +290,7 @@ export async function POST(request, context) {
           approveOnce = await approvalContext.attestBudgetApproval(assetConfirmation, terms);
         }
         gate = await invokeRaw(name, stampSpendPermission(name, args, spend), {
-          approveOnce, spendAuthorization, swapTicket: assetConfirmation.swapTicket,
+          approveOnce, spendAuthorization, swapTicket: assetConfirmation.swapTicket, lasoPayment,
         });
         return gate;
       });
@@ -374,6 +383,7 @@ export async function POST(request, context) {
       botId,
       reply: reply.text,
       ...(assetConfirmation?.args?.action === 'x402' && reply.claimUrl ? { claimUrl: reply.claimUrl } : {}),
+      ...(lasoPayment?.phase === 'prepare' && reply.lasoPayment ? { lasoPayment: reply.lasoPayment } : {}),
       ...(assetConfirmation && spendAuthorization === 'prepare' && reply.spendAuthorization
         ? { spendAuthorization: reply.spendAuthorization } : {}),
       ...(replies.length > 0 ? { replies } : {}),

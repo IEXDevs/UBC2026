@@ -59,6 +59,7 @@ import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { submitChatSpend } from '../lib/desk-grant-client.mjs';
+import { submitLasoChatPayment } from '../lib/laso-payment-client.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -132,6 +133,7 @@ export default function Composer({
   fileCatalog = null,
   getAccessToken = null,
   authorizeSpend = null,
+  signChatTransaction = null,
   lines = [],
   onLine,
   onThinking,
@@ -767,7 +769,7 @@ export default function Composer({
       const shown = [];
       const voiceReply = createReplySpeech(sessionRef.current?.speechQueue);
       let firstLineId = null;
-      const send = async (spendAuthorization) => {
+      const send = async (spendAuthorization, lasoPayment) => {
         let accessToken = '';
         try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
         if (controller.signal.aborted || targetId !== botIdRef.current) return { ok: false, error: 'aborted' };
@@ -782,6 +784,7 @@ export default function Composer({
           permission: permissionRef.current,
           grants,
           spendAuthorization,
+          lasoPayment,
           ...selection,
           effort: currentEffortId(),
           shellBots,
@@ -811,9 +814,12 @@ export default function Composer({
         });
       };
       const confirmedSpend = grants?.some(hold => hold?.name === 'request_spend' && typeof hold.proof === 'string');
-      const result = confirmedSpend
-        ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal, authorize: authorizeSpend })
-        : await send();
+      const lasoSpend = grants?.some(hold => hold?.name === 'request_spend' && hold.args?.action === 'x402');
+      const result = lasoSpend
+        ? await submitLasoChatPayment({ send, sign: signChatTransaction, unlock: onDeskUnlock, signal: controller.signal })
+        : confirmedSpend
+          ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal, authorize: authorizeSpend })
+          : await send();
       if (run !== runRef.current || result?.error === 'aborted') return;
       if (grants?.some(hold => hold.idempotencyKey === pendingSwap?.idempotencyKey)
           && result?.reply?.startsWith('Swap submitted.')) setPendingSwap(null);

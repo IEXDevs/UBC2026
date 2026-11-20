@@ -5,6 +5,7 @@
  * Never invent PreviewMain / demo bots.
  */
 import { publicCardLoop } from '@ubc2026/contracts/card-loop';
+import { parseLasoBrowserPayment } from '../../agent-runtime/src/laso-browser-payment.mjs';
 import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { sanitizeActivity } from './chat-activity.mjs';
 import { catalogPayload } from './file-catalog.mjs';
@@ -278,6 +279,8 @@ export function botChatUrl(_runtimeBase, botId) {
 }
 
 function chatResult(body) {
+  const lasoPayment = parseLasoBrowserPayment(body.lasoPayment);
+  if (lasoPayment?.phase === 'prepared') return { ok: true, lasoPayment };
   const spendAuthorization = parseSpendAuthorizationChallenge(body.spendAuthorization);
   if (spendAuthorization) return { ok: true, spendAuthorization };
   const hold = body.hold && (body.hold.kind === 'inline' || body.hold.kind === 'modal')
@@ -366,6 +369,7 @@ export async function sendBotChat({
   permission,
   grants = null,
   spendAuthorization,
+  lasoPayment,
   model,
   modelProvider = null,
   effort,
@@ -424,6 +428,7 @@ export async function sendBotChat({
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
         ...(Array.isArray(grants) ? { grants: grants.slice(0, 4) } : {}),
         ...(spendAuthorization ? { spendAuthorization } : {}),
+        ...(lasoPayment ? { lasoPayment } : {}),
         ...(typeof model === 'string' && model.trim() ? { model: model.trim().slice(0, 80) } : {}),
         ...(modelProvider ? { modelProvider } : {}),
         ...(typeof effort === 'string' && effort.trim() ? { effort: effort.trim().slice(0, 16) } : {}),

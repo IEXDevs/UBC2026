@@ -24,6 +24,7 @@ import { isLoopSwapKey, matchesLoopSwap, useLoopSwap } from './loop-swap.mjs';
 import { valueUsdSpend } from './usd-budget.mjs';
 import { prepareLasoPayment, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
 import { swapFailure } from './swap-failure.mjs';
+import { parseLasoBrowserPayment } from './laso-browser-payment.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
 const WALLET_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -163,11 +164,19 @@ async function handleSpendRequest(request, env = {}) {
   if (!parsed) return json({ error: 'invalid_spend', signed: false }, 400);
   const swap = parsed.action === 'swap';
   const laso = parsed.action === 'x402';
+  const browserPayment = parseLasoBrowserPayment(raw.lasoPayment);
+  if (raw.lasoPayment !== undefined && (!laso || !parsed.confirmed || !browserPayment
+      || browserPayment.phase === 'prepared' || raw.spendAuthorization !== undefined)) {
+    return json({ error: 'invalid_laso_payment', signed: false }, 400);
+  }
   const assetTransfer = laso || swap || parsed.asset !== 'USDC';
   const overrideToken = request.headers.get('x-spend-approve-once');
   const approvalKey = supabaseConfig(env)?.key;
   const prepareAuthorization = raw.spendAuthorization === 'prepare';
   const ownerAuthorization = parseSpendAuthorizationSignature(raw.spendAuthorization);
+  if (browserPayment && (!approvalKey || !desk.ok || desk.via !== 'grant')) {
+    return json({ error: desk.ok ? 'invalid_laso_payment' : 'desk_locked', signed: false }, 403);
+  }
   if (raw.spendAuthorization !== undefined
     && (!assetTransfer || !parsed.confirmed || (!prepareAuthorization && !ownerAuthorization))) {
     return json({ error: 'invalid_spend_authorization', signed: false }, 400);
@@ -200,9 +209,15 @@ async function handleSpendRequest(request, env = {}) {
   }
 
   const now = Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now();
+  if (browserPayment?.phase === 'settle' && (browserPayment.expiresAt <= now
+      || browserPayment.expiresAt > now + SPEND_AUTHORIZATION_TTL_MS
+      || browserPayment.walletAddress !== context.wallet.address)) {
+    return json({ error: 'laso_payment_expired', signed: false }, 409);
+  }
   const lasoOffer = laso ? readLasoTicket(parsed.lasoTicket, ownerId, parsed.botId, approvalKey, now) : null;
   if (laso && (!lasoOffer || lasoOffer.amount !== parsed.amount)) return json({ error: 'laso_ticket_invalid', signed: false }, 409);
-  if (laso && (!env.transferClient?.prepareSolanaX402Payment || !env.transferClient?.signPreparedSolanaX402Payment
+  if (laso && (!env.transferClient?.prepareSolanaX402Payment || !(browserPayment
+      ? env.transferClient?.verifyPreparedSolanaX402Payment : env.transferClient?.signPreparedSolanaX402Payment)
       || !env.ledgerApi?.reserveBudget || !approvalKey)) return json({ error: 'laso_unavailable', signed: false }, 503);
   const usdBudget = context.bot.cap?.asset === 'USD';
   const loopSwap = isLoopSwapKey(parsed.idempotencyKey);
@@ -277,12 +292,12 @@ async function handleSpendRequest(request, env = {}) {
   if ((laso || usdBudget || (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset))
       && !context.wallet.frozen && !context.bot.frozen) {
     if (!parsed.idempotencyKey && assetTransfer) return json({ error: 'idempotency_key_required', signed: false }, 400);
-    if (!env.ledgerApi?.reserveBudget || !(laso ? env.transferClient?.signPreparedSolanaX402Payment : env.transferClient?.signPreparedSolanaTransfer)) {
+    if (!env.ledgerApi?.reserveBudget || !(laso ? (browserPayment ? env.transferClient?.verifyPreparedSolanaX402Payment : env.transferClient?.signPreparedSolanaX402Payment) : env.transferClient?.signPreparedSolanaTransfer)) {
       return json({ error: 'asset_transfer_unavailable', signed: false }, 503);
     }
     try {
       if (laso) {
-        ({ prepared, blockhash } = await prepareLasoPayment(env, context, lasoOffer, ownerAuthorization?.blockhash));
+        ({ prepared, blockhash } = await prepareLasoPayment(env, context, lasoOffer, browserPayment?.blockhash ?? ownerAuthorization?.blockhash));
         if (usdBudget) valuation = await valueUsdSpend(env, { mint, decimals: 6, amount: parsed.amount, feeLamports: '0', now });
       } else if (swap) {
         blockhash = swapOffer.blockhash;
@@ -346,13 +361,15 @@ async function handleSpendRequest(request, env = {}) {
   let authorizationChallenge;
   let lasoReceipt;
   let lasoFailure;
+  let lasoChallenge;
+  let browserPartial;
   if (prepared) {
     const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
     signSolana = async ({ bot, wallet }) => {
       try {
         if (laso) {
           if (lasoOffer.expiresAt <= Date.now() && !Number.isSafeInteger(env.spendNow)) throw new Error('laso_ticket_invalid');
-          const partial = await env.transferClient.signPreparedSolanaX402Payment({
+          const partial = browserPayment ? browserPartial : await env.transferClient.signPreparedSolanaX402Payment({
             bot, wallet, prepared, ...(ownerAuthorization ? { ownerAuthorization } : { accessToken }),
           });
           lasoReceipt = await settleLasoPayment(env, lasoOffer, partial.transaction);
@@ -368,6 +385,26 @@ async function handleSpendRequest(request, env = {}) {
       }
     };
     beforeSign = async ({ bot, wallet, proposal, policy, approvedOnce }) => {
+      if (browserPayment) {
+        const expiresAt = browserPayment.phase === 'settle' ? browserPayment.expiresAt
+          : Math.min(proposal.expiresAt, now + SPEND_AUTHORIZATION_TTL_MS);
+        const binding = JSON.stringify([
+          'maelstrom:laso-browser-payment:v1', ownerId, bot.id, id, wallet.id, wallet.address,
+          bot.policyVersion, expiresAt, blockhash, prepared.transaction,
+        ]);
+        const proof = createHmac('sha256', approvalKey).update(binding).digest();
+        if (browserPayment.phase === 'prepare') {
+          lasoChallenge = { phase: 'prepared', transaction: prepared.transaction,
+            walletAddress: wallet.address, expiresAt, blockhash, proof: proof.toString('hex') };
+          return { state: 'awaiting-wallet-authorization' };
+        }
+        if (!timingSafeEqual(proof, Buffer.from(browserPayment.proof, 'hex'))) {
+          return { state: 'blocked', reason: 'laso_payment_changed' };
+        }
+        browserPartial = await env.transferClient.verifyPreparedSolanaX402Payment({
+          bot, wallet, prepared, signedTransaction: browserPayment.transaction,
+        });
+      }
       if (prepareAuthorization || ownerAuthorization) {
         const expiresAt = ownerAuthorization?.expiresAt ?? Math.min(proposal.expiresAt, now + SPEND_AUTHORIZATION_TTL_MS);
         const payload = env.transferClient.formatPreparedSpendAuthorization({ bot, wallet, prepared, expiresAt });
@@ -442,6 +479,9 @@ async function handleSpendRequest(request, env = {}) {
 
   if (authorizationChallenge && result.reason === 'awaiting-wallet-authorization') {
     return json({ signed: false, spendAuthorization: authorizationChallenge });
+  }
+  if (lasoChallenge && result.reason === 'awaiting-wallet-authorization') {
+    return json({ signed: false, lasoPayment: lasoChallenge });
   }
 
   let state = result.state;

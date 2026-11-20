@@ -6,6 +6,7 @@ import { formatBaseUnits } from './money-views.mjs';
 import { TextChatError } from './text-chat.mjs';
 import { txReceiptFromResult } from './tx-receipt.mjs';
 import { swapFailure } from './swap-failure.mjs';
+import { parseLasoBrowserPayment } from '../../agent-runtime/src/laso-browser-payment.mjs';
 
 const HOLD_LIFETIME_MS = 5 * 60 * 1000;
 
@@ -66,6 +67,10 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
     throw new TextChatError('desk_locked', 403);
   }
   const spendAuthorization = parseSpendAuthorizationChallenge(result?.spendAuthorization);
+  const lasoPayment = parseLasoBrowserPayment(result?.lasoPayment);
+  if (hold.args.action === 'x402' && lasoPayment?.phase === 'prepared' && result.signed === false) {
+    return { provider: 'desk', toolRounds: 1, lasoPayment };
+  }
   if (spendAuthorization && result.signed === false) {
     return { provider: 'desk', toolRounds: 1, spendAuthorization };
   }
