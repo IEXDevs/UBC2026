@@ -117,3 +117,11 @@ test('refresh keeps a stored session off the login page and the unlock field is 
   assert.doesNotMatch(desk, /current-password/);
   assert.match(desk, /name="maelstrom-desk-unlock"/);
 });
+
+test('wallet unlock has a non-submit clear control that empties and refocuses the password field', () => {
+  const desk = readFileSync(new URL('../components/DeskLock.js', import.meta.url), 'utf8');
+  const row = desk.match(/<div className="desk-unlock-row">([\s\S]*?)<\/div>/)?.[1] ?? '';
+  assert.match(row, /ref=\{unlockInput\}[\s\S]*name="maelstrom-desk-unlock"/);
+  assert.match(row, /<button\s+type="button"[\s\S]*aria-label="Clear password"\s+disabled=\{record === undefined \|\| pending\}\s+onClick=\{clearUnlockPassword\}/);
+  assert.match(desk, /function clearUnlockPassword\(\) \{[^}]*input\.value = '';\s*setPassword\(''\);\s*setNote\(''\);\s*input\.focus\(\);/);
+});
