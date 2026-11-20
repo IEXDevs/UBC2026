@@ -8,7 +8,7 @@ import { browserSessionUrl, liveViewFrame, liveSessionKey, reconcileLiveSession 
 
 function panelHarness(fetcher) {
   const source = readFileSync(new URL('../components/LiveViewPanel.js', import.meta.url), 'utf8')
-    .replace(/^import .*;\n/gm, '').replace('export default function', 'function');
+    .replace(/^import .*;\r?\n/gm, '').replace('export default function', 'function');
   const { code } = transformSync(source, { loader: 'jsx', jsx: 'transform' });
   const slots = [];
   const effects = [];
