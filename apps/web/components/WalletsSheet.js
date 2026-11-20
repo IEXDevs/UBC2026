@@ -635,6 +635,7 @@ function SendPane({
   const [amount, setAmount] = useState('');
   const [symbol, setSymbol] = useState('USDC');
   const [status, setStatus] = useState('');
+  const [sendComplete, setSendComplete] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [folded, setFolded] = useState(false);
   const asset = tokens.find(token => token.symbol === symbol) || tokens[0] || null;
@@ -792,10 +793,11 @@ function SendPane({
       <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
       <SlideCommit
         label="Slide to send"
-        doneLabel="Sending"
+        doneLabel={sendComplete ? 'Sent' : 'Sending'}
         disabled={!ready}
         resetKey={`${resetKey}:${to}:${amount}:${asset?.symbol || ''}`}
         onCommit={() => {
+          setSendComplete(false);
           const pending = {
             target,
             fromWalletId: active.id,
@@ -807,6 +809,7 @@ function SendPane({
           Promise.resolve(onSend?.(pending)).then(result => {
             setStatus(result?.message || result?.error || 'The send did not post.');
             if (result?.ok) {
+              setSendComplete(true);
               setFolded(true);
               if (result.receipt) onReceipt?.(result.receipt);
             }

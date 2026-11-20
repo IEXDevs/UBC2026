@@ -98,7 +98,7 @@ export function recipientHint(recipient) {
   if (!recipient || typeof recipient !== 'object') return '';
   if (recipient.kind === 'sns') {
     const where = shortAddress(recipient.address);
-    if (where) return `${recipient.domain}(${where})`;
+    if (where) return `${recipient.domain} (${where})`;
     if (recipient.error) return 'Failed.';
     return recipient.domain;
   }
@@ -106,7 +106,7 @@ export function recipientHint(recipient) {
   if (!recipient.address && recipient.self !== true) return `@${recipient.handle} does not have a wallet yet.`;
   const who = recipient.displayName || `@${recipient.handle}`;
   const where = shortAddress(recipient.address);
-  return where ? `${who}(${where})` : who;
+  return where ? `${who} (${where})` : who;
 }
 
 /** Platform ledger sends need a found handle with a wallet address. */

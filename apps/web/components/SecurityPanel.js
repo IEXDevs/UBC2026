@@ -175,6 +175,7 @@ export default function SecurityPanel({
               resetKey={armed.id}
               onCommit={() => {
                 if (armed.id === 'request-grab-back' && walletUnlocked !== true) {
+                  setArmed(null);
                   onWalletLocked?.();
                   return;
                 }

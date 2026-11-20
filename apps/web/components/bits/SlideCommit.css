@@ -39,6 +39,9 @@
   touch-action: none;
 }
 
+.slide-commit-thumb:not(:disabled) { cursor: grab; }
+.slide-commit.is-dragging .slide-commit-thumb { cursor: grabbing; }
+
 .slide-commit:not(.is-dragging) .slide-commit-thumb {
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }

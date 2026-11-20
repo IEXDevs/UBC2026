@@ -198,10 +198,12 @@ function ShoppingProposal({ result, bot, busy, armed, settled, onArm, onCancel, 
           <dt>Provider</dt>
           <dd>{result.provider || 'sandbox'}</dd>
         </div>
-        <div>
-          <dt>Next</dt>
-          <dd>{result.next}</dd>
-        </div>
+        {!settled ? (
+          <div>
+            <dt>Next</dt>
+            <dd>{result.next}</dd>
+          </div>
+        ) : null}
         {result.pick?.item ? (
           <div>
             <dt>Pick</dt>
