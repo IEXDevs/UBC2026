@@ -135,3 +135,19 @@ test('account catalogs never advertise router aliases that inference silently re
   assert.deepEqual(accountProviderModels(catalog, 'openai'), catalog);
   assert.ok(fallbackAccountModels('openrouter')[0].id.endsWith(':free'));
 });
+
+test('advertised thinking choices for newly discovered models reach inference', async () => {
+  const [discovered] = parseProviderModels({ data: [{ id: 'new-reasoner', reasoning: { efforts: ['low', 'high'] } }] });
+  const high = discovered.levels.find(level => level.id === 'high');
+  let inference;
+  await completeTextChat({
+    modelProvider: { token, baseUrl }, model: discovered.id, reasoningEffort: high.label, message: 'Hello',
+    fetcher: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (init.body.includes('Role: turn-verify')) return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
+      inference = body;
+      return Response.json({ choices: [{ message: { content: 'Hello' } }] });
+    },
+  });
+  assert.equal(inference.reasoning_effort, 'high');
+});

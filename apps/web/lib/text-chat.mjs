@@ -442,7 +442,7 @@ export async function completeTextChat({
   const spoken = [];
   let forceAnswer = false;
   let nudged = false;
-  const effort = reasoningEffortFor(modelId, reasoningEffort);
+  const effort = reasoningEffortFor(modelId, reasoningEffort, { allowUnknown: true });
 
   function publish(text) {
     const clean = typeof text === 'string' ? text.trim() : '';
