@@ -8,8 +8,6 @@ import { motion } from 'motion/react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
 import ProfileMark from './ProfileMark';
 import { usePresence } from './usePresence';
-import ProviderAdd from './ProviderAdd';
-import { readProviderViews, removeProvider } from '../lib/provider-tokens.mjs';
 
 export default function ProfileSheet({
   open,
@@ -31,16 +29,12 @@ export default function ProfileSheet({
   const [displayName, setDisplayName] = useState(profile?.displayName || accountLabel || '');
   const [handle, setHandle] = useState(profile?.handle || '');
   const [note, setNote] = useState('');
-  const [providers, setProviders] = useState([]);
-  const [providerOpen, setProviderOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setDisplayName(profile?.displayName || accountLabel || '');
     setHandle(profile?.handle || '');
     setNote('');
-    setProviders(readProviderViews(localStorage));
-    setProviderOpen(false);
   }, [open, profile, accountLabel]);
 
   useEffect(() => {
@@ -128,32 +122,7 @@ export default function ProfileSheet({
           {signedIn ? (
             <button type="button" className="ghost" onClick={onLogout}>Log out</button>
           ) : null}
-          <p className="plugin-kicker">Providers</p>
-          {providers.length ? (
-            <ul className="provider-list">
-              {providers.map(item => (
-                <li key={item.id}>
-                  <span>
-                    <strong>{item.name}</strong>
-                    <span className="quiet">{item.hint ? `Token ${item.hint}` : 'Custom provider'}</span>
-                  </span>
-                  <button type="button" className="provider-remove" onClick={() => {
-                    removeProvider(localStorage, item.id);
-                    setProviders(readProviderViews(localStorage));
-                  }}>Remove</button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="quiet">No custom providers on this device.</p>
-          )}
-          <button type="button" className="ghost" onClick={() => setProviderOpen(true)}>Add Provider</button>
         </div>
-        <ProviderAdd
-          open={providerOpen}
-          onClose={() => setProviderOpen(false)}
-          onSaved={() => setProviders(readProviderViews(localStorage))}
-        />
       </motion.section>
     </div>
   );
