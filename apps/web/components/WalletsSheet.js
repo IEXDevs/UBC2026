@@ -75,6 +75,7 @@ export default function WalletsSheet({
   const [balanceRevision, setBalanceRevision] = useState(0);
   const settingsRef = useRef(null);
   const transferRef = useRef(null);
+  const bodyRef = useRef(null);
   const [transfer, setTransfer] = useState('send');
   const [transferDir, setTransferDir] = useState(1);
   const reduceMotion = useReducedMotion();
@@ -130,7 +131,16 @@ export default function WalletsSheet({
 
   function openTransfer(section) {
     chooseTransfer(section);
-    transferRef.current?.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'nearest' });
+    scrollToSection(transferRef.current);
+  }
+
+  function scrollToSection(section) {
+    const body = bodyRef.current;
+    if (!body || !section) return;
+    body.scrollTo({
+      top: body.scrollTop + section.getBoundingClientRect().top - body.getBoundingClientRect().top - 16,
+      behavior: reduceMotion ? 'instant' : 'smooth',
+    });
   }
 
   function openParty(party) {
@@ -176,7 +186,7 @@ export default function WalletsSheet({
   if (!mounted || !root) return null;
 
   return createPortal(
-    <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
+    <div className={`backdrop is-center wallet-backdrop ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section
         className="sheet wallets-sheet"
         role="dialog"
@@ -193,7 +203,7 @@ export default function WalletsSheet({
             <button type="button" className="ghost wallet-manage" onClick={() => {
               if (!settingsRef.current) return;
               settingsRef.current.open = true;
-              settingsRef.current.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'start' });
+              scrollToSection(settingsRef.current);
             }}>
               <Settings2 size={15} aria-hidden="true" />
               Manage wallets
@@ -203,7 +213,7 @@ export default function WalletsSheet({
             </button>
           </div>
         </header>
-        <div className="wallet-body">
+        <div className="wallet-body" ref={bodyRef}>
           <div className="wallet-overview">
             <section className="wallet-card wallet-assets" aria-label="Wallet assets">
               <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} />

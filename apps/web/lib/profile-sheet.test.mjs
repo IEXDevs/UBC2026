@@ -64,6 +64,10 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   assert.match(css, /\.wallet-body \{[^}]*min-height: 0;[^}]*overflow-y: auto/s);
   assert.equal((css.match(/\.sheet\.wallets-sheet \{/g) || []).length, 3);
   assert.match(css, /\.backdrop\.is-center > \.sheet\.wallets-sheet \{ overflow: hidden/);
+  assert.match(css, /\.backdrop\.is-center\.wallet-backdrop \{ overflow: hidden/);
+  assert.match(css, /\.wallet-settings \.wallet-add-create \{ flex-wrap: wrap/);
+  assert.match(sheet, /body\.scrollTo\(/);
+  assert.doesNotMatch(sheet, /scrollIntoView/);
   assert.match(css, /width: calc\(100vw - 32px\);\s+height: calc\(100dvh - 32px\)/);
   assert.doesNotMatch(css, /\.wallet-nav/);
   assert.match(sheet, /function openParty\(party\) \{\s+if \(!onParty\) return;\s+onClose\(\);\s+onParty\(party\)/);
