@@ -143,7 +143,8 @@ test('a rate limit keeps the saved profile and does not reuse a price', async ()
   assert.equal(view.price, null);
   assert.equal(view.points.length, 0);
   assert.match(view.note, /Saved token details/);
-  assert.match(view.note, /mainnet-beta execution, mainnet pricing/);
+  assert.doesNotMatch(view.note, /mainnet|devnet|testnet/i);
+  assert.match(view.note, /does not authorize a transaction/);
 });
 
 /**
@@ -264,7 +265,7 @@ test('ranges past one day draw that window, not the 24h move', async () => {
   assert.equal(drawn.points.length, 3);
   assert.notEqual(drawn.points[1].price, day.points[1].price);
   assert.match(drawn.note, /GeckoTerminal history/);
-  assert.match(drawn.note, /mainnet-beta execution, mainnet pricing/);
+  assert.doesNotMatch(drawn.note, /mainnet|devnet|testnet/i);
 
   const now = Date.UTC(2026, 10, 19);
   assert.match(geckoCandleUrl(POOL, '1H', now), /\/ohlcv\/minute\?aggregate=5&limit=12&currency=usd$/);

@@ -1,5 +1,4 @@
 
-import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Browser DexScreener reads for token details and USD prices.
@@ -360,10 +359,10 @@ export function dexTokenView({ mint, range = '1D', cluster = 'mainnet', token = 
     quoteSource: 'dexscreener',
     fromCache: cached,
     note: drawn
-      ? `GeckoTerminal history. DexScreener price. ${EXECUTION_LABEL}. This does not authorize a transaction.`
+      ? 'GeckoTerminal history. DexScreener price. This does not authorize a transaction.'
       : cached
-        ? `Saved token details. The price waits on DexScreener. ${EXECUTION_LABEL}. This does not authorize a transaction.`
-        : `DexScreener price. ${EXECUTION_LABEL}. This does not authorize a transaction.`,
+        ? 'Saved token details. The price waits on DexScreener. This does not authorize a transaction.'
+        : 'DexScreener price. This does not authorize a transaction.',
   };
 }
 

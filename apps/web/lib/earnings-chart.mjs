@@ -1,4 +1,4 @@
-import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Paper earnings for the positions pane, plus read-only balances
  * from Phantom and other connected wallets.
@@ -9,8 +9,8 @@ const AMOUNT = /^(0|[1-9][0-9]{0,39})$/;
 const SIGNED = /^-?(0|[1-9][0-9]{0,39})$/;
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-export const PAPER_PNL_LABEL = EXECUTION_LABEL;
-export const PAPER_PNL_CAPTION = `Paper PnL. ${EXECUTION_LABEL}. A mainnet quote does not authorize a transaction.`;
+export const PAPER_PNL_LABEL = 'Paper PnL';
+export const PAPER_PNL_CAPTION = 'Paper PnL. A price quote does not authorize a transaction.';
 
 function units(value) {
   return typeof value === 'string' && AMOUNT.test(value) ? BigInt(value) : null;
@@ -141,7 +141,6 @@ export function mergeConnectedPositions({ positions = [], wallets = [], portfoli
       if (seen.has(positionId)) continue;
       seen.add(positionId);
       const priced = typeof holding.usdMicro === 'string' && AMOUNT.test(holding.usdMicro) && holding.usdMicro !== '0';
-      const mainnet = cluster === 'mainnet';
       nextPositions.push({
         id: positionId,
         botId: null,
@@ -153,9 +152,8 @@ export function mergeConnectedPositions({ positions = [], wallets = [], portfoli
         decimals: holding.decimals,
         pnlMicroUsdc: '0',
         notionalMicroUsdc: priced ? holding.usdMicro : null,
-        quoteSource: mainnet ? 'mainnet price' : `${cluster} balance`,
+        quoteSource: 'Wallet balance',
         venue: 'Balance',
-        market: mainnet ? 'mainnet price' : `${cluster} balance`,
         side: 'balance',
         source: 'connected-balance',
         readOnly: true,

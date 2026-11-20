@@ -1,6 +1,5 @@
 'use client';
 
-import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
@@ -46,7 +45,7 @@ function historyRows(state) {
     botId: state.payments?.[index]?.botId ?? null,
     direction: row.flow,
     title: row.counterparty,
-    detail: `${row.botName} · ${row.protocol} · ${row.cluster}`,
+    detail: `${row.botName} · ${row.protocol}`,
     amount: row.baseUnits,
     asset: row.asset,
     party: partyFromToken(row.counterparty),
@@ -143,7 +142,6 @@ function HistoryDetail({ row }) {
       <Detail label="Where" value={row.counterparty} />
       <Detail label="Agent" value={row.botName} />
       <Detail label="Protocol" value={row.protocol} />
-      <Detail label="Cluster" value={row.cluster} />
       <Detail label="Amount" value={row.signedFigure} flow={row.flow} />
       <Detail label="Base units" value={`${row.baseUnits} ${row.asset}`} />
       <Detail label="Payment" value={row.id} />
@@ -153,7 +151,7 @@ function HistoryDetail({ row }) {
         <dt>Explorer</dt>
         <dd>
           <a href={row.explorerUrl ?? row.solscanUrl ?? SOLSCAN_SOLANA} target="_blank" rel="noreferrer">
-            {row.explorerUrl || row.solscanUrl ? 'Open in Solana Explorer' : 'Open mainnet-beta explorer'}
+            Open in Solana Explorer
             <ExternalLink size={14} strokeWidth={1.75} />
           </a>
         </dd>
@@ -187,7 +185,7 @@ function Wallets({ state }) {
           ))}
         </ul>
       )}
-      <p className="quiet">{EXECUTION_LABEL}. Freeze calls the policy API when that route is live.</p>
+      <p className="quiet">Freeze calls the policy API when that route is live.</p>
     </section>
   );
 }

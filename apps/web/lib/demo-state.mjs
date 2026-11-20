@@ -40,7 +40,7 @@ export function getDemoShellState() {
         walletId: 'wallet_main',
         type: 'position-management',
         status: 'paused',
-        goal: 'Monitor paper PnL on mainnet prices; alert on max-loss proximity.',
+        goal: 'Monitor paper PnL and alert when losses approach the limit.',
       },
     ].map((bot) => ({ ...bot, experience: experiences[bot.id] })),
     timeline: [

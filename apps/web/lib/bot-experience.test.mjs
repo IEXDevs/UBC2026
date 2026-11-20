@@ -14,10 +14,20 @@ import {
   raisedCap,
   logsUrl,
   timelineEntries,
+  timelineSummary,
   whyExplanation,
   whyFromListedDecision,
 } from './bot-experience.mjs';
 import { getDemoShellState } from './demo-state.mjs';
+
+test('saved verification summaries keep the result without a network label', () => {
+  for (const cluster of ['mainnet-beta', 'devnet']) {
+    assert.equal(timelineSummary({
+      kind: 'verify.settled',
+      summary: `Decision memo recorded. Approval recorded. ${cluster} execution, mainnet pricing.`,
+    }), 'Decision memo recorded. Approval recorded.');
+  }
+});
 
 /**
  * Achieves: verifies approval preview is the first bot-page section.

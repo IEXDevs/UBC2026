@@ -1,5 +1,4 @@
 
-import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Profile statistics. Voice time is measured on this device.
  * Token totals use the provider usage when a line has it, and estimate the rest.
@@ -93,8 +92,8 @@ export function statisticsView({ bots = [], ownerId = '', remoteMetric = null, v
   return {
     source: overview.source,
     note: overview.source === 'runtime'
-      ? `Counted from the agent runtime. ${EXECUTION_LABEL}.`
-      : `Counted from activity stored for these agents. ${EXECUTION_LABEL}.`,
+      ? 'Counted from the agent runtime.'
+      : 'Counted from activity stored for these agents.',
     ownerRows,
     agents,
   };

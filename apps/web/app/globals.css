@@ -5090,7 +5090,6 @@ body:has(.backdrop.is-cover) {
 .profile-handle small { min-width: 40px; font-size: 12px; }
 .profile-save { margin-top: 2px; }
 .profile-note { max-width: 360px; line-height: 1.5; }
-.profile-context { font-size: 11px; margin: 12px 0 20px; }
 .profile-claim { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 12px; }
 .profile-claim-input { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .profile-claim-input input { width: 160px; min-width: 0; border: 0; border-bottom: 1px solid #666; border-radius: 0; padding: 5px 0; background: transparent; font: inherit; }

@@ -66,7 +66,7 @@ test('demo money rows match the contract shapes', () => {
   assert.equal(payments[0].direction, 'paid');
   assert.equal(payments[0].amountLabel, '0.01 USDC');
   assert.equal(payments[0].badge, null);
-  assert.match(payments[1].detail, /Meteora · x402 · mainnet-beta/);
+  assert.equal(payments[1].detail, 'Meteora · x402');
 
   const wallets = describeWallets(state.wallets, state.bots);
   assert.equal(wallets[0].kind, 'main');
@@ -77,7 +77,7 @@ test('demo money rows match the contract shapes', () => {
   const positions = describePositions(state.positions, state.bots);
   assert.equal(positions[0].amountLabel, '25 USDC');
   assert.equal(positions[0].pnlLabel, '-1.5 USDC');
-  assert.match(positions[0].note, /mainnet-beta execution, mainnet pricing/);
+  assert.equal(positions[0].note, state.positions[0].quoteSource);
 
   const history = describeHistory(state.payments, state.bots);
   assert.equal(history[0].solscanUrl, null);

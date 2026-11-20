@@ -126,7 +126,7 @@ export function positionsFromStatus(botId, body) {
       ...(typeof row.venue === 'string' && row.venue.trim() ? { venue: row.venue.trim().slice(0, 32) } : {}),
       ...(typeof row.market === 'string' && row.market.trim()
         ? { market: row.market.trim().slice(0, 32) }
-        : (row.pricingCluster === 'mainnet' ? { market: 'mainnet price' } : {})),
+        : {}),
       side: typeof row.side === 'string' && row.side.trim() ? row.side.trim().slice(0, 16) : 'supply',
       mark: typeof row.priceUsd === 'string' ? row.priceUsd : null,
       notionalMicroUsdc: mark && AMOUNT.test(mark) ? mark : null,
@@ -172,7 +172,7 @@ export function positionsFromBook(items, marks = []) {
       pnlMicroUsdc: mark && SIGNED.test(mark.pnlMicroUsdc) ? mark.pnlMicroUsdc : realized,
       quoteSource: mark?.quoteSource || 'paper book',
       ...(mark?.venue ? { venue: mark.venue } : {}),
-      market: mark?.market || (row.cluster === 'mainnet' ? 'mainnet price' : 'mainnet-beta book'),
+      ...(mark?.market ? { market: mark.market } : {}),
       side: mark?.side || (typeof row.mode === 'string' && row.mode.trim() ? row.mode.trim().slice(0, 16) : 'supply'),
       ...(mark?.mark ? { mark: mark.mark } : {}),
       notionalMicroUsdc: entry || mark?.notionalMicroUsdc || null,

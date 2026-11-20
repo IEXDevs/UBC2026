@@ -1,5 +1,4 @@
 
-import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 import { SOLANA_CLUSTER, explorerClusterQuery } from '@ubc2026/contracts/solana';
 /** Money pane view models from live Worker / Privy rows (no preview seeds). */
 import { platformBalance } from './platform-send.mjs';
@@ -46,7 +45,7 @@ export function describePayments(payments, bots) {
     direction: payment.direction,
     amountLabel: `${formatBaseUnits(payment.amount)} ${payment.asset}`,
     title: payment.counterparty,
-    detail: `${botName(bots, payment.botId)} · ${payment.protocol} · ${payment.cluster}`,
+    detail: `${botName(bots, payment.botId)} · ${payment.protocol}`,
     badge: confirmationBadge(payment),
   }));
 }
@@ -320,7 +319,7 @@ export function describePositions(positions, bots) {
         : null,
       healthLabel: percentWhole(position.healthPct),
       apyLabel: percentFromBps(position.apyBps),
-      note: `${EXECUTION_LABEL} · ${position.quoteSource}`,
+      note: position.quoteSource,
     };
   });
 }

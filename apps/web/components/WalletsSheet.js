@@ -891,7 +891,7 @@ function SendPane({
         ))}
       </div>
       {asset && asset.symbol !== 'USDC' ? (
-        <p className="quiet">This prices {asset.symbol} in USDC. The quote is mainnet pricing and is not broadcast. The slide sends that USDC on the platform ledger.</p>
+        <p className="quiet">This prices {asset.symbol} in USDC. The quote doesn’t move funds. Sliding sends USDC on the platform ledger.</p>
       ) : null}
       <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
       <SlideCommit
@@ -931,14 +931,14 @@ function SendPane({
 function targetHint(target, observing = false) {
   if (observing) {
     if (target?.kind === 'wallet' && target.walletKind === 'main') {
-      return 'This sends mainnet-beta USDC to the main wallet. The connected wallet approves it.';
+      return 'This sends USDC to the main wallet. The connected wallet approves it.';
     }
-    return 'A connected wallet sends mainnet-beta USDC to the main wallet.';
+    return 'A connected wallet sends USDC to the main wallet.';
   }
   if (!target) return 'Type a @handle or a .sol name, or pick a wallet.';
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
   if (target.kind === 'wallet' && target.spendable === false) return 'Pick the main wallet to move funds there.';
-  if (target.kind === 'wallet') return `Sends USDC on Solana mainnet-beta to ${target.caption}.`;
+  if (target.kind === 'wallet') return `Sends USDC to ${target.caption}.`;
   if (target.kind === 'invalid-address') return 'That address is not a valid Solana pubkey.';
   return 'Raw addresses are not on the platform ledger yet.';
 }

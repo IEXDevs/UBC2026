@@ -96,7 +96,7 @@ test('portfolio slices sum to the whole and skip dust nfts', () => {
   assert.equal(book.wallets[0].spendable, false);
   assert.equal(book.unpriced, 0);
   assert.match(book.note, /do not authorize a transaction/);
-  assert.match(book.note, /mainnet-beta execution, mainnet pricing/);
+  assert.doesNotMatch(book.note, /mainnet|devnet|testnet/i);
 });
 
 /**
@@ -162,7 +162,7 @@ test('quicknode read prices balances and never sends a transaction', async () =>
   assert.equal(book.fetchedAt, '2026-11-15T00:00:00.000Z');
   assert.equal(calls.includes('sendTransaction'), false);
   assert.equal(JSON.stringify(book).includes('quicknode-secret-path'), false);
-  assert.match(book.note, /Read-only mainnet balances/);
+  assert.match(book.note, /Read-only balances/);
 });
 
 /**

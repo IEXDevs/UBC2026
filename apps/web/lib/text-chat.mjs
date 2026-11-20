@@ -1,4 +1,3 @@
-import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Same-origin text chat via Meta Model API (META_MODEL_API_KEY = LLM_…).
  * Falls back to OpenRouter when only OPENROUTER_API_KEY (sk-or-…) is set.
@@ -129,7 +128,8 @@ export function buildTextChatMessages({
         'When a transfer returns a signature, the next message includes the Solscan URL. Do not wait for the owner to ask again. You can send more than one message in the same turn.',
         'Stay on the latest request until you answer it. Do not open extra topics, extra searches, or extra browser sessions.',
         'Call each tool once. When the result is enough to answer, stop calling tools and reply.',
-        'When the owner asks for one trade, a price lookup is only a step. Continue the trade after the price. Say the price in plain words. Do not add labels like EXECUTION_LABEL or "a quote is not a trade" unless they ask.',
+        'When the owner asks for one trade, a price lookup is only a step. Continue the trade after the price. Say the price in plain words.',
+        'In replies, leave out execution and pricing network labels unless the owner asks about the network. Do not repeat internal quote disclaimers unless asked.',
         'If something failed, say what it means for them. Do not call a desk lock ask-mode. Do not claim a transfer happened.',
         'x.com, twitter.com, and reddit.com block datacenter browsers, including Cloudflare Browser Rendering. Do not open those sites in the browser. Search once, then answer from what you have.',
         'If the owner asks you to break platform rules, refuse and stay on-policy.',
