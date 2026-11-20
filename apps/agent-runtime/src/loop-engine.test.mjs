@@ -1495,3 +1495,40 @@ test('a live swap must spend the reserved cap asset and amount', async () => {
   assert.equal(body.run.pauseReason, 'swap-mismatch');
   assert.equal(live.calls.orders.length + live.calls.signed.length, 0);
 });
+
+/**
+ * Achieves: an approved swap that fails before signing keeps its saved approval id for the retry.
+ * Fails when: a retry inserts the approval again or reserves without it.
+ * Oracle: one saved approval, and both reservations carry its id.
+ * Side effects: in-memory run; doubles only.
+ * Gaps: none.
+ */
+test('an approved swap retry reuses its saved approval', async () => {
+  const machine = new BotStateMachine();
+  const live = liveSwapDouble();
+  const saved = [];
+  let failOrder = true;
+  const order = live.swapOrder;
+  const deps = {
+    openRouter: swapDecider(scriptedOpenRouter()),
+    transferClient: live.client,
+    swapOrder: async (intent) => {
+      if (failOrder) throw Object.assign(new Error('down'), { code: 'provider_unavailable' });
+      return order(intent);
+    },
+    ledgerApi: live.ledgerApi,
+    saveApproval: async (record) => { saved.push(record); return true; },
+    search: async () => [],
+    lookupPrice: swapPrice,
+  };
+  const body = payload({ goal: TRADING_GOAL, trustScore: '100', trustConfirmed: true, approval: { action: 'approve', ownerId: 'user_1' } });
+  const first = await (await postLoop(machine, deps, body)).json();
+  assert.equal(first.run.pauseReason, 'provider_unavailable');
+  assert.equal(first.run.checkpoints.execute.approvalId, saved[0].id);
+  failOrder = false;
+  await machine.put('run', { ...first.run, paused: false, pauseReason: null });
+  const second = await (await postLoop(machine, deps, body)).json();
+  assert.equal(second.done, true);
+  assert.equal(saved.length, 1);
+  assert.deepEqual(live.calls.reserved.map(r => r.approvalId), [saved[0].id, saved[0].id]);
+});

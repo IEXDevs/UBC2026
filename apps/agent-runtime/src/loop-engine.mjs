@@ -803,8 +803,9 @@ async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
   }
   const started = withCheckpoint(run, 'execute', { at: ctx.now, status: 'started', idempotencyKey, memo, ...(approvalId ? { approvalId } : {}) });
   await ctx.persist(started);
+  const kept = { idempotencyKey, ...(approvalId ? { approvalId } : {}) };
   const reserved = await reserveSpend(started, ctx, proposal, idempotencyKey, approvalId);
-  if (reserved.wait) return waitStep(started, 'execute', reserved.wait[0], { ...reserved.wait[1], ...(approvalId ? { approvalId } : {}) }, ctx.now);
+  if (reserved.wait) return waitStep(started, 'execute', reserved.wait[0], { ...reserved.wait[1], ...kept }, ctx.now);
   let order;
   try {
     order = await orderFn({
@@ -814,12 +815,12 @@ async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
       userPublicKey: ctx.wallet.address,
     });
   } catch (error) {
-    return waitStep(started, 'execute', priceErrorCode(error), { idempotencyKey }, ctx.now);
+    return waitStep(started, 'execute', priceErrorCode(error), kept, ctx.now);
   }
   if (!order || order.inputMint !== swap.inputMint || order.outputMint !== swap.outputMint
     || order.inAmount !== swap.inAmount || typeof order.transaction !== 'string'
     || !/^(?:[1-9][0-9]{0,39})$/.test(order.outAmount ?? '')) {
-    return waitStep(started, 'execute', 'invalid_quote', { idempotencyKey }, ctx.now);
+    return waitStep(started, 'execute', 'invalid_quote', kept, ctx.now);
   }
   const client = ctx.deps.transferClient;
   let prepared;
@@ -827,7 +828,7 @@ async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
     prepared = await client.prepareSolanaTransfer({ transaction: order.transaction });
     if (prepared?.transaction !== order.transaction) throw Object.assign(new Error('invalid_simulation'), { code: 'invalid_simulation' });
   } catch (error) {
-    return waitStep(started, 'execute', typeof error?.code === 'string' ? error.code : 'swap-failed', { idempotencyKey }, ctx.now);
+    return waitStep(started, 'execute', typeof error?.code === 'string' ? error.code : 'swap-failed', kept, ctx.now);
   }
   // Once signing starts, a retry could land a second swap with a fresh blockhash. It waits for a person instead.
   const signing = withCheckpoint(started, 'execute', { ...started.checkpoints.execute, signing: true });
@@ -836,11 +837,11 @@ async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
   try {
     sent = await client.signPreparedSolanaTransfer({ bot: ctx.bot, wallet: ctx.wallet, prepared });
   } catch (error) {
-    return waitStep(signing, 'execute', typeof error?.code === 'string' ? error.code : 'swap-failed', { idempotencyKey, signing: true }, ctx.now);
+    return waitStep(signing, 'execute', typeof error?.code === 'string' ? error.code : 'swap-failed', { ...kept, signing: true }, ctx.now);
   }
-  if (sent?.cluster !== SOLANA_CLUSTER) return waitStep(signing, 'execute', 'wrong-cluster', { idempotencyKey, signing: true }, ctx.now);
+  if (sent?.cluster !== SOLANA_CLUSTER) return waitStep(signing, 'execute', 'wrong-cluster', { ...kept, signing: true }, ctx.now);
   if (typeof sent.signature !== 'string' || !sent.signature) {
-    return waitStep(signing, 'execute', 'execute-unconfirmed', { idempotencyKey, signing: true }, ctx.now);
+    return waitStep(signing, 'execute', 'execute-unconfirmed', { ...kept, signing: true }, ctx.now);
   }
   return finishStep(signing, 'execute', {
     mode: 'swap',
