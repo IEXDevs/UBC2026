@@ -9,6 +9,7 @@ import { ChevronDown, Plus, Settings2, X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
 import GlideSelect from './GlideSelect';
+import JupiterSwap from './JupiterSwap';
 import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
 import TokenScreen from './TokenScreen';
@@ -23,7 +24,7 @@ import { partyFromToken } from '../lib/party-book.mjs';
 import { embeddedCreateOptions, embeddedSolanaCount } from '../lib/wallet-provision.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
 import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
-import { describeWallets, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
+import { describeWallets, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
   displayToUnits,
@@ -31,7 +32,6 @@ import {
   normalizeTokenPrefs,
   parseImportKey,
   parseSendTarget,
-  readQuoteOut,
   swapDraft,
   verifyRecoveryPhrase,
   tokenStorageKey,
@@ -41,6 +41,7 @@ import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
 import { sendPreview } from '../lib/txn-preview.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
+import { swapReceipt } from '../lib/jupiter-plugin.mjs';
 
 const TRANSFER = [
   { id: 'send', label: 'Send' },
@@ -83,6 +84,7 @@ export default function WalletsSheet({
   const [prefs, setPrefs] = useState(emptyTokenPrefs);
   const [retiring, setRetiring] = useState('');
   const [retireNote, setRetireNote] = useState('');
+  const [swapMint, setSwapMint] = useState('');
 
   useEffect(() => {
     setRoot(document.body);
@@ -153,6 +155,12 @@ export default function WalletsSheet({
     const result = await onSend?.(pending);
     if (result?.ok) setBalanceRevision(value => value + 1);
     return result;
+  }
+
+  function swapped(signature) {
+    setBalanceRevision(value => value + 1);
+    const receipt = swapReceipt({ signature, walletLabel: active?.label || '' });
+    if (receipt) onReceipt?.(receipt);
   }
 
   const wallets = (state?.wallets || []).filter(wallet => wallet && !wallet.deletedAt && !wallet.deleted_at);
@@ -232,7 +240,10 @@ export default function WalletsSheet({
                   previewPortfolio={previewBook}
                   onSend={() => openTransfer('send')}
                   onReceive={() => openTransfer('receive')}
-                  onSwap={() => openTransfer('swap')}
+                  onSwap={(symbol, mint) => {
+                    setSwapMint(mint || tokens.find(token => token.symbol === symbol)?.mint || '');
+                    openTransfer('swap');
+                  }}
                 />
               ) : <p className="quiet">{signedIn ? 'Add a wallet to see its assets here.' : 'Sign in to read the assets in your wallets.'}</p>}
               <details className="wallet-fold wallet-allocation" onToggle={event => setPortfolioOpen(event.currentTarget.open)}>
@@ -290,7 +301,15 @@ export default function WalletsSheet({
                     />
                   ) : null}
                   {transfer === 'receive' ? <ReceivePane active={active} handle={handle} /> : null}
-                  {transfer === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} /> : null}
+                  {transfer === 'swap' ? (
+                    <JupiterSwap
+                      address={active?.address || ''}
+                      label={active?.label || ''}
+                      frozen={Boolean(active?.frozen)}
+                      inputMint={swapMint}
+                      onSwapped={swapped}
+                    />
+                  ) : null}
                 </motion.div>
               </AnimatePresence>
             </section>
@@ -952,104 +971,6 @@ function ReceivePane({ active, handle }) {
   );
 }
 
-function SwapPane({ tokens }) {
-  const [from, setFrom] = useState(tokens[0]?.symbol || 'USDC');
-  const [to, setTo] = useState(tokens[1]?.symbol || 'SOL');
-  const [amount, setAmount] = useState('');
-  const [status, setStatus] = useState('');
-  const [quote, setQuote] = useState('');
-  const draft = swapDraft(tokens, { from, to, amountText: amount });
-  const decimals = draft.output?.decimals;
-  const symbol = draft.output?.symbol || '';
-  const quoteUrl = draft.url || '';
-  const options = tokens.map(token => ({ value: token.symbol, label: token.symbol }));
-
-  useEffect(() => {
-    if (!quoteUrl || !Number.isInteger(decimals)) {
-      setQuote('');
-      if (amount.trim() && draft.error) {
-        setStatus(draft.error === 'not_tradeable'
-          ? 'That token is restricted.'
-          : draft.error === 'invalid_amount'
-            ? 'Enter an amount.'
-            : 'Choose two different tokens.');
-      } else {
-        setStatus('');
-      }
-      return undefined;
-    }
-    let stop = false;
-    setStatus('Quoting…');
-    const timer = setTimeout(() => {
-      fetch(quoteUrl)
-        .then(response => response.json().then(body => ({ ok: response.ok, body })))
-        .then(({ ok, body }) => {
-          if (stop) return;
-          const out = readQuoteOut(body);
-          if (!ok || !out) {
-            setQuote('');
-            setStatus('No quote. Nothing was signed.');
-            return;
-          }
-          setQuote(`${formatBaseUnits(out, decimals)} ${symbol}`);
-          setStatus('Quote ready. Nothing was signed.');
-        })
-        .catch(() => {
-          if (!stop) {
-            setQuote('');
-            setStatus('The quote did not load. Nothing was signed.');
-          }
-        });
-    }, 350);
-    return () => {
-      stop = true;
-      clearTimeout(timer);
-    };
-  }, [quoteUrl, decimals, symbol, amount, draft.error]);
-
-  return (
-    <form className="wallet-form field swap-form" onSubmit={event => event.preventDefault()}>
-      <p className="quiet">A quote fills in as you type. Nothing is signed from this screen.</p>
-      <label className="wallet-pick-label">
-        From
-        <GlideSelect
-          className="wallet-pick"
-          ariaLabel="From"
-          menuWidth={420}
-          accentColor="#e4c27a"
-          surfaceColor="#1a2422"
-          highlightColor="#243833"
-          textColor="#f6f3ea"
-          value={from}
-          options={options}
-          onChange={(next) => { setFrom(next); setQuote(''); }}
-        />
-      </label>
-      <label className="wallet-pick-label">
-        To
-        <GlideSelect
-          className="wallet-pick"
-          ariaLabel="To"
-          menuWidth={420}
-          accentColor="#e4c27a"
-          surfaceColor="#1a2422"
-          highlightColor="#243833"
-          textColor="#f6f3ea"
-          value={to}
-          options={options}
-          onChange={(next) => { setTo(next); setQuote(''); }}
-        />
-      </label>
-      <label>
-        Amount
-        <input value={amount} inputMode="decimal" placeholder="0.00" onChange={event => { setAmount(event.target.value); setQuote(''); }} />
-      </label>
-      {quote ? <p className="wallet-figure wallet-figure-sm">{quote}</p> : null}
-      {status ? <p className="quiet" role="status">{status}</p> : null}
-    </form>
-  );
-}
-
 function TokenPane({ tokens, prefs, onSave }) {
   const [symbol, setSymbol] = useState('');
   const [mint, setMint] = useState('');
@@ -1062,7 +983,7 @@ function TokenPane({ tokens, prefs, onSave }) {
 
   return (
     <div className="wallet-form">
-      <p className="quiet">Hidden tokens leave the asset list. Restricted tokens stay visible and cannot be sent or swapped here. USDC stays on both.</p>
+      <p className="quiet">Hidden tokens leave the asset list. Restricted tokens stay visible and cannot be sent here. USDC stays on both.</p>
       <ul className="token-rows">
         {tokens.map(token => (
           <li key={token.symbol} className="token-settings">
