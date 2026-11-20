@@ -14,21 +14,22 @@ export default function AccountValue({ ownerId, getAccessToken, wallets = [], de
   useEffect(() => {
     setPortfolio(null);
     if (!ownerId) return undefined;
-    if (devPreview) {
-      setPortfolio(previewPortfolioFor(walletKey.split(',').filter(Boolean).map(address => ({ address }))));
-      return undefined;
-    }
     const controller = new AbortController();
     let stopped = false;
     (async () => {
       try {
-        const response = await fetch('/api/portfolio?cluster=devnet', {
-          headers: await ownerAuthHeaders(ownerId, getAccessToken),
-          cache: 'no-store',
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
-        });
-        if (!response.ok) return;
-        const body = await response.json();
+        let body;
+        if (devPreview) {
+          body = previewPortfolioFor(walletKey.split(',').filter(Boolean).map(address => ({ address })));
+        } else {
+          const response = await fetch('/api/portfolio?cluster=devnet', {
+            headers: await ownerAuthHeaders(ownerId, getAccessToken),
+            cache: 'no-store',
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+          });
+          if (!response.ok) return;
+          body = await response.json();
+        }
         const enriched = await enrichPortfolio(body, { userId: ownerId, storage: window.localStorage })
           .catch(() => ({ portfolio: body }));
         if (stopped) return;
