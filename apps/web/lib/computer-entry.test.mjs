@@ -55,7 +55,7 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
   assert.match(panel, /if \(screen\) \{\s*if \(!sessionRecordId\) return null;\s*return \(\s*<section className="side-computer"/);
   assert.match(panel, /is-off/);
   assert.match(panel, /framed \? 'Watch' : 'Open Computer'/);
-  assert.match(source('components/AccountMenu.js'), /id: 'computer', label: 'Computer'/);
+  assert.doesNotMatch(source('components/AccountMenu.js'), /id: 'computer', label: 'Computer'/);
   assert.match(panel, /Take control/);
   assert.match(panel, /Return control/);
   assert.match(panel, /Force stop/);
