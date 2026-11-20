@@ -901,9 +901,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const styled = useMemo(() => {
     const looked = applyLooks(seedBots, looks);
     if (!devPreview || looked.length > 0) return looked;
-    const sample = previewBot();
+    const sample = previewBot(botRecords);
     return sample && !removedIds?.has(sample.id) ? [sample] : looked;
-  }, [seedBots, looks, devPreview, removedIds]);
+  }, [seedBots, looks, devPreview, removedIds, botRecords]);
   const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
   const bots = assigned.bots.map((bot) => (
     Object.prototype.hasOwnProperty.call(loopOverrides, bot.id)

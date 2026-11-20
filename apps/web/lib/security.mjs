@@ -10,6 +10,20 @@ export const SECURITY_ACTIONS = Object.freeze([
   'request-grab-back',
 ]);
 
+const ACTION_DESCRIPTIONS = {
+  'pause-all': 'Stop agent runs. Resume them individually when you’re ready.',
+  'freeze-all-bots': 'Block new spending and pause agents until you choose to unfreeze.',
+  'unfreeze-all-bots': 'Allow spending again. Paused agents stay paused.',
+  'request-grab-back': 'Request a transfer from agent wallets to your main wallet.',
+};
+
+export function securityAgentStatus(bot) {
+  if (bot.frozen) return 'Frozen';
+  if (bot.status === 'draft') return 'Draft';
+  if (bot.status === 'paused') return 'Paused';
+  return bot.enabled ? 'Enabled' : 'Disabled';
+}
+
 export function securityActionLabel(action) {
   switch (action) {
     case 'pause-all': return 'Pause every agent';
@@ -58,6 +72,7 @@ export function buildSecurityPage({
     actions: SECURITY_ACTIONS.map((id) => ({
       id,
       label: securityActionLabel(id),
+      description: ACTION_DESCRIPTIONS[id],
       kind: id === 'request-grab-back' ? 'danger' : id === 'freeze-all-bots' ? 'warn' : 'default',
       confirm: id === 'pause-all'
         ? 'Pause every running agent? They can be resumed later.'
