@@ -1,92 +1,57 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import {
-  applySecurityActionLocal,
-  buildSecurityPage,
-  pauseAllUrl,
-  securityActionLabel,
-  securityAgentStatus,
-} from './security.mjs';
-import { getDemoShellState } from './demo-state.mjs';
+import { securityAgent, securityPauseStatus, setSecurityPause, setSecurityFreeze } from './security.mjs';
 
-test('the scrollable agent statuses remain reachable with a keyboard', () => {
+test('security shows bulk controls before agent rows and gives each icon an accessible name', () => {
   const source = readFileSync(new URL('../components/SecurityPanel.js', import.meta.url), 'utf8');
-  assert.match(source, /<ul className="security-agent-list" tabIndex=\{0\} aria-label="Agent statuses">/);
+  assert.match(source, /Pause all[\s\S]*Freeze all[\s\S]*<ul className="security-agent-list" aria-label="Agents">/);
+  assert.match(source, /aria-label=\{playbackLabel\}/);
+  assert.doesNotMatch(source, /accountLabel|security-assurance|security-overview/);
 });
 
-test('security action accessible names use the visible button text', () => {
-  const source = readFileSync(new URL('../components/SecurityPanel.js', import.meta.url), 'utf8');
-  const button = source.match(/<button[\s\S]*?className="security-action-button"[\s\S]*?<\/button>/)?.[0];
-  assert.ok(button);
-  assert.match(button, /look\.button/);
-  assert.doesNotMatch(button, /aria-label=/);
-});
-
-/**
- * Achieves: verifies security page lists kill-switch actions and never echoes secrets in notes.
- * Fails when: action count drifts, labels wrong, notes contain sk-/JWT/secret, or javascript: pause URL accepted.
- * Oracle: 4 actions; pause URL is runtime/bots/:id/pause; javascript:x → null.
- * Side effects / state checked: N/A.
- * Gaps: none for page builder; remote pause HTTP is out of scope.
- */
-test('security page lists kill-switch actions without secrets', () => {
-  const state = getDemoShellState();
-  const page = buildSecurityPage({
-    ownerId: 'did:privy:abc',
-    accountLabel: 'a@example.com',
-    bots: state.bots,
+test('the agent list reads freeze state from the spending record', () => {
+  assert.deepEqual(securityAgent({ id: 'one', name: 'One', status: 'idle', record: { frozen: true } }), {
+    id: 'one', name: 'One', draft: false, frozen: true, disabled: false,
   });
-  assert.equal(page.signedIn, true);
-  assert.equal(page.actions.length, 4);
-  assert.ok(page.actions.every((action) => action.description.length > 20));
-  assert.equal(securityActionLabel('unfreeze-all-bots'), 'Unfreeze every agent');
-  assert.equal(securityActionLabel('pause-all'), 'Pause every agent');
-  assert.ok(page.notes.every((n) => !/sk-|eyJ|secret/i.test(n)));
-  assert.equal(pauseAllUrl('https://runtime.example/', 'bot_1'), 'https://runtime.example/bots/bot_1/pause');
-  assert.equal(pauseAllUrl('javascript:x', 'bot_1'), null);
 });
 
-test('agent status prioritizes frozen and paused over enabled', () => {
-  assert.equal(securityAgentStatus({ frozen: true, enabled: true, status: 'paused' }), 'Frozen');
-  assert.equal(securityAgentStatus({ enabled: true, status: 'paused' }), 'Paused');
-  assert.equal(securityAgentStatus({ enabled: false, status: 'draft' }), 'Draft');
-  assert.equal(securityAgentStatus({ enabled: false, status: 'idle' }), 'Disabled');
-  assert.equal(securityAgentStatus({ enabled: true, status: 'watching' }), 'Enabled');
+test('pause state reloads from the agent checkpoint', async () => {
+  const signal = new AbortController().signal;
+  const fetcher = async (url, options) => {
+    assert.equal(url, '/api/runtime/bots/bot_1/status');
+    assert.equal(options.signal, signal);
+    return Response.json({ ok: true, paused: true, run: null });
+  };
+  assert.equal(await securityPauseStatus('bot_1', {}, signal, fetcher), true);
+  assert.equal(await securityPauseStatus('bot_1', {}, signal, async () => new Response('', { status: 502 })), null);
 });
 
-test('security overview handles an empty signed-out account without invented agents', () => {
-  const page = buildSecurityPage();
-  assert.equal(page.signedIn, false);
-  assert.equal(page.accountLabel, 'Not signed in');
-  assert.deepEqual(page.summary, { botCount: 0, enabled: 0, paused: 0, frozen: 0 });
-  assert.deepEqual(page.bots, []);
+test('bulk pause updates only successful agents and resume targets one agent', async () => {
+  const headers = { 'x-owner-id': 'owner' };
+  const fetcher = async (url, options) => {
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers, headers);
+    if (url.endsWith('/bot_2/pause')) return Response.json({ error: 'unavailable' }, { status: 502 });
+    assert.match(url, /^\/api\/runtime\/bots\/bot_1\/(pause|resume)$/);
+    return Response.json({ ok: true, paused: url.endsWith('/pause') });
+  };
+  assert.deepEqual(await setSecurityPause(['bot_1', 'bot_2'], true, headers, fetcher), { ids: ['bot_1'], ok: false });
+  assert.deepEqual(await setSecurityPause(['bot_1'], false, headers, fetcher), { ids: ['bot_1'], ok: true });
 });
 
-test('security status reflects the record after a freeze and unfreeze', () => {
-  const bots = [{ id: 'one', name: 'One', status: 'watching', record: { enabled: true, frozen: false } }];
-  const frozen = applySecurityActionLocal(bots, 'freeze-all-bots');
-  const page = buildSecurityPage({ ownerId: 'owner', bots: frozen });
-  assert.equal(page.summary.frozen, 1);
-  assert.equal(page.summary.paused, 1);
-  assert.equal(securityAgentStatus(page.bots[0]), 'Frozen');
-  const unfrozen = buildSecurityPage({ bots: applySecurityActionLocal(frozen, 'unfreeze-all-bots') });
-  assert.equal(securityAgentStatus(unfrozen.bots[0]), 'Paused');
-  assert.equal(bots[0].status, 'watching');
-  assert.equal(bots[0].record.frozen, false);
-});
-
-/**
- * Achieves: verifies local pause/freeze mutate bot shell status without remote calls.
- * Fails when: pause-all leaves watching bots active, or freeze-all leaves frozen=false on live bots.
- * Oracle: every bot is draft|paused after pause-all; frozen===true or draft after freeze-all.
- * Side effects / state checked: returned bot arrays only (inputs not required to stay immutable).
- * Gaps: none for local apply; undo/unfreeze path is separate.
- */
-test('local pause and freeze update bot shell state', () => {
-  const state = getDemoShellState();
-  const paused = applySecurityActionLocal(state.bots, 'pause-all');
-  assert.ok(paused.every((b) => b.status === 'draft' || b.status === 'paused'));
-  const frozen = applySecurityActionLocal(state.bots, 'freeze-all-bots');
-  assert.ok(frozen.every((b) => b.frozen === true || b.status === 'draft'));
+test('the freeze request targets an agent and bulk changes can partially succeed', async () => {
+  const expected = { botId: 'bot_1', frozen: false, enabled: false };
+  const single = await setSecurityFreeze('bot_1', false, {}, async (url, options) => {
+    assert.equal(url, '/api/runtime/api/bots/freeze');
+    assert.deepEqual(JSON.parse(options.body), { botId: 'bot_1', frozen: false });
+    return Response.json({ ok: true, items: [expected, { ...expected, botId: 'bot_2' }] });
+  });
+  assert.deepEqual(single, { items: [expected], ok: true });
+  const frozen = { ...expected, frozen: true };
+  const bulk = await setSecurityFreeze(null, true, {}, async (url, options) => {
+    assert.deepEqual(JSON.parse(options.body), { frozen: true });
+    return Response.json({ items: [frozen] }, { status: 502 });
+  });
+  assert.deepEqual(bulk, { items: [frozen], ok: false });
 });

@@ -1,130 +1,59 @@
-/**
- * Account security page model (Isaac / 7C).
- * Kill-switch + freeze intents only. Never signs, never shows secret values.
- */
+import { shellRuntimeUrl } from './runtime-data.mjs';
 
-export const SECURITY_ACTIONS = Object.freeze([
-  'pause-all',
-  'freeze-all-bots',
-  'unfreeze-all-bots',
-  'request-grab-back',
-]);
-
-const ACTION_DESCRIPTIONS = {
-  'pause-all': 'Stop agent runs. Resume them individually when you’re ready.',
-  'freeze-all-bots': 'Block new spending and pause agents until you choose to unfreeze.',
-  'unfreeze-all-bots': 'Allow spending again. Paused agents stay paused.',
-  'request-grab-back': 'Request a transfer from agent wallets to your main wallet.',
-};
-
-export function securityAgentStatus(bot) {
-  if (bot.frozen) return 'Frozen';
-  if (bot.status === 'draft') return 'Draft';
-  if (bot.status === 'paused') return 'Paused';
-  return bot.enabled ? 'Enabled' : 'Disabled';
-}
-
-export function securityActionLabel(action) {
-  switch (action) {
-    case 'pause-all': return 'Pause every agent';
-    case 'freeze-all-bots': return 'Freeze every agent';
-    case 'unfreeze-all-bots': return 'Unfreeze every agent';
-    case 'request-grab-back': return 'Request grab-back';
-    default: return action;
-  }
-}
-
-/**
- * Build the security view. `account` is display-only Privy label / owner id.
- * Bot freeze/enabled flags come from local shell state until wallets/API land.
- */
-export function buildSecurityPage({
-  ownerId = null,
-  accountLabel = null,
-  bots = [],
-  cluster = 'devnet',
-} = {}) {
-  const list = Array.isArray(bots) ? bots : [];
-  const frozen = list.filter((b) => b.record?.frozen === true || b.frozen === true);
-  const enabled = list.filter((b) => b.record?.enabled !== false && b.status !== 'draft');
-  const paused = list.filter((b) => b.status === 'paused');
-
+export function securityAgent(bot) {
   return {
-    title: 'Security',
-    subtitle: 'Kill switch and freezes. Keys stay in Privy; this page never shows secrets.',
-    ownerId,
-    accountLabel: accountLabel || (ownerId ? String(ownerId) : 'Not signed in'),
-    cluster,
-    signedIn: Boolean(ownerId),
-    summary: {
-      botCount: list.length,
-      enabled: enabled.length,
-      paused: paused.length,
-      frozen: frozen.length,
-    },
-    bots: list.map((bot) => ({
-      id: bot.id,
-      name: bot.name,
-      status: bot.status,
-      frozen: bot.record?.frozen === true || bot.frozen === true,
-      enabled: bot.record?.enabled !== false && bot.status !== 'draft',
-    })),
-    actions: SECURITY_ACTIONS.map((id) => ({
-      id,
-      label: securityActionLabel(id),
-      description: ACTION_DESCRIPTIONS[id],
-      kind: id === 'request-grab-back' ? 'danger' : id === 'freeze-all-bots' ? 'warn' : 'default',
-      confirm: id === 'pause-all'
-        ? 'Pause every running agent? They can be resumed later.'
-        : id === 'freeze-all-bots'
-          ? 'Freeze every agent so policy refuses new spends until you unfreeze them?'
-          : id === 'unfreeze-all-bots'
-            ? 'Clear the freeze on every agent? A paused agent stays paused until you resume it.'
-            : 'Request grab-back of agent funds to the owner main wallet? Signing stays server-side.',
-    })),
-    notes: [
-      'Privy holds wallet keys. The model and this UI never receive private keys.',
-      'Pause stops the Durable Object run. Freeze blocks policy until an owner unfreezes.',
-      'Grab-back is an owner intent only here — the Worker signs on Privy when wired.',
-    ],
+    id: bot.id,
+    name: bot.name,
+    draft: !bot.record || bot.status === 'draft',
+    frozen: bot.record?.frozen === true || bot.frozen === true,
+    disabled: bot.record?.enabled === false,
   };
 }
 
-/**
- * Apply a local security action to bot list state (optimistic UI).
- * Real pause/freeze hits the runtime when `runtimeApply` is provided by the caller.
- */
-export function applySecurityActionLocal(bots, actionId) {
-  if (!Array.isArray(bots)) return [];
-  if (actionId === 'pause-all') {
-    return bots.map((bot) => (
-      bot.status === 'draft' ? bot : { ...bot, status: 'paused' }
-    ));
+export async function securityPauseStatus(botId, headers, signal, fetcher = fetch) {
+  const url = shellRuntimeUrl(`/bots/${botId}/status`);
+  if (!url) return null;
+  try {
+    const response = await fetcher(url, { headers, signal, cache: 'no-store' });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.ok === true ? data.paused === true || data.run?.paused === true : null;
+  } catch {
+    return null;
   }
-  if (actionId === 'freeze-all-bots') {
-    return bots.map((bot) => ({
-      ...bot,
-      frozen: true,
-      status: bot.status === 'draft' ? bot.status : 'paused',
-      record: bot.record ? { ...bot.record, frozen: true, enabled: false } : bot.record,
-    }));
-  }
-  if (actionId === 'unfreeze-all-bots') {
-    return bots.map((bot) => ({
-      ...bot,
-      frozen: false,
-      record: bot.record ? { ...bot.record, frozen: false } : bot.record,
-    }));
-  }
-  // grab-back: no local mutation beyond returning the same list
-  return bots.map((bot) => bot);
 }
 
-export function pauseAllUrl(runtimeBase, botId) {
-  if (typeof runtimeBase !== 'string' || !runtimeBase || !botId) return null;
-  let base;
-  try { base = new URL(runtimeBase); } catch { return null; }
-  if (base.protocol !== 'https:' && base.protocol !== 'http:') return null;
-  const root = `${base.origin}${base.pathname.replace(/\/$/, '')}`;
-  return `${root}/bots/${encodeURIComponent(botId)}/pause`;
+export async function setSecurityPause(botIds, paused, headers, fetcher = fetch) {
+  const action = paused ? 'pause' : 'resume';
+  const updated = await Promise.all(botIds.map(async (id) => {
+    const url = shellRuntimeUrl(`/bots/${id}/${action}`);
+    if (!url) return null;
+    try {
+      const response = await fetcher(url, { method: 'POST', headers });
+      const data = await response.json();
+      return response.ok && data.ok === true && data.paused === paused ? id : null;
+    } catch {
+      return null;
+    }
+  }));
+  const ids = updated.filter(Boolean);
+  return { ids, ok: ids.length === botIds.length };
+}
+
+export async function setSecurityFreeze(botId, frozen, headers, fetcher = fetch) {
+  try {
+    const response = await fetcher(shellRuntimeUrl('/api/bots/freeze'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(botId ? { botId, frozen } : { frozen }),
+    });
+    const data = await response.json();
+    // A bulk response can report some confirmed changes alongside an error.
+    const items = (Array.isArray(data.items) ? data.items : []).filter(
+      item => typeof item?.botId === 'string' && item.frozen === frozen && (!botId || item.botId === botId),
+    );
+    return { items, ok: response.ok && data.ok === true && (!botId || items.length === 1) };
+  } catch {
+    return { items: [], ok: false };
+  }
 }

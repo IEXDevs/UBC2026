@@ -20,10 +20,10 @@ import {
 import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
-import { handleApiData, resolveOwner } from './api-data.mjs';
+import { handleApiData, resolveOwner, resolveVerifiedOwner } from './api-data.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
 import { botStub, rememberBotAlert } from './bot-alerts.mjs';
-import { supabaseConfig, supabaseGet } from './supabase-rest.mjs';
+import { createSupabaseRpc, supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 import { corsPreflightResponse, withCors } from './cors.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
@@ -53,8 +53,10 @@ function isOwnerBotAction(action) {
  * Status / positions / control plane: identity from resolveOwner (Privy bearer when
  * secrets exist), then prove that owner owns the bot when Supabase is configured.
  */
-async function assertBotOwner(request, env, botId) {
-  const { ownerId, error } = await resolveOwner(request, env);
+async function assertBotOwner(request, env, botId, verifyToken = false) {
+  const { ownerId, error } = verifyToken
+    ? await resolveVerifiedOwner(request, env, env.fetch ?? fetch)
+    : await resolveOwner(request, env);
   if (error && !ownerId) {
     const status = error === 'owner_mismatch' ? 403 : 401;
     return { ok: false, status, error, ownerId: null };
@@ -159,6 +161,20 @@ function forwardPrepared(stub, target, request, ownerId, body, raw = false) {
 }
 
 async function forwardBotAction(stub, target, request, ownerId, env, botId, action) {
+  if (request.method === 'POST' && (action === 'pause' || action === 'resume') && supabaseConfig(env)) {
+    // Update the spend policy before changing the checkpoint. The RPC is
+    // idempotent, so a caller can retry if the checkpoint write fails.
+    try {
+      const rpc = createSupabaseRpc(env, env.fetch ?? fetch);
+      const result = await rpc(action === 'pause' ? 'policy_pause_bot' : 'policy_resume_bot', {
+        payload: { ownerId, botId, now: Date.now() },
+      });
+      if (result?.state === 'blocked') return json({ error: result.reason }, 409);
+      if (result?.enabled !== (action === 'resume')) return json({ error: 'agent_control_failed' }, 502);
+    } catch {
+      return json({ error: 'agent_control_failed' }, 502);
+    }
+  }
   if (action === 'loop' && request.method === 'POST') {
     const read = await readLoopPayload(request);
     if (read.kind === 'raw') return forwardPrepared(stub, target, request, ownerId, read.text, true);
@@ -322,7 +338,7 @@ async function dispatch(request, env, rawEnv = env) {
       const action = botMatch[2] ?? 'status';
       let ownerId = null;
       if (isOwnerBotAction(action)) {
-        const gate = await assertBotOwner(request, env, botId);
+        const gate = await assertBotOwner(request, env, botId, action === 'pause' || action === 'resume');
         if (!gate.ok) return json({ error: gate.error }, gate.status);
         ownerId = gate.ownerId;
       }
