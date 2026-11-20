@@ -29,6 +29,88 @@ function turnAllowed() {
   return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
 }
 
+test('tool errors remain owner-visible when follow-up model calls fail, without raw error details', async () => {
+  for (const failure of ['http', 'network', 'invalid_json']) {
+    for (const result of [
+      { error: 'recipient_not_found', detail: `secret ${META_KEY}` },
+      JSON.stringify({ error: 'recipient_not_found', hint: 'https://live.browser.run/ui/view?token=private' }),
+      { error: `private ${META_KEY}`, hint: 'raw provider credentials' },
+      { ok: false, detail: 'private provider message' },
+    ]) {
+      let calls = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'Find the recipient',
+        tools: [{ type: 'function', function: { name: 'lookup_recipient', parameters: { type: 'object' } } }],
+        invokeTool: async () => result,
+        fetcher: async (_url, options) => {
+          assert.equal(isTurnVerify(options), false);
+          if (++calls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'lookup', type: 'function', function: { name: 'lookup_recipient', arguments: '{"q":"alice"}' },
+          }] } }] });
+          if (failure === 'network') throw new Error('private network error');
+          if (failure === 'invalid_json') return new Response('not json');
+          return Response.json({ error: { message: 'private model error' } }, { status: 503 });
+        },
+      });
+      const known = typeof result === 'string' || result.error === 'recipient_not_found';
+      assert.equal(reply.text, `The recipient lookup failed${known ? ' (recipient not found)' : ''}. Please check the request and try again.`);
+      assert.deepEqual(reply.messages, [reply.text]);
+      assert.equal(reply.hold, undefined);
+      assert.equal(calls, 2);
+    }
+  }
+});
+
+test('multiple failed tools survive a follow-up outage without claiming that a successful tool failed', async () => {
+  const names = ['browser_navigate', 'get_price', 'get_wallets'];
+  let calls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: 'Check the page and my prices',
+    tools: names.map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+    invokeTool: async name => {
+      if (name === 'get_wallets') return { ok: true, items: [] };
+      if (name === 'get_price') throw new Error('private provider details');
+      return { error: 'browser_session_missing', viewerUrl: 'private viewer URL' };
+    },
+    fetcher: async (_url, options) => {
+      assert.equal(isTurnVerify(options), false);
+      if (++calls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: names.map(name => ({
+        id: name, type: 'function', function: { name, arguments: '{"url":"https://example.com"}' },
+      })) } }] });
+      return Response.json({}, { status: 503 });
+    },
+  });
+  assert.equal(reply.text, 'The browser navigation failed (no open browser session). Please check the request and try again. The price lookup failed. Please check the request and try again.');
+  assert.deepEqual(reply.messages, [reply.text]);
+  assert.equal(calls, 2);
+});
+
+test('model failures without a tool error still propagate and successful follow-ups still summarize errors', async () => {
+  for (const result of [{ ok: true }, {}, { error: 'recipient_not_found' }]) {
+    for (const modelFails of [false, true]) {
+      let calls = 0;
+      const request = completeTextChat({
+        modelApiKey: META_KEY, message: 'Find the recipient',
+        tools: [{ type: 'function', function: { name: 'lookup_recipient', parameters: { type: 'object' } } }],
+        invokeTool: async () => result,
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) return turnAllowed();
+          if (++calls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'lookup', type: 'function', function: { name: 'lookup_recipient', arguments: '{"q":"alice"}' },
+          }] } }] });
+          if (modelFails) return Response.json({}, { status: 503 });
+          return Response.json({ choices: [{ message: { content: 'Here is the lookup result.' } }] });
+        },
+      });
+      if (modelFails && !result.error) await assert.rejects(request, { code: 'openrouter_failed' });
+      else {
+        const reply = await request;
+        assert.equal(reply.text, modelFails ? 'The recipient lookup failed (recipient not found). Please check the request and try again.' : 'Here is the lookup result.');
+      }
+    }
+  }
+});
+
 test('every assistant tool call gets a result, including calls beyond the execution limit and tool failures', async () => {
   for (const count of [0, 1, 4, 6]) {
     for (const failTool of [false, true]) {

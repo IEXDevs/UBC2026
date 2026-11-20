@@ -262,6 +262,28 @@ function cardCheckout(message, history) {
   return /\blaso\b|reloadable card|\bx402\b/i.test(bits.join('\n'));
 }
 
+function toolFailureReply(name, result) {
+  const payload = typeof result === 'string' ? parseToolArgs(result) : result;
+  if (!payload || (!payload.error && payload.ok !== false)) return '';
+  const label = {
+    __proto__: null,
+    lookup_recipient: 'recipient lookup', get_price: 'price lookup', get_wallets: 'wallet lookup',
+    list_bots: 'agent lookup', web_search: 'web search', web_scrape: 'page lookup',
+    browser_open: 'browser session request', browser_navigate: 'browser navigation',
+    browser_live_view: 'browser view request', browser_release: 'browser session release',
+    request_spend: 'spend request',
+  }[name] || 'requested step';
+  const reason = {
+    __proto__: null,
+    recipient_not_found: 'recipient not found', invalid_recipient: 'invalid recipient',
+    invalid_parameters: 'invalid request', browser_session_missing: 'no open browser session',
+    browser_session_ambiguous: 'more than one browser session is open',
+    provider_unavailable: 'service unavailable', provider_failed: 'service unavailable',
+    price_unavailable: 'price unavailable', insufficient_funds: 'insufficient funds',
+  }[payload.error];
+  return `The ${label} failed${reason ? ` (${reason})` : ''}. Please check the request and try again.`;
+}
+
 function assistantToolMessage(message) {
   const next = {
     role: 'assistant',
@@ -470,6 +492,7 @@ export async function completeTextChat({
   const seenTools = new Set();
   const seenSigs = new Set();
   const spoken = [];
+  const toolFailures = new Set();
   let forceAnswer = false;
   let nudged = false;
   let readOnlyTurn = true;
@@ -602,6 +625,8 @@ export async function completeTextChat({
         const apiLine = publicApiSummary(name, result);
         if (apiLine) publish(apiLine);
       }
+      const failureReply = toolFailureReply(name, result);
+      if (failureReply) toolFailures.add(failureReply);
       const content = typeof result === 'string'
         ? clip(redact(result, secrets), 6000)
         : clip(redact(JSON.stringify(result), secrets), 6000);
@@ -631,6 +656,10 @@ export async function completeTextChat({
         reasoningEffort: effort,
       });
     } catch (error) {
+      if (toolFailures.size > 0) {
+        publish([...toolFailures].join(' '));
+        return finish(spoken.at(-1));
+      }
       // The signature line already went out. A slow follow-up model call must not hide it.
       if (spoken.length > 0) return finish(spoken.at(-1));
       throw error;
