@@ -19,6 +19,15 @@ test('agent output preserves URLs, handles, code, and dotted identifiers', () =>
 test('chat formats agent and assistant replies at render time and leaves user text intact', () => {
   const bubbles = readFileSync(new URL('../components/ChatBubbles.js', import.meta.url), 'utf8');
   assert.match(bubbles, /<MentionText text=\{line\.text\}/);
+  assert.match(bubbles, /className="chat-address"/);
+  assert.match(bubbles, /line\.mentionAddress \? <CopyAddress address=\{line\.mentionAddress\}/);
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  const address = css.slice(css.indexOf('.chat-address {'), css.indexOf('.chat-address small'));
+  assert.match(address, /font-weight:\s*700/);
+  assert.match(address, /text-decoration:\s*underline/);
+  const composer = readFileSync(new URL('../components/Composer.js', import.meta.url), 'utf8');
+  assert.match(composer, /function postUser\(text, hint, address/);
+  assert.match(composer, /if \(hint && !address\) pushLine\('assistant', hint, targetId\)/);
   assert.match(bubbles, /line\.role === 'agent' \|\| line\.role === 'assistant'\s*\? formatAgentOutput\(line\.text\)\s*: line\.text/);
   assert.match(bubbles, /linkParts\(text\)/);
   assert.match(bubbles, /className="chat-link"/);

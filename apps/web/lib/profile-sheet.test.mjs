@@ -25,9 +25,19 @@ test('profile shows the wallet name and address once', () => {
   assert.equal(logins.includes('Add a wallet'), false);
   assert.equal(logins.includes('linkWallet'), false);
   assert.equal(logins.includes('described.wallets'), false);
-  for (const pane of ['assets', 'portfolio', 'send', 'receive', 'swap', 'tokens', 'history', 'keys']) {
+  for (const pane of ['assets', 'signin', 'portfolio', 'transfer', 'history', 'keys']) {
     assert.match(sheet, new RegExp(`id: '${pane}'`));
   }
+  for (const section of ['send', 'receive', 'swap', 'tokens']) {
+    assert.match(sheet, new RegExp(`id: '${section}'`));
+  }
+  const assets = sheet.slice(sheet.indexOf("pane === 'assets'"), sheet.indexOf("pane === 'signin'"));
+  const signin = sheet.slice(sheet.indexOf("pane === 'signin'"), sheet.indexOf("pane === 'portfolio'"));
+  assert.equal(assets.includes('LinkedLogins'), false);
+  assert.match(signin, /<LinkedLogins/);
+  assert.match(sheet, /function ReceivePane\(\{ active, handle \}\)/);
+  assert.equal(sheet.includes('SNS name'), false);
+  assert.match(sheet, /aria-label="Transfer"/);
 });
 
 test('agent creation shows asset and limits on their own steps after color', () => {
