@@ -5,7 +5,13 @@ import { X } from 'lucide-react';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
 import { draftBot, draftTransferCap } from '../lib/roster.mjs';
 import { AgentPhoto } from './AgentEdit';
+import GlideSelect from './GlideSelect';
 import { usePresence } from './usePresence';
+
+const SPEND_ASSETS = [
+  { value: 'USDC', label: 'USDC' },
+  { value: 'SOL', label: 'SOL' },
+];
 
 const SPLASH = [
   { kind: 'circle', color: '#7c5cff', size: 196, side: 'left', y: '16%', gap: 28, rot: -8 },
@@ -187,8 +193,15 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
             <details>
               <summary>Spending asset and limits</summary>
               <label className="field">
-                Asset (USDC, SOL, or token mint address)
-                <input value={asset} maxLength={44} onChange={event => setAsset(event.target.value)} />
+                Asset
+                <GlideSelect
+                  className="spend-asset"
+                  ariaLabel="Spending asset"
+                  value={asset}
+                  options={SPEND_ASSETS}
+                  onChange={setAsset}
+                  menuWidth={280}
+                />
               </label>
               <label className="field">
                 Total limit (base units)

@@ -176,13 +176,14 @@ export default function WalletsSheet({
               <X size={18} strokeWidth={1.75} />
             </button>
           </div>
-          {needsWallet ? <WalletPick rows={rows} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
+          {needsWallet ? <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
           {pane === 'assets' ? (
             <>
               {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
               {signedIn ? <LinkedLogins /> : null}
               <WalletRoster
                 rows={rows}
+                handle={handle}
                 activeId={active?.id || ''}
                 onSelect={setWalletId}
                 retiring={retiring}
@@ -562,7 +563,8 @@ export function WalletAdd() {
   );
 }
 
-function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
+function WalletRoster({ rows, handle = '', activeId, onSelect, onRetire, retiring }) {
+  const name = typeof handle === 'string' ? handle.trim().replace(/^@/, '') : '';
   if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one above, or generate a new one.</p>;
   return (
     <div className="wallet-roster" role="list" aria-label="Wallets">
@@ -575,6 +577,7 @@ function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
             onClick={() => onSelect(row.id)}
           >
             <strong>{row.label}</strong>
+            {name ? <span className="wallet-roster-handle">@{name}</span> : null}
             <small>{row.kind === 'main' ? 'Main' : 'Additional'}{row.frozen ? ' · Frozen' : ''}</small>
           </button>
           <AddressCopy address={row.address} compact />
@@ -594,7 +597,8 @@ function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
   );
 }
 
-function WalletPick({ rows, activeId, onSelect }) {
+function WalletPick({ rows, handle = '', activeId, onSelect }) {
+  const name = typeof handle === 'string' ? handle.trim().replace(/^@/, '') : '';
   if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one in settings, or generate a new one.</p>;
   return (
     <label className="wallet-pick-label">
@@ -611,7 +615,7 @@ function WalletPick({ rows, activeId, onSelect }) {
         value={activeId}
         options={rows.map(row => ({
           value: row.id,
-          label: `${row.label} · ${shortAddress(row.address)}`,
+          label: `${row.label}${name ? ` · @${name}` : ''} · ${shortAddress(row.address)}`,
           tag: row.kind === 'main' ? 'Main' : 'Added',
         }))}
         onChange={onSelect}
