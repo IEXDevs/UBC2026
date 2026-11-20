@@ -15,3 +15,7 @@ export function needsChatModel(message, grants = []) {
   return !Array.isArray(grants) || !grants.some(grant => grant?.name === 'request_spend'
     && grant.kind === 'modal' && typeof grant.proof === 'string');
 }
+
+export function canReleaseChatMessage(message, { hasModel, paymentPending = false }) {
+  return !paymentPending && (hasModel || !needsChatModel(message));
+}

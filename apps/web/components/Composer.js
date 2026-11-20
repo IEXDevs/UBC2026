@@ -16,7 +16,7 @@ import GlideSelect from './GlideSelect';
 import PromptBar from './PromptBar';
 import AIProvidersSheet from './AIProvidersSheet';
 import { providerStorage } from '../lib/provider-storage.mjs';
-import { modelFreeCommand, needsChatModel } from '../lib/model-free-command.mjs';
+import { canReleaseChatMessage, modelFreeCommand, needsChatModel } from '../lib/model-free-command.mjs';
 import {
   ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
   selectedModelRequest, visibleModelOptions,
@@ -534,6 +534,11 @@ export default function Composer({
   }
 
   function sendQueuedNow(id) {
+    const queued = queueRef.current.find(item => item.id === id);
+    if (queued && needsChatModel(queued.text) && !selectedModelRequest(modelStorage, modelRef.current)) {
+      setAIProvidersOpen(true);
+      return;
+    }
     const taken = takeQueued(queueRef.current, id);
     if (!taken.item) return;
     rememberQueue(taken.queue);
@@ -745,7 +750,14 @@ export default function Composer({
       if (run !== runRef.current) return;
       const stopped = stopHold.current === run;
       if (stopped) stopHold.current = 0;
-      const released = releaseQueued(queueRef.current, { stopped });
+      const hasModel = Boolean(selectedModelRequest(modelStorage, modelRef.current));
+      // A model-dependent message stays queued while models are hidden. The
+      // shell owns USDC approvals; don't replace one by auto-starting another.
+      const paymentPending = modelFreeCommand(spoken) === 'platform-send';
+      const released = releaseQueued(queueRef.current, {
+        stopped,
+        canRelease: item => canReleaseChatMessage(item.text, { hasModel, paymentPending }),
+      });
       if (!stopped && released.next) {
         rememberQueue(released.queue);
         const history = threadRef.current.slice();
