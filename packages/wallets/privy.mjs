@@ -1,5 +1,5 @@
 import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
-import { VersionedTransaction } from '@solana/web3.js';
+import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import { verifySwapSimulation } from './swap-simulation.mjs';
 /**
  * Privy Solana wallet path for Maelstrom.
@@ -1383,7 +1383,7 @@ export function createPrivyWalletClient({
      * Bot freeze does not apply: Stop All grab-back must still move a frozen wallet.
      * Broadcast still refuses any cluster whose genesis hash is not solana.
      */
-    async signAndBroadcastOwnerSolana({ ownerId, wallet, transaction, accessToken } = {}) {
+    async signAndBroadcastOwnerSolana({ ownerId, wallet, transaction, accessToken, feePayerWallet } = {}) {
       const owner = assertOwnerId(ownerId);
       try {
         validateWallet(wallet);
@@ -1393,10 +1393,46 @@ export function createPrivyWalletClient({
       }
       if (wallet.ownerId !== owner) fail('Wallet owner must match', 'owner_mismatch');
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
+      if (feePayerWallet) {
+        try {
+          validateWallet(feePayerWallet);
+        } catch (error) {
+          if (error instanceof ContractError) fail(error.message, 'invalid_wallet');
+          throw error;
+        }
+        if (feePayerWallet.ownerId !== owner) fail('Wallet owner must match', 'owner_mismatch');
+        if (feePayerWallet.frozen || feePayerWallet.spendable === false
+            || String(feePayerWallet.id).startsWith('linked_') || String(feePayerWallet.id).startsWith('client_')) {
+          fail('Wallet cannot sign', 'wallet_frozen');
+        }
+        assertPrivyWalletId(feePayerWallet.privyWalletId);
+      }
       const ownerSession = typeof accessToken === 'string' && accessToken
         ? { ownerId: owner, accessToken, walletAddress: wallet.address }
         : undefined;
-      const signedTransaction = await signWithPrivy(walletId, transaction, ownerSession);
+      let signedTransaction = await signWithPrivy(walletId, transaction, ownerSession);
+      if (feePayerWallet && feePayerWallet.address !== wallet.address) {
+        const original = Transaction.from(decodeBase64(transaction, 'Transaction'));
+        const sourceSigned = Transaction.from(decodeBase64(signedTransaction, 'Signed transaction'));
+        const message = original.serializeMessage();
+        if (!sourceSigned.serializeMessage().equals(message)
+            || original.feePayer?.toBase58() !== feePayerWallet.address
+            || original.signatures.length !== 2
+            || !original.signatures.some(entry => entry.publicKey.toBase58() === wallet.address)
+            || !sourceSigned.verifySignatures(false)) fail('Signed transfer differs from the request', 'transaction_mismatch');
+        const sourceEntry = sourceSigned.signatures.find(entry => entry.publicKey.toBase58() === wallet.address);
+        if (!sourceEntry?.signature) fail('Source signature is required', 'invalid_signature');
+        const payerSession = typeof accessToken === 'string' && accessToken
+          ? { ownerId: owner, accessToken, walletAddress: feePayerWallet.address }
+          : undefined;
+        const payerSigned = await signWithPrivy(feePayerWallet.privyWalletId,
+          sourceSigned.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64'), payerSession);
+        const fullySigned = Transaction.from(decodeBase64(payerSigned, 'Signed transaction'));
+        if (!fullySigned.serializeMessage().equals(message)) fail('Signed transfer differs from the request', 'transaction_mismatch');
+        fullySigned.addSignature(sourceEntry.publicKey, sourceEntry.signature);
+        if (!fullySigned.verifySignatures()) fail('Both wallet signatures are required', 'invalid_signature');
+        signedTransaction = fullySigned.serialize().toString('base64');
+      }
       const signature = await sendSigned(signedTransaction, { privy: true });
       return { cluster: SOLANA_CLUSTER, signature, privyWalletId: walletId };
     },

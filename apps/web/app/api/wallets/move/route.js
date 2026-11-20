@@ -89,11 +89,17 @@ export async function POST(request) {
         { status, headers: { 'Cache-Control': 'no-store' } },
       );
     }
+    const main = plan.from.kind !== 'main'
+      ? wallets.find(wallet => wallet.kind === 'main' && wallet.ownerId === ownerId && wallet.spendable && !wallet.frozen
+        && !String(wallet.id).startsWith('linked_') && !String(wallet.id).startsWith('client_'))
+      : null;
+    const feePayerWallet = main ? selectOwnedMoveWallet(wallets, main) : undefined;
     const sent = await moveBetweenWallets({
       client,
       ownerId,
       accessToken,
       fromWallet: plan.from,
+      feePayerWallet,
       toWallet: plan.to,
       amount: plan.amount,
       memo: plan.memo,

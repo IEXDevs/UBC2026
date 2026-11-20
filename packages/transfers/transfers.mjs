@@ -325,6 +325,7 @@ async function ownerMove({
   client,
   ownerId,
   fromWallet,
+  feePayerWallet,
   toAddress,
   amount: rawAmount,
   memo,
@@ -334,10 +335,11 @@ async function ownerMove({
 }) {
   requireMethod(client, 'signAndBroadcastOwnerSolana');
   const source = ownedWallet(fromWallet, ownerId);
+  const payer = feePayerWallet ? ownedWallet(feePayerWallet, ownerId) : source;
   if (source.address === toAddress) fail('Source and destination must differ', 'invalid_destination');
   const hash = await blockhashFrom(client, recentBlockhash);
   const built = buildSolanaUsdcTransaction({
-    feePayer: source.address,
+    feePayer: payer.address,
     sourceOwner: source.address,
     destinationOwner: toAddress,
     amount: rawAmount,
@@ -347,6 +349,7 @@ async function ownerMove({
   const sent = await client.signAndBroadcastOwnerSolana({
     ownerId,
     wallet: source,
+    feePayerWallet,
     transaction: built.transactionBase64,
     accessToken,
   });
@@ -358,6 +361,7 @@ export async function moveBetweenWallets({
   client,
   ownerId,
   fromWallet,
+  feePayerWallet,
   toWallet,
   amount: rawAmount,
   memo = 'wallet.move',
@@ -370,6 +374,7 @@ export async function moveBetweenWallets({
     client,
     ownerId,
     fromWallet,
+    feePayerWallet,
     toAddress: destination.address,
     amount: rawAmount,
     memo,

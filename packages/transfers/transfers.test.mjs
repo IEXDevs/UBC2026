@@ -334,6 +334,73 @@ test('wallet adapter deposit signs locally and broadcasts only on mainnet-beta',
  * Side effects: Injected Privy/RPC mocks.
  * Gaps: Does not cover zero-balance no-op grab across all sleeves in isolation.
  */
+test('main wallet sponsors agent moves and retains both signatures', async () => {
+  for (const dropSourceSignature of [false, true]) {
+    const signers = [];
+    let broadcasts = 0;
+    const { client: signer } = client(async (url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.method === 'signTransaction') {
+        const payerSigns = url.endsWith(`/${walletId}/rpc`);
+        signers.push(payerSigns ? walletId : tradingId);
+        const tx = decode(body.params.transaction);
+        assert.equal(tx.feePayer.toBase58(), mainWallet.address);
+        assert.equal(tx.instructions[0].keys[0].pubkey.toBase58(), mainWallet.address);
+        const transfer = decodeTransferCheckedInstruction(tx.instructions[1]);
+        assert.equal(transfer.keys.owner.pubkey.toBase58(), tradingWallet.address);
+        if (payerSigns) {
+          assert.ok(tx.signatures.find(entry => entry.publicKey.equals(extra.publicKey)).signature);
+          if (dropSourceSignature) tx.signatures.forEach(entry => { entry.signature = null; });
+        }
+        tx.partialSign(payerSigns ? source : extra);
+        return Response.json({ data: { signed_transaction: tx.serialize({ requireAllSignatures: false }).toString('base64') } });
+      }
+      if (body.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+      assert.equal(body.method, 'sendTransaction');
+      const tx = decode(body.params[0]);
+      assert.equal(tx.signatures.length, 2);
+      assert.equal(tx.verifySignatures(), true);
+      broadcasts += 1;
+      return Response.json({ result: txSignature });
+    });
+    await moveBetweenWallets({ client: signer, ownerId: 'user_1', fromWallet: tradingWallet,
+      toWallet: mainWallet, feePayerWallet: mainWallet, amount: '500000', recentBlockhash: blockhash });
+    assert.deepEqual(signers, [tradingId, walletId]);
+    assert.equal(broadcasts, 1);
+  }
+});
+
+test('owner moves reject invalid fee payers before signing or broadcasting', async () => {
+  const { client: signer } = client(async () => { throw new Error('unexpected fetch'); });
+  const transaction = buildSolanaUsdcTransaction({ feePayer: mainWallet.address, sourceOwner: tradingWallet.address,
+    destinationOwner: mainWallet.address, amount: '1', memo: 'wallet.move', recentBlockhash: blockhash }).transactionBase64;
+  for (const [feePayerWallet, code] of [
+    [{ ...mainWallet, ownerId: 'another_owner' }, 'owner_mismatch'],
+    [{ ...mainWallet, frozen: true }, 'wallet_frozen'],
+    [{ ...mainWallet, spendable: false }, 'wallet_frozen'],
+    [{ ...mainWallet, id: `linked_${mainWallet.address}` }, 'wallet_frozen'],
+  ]) {
+    await assert.rejects(signer.signAndBroadcastOwnerSolana({ ownerId: 'user_1', wallet: tradingWallet,
+      transaction, feePayerWallet }), error => error.code === code);
+  }
+});
+
+test('owner moves do not broadcast without the fee payer signature', async () => {
+  let broadcasts = 0;
+  const { client: signer } = client(async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === 'sendTransaction') broadcasts += 1;
+    assert.equal(body.method, 'signTransaction');
+    const tx = decode(body.params.transaction);
+    if (url.endsWith(`/${tradingId}/rpc`)) tx.partialSign(extra);
+    return Response.json({ data: { signed_transaction: tx.serialize({ requireAllSignatures: false }).toString('base64') } });
+  });
+  await assert.rejects(moveBetweenWallets({ client: signer, ownerId: 'user_1', fromWallet: tradingWallet,
+    toWallet: mainWallet, feePayerWallet: mainWallet, amount: '1', recentBlockhash: blockhash }),
+  error => error.code === 'invalid_signature');
+  assert.equal(broadcasts, 0);
+});
+
 test('withdraw, wallet moves, and grab-back return USDC to the main wallet', async () => {
   let adapterSigned = 0;
   const adapter = {
