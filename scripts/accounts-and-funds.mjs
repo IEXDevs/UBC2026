@@ -136,7 +136,7 @@ export const ACCOUNT_VENDORS = Object.freeze([
       `Create an endpoint with chain Solana and network ${SOLANA_CLUSTER}.`,
       'Store the HTTP provider URL as SOLANA_RPC_URL.',
       `For public read-only fallback, use ${PUBLIC_SOLANA_RPC}. Signing still requires an explicitly configured $SOLANA_RPC_URL.`,
-      'Optional: create a Solana Mainnet endpoint and store it as QUICKNODE_MAINNET_RPC_URL. The portfolio graph reads it and never signs or broadcasts.',
+      'On mainnet, the existing QUICKNODE_MAINNET_RPC_URL secret also works when SOLANA_RPC_URL is empty.',
       'QUICKNODE_WEBHOOK_SECRET is for Streams later. Leave it empty until that chunk.',
     ]),
   },

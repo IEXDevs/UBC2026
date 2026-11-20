@@ -1,4 +1,4 @@
-import { SOLANA_CLUSTER, SOLANA_USDC_MINT, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_USDC_MINT, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Read-only portfolio of linked Solana wallets.
  * Balances come from QuickNode. Dollar values use mainnet prices.
@@ -73,7 +73,7 @@ export function assertPortfolioRpc(url) {
 
 export function choosePortfolioRpc(env = {}, cluster = '') {
   const mainnet = typeof env.QUICKNODE_MAINNET_RPC_URL === 'string' ? env.QUICKNODE_MAINNET_RPC_URL.trim() : '';
-  const solana = typeof env.SOLANA_RPC_URL === 'string' ? env.SOLANA_RPC_URL.trim() : '';
+  const solana = configuredSolanaRpc(env);
   if (cluster === SOLANA_CLUSTER) return { rpcUrl: solana, missing: solana ? [] : ['SOLANA_RPC_URL'] };
   if (mainnet) return { rpcUrl: mainnet, missing: [] };
   if (solana) return { rpcUrl: solana, missing: [] };

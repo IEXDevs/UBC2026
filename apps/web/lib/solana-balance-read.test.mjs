@@ -51,8 +51,8 @@ function rpcMock({ genesis, lamports, usdc = '0', extra = [] }) {
 }
 
 /**
- * Achieves: confirmed mainnet-beta read returns 20 USDC and SOL, and ignores a mainnet RPC URL.
- * Fails when: the public mainnet-beta host is skipped, mainnet is queried, or the faucet amount is dropped.
+ * Achieves: confirmed mainnet reads fall back to the public endpoint without configured secrets.
+ * Fails when: the public endpoint is skipped or private RPC metadata leaks.
  * Oracle: fetcher URL is PUBLIC_SOLANA_RPC_URL; label '0.5 SOL · 20 USDC'; JSON has no RPC host.
  * Side effects: mocked fetch only.
  * Gaps: does not hit a live cluster.
@@ -60,7 +60,7 @@ function rpcMock({ genesis, lamports, usdc = '0', extra = [] }) {
 test('readAssignedSolanaBalance uses public mainnet-beta when QuickNode is unset', async () => {
   const mainnet = 'https://example.invalid/mainnet-secret-path';
   assert.equal(solanaBalanceRpcUrl({}), PUBLIC_SOLANA_RPC_URL);
-  assert.equal(solanaBalanceRpcUrl({ QUICKNODE_MAINNET_RPC_URL: mainnet }), PUBLIC_SOLANA_RPC_URL);
+  assert.equal(solanaBalanceRpcUrl({ QUICKNODE_MAINNET_RPC_URL: mainnet }), mainnet);
   const { urls, fetcher } = rpcMock({
     genesis: SOLANA_GENESIS_HASH,
     lamports: 500_000_000,
@@ -77,7 +77,7 @@ test('readAssignedSolanaBalance uses public mainnet-beta when QuickNode is unset
   });
   const bal = await readAssignedSolanaBalance({
     address: ADDRESS,
-    env: { QUICKNODE_MAINNET_RPC_URL: mainnet, SOLANA_RPC_URL: '' },
+    env: {},
     fetcher,
   });
   assert.equal(bal.ok, true);

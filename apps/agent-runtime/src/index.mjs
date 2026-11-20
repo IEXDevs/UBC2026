@@ -1,4 +1,4 @@
-import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { configuredSolanaRpc, SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
 import { handleSpend } from './spend-route.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
@@ -236,6 +236,7 @@ async function dispatch(request, env, rawEnv = env) {
         ok: true,
         product: env.PRODUCT ?? 'Maelstrom',
         cluster: SOLANA_CLUSTER,
+        rpcConfigured: Boolean(configuredSolanaRpc(rawEnv)),
         signing: Boolean(env.transferClient),
         supabase: Boolean(sb),
         secrets: {
@@ -243,6 +244,7 @@ async function dispatch(request, env, rawEnv = env) {
           PRIVY_APP_SECRET: flag('PRIVY_APP_SECRET'),
           PRIVY_AUTHORIZATION_KEY: flag('PRIVY_AUTHORIZATION_KEY'),
           SOLANA_RPC_URL: flag('SOLANA_RPC_URL'),
+          QUICKNODE_MAINNET_RPC_URL: flag('QUICKNODE_MAINNET_RPC_URL'),
           SUPABASE_URL: flag('SUPABASE_URL'),
           SUPABASE_ANON_KEY: flag('SUPABASE_ANON_KEY'),
           SUPABASE_SERVICE_ROLE_KEY: flag('SUPABASE_SERVICE_ROLE_KEY'),
@@ -477,7 +479,7 @@ async function readBalance(env, address) {
     }
   }
   return readSolanaUsdcBalance({
-    rpcUrl: env.SOLANA_RPC_URL,
+    rpcUrl: configuredSolanaRpc(env),
     address,
     fetcher: env.fetch ?? fetch,
   });

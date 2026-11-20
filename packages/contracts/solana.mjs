@@ -38,6 +38,14 @@ export const SOLANA_STREAM_NETWORK = SOLANA_CONFIG.streamNetwork;
 export const SOLANA_PRIVY_CHAIN = SOLANA_CONFIG.privyChain;
 export const EXECUTION_LABEL = `${SOLANA_CLUSTER} execution, mainnet pricing`;
 
+export function configuredSolanaRpc(env, cluster = SOLANA_CLUSTER) {
+  const explicit = typeof env?.SOLANA_RPC_URL === 'string' ? env.SOLANA_RPC_URL.trim() : '';
+  if (explicit) return explicit;
+  return cluster === 'mainnet-beta' && typeof env?.QUICKNODE_MAINNET_RPC_URL === 'string'
+    ? env.QUICKNODE_MAINNET_RPC_URL.trim()
+    : '';
+}
+
 export function explorerClusterQuery(cluster = SOLANA_CLUSTER) {
   return cluster === 'mainnet' || cluster === 'mainnet-beta' ? '' : `?cluster=${encodeURIComponent(cluster)}`;
 }

@@ -17,6 +17,9 @@ test('root env reads a named value and ignores blanks', () => {
   assert.equal(readRootEnv('ELEVENLABS_API_KEY', env), 'server-key');
   assert.equal(readRootEnv('ELEVENLABS_AGENT_ID', env), '');
   assert.equal(readRootEnv('MISSING', env), '');
+  assert.equal(readRootEnv('SOLANA_RPC_URL', {
+    QUICKNODE_MAINNET_RPC_URL: 'https://example.invalid/mainnet',
+  }), 'https://example.invalid/mainnet');
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maelstrom-env-'));
   const nested = path.join(root, 'apps', 'web');
