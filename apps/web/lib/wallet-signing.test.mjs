@@ -87,7 +87,7 @@ test('browser move retains both signatures even when the second signer clears th
   await assert.rejects(signWalletMoveTransaction({ wallets, transaction, signer }), { code: 'invalid_signature' });
 });
 
-test('browser move merges an owner-authorized agent signature with Main useWallets signature', async () => {
+test('browser move signs the agent before Main even when Main is listed first and the agent is in useWallets', async () => {
   const agent = Keypair.generate();
   const main = Keypair.generate();
   const wallets = [{ id: 'agent-wallet-id', kind: 'additional', provider: 'privy', address: agent.publicKey.toBase58() },
@@ -100,12 +100,21 @@ test('browser move merges an owner-authorized agent signature with Main useWalle
     next.partialSign(key);
     return new Uint8Array(next.serialize({ requireAllSignatures: false }));
   };
-  const signer = { ready: true, wallets: [wallets[1]],
-    signWithOwnerAuthorization: async ({ transaction }) => sign(transaction, agent),
-    signTransaction: async ({ transaction }) => ({ signedTransaction: sign(transaction, main) }) };
+  const calls = [];
+  const signer = { ready: true, wallets,
+    signWithOwnerAuthorization: async ({ transaction }) => { calls.push('agent'); return sign(transaction, agent); },
+    signTransaction: async ({ transaction, wallet }) => {
+      calls.push('main');
+      assert.equal(wallet.address, main.publicKey.toBase58());
+      const partial = Transaction.from(transaction);
+      assert.ok(partial.signatures.find(entry => entry.publicKey.equals(agent.publicKey)).signature);
+      assert.equal(partial.verifySignatures(false), true);
+      return { signedTransaction: sign(transaction, main) };
+    } };
   assert.equal(await waitForBrowserSigner(() => signer, wallets, 0), signer);
-  const signed = await signWalletMoveTransaction({ wallets, transaction: new Uint8Array(tx.serialize({ requireAllSignatures: false })), signer });
+  const signed = await signWalletMoveTransaction({ wallets: [...wallets].reverse(), transaction: new Uint8Array(tx.serialize({ requireAllSignatures: false })), signer });
   assert.equal(Transaction.from(signed).verifySignatures(), true);
+  assert.deepEqual(calls, ['agent', 'main']);
 });
 
 test('Privy wallets sign on the server and linked wallets stay in the browser', () => {

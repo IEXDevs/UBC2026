@@ -186,6 +186,7 @@ test('wallet move accepts a verified connected recipient and signs only with the
     PRIVY_APP_SECRET: 'offline-secret',
     PRIVY_AUTHORIZATION_KEY: ' ',
     SOLANA_RPC_URL: 'https://move-rpc.invalid',
+    QUICKNODE_MAINNET_RPC_URL: 'https://move-rpc.invalid',
     SUPABASE_URL: 'https://move-store.invalid',
     SUPABASE_SERVICE_ROLE_KEY: 'offline-store-key',
   };
@@ -280,10 +281,12 @@ test('wallet move accepts a verified connected recipient and signs only with the
   assert.equal(broadcasts.length, 1, 'invalid requests never broadcast');
   for (const name of ['PRIVY_APP_SECRET', 'SOLANA_RPC_URL']) {
     delete process.env[name];
+    if (name === 'SOLANA_RPC_URL') delete process.env.QUICKNODE_MAINNET_RPC_URL;
     const unconfigured = await move();
     assert.equal(unconfigured.status, 503);
     assert.deepEqual(await unconfigured.json(), { error: 'missing_config', missing: [name] });
     process.env[name] = settings[name];
+    if (name === 'SOLANA_RPC_URL') process.env.QUICKNODE_MAINNET_RPC_URL = settings.QUICKNODE_MAINNET_RPC_URL;
   }
   loginOwner = ownerId;
   for (const asset of ['SOL', tokenMint, tokenMint]) {
@@ -1021,10 +1024,12 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     PRIVY_APP_ID: process.env.PRIVY_APP_ID,
     PRIVY_APP_SECRET: process.env.PRIVY_APP_SECRET,
     SOLANA_RPC_URL: process.env.SOLANA_RPC_URL,
+    QUICKNODE_MAINNET_RPC_URL: process.env.QUICKNODE_MAINNET_RPC_URL,
   };
   process.env.PRIVY_APP_ID = session.appId;
   process.env.PRIVY_APP_SECRET = 'portfolio-app-secret';
   process.env.SOLANA_RPC_URL = rpcUrl;
+  process.env.QUICKNODE_MAINNET_RPC_URL = rpcUrl;
   const previousFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {

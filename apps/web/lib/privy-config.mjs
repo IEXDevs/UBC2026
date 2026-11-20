@@ -1,11 +1,14 @@
 /**
  * Privy login settings for the glass shell.
- * App id and client id are public. Never put PRIVY_APP_SECRET or an RPC URL here.
+ * App id and client id are public. Never put server secrets or private RPC URLs here.
  * Dashboard login methods: Email, Google, GitHub, Discord, and Solana wallets.
  * Ethereum wallet login and Ethereum embedded wallets stay off.
  * Signup creates a Solana embedded wallet for every user.
  * Dashboard MFA (authenticator app and passkey) stays enabled; prompts use Privy's UI.
  */
+
+import { createSolanaRpc, createSolanaRpcSubscriptions } from '@solana/kit';
+import { SOLANA_PRIVY_CHAIN, SOLANA_RPC_URL } from '@ubc2026/contracts/solana';
 
 const SOLANA_WALLETS = Object.freeze([
   'detected_solana_wallets',
@@ -69,12 +72,20 @@ function linkedAccountLabel(user) {
   return '';
 }
 
-export function privyProviderProps({ appId, clientId } = {}) {
+export function privyProviderProps({ appId, clientId, origin = globalThis.location?.origin || 'http://localhost' } = {}) {
   const id = publicId(appId);
   if (!id) return null;
   const props = {
     appId: id,
     config: {
+      solana: {
+        rpcs: {
+          [SOLANA_PRIVY_CHAIN]: {
+            rpc: createSolanaRpc(new URL('/api/solana-rpc', origin).href),
+            rpcSubscriptions: createSolanaRpcSubscriptions(SOLANA_RPC_URL.replace('https:', 'wss:')),
+          },
+        },
+      },
       appearance: {
         ...SOLANA_LOGIN.appearance,
         walletList: [...SOLANA_LOGIN.appearance.walletList],
@@ -87,7 +98,7 @@ export function privyProviderProps({ appId, clientId } = {}) {
       mfa: { ...SOLANA_LOGIN.mfa },
       // Do not mirror the access token into a document.cookie the page can read.
       // The refresh token is stored by /api/privy-auth, not by this page.
-      sessions: { cookieWriteBehavior: 'never' },
+      sessions: { cookieWriteBehavior: 'default' },
     },
   };
   const client = publicId(clientId);

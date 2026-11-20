@@ -14,7 +14,7 @@ import worker from './index.mjs';
 import { BotStateMachine } from './bot-do.mjs';
 
 // The Next.js route has its own smoke test in next-api-routes.test.mjs.
-const NEXT_ONLY_HTTP = new Set(['wallets.additional']);
+const NEXT_ONLY_HTTP = new Set(['solana.rpc', 'wallets.additional']);
 
 const SAMPLES = Object.freeze({
   walletId: 'fmfdj6yqly31huorjqzq38zc',

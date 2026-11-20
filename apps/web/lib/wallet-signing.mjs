@@ -87,18 +87,19 @@ export async function signSelectedWalletTransaction({ from, transaction, signer 
   const wallets = Array.isArray(signer?.wallets) ? signer.wallets : [];
   const wallet = wallets.find(item => item?.address === from.address)
     || wallets.find(item => typeof item?.address === 'string' && item.address.toLowerCase() === from.address.toLowerCase());
-  if (!wallet || typeof signer?.signTransaction !== 'function') {
-    if (!wallet && from.kind !== 'main' && typeof signer?.signWithOwnerAuthorization === 'function') {
-      try {
-        const signed = await signer.signWithOwnerAuthorization({ address: from.address, transaction });
-        if (!(signed instanceof Uint8Array) || signed.length <= 64) fail('invalid_signature');
-        return signed;
-      } catch (error) {
-        throw Object.assign(new Error('wallet_owner_authorization_failed'), {
-          code: 'wallet_owner_authorization_failed', ...(error?.privyFailure ? { privyFailure: error.privyFailure } : {}),
-        });
-      }
+  if (from.kind !== 'main' && typeof signer?.signWithOwnerAuthorization === 'function'
+      && (!wallet || signer.preferOwnerAuthorization)) {
+    try {
+      const signed = await signer.signWithOwnerAuthorization({ address: from.address, transaction });
+      if (!(signed instanceof Uint8Array) || signed.length <= 64) fail('invalid_signature');
+      return signed;
+    } catch (error) {
+      throw Object.assign(new Error('wallet_owner_authorization_failed'), {
+        code: 'wallet_owner_authorization_failed', ...(error?.privyFailure ? { privyFailure: error.privyFailure } : {}),
+      });
     }
+  }
+  if (!wallet || typeof signer?.signTransaction !== 'function') {
     signer?.connectWallet?.(walletConnectionOptions(from));
     fail('wallet_connection_required');
   }
@@ -115,10 +116,20 @@ export async function signSelectedWalletTransaction({ from, transaction, signer 
 export async function signWalletMoveTransaction({ wallets, transaction, signer } = {}) {
   let current = Transaction.from(transaction);
   const message = current.serializeMessage();
-  for (const from of wallets) {
+  const payer = current.feePayer?.toBase58();
+  const ordered = [...wallets.filter(wallet => wallet.address !== payer), ...wallets.filter(wallet => wallet.address === payer)];
+  if (new Set(ordered.map(wallet => wallet.address)).size !== current.signatures.length
+      || current.signatures.some(entry => !ordered.some(wallet => wallet.address === entry.publicKey.toBase58()))) fail('invalid_signature');
+  for (const from of ordered) {
+    if (from.address === payer && current.signatures.some(entry => entry.publicKey.toBase58() !== payer && !entry.signature)) {
+      fail('invalid_signature');
+    }
+    const signingContext = from.address !== payer && from.kind !== 'main' && from.provider === 'privy'
+      && typeof signer?.signWithOwnerAuthorization === 'function'
+      ? { ...signer, preferOwnerAuthorization: true } : signer;
     const signed = await signSelectedWalletTransaction({ from, transaction: new Uint8Array(current.serialize({
       requireAllSignatures: false, verifySignatures: false,
-    })), signer });
+    })), signer: signingContext });
     const next = Transaction.from(signed);
     if (!next.serializeMessage().equals(message)) fail('transaction_mismatch');
     for (const entry of current.signatures) {

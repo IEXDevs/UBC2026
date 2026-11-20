@@ -661,6 +661,7 @@ export function spendApprovalMessage({ ownerId, spend, terms, expiresAt }) {
 }
 
 export const API_ROUTES = Object.freeze([
+  { id: 'solana.rpc', method: 'POST', path: '/api/solana-rpc', status: 'live' },
   { id: 'wallets.authorize-sign', method: 'POST', path: '/api/wallets/authorize-sign', phase: 1, auth: 'privy', status: 'guarded' },
   { id: 'models.list', method: 'GET', path: '/api/models', phase: 1, auth: 'none', status: 'guarded' },
   { id: 'models.check', method: 'POST', path: '/api/models', phase: 1, auth: 'none', status: 'guarded' },
