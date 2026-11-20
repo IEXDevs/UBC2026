@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, SOLANA_USDC_MINT, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Read-only portfolio of linked Solana wallets.
  * Balances come from QuickNode. Dollar values use mainnet prices.
@@ -19,7 +20,7 @@ const PRICE = /^(0|[1-9]\d*)(\.\d+)?$/;
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 export const MAINNET_USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
-export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+export { SOLANA_USDC_MINT };
 
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
@@ -39,16 +40,16 @@ const SYMBOLS = Object.freeze({
   [SOL_MINT]: 'SOL',
   [MAINNET_USDC_MINT]: 'USDC',
   [MAINNET_USDT_MINT]: 'USDT',
-  [DEVNET_USDC_MINT]: 'USDC',
+  [SOLANA_USDC_MINT]: 'USDC',
 });
 
 const PEGS = Object.freeze({
   [MAINNET_USDC_MINT]: '1',
   [MAINNET_USDT_MINT]: '1',
-  [DEVNET_USDC_MINT]: '1',
+  [SOLANA_USDC_MINT]: '1',
 });
 
-export const PRICE_LABEL = 'devnet execution, mainnet pricing';
+export const PRICE_LABEL = EXECUTION_LABEL;
 const MAX_WALLETS = 24;
 const MAX_TOKENS = 40;
 
@@ -72,10 +73,10 @@ export function assertPortfolioRpc(url) {
 
 export function choosePortfolioRpc(env = {}) {
   const mainnet = typeof env.QUICKNODE_MAINNET_RPC_URL === 'string' ? env.QUICKNODE_MAINNET_RPC_URL.trim() : '';
-  const devnet = typeof env.QUICKNODE_DEVNET_RPC_URL === 'string' ? env.QUICKNODE_DEVNET_RPC_URL.trim() : '';
+  const solana = typeof env.SOLANA_RPC_URL === 'string' ? env.SOLANA_RPC_URL.trim() : '';
   if (mainnet) return { rpcUrl: mainnet, missing: [] };
-  if (devnet) return { rpcUrl: devnet, missing: [] };
-  return { rpcUrl: '', missing: ['QUICKNODE_MAINNET_RPC_URL', 'QUICKNODE_DEVNET_RPC_URL'] };
+  if (solana) return { rpcUrl: solana, missing: [] };
+  return { rpcUrl: '', missing: ['QUICKNODE_MAINNET_RPC_URL', 'SOLANA_RPC_URL'] };
 }
 
 export function usdMicro(amount, decimals, priceUsd) {
@@ -110,7 +111,7 @@ function symbolFor(mint) {
 }
 
 function pegFor(mint, cluster) {
-  if (mint === DEVNET_USDC_MINT && cluster === 'mainnet') return null;
+  if (mint === SOLANA_USDC_MINT && SOLANA_CLUSTER !== 'mainnet-beta' && cluster === 'mainnet') return null;
   return PEGS[mint] ?? null;
 }
 
@@ -151,7 +152,7 @@ function sharesOf(slices) {
 export function portfolioErrorNote(body = {}) {
   const code = typeof body?.error === 'string' ? body.error : '';
   if (code === 'missing_config') {
-    return 'Portfolio needs QUICKNODE_MAINNET_RPC_URL or QUICKNODE_DEVNET_RPC_URL in the repo root .env.local, then restart Next.';
+    return 'Portfolio needs QUICKNODE_MAINNET_RPC_URL or SOLANA_RPC_URL in the repo root .env.local, then restart Next.';
   }
   if (code === 'invalid_rpc') return 'The QuickNode portfolio URL must be https.';
   if (code === 'wrong_cluster') return 'QuickNode returned a cluster this portfolio does not read.';
@@ -170,7 +171,7 @@ export function portfolioNote(cluster) {
     ? 'Read-only mainnet balances from QuickNode.'
     : cluster === 'testnet'
       ? 'Testnet balances from QuickNode.'
-      : 'Devnet balances from QuickNode. Set QUICKNODE_MAINNET_RPC_URL to graph mainnet holdings.';
+      : 'Solana balances from QuickNode. Set QUICKNODE_MAINNET_RPC_URL to graph mainnet holdings.';
   return `${where} Dollar values use mainnet prices and do not authorize a transaction. ${PRICE_LABEL}.`;
 }
 
@@ -178,7 +179,7 @@ export function portfolioNote(cluster) {
  * @param {{ cluster: string, wallets: Array<{ address: string, label?: string, walletClientType?: string, spendable?: boolean, tokens: Array<{ mint: string, amount: string, decimals: number }> }>, prices: Record<string, string> }} input
  */
 export function buildPortfolio({ cluster, wallets, prices = {} }) {
-  if (cluster !== 'mainnet' && cluster !== 'devnet' && cluster !== 'testnet') fail('wrong_cluster');
+  if (cluster !== 'mainnet' && cluster !== SOLANA_CLUSTER) fail('wrong_cluster');
   const walletRows = [];
   const combined = new Map();
   let unpriced = 0;

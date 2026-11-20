@@ -20,12 +20,12 @@ import {
   streamConfirmedPayments,
   walletLedgerCrossCheck,
   spendLedgerCrossCheck,
-  DEVNET_USDC_MINT,
+  SOLANA_USDC_MINT,
   StreamsError,
 } from './streams.mjs';
 
 const secret = 'qn_test_secret';
-const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const wallet = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 function sign(nonce, timestamp, body) {
   return createHmac('sha256', secret).update(nonce + timestamp + body).digest('hex');
@@ -55,7 +55,7 @@ test('verifies QuickNode HMAC and rejects skew or bad signatures', () => {
 });
 
 /**
- * Achieves: normalizeStreamEvent defaults cluster=devnet; planWalletKvSync/planBackfill produce add lists and slot ranges.
+ * Achieves: normalizeStreamEvent defaults cluster=solana; planWalletKvSync/planBackfill produce add lists and slot ranges.
  * Fails when: Cluster flips to mainnet, duplicate wallets double-add, or destination path drifts.
  * Oracle: Compact stream event + wallet KV sync plan contract.
  * Side effects: none
@@ -71,7 +71,7 @@ test('normalizes compact stream events and plans KV sync', () => {
     slot: 12,
     botId: 'bot_1',
   });
-  assert.equal(event.cluster, 'devnet');
+  assert.equal(event.cluster, 'mainnet-beta');
   const plan = planWalletKvSync({ wallets: [wallet, { address: wallet }], existing: [] });
   assert.deepEqual(plan.add, [wallet]);
   assert.equal(plan.destination, 'POST /webhooks/quicknode');
@@ -80,7 +80,7 @@ test('normalizes compact stream events and plans KV sync', () => {
 });
 
 /**
- * Achieves: First webhook persists+wakes; replay is duplicate-only; bad HMAC never persists; README mentions solana-devnet.
+ * Achieves: First webhook persists+wakes; replay is duplicate-only; bad HMAC never persists; README mentions solana-solana.
  * Fails when: Duplicates re-persist/re-wake, or signature verification is skipped before persist.
  * Oracle: Dedupe store + wake queue semantics for QuickNode webhooks.
  * Side effects: In-memory dedupe + persist callbacks.
@@ -137,7 +137,7 @@ test('webhook handler dedupes by signature and queues bot wakes', async () => {
   assert.deepEqual(second.duplicates, [bodyObj.signature]);
   assert.equal(second.accepted.length, 0);
   assert.equal(persisted.length, 1);
-  assert.match(streamsReadmeSection(), /solana-devnet/);
+  assert.match(streamsReadmeSection(), /solana-mainnet/);
   assert.equal(parseStreamPayload(JSON.stringify([bodyObj])).length, 1);
 });
 
@@ -231,7 +231,7 @@ test('supabase store resolves bots, persists, and backfill wakes with afterWake'
   assert.equal(bots[0].botId, 'bot_1');
   await store.persistEvent({
     signature: 'abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd',
-    wallet, type: 'deposit', amount: '1', token: null, slot: 1, cluster: 'devnet',
+    wallet, type: 'deposit', amount: '1', token: null, slot: 1, cluster: 'mainnet-beta',
   });
   assert.equal(rest.some((r) => r.url.includes('stream_events') && r.method === 'POST'), true);
 
@@ -253,7 +253,7 @@ test('supabase store resolves bots, persists, and backfill wakes with afterWake'
 /**
  * Achieves: Only x402-in/out with amounts on execution clusters become confirmed feed rows; deposits/mainnet/missing amounts stay hidden.
  * Fails when: Deposits appear as confirmed payments, or mainnet x402 is shown.
- * Oracle: streamConfirmedPayments filter rules + DEVNET_USDC_MINT asset labeling.
+ * Oracle: streamConfirmedPayments filter rules + SOLANA_USDC_MINT asset labeling.
  * Side effects: none
  * Gaps: Does not cover bot roster edge cases beyond walletAddress match.
  */
@@ -262,14 +262,14 @@ test('payment feed stays empty until a stream posts an x402 amount', () => {
   assert.deepEqual(streamConfirmedPayments(null), []);
   const signature = '5'.repeat(64);
   const hidden = streamConfirmedPayments([
-    { signature, wallet, type: 'deposit', amount: '10', token: 'USDC', cluster: 'devnet', botId: 'bot_1' },
-    { signature: '6'.repeat(64), wallet, type: 'x402-out', token: 'USDC', cluster: 'devnet', botId: 'bot_1' },
+    { signature, wallet, type: 'deposit', amount: '10', token: 'USDC', cluster: 'mainnet-beta', botId: 'bot_1' },
+    { signature: '6'.repeat(64), wallet, type: 'x402-out', token: 'USDC', cluster: 'mainnet-beta', botId: 'bot_1' },
     { signature: '7'.repeat(64), wallet, type: 'x402-in', amount: '4', token: 'USDC', cluster: 'mainnet', botId: 'bot_1' },
   ]);
   assert.deepEqual(hidden, []);
   const rows = streamConfirmedPayments([
-    { signature, wallet, type: 'x402-out', amount: '25', token: 'USDC', cluster: 'devnet', botId: 'bot_shop' },
-    { signature: '8'.repeat(64), wallet, event_type: 'x402-in', amount: '9', token: DEVNET_USDC_MINT, cluster: 'devnet' },
+    { signature, wallet, type: 'x402-out', amount: '25', token: 'USDC', cluster: 'mainnet-beta', botId: 'bot_shop' },
+    { signature: '8'.repeat(64), wallet, event_type: 'x402-in', amount: '9', token: SOLANA_USDC_MINT, cluster: 'mainnet-beta' },
   ], { bots: [{ id: 'bot_only', walletAddress: wallet }] });
   assert.equal(rows.length, 2);
   assert.equal(rows[0].direction, 'paid');
@@ -330,13 +330,13 @@ test('spend ledger cross-check freezes only unapproved outflows', () => {
 /**
  * Achieves: streamAsset maps USDC mint/symbol to USDC; drops empty/overlong; passes other tokens through.
  * Fails when: Circle mint stays raw, or blank/oversize tokens return truthy.
- * Oracle: DEVNET_USDC_MINT + 'USDC' → 'USDC'; null/''/>64 → null.
+ * Oracle: SOLANA_USDC_MINT + 'USDC' → 'USDC'; null/''/>64 → null.
  * Side effects: none.
  * Gaps: mainnet USDC mint is intentionally not remapped here.
  */
 test('streamAsset maps Circle USDC and rejects empty or overlong tokens', () => {
   assert.equal(streamAsset('USDC'), 'USDC');
-  assert.equal(streamAsset(DEVNET_USDC_MINT), 'USDC');
+  assert.equal(streamAsset(SOLANA_USDC_MINT), 'USDC');
   assert.equal(streamAsset(' SOL '), 'SOL');
   assert.equal(streamAsset(null), null);
   assert.equal(streamAsset(''), null);

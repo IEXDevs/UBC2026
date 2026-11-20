@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
 import { handleSpend } from './spend-route.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
@@ -13,7 +14,7 @@ import {
   assessPositions,
   listScheduledBotsFromSupabase,
   planScheduledWork,
-  readDevnetUsdcBalance,
+  readSolanaUsdcBalance,
   readStreamHealthFromSupabase,
   walletAddress,
 } from './schedules.mjs';
@@ -189,7 +190,7 @@ function botStub(env, botId) {
  * Maelstrom agent runtime Worker.
  * Routes wake/pause/resume/status, the checkpointed bot loop, and owner-bound browser sessions to a per-bot Durable Object.
  * QuickNode Streams wake bots through /wake. Hourly cron records a paper
- * position check. A second cron re-checks devnet USDC when the stream is stale.
+ * position check. A second cron re-checks mainnet-beta USDC when the stream is stale.
  * ElevenLabs speech hits /voice. The desk text agent decides. Webhook tools do not.
  */
 const routed = {
@@ -219,14 +220,14 @@ async function dispatch(request, env, rawEnv = env) {
       return json({
         ok: true,
         product: env.PRODUCT ?? 'Maelstrom',
-        cluster: env.CLUSTER ?? 'devnet',
+        cluster: SOLANA_CLUSTER,
         signing: Boolean(env.transferClient),
         supabase: Boolean(sb),
         secrets: {
           PRIVY_APP_ID: flag('PRIVY_APP_ID'),
           PRIVY_APP_SECRET: flag('PRIVY_APP_SECRET'),
           PRIVY_AUTHORIZATION_KEY: flag('PRIVY_AUTHORIZATION_KEY'),
-          QUICKNODE_DEVNET_RPC_URL: flag('QUICKNODE_DEVNET_RPC_URL'),
+          SOLANA_RPC_URL: flag('SOLANA_RPC_URL'),
           SUPABASE_URL: flag('SUPABASE_URL'),
           SUPABASE_ANON_KEY: flag('SUPABASE_ANON_KEY'),
           SUPABASE_SERVICE_ROLE_KEY: flag('SUPABASE_SERVICE_ROLE_KEY'),
@@ -456,11 +457,11 @@ async function readBalance(env, address) {
     try {
       return await env.readWalletBalance({ address });
     } catch {
-      return { ok: false, code: 'rpc_failed', cluster: 'devnet', address };
+      return { ok: false, code: 'rpc_failed', cluster: SOLANA_CLUSTER, address };
     }
   }
-  return readDevnetUsdcBalance({
-    rpcUrl: env.QUICKNODE_DEVNET_RPC_URL,
+  return readSolanaUsdcBalance({
+    rpcUrl: env.SOLANA_RPC_URL,
     address,
     fetcher: env.fetch ?? fetch,
   });

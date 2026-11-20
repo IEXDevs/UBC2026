@@ -21,7 +21,7 @@ const bot = {
   cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
 };
 const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
-const payTo = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const payTo = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const feePayer = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
 /**
@@ -31,7 +31,7 @@ const feePayer = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
  * Side effects / state checked: commerce handler mocks.
  * Gaps: payment failure path partial
  */
-test('shopping prepare + settle through worker routes', async () => {
+test('sandbox shopping prepare and settle are disabled on mainnet', async () => {
   assert.equal(matchCommerceRoute('POST', '/bots/bot_shop/shopping/prepare').kind, 'shopping-prepare');
   const env = {
     sandboxStoreClient: {
@@ -45,7 +45,7 @@ test('shopping prepare + settle through worker routes', async () => {
             body: {
               accepts: [{
                 scheme: 'exact',
-                network: NETWORKS.devnet,
+                network: NETWORKS.solana,
                 amount: '1000',
                 asset: payTo,
                 payTo,
@@ -66,10 +66,9 @@ test('shopping prepare + settle through worker routes', async () => {
     headers: { 'content-type': 'application/json', 'x-owner-id': 'own_1' },
     body: JSON.stringify({ bot, ledger, recipient: payTo }),
   }), env, { kind: 'shopping-prepare', botId: 'bot_shop' });
-  assert.equal(prep.status, 200);
+  assert.equal(prep.status, 409);
   const prepBody = await prep.json();
-  assert.equal(prepBody.provider, 'sandbox');
-  assert.equal(prepBody.pick.item.id, 'sku_lo');
+  assert.equal(prepBody.error, 'sandbox_disabled_on_mainnet');
 
   const settle = await dispatchCommerceRoute(new Request('https://runtime/bots/bot_shop/shopping/settle', {
     method: 'POST',
@@ -79,7 +78,7 @@ test('shopping prepare + settle through worker routes', async () => {
       itemId: 'sku_lo',
       accepted: {
         scheme: 'exact',
-        network: NETWORKS.devnet,
+        network: NETWORKS.solana,
         amount: '1000',
         asset: payTo,
         payTo,
@@ -88,9 +87,9 @@ test('shopping prepare + settle through worker routes', async () => {
       },
     }),
   }), env, { kind: 'shopping-settle', botId: 'bot_shop' });
-  assert.equal(settle.status, 200);
+  assert.equal(settle.status, 409);
   const settled = await settle.json();
-  assert.equal(settled.next, 'settled');
+  assert.equal(settled.error, 'sandbox_disabled_on_mainnet');
 });
 
 /**
@@ -198,7 +197,7 @@ test('sns send builds unsigned intent from demo resolver', async () => {
 test('commerce exports via worker.fetch enforce owner and payment gates', async () => {
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     BOT: {
       idFromName: name => name,
       get: () => ({ fetch: async () => Response.json({ ok: true }) }),

@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 export const runtime = 'nodejs';
 
 import { resolveSnsOwner, SnsError } from '@ubc2026/sns';
@@ -12,7 +13,7 @@ function env() {
   return {
     PRIVY_APP_ID: readRootEnv('PRIVY_APP_ID'),
     PRIVY_APP_SECRET: readRootEnv('PRIVY_APP_SECRET'),
-    QUICKNODE_DEVNET_RPC_URL: readRootEnv('QUICKNODE_DEVNET_RPC_URL'),
+    SOLANA_RPC_URL: readRootEnv('SOLANA_RPC_URL'),
     PRIVY_AUTHORIZATION_KEY: readRootEnv('PRIVY_AUTHORIZATION_KEY'),
     NEXT_PUBLIC_PRIVY_APP_ID: readRootEnv('NEXT_PUBLIC_PRIVY_APP_ID'),
   };
@@ -52,7 +53,7 @@ export async function POST(request) {
     const client = createPrivyWalletClient({
       appId: resolvePrivyAppId(secrets),
       appSecret: secrets.PRIVY_APP_SECRET,
-      rpcUrl: secrets.QUICKNODE_DEVNET_RPC_URL,
+      rpcUrl: secrets.SOLANA_RPC_URL,
       authorizationKey: secrets.PRIVY_AUTHORIZATION_KEY || null,
     });
     const sent = await withdrawToWalletAdapter({
@@ -68,7 +69,7 @@ export async function POST(request) {
       domain: plan.domain,
       address: plan.address,
       signature: sent.signature,
-      cluster: 'devnet',
+      cluster: SOLANA_CLUSTER,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = typeof error?.code === 'string' ? error.code : 'sns_send_failed';

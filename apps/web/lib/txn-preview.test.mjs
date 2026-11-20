@@ -35,7 +35,7 @@ test('log rows keep a timestamp, the transfer, and a solscan link', () => {
       title: 'Send 1 USDC',
       lines: [{ label: 'To', value: '@alex' }],
       signature,
-      cluster: 'devnet',
+      cluster: 'mainnet-beta',
     }],
     payments: [{
       id: 'p1',
@@ -43,7 +43,7 @@ test('log rows keep a timestamp, the transfer, and a solscan link', () => {
       asset: 'USDC',
       direction: 'paid',
       counterparty: 'shop',
-      cluster: 'devnet',
+      cluster: 'mainnet-beta',
       txSignature: signature,
       createdAt: '2026-11-15T04:00:00.000Z',
     }],
@@ -59,10 +59,10 @@ test('log rows keep a timestamp, the transfer, and a solscan link', () => {
   });
   assert.equal(rows[0].id, 'r1');
   assert.match(rows[0].solscanUrl, /solscan.io\/tx\//);
-  assert.match(rows[0].solscanUrl, /cluster=devnet/);
+  assert.equal(new URL(rows[0].solscanUrl).search, '');
   assert.deepEqual(rows.map(row => row.id), ['r1', 'p1', 't1', `stream:${deposit}`, 'refund']);
   assert.equal(rows[2].solscanUrl, null);
-  assert.equal(rows[3].solscanUrl, `https://solscan.io/tx/${deposit}?cluster=devnet`);
+  assert.equal(rows[3].solscanUrl, `https://solscan.io/tx/${deposit}`);
   assert.equal(rows[3].lines[0].value, 'Stream deposit');
   assert.equal(swapPreview({ pay: '1', from: 'USDC', to: 'SOL', receive: '' }).lines[1].value, 'Quoted when you slide');
 });

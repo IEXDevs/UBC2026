@@ -11,6 +11,8 @@ const fromApp = (name) => path.join(appDir, 'node_modules', name);
 // Root `.env.local` holds NEXT_PUBLIC_* for the monorepo; Next would otherwise
 // only read apps/web/.env*. Apply before the config object is used.
 applyRootPublicEnv();
+const executionCluster = readRootEnv('SOLANA_CLUSTER') || readRootEnv('NEXT_PUBLIC_SOLANA_CLUSTER') || 'mainnet-beta';
+process.env.SOLANA_CLUSTER = executionCluster;
 
 const buildId = resolveBuildId();
 // DEV_PREVIEW=1 in the root env shows the developer bypass on the login page.
@@ -20,6 +22,7 @@ const devPreview = publicDevPreviewValue({ devPreview: readRootEnv('DEV_PREVIEW'
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
+    NEXT_PUBLIC_SOLANA_CLUSTER: readRootEnv('NEXT_PUBLIC_SOLANA_CLUSTER') || executionCluster,
     NEXT_PUBLIC_BUILD_ID: buildId,
     NEXT_PUBLIC_DEV_PREVIEW: devPreview,
   },

@@ -720,7 +720,7 @@ test('a send posts the Solscan URL before the model is asked to close the turn',
       type: 'function',
       function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object', properties: {} } },
     }],
-    invokeTool: async () => ({ signed: true, signature, cluster: 'devnet' }),
+    invokeTool: async () => ({ signed: true, signature, cluster: 'mainnet-beta' }),
     fetcher: async (_url, options) => {
       if (isTurnVerify(options)) return turnAllowed();
       rounds += 1;
@@ -741,7 +741,7 @@ test('a send posts the Solscan URL before the model is asked to close the turn',
       return Response.json({ choices: [{ message: { content: '1 SOL is on the way to @hi.' } }] });
     },
   });
-  const url = `https://solscan.io/tx/${signature}?cluster=devnet`;
+  const url = `https://solscan.io/tx/${signature}`;
   assert.equal(order[0], `Sent. ${url}`);
   assert.equal(order[1], 'model-again');
   assert.equal(order[2], '1 SOL is on the way to @hi.');

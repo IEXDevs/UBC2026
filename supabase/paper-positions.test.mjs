@@ -18,6 +18,7 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 const foundations = readFileSync(new URL('./migrations/20261114000000_foundations.sql', import.meta.url), 'utf8');
 const activity = readFileSync(new URL('./migrations/20261114180000_activity_logs.sql', import.meta.url), 'utf8');
 const paper = readFileSync(new URL('./migrations/20261117120000_paper_positions.sql', import.meta.url), 'utf8');
+const mainnet = readFileSync(new URL('./migrations/20261120000000_solana_mainnet.sql', import.meta.url), 'utf8');
 
 const MINT = 'So11111111111111111111111111111111111111112';
 
@@ -25,6 +26,7 @@ async function seed(db) {
   await db.exec(foundations);
   await db.exec(activity);
   await db.exec(paper);
+  await db.exec(mainnet);
   await db.exec(`
     insert into users (id, privy_user_id) values ('alice', 'privy_alice'), ('bob', 'privy_bob');
     insert into wallets (id, owner_id, kind, label, address) values
@@ -43,9 +45,9 @@ async function seed(db) {
       status, mode, cluster, opened_at, updated_at
     ) values
       ('pos:bot_alice:sol', 'alice', 'bot_alice', '${MINT}', 9, '1000000000', '150000000', '0',
-       'open', 'paper', 'devnet', 1, 1),
+       'open', 'paper', 'mainnet-beta', 1, 1),
       ('pos:bot_bob:sol', 'bob', 'bot_bob', '${MINT}', 9, '2000000000', '250000000', '0',
-       'open', 'paper', 'devnet', 1, 1);
+       'open', 'paper', 'mainnet-beta', 1, 1);
     insert into position_checks (id, owner_id, bot_id, at, reason, status, flag, unrealized_loss_micro_usd, detail)
     values
       ('pchk_alice', 'alice', 'bot_alice', 10, 'cron-hourly', 'checked', 'within-cap', '0', '{"authorization":"Bearer secret-alice"}'::jsonb),
@@ -55,9 +57,9 @@ async function seed(db) {
       realized_micro_usdc, cluster, pricing_cluster, mode, broadcast, at
     ) values
       ('fill_alice', 'pos:bot_alice:sol', 'alice', 'bot_alice', 'buy', '${MINT}', '1000000000', '150000000',
-       '0', 'devnet', 'mainnet', 'paper', false, 1),
+       '0', 'mainnet-beta', 'mainnet', 'paper', false, 1),
       ('fill_bob', 'pos:bot_bob:sol', 'bob', 'bot_bob', 'buy', '${MINT}', '2000000000', '250000000',
-       '0', 'devnet', 'mainnet', 'paper', false, 1);
+       '0', 'mainnet-beta', 'mainnet', 'paper', false, 1);
   `);
 }
 
@@ -103,7 +105,7 @@ test('authenticated cannot DML paper tables; bob rows stay untouched', async () 
       status, mode, cluster, opened_at, updated_at
     ) values (
       'pos:forged', 'bob', 'bot_bob', '${MINT}', 9, '1', '1', '0',
-      'open', 'paper', 'devnet', 2, 2
+      'open', 'paper', 'mainnet-beta', 2, 2
     )
   `));
 
@@ -113,7 +115,7 @@ test('authenticated cannot DML paper tables; bob rows stay untouched', async () 
       realized_micro_usdc, cluster, pricing_cluster, mode, broadcast, at
     ) values (
       'fill_forged', 'pos:bot_bob:sol', 'bob', 'bot_bob', 'sell', '${MINT}', '1', '1',
-      '0', 'devnet', 'mainnet', 'paper', false, 2
+      '0', 'mainnet-beta', 'mainnet', 'paper', false, 2
     )
   `));
 

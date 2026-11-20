@@ -14,7 +14,7 @@ import {
 const base = {
   asset: 'SOL',
   mint: 'So11111111111111111111111111111111111111112',
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   price: '150000000',
   amount: '1000000',
   trustScore: '800',
@@ -28,10 +28,10 @@ const base = {
  * Side effects: none
  * Gaps: none meaningful
  */
-test('facts require testnet/devnet and integer string amounts', () => {
+test('facts require testnet/mainnet-beta and integer string amounts', () => {
   assert.equal(normalizeFacts(base).asset, 'SOL');
-  assert.equal(normalizeFacts({ ...base, cluster: 'testnet' }).cluster, 'testnet');
-  assert.throws(() => normalizeFacts({ ...base, cluster: 'mainnet-beta' }));
+  assert.throws(() => normalizeFacts({ ...base, cluster: 'testnet' }));
+  assert.throws(() => normalizeFacts({ ...base, cluster: 'devnet' }));
   assert.throws(() => normalizeFacts({ ...base, price: '1.5' }));
   assert.throws(() => normalizeFacts({ ...base, trustScore: '1001' }));
   assert.throws(() => normalizeFacts({ ...base, reasonSummary: '' }));
@@ -197,6 +197,6 @@ test('buildDecisionRecord hashes attempt history and rejects incomplete inputs',
 
   assert.throws(() => buildDecisionRecord({ facts: base, attempts: [], outcome: 'consensus' }), ConsensusError);
   assert.throws(() => buildDecisionRecord({ facts: base, attempts, outcome: 'approve' }), ConsensusError);
-  assert.throws(() => buildDecisionRecord({ facts: { ...base, cluster: 'mainnet-beta' }, attempts, outcome: 'consensus' }), ConsensusError);
+  assert.throws(() => buildDecisionRecord({ facts: { ...base, cluster: 'devnet' }, attempts, outcome: 'consensus' }), ConsensusError);
   assert.throws(() => normalizeFacts({ ...base, amount: '-1' }), ConsensusError);
 });

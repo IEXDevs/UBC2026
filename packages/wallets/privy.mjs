@@ -1,8 +1,9 @@
+import { SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 /**
  * Privy Solana wallet path for Maelstrom.
  * Login provisioning (main wallet at sign-up, additional wallets) and
  * server signing. Bot spends, owner sweeps, and wallet-adapter deposits
- * broadcast on Solana devnet through QUICKNODE_DEVNET_RPC_URL.
+ * broadcast on Solana mainnet-beta through SOLANA_RPC_URL.
  * Wallet keys stay in Privy. Signing credentials stay server-side.
  */
 import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
@@ -17,14 +18,10 @@ import {
 export { WalletError };
 
 /**
- * Full Solana-devnet genesis hash from getGenesisHash.
- * CAIP-2 uses the truncated form solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1 — do not use that for RPC checks.
+ * Full Solana-mainnet-beta genesis hash from getGenesisHash.
+ * CAIP-2 uses the truncated form solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp — do not use that for RPC checks.
  */
-export const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
-export const DEVNET_CAIP2 = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
-
-/** Circle USDC mint on Solana devnet. Mainnet USDC is never queried or transferred here. */
-export const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+export { SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT };
 
 const PRIVY_API_BASE = 'https://api.privy.io';
 const PRIVY_AUTH_BASE = 'https://auth.privy.io';
@@ -568,7 +565,7 @@ export function createPrivyWalletClient({
   const id = assertHeaderSafe(appId, 'Privy app id');
   const secret = assertHeaderSafe(appSecret, 'Privy app secret');
   // RPC is required for broadcast/signing; acceptLogin / wallet create can omit it.
-  const quicknode = rpcUrl == null || rpcUrl === '' ? null : assertHttps(rpcUrl, 'QuickNode devnet RPC');
+  const quicknode = rpcUrl == null || rpcUrl === '' ? null : assertHttps(rpcUrl, 'QuickNode mainnet-beta RPC');
   const privyApi = assertHttps(apiBase, 'Privy API');
   const privyAuth = assertHttps(authBase, 'Privy auth API');
   const authKey = authorizationKey == null || authorizationKey === '' ? null : authorizationKey;
@@ -603,7 +600,7 @@ export function createPrivyWalletClient({
       if (signingAttempt) {
         failSigning('Could not reach the Privy signing API', code, { transport: aborted ? 'timeout' : 'network' });
       }
-      const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
+      const target = code === 'rpc_failed' ? 'QuickNode mainnet-beta RPC' : 'Privy';
       if (isForbiddenOutboundHeaderError(error)) {
         fail(`${target} request failed (forbidden_header)`, code === 'rpc_failed' ? code : 'worker_origin_forbidden');
       }
@@ -613,7 +610,7 @@ export function createPrivyWalletClient({
     }
     if (signingAttempt) recordPrivyResponse(signingAttempt, response);
     {
-      const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
+      const target = code === 'rpc_failed' ? 'QuickNode mainnet-beta RPC' : 'Privy';
       if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
         if (signingAttempt) failSigning('Privy redirected the signing request', code, { transport: 'redirect' });
         fail(`${target} request failed (redirect)`, code);
@@ -647,14 +644,14 @@ export function createPrivyWalletClient({
       }
       const detail = safePrivyCode(payload);
       if (code === 'rpc_failed') {
-        fail(`QuickNode devnet RPC request failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
+        fail(`QuickNode mainnet-beta RPC request failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
       }
       const step = safePrivyPath(url);
       fail(`Privy ${step} failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
     }
     if (payload == null) {
       if (signingAttempt) failSigning('Privy returned an unreadable signing response', code, { transport: 'invalid-response' });
-      fail(code === 'rpc_failed' ? 'QuickNode devnet RPC failed' : 'Privy request failed', code);
+      fail(code === 'rpc_failed' ? 'QuickNode mainnet-beta RPC failed' : 'Privy request failed', code);
     }
     return payload;
   }
@@ -801,7 +798,7 @@ export function createPrivyWalletClient({
   }
 
   async function rpc(method, params) {
-    if (!quicknode) fail('QuickNode devnet RPC is required', 'missing_config');
+    if (!quicknode) fail('QuickNode mainnet-beta RPC is required', 'missing_config');
     return fetchJson(quicknode, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -809,14 +806,14 @@ export function createPrivyWalletClient({
     }, 'rpc_failed');
   }
 
-  /** Genesis gate shared by signing, owner sweeps, deposits, and devnet reads. */
-  async function assertDevnet() {
-    if (!quicknode) fail('QuickNode devnet RPC is required', 'missing_config');
+  /** Genesis gate shared by signing, owner sweeps, deposits, and mainnet-beta reads. */
+  async function assertSolana() {
+    if (!quicknode) fail('QuickNode mainnet-beta RPC is required', 'missing_config');
     const genesis = await rpc('getGenesisHash');
-    if (genesis.result !== DEVNET_GENESIS_HASH) {
-      fail('Refusing to broadcast outside Solana devnet', 'wrong_cluster');
+    if (genesis.result !== SOLANA_GENESIS_HASH) {
+      fail('Refusing to broadcast outside Solana mainnet-beta', 'wrong_cluster');
     }
-    return { cluster: 'devnet' };
+    return { cluster: SOLANA_CLUSTER };
   }
 
   async function checkPrivyWalletAccess(walletId, walletAddress, attempt) {
@@ -1010,13 +1007,13 @@ export function createPrivyWalletClient({
       );
     }
     if (signed.length > MAX_TX_BYTES) fail('Signed transaction exceeds the Solana packet limit', 'invalid_transaction');
-    await assertDevnet();
+    await assertSolana();
     const sent = await rpc('sendTransaction', [
       signedTransaction,
       { encoding: 'base64', preflightCommitment: 'confirmed' },
     ]);
     if (typeof sent.result !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(sent.result)) {
-      fail('Devnet broadcast did not return a signature', 'rpc_rejected');
+      fail('Solana broadcast did not return a signature', 'rpc_rejected');
     }
     return sent.result;
   }
@@ -1154,46 +1151,46 @@ export function createPrivyWalletClient({
       return createdRecord(created, owner, user.id, 'additional', label);
     },
 
-    async assertDevnetCluster() {
-      return assertDevnet();
+    async assertSolanaCluster() {
+      return assertSolana();
     },
 
-    async signAndBroadcastDevnet({ bot, wallet, transaction } = {}) {
+    async signAndBroadcastSolana({ bot, wallet, transaction } = {}) {
       assertSpendAllowed({ bot, wallet });
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
       const signedTransaction = await signWithPrivy(walletId, transaction);
       const signature = await sendSigned(signedTransaction, { privy: true });
       return {
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         signature,
         privyWalletId: walletId,
         botId: bot.id,
       };
     },
 
-    async readDevnetMint({ mint } = {}) {
+    async readSolanaMint({ mint } = {}) {
       if (typeof mint !== 'string' || !base58.test(mint)) fail('Mint address is required', 'invalid_mint');
-      await assertDevnet();
+      await assertSolana();
       const result = await rpc('getAccountInfo', [mint, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
       const account = result.result?.value;
       const decimals = account?.data?.parsed?.info?.decimals;
       if (account?.owner !== CLASSIC_TOKEN_PROGRAM || account?.data?.parsed?.type !== 'mint'
         || account.data.parsed.info?.isInitialized !== true || !Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
-        fail('Unsupported or missing devnet mint', 'unsupported_mint');
+        fail('Unsupported or missing mainnet-beta mint', 'unsupported_mint');
       }
-      return { cluster: 'devnet', mint, decimals };
+      return { cluster: SOLANA_CLUSTER, mint, decimals };
     },
 
-    async prepareDevnetTransfer({ transaction } = {}) {
+    async prepareSolanaTransfer({ transaction } = {}) {
       const message = singleSignerMessage(transaction);
-      await assertDevnet();
+      await assertSolana();
       const [fee, simulation] = await Promise.all([
         rpc('getFeeForMessage', [message.toString('base64'), { commitment: 'confirmed' }]),
         rpc('simulateTransaction', [transaction, { encoding: 'base64', commitment: 'confirmed', sigVerify: false, replaceRecentBlockhash: false }]),
       ]);
-      if (simulation.result?.value?.err !== null) fail('Devnet transfer simulation failed', 'simulation_failed');
+      if (simulation.result?.value?.err !== null) fail('Solana transfer simulation failed', 'simulation_failed');
       const lamports = fee.result?.value;
-      if (!Number.isSafeInteger(lamports) || lamports < 0) fail('Devnet transaction fee unavailable', 'rpc_rejected');
+      if (!Number.isSafeInteger(lamports) || lamports < 0) fail('Solana transaction fee unavailable', 'rpc_rejected');
       const prepared = Object.freeze({ transaction, feeLamports: String(lamports) });
       simulatedTransfers.add(prepared);
       return prepared;
@@ -1206,10 +1203,10 @@ export function createPrivyWalletClient({
       return Buffer.from(canonicalizeJson(request)).toString('base64');
     },
 
-    async signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken, ownerAuthorization } = {}) {
+    async signPreparedSolanaTransfer({ bot, wallet, prepared, accessToken, ownerAuthorization } = {}) {
       assertSpendAllowed({ bot, wallet });
       if (!simulatedTransfers.delete(prepared)) fail('Transfer simulation is required', 'simulation_required');
-      await assertDevnet();
+      await assertSolana();
       const signed = ownerAuthorization
         ? await signWithBrowserAuthorization(wallet, prepared, ownerAuthorization)
         : await signWithPrivy(assertPrivyWalletId(wallet.privyWalletId), prepared.transaction, {
@@ -1220,15 +1217,15 @@ export function createPrivyWalletClient({
       if (!singleSignerMessage(signed).equals(singleSignerMessage(prepared.transaction))) {
         fail('Signed transfer differs from the simulation', 'transaction_mismatch');
       }
-      return { cluster: 'devnet', signature: await sendSigned(signed, { privy: true }) };
+      return { cluster: SOLANA_CLUSTER, signature: await sendSigned(signed, { privy: true }) };
     },
 
     /**
      * Owner sweep / withdraw / wallet-to-wallet move.
      * Bot freeze does not apply: Stop All grab-back must still move a frozen wallet.
-     * Broadcast still refuses any cluster whose genesis hash is not devnet.
+     * Broadcast still refuses any cluster whose genesis hash is not solana.
      */
-    async signAndBroadcastOwnerDevnet({ ownerId, wallet, transaction } = {}) {
+    async signAndBroadcastOwnerSolana({ ownerId, wallet, transaction } = {}) {
       const owner = assertOwnerId(ownerId);
       try {
         validateWallet(wallet);
@@ -1240,7 +1237,7 @@ export function createPrivyWalletClient({
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
       const signedTransaction = await signWithPrivy(walletId, transaction);
       const signature = await sendSigned(signedTransaction, { privy: true });
-      return { cluster: 'devnet', signature, privyWalletId: walletId };
+      return { cluster: SOLANA_CLUSTER, signature, privyWalletId: walletId };
     },
 
     /**
@@ -1269,46 +1266,46 @@ export function createPrivyWalletClient({
     },
 
     /** Broadcast a transaction the Wallet Adapter already signed. No Privy call. */
-    async broadcastSignedDevnet({ signedTransaction } = {}) {
+    async broadcastSignedSolana({ signedTransaction } = {}) {
       const signature = await sendSigned(signedTransaction, { privy: false });
-      return { cluster: 'devnet', signature };
+      return { cluster: SOLANA_CLUSTER, signature };
     },
 
-    async getDevnetBlockhash() {
-      await assertDevnet();
+    async getSolanaBlockhash() {
+      await assertSolana();
       const latest = await rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]);
       const blockhash = latest.result?.value?.blockhash;
       const lastValidBlockHeight = latest.result?.value?.lastValidBlockHeight;
-      if (typeof blockhash !== 'string' || !base58.test(blockhash)) fail('Devnet blockhash was not returned', 'rpc_rejected');
+      if (typeof blockhash !== 'string' || !base58.test(blockhash)) fail('Solana blockhash was not returned', 'rpc_rejected');
       if (!Number.isSafeInteger(lastValidBlockHeight) || lastValidBlockHeight < 0) {
-        fail('Devnet blockhash was not returned', 'rpc_rejected');
+        fail('Solana blockhash was not returned', 'rpc_rejected');
       }
-      return { cluster: 'devnet', blockhash, lastValidBlockHeight };
+      return { cluster: SOLANA_CLUSTER, blockhash, lastValidBlockHeight };
     },
 
-    async getDevnetUsdcBalance({ address: owner } = {}) {
+    async getSolanaUsdcBalance({ address: owner } = {}) {
       if (typeof owner !== 'string' || !base58.test(owner)) fail('Wallet address is required', 'invalid_address');
-      await assertDevnet();
+      await assertSolana();
       const listed = await rpc('getTokenAccountsByOwner', [
         owner,
-        { mint: DEVNET_USDC_MINT },
+        { mint: SOLANA_USDC_MINT },
         { encoding: 'jsonParsed' },
       ]);
       const accounts = listed.result?.value;
-      if (!Array.isArray(accounts)) fail('Devnet USDC balance was not returned', 'rpc_rejected');
+      if (!Array.isArray(accounts)) fail('Solana USDC balance was not returned', 'rpc_rejected');
       let total = 0n;
       for (const account of accounts) {
         const info = account?.account?.data?.parsed?.info;
         const tokenAmount = info?.tokenAmount;
-        if (!info || info.mint !== DEVNET_USDC_MINT || tokenAmount?.decimals !== 6) {
-          fail('Devnet USDC balance was not returned', 'rpc_rejected');
+        if (!info || info.mint !== SOLANA_USDC_MINT || tokenAmount?.decimals !== 6) {
+          fail('Solana USDC balance was not returned', 'rpc_rejected');
         }
         if (typeof tokenAmount.amount !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(tokenAmount.amount)) {
-          fail('Devnet USDC balance was not returned', 'rpc_rejected');
+          fail('Solana USDC balance was not returned', 'rpc_rejected');
         }
         total += BigInt(tokenAmount.amount);
       }
-      return { cluster: 'devnet', mint: DEVNET_USDC_MINT, address: owner, amount: total.toString() };
+      return { cluster: SOLANA_CLUSTER, mint: SOLANA_USDC_MINT, address: owner, amount: total.toString() };
     },
   };
 }
@@ -1320,7 +1317,7 @@ export function createPrivyWalletClientFromEnv(env = process.env, options = {}) 
     ...options,
     appId: values.PRIVY_APP_ID,
     appSecret: values.PRIVY_APP_SECRET,
-    rpcUrl: values.QUICKNODE_DEVNET_RPC_URL,
+    rpcUrl: values.SOLANA_RPC_URL,
     authorizationKey: authorizationKey || null,
   });
 }

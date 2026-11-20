@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { solscanTxUrl } from './money-views.mjs';
 
 const SIG = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
@@ -25,8 +26,8 @@ export function txReceiptFromResult(result) {
   if (parsed.signed === false || parsed.ok === false) return null;
   const signature = typeof parsed.signature === 'string' ? parsed.signature : '';
   if (!SIG.test(signature)) return null;
-  if (parsed.cluster != null && parsed.cluster !== 'devnet' && parsed.cluster !== 'testnet') return null;
-  const cluster = parsed.cluster === 'testnet' ? 'testnet' : 'devnet';
+  if (parsed.cluster != null && parsed.cluster !== SOLANA_CLUSTER && parsed.cluster !== 'testnet') return null;
+  const cluster = parsed.cluster === 'testnet' ? 'testnet' : SOLANA_CLUSTER;
   const url = solscanTxUrl(signature, cluster);
   if (!url) return null;
   return {

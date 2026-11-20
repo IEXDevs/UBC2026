@@ -84,7 +84,7 @@ test('missing wallet secrets allow public app id as PRIVY_APP_ID', () => {
  * Gaps: none for change detection. Remaining: does not prove page.js effect deps.
  */
 test('linkedWalletKey changes when another Solana wallet is added', () => {
-  const first = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const first = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const second = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   assert.equal(linkedWalletKey(null), '');
   assert.equal(linkedWalletKey({ linkedAccounts: [{ address: first }] }), first);
@@ -103,7 +103,7 @@ test('linkedWalletKey changes when another Solana wallet is added', () => {
  * Gaps: none for single embedded case.
  */
 test('walletsFromPrivyUser maps createOnLogin Solana embedded addresses', () => {
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const wallets = walletsFromPrivyUser({
     linkedAccounts: [
       {
@@ -131,7 +131,7 @@ test('walletsFromPrivyUser maps createOnLogin Solana embedded addresses', () => 
  * Gaps: none for mix of embedded/external/EVM.
  */
 test('walletsFromPrivyUser also keeps connected external Solana wallets', () => {
-  const embedded = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const embedded = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const phantom = 'So11111111111111111111111111111111111111112';
   const wallets = walletsFromPrivyUser({
     linkedAccounts: [
@@ -173,7 +173,7 @@ test('walletsFromPrivyUser also keeps connected external Solana wallets', () => 
  * Gaps: none for this merge shape.
  */
 test('mergeObservedWallets keeps the agent wallet and appends linked wallets', () => {
-  const agent = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const agent = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const phantom = 'So11111111111111111111111111111111111111112';
   const merged = mergeObservedWallets(
     [{ id: 'w_main', kind: 'main', label: 'Main', address: agent, frozen: false, provider: 'privy' }],
@@ -238,8 +238,8 @@ test('wallet provision notes explain Worker Origin failures without leaking secr
  */
 test('wallet provision notes stay actionable and secret-free', () => {
   assert.match(
-    walletProvisionNote({ error: 'missing_config', missing: ['PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL'] }),
-    /PRIVY_APP_SECRET, QUICKNODE_DEVNET_RPC_URL/,
+    walletProvisionNote({ error: 'missing_config', missing: ['PRIVY_APP_SECRET', 'SOLANA_RPC_URL'] }),
+    /PRIVY_APP_SECRET, SOLANA_RPC_URL/,
   );
   assert.match(walletProvisionNote({ error: 'invalid_rpc' }), /https QuickNode/);
   assert.match(walletProvisionNote({ error: 'privy_failed' }), /PRIVY_APP_SECRET/);
@@ -291,7 +291,7 @@ test('wallet provision notes stay actionable and secret-free', () => {
  * Gaps: does not call Privy.
  */
 test('another embedded wallet uses the next HD index', () => {
-  const embedded = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const embedded = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const phantom = 'So11111111111111111111111111111111111111112';
   assert.equal(embeddedSolanaCount(null), 0);
   assert.equal(embeddedCreateOptions(0), undefined);
@@ -318,7 +318,7 @@ test('walletConfigFlags reports alignment without leaking app ids', async () => 
     NEXT_PUBLIC_PRIVY_APP_ID: 'cm_test_app',
     PRIVY_APP_SECRET: 'secret',
     PRIVY_AUTHORIZATION_KEY: 'wallet-auth:test',
-    QUICKNODE_DEVNET_RPC_URL: 'https://example.quiknode.pro/x',
+    SOLANA_RPC_URL: 'https://example.quiknode.pro/x',
     NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://runtime.maelstrom.iexdevs.com',
   });
   assert.equal(aligned.appIdAligned, true);

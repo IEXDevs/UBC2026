@@ -62,7 +62,7 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     else process.env.META_MODEL_API_KEY = previous.modelKey;
   });
 
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const signature = 'a'.repeat(88);
   const deskGrant = 'ab'.repeat(32);
   let recipient = { kind: 'handle', handle: 'hi', missing: false, address };
@@ -87,7 +87,7 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     if (payload.destination !== recipient.address) {
       return Response.json({ signed: false, error: 'recipient_address_missing' }, { status: 400 });
     }
-    return Response.json({ signed: true, cluster: 'devnet', signature });
+    return Response.json({ signed: true, cluster: 'mainnet-beta', signature });
   });
 
   const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
@@ -114,7 +114,7 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
   assert.equal(toolRounds, 0);
   assert.equal(hold.kind, 'modal');
   assert.match(hold.proof, /^[0-9a-f]{64}$/);
-  assert.match(hold.prompt, /1 SOL to @hi \(4zMMC\.\.\.DncDU\) on Solana devnet/);
+  assert.match(hold.prompt, /1 SOL to @hi \(EPjFW\.\.\.TDt1v\) on Solana mainnet-beta/);
   assert.deepEqual(sends, []);
 
   recipient = { ...recipient, address: 'So11111111111111111111111111111111111111112' };
@@ -135,7 +135,7 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
   const sent = await chat([hold]);
   assert.equal(sent.toolRounds, 1);
   assert.match(sent.reply, /Sent\./);
-  assert.ok(sent.reply.includes(`https://solscan.io/tx/${signature}?cluster=devnet`));
+  assert.ok(sent.reply.includes(`https://solscan.io/tx/${signature}`));
   assert.deepEqual(sends[3], {
     botId: 'bot_1',
     action: 'spend',
@@ -177,7 +177,7 @@ test('chat requires a second sealed slide and a verified owner to approve an ove
   const terms = { walletId: 'wallet_1', walletAddress: 'So11111111111111111111111111111111111111112', policyVersion: 1, feeLamports: '5000' };
   const args = {
     botId, action: 'spend', amount: '1000000000', asset: 'SOL', handle: 'hi',
-    destination: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    destination: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   };
   const initial = sealAssetSpendHold(toolAccessRequest('review', 'request_spend', args), {
     ownerId, botId, secret: config.META_MODEL_API_KEY,
@@ -215,7 +215,7 @@ test('chat requires a second sealed slide and a verified owner to approve an ove
     if (raw.spendAuthorization === 'prepare') {
       return Response.json({ signed: false, spendAuthorization: challenge });
     }
-    return Response.json({ signed: true, cluster: 'devnet', signature: 'a'.repeat(88) });
+    return Response.json({ signed: true, cluster: 'mainnet-beta', signature: 'a'.repeat(88) });
   });
 
   const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
@@ -665,11 +665,11 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
   const previous = {
     PRIVY_APP_ID: process.env.PRIVY_APP_ID,
     PRIVY_APP_SECRET: process.env.PRIVY_APP_SECRET,
-    QUICKNODE_DEVNET_RPC_URL: process.env.QUICKNODE_DEVNET_RPC_URL,
+    SOLANA_RPC_URL: process.env.SOLANA_RPC_URL,
   };
   process.env.PRIVY_APP_ID = 'app_portfolio_test';
   process.env.PRIVY_APP_SECRET = 'portfolio-app-secret';
-  process.env.QUICKNODE_DEVNET_RPC_URL = rpcUrl;
+  process.env.SOLANA_RPC_URL = rpcUrl;
   const previousFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
@@ -693,7 +693,7 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
       const body = JSON.parse(init.body);
       const results = body.map(row => {
         if (row.method === 'getGenesisHash') {
-          return { jsonrpc: '2.0', id: row.id, result: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG' };
+          return { jsonrpc: '2.0', id: row.id, result: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d' };
         }
         if (row.method === 'getBalance') {
           return { jsonrpc: '2.0', id: row.id, result: { value: 1000 } };
@@ -715,7 +715,7 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     }));
     const body = await res.json();
     assert.equal(res.status, 200, JSON.stringify(body));
-    assert.equal(body.cluster, 'devnet');
+    assert.equal(body.cluster, 'mainnet');
     assert.equal(body.authorizesTransaction, false);
     assert.equal(body.wallets[0].address, address);
     assert.equal(calls.some(call => call.url.includes('/users/me')), false);

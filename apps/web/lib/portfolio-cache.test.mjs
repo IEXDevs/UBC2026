@@ -10,7 +10,7 @@ import { cachedPortfolio, rememberPortfolio } from './portfolio-cache.mjs';
  * Gaps: does not expire entries.
  */
 test('portfolio cache returns the last book for a key', () => {
-  const book = { cluster: 'devnet', wallets: [] };
+  const book = { cluster: 'mainnet-beta', wallets: [] };
   assert.equal(cachedPortfolio(''), null);
   rememberPortfolio('owner-1', book);
   assert.equal(cachedPortfolio('owner-1'), book);

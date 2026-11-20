@@ -1,6 +1,6 @@
 /**
  * Privy wallet assignment and freeze helpers.
- * The Privy HTTP path (login provisioning and devnet server signing) lives in
+ * The Privy HTTP path (login provisioning and mainnet-beta server signing) lives in
  * `privy.mjs`. Private keys stay in Privy and in environment variables.
  */
 import { validateWallet, validateBotRecord, ContractError } from '@ubc2026/contracts';

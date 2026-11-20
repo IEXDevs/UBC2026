@@ -1,5 +1,7 @@
 'use client';
 
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+
 import { useEffect, useMemo, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { ExternalLink } from 'lucide-react';
@@ -8,7 +10,7 @@ import {
   describeHistory,
   describeSpendAlerts,
   describeWallets,
-  SOLSCAN_DEVNET,
+  SOLSCAN_SOLANA,
 } from '../lib/money-views.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { buildEarningsSeries, mergeConnectedPositions } from '../lib/earnings-chart.mjs';
@@ -150,8 +152,8 @@ function HistoryDetail({ row }) {
       <div className="ledger-meta ledger-meta-link">
         <dt>Explorer</dt>
         <dd>
-          <a href={row.explorerUrl ?? row.solscanUrl ?? SOLSCAN_DEVNET} target="_blank" rel="noreferrer">
-            {row.explorerUrl || row.solscanUrl ? 'Open in Solana Explorer' : 'Open devnet explorer'}
+          <a href={row.explorerUrl ?? row.solscanUrl ?? SOLSCAN_SOLANA} target="_blank" rel="noreferrer">
+            {row.explorerUrl || row.solscanUrl ? 'Open in Solana Explorer' : 'Open mainnet-beta explorer'}
             <ExternalLink size={14} strokeWidth={1.75} />
           </a>
         </dd>
@@ -185,7 +187,7 @@ function Wallets({ state }) {
           ))}
         </ul>
       )}
-      <p className="quiet">devnet execution, mainnet pricing. Freeze calls the policy API when that route is live.</p>
+      <p className="quiet">{EXECUTION_LABEL}. Freeze calls the policy API when that route is live.</p>
     </section>
   );
 }

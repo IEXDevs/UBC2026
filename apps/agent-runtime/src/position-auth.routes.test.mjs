@@ -15,7 +15,7 @@ import worker from './index.mjs';
 function envWithBots(rows, extras = {}) {
   const stubStore = new Map();
   return {
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     PRODUCT: 'Maelstrom',
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role',
@@ -122,8 +122,8 @@ test('GET /api/positions scopes by verified owner even when botId is attacker-co
     [{ id: 'bot_alice', owner_id: 'alice' }, { id: 'bot_bob', owner_id: 'bob' }],
     {
       positions: [
-        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'devnet', updated_at: 1 },
-        { id: 'pos:b', owner_id: 'bob', bot_id: 'bot_bob', mint: 'So11111111111111111111111111111111111111112', quantity: '9', entry_micro_usdc: '9', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'devnet', updated_at: 1 },
+        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'mainnet-beta', updated_at: 1 },
+        { id: 'pos:b', owner_id: 'bob', bot_id: 'bot_bob', mint: 'So11111111111111111111111111111111111111112', quantity: '9', entry_micro_usdc: '9', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'mainnet-beta', updated_at: 1 },
       ],
     },
   );
@@ -171,7 +171,7 @@ test('/api/positions rejects spoofed x-owner-id when Privy secrets are configure
       PRIVY_APP_ID: 'app_test',
       PRIVY_APP_SECRET: 'secret_test',
       positions: [
-        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'devnet', updated_at: 1 },
+        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'mainnet-beta', updated_at: 1 },
       ],
     },
   );
@@ -187,8 +187,8 @@ test('alice and bob each list only their own positions when authorized', async (
     [{ id: 'bot_alice', owner_id: 'alice' }, { id: 'bot_bob', owner_id: 'bob' }],
     {
       positions: [
-        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'devnet', updated_at: 1 },
-        { id: 'pos:b', owner_id: 'bob', bot_id: 'bot_bob', mint: 'So11111111111111111111111111111111111111112', quantity: '9', entry_micro_usdc: '9', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'devnet', updated_at: 1 },
+        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'mainnet-beta', updated_at: 1 },
+        { id: 'pos:b', owner_id: 'bob', bot_id: 'bot_bob', mint: 'So11111111111111111111111111111111111111112', quantity: '9', entry_micro_usdc: '9', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'mainnet-beta', updated_at: 1 },
       ],
     },
   );

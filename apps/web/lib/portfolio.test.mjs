@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEVNET_USDC_MINT,
+  SOLANA_USDC_MINT,
   MAINNET_USDC_MINT,
   PRICE_LABEL,
   SOL_MINT,
@@ -18,9 +18,9 @@ import {
 
 const RPC = 'https://example.invalid/quicknode-secret-path';
 const MAINNET = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
-const DEVNET = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
+const SOLANA = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 const PHANTOM = 'So11111111111111111111111111111111111111112';
-const AGENT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const AGENT = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
 
 /**
  * Achieves: verifies portfolio reads refuse a broadcast method.
@@ -96,13 +96,13 @@ test('portfolio slices sum to the whole and skip dust nfts', () => {
   assert.equal(book.wallets[0].spendable, false);
   assert.equal(book.unpriced, 0);
   assert.match(book.note, /do not authorize a transaction/);
-  assert.match(book.note, /devnet execution, mainnet pricing/);
+  assert.match(book.note, /mainnet-beta execution, mainnet pricing/);
 });
 
 /**
  * Achieves: verifies quicknode read prices balances and never sends a transaction.
- * Fails when: quicknode read prices balances and never sends a transaction breaks (e.g. expected RPC, false, 'devnet').
- * Oracle: assert.equal(url, RPC); assert.equal(body.some(row => row.method === 'sendTransaction'), false); assert.equal(book.cluster, 'devnet'); assert.equal(book.totalUsdMicro, '102000000'); assert.equal(book.wallets[0].holdings.some(row => row.symbol === 'USDC' && row.usdMicro === '2000000'), true); assert.equal(book.fetchedAt, '2026-11-15T00:00:00.000Z')
+ * Fails when: quicknode read prices balances and never sends a transaction breaks (e.g. expected RPC, false, 'mainnet-beta').
+ * Oracle: assert.equal(url, RPC); assert.equal(body.some(row => row.method === 'sendTransaction'), false); assert.equal(book.cluster, 'mainnet'); assert.equal(book.totalUsdMicro, '102000000'); assert.equal(book.wallets[0].holdings.some(row => row.symbol === 'USDC' && row.usdMicro === '2000000'), true); assert.equal(book.fetchedAt, '2026-11-15T00:00:00.000Z')
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
@@ -115,7 +115,7 @@ test('quicknode read prices balances and never sends a transaction', async () =>
     calls.push(...body.map(row => row.method));
     assert.equal(body.some(row => row.method === 'sendTransaction'), false);
     const results = body.map(row => {
-      if (row.method === 'getGenesisHash') return { jsonrpc: '2.0', id: row.id, result: DEVNET };
+      if (row.method === 'getGenesisHash') return { jsonrpc: '2.0', id: row.id, result: SOLANA };
       if (row.method === 'getBalance') {
         return { jsonrpc: '2.0', id: row.id, result: { value: row.params[0] === PHANTOM ? 1_000_000_000 : 0 } };
       }
@@ -131,7 +131,7 @@ test('quicknode read prices balances and never sends a transaction', async () =>
               data: {
                 parsed: {
                   info: {
-                    mint: DEVNET_USDC_MINT,
+                    mint: SOLANA_USDC_MINT,
                     tokenAmount: { amount: '2000000', decimals: 6 },
                   },
                 },
@@ -156,19 +156,19 @@ test('quicknode read prices balances and never sends a transaction', async () =>
     },
     now: () => new Date('2026-11-15T00:00:00.000Z'),
   });
-  assert.equal(book.cluster, 'devnet');
+  assert.equal(book.cluster, 'mainnet');
   assert.equal(book.totalUsdMicro, '102000000');
   assert.equal(book.wallets[0].holdings.some(row => row.symbol === 'USDC' && row.usdMicro === '2000000'), true);
   assert.equal(book.fetchedAt, '2026-11-15T00:00:00.000Z');
   assert.equal(calls.includes('sendTransaction'), false);
   assert.equal(JSON.stringify(book).includes('quicknode-secret-path'), false);
-  assert.match(book.note, /QUICKNODE_MAINNET_RPC_URL/);
+  assert.match(book.note, /Read-only mainnet balances/);
 });
 
 /**
  * Achieves: verifies a non-solana genesis and a leaked url are refused.
- * Fails when: a non-solana genesis and a leaked url are refused breaks (e.g. expected ['QUICKNODE_MAINNET_RPC_URL', 'QUICKNODE_DEVNET_RPC_URL'], RPC).
- * Oracle: assert.equal(choosePortfolioRpc({ QUICKNODE_MAINNET_RPC_URL: ` ${RPC} ` }).rpcUrl, RPC); assert.deepEqual(choosePortfolioRpc({}).missing, ['QUICKNODE_MAINNET_RPC_URL', 'QUICKNODE_DEVNET_RPC_URL']); assert.rejects( () => loadPortfolio({ rpcUrl: RPC, fetcher, wallets: [{ address: PHANTOM, label: 'Phantom' }],; assert.rejects( () => loadPortfolio({ rpcUrl: 'http://example.invalid/quicknode-secret-path', fetcher: async (
+ * Fails when: a non-solana genesis and a leaked url are refused breaks (e.g. expected ['QUICKNODE_MAINNET_RPC_URL', 'SOLANA_RPC_URL'], RPC).
+ * Oracle: assert.equal(choosePortfolioRpc({ QUICKNODE_MAINNET_RPC_URL: ` ${RPC} ` }).rpcUrl, RPC); assert.deepEqual(choosePortfolioRpc({}).missing, ['QUICKNODE_MAINNET_RPC_URL', 'SOLANA_RPC_URL']); assert.rejects( () => loadPortfolio({ rpcUrl: RPC, fetcher, wallets: [{ address: PHANTOM, label: 'Phantom' }],; assert.rejects( () => loadPortfolio({ rpcUrl: 'http://example.invalid/quicknode-secret-path', fetcher: async (
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
@@ -185,7 +185,7 @@ test('a non-solana genesis and a leaked url are refused', async () => {
     }),
     error => error instanceof PortfolioError && error.code === 'wrong_cluster' && !String(error.message).includes('quicknode'),
   );
-  assert.deepEqual(choosePortfolioRpc({}).missing, ['QUICKNODE_MAINNET_RPC_URL', 'QUICKNODE_DEVNET_RPC_URL']);
+  assert.deepEqual(choosePortfolioRpc({}).missing, ['QUICKNODE_MAINNET_RPC_URL', 'SOLANA_RPC_URL']);
   assert.equal(choosePortfolioRpc({ QUICKNODE_MAINNET_RPC_URL: ` ${RPC} ` }).rpcUrl, RPC);
   await assert.rejects(
     () => loadPortfolio({

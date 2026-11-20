@@ -10,8 +10,8 @@ import {
   mergeConnectedPositions,
 } from './earnings-chart.mjs';
 
-const PHANTOM = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
-const SOLFLARE = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const PHANTOM = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const SOLFLARE = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
 
 const paper = {
   id: 'pos_sol',
@@ -84,7 +84,7 @@ test('earnings chart is paper PnL and does not authorize a transaction', () => {
   assert.equal(series.authorizesTransaction, false);
   assert.equal(series.paperPnl, true);
   assert.equal(series.label, PAPER_PNL_LABEL);
-  assert.match(series.caption, /devnet execution, mainnet pricing/);
+  assert.match(series.caption, /mainnet-beta execution, mainnet pricing/);
   assert.match(series.caption, /does not authorize a transaction/);
   assert.deepEqual(series.points.map(point => point.micro), ['0', '-250000', '750000', '1250000', '-250000']);
   assert.equal(series.totalMicro, '-250000');
@@ -133,7 +133,7 @@ test('connected wallets add read-only mainnet balances and keep paper lots', () 
   const described = describePositions(merged.positions, [{ id: 'bot_positions', name: 'Position guard' }]);
   assert.equal(described[0].botName, 'Position guard');
   assert.equal(described.find(row => row.asset === 'SOL' && row.botName === 'Phantom').market, 'mainnet price');
-  assert.match(described.find(row => row.botName === 'Phantom').note, /devnet execution, mainnet pricing/);
+  assert.match(described.find(row => row.botName === 'Phantom').note, /mainnet-beta execution, mainnet pricing/);
 
   const book = layoutPositionBook(merged.positions, [], merged.wallets);
   const node = book.wallets.find(wallet => wallet.label === 'Phantom');

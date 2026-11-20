@@ -1,16 +1,17 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Chunk 5B schedules.
- * Hourly Cron marks paper positions. A second Cron re-checks devnet USDC
+ * Hourly Cron marks paper positions. A second Cron re-checks mainnet-beta USDC
  * over RPC when QuickNode Streams has gone quiet, so a dropped stream is
  * not the only way a wallet is observed. This module does not sign or spend.
  */
-import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 export {
   SPL_TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   parseTokenAccountsByMint,
-  readDevnetWalletBalances,
-  readDevnetUsdcBalance,
+  readSolanaWalletBalances,
+  readSolanaUsdcBalance,
 } from '@ubc2026/wallets/balances';
 
 export const HOURLY_CRON = '0 * * * *';
@@ -103,8 +104,8 @@ function publicBalance(balance) {
   return {
     ok,
     code: ok ? null : (typeof balance.code === 'string' ? balance.code.slice(0, 64) : 'rpc_rejected'),
-    cluster: 'devnet',
-    mint: ok ? DEVNET_USDC_MINT : null,
+    cluster: SOLANA_CLUSTER,
+    mint: ok ? SOLANA_USDC_MINT : null,
     address,
     amount: ok ? amount : null,
   };
@@ -180,7 +181,7 @@ export function assessPositions({ bot, positions, quotes, balance, reason, now }
     at,
     reason: reason === 'stream-drop-recheck' ? 'stream-drop-recheck' : 'cron-hourly',
     paper: true,
-    label: 'devnet execution, mainnet pricing',
+    label: EXECUTION_LABEL,
     status,
     flag,
     unrealizedLossMicroUsd: loss.toString(),

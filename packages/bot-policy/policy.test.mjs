@@ -15,7 +15,7 @@ const bot = {
 const p = {
   id: 'p',
   botId: 'b',
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   asset: 'USDC',
   recipient: 'merchant',
   quoteId: 'q',
@@ -83,7 +83,7 @@ test('fees and reservations count toward limits with exact integer arithmetic', 
  * Gaps: testnet acceptance is allowed by policy (hackathon) — not rejected here.
  */
 test('mainnet, wrong bot and malformed amounts are rejected', () => {
-  for (const change of [{ cluster: 'mainnet-beta' }, { botId: 'other' }, { outflow: '1.2' }, { maxFee: '-1' }]) {
+  for (const change of [{ cluster: 'devnet' }, { botId: 'other' }, { outflow: '1.2' }, { maxFee: '-1' }]) {
     assert.throws(() => evaluateProposal(bot, { ...p, ...change }, ledger, 1000));
   }
 });

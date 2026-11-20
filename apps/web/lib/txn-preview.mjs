@@ -1,10 +1,11 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Transaction preview and log rows. No signing.
  */
 import { formatBaseUnits, solscanTxUrl } from './money-views.mjs';
 import { timelineSummary } from './bot-experience.mjs';
 
-const CLUSTER = new Set(['mainnet', 'devnet', 'testnet']);
+const CLUSTER = new Set(['mainnet', SOLANA_CLUSTER, 'testnet']);
 const MONEY_EVENTS = new Map([
   ['payment.x402', 'Payment'],
   ['tx.submitted', 'Transaction submitted'],
@@ -20,7 +21,7 @@ export function sendPreview({ from, to, amountLabel }) {
       { label: 'From', value: from || 'Agent wallet' },
       { label: 'To', value: to || '' },
       { label: 'Amount', value: amountLabel },
-      { label: 'Network', value: 'devnet execution, mainnet pricing' },
+      { label: 'Network', value: EXECUTION_LABEL },
     ],
   };
 }
@@ -33,13 +34,13 @@ export function swapPreview({ pay, receive, from, to }) {
       { label: 'Pay', value: `${pay} ${from}` },
       { label: 'Receive', value: receive ? `${receive} ${to}` : 'Quoted when you slide' },
       { label: 'Route', value: 'Jupiter' },
-      { label: 'Network', value: 'devnet execution, mainnet pricing' },
+      { label: 'Network', value: EXECUTION_LABEL },
     ],
   };
 }
 
 function clusterOf(value) {
-  return typeof value === 'string' && CLUSTER.has(value) ? value : 'devnet';
+  return typeof value === 'string' && CLUSTER.has(value) ? value : SOLANA_CLUSTER;
 }
 
 function line(label, value) {
@@ -100,7 +101,7 @@ export function logRows({ receipts = [], payments = [], transfers = [], events =
       title: `${direction} ${amountLabel}`,
       lines: [
         line('Handle', transfer.handle ? `@${String(transfer.handle).replace(/^@/, '')}` : ''),
-        line('Network', 'Platform ledger · devnet execution, mainnet pricing'),
+        line('Network', `Platform ledger · ${EXECUTION_LABEL}`),
       ].filter(Boolean),
       solscanUrl: null,
     });
@@ -109,9 +110,9 @@ export function logRows({ receipts = [], payments = [], transfers = [], events =
   for (const event of events) {
     const title = MONEY_EVENTS.get(event?.kind);
     if (typeof event?.id !== 'string' || !event.id || !title) continue;
-    // The QuickNode devnet stream uses the transaction signature as the event ID.
+    // The QuickNode mainnet-beta stream uses the transaction signature as the event ID.
     const solscanUrl = event.kind === 'tx.confirmed' && event.id.startsWith('stream:')
-      ? solscanTxUrl(event.id.slice('stream:'.length), 'devnet')
+      ? solscanTxUrl(event.id.slice('stream:'.length), SOLANA_CLUSTER)
       : null;
     if (solscanUrl && linkedTransactions.has(solscanUrl)) continue;
     rows.push({

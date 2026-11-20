@@ -1,4 +1,5 @@
 'use client';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 
 import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
@@ -114,7 +115,7 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
       <TokenDetail
         mint={selected}
         holding={holding}
-        cluster={portfolio?.cluster || 'devnet'}
+        cluster={portfolio?.cluster || SOLANA_CLUSTER}
         userId={user?.id}
         onBack={() => setSelected(null)}
         onSend={() => onSend?.(holding?.symbol)}
@@ -132,7 +133,7 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
       transition={{ duration: 0.4, ease }}
     >
       {holdings.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
-      {loading ? <p className="quiet">Reading devnet balances.</p> : null}
+      {loading ? <p className="quiet">Reading mainnet-beta balances.</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
       <ul className="token-rows">
         {holdings.map(row => (

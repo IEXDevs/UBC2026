@@ -1,18 +1,19 @@
+import { SOLANA_CLUSTER, SOLANA_RPC_URL } from '@ubc2026/contracts/solana';
 /**
  * Chunk 0B: where account keys live (names only) and how a person funds
- * Solana devnet SOL and USDC. Prints steps. Does not read secret values,
+ * Solana mainnet-beta SOL and USDC. Prints steps. Does not read secret values,
  * call faucets, or sign.
  */
 import { pathToFileURL } from 'node:url';
 import { SECRET_GROUPS, SECRET_NAMES } from '../packages/contracts/contracts.mjs';
-import { DEVNET_USDC_MINT } from '../packages/x402/x402.mjs';
+import { SOLANA_USDC_MINT } from '../packages/x402/x402.mjs';
 
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 export const SOL_FAUCET_URL = 'https://faucet.solana.com/';
 export const USDC_FAUCET_URL = 'https://faucet.circle.com/?chain=SOL';
-export const DEVNET_USDC_MINT_ADDRESS = DEVNET_USDC_MINT;
-export const PUBLIC_DEVNET_RPC = 'https://api.devnet.solana.com';
+export const SOLANA_USDC_MINT_ADDRESS = SOLANA_USDC_MINT;
+export const PUBLIC_SOLANA_RPC = SOLANA_RPC_URL;
 
 export class AccountsFundsError extends Error {}
 
@@ -132,8 +133,9 @@ export const ACCOUNT_VENDORS = Object.freeze([
     ]),
     steps: Object.freeze([
       'Sign in to QuickNode and claim any hackathon credits from the sponsor instructions.',
-      'Create an endpoint with chain Solana and network Devnet.',
-      'Store the HTTP provider URL as QUICKNODE_DEVNET_RPC_URL.',
+      `Create an endpoint with chain Solana and network ${SOLANA_CLUSTER}.`,
+      'Store the HTTP provider URL as SOLANA_RPC_URL.',
+      `For public read-only fallback, use ${PUBLIC_SOLANA_RPC}. Signing still requires an explicitly configured $SOLANA_RPC_URL.`,
       'Optional: create a Solana Mainnet endpoint and store it as QUICKNODE_MAINNET_RPC_URL. The portfolio graph reads it and never signs or broadcasts.',
       'QUICKNODE_WEBHOOK_SECRET is for Streams later. Leave it empty until that chunk.',
     ]),
@@ -182,27 +184,33 @@ export function buildAccountsAndFundsPlan({ address } = {}) {
     funds: {
       sol: {
         asset: 'SOL',
-        cluster: 'devnet',
-        url: SOL_FAUCET_URL,
-        steps: [
+        cluster: SOLANA_CLUSTER,
+        url: SOLANA_CLUSTER === 'devnet' ? SOL_FAUCET_URL : null,
+        steps: SOLANA_CLUSTER === 'devnet' ? [
           `Open ${SOL_FAUCET_URL}`,
           `Paste ${token}. The page allows 2 requests every 8 hours. Signing in with GitHub raises the limit.`,
-          `The public devnet RPC faucet is closed (HTTP 410 on ${PUBLIC_DEVNET_RPC}). Do not use \`solana airdrop --url devnet\` or requestAirdrop against that host.`,
-          `Optional, only if your QuickNode devnet endpoint still serves airdrops: solana airdrop 2 ${token} --url "$QUICKNODE_DEVNET_RPC_URL"`,
-          'That command reads the URL from the environment. Do not paste the URL into the repo or into chat.',
+          'Use test SOL only. Never send real funds to a faucet.',
+        ] : [
+          `Fund ${token} with real mainnet SOL from a wallet you control.`,
+          'Keep enough SOL for transaction fees and token-account rent. Mainnet has no faucet or airdrop.',
+          'Verify the network and recipient; begin with a small owner-approved transfer.',
         ],
       },
       usdc: {
         asset: 'USDC',
-        cluster: 'devnet',
-        url: USDC_FAUCET_URL,
-        mint: DEVNET_USDC_MINT_ADDRESS,
-        steps: [
+        cluster: SOLANA_CLUSTER,
+        url: SOLANA_CLUSTER === 'devnet' ? USDC_FAUCET_URL : null,
+        mint: SOLANA_USDC_MINT_ADDRESS,
+        steps: SOLANA_CLUSTER === 'devnet' ? [
           `Open ${USDC_FAUCET_URL}`,
           'Choose Solana and USDC. The public faucet does not need a Circle account or API key.',
           `Paste ${token} and request devnet USDC.`,
-          `Confirm the token account uses mint ${DEVNET_USDC_MINT_ADDRESS}.`,
+          `Confirm the token account uses mint ${SOLANA_USDC_MINT_ADDRESS}.`,
           'Get devnet SOL first. Creating the USDC token account needs a little SOL for rent.',
+        ] : [
+          `Send real Solana mainnet USDC to ${token} from a wallet you control.`,
+          `Verify Circle mint ${SOLANA_USDC_MINT_ADDRESS}; bridged or similarly named tokens are not USDC.`,
+          'Fund SOL fees first. Begin with a small owner-approved transfer; transfers are irreversible.',
         ],
       },
     },
@@ -211,7 +219,7 @@ export function buildAccountsAndFundsPlan({ address } = {}) {
 
 export function formatAccountsAndFunds(plan) {
   const lines = [
-    'Accounts and devnet funds',
+    `Accounts and ${SOLANA_CLUSTER} funds`,
     '',
     'Secret names only. This command does not read secret values or call a faucet.',
     `Local file (gitignored): ${plan.copyEnv}`,
@@ -223,12 +231,12 @@ export function formatAccountsAndFunds(plan) {
     lines.push('', `${vendor.id}`, `  dashboard: ${vendor.dashboard}`, `  names: ${vendor.names.join(', ')}`);
     for (const step of vendor.steps) lines.push(`  - ${step}`);
   }
-  lines.push('', 'Devnet SOL', `  ${plan.funds.sol.url}`);
+  lines.push('', 'Solana SOL', `  ${plan.funds.sol.url}`);
   for (const step of plan.funds.sol.steps) lines.push(`  - ${step}`);
-  lines.push('', 'Devnet USDC', `  ${plan.funds.usdc.url}`, `  mint: ${plan.funds.usdc.mint}`);
+  lines.push('', 'Solana USDC', `  ${plan.funds.usdc.url}`, `  mint: ${plan.funds.usdc.mint}`);
   for (const step of plan.funds.usdc.steps) lines.push(`  - ${step}`);
   if (plan.wallet) lines.push('', `Wallet address: ${plan.wallet}`);
-  else lines.push('', 'Pass --address <SOLANA_PUBKEY> to fill the faucet steps with a public wallet address.');
+  else lines.push('', 'Pass --address <SOLANA_PUBKEY> to fill the funding steps with a public wallet address.');
   return `${lines.join('\n')}\n`;
 }
 

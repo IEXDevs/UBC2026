@@ -1,6 +1,6 @@
 /**
  * Existing Privy client suite. Each test below carries a rigor audit comment.
- * Oracles: Privy HTTP shapes, Solana-devnet genesis, and wallet assignment rules.
+ * Oracles: Privy HTTP shapes, Solana-mainnet-beta genesis, and wallet assignment rules.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +12,7 @@ import { formatRequestForAuthorizationSignature } from '@privy-io/node';
 import { assignBotWallet, createMainWallet } from './wallets.mjs';
 import { accountWriteBodies } from './wallets.mjs';
 import {
-  DEVNET_GENESIS_HASH,
+  SOLANA_GENESIS_HASH,
   WalletError,
   canonicalizeJson,
   privyAuthorizationSignature,
@@ -21,7 +21,7 @@ import {
   loginMethodsFromUser,
 } from './privy.mjs';
 
-const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const appId = 'app_test';
 const appSecret = 'app-secret-value';
 const accessToken = 'privy-access-token-value';
@@ -116,7 +116,7 @@ test('a prepared transfer binds the exact simulated message to its signature', a
   const bot = { ...baseBot, walletId };
   const privy = client({ fetcher: async (url, init) => {
     const req = JSON.parse(init.body);
-    if (req.method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
+    if (req.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
     if (req.method === 'getFeeForMessage') {
       assert.equal(req.params[0], unsigned.subarray(65).toString('base64'));
       return Response.json({ result: { value: 5000 } });
@@ -149,18 +149,18 @@ test('a prepared transfer binds the exact simulated message to its signature', a
     broadcasts++;
     return Response.json({ result: txSignature });
   } });
-  const prepared = await privy.prepareDevnetTransfer({ transaction });
+  const prepared = await privy.prepareSolanaTransfer({ transaction });
   assert.equal(prepared.feeLamports, '5000');
   const input = { bot, wallet, prepared };
-  await assert.rejects(privy.signPreparedDevnetTransfer({ ...input, prepared: { ...prepared } }), { code: 'simulation_required' });
-  assert.equal((await privy.signPreparedDevnetTransfer(input)).signature, txSignature);
-  await assert.rejects(privy.signPreparedDevnetTransfer(input), { code: 'simulation_required' });
+  await assert.rejects(privy.signPreparedSolanaTransfer({ ...input, prepared: { ...prepared } }), { code: 'simulation_required' });
+  assert.equal((await privy.signPreparedSolanaTransfer(input)).signature, txSignature);
+  await assert.rejects(privy.signPreparedSolanaTransfer(input), { code: 'simulation_required' });
   swapMessage = true;
-  const again = await privy.prepareDevnetTransfer({ transaction });
-  await assert.rejects(privy.signPreparedDevnetTransfer({ ...input, prepared: again }), { code: 'transaction_mismatch' });
+  const again = await privy.prepareSolanaTransfer({ transaction });
+  await assert.rejects(privy.signPreparedSolanaTransfer({ ...input, prepared: again }), { code: 'transaction_mismatch' });
   assert.equal(broadcasts, 1);
 
-  const browserPrepared = await privy.prepareDevnetTransfer({ transaction });
+  const browserPrepared = await privy.prepareSolanaTransfer({ transaction });
   const expiresAt = 1_700_000_050_000;
   const challenge = privy.formatPreparedSpendAuthorization({ bot, wallet, prepared: browserPrepared, expiresAt });
   assertNoSecrets(Buffer.from(challenge, 'base64').toString());
@@ -168,8 +168,8 @@ test('a prepared transfer binds the exact simulated message to its signature', a
   const browserInput = { bot, wallet, prepared: browserPrepared, ownerAuthorization: { expiresAt, signature } };
   swapMessage = false;
   verifyBrowserAuthorization = true;
-  assert.equal((await privy.signPreparedDevnetTransfer(browserInput)).signature, txSignature);
-  await assert.rejects(privy.signPreparedDevnetTransfer(browserInput), { code: 'simulation_required' });
+  assert.equal((await privy.signPreparedSolanaTransfer(browserInput)).signature, txSignature);
+  await assert.rejects(privy.signPreparedSolanaTransfer(browserInput), { code: 'simulation_required' });
   assert.equal(broadcasts, 2);
 });
 
@@ -236,7 +236,7 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
       if (ownerRejection) return ownerRejection;
       return Response.json({ method: 'signTransaction', data: { signed_transaction: signed.toString('base64'), encoding: 'base64' } });
     }
-    if (body.method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
+    if (body.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
     if (body.method === 'getFeeForMessage') return Response.json({ result: { value: 5000 } });
     if (body.method === 'simulateTransaction') return Response.json({ result: { value: { err: null } } });
     assert.equal(body.method, 'sendTransaction');
@@ -245,8 +245,8 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
     return Response.json({ result: txSignature });
   } });
   async function send(accessToken) {
-    const prepared = await privy.prepareDevnetTransfer({ transaction });
-    return privy.signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken });
+    const prepared = await privy.prepareSolanaTransfer({ transaction });
+    return privy.signPreparedSolanaTransfer({ bot, wallet, prepared, accessToken });
   }
   await assert.rejects(send(token('did:privy:other')), { code: 'wallet_owner_session_required' });
   assert.equal(exchanged, 0);
@@ -340,7 +340,7 @@ test('an unexplained signing 401 checks wallet access with the same app credenti
       return Response.json({ error: 'undocumented detail' }, { status: 401 });
     }
     const { method } = JSON.parse(init.body);
-    if (method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
+    if (method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
     if (method === 'getFeeForMessage') return Response.json({ result: { value: 5000 } });
     assert.equal(method, 'simulateTransaction', 'the signing rejection must never broadcast');
     return Response.json({ result: { value: { err: null } } });
@@ -360,8 +360,8 @@ test('an unexplained signing 401 checks wallet access with the same app credenti
     lookupStatus = status;
     returnedWalletId = id;
     returnedAddress = walletAddress;
-    const prepared = await privy.prepareDevnetTransfer({ transaction });
-    await assert.rejects(privy.signPreparedDevnetTransfer({ bot, wallet, prepared }), error => {
+    const prepared = await privy.prepareSolanaTransfer({ transaction });
+    await assert.rejects(privy.signPreparedSolanaTransfer({ bot, wallet, prepared }), error => {
       assert.equal(error.code, code);
       const { status, walletLookupStatus, requests, session } = error.privyFailure;
       assert.equal(status, diagnostic.status);
@@ -381,7 +381,7 @@ test('an unexplained signing 401 checks wallet access with the same app credenti
  * Rigor audit — missing server-signing names throw before any request
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -391,7 +391,7 @@ test('missing server-signing names throw before any request', () => {
     () => createPrivyWalletClientFromEnv({ PRIVY_APP_SECRET: appSecret, fetcher }),
     error => {
       assert.ok(error instanceof ConfigError);
-      assert.deepEqual(error.missing, ['PRIVY_APP_ID', 'QUICKNODE_DEVNET_RPC_URL']);
+      assert.deepEqual(error.missing, ['PRIVY_APP_ID', 'SOLANA_RPC_URL']);
       assertNoSecrets(error.message);
       return true;
     },
@@ -407,7 +407,7 @@ test('missing server-signing names throw before any request', () => {
  * Rigor audit — readLoginUser returns linked wallets and does not create one
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -499,7 +499,7 @@ test('readLoginUser on Workers loads by JWT sub and does not call users/me', asy
  * Rigor audit — login recovers owner id from JWT sub without users/me (Worker-safe)
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -530,7 +530,7 @@ test('login recovers owner id from JWT sub without users/me (Worker-safe)', asyn
  * Rigor audit — login prefers JWT sub over a stale x-owner-id header
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -554,7 +554,7 @@ test('login prefers JWT sub over a stale x-owner-id header', async () => {
  * Rigor audit — Worker-safe login loads the user with app secret and no authorization signature
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -575,7 +575,7 @@ test('Worker-safe login loads the user with app secret and no authorization sign
  * Rigor audit — login keeps linked wallets and sign-in methods on the same owner
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -625,7 +625,7 @@ test('login keeps linked wallets and sign-in methods on the same owner', async (
  * Rigor audit — login creates the main Solana wallet when Privy has none
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -689,7 +689,7 @@ test('login creates the main Solana wallet when Privy has none', async () => {
  * Rigor audit — login recovers when createOnLogin linked a Solana wallet with null server id
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -729,7 +729,7 @@ test('login recovers when createOnLogin linked a Solana wallet with null server 
  * Rigor audit — login retries list after create fails when a server wallet already exists
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -767,7 +767,7 @@ test('login retries list after create fails when a server wallet already exists'
  * Rigor audit — login keeps an existing main wallet and maps later embedded wallets as additional
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -802,7 +802,7 @@ test('login keeps an existing main wallet and maps later embedded wallets as add
  * Rigor audit — additional wallets require a main wallet and a label
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -843,14 +843,14 @@ test('additional wallets require a main wallet and a label', async () => {
 });
 
 /**
- * Rigor audit — server signing broadcasts only after devnet genesis matches
+ * Rigor audit — server signing broadcasts only after mainnet-beta genesis matches
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
-test('server signing broadcasts only after devnet genesis matches', async () => {
+test('server signing broadcasts only after mainnet-beta genesis matches', async () => {
   const wallet = {
     ...createMainWallet({ ownerId: 'user_1', address, id: walletId }),
     privyWalletId: walletId,
@@ -866,15 +866,15 @@ test('server signing broadcasts only after devnet genesis matches', async () => 
     },
     {
       match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash',
-      body: { jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH },
+      body: { jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH },
     },
     {
       match: (url, body) => url === rpcUrl && body?.method === 'sendTransaction',
       body: { jsonrpc: '2.0', id: 1, result: txSignature },
     },
   ]);
-  const sent = await client({ fetcher }).signAndBroadcastDevnet({ bot, wallet, transaction });
-  assert.equal(sent.cluster, 'devnet');
+  const sent = await client({ fetcher }).signAndBroadcastSolana({ bot, wallet, transaction });
+  assert.equal(sent.cluster, 'mainnet-beta');
   assert.equal(sent.signature, txSignature);
   assert.equal(sent.botId, bot.id);
   assert.equal(calls[1].init.headers.Authorization, undefined);
@@ -888,14 +888,14 @@ test('server signing broadcasts only after devnet genesis matches', async () => 
 });
 
 /**
- * Rigor audit — a non-devnet QuickNode genesis hash never sends the transaction
+ * Rigor audit — a non-mainnet-beta QuickNode genesis hash never sends the transaction
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
-test('a non-devnet QuickNode genesis hash never sends the transaction', async () => {
+test('a non-mainnet-beta QuickNode genesis hash never sends the transaction', async () => {
   const wallet = {
     ...createMainWallet({ ownerId: 'user_1', address, id: walletId }),
     privyWalletId: walletId,
@@ -912,7 +912,7 @@ test('a non-devnet QuickNode genesis hash never sends the transaction', async ()
     },
   ]);
   await assert.rejects(
-    () => client({ fetcher }).signAndBroadcastDevnet({ bot, wallet, transaction: unsignedTx() }),
+    () => client({ fetcher }).signAndBroadcastSolana({ bot, wallet, transaction: unsignedTx() }),
     error => error instanceof WalletError && error.code === 'wrong_cluster',
   );
   assert.equal(calls.some(call => call.body?.method === 'sendTransaction'), false);
@@ -922,7 +922,7 @@ test('a non-devnet QuickNode genesis hash never sends the transaction', async ()
  * Rigor audit — freeze and provider failures do not reveal secrets or broadcast
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
@@ -935,7 +935,7 @@ test('freeze and provider failures do not reveal secrets or broadcast', async ()
   const wallet = { ...openWallet, frozen: true };
   const frozenFetch = mockFetch([]);
   await assert.rejects(
-    () => client({ fetcher: frozenFetch.fetcher }).signAndBroadcastDevnet({
+    () => client({ fetcher: frozenFetch.fetcher }).signAndBroadcastSolana({
       bot: openBot,
       wallet,
       transaction: unsignedTx(),
@@ -951,7 +951,7 @@ test('freeze and provider failures do not reveal secrets or broadcast', async ()
     },
   ]);
   await assert.rejects(
-    () => client({ fetcher: raw.fetcher }).signAndBroadcastDevnet({
+    () => client({ fetcher: raw.fetcher }).signAndBroadcastSolana({
       bot: openBot,
       wallet: openWallet,
       transaction: unsignedTx(),
@@ -970,7 +970,7 @@ test('freeze and provider failures do not reveal secrets or broadcast', async ()
     },
   ]);
   await assert.rejects(
-    () => client({ fetcher: leaky.fetcher }).signAndBroadcastDevnet({
+    () => client({ fetcher: leaky.fetcher }).signAndBroadcastSolana({
       bot: liveBot,
       wallet: liveWallet,
       transaction: unsignedTx(),
@@ -985,20 +985,20 @@ test('freeze and provider failures do not reveal secrets or broadcast', async ()
   await assert.rejects(
     () => client({
       fetcher: async () => { throw new Error(rpcUrl); },
-    }).signAndBroadcastDevnet({ bot: liveBot, wallet: liveWallet, transaction: unsignedTx() }),
+    }).signAndBroadcastSolana({ bot: liveBot, wallet: liveWallet, transaction: unsignedTx() }),
     error => error instanceof WalletError && error.code === 'privy_failed' && !error.message.includes('quicknode-secret-path'),
   );
 });
 
 /**
- * Rigor audit — devnet reads and owner sweeps stay off the public client surface and off mainnet
+ * Rigor audit — mainnet-beta reads and owner sweeps stay off the public client surface and off mainnet
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
-test('devnet reads and owner sweeps stay off the public client surface and off mainnet', async () => {
+test('mainnet-beta reads and owner sweeps stay off the public client surface and off mainnet', async () => {
   const live = client();
   assert.equal(live.rpc, undefined);
   assert.equal(live.sendSigned, undefined);
@@ -1018,15 +1018,15 @@ test('devnet reads and owner sweeps stay off the public client surface and off m
   ]);
   const blockedClient = client({ fetcher: blocked.fetcher });
   await assert.rejects(
-    () => blockedClient.getDevnetBlockhash(),
+    () => blockedClient.getSolanaBlockhash(),
     error => error instanceof WalletError && error.code === 'wrong_cluster',
   );
   await assert.rejects(
-    () => blockedClient.getDevnetUsdcBalance({ address: owner }),
+    () => blockedClient.getSolanaUsdcBalance({ address: owner }),
     error => error instanceof WalletError && error.code === 'wrong_cluster',
   );
   await assert.rejects(
-    () => blockedClient.broadcastSignedDevnet({ signedTransaction: signedTx() }),
+    () => blockedClient.broadcastSignedSolana({ signedTransaction: signedTx() }),
     error => error instanceof WalletError && error.code === 'wrong_cluster',
   );
   assert.equal(blocked.calls.some(call => call.body?.method === 'getLatestBlockhash'), false);
@@ -1034,7 +1034,7 @@ test('devnet reads and owner sweeps stay off the public client surface and off m
   assert.equal(blocked.calls.some(call => call.body?.method === 'sendTransaction'), false);
 
   const read = mockFetch([
-    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: DEVNET_GENESIS_HASH } },
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: SOLANA_GENESIS_HASH } },
     {
       match: (url, body) => url === rpcUrl && body?.method === 'getLatestBlockhash',
       body: { result: { value: { blockhash, lastValidBlockHeight: 42 } } },
@@ -1052,10 +1052,10 @@ test('devnet reads and owner sweeps stay off the public client surface and off m
     },
   ]);
   const reader = client({ fetcher: read.fetcher });
-  const hash = await reader.getDevnetBlockhash();
-  assert.equal(hash.cluster, 'devnet');
+  const hash = await reader.getSolanaBlockhash();
+  assert.equal(hash.cluster, 'mainnet-beta');
   assert.equal(hash.blockhash, blockhash);
-  const balance = await reader.getDevnetUsdcBalance({ address: owner });
+  const balance = await reader.getSolanaUsdcBalance({ address: owner });
   assert.equal(balance.amount, '3500');
   assert.equal(balance.mint, address);
   const balanceCall = read.calls.find(call => call.body?.method === 'getTokenAccountsByOwner');
@@ -1064,7 +1064,7 @@ test('devnet reads and owner sweeps stay off the public client surface and off m
 
   const mismatch = mockFetch([]);
   await assert.rejects(
-    () => client({ fetcher: mismatch.fetcher }).signAndBroadcastOwnerDevnet({
+    () => client({ fetcher: mismatch.fetcher }).signAndBroadcastOwnerSolana({
       ownerId: 'user_2',
       wallet,
       transaction: unsignedTx(),
@@ -1078,10 +1078,10 @@ test('devnet reads and owner sweeps stay off the public client surface and off m
       match: (url, body) => url.endsWith('/rpc') && body?.method === 'signTransaction',
       body: { data: { signed_transaction: signedTx() } },
     },
-    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: DEVNET_GENESIS_HASH } },
+    { match: (url, body) => url === rpcUrl && body?.method === 'getGenesisHash', body: { result: SOLANA_GENESIS_HASH } },
     { match: (url, body) => url === rpcUrl && body?.method === 'sendTransaction', body: { result: txSignature } },
   ]);
-  const swept = await client({ fetcher: sweep.fetcher }).signAndBroadcastOwnerDevnet({
+  const swept = await client({ fetcher: sweep.fetcher }).signAndBroadcastOwnerSolana({
     ownerId: 'user_1',
     wallet,
     transaction: unsignedTx(),
@@ -1096,7 +1096,7 @@ test('devnet reads and owner sweeps stay off the public client surface and off m
  * Rigor audit — an owner export returns HPKE ciphertext and refuses a plaintext key
  * Achieves: behavior named in the test title (see assertions).
  * Fails when: assertions below would not hold for a plausible defective impl.
- * Oracle: Privy/devnet contracts and prior product decisions (not control-flow mirrors).
+ * Oracle: Privy/mainnet-beta contracts and prior product decisions (not control-flow mirrors).
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */

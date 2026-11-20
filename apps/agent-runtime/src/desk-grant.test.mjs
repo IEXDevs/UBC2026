@@ -40,7 +40,7 @@ test('freeze all bots calls policy for each owned bot', async () => {
   const frozen = [];
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ...SUPABASE,
     fetch: async (url, init = {}) => {
       const href = String(url);
@@ -77,7 +77,7 @@ test('desk unlock stores a grant hash and spend rejects a bare owner', async () 
   let row = null;
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ...SUPABASE,
     fetch: async (url, init = {}) => {
       const href = String(url);
@@ -159,7 +159,7 @@ test('a later desk password replaces the stored verifier only with the seed proo
   let row = null;
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ...SUPABASE,
     fetch: async (url, init = {}) => {
       const href = String(url);
@@ -277,7 +277,7 @@ test('a later desk password replaces the stored verifier only with the seed proo
 test('unlock refuses a verifier the Worker cannot check', async () => {
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ...SUPABASE,
     fetch: async (url) => {
       const href = String(url);

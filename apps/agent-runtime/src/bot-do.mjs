@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 import { createSearch } from '@ubc2026/browser-search';
 import { createBrowserSessionService, createDefaultBrowserSessionService, ProviderError, SessionError } from '@ubc2026/browser-session';
 import { SECRET_NAMES } from '@ubc2026/contracts';
@@ -311,7 +312,7 @@ export class BotStateMachine {
           ...(meta && typeof meta === 'object' ? meta : {}),
           botId: meta?.botId || botId,
           ownerId,
-          cluster: meta?.cluster || env.CLUSTER || 'devnet',
+          cluster: meta?.cluster || SOLANA_CLUSTER,
           updatedAt: now,
         });
       }
@@ -404,7 +405,7 @@ export class BotStateMachine {
       await this.put('meta', {
         botId,
         ownerId: ownerId || null,
-        cluster: env.CLUSTER ?? 'devnet',
+        cluster: SOLANA_CLUSTER,
         updatedAt: now,
       });
       return Response.json({ ok: true, run });
@@ -468,7 +469,7 @@ export class BotStateMachine {
         await this.put('meta', {
           botId,
           ownerId,
-          cluster: env.CLUSTER ?? 'devnet',
+          cluster: SOLANA_CLUSTER,
           updatedAt: loopNow,
         });
       } else if (goal && !run.goal) {
@@ -521,7 +522,7 @@ export class BotStateMachine {
           paper
           && paper.mode === 'paper'
           && paper.broadcast === false
-          && paper.label === 'devnet execution, mainnet pricing'
+          && paper.label === EXECUTION_LABEL
           && typeof paper.mint === 'string'
           && typeof paper.quantity === 'string'
         ) {
@@ -635,7 +636,7 @@ export class BotStateMachine {
         ...(meta && typeof meta === 'object' ? meta : {}),
         botId,
         ownerId,
-        cluster: meta?.cluster || env.CLUSTER || 'devnet',
+        cluster: meta?.cluster || SOLANA_CLUSTER,
         updatedAt: now,
       });
     }

@@ -9,7 +9,7 @@ import { sha256Hex } from './desk-grant.mjs';
 function fakeEnv(extra = {}) {
   return {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     BOT: {
       idFromName: name => name,
       get: () => ({
@@ -28,7 +28,7 @@ function fakeEnv(extra = {}) {
  * Gaps: none
  */
 test('enrichEnv is idempotent and leaves injectables alone', () => {
-  const transferClient = { signAndBroadcastDevnet: async () => ({}) };
+  const transferClient = { signAndBroadcastSolana: async () => ({}) };
   const loadLoopContext = async () => ({});
   const once = enrichEnv(fakeEnv({ transferClient, loadLoopContext }));
   const twice = enrichEnv(once);
@@ -127,7 +127,7 @@ test('wallets.persist writes rows without calling Privy acceptLogin', async () =
           owner_id: 'user_1',
           kind: 'main',
           label: 'Main',
-          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
           provider: 'privy',
           frozen: false,
         }]);
@@ -148,7 +148,7 @@ test('wallets.persist writes rows without calling Privy acceptLogin', async () =
         ownerId: 'user_1',
         kind: 'main',
         label: 'Main',
-        address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+        address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         provider: 'privy',
         frozen: false,
       }],
@@ -177,7 +177,7 @@ test('wallets.persist is idempotent on a duplicate second POST', async () => {
     ownerId: 'user_1',
     kind: 'main',
     label: 'Main',
-    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     provider: 'privy',
     frozen: false,
   };
@@ -199,7 +199,7 @@ test('wallets.persist is idempotent on a duplicate second POST', async () => {
           owner_id: 'user_1',
           kind: 'main',
           label: 'Main',
-          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
           provider: 'privy',
           frozen: false,
         }]);
@@ -274,11 +274,11 @@ test('wallets.persist rejects malformed JSON body', async () => {
  * Gaps: RPC failure path not covered here
  */
 test('wallets.list attaches usdcBalance from QuickNode when configured', async () => {
-  const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const { SOLANA_GENESIS_HASH, SOLANA_USDC_MINT } = await import('@ubc2026/wallets/privy');
   const env = fakeEnv({
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+    SOLANA_RPC_URL: 'https://example.invalid/rpc',
     fetch: async (url, init = {}) => {
       const href = String(url);
       if (href.includes('/rest/v1/wallets')) {
@@ -287,7 +287,7 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
           owner_id: 'user_1',
           kind: 'main',
           label: 'Main',
-          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
           provider: 'privy',
           frozen: false,
         }]);
@@ -295,7 +295,7 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
       if (href.includes('/rpc') || href === 'https://example.invalid/rpc') {
         const body = JSON.parse(init.body || '{}');
         if (body.method === 'getGenesisHash') {
-          return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+          return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
         }
         if (body.method === 'getBalance') {
           return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 0 } });
@@ -313,7 +313,7 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
                   data: {
                     parsed: {
                       info: {
-                        mint: DEVNET_USDC_MINT,
+                        mint: SOLANA_USDC_MINT,
                         tokenAmount: { amount: '1234500', decimals: 6 },
                       },
                     },
@@ -337,7 +337,7 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
   assert.equal(body.items[0].solLamports, '0');
   assert.equal(body.items[0].tokens[0].symbol, 'USDC');
   assert.equal(body.items[0].balanceStatus, 'ok');
-  assert.equal(body.items[0].cluster, 'devnet');
+  assert.equal(body.items[0].cluster, 'mainnet-beta');
   assert.equal(body.balances.onchainUsdc, '1234500');
   assert.equal(body.balances.displayUsdcLabel, '1.2345 USDC');
   assert.equal(JSON.stringify(body).includes('example.invalid'), false);
@@ -351,12 +351,12 @@ test('wallets.list attaches usdcBalance from QuickNode when configured', async (
  * Gaps: Token-2022 accounts empty-path only
  */
 test('wallets.list reports SOL and every SPL token in the wallet', async () => {
-  const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const { SOLANA_GENESIS_HASH, SOLANA_USDC_MINT } = await import('@ubc2026/wallets/privy');
   const otherMint = 'So11111111111111111111111111111111111111112';
   const env = fakeEnv({
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+    SOLANA_RPC_URL: 'https://example.invalid/rpc',
     fetch: async (url, init = {}) => {
       const href = String(url);
       if (href.includes('/rest/v1/wallets')) {
@@ -365,7 +365,7 @@ test('wallets.list reports SOL and every SPL token in the wallet', async () => {
           owner_id: 'user_1',
           kind: 'main',
           label: 'Main',
-          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
           provider: 'privy',
           frozen: false,
         }]);
@@ -374,7 +374,7 @@ test('wallets.list reports SOL and every SPL token in the wallet', async () => {
       if (href.includes('/rpc') || href === 'https://example.invalid/rpc') {
         const body = JSON.parse(init.body || '{}');
         if (body.method === 'getGenesisHash') {
-          return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+          return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
         }
         if (body.method === 'getBalance') {
           return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 1_500_000_000 } });
@@ -394,7 +394,7 @@ test('wallets.list reports SOL and every SPL token in the wallet', async () => {
                     data: {
                       parsed: {
                         info: {
-                          mint: DEVNET_USDC_MINT,
+                          mint: SOLANA_USDC_MINT,
                           tokenAmount: { amount: '2500000', decimals: 6 },
                         },
                       },
@@ -445,11 +445,11 @@ test('wallets.list reports SOL and every SPL token in the wallet', async () => {
  * Gaps: mixed platform+onchain edge not asserted
  */
 test('wallets.list prefers platform transfer net for displayUsdcLabel', async () => {
-  const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const { SOLANA_GENESIS_HASH, SOLANA_USDC_MINT } = await import('@ubc2026/wallets/privy');
   const env = fakeEnv({
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+    SOLANA_RPC_URL: 'https://example.invalid/rpc',
     fetch: async (url, init = {}) => {
       const href = String(url);
       if (href.includes('/rest/v1/wallets')) {
@@ -458,7 +458,7 @@ test('wallets.list prefers platform transfer net for displayUsdcLabel', async ()
           owner_id: 'user_1',
           kind: 'main',
           label: 'Main',
-          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
           provider: 'privy',
           frozen: false,
         }]);
@@ -476,7 +476,7 @@ test('wallets.list prefers platform transfer net for displayUsdcLabel', async ()
       if (href.includes('/rpc') || href === 'https://example.invalid/rpc') {
         const body = JSON.parse(init.body || '{}');
         if (body.method === 'getGenesisHash') {
-          return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+          return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
         }
         if (body.method === 'getBalance') {
           return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 0 } });
@@ -556,7 +556,7 @@ test('wallets.persist rejects missing auth, owner, empty wallets, and unconfigur
         ownerId: 'user_1',
         kind: 'main',
         label: 'Main',
-        address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+        address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         provider: 'privy',
         frozen: false,
       }],
@@ -590,7 +590,7 @@ test('wallets.persist ignores foreign-owner wallet rows (owner header wins)', as
           owner_id: 'user_1',
           kind: 'main',
           label: 'Main',
-          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
           provider: 'privy',
           frozen: false,
         }]);
@@ -611,7 +611,7 @@ test('wallets.persist ignores foreign-owner wallet rows (owner header wins)', as
         ownerId: 'attacker',
         kind: 'main',
         label: 'Main',
-        address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+        address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         provider: 'privy',
         frozen: false,
       }],
@@ -707,7 +707,7 @@ test('wallet create does not forward Origin into Privy acceptLogin', async () =>
             ownerId: 'user_1',
             kind: 'main',
             label: 'Main',
-            address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+            address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
             frozen: false,
             provider: 'privy',
           },
@@ -774,7 +774,7 @@ test('supabase mappers turn rows into bot/wallet/ledger records', () => {
     owner_id: 'user_1',
     kind: 'main',
     label: 'Main',
-    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     provider: 'privy',
     frozen: false,
   }).privyWalletId, 'wal_1');
@@ -960,7 +960,7 @@ test('activity logs require an owner and stay empty without Supabase', async () 
  * Gaps: missing-profile / SNS miss paths not asserted here
  */
 test('profile lookup sends a handle to its owner and a .sol name through SNS', async () => {
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const fetcher = async (url) => {
     const href = String(url);
     if (new URL(href).searchParams.get('handle') === 'eq.alex') {
@@ -995,7 +995,7 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
 });
 
 test('handle lookup chooses the exact stored handle and refuses ambiguous spoken matches', async () => {
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const env = fakeEnv({
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
@@ -1372,7 +1372,7 @@ test('payments feed lists stream-confirmed x402 rows and cross-checks the ledger
             event_type: 'x402-out',
             amount: '12',
             token: 'USDC',
-            cluster: 'devnet',
+            cluster: 'mainnet-beta',
           },
           {
             signature: '6'.repeat(64),
@@ -1381,7 +1381,7 @@ test('payments feed lists stream-confirmed x402 rows and cross-checks the ledger
             event_type: 'deposit',
             amount: '99',
             token: 'USDC',
-            cluster: 'devnet',
+            cluster: 'mainnet-beta',
           },
         ]);
       }
@@ -1394,7 +1394,7 @@ test('payments feed lists stream-confirmed x402 rows and cross-checks the ledger
           amount: '1',
           asset: 'USDC',
           counterparty: 'not-from-stream',
-          cluster: 'devnet',
+          cluster: 'mainnet-beta',
         }]);
       }
       if (href.includes('/rest/v1/spend_ledgers')) {
@@ -1629,7 +1629,7 @@ test('a server wallet export returns HPKE fields and not a plaintext key', async
           owner_id: 'user_1',
           kind: 'main',
           label: 'Main',
-          address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
           provider: 'privy',
           frozen: false,
           spendable: true,

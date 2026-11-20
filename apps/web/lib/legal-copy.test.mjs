@@ -18,7 +18,7 @@ test('privacy and terms name the product rules and the liability limit', () => {
   assert.match(privacy, /never a new one/);
   assert.match(privacy, /5 GB/);
   assert.match(privacy, /512 MB/);
-  assert.match(privacy, /devnet execution, mainnet pricing/);
+  assert.match(privacy, /mainnet-beta execution, mainnet pricing/);
   assert.match(terms, /AI is not proven to be accurate all the time/);
   assert.match(terms, /not treat it as financial advice from the creators/);
   assert.match(terms, /provided as-is/);

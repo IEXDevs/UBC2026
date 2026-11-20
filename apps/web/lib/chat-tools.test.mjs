@@ -9,7 +9,7 @@ import {
 import worker from '../../agent-runtime/src/index.mjs';
 
 test('the agent tool resolves another signed-in user’s handle to their main wallet', async () => {
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   let displayName = 'Bob';
   const env = {
     PRIVY_APP_ID: 'test-app',
@@ -51,8 +51,8 @@ test('the agent tool resolves another signed-in user’s handle to their main wa
 
 /**
  * Achieves: verifies openAiAgentTools maps shared research and dashboard schemas.
- * Fails when: openAiAgentTools maps shared research and dashboard schemas breaks (e.g. expected /You have the following tools/, /get_price/, /devnet execution, mainnet pricing/).
- * Oracle: assert.match(chatToolsInstruction(), /You have the following tools/); assert.match(chatToolsInstruction(), /get_price/); assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/); assert.ok(tools.some(tool => tool.function.name === 'get_price'); assert.ok(tools.some(tool => tool.function.name === 'web_search'); assert.ok(tools.some(tool => tool.function.name === 'browser_open')
+ * Fails when: openAiAgentTools maps shared research and dashboard schemas breaks (e.g. expected /You have the following tools/, /get_price/, /mainnet-beta execution, mainnet pricing/).
+ * Oracle: assert.match(chatToolsInstruction(), /You have the following tools/); assert.match(chatToolsInstruction(), /get_price/); assert.match(chatToolsInstruction(), /mainnet-beta execution, mainnet pricing/); assert.ok(tools.some(tool => tool.function.name === 'get_price'); assert.ok(tools.some(tool => tool.function.name === 'web_search'); assert.ok(tools.some(tool => tool.function.name === 'browser_open')
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
@@ -65,13 +65,13 @@ test('openAiAgentTools maps shared research and dashboard schemas', () => {
   assert.ok(tools.some(tool => tool.function.name === 'pause_bot'));
   assert.match(chatToolsInstruction(), /You have the following tools/);
   assert.match(chatToolsInstruction(), /get_price/);
-  assert.match(chatToolsInstruction(), /devnet execution, mainnet pricing/);
+  assert.match(chatToolsInstruction(), /mainnet-beta execution, mainnet pricing/);
 });
 
 /**
  * Achieves: verifies get_price returns a paper quote and does not sign.
  * Fails when: get_price returns a paper quote and does not sign breaks (e.g. expected true, 'jupiter-price-v3', 'dexscreener'); failure/null paths flip.
- * Oracle: assert.equal(result.ok, true); assert.equal(result.quote.quoteSource, 'jupiter-price-v3'); assert.equal(result.quote.fallbackFrom, 'dexscreener'); assert.equal(result.quote.label, 'devnet execution, mainnet pricing'); assert.equal(result.quote.authorizesTransaction, false); assert.equal(result.quote.executionCluster, 'devnet')
+ * Oracle: assert.equal(result.ok, true); assert.equal(result.quote.quoteSource, 'jupiter-price-v3'); assert.equal(result.quote.fallbackFrom, 'dexscreener'); assert.equal(result.quote.label, 'mainnet-beta execution, mainnet pricing'); assert.equal(result.quote.authorizesTransaction, false); assert.equal(result.quote.executionCluster, 'mainnet-beta')
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
@@ -92,9 +92,9 @@ test('get_price returns a paper quote and does not sign', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.quote.quoteSource, 'jupiter-price-v3');
   assert.equal(result.quote.fallbackFrom, 'dexscreener');
-  assert.equal(result.quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(result.quote.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(result.quote.authorizesTransaction, false);
-  assert.equal(result.quote.executionCluster, 'devnet');
+  assert.equal(result.quote.executionCluster, 'mainnet-beta');
   assert.equal(JSON.stringify(result).includes('jupiter-test-key'), false);
   assert.equal(calls.some(call => call.key === 'jupiter-test-key'), true);
 });
@@ -132,7 +132,7 @@ test('get_price uses the public client for wrapped SOL and reports a real outage
   assert.equal(result.quote.mint, mint);
   assert.equal(result.quote.priceUsd, '74.73');
   assert.equal(result.quote.quoteSource, 'dexscreener');
-  assert.equal(result.quote.label, 'devnet execution, mainnet pricing');
+  assert.equal(result.quote.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(result.quote.authorizesTransaction, false);
   assert.equal(runtimeCalls, 0);
 
@@ -510,7 +510,7 @@ test('createChatToolInvoker get_wallets sends Bearer and falls back on login_req
 /**
  * Achieves: verifies createChatToolInvoker falls back to shell bots and wallets when Worker is empty.
  * Fails when: createChatToolInvoker falls back to shell bots and wallets when Worker is empty breaks (e.g. expected 'shell', 'bot_local', 'shell').
- * Oracle: assert.equal(bots.source, 'shell'); assert.equal(bots.items[0].id, 'bot_local'); assert.equal(wallets.source, 'shell'); assert.equal(wallets.items[0].id, 'w_main'); assert.match(wallets.balances.displayBalanceLabel, /12\.5 USDC/); assert.match(wallets.clusterNote, /devnet/)
+ * Oracle: assert.equal(bots.source, 'shell'); assert.equal(bots.items[0].id, 'bot_local'); assert.equal(wallets.source, 'shell'); assert.equal(wallets.items[0].id, 'w_main'); assert.match(wallets.balances.displayBalanceLabel, /12\.5 USDC/); assert.match(wallets.clusterNote, /mainnet-beta/)
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
@@ -522,13 +522,13 @@ test('createChatToolInvoker get_wallets sends Bearer and falls back on login_req
  * Gaps: none.
  */
 test('createChatToolInvoker get_wallets keeps rpc_failed distinct from empty success', async () => {
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
     botId: 'bot_local',
     runtimeBase: 'https://runtime.example',
     env: {
-      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      SOLANA_RPC_URL: 'https://example.invalid/mainnet-beta',
       QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
     },
     shellWallets: [{ id: 'w_main', label: 'Main', address, kind: 'main' }],
@@ -577,7 +577,7 @@ test('createChatToolInvoker falls back to shell bots and wallets when Worker is 
   assert.equal(wallets.source, 'shell');
   assert.equal(wallets.items[0].id, 'w_main');
   assert.match(wallets.balances.displayBalanceLabel, /12\.5 USDC/);
-  assert.match(wallets.clusterNote, /devnet/);
+  assert.match(wallets.clusterNote, /mainnet-beta/);
 });
 
 /**
@@ -597,9 +597,9 @@ test('createChatToolInvoker falls back to shell bots and wallets when Worker is 
  * Gaps: none for binding bypass.
  */
 test('createChatToolInvoker get_wallets uses rpcFetch and keeps runtime-ok balances', async () => {
-  const { DEVNET_GENESIS_HASH } = await import('@ubc2026/wallets/privy');
+  const { SOLANA_GENESIS_HASH } = await import('@ubc2026/wallets/privy');
   const { TESTNET_GENESIS_HASH } = await import('@ubc2026/wallets/balances');
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const rpcHosts = [];
   const bindingHosts = [];
   const invoke = createChatToolInvoker({
@@ -607,7 +607,7 @@ test('createChatToolInvoker get_wallets uses rpcFetch and keeps runtime-ok balan
     botId: 'bot_local',
     runtimeBase: 'https://runtime.example',
     env: {
-      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      SOLANA_RPC_URL: 'https://example.invalid/mainnet-beta',
       QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
     },
     shellWallets: [{ id: 'w_main', label: 'Main', address, kind: 'main' }],
@@ -623,7 +623,7 @@ test('createChatToolInvoker get_wallets uses rpcFetch and keeps runtime-ok balan
       const href = String(url);
       rpcHosts.push(href);
       const body = JSON.parse(init.body || '{}');
-      const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : DEVNET_GENESIS_HASH;
+      const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : SOLANA_GENESIS_HASH;
       if (body.method === 'getGenesisHash') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: genesis });
       }
@@ -644,7 +644,7 @@ test('createChatToolInvoker get_wallets uses rpcFetch and keeps runtime-ok balan
     botId: 'bot_local',
     runtimeBase: 'https://runtime.example',
     env: {
-      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      SOLANA_RPC_URL: 'https://example.invalid/mainnet-beta',
       QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
     },
     fetcher: async (url) => {
@@ -659,8 +659,8 @@ test('createChatToolInvoker get_wallets uses rpcFetch and keeps runtime-ok balan
             kind: 'main',
             solLamports: '5000000000',
             solBalanceLabel: '5 SOL',
-            holdings: [{ label: '5 SOL (devnet)', cluster: 'devnet' }],
-            displayBalanceLabel: '5 SOL (devnet)',
+            holdings: [{ label: '5 SOL (solana)', cluster: 'mainnet-beta' }],
+            displayBalanceLabel: '5 SOL (solana)',
             balanceStatus: 'ok',
           }],
         });
@@ -679,15 +679,15 @@ test('createChatToolInvoker get_wallets uses rpcFetch and keeps runtime-ok balan
 });
 
 test('createChatToolInvoker enriches shell wallet addresses via QuickNode', async () => {
-  const { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } = await import('@ubc2026/wallets/privy');
+  const { SOLANA_GENESIS_HASH, SOLANA_USDC_MINT } = await import('@ubc2026/wallets/privy');
   const { TESTNET_GENESIS_HASH } = await import('@ubc2026/wallets/balances');
-  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const invoke = createChatToolInvoker({
     ownerId: 'did:privy:owner1',
     botId: 'bot_local',
     runtimeBase: 'https://runtime.example',
     env: {
-      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      SOLANA_RPC_URL: 'https://example.invalid/mainnet-beta',
       QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
     },
     shellWallets: [{ id: 'w_main', label: 'Main', address, kind: 'main' }],
@@ -698,7 +698,7 @@ test('createChatToolInvoker enriches shell wallet addresses via QuickNode', asyn
       }
       if (href.includes('example.invalid')) {
         const body = JSON.parse(init.body || '{}');
-        const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : DEVNET_GENESIS_HASH;
+        const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : SOLANA_GENESIS_HASH;
         if (body.method === 'getGenesisHash') {
           return Response.json({ jsonrpc: '2.0', id: 1, result: genesis });
         }
@@ -719,7 +719,7 @@ test('createChatToolInvoker enriches shell wallet addresses via QuickNode', asyn
                   data: {
                     parsed: {
                       info: {
-                        mint: DEVNET_USDC_MINT,
+                        mint: SOLANA_USDC_MINT,
                         tokenAmount: { amount: '750000', decimals: 6 },
                       },
                     },
@@ -738,7 +738,7 @@ test('createChatToolInvoker enriches shell wallet addresses via QuickNode', asyn
   assert.equal(wallets.items[0].tokens[0].symbol, 'USDC');
   assert.match(wallets.balances.displayBalanceLabel, /2\.5 SOL/);
   assert.match(wallets.balances.displayBalanceLabel, /0\.75 USDC/);
-  assert.ok(wallets.items[0].holdings.some((row) => row.cluster === 'devnet'));
+  assert.ok(wallets.items[0].holdings.some((row) => row.cluster === 'mainnet-beta'));
 });
 
 /**
@@ -950,7 +950,7 @@ test('request_spend posts a 1 USDC buy without a destination', async () => {
         state: 'reserved',
         steps: ['trust-gate', 'verify-consensus', 'bot-policy', 'approval-mode', 'reserve'],
         signed: false,
-        cluster: 'devnet',
+        cluster: 'mainnet-beta',
       });
     },
   });
@@ -959,7 +959,7 @@ test('request_spend posts a 1 USDC buy without a destination', async () => {
     amount: 1000000,
     asset: 'USDC',
     botId: 'bot_e0madta8',
-    quoteCluster: 'devnet',
+    quoteCluster: 'mainnet-beta',
     permission: 'full',
   });
   assert.equal(calls.length, 1);
@@ -967,7 +967,7 @@ test('request_spend posts a 1 USDC buy without a destination', async () => {
   assert.equal(calls[0].amount, '1000000');
   assert.equal(calls[0].asset, 'USDC');
   assert.equal(calls[0].botId, 'bot_e0madta8');
-  assert.equal(calls[0].quoteCluster, 'devnet');
+  assert.equal(calls[0].quoteCluster, 'mainnet-beta');
   assert.equal(calls[0].permission, 'full');
   assert.equal(calls[0].destination, undefined);
   assert.equal(spent.error, undefined);

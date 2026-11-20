@@ -27,7 +27,8 @@ test('OpenNext wrangler config targets Cloudflare', () => {
   assert.equal(wrangler.services[1].service, 'maelstrom-agent-runtime');
   assert.equal(wrangler.env.dev.services[1].binding, 'AGENT_RUNTIME');
   assert.equal(wrangler.env.dev.services[1].service, 'maelstrom-agent-runtime');
-  assert.equal(wrangler.vars, undefined);
+  assert.deepEqual(wrangler.vars, { SOLANA_CLUSTER: 'mainnet-beta' });
+  assert.deepEqual(wrangler.env.dev.vars, { SOLANA_CLUSTER: 'mainnet-beta' });
   assert.equal(wrangler.cache?.enabled, true);
   assert.equal(wrangler.env.dev.cache?.enabled, true);
 

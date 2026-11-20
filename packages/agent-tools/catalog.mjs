@@ -1,3 +1,4 @@
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Shared agent tool surface for text chat and voice.
  * Research/browser tools come from @ubc2026/browser-session.
@@ -37,7 +38,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
   dashboard('get_bot_status', 'Status for one bot.', ['botId'], { botId }, [call('GET', '/bots/:botId/status')]),
   dashboard(
     'get_wallets',
-    'List wallets and every non-zero balance found for this owner. Read balances.displayBalanceLabel / holdings[] aloud — whatever SOL or SPL tokens exist on Solana-devnet and Solana-testnet for those addresses.',
+    'List wallets and every non-zero balance found for this owner. Read balances.displayBalanceLabel / holdings[] aloud — whatever SOL or SPL tokens exist on Solana-mainnet-beta and Solana-testnet for those addresses.',
     [],
     {},
     [call('GET', '/api/wallets')],
@@ -74,7 +75,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
   }, [call('POST', '/bots/:botId/loop', { body: ['goal'] })]),
   dashboard(
     'create_loop',
-    'Start a loop that wakes this bot again after a cooldown so it can check positions or do the stored purpose. The purpose is stored with the loop. cooldownMinutes is minutes and the minimum is 15. A shorter cooldown is rejected. The wake still goes through the decision gate before any spend. Execution stays on Solana devnet.',
+    'Start a loop that wakes this bot again after a cooldown so it can check positions or do the stored purpose. The purpose is stored with the loop. cooldownMinutes is minutes and the minimum is 15. A shorter cooldown is rejected. The wake still goes through the decision gate before any spend. Execution stays on configured Solana network.',
     ['botId', 'purpose', 'cooldownMinutes'],
     {
       botId,
@@ -113,7 +114,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
   }, [call('POST', '/bots/:botId/shopping/prepare', { body: ['provider'] })]),
   dashboard(
     'request_spend',
-    'Move funds through the shared permissioned spend API. Use it for a buy, sell, spend, or pay. When the owner set full permissions, do not ask which of those they mean. A buy of wrapped SOL spends USDC. amount 1000000 is 1 USDC and does not need a destination. quoteCluster devnet does not authorize a mainnet trade. A mainnet price quote does not authorize the transaction. Execution is Solana devnet.',
+    'Move funds through the shared permissioned spend API. Use it for a buy, sell, spend, or pay. When the owner set full permissions, do not ask which of those they mean. A buy of wrapped SOL spends USDC. amount 1000000 is 1 USDC and does not need a destination. quoteCluster mainnet-beta does not authorize a mainnet trade. A mainnet price quote does not authorize the transaction. Execution is configured Solana network.',
     ['botId', 'action', 'amount', 'asset'],
     {
       botId,
@@ -122,7 +123,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
       destination: { type: 'string', description: 'Destination Solana address' },
       handle: { type: 'string', description: 'Maelstrom handle without @' },
       asset: { type: 'string', description: 'USDC, SOL, or the exact SPL token mint address. Must match the agent accounting asset. SOL and mint addresses support pay or spend transfers.' },
-      quoteCluster: { type: 'string', description: 'mainnet or devnet. A mainnet quote never authorizes a transaction.' },
+      quoteCluster: { type: 'string', description: 'mainnet or solana. A mainnet quote never authorizes a transaction.' },
     },
     [call('POST', '/api/spend', { body: ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'quoteCluster', 'idempotencyKey'] })],
   ),
@@ -156,7 +157,7 @@ export const RESEARCH_TOOLS = agentTools;
 export const PRICE_TOOLS = Object.freeze([
   Object.freeze({
     name: 'get_price',
-    description: 'Look up a mainnet USD price for one Solana mint. DexScreener first; Jupiter Price API v3 only if DexScreener fails. Paper PnL. The quote is labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
+    description: `Look up a mainnet USD price for one Solana mint. DexScreener first; Jupiter Price API v3 only if DexScreener fails. Paper PnL. The quote is labeled ${EXECUTION_LABEL}. It does not sign, broadcast, or authorize a transaction. Execution stays on the configured Solana network.`,
     parameters: Object.freeze({
       type: 'object',
       additionalProperties: false,
@@ -200,7 +201,7 @@ export function sharedToolsInstruction() {
     'create_loop stores a purpose and a cooldown of at least 15 minutes, then starts this bot again after that cooldown. set_loop_cooldown changes that cooldown. A shorter cooldown is rejected. A loop wake still goes through the decision gate before any spend.',
     'Call break_loop only when the owner explicitly asks to break, stop, or cancel the loop. Do not break a loop on your own.',
     'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
-    'For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled "devnet execution, mainnet pricing". It does not sign, broadcast, or authorize a transaction. Execution stays on Solana devnet.',
+    `For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled ${EXECUTION_LABEL}. It does not sign, broadcast, or authorize a transaction. Execution stays on the configured Solana network.`,
     'When the owner asks you to find and do one trade, call get_price for the mint, then start_task. get_price does not place the trade. start_task runs the existing loop. provider_failed means the price provider is down. client_missing means the price client is not configured. invalid_mint means the mint is not a Solana address.',
     'request_spend posts the shared spend route. A locked desk is not an approval hold and does not replace trust, verify, reserve, or the permission gate. Fully-automatic still runs those gates. 1000000 is 1 USDC in base units. A USDC buy of wrapped SOL does not need a destination. Do not describe a desk lock as ask-mode.',
     'When the owner names a .sol SNS domain, an @handle, or a wallet address, call lookup_recipient with q set to that token. It hits GET /api/profiles/lookup (SNS resolve or handle directory). Never web_search for .sol names or handles. Speak the resolved address as first5...last5.',
@@ -210,7 +211,7 @@ export function sharedToolsInstruction() {
     'Do not invent balances, positions, or decisions — call get_wallets and read balances.balanceStatus / balances.ok / balances.displayBalanceLabel / holdings. If balanceStatus is failed or balances.ok is false, say balances could not be read (use the unavailable label). Never claim "no open positions" or "0 SOL" from a failed or partial read. Empty success means holdings is empty and balanceStatus is empty or ok with zero amounts.',
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
-    'Fund movements use request_spend. Execution stays on Solana devnet.',
+    'Fund movements use request_spend. Execution stays on configured Solana network.',
     'When request_spend or sns_send returns a signature, the next message includes the Solscan URL on solscanUrl. Send that message in the same turn. Do not wait for the owner to ask again.',
     'Do not raise limits or freeze wallets from tools.',
     'If a tool is not set up, say which setting is missing in plain words. Otherwise leave the error code out of the reply.',

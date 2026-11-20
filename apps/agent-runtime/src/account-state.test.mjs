@@ -98,7 +98,7 @@ function database({ deletionListStatus = 200 } = {}) {
 function envFor(db) {
   return {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
     fetch: db.fetcher,
@@ -300,7 +300,7 @@ test('state and recovery routes reject bad bodies, anonymous calls, and unconfig
   // The Worker's own request log is the only table touched. No state, recovery, or user row.
   assert.deepEqual(db.calls.filter(item => item.table !== 'activity_logs'), []);
 
-  const bare = { PRODUCT: 'Maelstrom', CLUSTER: 'devnet' };
+  const bare = { PRODUCT: 'Maelstrom', SOLANA_CLUSTER: 'mainnet-beta' };
   const read = await (await call(bare, '/api/recovery')).json();
   assert.equal(read.source, 'unconfigured');
   assert.equal(read.state, 'none');

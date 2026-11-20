@@ -115,7 +115,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
         >
           <ProfileMark src={avatarUrl} label={accountLabel} className="you-mark is-round" />
           {collapsed ? null : <strong>{accountLabel}</strong>}
-          {/* Assigned wallet devnet SOL and USDC when the chain read is in. Otherwise the shared USDC book. */}
+          {/* Assigned wallet mainnet-beta SOL and USDC when the chain read is in. Otherwise the shared USDC book. */}
           {collapsed || !holdingsLabel ? null : <span className="you-holdings">{holdingsLabel}</span>}
         </button>
       </div>

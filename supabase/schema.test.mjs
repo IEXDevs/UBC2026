@@ -11,6 +11,7 @@ const foundations = readSql('./migrations/20261114000000_foundations.sql');
 const policy = readSql('./migrations/20261114020000_policy_ledger.sql');
 const templates = readSql('./migrations/20261114040000_bot_templates.sql');
 const walletSoftDelete = readSql('./migrations/20261119000000_wallet_soft_delete.sql');
+const mainnet = readSql('./migrations/20261120000000_solana_mainnet.sql');
 
 function concat(parts) {
   return parts.reduce((sql, part) => (sql.endsWith('\n') ? sql + part : `${sql}\n${part}`));
@@ -24,7 +25,7 @@ function concat(parts) {
  * Gaps: This check covers only the bundled migrations.
  */
 test('schema.sql matches the three phase-1 migrations and wallet soft delete', () => {
-  assert.equal(schema, concat([foundations, policy, templates, walletSoftDelete]));
+  assert.equal(schema, concat([foundations, policy, templates, walletSoftDelete, mainnet]));
 });
 
 /**

@@ -1,5 +1,7 @@
 'use client';
 
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import AccountStats from './AccountStats';
@@ -118,7 +120,7 @@ export default function ProfileSheet({
         <div className="profile-settings">
           <p className="plugin-kicker">Stats</p>
           <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
-          <p className="quiet">Talk time is seconds on this device. Net PnL is inflows minus outflows. devnet execution, mainnet pricing.</p>
+          <p className="quiet">Talk time is seconds on this device. Net PnL is inflows minus outflows. {EXECUTION_LABEL}.</p>
           {signedIn ? (
             <button type="button" className="ghost" onClick={onLogout}>Log out</button>
           ) : null}

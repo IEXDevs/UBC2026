@@ -22,9 +22,9 @@ function event(overrides = {}) {
     botId: 'bot_1',
     botName: 'APY hunter',
     kind: 'tx.confirmed',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
     signature: SIG_A,
-    summary: 'Devnet USDC transfer landed in the bot wallet.',
+    summary: 'Solana USDC transfer landed in the bot wallet.',
     at: 1_700_000_000_000,
     asset: 'USDC',
     amount: '5000000',
@@ -39,7 +39,7 @@ function event(overrides = {}) {
  * Side effects: none
  * Gaps: Does not cover production stream store ordering under concurrent writers.
  */
-test('notable on-chain events are confirmed moves with a devnet signature', () => {
+test('notable on-chain events are confirmed moves with a mainnet-beta signature', () => {
   const quiet = event({
     id: 'evt_quiet',
     kind: 'run.checkpoint',
@@ -82,7 +82,7 @@ test('post payload stays offline and omits secrets even if an X token is set', (
     assert.equal(payload.posts.length, 1);
     assert.equal(payload.posts[0].delivered, false);
     assert.equal(payload.posts[0].text.length <= 280, true);
-    assert.match(payload.posts[0].text, new RegExp(`explorer\\.solana\\.com/tx/${SIG_A}\\?cluster=devnet`));
+    assert.match(payload.posts[0].text, new RegExp(`explorer\\.solana\\.com/tx/${SIG_A}`));
     assert.match(payload.posts[0].text, /APY hunter — transaction confirmed \(5 USDC\)/);
     const encoded = JSON.stringify(payload);
     assert.equal(encoded.includes(SECRET), false);
@@ -112,7 +112,7 @@ test('long summaries are trimmed to the X character limit and bursts keep the ne
     signature: '9'.repeat(128),
     amount: '9'.repeat(40),
     summary: 'S'.repeat(500),
-    cluster: 'testnet',
+    cluster: 'mainnet-beta',
   })]);
   assert.equal(wide.posts[0].text.length <= 280, true);
   assert.match(wide.posts[0].text, /9{128}/);
@@ -138,7 +138,7 @@ test('long summaries are trimmed to the X character limit and bursts keep the ne
  * Gaps: Does not exercise live QuickNode webhook → prepareNotablePosts wiring.
  */
 test('QuickNode stream rows draft the same offline payload', () => {
-  const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const wallet = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const payload = prepareNotablePosts([
     {
       signature: '6'.repeat(88),
@@ -163,7 +163,7 @@ test('QuickNode stream rows draft the same offline payload', () => {
   assert.equal(payload.posts[0].kind, 'deposit');
   assert.equal(payload.posts[0].botId, 'bot_1');
   assert.match(payload.posts[0].text, /deposit landed \(2\.5 USDC\)/);
-  assert.match(payload.posts[0].text, /cluster=devnet/);
+  assert.equal(payload.posts[0].text.includes("?cluster="), false);
   assert.throws(() => prepareNotablePosts([{ signature: 'nope', wallet, type: 'deposit' }]), GrokBotError);
 });
 
@@ -194,7 +194,7 @@ test('chat export redacts secrets and can render markdown', () => {
     title: 'Watch the APY hunter wallet',
     exportedAt: 1_700_000_100_000,
     messages: [
-      { id: 'm1', role: 'user', at: 1_700_000_000_000, text: 'What landed on devnet?' },
+      { id: 'm1', role: 'user', at: 1_700_000_000_000, text: 'What landed on solana?' },
       { id: 'm2', role: 'assistant', at: 1_700_000_050_000, text: `Confirmed 5 USDC. Drop this key: ${SECRET}` },
       { id: 'm3', role: 'tool', at: 1_700_000_060_000, text: 'Draft withheld. wallet-auth:abcdef0123456789' },
     ],

@@ -17,7 +17,7 @@ import {
 } from './creation.mjs';
 
 const ownerId = 'user_1';
-const mainAddress = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const mainAddress = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const extraAddress = 'So11111111111111111111111111111111111111112';
 const frozenAddress = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 

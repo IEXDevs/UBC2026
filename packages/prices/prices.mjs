@@ -1,6 +1,7 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Mainnet price reads for paper PnL / research.
- * Execution stays on Solana devnet; these quotes are labeled as mainnet pricing.
+ * Execution stays on configured Solana network; these quotes are labeled as mainnet pricing.
  */
 export class PriceError extends Error {
   constructor(code, status = 502) { super(code); this.code = code; this.status = status; }
@@ -106,8 +107,8 @@ export function createDexScreenerPriceProvider({
       priceUsd,
       quoteSource: 'dexscreener',
       pricingCluster: 'mainnet',
-      executionCluster: 'devnet',
-      label: 'devnet execution, mainnet pricing',
+      executionCluster: SOLANA_CLUSTER,
+      label: EXECUTION_LABEL,
       pairAddress: typeof best.pair.pairAddress === 'string' ? best.pair.pairAddress : null,
       liquidityUsd: typeof best.pair.liquidity?.usd === 'number' ? best.pair.liquidity.usd : null,
       fetchedAt: new Date().toISOString(),
@@ -115,7 +116,7 @@ export function createDexScreenerPriceProvider({
   };
 }
 
-export const PRICE_LABEL = 'devnet execution, mainnet pricing';
+export const PRICE_LABEL = EXECUTION_LABEL;
 const FALLBACK_CODES = new Set([
   'price_not_found',
   'provider_unavailable',
@@ -190,7 +191,7 @@ export async function readAgentPriceQuote(mint, options = {}) {
     !quote
     || quote.label !== PRICE_LABEL
     || quote.pricingCluster !== 'mainnet'
-    || quote.executionCluster !== 'devnet'
+    || quote.executionCluster !== SOLANA_CLUSTER
     || typeof quote.priceUsd !== 'string'
   ) throw new PriceError('invalid_provider_response');
   return {
@@ -200,7 +201,7 @@ export async function readAgentPriceQuote(mint, options = {}) {
     quoteSource: quote.quoteSource,
     fallbackFrom: typeof quote.fallbackFrom === 'string' ? quote.fallbackFrom : null,
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
+    executionCluster: SOLANA_CLUSTER,
     label: PRICE_LABEL,
     paperPnl: true,
     authorizesTransaction: false,
@@ -213,7 +214,7 @@ function quoteShell(mint, priceUsd, extra) {
     mint,
     priceUsd,
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
+    executionCluster: SOLANA_CLUSTER,
     label: PRICE_LABEL,
     pairAddress: null,
     fetchedAt: new Date().toISOString(),
@@ -342,7 +343,7 @@ export async function readJupiterSwapQuote({
     outAmount,
     quoteSource: 'jupiter-swap-v1',
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
+    executionCluster: SOLANA_CLUSTER,
     label: PRICE_LABEL,
     broadcast: false,
     authorizesTransaction: false,

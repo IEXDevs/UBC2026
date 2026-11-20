@@ -1,20 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSignalOffer, signalSaleFeedEntry, settleSignalSale, CommerceError } from './commerce.mjs';
-import { buildPaymentSignature, DEVNET_USDC_MINT, NETWORKS } from '@ubc2026/x402';
+import { buildPaymentSignature, SOLANA_USDC_MINT, NETWORKS } from '@ubc2026/x402';
 
-const payTo = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const payTo = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const feePayer = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const buyer = 'So11111111111111111111111111111111111111112';
 
 /**
- * Achieves: A bot signal sale produces a 402 challenge on Solana devnet USDC with earned direction.
+ * Achieves: A bot signal sale produces a 402 challenge on Solana mainnet-beta USDC with earned direction.
  * Fails when: Challenge status/network/asset drift, or direction is not earned (buyer-facing).
- * Oracle: x402 NETWORKS.devnet + DEVNET_USDC_MINT constants and HTTP 402 semantics — not commerce.mjs internals.
+ * Oracle: x402 NETWORKS.solana + SOLANA_USDC_MINT constants and HTTP 402 semantics — not commerce.mjs internals.
  * Side effects: none (pure builders).
  * Gaps: Does not assert on-chain settlement or fee-payer signature validity.
  */
-test('builds a devnet x402 challenge for a bot signal sale', () => {
+test('builds a mainnet-beta x402 challenge for a bot signal sale', () => {
   const offer = buildSignalOffer({
     botId: 'bot_1',
     walletAddress: payTo,
@@ -25,12 +25,12 @@ test('builds a devnet x402 challenge for a bot signal sale', () => {
   });
   assert.equal(offer.challenge.status, 402);
   assert.equal(offer.direction, 'earned');
-  assert.equal(offer.cluster, 'devnet');
+  assert.equal(offer.cluster, 'mainnet-beta');
   assert.equal(offer.botId, 'bot_1');
   assert.equal(offer.signalId, 'apy-1');
   const accepted = offer.challenge.body.accepts[0];
-  assert.equal(accepted.network, NETWORKS.devnet);
-  assert.equal(accepted.asset, DEVNET_USDC_MINT);
+  assert.equal(accepted.network, NETWORKS.solana);
+  assert.equal(accepted.asset, SOLANA_USDC_MINT);
   assert.equal(accepted.payTo, payTo);
   assert.equal(accepted.amount, '25000');
   const feed = signalSaleFeedEntry({
@@ -43,7 +43,7 @@ test('builds a devnet x402 challenge for a bot signal sale', () => {
   });
   assert.equal(feed.status, 'requested');
   assert.equal(feed.protocol, 'x402-v2');
-  assert.equal(feed.asset, DEVNET_USDC_MINT);
+  assert.equal(feed.asset, SOLANA_USDC_MINT);
 });
 
 /**

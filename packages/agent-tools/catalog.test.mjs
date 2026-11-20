@@ -54,7 +54,7 @@ test('shared catalog covers research and dashboard tools', () => {
   assert.deepEqual(price.voiceCalls, []);
   assert.match(price.description, /DexScreener/);
   assert.match(price.description, /Jupiter Price API v3/);
-  assert.match(price.description, /devnet execution, mainnet pricing/);
+  assert.match(price.description, /mainnet-beta execution, mainnet pricing/);
   assert.match(price.description, /does not sign/);
 });
 
@@ -149,7 +149,7 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.match(sharedToolsInstruction(), /You have the following tools/);
   assert.match(sharedToolsInstruction(), /get_price/);
   assert.match(sharedToolsInstruction(), /DexScreener/);
-  assert.match(sharedToolsInstruction(), /devnet execution, mainnet pricing/);
+  assert.match(sharedToolsInstruction(), /mainnet-beta execution, mainnet pricing/);
   assert.match(sharedToolsInstruction(), /balances\.displayBalanceLabel/);
   assert.match(sharedToolsInstruction(), /what_happened_while_away/);
   assert.match(sharedToolsInstruction(), /create_loop stores a purpose/);
@@ -186,5 +186,5 @@ test('voice research webhooks include live_view and navigate', () => {
   const walletsTool = DASHBOARD_TOOLS.find((tool) => tool.name === 'get_wallets');
   assert.match(walletsTool.description, /displayBalanceLabel/);
   assert.match(walletsTool.description, /tokens/);
-  assert.match(walletsTool.description, /devnet/);
+  assert.match(walletsTool.description, /mainnet-beta/);
 });

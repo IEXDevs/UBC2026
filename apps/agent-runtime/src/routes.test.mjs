@@ -6,7 +6,7 @@ import { API_ROUTES, SECRET_NAMES } from '@ubc2026/contracts';
 function fakeEnv(extra = {}) {
   return {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     BOT: {
       idFromName: name => name,
       get: () => ({
@@ -121,7 +121,7 @@ test('the loop route attaches the assigned bot context for a goal-only start', a
   const wallet = {
     id: 'w_main',
     ownerId: 'user_1',
-    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     frozen: false,
   };
   const bot = {
@@ -190,7 +190,7 @@ test('bot routes still reach the Durable Object', async () => {
   assert.equal(body.forwarded, '/wake');
 });
 
-const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const wallet = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const now = 1_700_000_000_000;
 
 function cronCtx() {
@@ -229,13 +229,13 @@ test('hourly cron records a position check and does nothing with an empty fleet'
 });
 
 /**
- * Achieves: fresh stream skips RPC; stale stream performs devnet balance read.
+ * Achieves: fresh stream skips RPC; stale stream performs mainnet-beta balance read.
  * Fails when: fresh still RPCs or stale skips.
  * Oracle: RPC call counts per freshness.
  * Side effects / state checked: stream age + RPC mocks.
  * Gaps: none
  */
-test('a fresh stream skips the RPC re-check, and a stale stream reads devnet balances', async () => {
+test('a fresh stream skips the RPC re-check, and a stale stream reads mainnet-beta balances', async () => {
   const calls = [];
   const fresh = cronCtx();
   await worker.scheduled({ cron: '0 * * * *', scheduledTime: now }, fakeEnv({
@@ -256,7 +256,7 @@ test('a fresh stream skips the RPC re-check, and a stale stream reads devnet bal
     readStreamHealth: async () => ({ lastEventAt: now - (61 * 60 * 1000), status: 'up' }),
     readWalletBalance: async ({ address }) => {
       calls.push(address);
-      return { ok: true, cluster: 'devnet', address, amount: '42', mint: wallet, rpcUrl: 'https://example.invalid/quicknode-secret-path' };
+      return { ok: true, cluster: 'mainnet-beta', address, amount: '42', mint: wallet, rpcUrl: 'https://example.invalid/quicknode-secret-path' };
     },
     fetch: async () => { throw new Error('network should not run'); },
   }), stale.ctx);

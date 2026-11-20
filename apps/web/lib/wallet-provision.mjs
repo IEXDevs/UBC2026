@@ -64,7 +64,7 @@ export function walletConfigFlags(env = {}) {
     hasAppId: Boolean(serverId || publicId),
     hasPublicAppId: Boolean(publicId),
     hasAppSecret: Boolean(typeof env.PRIVY_APP_SECRET === 'string' && env.PRIVY_APP_SECRET.trim()),
-    hasRpc: Boolean(typeof env.QUICKNODE_DEVNET_RPC_URL === 'string' && env.QUICKNODE_DEVNET_RPC_URL.trim()),
+    hasRpc: Boolean(typeof env.SOLANA_RPC_URL === 'string' && env.SOLANA_RPC_URL.trim()),
     hasAuthorizationKey: Boolean(typeof env.PRIVY_AUTHORIZATION_KEY === 'string' && env.PRIVY_AUTHORIZATION_KEY.trim()),
     hasRuntimeUrl: Boolean(runtimeUrl),
     runtimeHostOk,
@@ -254,7 +254,7 @@ export function walletProvisionNote(body = {}, { ok = false } = {}) {
     return 'Privy did not return an access token. Sign out and sign in again, then open Wallets.';
   }
   if (code === 'invalid_rpc') {
-    return 'QUICKNODE_DEVNET_RPC_URL must be an https QuickNode Solana devnet RPC URL.';
+    return 'SOLANA_RPC_URL must be an https QuickNode Solana mainnet-beta RPC URL.';
   }
   if (code === 'missing_origin' || (/must_specify_origin/i.test(typeof body.detail === 'string' ? body.detail : ''))) {
     return 'Privy users/me needs Origin. Sign in again so the shell can send your Privy user id, or allowlist this site under Privy → Domains.';

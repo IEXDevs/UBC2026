@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Shopping bot helpers (Isaac / chunk 6B).
  * Sandbox catalog → proposal → approval → settle 402 buy.
@@ -5,7 +6,7 @@
  */
 import {
   createSandboxStoreClient,
-  DEVNET_USDC_MINT,
+  SOLANA_USDC_MINT,
   MAINNET_USDC_MINT,
   NETWORKS,
   buildPaymentSignature,
@@ -90,7 +91,7 @@ export function buildShoppingProposal({
   maxFee = '0',
   expiresInMs = 120_000,
   now = Date.now(),
-  cluster = 'devnet',
+  cluster = SOLANA_CLUSTER,
 }) {
   if (!bot?.id) fail('Bot is required');
   if (!item?.id || !item?.price) fail('Catalog item is required');
@@ -99,7 +100,7 @@ export function buildShoppingProposal({
     id: `prop_${bot.id}_${item.id}`,
     botId: bot.id,
     cluster,
-    asset: bot.cap?.asset === 'USDC' ? 'USDC' : (bot.cap?.asset ?? DEVNET_USDC_MINT),
+    asset: bot.cap?.asset === 'USDC' ? 'USDC' : (bot.cap?.asset ?? SOLANA_USDC_MINT),
     recipient,
     quoteId,
     outflow: String(item.price),
@@ -148,7 +149,7 @@ export async function prepareSandboxPurchase({
 
 /**
  * After owner approval + bot-policy reserve, settle the sandbox 402 with a PAYMENT-SIGNATURE.
- * `signPayment` must return a Solana tx signature string (Privy/devnet transfer outside this package).
+ * `signPayment` must return a Solana tx signature string (Privy/mainnet-beta transfer outside this package).
  */
 export async function settleSandboxPurchase({
   bot,
@@ -164,13 +165,13 @@ export async function settleSandboxPurchase({
   if (!bot?.id) fail('Bot is required');
   if (!itemId) fail('itemId is required');
   if (!accepted || accepted.scheme !== 'exact') fail('Accepted sandbox payment terms are required');
-  if (accepted.network && accepted.network !== NETWORKS.devnet) fail('Sandbox settlement must stay on Solana devnet');
+  if (accepted.network && accepted.network !== NETWORKS.solana) fail('Sandbox settlement must stay on Solana mainnet-beta');
   if (typeof signPayment !== 'function') fail('signPayment is required');
 
   const signature = await signPayment({
     amount: String(accepted.amount),
     payTo: accepted.payTo,
-    asset: accepted.asset || DEVNET_USDC_MINT,
+    asset: accepted.asset || SOLANA_USDC_MINT,
     memo: `maelstrom:shop:${itemId}`,
   });
   if (typeof signature !== 'string' || !signature) fail('Payment signature is required');
@@ -187,7 +188,7 @@ export async function settleSandboxPurchase({
       botId: bot.id,
       recipient: accepted.payTo,
       amount: String(accepted.amount),
-      asset: accepted.asset || DEVNET_USDC_MINT,
+      asset: accepted.asset || SOLANA_USDC_MINT,
       resourceUrl: `sandbox:buy:${itemId}`,
       transaction: signature,
       status: 'paid',
@@ -302,7 +303,7 @@ export async function prepareLasoTinyCardPurchase({
     proposal,
     digest: proposalDigest({
       ...proposal,
-      cluster: 'devnet',
+      cluster: SOLANA_CLUSTER,
       expectedReceiveAsset: proposal.expectedReceiveAsset,
     }),
     policy,

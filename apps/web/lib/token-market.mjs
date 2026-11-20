@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, explorerClusterQuery } from '@ubc2026/contracts/solana';
 /**
  * Token page chart math. Prices and token details come from DexScreener
  * in the browser (`dex-token.mjs`). This module does not sign or fetch.
@@ -10,7 +11,7 @@ export const CHART_RANGES = Object.freeze(['1H', '1D', '1W', '1M', 'YTD', '1Y', 
 export function solscanTokenUrl(mint, cluster = 'mainnet') {
   if (typeof mint !== 'string' || !MINT.test(mint)) return null;
   if (cluster === 'mainnet') return `https://solscan.io/token/${mint}`;
-  if (cluster === 'devnet' || cluster === 'testnet') return `https://solscan.io/token/${mint}?cluster=${cluster}`;
+  if (['mainnet-beta', 'mainnet', 'devnet', 'testnet'].includes(cluster)) return `https://solscan.io/token/${mint}${explorerClusterQuery(cluster)}`;
   return null;
 }
 

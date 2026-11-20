@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Account security page model (Isaac / 7C).
  * Kill-switch + freeze intents only. Never signs, never shows secret values.
@@ -28,7 +29,7 @@ export function buildSecurityPage({
   ownerId = null,
   accountLabel = null,
   bots = [],
-  cluster = 'devnet',
+  cluster = SOLANA_CLUSTER,
 } = {}) {
   const list = Array.isArray(bots) ? bots : [];
   const frozen = list.filter((b) => b.record?.frozen === true || b.frozen === true);

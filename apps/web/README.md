@@ -22,7 +22,7 @@ https://auth.privy.io/api/v1/oauth/callback
 
 For Discord: [Developer Portal](https://discord.com/developers/applications) → your app → OAuth2 → Redirects → add that URL → Save. Do not use `http://localhost:3000/...` as the Discord redirect — Privy owns the callback, then sends the user back to your allowed origin. Same callback URL for GitHub Authorization callback URL and Google Authorized redirect URIs.
 
-After login the shell calls `POST /api/wallets`. That needs **server** names in the same root `.env.local`: `PRIVY_APP_SECRET` and `QUICKNODE_DEVNET_RPC_URL` (https Solana **devnet** endpoint). `PRIVY_APP_ID` can match `NEXT_PUBLIC_PRIVY_APP_ID`. Until that succeeds the wallet list stays empty. The on-screen note lists any missing names — fix those, restart Next, sign in again.
+After login the shell calls `POST /api/wallets`. That needs **server** names in the same root `.env.local`: `PRIVY_APP_SECRET` and `SOLANA_RPC_URL` (https Solana **mainnet-beta** endpoint). `PRIVY_APP_ID` can match `NEXT_PUBLIC_PRIVY_APP_ID`. Until that succeeds the wallet list stays empty. The on-screen note lists any missing names — fix those, restart Next, sign in again.
 
 Set `NEXT_PUBLIC_AGENT_RUNTIME_URL` to the deployed agent-runtime origin (for example `https://maelstrom-agent-runtime.<subdomain>.workers.dev`). That is not the Next dev server on port 3000.
 

@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 const HANDLE = /^[a-z0-9][a-z0-9_]{1,31}$/;
 const AMOUNT = /^[1-9][0-9]{0,39}$/;
 const KEY = /^[a-zA-Z0-9:_-]{8,128}$/;
@@ -30,7 +31,7 @@ export function platformProposal({ ownerId, botId, handle, amount, idempotencyKe
       expectedReceiveAsset: 'USDC',
       maxFee: '0',
       expiresAt: String(now + 120_000),
-      cluster: 'devnet',
+      cluster: SOLANA_CLUSTER,
     },
   };
 }

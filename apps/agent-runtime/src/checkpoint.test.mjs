@@ -36,7 +36,7 @@ test('BotStateMachine wakes, advances, and blocks while paused', async () => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ botId: 'bot_1', goal: 'shop' }),
-  }), { CLUSTER: 'devnet' });
+  }), { SOLANA_CLUSTER: 'mainnet-beta' });
   assert.equal(wake.status, 200);
   const paused = await machine.handle(new Request('https://bot/pause', {
     method: 'POST',
@@ -67,7 +67,7 @@ const wallet = {
   ownerId: 'user_1',
   kind: 'main',
   label: 'Main',
-  address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   frozen: false,
   provider: 'privy',
 };
@@ -88,7 +88,7 @@ const ledger = { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', reali
 const proposal = {
   id: 'p1',
   botId: 'bot_1',
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   asset: 'USDC',
   recipient: 'Alex111111111111111111111111111111111111111',
   quoteId: 'q1',
@@ -100,8 +100,8 @@ const proposal = {
 };
 const facts = {
   asset: 'USDC',
-  mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-  cluster: 'devnet',
+  mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  cluster: 'mainnet-beta',
   price: '1000000',
   amount: '1000',
   trustScore: '800',

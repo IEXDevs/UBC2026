@@ -13,7 +13,7 @@ import {
   sanitizeOrigin,
 } from './privy.mjs';
 
-const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const appId = 'app_test';
 const appSecret = 'app-secret-value';
 const rpcUrl = 'https://example.invalid/quicknode-secret-path';

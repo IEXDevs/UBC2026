@@ -38,7 +38,7 @@ import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
 const MAX_TOOL_RESULT = 6000;
 const DASHBOARD_NAMES = new Set(DASHBOARD_TOOLS.map((tool) => tool.name));
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const CLUSTER_NOTE = 'Holdings are whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet for these addresses. Mainnet is never queried.';
+const CLUSTER_NOTE = 'Holdings are whatever non-zero SOL/SPL balances exist on Solana-mainnet-beta and Solana-testnet for these addresses. Mainnet is never queried.';
 
 export function openAiAgentTools(tools = SHARED_AGENT_TOOLS) {
   return toOpenAiTools(tools);
@@ -230,7 +230,7 @@ function walletAlreadyOnchainOk(wallet) {
     || (Array.isArray(wallet?.holdings) && wallet.holdings.some((row) => row?.label));
 }
 
-/** Read whatever non-zero SOL/SPL balances exist on Solana-devnet + Solana-testnet. */
+/** Read whatever non-zero SOL/SPL balances exist on Solana-mainnet-beta + Solana-testnet. */
 async function enrichWalletsOnchain(wallets, { env = {}, fetcher = fetch } = {}) {
   const list = Array.isArray(wallets) ? wallets : [];
   const head = list.slice(0, 8);

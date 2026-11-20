@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { SOLANA_GENESIS_HASH, SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 import { BotStateMachine } from './bot-do.mjs';
 import {
   HOURLY_CRON,
@@ -10,14 +10,14 @@ import {
   isStreamDropped,
   listScheduledBotsFromSupabase,
   planScheduledWork,
-  readDevnetUsdcBalance,
-  readDevnetWalletBalances,
+  readSolanaUsdcBalance,
+  readSolanaWalletBalances,
   parseTokenAccountsByMint,
   readStreamHealthFromSupabase,
   SPL_TOKEN_PROGRAM_ID,
 } from './schedules.mjs';
 
-const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const now = 1_700_000_000_000;
 const secretUrl = 'https://example.invalid/quicknode-secret-path';
 
@@ -114,34 +114,34 @@ test('paper loss flags max-loss without keeping provider extras', () => {
 });
 
 /**
- * Achieves: USDC read refuses non-devnet clusters and never echoes RPC URL.
+ * Achieves: USDC read refuses non-mainnet-beta clusters and never echoes RPC URL.
  * Fails when: other cluster accepted or RPC URL in output.
  * Oracle: refusal + no URL leak.
  * Side effects / state checked: RPC mocks.
  * Gaps: none
  */
-test('a devnet USDC read refuses other clusters and hides the RPC URL', async () => {
+test('a mainnet-beta USDC read refuses other clusters and hides the RPC URL', async () => {
   const calls = [];
   const fetcher = async (url, init) => {
     calls.push(url);
     const body = JSON.parse(init.body);
     if (body.method === 'getGenesisHash') {
-      return Response.json({ jsonrpc: '2.0', id: 1, result: 'mainnet-genesis-not-devnet' });
+      return Response.json({ jsonrpc: '2.0', id: 1, result: 'mainnet-genesis-not-mainnet-beta' });
     }
     throw new Error('balance should not be read');
   };
-  const refused = await readDevnetUsdcBalance({ rpcUrl: secretUrl, address, fetcher });
+  const refused = await readSolanaUsdcBalance({ rpcUrl: secretUrl, address, fetcher });
   assert.equal(refused.code, 'wrong_cluster');
   assert.equal(JSON.stringify(refused).includes('quicknode-secret-path'), false);
   assert.equal(calls[0], secretUrl);
 
-  const ok = await readDevnetUsdcBalance({
+  const ok = await readSolanaUsdcBalance({
     rpcUrl: secretUrl,
     address,
     fetcher: async (url, init) => {
       const body = JSON.parse(init.body);
       if (body.method === 'getGenesisHash') {
-        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
       }
       if (body.method === 'getBalance') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 9 } });
@@ -154,7 +154,7 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
         result: {
           value: [{
             account: {
-              data: { parsed: { info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
+              data: { parsed: { info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } } } },
             },
           }],
         },
@@ -162,16 +162,16 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
     },
   });
   assert.equal(ok.amount, '42');
-  assert.equal(ok.mint, DEVNET_USDC_MINT);
+  assert.equal(ok.mint, SOLANA_USDC_MINT);
   assert.equal(JSON.stringify(ok).includes(secretUrl), false);
 
-  const both = await readDevnetWalletBalances({
+  const both = await readSolanaWalletBalances({
     rpcUrl: secretUrl,
     address,
     fetcher: async (_url, init) => {
       const body = JSON.parse(init.body);
       if (body.method === 'getGenesisHash') {
-        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
       }
       if (body.method === 'getBalance') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 2_000_000_000 } });
@@ -190,7 +190,7 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
       account: {
         data: {
           parsed: {
-            info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '10', decimals: 6 } },
+            info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '10', decimals: 6 } },
           },
         },
       },
@@ -220,7 +220,7 @@ test('a devnet USDC read refuses other clusters and hides the RPC URL', async ()
   assert.equal(parsed.tokens[0].amount, '10');
   assert.equal(parsed.tokens[1].amount, '5000000000');
 
-  const missing = await readDevnetUsdcBalance({ address, fetcher: async () => { throw new Error('no'); } });
+  const missing = await readSolanaUsdcBalance({ address, fetcher: async () => { throw new Error('no'); } });
   assert.equal(missing.code, 'rpc_not_configured');
 });
 
@@ -312,7 +312,7 @@ test('a position check does not move a paused run', async () => {
       now,
       reason: 'stream-drop-recheck',
       maxLoss: '10',
-      balance: { ok: true, amount: '7', address, rpcUrl: secretUrl, cluster: 'devnet' },
+      balance: { ok: true, amount: '7', address, rpcUrl: secretUrl, cluster: 'mainnet-beta' },
     }),
   }));
   assert.equal(checked.status, 200);

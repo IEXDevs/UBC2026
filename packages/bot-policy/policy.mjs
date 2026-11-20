@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createHash } from 'node:crypto';
 
 export class PolicyError extends Error {}
@@ -21,7 +22,7 @@ export function validateBot(bot) {
 }
 function proposalFields(p) {
   if (!p || ![p.id, p.botId, p.asset, p.recipient, p.quoteId, p.expectedReceiveAsset].every(required)) fail('Incomplete transaction preview');
-  if (!['devnet', 'testnet'].includes(p.cluster)) fail('Hackathon execution must use devnet or testnet');
+  if (![SOLANA_CLUSTER].includes(p.cluster)) fail('Execution must use the configured Solana cluster');
   amount(p.outflow); amount(p.expectedReceive); amount(p.maxFee);
   if (!Number.isSafeInteger(p.expiresAt) || p.expiresAt <= 0) fail('Invalid quote expiry');
   return { id: p.id, botId: p.botId, cluster: p.cluster, asset: p.asset, recipient: p.recipient, quoteId: p.quoteId, outflow: p.outflow, expectedReceive: p.expectedReceive, expectedReceiveAsset: p.expectedReceiveAsset, maxFee: p.maxFee, expiresAt: p.expiresAt };

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSign, generateKeyPairSync } from 'node:crypto';
 import { Keypair } from '@solana/web3.js';
-import { buildDevnetUsdcTransaction } from '@ubc2026/transfers';
+import { buildSolanaUsdcTransaction } from '@ubc2026/transfers';
 import { postConnectedDeposit, signedDepositMatches, walletsForDeposit } from './connected-deposit.mjs';
 import { privyJwksUrl } from './privy-access-token.mjs';
 
@@ -11,7 +11,7 @@ const ownerId = 'did:privy:abc';
 const env = {
   PRIVY_APP_ID: appId,
   PRIVY_APP_SECRET: 'secret',
-  QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/rpc',
+  SOLANA_RPC_URL: 'https://example.invalid/rpc',
 };
 const now = 1_700_000_000_000;
 const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -57,7 +57,7 @@ const connected = wallet('linked_phantom', sourceKey.publicKey.toBase58(), { spe
 const main = wallet('w_main', mainKey.publicKey.toBase58(), { kind: 'main', spendable: true });
 
 function depositBytes({ amount = '2500000', destination = main.address, memo = 'deposit', payer = sourceKey } = {}) {
-  const built = buildDevnetUsdcTransaction({
+  const built = buildSolanaUsdcTransaction({
     feePayer: payer.publicKey.toBase58(),
     sourceOwner: payer.publicKey.toBase58(),
     destinationOwner: destination,
@@ -103,7 +103,7 @@ function harness(wallets, { loads = [] } = {}) {
       },
       chain: {
         async blockhash() { return blockhash; },
-        async assertDevnet() {},
+        async assertSolana() {},
         async broadcast(signed) {
           broadcasts.push(signed);
           return 'sig_deposit';

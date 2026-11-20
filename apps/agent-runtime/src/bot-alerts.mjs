@@ -1,3 +1,5 @@
+
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * In-app alerts for one bot's timeline.
  * There is no central notifier. Nothing here sends email, push, or X.
@@ -174,7 +176,7 @@ export async function rememberDecisionMemo(env, storage, input, fetcher = env?.f
     trust ? `Trust ${trust}.` : '',
     'Verifier consensus.',
     `Approval ${approval}.`,
-    'devnet execution, mainnet pricing.',
+    `${EXECUTION_LABEL}.`,
   ].filter(Boolean).join(' ').slice(0, 500);
   const rawId = `evt_memo_${input?.runId || input?.at || 'run'}`;
   const id = rawId.replace(/[^a-zA-Z0-9:_.-]/g, '_').slice(0, 256);

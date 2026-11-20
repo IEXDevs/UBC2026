@@ -11,7 +11,7 @@ const botId = 'bot_sol';
 const context = { ownerId, botId, secret: 'test-only-chat-key' };
 const args = {
   action: 'pay', amount: '1000000000', asset: 'SOL', botId,
-  destination: '11111111111111111111111111111111', handle: 'hi', quoteCluster: 'devnet',
+  destination: '11111111111111111111111111111111', handle: 'hi', quoteCluster: 'mainnet-beta',
 };
 const signature = '5'.repeat(64);
 
@@ -23,7 +23,7 @@ test('a slide submits the original SOL payment directly and returns its Solscan 
     ownerId, botId, runtimeBase: 'https://runtime.example',
     fetcher: async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body) });
-      return Response.json({ ok: true, signed: true, cluster: 'devnet', signature });
+      return Response.json({ ok: true, signed: true, cluster: 'mainnet-beta', signature });
     },
   });
   const reply = await resumeAssetSpend(confirmed, context, (name, inputs) => invoke(
@@ -35,7 +35,7 @@ test('a slide submits the original SOL payment directly and returns its Solscan 
     body: { ...args, idempotencyKey: hold.idempotencyKey, confirmed: true, permission: 'full', reviewCap: '30000000' },
   }]);
   assert.equal(reply.hold, undefined);
-  assert.equal(reply.text, `Sent. https://solscan.io/tx/${signature}?cluster=devnet`);
+  assert.equal(reply.text, `Sent. https://solscan.io/tx/${signature}`);
 });
 
 test('a changed, expired, or unsigned payment confirmation never invokes the spend tool', async () => {
@@ -169,7 +169,7 @@ test('a failed owner session exchange shows the full provider trace in chat and 
     assert.match(output, /Worker time 2023-11-14T22:13:20.000Z/);
     assert.match(output, /Token audience match. Token issuer match. Token expiry current/);
     assert.match(output, /The Worker did not send an owner-session signing request/);
-    assert.match(output, /stopped before broadcast on Solana devnet/);
+    assert.match(output, /stopped before broadcast on Solana mainnet-beta/);
     assert.doesNotMatch(output, /private diagnostics/);
   }
 });

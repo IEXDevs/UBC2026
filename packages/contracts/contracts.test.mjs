@@ -71,7 +71,7 @@ const wallet = {
   ownerId: 'user_1',
   kind: 'main',
   label: 'Main',
-  address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   frozen: false,
   provider: 'privy',
 };
@@ -157,7 +157,7 @@ test('spend ledger, decisions, and timeline events validate tightly', () => {
       id: 'dec_1',
       botId: 'bot_1',
       runId: 'run_1',
-      cluster: 'devnet',
+      cluster: 'mainnet-beta',
       factsDigest: digest,
       proposalDigest: digest,
       createdAt: Date.now(),
@@ -205,7 +205,7 @@ test('payments and metrics validate, and reject bad shapes', () => {
     protocol: 'x402',
     amount: '5000000',
     asset: 'USDC',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
   }).direction, 'paid');
   assert.throws(() => validatePayment({
     id: 'pay_1',
@@ -214,7 +214,7 @@ test('payments and metrics validate, and reject bad shapes', () => {
     protocol: 'card',
     amount: '1',
     asset: 'USDC',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
   }), ContractError);
   assert.equal(validateMetric({
     id: 'metric_1',
@@ -421,7 +421,7 @@ test('builtin templates are locked and non-deletable', () => {
  * Gaps: Does not exercise voice/UI callers — only the shared body parser.
  */
 test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes', () => {
-  const dest = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const dest = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const ok = parsePermissionedSpendBody({
     permission: 'full',
     botId: 'bot_1',
@@ -487,15 +487,15 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
     action: 'buy',
     amount: 1000000,
     asset: 'USDC',
-    quoteCluster: 'devnet',
+    quoteCluster: 'mainnet-beta',
   });
   assert.equal(buy.amount, '1000000');
   assert.equal(buy.asset, 'USDC');
   assert.equal(buy.action, 'buy');
   assert.equal(buy.selfCustody, true);
   assert.equal(buy.destination, null);
-  assert.equal(buy.quote.pricingCluster, 'devnet');
-  assert.equal(buy.quote.cluster, 'devnet');
+  assert.equal(buy.quote.pricingCluster, 'mainnet-beta');
+  assert.equal(buy.quote.cluster, 'mainnet-beta');
   assert.equal(buy.quote.authorizesTransaction, false);
   assert.equal(buy.quote.paperPnl, undefined);
   assert.equal(parsePermissionedSpendBody({
@@ -504,7 +504,7 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
     action: 'spend',
     amount: '1000000',
     asset: 'USDC',
-    quoteCluster: 'devnet',
+    quoteCluster: 'mainnet-beta',
   }), null);
   assert.equal(parsePermissionedSpendBody({
     permission: 'full',
@@ -512,7 +512,7 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
     action: 'buy',
     amount: '1000000',
     asset: 'SOL',
-    quoteCluster: 'devnet',
+    quoteCluster: 'mainnet-beta',
   }), null);
   assert.equal(parsePermissionedSpendBody({
     permission: 'full',
@@ -520,7 +520,7 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
     action: 'buy',
     amount: '1000000',
     asset: 'USDC',
-    quoteCluster: 'mainnet-beta',
+    quoteCluster: 'devnet',
   }), null);
   assert.throws(
     () => buildPermissionedSpendRequest({ permission: 'full', botId: 'bot_1', amount: '1' }),
@@ -531,13 +531,13 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
 /**
  * Achieves: httpsAvatarUrl / normalizeDisplayName / CLUSTERS enforce https-only, trim rules, and hackathon clusters.
  * Fails when: http avatars accepted, newline names pass, or mainnet appears in CLUSTERS.
- * Oracle: https-only URL gate; display-name length/whitespace rules; frozen ['devnet','testnet'].
+ * Oracle: https-only URL gate; display-name length/whitespace rules; frozen ['mainnet-beta','testnet'].
  * Side effects: none.
  * Gaps: privyAvatarUrl composition already covered above.
  */
 test('httpsAvatarUrl, normalizeDisplayName, and CLUSTERS enforce hackathon profile rules', () => {
-  assert.deepEqual(CLUSTERS, ['devnet', 'testnet']);
-  assert.equal(CLUSTERS.includes('mainnet-beta'), false);
+  assert.deepEqual(CLUSTERS, ['mainnet-beta']);
+  assert.equal(CLUSTERS.includes('devnet'), false);
   assert.equal(httpsAvatarUrl('https://cdn.example/a.png'), 'https://cdn.example/a.png');
   assert.equal(httpsAvatarUrl('http://cdn.example/a.png'), null);
   assert.equal(httpsAvatarUrl('https://user:pass@cdn.example/a.png'), null);
@@ -551,4 +551,3 @@ test('httpsAvatarUrl, normalizeDisplayName, and CLUSTERS enforce hackathon profi
   assert.equal(normalizeDisplayName('a'.repeat(65)), null);
   assert.equal(normalizeDisplayName(42), null);
 });
-

@@ -38,7 +38,7 @@ function quote(mint, priceUsd, overrides = {}) {
     priceUsd,
     quoteSource: 'dexscreener',
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
+    executionCluster: 'mainnet-beta',
     label: PRICE_LABEL,
     pairAddress: 'pair',
     liquidityUsd: 1000,
@@ -50,7 +50,7 @@ function quote(mint, priceUsd, overrides = {}) {
 const proposal = {
   id: 'p',
   botId: 'bot_watch',
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   asset: 'USDC',
   recipient: 'treasury',
   quoteId: 'q',
@@ -82,7 +82,7 @@ test('trading bot opens a paper SOL lot from a mainnet quote and does not broadc
   });
   assert.equal(opened.replayed, false);
   assert.equal(opened.position.mode, 'paper');
-  assert.equal(opened.position.cluster, 'devnet');
+  assert.equal(opened.position.cluster, 'mainnet-beta');
   assert.equal(opened.position.label, PRICE_LABEL);
   assert.equal(opened.position.symbol, 'SOL');
   assert.equal(opened.position.entryMicroUsdc, '75000000');
@@ -154,9 +154,9 @@ test('a sell after the hold realizes paper PnL and a same-hour sell does not', (
     quote: quote(SOL, '150'),
     now: NOW,
     idempotencyKey: 'buy-2',
-    cluster: 'testnet',
+    cluster: 'mainnet-beta',
   });
-  assert.equal(opened.position.cluster, 'testnet');
+  assert.equal(opened.position.cluster, 'mainnet-beta');
   assert.throws(() => closePaperPosition({
     book,
     bot: trader,

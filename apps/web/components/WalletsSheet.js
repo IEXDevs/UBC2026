@@ -72,7 +72,7 @@ export default function WalletsSheet({
   focusId = '',
   getAccessToken,
   resolveRecipient = null,
-  devnetBalance = null,
+  solanaBalance = null,
   onRetire = null,
   devPreview = false,
 }) {
@@ -155,7 +155,7 @@ export default function WalletsSheet({
     positions,
     transfers,
     prefs: { ...prefs, sns: prefs.sns || sns || '' },
-    devnet: devnetBalance,
+    solana: solanaBalance,
   });
 
   if (!mounted) return null;
@@ -864,14 +864,14 @@ function SendPane({
 function targetHint(target, observing = false) {
   if (observing) {
     if (target?.kind === 'wallet' && target.walletKind === 'main') {
-      return 'This sends devnet USDC to the main wallet. The connected wallet approves it.';
+      return 'This sends mainnet-beta USDC to the main wallet. The connected wallet approves it.';
     }
-    return 'A connected wallet sends devnet USDC to the main wallet.';
+    return 'A connected wallet sends mainnet-beta USDC to the main wallet.';
   }
   if (!target) return 'Type a @handle or a .sol name, or pick a wallet.';
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
   if (target.kind === 'wallet' && target.spendable === false) return 'Pick the main wallet to move funds there.';
-  if (target.kind === 'wallet') return `Sends USDC on Solana devnet to ${target.caption}.`;
+  if (target.kind === 'wallet') return `Sends USDC on Solana mainnet-beta to ${target.caption}.`;
   if (target.kind === 'invalid-address') return 'That address is not a valid Solana pubkey.';
   return 'Raw addresses are not on the platform ledger yet.';
 }

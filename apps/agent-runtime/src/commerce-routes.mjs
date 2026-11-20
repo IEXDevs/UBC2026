@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Isaac / 6B + 6C Worker routes:
  * - Shopping sandbox prep/settle + Laso tiny-card challenge
@@ -13,7 +14,7 @@ import {
 import { buildSignalOffer, settleSignalSale, CommerceError } from '@ubc2026/agent-commerce';
 import { createSnsResolver, prepareSnsSend, resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { grabBackToMain, TransferError } from '@ubc2026/transfers';
-import { DEVNET_USDC_MINT } from '@ubc2026/x402';
+import { SOLANA_USDC_MINT } from '@ubc2026/x402';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -80,6 +81,7 @@ export async function handleShoppingPrepare(request, env, botId) {
   const owner = ownerId(request);
   if (!owner) return json({ error: 'owner_required' }, 401);
   const body = await readBody(request);
+  if (SOLANA_CLUSTER === 'mainnet-beta' && body.provider !== 'laso') return json({ error: 'sandbox_disabled_on_mainnet' }, 409);
   const bot = shoppingBotFrom(body, botId, owner);
   const ledger = body.ledger || { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
   try {
@@ -96,7 +98,7 @@ export async function handleShoppingPrepare(request, env, botId) {
     const result = await prepareSandboxPurchase({
       bot,
       ledger,
-      recipient: body.recipient || env.SANDBOX_PAY_TO || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+      recipient: body.recipient || env.SANDBOX_PAY_TO || SOLANA_USDC_MINT,
       storeClient: env.sandboxStoreClient || null,
       fetcher: env.fetch || fetch,
       baseUrl: env.X402_SANDBOX_BASE_URL,
@@ -109,10 +111,11 @@ export async function handleShoppingPrepare(request, env, botId) {
   }
 }
 
-/** POST /bots/:botId/shopping/settle — sandbox only (devnet). */
+/** POST /bots/:botId/shopping/settle — sandbox only (solana). */
 export async function handleShoppingSettle(request, env, botId) {
   const owner = ownerId(request);
   if (!owner) return json({ error: 'owner_required' }, 401);
+  if (SOLANA_CLUSTER === 'mainnet-beta') return json({ error: 'sandbox_disabled_on_mainnet' }, 409);
   const body = await readBody(request);
   try {
     const bot = body.bot || { id: botId };
@@ -156,7 +159,7 @@ export async function handleShoppingSettle(request, env, botId) {
               ? 'USDC'
               : 'USDC',
             counterparty: result.payment.recipient || null,
-            cluster: 'devnet',
+            cluster: SOLANA_CLUSTER,
             tx_signature: result.payment.transaction || null,
           },
           prefer: 'resolution=merge-duplicates,return=minimal',
@@ -278,7 +281,7 @@ export async function handleSnsSend(request, env, botId) {
       executeTransfer,
       memo: body.memo,
     });
-    return json({ ok: true, botId, mintHint: DEVNET_USDC_MINT, ...result });
+    return json({ ok: true, botId, mintHint: SOLANA_USDC_MINT, ...result });
   } catch (error) {
     return err(error);
   }
@@ -301,7 +304,7 @@ export async function handleGrabBack(request, env) {
         ok: true,
         dryRun: true,
         kind: 'grab-back',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         memo: 'funds.grabbed',
         moves: body.wallets
           .filter((w) => w.kind === 'additional')

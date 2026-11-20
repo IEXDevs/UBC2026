@@ -1,35 +1,35 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEVNET_GENESIS_HASH, DEVNET_USDC_MINT } from './privy.mjs';
+import { SOLANA_GENESIS_HASH, SOLANA_USDC_MINT } from './privy.mjs';
 import {
   SPL_TOKEN_PROGRAM_ID,
   TESTNET_GENESIS_HASH,
-  PUBLIC_DEVNET_RPC_URL,
+  PUBLIC_SOLANA_RPC_URL,
   PUBLIC_TESTNET_RPC_URL,
   CLUSTERS,
   parseTokenAccountsByMint,
   readClusterWalletBalances,
   resolveClusterRpcUrls,
-  readDevnetWalletBalances,
-  readDevnetUsdcBalance,
+  readSolanaWalletBalances,
+  readSolanaUsdcBalance,
   readWalletBalancesAcrossClusters,
 } from './balances.mjs';
 
-const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const rpcUrl = 'https://example.invalid/quicknode-secret-path';
 
 /**
  * Rigor audit — genesis constant
- * Achieves: full 44-char Solana-devnet genesis (not CAIP-2 truncated form).
+ * Achieves: full 44-char Solana-mainnet-beta genesis (not CAIP-2 truncated form).
  * Fails when: truncated hash used for getGenesisHash compares (false cluster accept).
- * Oracle: published Solana-devnet genesis hash.
+ * Oracle: published Solana-mainnet-beta genesis hash.
  * Side effects: none.
  * Gaps: none.
  */
-test('DEVNET_GENESIS_HASH is the full getGenesisHash value (not the CAIP-2 truncation)', () => {
-  assert.equal(DEVNET_GENESIS_HASH, 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG');
-  assert.equal(DEVNET_GENESIS_HASH.length, 44);
-  assert.notEqual(DEVNET_GENESIS_HASH, 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1');
+test('SOLANA_GENESIS_HASH is the full getGenesisHash value (not the CAIP-2 truncation)', () => {
+  assert.equal(SOLANA_GENESIS_HASH, '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
+  assert.equal(SOLANA_GENESIS_HASH.length, 44);
+  assert.notEqual(SOLANA_GENESIS_HASH, 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1');
 });
 
 /**
@@ -45,7 +45,7 @@ test('parseTokenAccountsByMint aggregates non-zero mints and skips zeros', () =>
   const parsed = parseTokenAccountsByMint([
     {
       account: {
-        data: { parsed: { info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '5', decimals: 6 } } } },
+        data: { parsed: { info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '5', decimals: 6 } } } },
       },
     },
     {
@@ -96,21 +96,21 @@ test('parseTokenAccountsByMint returns every non-zero mint the wallet holds (not
 });
 
 /**
- * Rigor audit — devnet balance read + secret hygiene
+ * Rigor audit — mainnet-beta balance read + secret hygiene
  * Achieves: SOL + USDC from mocked RPC; response JSON never contains RPC URL path.
  * Fails when: wrong cluster accepted, USDC missed, or RPC URL leaks into client JSON.
- * Oracle: getGenesisHash must match DEVNET_GENESIS_HASH; amounts from RPC result.
+ * Oracle: getGenesisHash must match SOLANA_GENESIS_HASH; amounts from RPC result.
  * Side effects: fetcher call methods asserted indirectly via returned balances.
  * Gaps: none for happy path. Remaining: wrong-genesis refusal covered elsewhere in privy tests.
  */
-test('readDevnetWalletBalances returns SOL and SPL tokens without leaking the RPC URL', async () => {
-  const bal = await readDevnetWalletBalances({
+test('readSolanaWalletBalances returns SOL and SPL tokens without leaking the RPC URL', async () => {
+  const bal = await readSolanaWalletBalances({
     rpcUrl,
     address,
     fetcher: async (_url, init) => {
       const body = JSON.parse(init.body);
       if (body.method === 'getGenesisHash') {
-        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
       }
       if (body.method === 'getBalance') {
         assert.deepEqual(body.params[1], { commitment: 'confirmed' });
@@ -129,7 +129,7 @@ test('readDevnetWalletBalances returns SOL and SPL tokens without leaking the RP
             account: {
               data: {
                 parsed: {
-                  info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } },
+                  info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '42', decimals: 6 } },
                 },
               },
             },
@@ -158,13 +158,13 @@ test('readWalletBalancesAcrossClusters returns whatever each cluster actually ho
   const bal = await readWalletBalancesAcrossClusters({
     address,
     env: {
-      QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet',
+      SOLANA_RPC_URL: 'https://example.invalid/mainnet-beta',
       QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet',
     },
     fetcher: async (url, init) => {
       const href = String(url);
       const body = JSON.parse(init.body || '{}');
-      const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : DEVNET_GENESIS_HASH;
+      const genesis = href.includes('testnet') ? TESTNET_GENESIS_HASH : SOLANA_GENESIS_HASH;
       if (body.method === 'getGenesisHash') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: genesis });
       }
@@ -176,12 +176,11 @@ test('readWalletBalancesAcrossClusters returns whatever each cluster actually ho
     },
   });
   assert.equal(bal.ok, true);
-  assert.equal(bal.clusters.testnet.solLamports, '3000000000');
-  assert.equal(bal.clusters.devnet.solLamports, '0');
-  assert.equal(bal.holdings.length, 1);
-  assert.equal(bal.holdings[0].cluster, 'testnet');
-  assert.equal(bal.holdings[0].label, '3 SOL (testnet)');
-  assert.equal(bal.displayBalanceLabel, '3 SOL (testnet)');
+  assert.equal(bal.clusters.testnet.solLamports, null);
+  assert.equal(bal.clusters.solana.solLamports, '0');
+  assert.equal(bal.holdings.length, 0);
+  assert.equal(bal.cluster, 'mainnet-beta');
+  assert.equal(bal.solLamports, '0');
   assert.equal(JSON.stringify(bal).includes('example.invalid'), false);
 });
 
@@ -193,21 +192,21 @@ test('readWalletBalancesAcrossClusters returns whatever each cluster actually ho
  * Gaps: does not probe live RPC reachability.
  */
 test('resolveClusterRpcUrls prefers secrets and falls back to public HTTPS', () => {
-  assert.deepEqual(CLUSTERS, ['devnet', 'testnet']);
+  assert.deepEqual(CLUSTERS, ['mainnet-beta', 'testnet']);
   const fallback = resolveClusterRpcUrls({});
-  assert.equal(fallback.devnet, new URL(PUBLIC_DEVNET_RPC_URL).toString());
-  assert.equal(fallback.testnet, new URL(PUBLIC_TESTNET_RPC_URL).toString());
+  assert.equal(fallback.solana, new URL(PUBLIC_SOLANA_RPC_URL).toString());
+  assert.equal(fallback.testnet, null);
   const secret = resolveClusterRpcUrls({
-    QUICKNODE_DEVNET_RPC_URL: 'https://example.invalid/devnet-secret',
+    SOLANA_RPC_URL: 'https://example.invalid/mainnet-beta-secret',
     QUICKNODE_TESTNET_RPC_URL: 'https://example.invalid/testnet-secret',
   });
-  assert.equal(secret.devnet, 'https://example.invalid/devnet-secret');
-  assert.equal(secret.testnet, 'https://example.invalid/testnet-secret');
+  assert.equal(secret.solana, 'https://example.invalid/mainnet-beta-secret');
+  assert.equal(secret.testnet, null);
   const refused = resolveClusterRpcUrls({
-    QUICKNODE_DEVNET_RPC_URL: 'http://insecure.example/rpc',
+    SOLANA_RPC_URL: 'http://insecure.example/rpc',
     QUICKNODE_TESTNET_RPC_URL: 'https://user:pass@example.invalid/rpc',
   });
-  assert.equal(refused.devnet, null);
+  assert.equal(refused.solana, null);
   assert.equal(refused.testnet, null);
 });
 
@@ -219,15 +218,15 @@ test('resolveClusterRpcUrls prefers secrets and falls back to public HTTPS', () 
  * Gaps: Token-2022 merge path covered via empty 2022 response.
  */
 test('readClusterWalletBalances validates cluster and soft-fails invalid inputs', async () => {
-  const invalidCluster = await readClusterWalletBalances({ cluster: 'mainnet-beta', address, rpcUrl });
+  const invalidCluster = await readClusterWalletBalances({ cluster: 'devnet', address, rpcUrl });
   assert.equal(invalidCluster.ok, false);
   assert.equal(invalidCluster.code, 'invalid_cluster');
-  const badAddress = await readClusterWalletBalances({ cluster: 'devnet', address: '!!!', rpcUrl });
+  const badAddress = await readClusterWalletBalances({ cluster: 'mainnet-beta', address: '!!!', rpcUrl });
   assert.equal(badAddress.code, 'invalid_address');
-  const noRpc = await readClusterWalletBalances({ cluster: 'devnet', address });
+  const noRpc = await readClusterWalletBalances({ cluster: 'mainnet-beta', address });
   assert.equal(noRpc.code, 'rpc_not_configured');
   const wrongGenesis = await readClusterWalletBalances({
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
     rpcUrl,
     address,
     fetcher: async () => Response.json({ jsonrpc: '2.0', id: 1, result: TESTNET_GENESIS_HASH }),
@@ -255,20 +254,20 @@ test('readClusterWalletBalances validates cluster and soft-fails invalid inputs'
 });
 
 /**
- * Achieves: readDevnetUsdcBalance returns only USDC amount fields from the cluster read.
+ * Achieves: readSolanaUsdcBalance returns only USDC amount fields from the cluster read.
  * Fails when: amount missing on ok path, or RPC URL leaks into JSON.
- * Oracle: Compat wrapper over readDevnetWalletBalances.usdcAmount.
+ * Oracle: Compat wrapper over readSolanaWalletBalances.usdcAmount.
  * Side effects: injected fetcher.
  * Gaps: none for USDC-only shape.
  */
-test('readDevnetUsdcBalance returns USDC amount without RPC URL leakage', async () => {
-  const bal = await readDevnetUsdcBalance({
+test('readSolanaUsdcBalance returns USDC amount without RPC URL leakage', async () => {
+  const bal = await readSolanaUsdcBalance({
     rpcUrl,
     address,
     fetcher: async (_url, init) => {
       const body = JSON.parse(init.body);
       if (body.method === 'getGenesisHash') {
-        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
       }
       if (body.method === 'getBalance') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 0 } });
@@ -284,7 +283,7 @@ test('readDevnetUsdcBalance returns USDC amount without RPC URL leakage', async 
             account: {
               data: {
                 parsed: {
-                  info: { mint: DEVNET_USDC_MINT, tokenAmount: { amount: '7', decimals: 6 } },
+                  info: { mint: SOLANA_USDC_MINT, tokenAmount: { amount: '7', decimals: 6 } },
                 },
               },
             },
@@ -295,10 +294,10 @@ test('readDevnetUsdcBalance returns USDC amount without RPC URL leakage', async 
   });
   assert.equal(bal.ok, true);
   assert.equal(bal.amount, '7');
-  assert.equal(bal.cluster, 'devnet');
-  assert.equal(bal.mint, DEVNET_USDC_MINT);
+  assert.equal(bal.cluster, 'mainnet-beta');
+  assert.equal(bal.mint, SOLANA_USDC_MINT);
   assert.equal(JSON.stringify(bal).includes('quicknode-secret-path'), false);
-  const failed = await readDevnetUsdcBalance({ address, fetcher: async () => { throw new Error('no'); } });
+  const failed = await readSolanaUsdcBalance({ address, fetcher: async () => { throw new Error('no'); } });
   assert.equal(failed.ok, false);
   assert.equal(failed.amount, null);
 });
@@ -321,7 +320,7 @@ test('readDevnetUsdcBalance returns USDC amount without RPC URL leakage', async 
 test('rpcCall uses redirect follow, retries once, and maps abort to rpc_timeout', async () => {
   let calls = 0;
   const ok = await readClusterWalletBalances({
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
     rpcUrl,
     address,
     fetcher: async (_url, init) => {
@@ -331,7 +330,7 @@ test('rpcCall uses redirect follow, retries once, and maps abort to rpc_timeout'
       if (calls === 1) throw new Error('network_blip');
       const body = JSON.parse(init.body);
       if (body.method === 'getGenesisHash') {
-        return Response.json({ jsonrpc: '2.0', id: 1, result: DEVNET_GENESIS_HASH });
+        return Response.json({ jsonrpc: '2.0', id: 1, result: SOLANA_GENESIS_HASH });
       }
       if (body.method === 'getBalance') {
         return Response.json({ jsonrpc: '2.0', id: 1, result: { value: 9 } });
@@ -344,7 +343,7 @@ test('rpcCall uses redirect follow, retries once, and maps abort to rpc_timeout'
   assert.ok(calls >= 2);
 
   const aborted = await readClusterWalletBalances({
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
     rpcUrl,
     address,
     fetcher: async () => {
@@ -393,8 +392,8 @@ test('classifyBalanceRead keeps rpc_failed distinct from empty success', async (
       balanceStatus: 'ok',
       ok: true,
       solLamports: '1000000000',
-      holdings: [{ label: '1 SOL (devnet)' }],
-      displayBalanceLabel: '1 SOL (devnet)',
+      holdings: [{ label: '1 SOL (solana)' }],
+      displayBalanceLabel: '1 SOL (solana)',
     }],
   });
   assert.equal(funded.status, 'ok');
@@ -406,8 +405,8 @@ test('classifyBalanceRead keeps rpc_failed distinct from empty success', async (
         balanceStatus: 'ok',
         ok: true,
         solLamports: '1000000000',
-        holdings: [{ label: '1 SOL (devnet)' }],
-        displayBalanceLabel: '1 SOL (devnet)',
+        holdings: [{ label: '1 SOL (solana)' }],
+        displayBalanceLabel: '1 SOL (solana)',
       },
       {
         balanceStatus: 'rpc_failed',

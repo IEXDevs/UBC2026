@@ -41,7 +41,7 @@ test('activity logs redact secrets and hide other owners', async () => {
     [JSON.stringify({
       goal: `fund ${SEED} please`,
       privateKey: 'do-not-store',
-      address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+      address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
       amount: '10',
       blob: '2'.repeat(88),
     })],
@@ -55,7 +55,7 @@ test('activity logs redact secrets and hide other owners', async () => {
   assert.equal(encoded.includes('2'.repeat(20)), false);
   assert.match(encoded, /fund/);
   assert.match(encoded, /please/);
-  assert.match(detail.address, /4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU/);
+  assert.match(detail.address, /EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/);
   assert.equal(String(detail.amount), '10');
 
   await db.query(`select set_config('request.jwt.claims', '{"owner_id":"alice"}', false)`);

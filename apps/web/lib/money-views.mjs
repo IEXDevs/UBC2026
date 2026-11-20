@@ -1,3 +1,6 @@
+
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+import { SOLANA_CLUSTER, explorerClusterQuery } from '@ubc2026/contracts/solana';
 /** Money pane view models from live Worker / Privy rows (no preview seeds). */
 import { platformBalance } from './platform-send.mjs';
 
@@ -7,7 +10,7 @@ export const MONEY_PANES = Object.freeze({
   Positions: 'positions',
 });
 
-export const SOLSCAN_DEVNET = 'https://solscan.io/?cluster=devnet';
+export const SOLSCAN_SOLANA = `https://solscan.io/${explorerClusterQuery()}`;
 
 const USDC_DECIMALS = 6;
 
@@ -77,23 +80,21 @@ export function describeWallets(wallets, bots) {
 }
 
 function txSignature(signature, cluster) {
-  if (cluster !== 'devnet' && cluster !== 'testnet' && cluster !== 'mainnet') return null;
+  if (!['mainnet-beta', 'mainnet', 'devnet', 'testnet'].includes(cluster)) return null;
   if (typeof signature !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(signature)) return null;
   return signature;
 }
 
-export function solscanTxUrl(signature, cluster = 'devnet') {
+export function solscanTxUrl(signature, cluster = SOLANA_CLUSTER) {
   const clean = txSignature(signature, cluster);
   if (!clean) return null;
-  if (cluster === 'mainnet') return `https://solscan.io/tx/${clean}`;
-  return `https://solscan.io/tx/${clean}?cluster=${cluster}`;
+  return `https://solscan.io/tx/${clean}${explorerClusterQuery(cluster)}`;
 }
 
-export function solanaExplorerTxUrl(signature, cluster = 'devnet') {
-  if (cluster !== 'devnet' && cluster !== 'testnet') return null;
+export function solanaExplorerTxUrl(signature, cluster = SOLANA_CLUSTER) {
   const clean = txSignature(signature, cluster);
   if (!clean) return null;
-  return `https://explorer.solana.com/tx/${clean}?cluster=${cluster}`;
+  return `https://explorer.solana.com/tx/${clean}${explorerClusterQuery(cluster)}`;
 }
 
 export function describeHistory(payments, bots) {
@@ -126,7 +127,7 @@ export function shortAddress(address) {
   return `${address.slice(0, 5)}...${address.slice(-5)}`;
 }
 
-/** `4zMMC...DncDU (Meteora)`. A bot name wins over the wallet label. */
+/** `EPjFW...TDt1v (Meteora)`. A bot name wins over the wallet label. */
 export function walletSendCaption(row) {
   const clipped = shortAddress(typeof row?.address === 'string' ? row.address : '');
   const bot = Array.isArray(row?.bots)
@@ -261,7 +262,7 @@ export function walletBalanceLabel(walletId, { wallets = [], positions = [], tra
   return `${formatBaseUnits(sumWalletUsdc(positions, walletId, bots).toString())} USDC`;
 }
 
-/** USDC across registered wallets. A devnet chain label replaces the book. */
+/** USDC across registered wallets. A mainnet-beta chain label replaces the book. */
 export function registeredHoldingsLabel({
   wallets = [],
   positions = [],
@@ -319,7 +320,7 @@ export function describePositions(positions, bots) {
         : null,
       healthLabel: percentWhole(position.healthPct),
       apyLabel: percentFromBps(position.apyBps),
-      note: `devnet execution, mainnet pricing · ${position.quoteSource}`,
+      note: `${EXECUTION_LABEL} · ${position.quoteSource}`,
     };
   });
 }
