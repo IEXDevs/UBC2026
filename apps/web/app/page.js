@@ -467,10 +467,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [voiceLive, setVoiceLive] = useState(false);
   const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
-  const [walletsFold, setWalletsFold] = useState(false);
   const closeProfile = useCallback(() => {
     setProfileOpen(false);
-    setWalletsFold(false);
   }, []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
   const closePlugins = useCallback(() => setPluginsOpen(false), []);
@@ -1587,11 +1585,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       return;
     }
     if (id === 'wallet') {
-      setPluginsOpen(false);
-      setStatsOpen(false);
-      setWalletsOpen(false);
-      setWalletsFold(true);
-      setProfileOpen(true);
+      openWallet();
       return;
     }
     if (id === 'lock-wallet') {
@@ -2153,8 +2147,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         accountLabel={profile?.displayName || accountLabel}
         avatarUrl={avatarUrl}
         profile={profile}
-        glance={glance}
-        wallets={wallets}
         voiceMs={voiceMs}
         talks={talks}
         payments={payments}
@@ -2164,9 +2156,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         onLogin={onLogin}
         onLogout={onLogout}
         onSave={saveProfile}
-        onWallet={() => { setProfileOpen(false); setWalletsFold(false); openWallet(); }}
-        privyLive={privyLive}
-        expandWallets={walletsFold}
       />
     </div>
     {/* Claim stays outside the shell. .shell.is-claim sets opacity 0. */}

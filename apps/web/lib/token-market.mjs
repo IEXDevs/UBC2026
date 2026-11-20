@@ -58,13 +58,14 @@ export function formatCandleTime(unixSeconds, range) {
 
 export function chartLayout(points, width, height, pad = 8) {
   if (!Array.isArray(points) || points.length < 2 || width < 32 || height < 32) return null;
+  const inset = Number.isFinite(pad) ? Math.max(0, pad) : 0;
   const prices = points.map(point => point.price);
   const min = Math.min(...prices);
   const max = Math.max(...prices);
   const span = max - min || Math.abs(max) || 1;
   const coords = points.map((point, index) => ({
-    x: pad + (index / (points.length - 1)) * (width - pad * 2),
-    y: pad + (1 - (point.price - min) / span) * (height - pad * 2),
+    x: inset + (index / (points.length - 1)) * (width - inset * 2),
+    y: inset + (1 - (point.price - min) / span) * (height - inset * 2),
     price: point.price,
     t: point.t,
   }));
