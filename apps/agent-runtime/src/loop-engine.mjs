@@ -767,6 +767,9 @@ async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
     return waitStep(run, 'execute', 'approval-needed', { idempotencyKey }, ctx.now);
   }
   const swap = proposal.swap;
+  if (assetByMint(swap.inputMint)?.symbol !== proposal.asset || swap.inAmount !== proposal.outflow) {
+    return waitStep(run, 'execute', 'swap-mismatch', { idempotencyKey }, ctx.now);
+  }
   const fetcher = typeof ctx.deps.fetch === 'function' ? ctx.deps.fetch : null;
   const orderFn = typeof ctx.deps.swapOrder === 'function'
     ? ctx.deps.swapOrder
