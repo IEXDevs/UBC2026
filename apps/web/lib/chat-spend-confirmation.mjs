@@ -11,7 +11,8 @@ import { parseLasoBrowserPayment } from '../../agent-runtime/src/laso-browser-pa
 const HOLD_LIFETIME_MS = 5 * 60 * 1000;
 
 export function isAssetSpendHold(hold) {
-  return needsBoundSpend(hold?.name, hold?.args);
+  return needsBoundSpend(hold?.name, hold?.args)
+    || (hold?.name === 'request_spend' && hold.args && ['spend', 'pay'].includes(hold.args.action ?? 'spend'));
 }
 
 function holdMac(hold, { ownerId, botId, secret }) {
@@ -25,7 +26,8 @@ function holdMac(hold, { ownerId, botId, secret }) {
 }
 
 export function sealAssetSpendHold(hold, context, now = Date.now()) {
-  const sealed = { ...hold, args: withDefaultBotId(hold.name, hold.args, context.botId), expiresAt: hold.budgetOverride || hold.swapTicket ? hold.expiresAt : now + HOLD_LIFETIME_MS };
+  const sealed = { ...hold, idempotencyKey: hold.idempotencyKey ?? `spend_${crypto.randomUUID()}`,
+    args: withDefaultBotId(hold.name, hold.args, context.botId), expiresAt: hold.budgetOverride || hold.swapTicket ? hold.expiresAt : now + HOLD_LIFETIME_MS };
   return { ...sealed, proof: holdMac(sealed, context).toString('hex') };
 }
 
@@ -67,6 +69,12 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
     throw new TextChatError('desk_locked', 403);
   }
   const spendAuthorization = parseSpendAuthorizationChallenge(result?.spendAuthorization);
+  if (result?.moveAuthorization && result.signed === false) {
+    return { provider: 'desk', toolRounds: 1, moveAuthorization: result.moveAuthorization };
+  }
+  if (result?.clientSwap && hold.args.action === 'swap') {
+    return { provider: 'desk', toolRounds: 1, clientSwap: result.clientSwap };
+  }
   const lasoPayment = parseLasoBrowserPayment(result?.lasoPayment);
   if (hold.args.action === 'x402' && lasoPayment?.phase === 'prepared' && result.signed === false) {
     return { provider: 'desk', toolRounds: 1, lasoPayment };

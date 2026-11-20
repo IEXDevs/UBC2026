@@ -112,6 +112,11 @@ export async function POST(request, context) {
     ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
     : [];
   const assetConfirmation = grants.find(isAssetSpendHold);
+  const moveAuthorization = body.moveAuthorization;
+  if (moveAuthorization !== undefined && (!assetConfirmation || !['spend', 'pay'].includes(assetConfirmation.args?.action ?? 'spend')
+      || body.spendAuthorization !== undefined || body.lasoPayment !== undefined)) {
+    return Response.json({ error: 'invalid_spend_authorization' }, { status: 400 });
+  }
   const lasoPayment = parseLasoBrowserPayment(body.lasoPayment);
   if (body.lasoPayment !== undefined && (assetConfirmation?.args?.action !== 'x402'
       || !lasoPayment || lasoPayment.phase === 'prepared' || body.spendAuthorization !== undefined)) {
@@ -283,14 +288,19 @@ export async function POST(request, context) {
     if (assetConfirmation) {
       let gate;
       const reply = await resumeAssetSpend(assetConfirmation, approvalContext, async (name, args) => {
+        if (args.action === 'swap') return { clientSwap: {
+          spend: { ...stampSpendPermission(name, args, spend), idempotencyKey: assetConfirmation.idempotencyKey },
+          swapTicket: assetConfirmation.swapTicket,
+        } };
         let approveOnce;
         if (assetConfirmation.budgetOverride != null) {
           const terms = parseSpendApprovalTerms(assetConfirmation.budgetOverride);
           if (!terms || !approvalContext.attestBudgetApproval) return { error: 'invalid_spend_approval' };
           approveOnce = await approvalContext.attestBudgetApproval(assetConfirmation, terms);
         }
-        gate = await invokeRaw(name, stampSpendPermission(name, args, spend), {
-          approveOnce, spendAuthorization, swapTicket: assetConfirmation.swapTicket, lasoPayment,
+        gate = await invokeRaw(name, { ...stampSpendPermission(name, args, spend),
+          confirmed: true, idempotencyKey: assetConfirmation.idempotencyKey }, {
+          approveOnce, spendAuthorization, swapTicket: assetConfirmation.swapTicket, lasoPayment, moveAuthorization,
         });
         return gate;
       });
@@ -321,6 +331,10 @@ export async function POST(request, context) {
     }, { swapTicket: swapHold.swapTicket });
     if (sent?.signed === true && typeof sent.signature === 'string') {
       return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted within your review limit: https://solscan.io/tx/${sent.signature}`;
+    }
+    if (sent?.reason === 'client_sign_required' || sent?.error === 'client_sign_required') {
+      return { clientSwap: { spend: { ...hold.args, botId, permission: permissionMode,
+        reviewCap: effectiveReviewCap(reviewCap), idempotencyKey: hold.idempotencyKey }, swapTicket: swapHold.swapTicket } };
     }
     // Only a swap stopped before its reservation can still go to the slide under the same key.
     const beforeReserve = sent?.state === 'approval-needed' || sent?.state === 'trust-confirmation-required'
@@ -363,7 +377,9 @@ export async function POST(request, context) {
       });
       const swapHold = swapHoldFromPreview(reply.hold, preview?.swapPreview);
       const auto = swapHold && await autoLoopSwap(reply.hold, swapHold, preview.swapPreview);
-      reply = auto
+      reply = auto?.clientSwap
+        ? { ...reply, text: '', hold: null, clientSwap: auto.clientSwap }
+        : auto
         ? { ...reply, text: auto, hold: null }
         : swapHold
         ? { ...reply, text: swapHold.label, hold: swapHold }
@@ -382,6 +398,8 @@ export async function POST(request, context) {
       ok: true,
       botId,
       reply: reply.text,
+      ...(reply.clientSwap ? { clientSwap: reply.clientSwap } : {}),
+      ...(moveAuthorization === 'prepare' && reply.moveAuthorization ? { moveAuthorization: reply.moveAuthorization } : {}),
       ...(assetConfirmation?.args?.action === 'x402' && reply.claimUrl ? { claimUrl: reply.claimUrl } : {}),
       ...(lasoPayment?.phase === 'prepare' && reply.lasoPayment ? { lasoPayment: reply.lasoPayment } : {}),
       ...(assetConfirmation && spendAuthorization === 'prepare' && reply.spendAuthorization

@@ -15,6 +15,19 @@ const args = {
 };
 const signature = '5'.repeat(64);
 
+for (const action of ['spend', 'pay', undefined]) test(`ordinary USDC ${action ?? 'default'} slides bind a stable browser-send key`, async () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', {
+    botId, action, asset: 'USDC', amount: '1000', destination: '11111111111111111111111111111111',
+  }), context, 1000);
+  assert.match(hold.idempotencyKey, /^spend_/);
+  const challenge = { transaction: 'unsigned' };
+  const result = await resumeAssetSpend(hold, context, async () => ({ signed: false, moveAuthorization: challenge }), 2000);
+  assert.deepEqual(result.moveAuthorization, challenge);
+  assert.equal(result.text, undefined);
+  assert.match((await resumeAssetSpend({ ...hold, idempotencyKey: `spend_${crypto.randomUUID()}` }, context,
+    () => assert.fail('changed key must not invoke runtime'), 2000)).text, /invalid or expired/);
+});
+
 test('sealed Laso confirmations forward browser phases outside model args and return unsigned payloads only to the owner', async () => {
   const args = { botId, action: 'x402', amount: '10000000', asset: 'USDC', lasoTicket: `payload.${'a'.repeat(64)}` };
   const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);

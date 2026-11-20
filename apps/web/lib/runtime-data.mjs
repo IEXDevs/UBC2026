@@ -279,6 +279,10 @@ export function botChatUrl(_runtimeBase, botId) {
 }
 
 function chatResult(body) {
+  if (body.clientSwap?.spend?.action === 'swap' && typeof body.clientSwap.swapTicket === 'string') {
+    return { ok: true, clientSwap: body.clientSwap };
+  }
+  if (body.moveAuthorization) return { ok: true, moveAuthorization: body.moveAuthorization };
   const lasoPayment = parseLasoBrowserPayment(body.lasoPayment);
   if (lasoPayment?.phase === 'prepared') return { ok: true, lasoPayment };
   const spendAuthorization = parseSpendAuthorizationChallenge(body.spendAuthorization);

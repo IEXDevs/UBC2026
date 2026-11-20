@@ -56,6 +56,7 @@ import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { browserSignerHasWallet, waitForBrowserSigner, withLinkedSolanaWallets, signSelectedWalletTransaction, signWalletMoveTransaction } from '../lib/wallet-signing.mjs';
+import { executeClientSignedSwap } from '../lib/swap-client-sign.mjs';
 import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
   deleteOwnerBot,
@@ -478,9 +479,12 @@ function DepositSigner({ signerRef }) {
 function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, onWalletCreated = null, privyLive = false }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
-  const signChatTransaction = useCallback(({ walletAddress, transaction }) => signSelectedWalletTransaction({
-    from: { address: walletAddress }, transaction, signer: depositSignerRef.current,
+  const signChatTransaction = useCallback(async ({ walletAddress, transaction }) => signSelectedWalletTransaction({
+    from: { address: walletAddress }, transaction,
+    signer: await waitForBrowserSigner(() => depositSignerRef.current, [{ address: walletAddress }]),
   }), []);
+  const executeChatSwap = useCallback(input => executeClientSignedSwap({ ...input, signer: depositSignerRef.current,
+    readSigner: () => depositSignerRef.current }), []);
   const [looks, setLooks] = useState({});
   const [savedPhoto, setSavedPhoto] = useState(null);
   const [roster, setRoster] = useState({ order: [], extra: [] });
@@ -2157,6 +2161,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             getAccessToken={getAccessToken}
             authorizeSpend={authorizeSpend}
             signChatTransaction={signChatTransaction}
+            executeChatSwap={executeChatSwap}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {
               const id = forBot || bot.id;

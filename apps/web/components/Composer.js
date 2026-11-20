@@ -60,6 +60,7 @@ import { rememberSessionFile } from '../lib/file-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { submitChatSpend } from '../lib/desk-grant-client.mjs';
 import { submitLasoChatPayment } from '../lib/laso-payment-client.mjs';
+import { completeChatSwap, submitChatMove } from '../lib/chat-browser-spend.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -134,6 +135,7 @@ export default function Composer({
   getAccessToken = null,
   authorizeSpend = null,
   signChatTransaction = null,
+  executeChatSwap = null,
   lines = [],
   onLine,
   onThinking,
@@ -813,13 +815,23 @@ export default function Composer({
           },
         });
       };
-      const confirmedSpend = grants?.some(hold => hold?.name === 'request_spend' && typeof hold.proof === 'string');
+      const confirmedSpend = grants?.some(hold => hold?.name === 'request_spend' && hold.args?.action !== 'swap' && typeof hold.proof === 'string');
       const lasoSpend = grants?.some(hold => hold?.name === 'request_spend' && hold.args?.action === 'x402');
-      const result = lasoSpend
+      const moveHold = grants?.find(hold => hold?.name === 'request_spend' && ['spend', 'pay'].includes(hold.args?.action ?? 'spend'));
+      let result = moveHold
+        ? await submitChatMove({ hold: moveHold, permission: permissionRef.current, reviewCap: reviewCapRef.current,
+          ownerId, getAccessToken, readGrant: () => readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
+          sign: signChatTransaction, unlock: onDeskUnlock, signal: controller.signal })
+        : lasoSpend
         ? await submitLasoChatPayment({ send, sign: signChatTransaction, unlock: onDeskUnlock, signal: controller.signal })
         : confirmedSpend
           ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal, authorize: authorizeSpend })
           : await send();
+      if (result?.clientSwap && !controller.signal.aborted && run === runRef.current) {
+        const accessToken = (await getAccessToken?.()) || '';
+        result = await completeChatSwap(result, executeChatSwap, { ownerId, accessToken,
+          deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '', signal: controller.signal });
+      }
       if (run !== runRef.current || result?.error === 'aborted') return;
       if (grants?.some(hold => hold.idempotencyKey === pendingSwap?.idempotencyKey)
           && result?.reply?.startsWith('Swap submitted.')) setPendingSwap(null);
