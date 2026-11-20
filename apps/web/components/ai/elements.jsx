@@ -74,7 +74,7 @@ export function ToolCall({ name, input, status }) {
   );
   if (!input) return line;
   return (
-    <TraceCollapsible defaultOpen={failed || running}>
+    <TraceCollapsible>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
         <Output text={input} failed={failed} />
@@ -89,7 +89,7 @@ export function TerminalBlock({ command, status }) {
   const title = running ? `Running ${command}` : failed ? `${command} failed` : `Ran ${command}`;
   return (
     <Trace>
-      <TraceCollapsible defaultOpen={running || failed}>
+      <TraceCollapsible>
         <TraceCollapsibleTrigger>
           <TraceLine status={traceStatus(status)}>
             <TraceIcon>
@@ -111,7 +111,7 @@ export function ChainOfThought({ sections = [], onSelect }) {
   return (
     <Trace>
       {sections.map((section) => (
-        <TraceCollapsible key={section.value} defaultOpen>
+        <TraceCollapsible key={section.value}>
           <TraceCollapsibleTrigger>
             <TraceLine>
               <TraceTitle>{section.label}</TraceTitle>
@@ -214,7 +214,7 @@ function FailedCommand({ title, command, error }) {
   );
   if (!body) return line;
   return (
-    <TraceCollapsible defaultOpen>
+    <TraceCollapsible>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
         <Output text={body} failed />
