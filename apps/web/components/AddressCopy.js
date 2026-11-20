@@ -7,7 +7,7 @@ import { shortAddress } from '../lib/money-views.mjs';
 export default function AddressCopy({ address, prefix = '', className = '', compact = false }) {
   const [note, setNote] = useState('');
   const clipped = shortAddress(address);
-  const shown = prefix ? `${prefix}(${clipped})` : clipped;
+  const shown = prefix ? `${prefix} (${clipped})` : clipped;
 
   async function copy() {
     if (!address) return;
