@@ -17,6 +17,11 @@ const LABELS = Object.freeze({
 });
 
 const PAGE_TOOLS = new Set(['web_scrape', 'browser_navigate', 'browser_open']);
+const SPEND_LIMIT_MESSAGES = new Map([
+  ['per-transaction', "This payment exceeds the agent's per-transfer limit."],
+  ['total-outflow', "This payment exceeds the agent's remaining spending budget."],
+  ['over-budget', "This payment exceeds the agent's spending budget."],
+]);
 const SECRET_KEY = /key|token|secret|password|authorization|cookie|seed|phrase/i;
 const SECRET_VALUE = /eyJ[A-Za-z0-9_-]{8,}|live\.browser\.run/i;
 
@@ -88,12 +93,14 @@ function commandLine(name, args) {
   return parts.join(' ').slice(0, 240);
 }
 
-function failureText(parsed) {
+function failureText(name, parsed) {
   const error = clip(parsed?.error, 80).replace(SECRET_VALUE, '[hidden]');
   const hint = clip(parsed?.hint, 180).replace(SECRET_VALUE, '[hidden]');
   const extra = clip(typeof parsed?.detail === 'string' ? parsed.detail : '', 180).replace(SECRET_VALUE, '[hidden]');
-  return [error, hint && hint !== error ? hint : '', extra && extra !== error && extra !== hint ? extra : '']
-    .filter(Boolean)
+  const spendReason = name === 'request_spend' && error === 'approval-needed'
+    ? SPEND_LIMIT_MESSAGES.get(parsed.reason) || (!parsed.reason ? 'The spend request reached the server without an accepted confirmation.' : '')
+    : '';
+  return [...new Set([error, hint, extra, spendReason].filter(Boolean))]
     .join('\n')
     .slice(0, 400);
 }
@@ -104,7 +111,7 @@ function withFailure(step, name, args, parsed, failed) {
     ...step,
     status: 'error',
     command: commandLine(name, args),
-    error: failureText(parsed),
+    error: failureText(name, parsed),
   };
 }
 

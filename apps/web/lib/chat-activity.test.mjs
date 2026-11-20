@@ -49,6 +49,22 @@ test('a scraped page becomes one site and a failed tool stays empty', () => {
   assert.match(kept[1].error, /tool_failed/);
 });
 
+test('spend approval activity shows the reason for the hold', () => {
+  const cases = [
+    ['per-transaction', /per-transfer limit/],
+    ['total-outflow', /remaining spending budget/],
+    [null, /without an accepted confirmation/],
+  ];
+  for (const [reason, expected] of cases) {
+    const spend = toolStep('request_spend', { asset: 'SOL' }, {
+      error: 'approval-needed', reason, signed: false,
+    });
+    const [kept] = sanitizeActivity([spend]);
+    assert.match(kept.error, /approval-needed/);
+    assert.match(kept.error, expected);
+  }
+});
+
 /**
  * Achieves: verifies sanitizeActivity drops private URLs and blank thoughts.
  * Fails when: blank think kept, live.browser.run site survives, or tool label lost.
