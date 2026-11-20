@@ -305,7 +305,7 @@ function chatResult(body) {
   };
 }
 
-async function readChatStream(response, onReply) {
+async function readChatStream(response, onReply, onReplyEvent) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -327,7 +327,10 @@ async function readChatStream(response, onReply) {
         continue;
       }
       if (!payload || typeof payload !== 'object') continue;
+      if (payload.type === 'reply_delta' && typeof payload.text === 'string') onReplyEvent?.(payload);
+      if (payload.type === 'reply_retract') onReplyEvent?.(payload);
       if (typeof payload.error === 'string' && payload.error) {
+        onReplyEvent?.({ type: 'reply_retract' });
         if (replies.length > 0) return chatResult({ ...(meta || {}), reply: replies.at(-1), replies });
         return { ok: false, error: payload.error };
       }
@@ -339,7 +342,10 @@ async function readChatStream(response, onReply) {
       if (payload.done === true) meta = payload;
     }
   }
-  if (!meta && replies.length === 0) return { ok: false, error: 'empty_reply' };
+  if (!meta && replies.length === 0) {
+    onReplyEvent?.({ type: 'reply_retract' });
+    return { ok: false, error: 'empty_reply' };
+  }
   const body = meta || { reply: replies.at(-1) || '', replies };
   if (!Array.isArray(body.replies) || body.replies.length === 0) body.replies = replies;
   return chatResult(body);
@@ -374,6 +380,7 @@ export async function sendBotChat({
   runtimeBase = runtimeBaseUrl(),
   signal,
   onReply = null,
+  onReplyEvent = null,
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
   if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
@@ -434,12 +441,13 @@ export async function sendBotChat({
     });
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('text/event-stream') && response.body) {
-      return await readChatStream(response, onReply);
+      return await readChatStream(response, onReply, onReplyEvent);
     }
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
     return chatResult(body);
   } catch (error) {
+    onReplyEvent?.({ type: 'reply_retract' });
     if (error?.name === 'AbortError') return { ok: false, error: 'aborted' };
     return { ok: false, error: 'network' };
   }

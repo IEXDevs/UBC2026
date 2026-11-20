@@ -280,6 +280,74 @@ function assistantToolMessage(message) {
   return next;
 }
 
+async function readCompletionStream(response, onDelta, onTool) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const message = { content: '', tool_calls: [] };
+  let buffer = '';
+  let finishReason = '';
+  let usage;
+  let finished = false;
+  const consume = frame => {
+    const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+    if (!data) return;
+    if (data.trim() === '[DONE]') { finished = true; return; }
+    const payload = JSON.parse(data);
+    if (payload.error) throw new Error('stream_failed');
+    if (payload.usage) usage = payload.usage;
+    const choice = payload.choices?.find(item => (item.index ?? 0) === 0);
+    if (!choice) return;
+    const delta = choice.delta || {};
+    if (delta.tool_calls?.length) {
+      for (const part of delta.tool_calls) {
+        const index = part.index ?? 0;
+        if (!Number.isInteger(index) || index < 0 || index > 127) throw new Error('invalid_tool_index');
+        const call = message.tool_calls[index] ||= { id: '', type: 'function', function: { name: '', arguments: '' } };
+        if (part.id) call.id += part.id;
+        if (part.function?.name) call.function.name += part.function.name;
+        if (part.function?.arguments) call.function.arguments += part.function.arguments;
+      }
+      onTool?.(message.tool_calls.filter(Boolean));
+    }
+    if (typeof delta.content === 'string') {
+      message.content += delta.content;
+      onDelta?.(message.content);
+    }
+    if (typeof delta.reasoning_content === 'string') message.reasoning_content = (message.reasoning_content || '') + delta.reasoning_content;
+    if (choice.finish_reason) { finishReason = choice.finish_reason; finished = true; }
+  };
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, '\n');
+      let end;
+      while ((end = buffer.indexOf('\n\n')) >= 0) {
+        consume(buffer.slice(0, end));
+        buffer = buffer.slice(end + 2);
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) consume(buffer);
+    if (!finished) throw new Error('incomplete_stream');
+    message.tool_calls = message.tool_calls.filter(Boolean);
+    return { choices: [{ message, finish_reason: finishReason }], usage };
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+function replyPreview(content, secrets) {
+  let safe = content.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<think>[\s\S]*$/i, '');
+  for (const token of [...secrets, '<think>']) {
+    for (let size = Math.min(token.length - 1, safe.length); size > 0; size -= 1) {
+      if (safe.endsWith(token.slice(0, size))) { safe = safe.slice(0, -size); break; }
+    }
+  }
+  return redact(safe, secrets);
+}
+
 async function postCompletion({
   resolved,
   modelId,
@@ -288,10 +356,13 @@ async function postCompletion({
   secrets,
   fetcher,
   reasoningEffort = '',
+  onDelta = null,
+  onTool = null,
 }) {
   const payload = {
     model: modelId,
     messages,
+    stream: true,
   };
   if (Array.isArray(tools) && tools.length > 0) {
     payload.tools = tools;
@@ -304,11 +375,11 @@ async function postCompletion({
   }
   let response;
   try {
-    response = await fetcher(`${resolved.baseUrl}/chat/completions`, {
+    const request = () => fetcher(`${resolved.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${resolved.apiKey}`,
-        Accept: 'application/json',
+        Accept: 'text/event-stream, application/json',
         'Content-Type': 'application/json',
         'X-Title': 'Maelstrom',
       },
@@ -317,6 +388,15 @@ async function postCompletion({
       redirect: 'manual',
       signal: AbortSignal.timeout(60000),
     });
+    response = await request();
+    if ([400, 422, 501].includes(response?.status)) {
+      const error = await response.clone().json().catch(() => ({}));
+      const detail = error?.error?.message || error?.error || '';
+      if (typeof detail === 'string' && /stream/i.test(detail) && /unsupported|not supported|does not support|not allowed|not implemented|not available|unknown|unrecognized/i.test(detail)) {
+        payload.stream = false;
+        response = await request();
+      }
+    }
   } catch {
     throw new TextChatError('openrouter_unavailable', 502);
   }
@@ -346,7 +426,9 @@ async function postCompletion({
   }
   let data;
   try {
-    data = await response.json();
+    data = response.headers?.get('content-type')?.includes('text/event-stream') && response.body
+      ? await readCompletionStream(response, onDelta, onTool)
+      : await response.json();
   } catch {
     throw new TextChatError('openrouter_invalid_response', 502);
   }
@@ -410,6 +492,8 @@ export async function completeTextChat({
   invokeTool = null,
   maxToolRounds = 4,
   onMessage = null,
+  onReplyEvent = null,
+  turnState = null,
 } = {}) {
   const custom = modelProvider == null ? null : parseModelProvider(modelProvider);
   if (modelProvider != null && !custom) throw new TextChatError('provider_not_supported', 400);
@@ -474,6 +558,7 @@ export async function completeTextChat({
   let nudged = false;
   let readOnlyTurn = true;
   let readOnlyToolRan = false;
+  const replyState = turnState || { fundProposed: false };
   const effort = reasoningEffortFor(modelId, reasoningEffort, { allowUnknown: true });
 
   function publish(text) {
@@ -617,6 +702,12 @@ export async function completeTextChat({
 
   while (true) {
     let completion;
+    let toolSeen = false;
+    let preview = '';
+    const retract = (force = false) => {
+      if (preview || force) onReplyEvent?.({ type: 'reply_retract' });
+      preview = '';
+    };
     try {
       completion = await postCompletion({
         resolved,
@@ -626,8 +717,23 @@ export async function completeTextChat({
         secrets,
         fetcher,
         reasoningEffort: effort,
+        onTool: calls => {
+          const firstTool = !toolSeen;
+          toolSeen = true;
+          if (calls.some(call => isFundTool(call.function?.name))) replyState.fundProposed = true;
+          retract(firstTool);
+        },
+        onDelta: content => {
+          if (toolSeen || replyState.fundProposed) return;
+          const safe = replyPreview(content, secrets);
+          if (safe.startsWith(preview) && safe.length > preview.length) {
+            onReplyEvent?.({ type: 'reply_delta', text: safe.slice(preview.length) });
+            preview = safe;
+          }
+        },
       });
     } catch (error) {
+      retract();
       // The signature line already went out. A slow follow-up model call must not hide it.
       if (spoken.length > 0) return finish(spoken.at(-1));
       throw error;
@@ -635,6 +741,8 @@ export async function completeTextChat({
     const calls = Array.isArray(completion.message?.tool_calls)
       ? completion.message.tool_calls.filter(call => call?.function?.name)
       : [];
+    if (calls.length) retract();
+    if (calls.some(call => isFundTool(call.function.name))) replyState.fundProposed = true;
     usage = addUsage(usage, completion.usage);
     const rawContent = typeof completion.message?.content === 'string' ? completion.message.content : '';
     const split = splitThink(rawContent);
@@ -663,7 +771,11 @@ export async function completeTextChat({
         }
         text = 'I stopped so this request would not keep spinning. I do not have a finished answer from the last step.';
       }
-      if (!(readOnlyTurn && readOnlyToolRan) && !(await allowStep('reply', text))) text = BLOCKED_TURN;
+      if (!(readOnlyTurn && readOnlyToolRan && !replyState.fundProposed) && !(await allowStep('reply', text))) {
+        retract(true);
+        text = BLOCKED_TURN;
+      }
+      if (preview && preview.trim() !== text) retract();
       publish(text);
       return finish(text);
     }
