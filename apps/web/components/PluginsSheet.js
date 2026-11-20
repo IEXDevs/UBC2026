@@ -1,17 +1,19 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import ConnectorsPane from './ConnectorsPane';
 import { usePresence } from './usePresence';
+import ModelProviders from './ModelProviders';
 
 export default function PluginsSheet({ open, onClose, connectors = [] }) {
   const { mounted, leaving } = usePresence(open);
+  const [tab, setTab] = useState('apps');
 
   useEffect(() => {
     if (!open) return undefined;
     function onKey(event) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !document.querySelector('.is-provider')) onClose();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -31,7 +33,13 @@ export default function PluginsSheet({ open, onClose, connectors = [] }) {
         <button type="button" className="plugins-close" aria-label="Close plugins" onClick={onClose}>
           <X size={18} strokeWidth={1.75} />
         </button>
-        <ConnectorsPane connectors={connectors} />
+        <div className="integration-tabs" role="tablist" aria-label="Integration settings">
+          <button type="button" id="apps-tab" role="tab" aria-selected={tab === 'apps'} aria-controls="apps-panel" onClick={() => setTab('apps')}>Apps</button>
+          <button type="button" id="models-tab" role="tab" aria-selected={tab === 'models'} aria-controls="models-panel" onClick={() => setTab('models')}>Model providers</button>
+        </div>
+        <div className="integration-panel" id={`${tab}-panel`} role="tabpanel" aria-labelledby={`${tab}-tab`}>
+          {tab === 'apps' ? <ConnectorsPane connectors={connectors} /> : <ModelProviders />}
+        </div>
       </section>
     </div>
   );
