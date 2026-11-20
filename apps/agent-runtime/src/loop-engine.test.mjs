@@ -679,13 +679,13 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 /**
- * Achieves: one SOL-to-USDC trade quotes Jupiter, signs on solana, and marks a paper position from the mainnet price.
- * Fails when: the swap is broadcast, the signature is not solana, or a provider outage still signs.
- * Oracle: execute checkpoint swap quote, paper label, and mainnet-beta signature.
+ * Achieves: one SOL-to-USDC trade quotes Jupiter and marks a paper position without moving funds.
+ * Fails when: a paper swap calls a signer, executor, or spend reservation.
+ * Oracle: paper checkpoint, absent signature, and no signing calls.
  * Side effects: in-memory run, position book, and mocked quote/signer.
  * Gaps: live Jupiter and Privy are not called.
  */
-test('a trading swap follows the gate, quotes Jupiter, signs on solana, and marks paper', async () => {
+test('a trading swap follows the gate and marks paper without signing or reserving funds', async () => {
   const machine = new BotStateMachine();
   const models = scriptedOpenRouter();
   const decide = models.openRouter;
@@ -709,7 +709,7 @@ test('a trading swap follows the gate, quotes Jupiter, signs on solana, and mark
   };
   const transfer = transferDouble();
   let quoted = 0;
-  const response = await postLoop(machine, {
+  const executionDeps = {
     openRouter: decide,
     transferClient: transfer.client,
     search: async () => [{ title: 'CPI', url: 'https://example.com/cpi', snippet: 'long-run inflation' }],
@@ -740,7 +740,8 @@ test('a trading swap follows the gate, quotes Jupiter, signs on solana, and mark
       label: 'mainnet-beta execution, mainnet pricing',
       fetchedAt: new Date(NOW).toISOString(),
     }),
-  }, payload({ goal: TRADING_GOAL }));
+  };
+  const response = await postLoop(machine, executionDeps, payload({ goal: TRADING_GOAL }));
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.error, undefined);
@@ -748,7 +749,10 @@ test('a trading swap follows the gate, quotes Jupiter, signs on solana, and mark
   assert.equal(quoted, 1);
   const execute = body.run.checkpoints.execute;
   assert.equal(execute.cluster, 'mainnet-beta');
-  assert.equal(execute.signature, 'sig_mainnet-beta_1');
+  assert.equal(execute.signature, undefined);
+  assert.equal(execute.executed, false);
+  assert.equal(execute.broadcast, false);
+  assert.equal(execute.reserved, false);
   assert.equal(execute.swapQuote.quoteSource, 'jupiter-swap-v1');
   assert.equal(execute.swapQuote.inputMint, SOL_MINT);
   assert.equal(execute.swapQuote.outAmount, '747000');
@@ -763,13 +767,25 @@ test('a trading swap follows the gate, quotes Jupiter, signs on solana, and mark
   assert.equal(execute.paper.quantity, '747000');
   assert.equal(execute.paper.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(execute.paper.cluster, 'mainnet-beta');
-  assert.equal(transfer.calls.length, 1);
-  assert.equal(transfer.calls[0].wallet.address, wallet.address);
+  assert.equal(transfer.calls.length, 0);
   const stored = await machine.get('positions');
   assert.equal(stored[0].mint, USDC_MINT);
   assert.equal(stored[0].amount, '747000');
   assert.equal(stored[0].mode, 'paper');
   assert.equal(stored[0].label, 'mainnet-beta execution, mainnet pricing');
+
+  for (const execute of [undefined, async () => assert.fail('paper must not execute a payment')]) {
+    const paperOnly = await postLoop(new BotStateMachine(), {
+      ...executionDeps,
+      transferClient: null,
+      execute,
+      ledgerApi: { reserveBudget: async () => assert.fail('paper must not reserve funds') },
+    }, payload({ goal: TRADING_GOAL }));
+    const paperBody = await paperOnly.json();
+    assert.equal(paperBody.done, true);
+    assert.equal(paperBody.run.checkpoints.execute.mode, 'paper');
+    assert.equal(paperBody.run.checkpoints.execute.signature, undefined);
+  }
 
   const downMachine = new BotStateMachine();
   const downModels = scriptedOpenRouter();
@@ -960,8 +976,8 @@ test('an owner ask runs one fully-automatic SOL to USDC trade through memo and n
   assert.equal(swaps, 1);
   const execute = body.run.checkpoints.execute;
   assert.equal(execute.cluster, 'mainnet-beta');
-  assert.equal(execute.signature, 'sig_mainnet-beta_1');
-  assert.equal(execute.reserved, true);
+  assert.equal(execute.signature, undefined);
+  assert.equal(execute.reserved, false);
   assert.equal(execute.paper.broadcast, false);
   assert.equal(execute.paper.mode, 'paper');
   assert.equal(execute.paper.quantity, '1000000');
@@ -977,8 +993,8 @@ test('an owner ask runs one fully-automatic SOL to USDC trade through memo and n
   assert.match(timeline[0].summary, /Trust 800/);
   assert.match(timeline[0].summary, /mainnet-beta execution, mainnet pricing/);
   const snap = await ledgerApi.snapshot();
-  assert.equal(snap.ledgers[0].reserved, '1000000');
-  assert.equal(snap.reservations.length, 1);
+  assert.equal(snap.ledgers[0].reserved, '0');
+  assert.equal(snap.reservations.length, 0);
   const again = await postLoop(machine, {
     openRouter: models.openRouter,
     transferClient: transfer.client,
@@ -987,8 +1003,8 @@ test('an owner ask runs one fully-automatic SOL to USDC trade through memo and n
     ledgerApi,
   }, payload({ goal: TRADING_GOAL, bot: wide }));
   assert.equal(again.status, 200);
-  assert.equal(transfer.calls.length, 1);
-  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+  assert.equal(transfer.calls.length, 0);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '0');
 
   const lowMachine = new BotStateMachine();
   const lowModels = scriptedOpenRouter();
@@ -1179,16 +1195,15 @@ test('a within-cap USDC buy of wrapped SOL clears the gates and an over-cap buy 
   assert.equal(body.run.checkpoints.approval.automatic, true);
   const execute = body.run.checkpoints.execute;
   assert.equal(execute.cluster, 'mainnet-beta');
-  assert.equal(execute.signature, 'sig_mainnet-beta_1');
-  assert.equal(execute.reserved, true);
+  assert.equal(execute.signature, undefined);
+  assert.equal(execute.reserved, false);
   assert.equal(execute.paper.mint, SOL_MINT);
   assert.equal(execute.paper.broadcast, false);
   assert.equal(execute.paper.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(execute.swapQuote.inputMint, USDC_MINT);
   assert.equal(execute.swapQuote.broadcast, false);
-  assert.equal(transfer.calls.length, 1);
-  assert.equal(transfer.calls[0].wallet.address, wallet.address);
-  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
+  assert.equal(transfer.calls.length, 0);
+  assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '0');
 
   const overMachine = new BotStateMachine();
   const overModels = scriptedOpenRouter();

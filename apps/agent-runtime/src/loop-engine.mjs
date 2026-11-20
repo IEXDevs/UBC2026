@@ -727,13 +727,20 @@ async function performExecute(run, ctx) {
   const proposal = run.checkpoints.decide?.proposal;
   if (typeof memo !== 'string' || !memo || !proposal) return waitStep(run, 'execute', 'memo-missing', {}, ctx.now);
   const idempotencyKey = run.runId;
-  let swapQuote = null;
-  let paper = null;
-  if (ctx.bot?.type === 'trading' && proposal.swap) {
+  if (proposal.swap) {
     const traded = await tradeQuoteAndPaper(proposal.swap, ctx, idempotencyKey);
     if (traded.error) return waitStep(run, 'execute', traded.error, { idempotencyKey }, ctx.now);
-    swapQuote = traded.swapQuote;
-    paper = traded.paper;
+    return finishStep(run, 'execute', {
+      mode: 'paper',
+      memo,
+      idempotencyKey,
+      cluster: SOLANA_CLUSTER,
+      executed: false,
+      broadcast: false,
+      reserved: false,
+      swapQuote: traded.swapQuote,
+      paper: traded.paper,
+    }, ctx.now);
   }
   if (!ctx.deps.transferClient && typeof ctx.deps.execute !== 'function') {
     return waitStep(run, 'execute', 'signer-not-configured', { idempotencyKey }, ctx.now);
@@ -805,8 +812,6 @@ async function performExecute(run, ctx) {
     cluster,
     executed: true,
     reserved: reservation?.state === 'reserved' || reservation?.ok === true,
-    ...(swapQuote ? { swapQuote } : {}),
-    ...(paper ? { paper } : {}),
   }, ctx.now);
 }
 
