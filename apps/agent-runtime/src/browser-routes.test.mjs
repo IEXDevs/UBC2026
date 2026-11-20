@@ -61,6 +61,22 @@ function machineWithBrowsers() {
   return { machine: new BotStateMachine(), closed, tabs, env: { browsers: provider } };
 }
 
+test('owner browser failures include safe provider diagnostics and no-store', async () => {
+  const { machine, env } = machineWithBrowsers();
+  env.browsers.createSession = async () => {
+    const error = new ProviderError('browser_not_configured', 503);
+    error.providerStatus = 403;
+    error.providerReason = 'https://live.browser.run/ui/view?token=private';
+    throw error;
+  };
+  const response = await machine.handle(new Request('https://bot/id/bot_1/browser/sessions', {
+    method: 'POST', headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' }, body: '{}',
+  }), env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await response.json(), { error: 'browser_not_configured', providerStatus: 403 });
+});
+
 /**
  * Achieves: browser create/list are owner-scoped and omit provider session ids from responses.
  * Fails when: other owners see sessions, or provider id leaks in JSON.
