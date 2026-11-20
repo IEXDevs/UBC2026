@@ -3,8 +3,6 @@
 import { createContext, useContext, useEffect } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
-import { createSolanaRpc, createSolanaRpcSubscriptions } from '@solana/kit';
-import { SOLANA_PRIVY_CHAIN, SOLANA_RPC_URL } from '@ubc2026/contracts/solana';
 import { privyProviderProps } from '../lib/privy-config.mjs';
 import { installSiwsLoginDiagnostic } from '../lib/siws-login-diagnostic.mjs';
 import { ToastProvider } from './bits/SwipeToast';
@@ -48,14 +46,6 @@ export default function PrivyRoot({ appId = '', clientId = '', signerId = '', ch
     appId: props.appId,
     config: {
       ...props.config,
-      solana: {
-        rpcs: {
-          [SOLANA_PRIVY_CHAIN]: {
-            rpc: createSolanaRpc(SOLANA_RPC_URL),
-            rpcSubscriptions: createSolanaRpcSubscriptions(SOLANA_RPC_URL.replace('https:', 'wss:')),
-          },
-        },
-      },
       externalWallets: {
         solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) },
       },
