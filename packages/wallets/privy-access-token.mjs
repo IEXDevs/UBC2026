@@ -2,7 +2,7 @@
  * Verify a Privy access token against the app JWKS.
  * The owner id is the verified `sub`. A header is not an owner.
  */
-import { createPublicKey, createVerify } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 
 const ISSUER = 'privy.io';
 const APP_ID = /^[a-z0-9]{8,64}$/;
@@ -26,12 +26,10 @@ function audienceMatches(aud, appId) {
   return Array.isArray(aud) && aud.some(value => value === appId);
 }
 
-function verifyEs256(signingInput, signature, jwk) {
-  const key = createPublicKey({ key: jwk, format: 'jwk' });
-  const verifier = createVerify('SHA256');
-  verifier.update(signingInput);
-  verifier.end();
-  return verifier.verify({ key, dsaEncoding: 'ieee-p1363' }, signature);
+async function verifyEs256(signingInput, signature, jwk) {
+  if (signature.length !== 64) return false;
+  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+  return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, signature, new TextEncoder().encode(signingInput));
 }
 
 async function loadJwks(appId, fetcher) {
@@ -91,7 +89,7 @@ export async function verifyPrivyAccessToken(accessToken, { appId, fetcher = fet
   }
   let signatureOk = false;
   try {
-    signatureOk = verifyEs256(
+    signatureOk = await verifyEs256(
       `${parts[0]}.${parts[1]}`,
       Buffer.from(parts[2], 'base64url'),
       jwk,
