@@ -1,19 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { executeClientSignedSwap } from './swap-client-sign.mjs';
+import { withLinkedSolanaWallets } from './wallet-signing.mjs';
 
 const transaction = new Uint8Array(100).fill(1);
 const challenge = () => ({ transaction: Buffer.from(transaction).toString('base64'), walletAddress: 'selected',
   expiresAt: Date.now() + 30_000, blockhash: 'blockhash', proof: 'proof' });
 
-function setup({ signerError, wallets = [{ address: 'selected' }], prepare, broadcast, signal } = {}) {
+function setup({ signerError, wallets = [{ address: 'selected' }], prepare, broadcast, signal, readSigner } = {}) {
   const calls = [];
   const signCalls = [];
   const connectCalls = [];
   const run = () => executeClientSignedSwap({
     spend: { botId: 'bot_1', action: 'swap', amount: '100', permission: 'ask', confirmed: false },
     swapTicket: 'ticket', ownerId: 'owner', accessToken: 'test-token', deskGrant: 'test-grant', signal,
-    signer: { wallets, connectWallet: options => connectCalls.push(options), signTransaction: async args => {
+    readSigner,
+    signer: { ready: true, wallets, connectWallet: options => connectCalls.push(options), signTransaction: async args => {
       signCalls.push(args);
       if (signerError) throw signerError;
       return { signedTransaction: new Uint8Array(120).fill(2) };
@@ -90,4 +93,67 @@ test('cancellation before signing never sends a broadcast', async () => {
   assert.equal((await run()).failure.code, 'aborted');
   assert.equal(calls.length, 1);
   assert.equal(signCalls.length, 0);
+});
+
+test('manual Jupiter merges the same linked Solana accounts used by sends', () => {
+  const source = readFileSync(new URL('../components/JupiterSwap.js', import.meta.url), 'utf8');
+  assert.match(source, /useStandardWallets\(\)/);
+  assert.match(source, /usePrivy\(\)/);
+  assert.match(source, /withLinkedSolanaWallets\(wallets, standardWallets, user\)/);
+  assert.match(source, /linkedWallets\.find\(wallet => wallet\?\.address === address\)/);
+});
+
+test('a reader waits for the exact swap wallet and signs its linked-account adapter, not the snapshot Main wallet', async () => {
+  let reads = 0;
+  const adapterCalls = [];
+  const standard = { features: { 'privy:': { privy: { signTransaction: async args => {
+    adapterCalls.push(args);
+    return { signedTransaction: new Uint8Array(120).fill(2) };
+  } } } } };
+  const linked = withLinkedSolanaWallets([{ address: 'main' }], [standard], {
+    linkedAccounts: [{ type: 'wallet', chainType: 'solana', walletClientType: 'privy', address: 'selected' }],
+  });
+  const readSigner = () => ({ ready: true, wallets: ++reads > 1 ? linked : [{ address: 'main' }],
+    signTransaction: () => assert.fail('the linked wallet must use its own adapter'),
+  });
+  const { run, calls, signCalls } = setup({ wallets: [{ address: 'main' }], readSigner });
+  assert.equal((await run()).ok, true);
+  assert.ok(reads > 1);
+  assert.equal(calls.length, 2);
+  assert.equal(signCalls.length, 0);
+  assert.equal(adapterCalls[0].address, 'selected');
+  assert.deepEqual(adapterCalls[0].transaction, transaction);
+});
+
+test('an empty reader falls back to the supplied signer snapshot', async () => {
+  const { run, signCalls } = setup({ readSigner: () => null });
+  assert.equal((await run()).ok, true);
+  assert.equal(signCalls[0].wallet.address, 'selected');
+});
+
+test('reader failures remain safe and never sign or broadcast', async () => {
+  const { run, calls, signCalls } = setup({ readSigner: () => { throw new Error('private provider details'); } });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(JSON.stringify(result).includes('private provider details'), false);
+  assert.equal(calls.length, 1);
+  assert.equal(signCalls.length, 0);
+});
+
+test('an expired quote or cancellation during wallet discovery never signs or broadcasts', async () => {
+  for (const cancelled of [false, true]) {
+    const controller = new AbortController();
+    let reads = 0;
+    const readSigner = () => {
+      if (++reads === 2 && cancelled) controller.abort();
+      return { ready: true, wallets: reads > 1 ? [{ address: 'selected' }] : [],
+        signTransaction: () => assert.fail('never sign after discovery expired or was cancelled'),
+      };
+    };
+    const { run, calls } = setup({ readSigner, signal: controller.signal,
+      prepare: { swapAuthorization: { ...challenge(), expiresAt: Date.now() + (cancelled ? 30_000 : 50) } },
+    });
+    assert.equal((await run()).failure.code, cancelled ? 'aborted' : 'spend_authorization_expired');
+    assert.equal(calls.length, 1);
+  }
 });

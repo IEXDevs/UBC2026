@@ -1,4 +1,4 @@
-import { signSelectedWalletTransaction } from './wallet-signing.mjs';
+import { signSelectedWalletTransaction, waitForBrowserSigner } from './wallet-signing.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
 import { swapFailure } from './swap-failure.mjs';
 
@@ -7,7 +7,7 @@ function failed(result) {
   return { ...result, ok: false, signed: false, failure, reply: failure.message };
 }
 
-export async function executeClientSignedSwap({ spend, swapTicket, signer, ownerId, accessToken, deskGrant, signal, fetchImpl = fetch } = {}) {
+export async function executeClientSignedSwap({ spend, swapTicket, signer, readSigner, ownerId, accessToken, deskGrant, signal, fetchImpl = fetch } = {}) {
   if (spend?.action !== 'swap' || !swapTicket) return failed({ error: 'invalid_spend' });
   const headers = {
     'content-type': 'application/json',
@@ -36,9 +36,13 @@ export async function executeClientSignedSwap({ spend, swapTicket, signer, owner
   let signed;
   try {
     if (signal?.aborted) return failed({ error: 'aborted' });
+    const from = { address: challenge.walletAddress };
+    const browserSigner = await waitForBrowserSigner(() => readSigner?.() ?? signer, [from]);
+    if (signal?.aborted) return failed({ error: 'aborted' });
+    if (challenge.expiresAt <= Date.now()) return failed({ error: 'spend_authorization_expired' });
     signed = await signSelectedWalletTransaction({
-      from: { address: challenge.walletAddress },
-      transaction: Uint8Array.from(atob(challenge.transaction), char => char.charCodeAt(0)), signer,
+      from,
+      transaction: Uint8Array.from(atob(challenge.transaction), char => char.charCodeAt(0)), signer: browserSigner,
     });
   } catch (error) {
     return failed({ error: error?.code === 'wallet_approval_cancelled' ? 'client_sign_rejected' : error?.code });
