@@ -4,7 +4,7 @@ import { createHash, createHmac } from 'node:crypto';
 import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
 import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
 import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
-import { SystemInstruction, Transaction } from '@solana/web3.js';
+import { Keypair, SystemInstruction, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { decodeTransferCheckedInstruction } from '@solana/spl-token';
 import { sha256Hex } from './desk-grant.mjs';
 import worker from './owner-auth.fixture.mjs';
@@ -96,6 +96,8 @@ test('USD valuation keeps precision and rounds the debit up', () => {
 });
 
 for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits only the approved quote and reserves USD once`, async () => {
+  const keypair = Keypair.generate();
+  const wallet = { id: 'w_main', ownerId: 'user_1', kind: 'main', label: 'Main', address: keypair.publicKey.toBase58(), frozen: false, provider: 'privy' };
   const sol = 'So11111111111111111111111111111111111111112';
   const grant = '12'.repeat(32);
   const grantHash = await sha256Hex(grant);
@@ -141,9 +143,10 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
         return { transaction: input.transaction, feeLamports: '5000', maxSolCost: '5000' };
       },
       formatPreparedSpendAuthorization: () => Buffer.from('swap-owner-authorization-payload'.repeat(2)).toString('base64'),
-      signPreparedSolanaTransfer: async ({ prepared: { transaction }, ownerAuthorization }) => {
-        assert.equal(transaction, simulation);
-        assert.ok(ownerAuthorization);
+      signPreparedSolanaTransfer: () => assert.fail('swaps must never server-sign'),
+      broadcastSignedSolana: async ({ signedTransaction }) => {
+        const transaction = VersionedTransaction.deserialize(Buffer.from(signedTransaction, 'base64'));
+        assert.deepEqual(transaction.message.serialize(), VersionedTransaction.deserialize(Buffer.from(simulation, 'base64')).message.serialize());
         signed += 1;
         return { cluster: 'mainnet-beta', signature: '5'.repeat(64) };
       },
@@ -198,30 +201,36 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
   assert.equal(signed, 0);
   assert.equal(reserved, 0);
   const ticket = preview.swapPreview.ticket;
-  const changed = await (await request({ confirmed: true, amount: '2000000', swapTicket: ticket, spendAuthorization: 'prepare' })).json();
+  const changed = await (await request({ confirmed: true, amount: '2000000', swapTicket: ticket, swapAuthorization: 'prepare' })).json();
   assert.equal(changed.error, intent ? 'swap_intent_unavailable' : 'swap_quote_expired');
   const unbound = await (await request({ confirmed: true, swapTicket: ticket })).json();
   assert.equal(unbound.error, 'swap_owner_authorization_required');
   usdBot.cap.maxPerTransaction = '1000000';
-  const capped = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization: 'prepare' })).json();
+  const capped = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization: 'prepare' })).json();
   assert.equal(capped.reason, 'per-transaction');
   assert.equal(capped.spendAuthorization, undefined);
   assert.equal(reserved, 0);
   usdBot.cap.maxPerTransaction = '1200000';
-  const challenge = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization: 'prepare' })).json();
+  const challenge = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization: 'prepare' })).json();
   assert.equal(reserved, 0);
-  const { payload, ...binding } = challenge.spendAuthorization;
-  const spendAuthorization = { ...binding, signature: 'A'.repeat(88) };
+  const { transaction, walletAddress, ...binding } = challenge.swapAuthorization;
+  assert.equal(walletAddress, wallet.address);
+  const signedTransaction = VersionedTransaction.deserialize(Buffer.from(transaction, 'base64'));
+  signedTransaction.sign([keypair]);
+  const swapAuthorization = { ...binding, signedTransaction: Buffer.from(signedTransaction.serialize()).toString('base64') };
+  const tampered = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization: { ...swapAuthorization, proof: '0'.repeat(64) } })).json();
+  assert.equal(tampered.reason, 'spend_authorization_changed');
+  assert.equal(reserved, 0);
   if (intent) {
     await machine.put('ownerPaused', true);
-    const paused = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization })).json();
+    const paused = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization })).json();
     assert.equal(paused.error, 'swap_intent_unavailable');
     assert.equal(reserved, 0);
     await machine.delete('ownerPaused');
   }
-  const approved = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization })).json();
+  const approved = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization })).json();
   assert.equal(approved.signed, true);
-  const replay = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization })).json();
+  const replay = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization })).json();
   if (intent) {
     assert.equal((await machine.get('run')).checkpoints.execute.signature, approved.signature);
     assert.equal((await machine.get('run')).checkpoints.execute.state, 'submitted');
@@ -1229,6 +1238,8 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
 });
 
 async function autoSwapSetup({ trust = '800' } = {}) {
+  const keypair = Keypair.generate();
+  const wallet = { id: 'w_main', ownerId: 'user_1', kind: 'main', label: 'Main', address: keypair.publicKey.toBase58(), frozen: false, provider: 'privy' };
   const sol = 'So11111111111111111111111111111111111111112';
   const grant = '34'.repeat(32);
   const grantHash = await sha256Hex(grant);
@@ -1261,6 +1272,7 @@ async function autoSwapSetup({ trust = '800' } = {}) {
         calls.signed.push(request);
         return { cluster: 'mainnet-beta', signature: '6'.repeat(64) };
       },
+      broadcastSignedSolana: () => assert.fail('no browser signature provided'),
     },
     ledgerApi: { reserveBudget: async () => ({ state: 'reserved', replay: calls.reserved++ > 0 }) },
     fetch: async url => {
@@ -1291,17 +1303,17 @@ async function autoSwapSetup({ trust = '800' } = {}) {
   const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey: intent.idempotencyKey };
   const request = (body, headers = { 'x-desk-grant': grant }) => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
   const ticket = (await (await request()).json()).swapPreview.ticket;
-  return { calls, request, ticket, machine };
+  return { calls, request, ticket, machine, env, keypair };
 }
 
 /**
  * Achieves: a queued agent swap runs without the slide only on an agent send's terms.
- * Fails when: an auto swap signs over the review cap, without the desk, or as a non-loop spend; or a trusted one under the cap does not sign.
- * Oracle: signed result once, with no owner wallet authorization; every other case unsigned.
+ * Fails when: an auto swap skips review, desk or browser-signing requirements.
+ * Oracle: unsigned results, no reservation, and a specific client-signing requirement under the cap.
  * Side effects: in-memory bot DO; Jupiter, prices, Privy and the ledger are doubles.
  * Gaps: live Jupiter and Privy are not called.
  */
-test('an auto agent swap signs only within the review cap and with the desk unlocked', async () => {
+test('an auto agent swap retains review and desk gates and requires browser signing', async () => {
   const { calls, request, ticket } = await autoSwapSetup();
   const over = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '1000000' })).json();
   assert.equal(over.signed, false);
@@ -1314,9 +1326,10 @@ test('an auto agent swap signs only within the review cap and with the desk unlo
   assert.equal(ask.error, 'invalid_auto_swap');
   assert.equal(calls.signed.length, 0);
   const auto = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
-  assert.equal(auto.signed, true);
-  assert.equal(calls.signed.length, 1);
-  assert.equal(calls.signed[0].ownerAuthorization, undefined);
+  assert.equal(auto.signed, false);
+  assert.equal(auto.reason, 'client_sign_required');
+  assert.equal(calls.signed.length, 0);
+  assert.equal(calls.reserved, 0);
 });
 
 /**
@@ -1338,8 +1351,41 @@ test('an owner-reviewed low-trust swap can prepare wallet authorization without 
   const held = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
   assert.equal(held.failure.step, 'trust');
   assert.equal(held.failure.code, 'trust-confirmation-required');
-  const reviewed = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization: 'prepare' })).json();
-  assert.ok(reviewed.spendAuthorization);
+  const reviewed = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization: 'prepare' })).json();
+  assert.ok(reviewed.swapAuthorization);
   assert.equal(reviewed.failure, undefined);
   assert.equal(calls.signed.length, 0);
+});
+
+test('client-signed swaps reject unsigned or expired messages before reserving and safely report broadcast failures', async () => {
+  const { calls, request, ticket, env, keypair } = await autoSwapSetup();
+  const prepared = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization: 'prepare' })).json();
+  const { transaction, walletAddress, ...binding } = prepared.swapAuthorization;
+  const unsigned = { ...binding, signedTransaction: transaction };
+  const rejected = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization: unsigned })).json();
+  assert.equal(rejected.reason, 'spend_authorization_changed');
+  const expired = await (await request({ confirmed: true, swapTicket: ticket, swapAuthorization: { ...unsigned, expiresAt: 1 } })).json();
+  assert.equal(expired.error, 'spend_authorization_expired');
+  assert.equal(calls.reserved, 0);
+  assert.equal(walletAddress, keypair.publicKey.toBase58());
+  const signed = VersionedTransaction.deserialize(Buffer.from(transaction, 'base64'));
+  signed.message.recentBlockhash = keypair.publicKey.toBase58();
+  signed.sign([keypair]);
+  const altered = await (await request({ confirmed: true, swapTicket: ticket,
+    swapAuthorization: { ...binding, signedTransaction: Buffer.from(signed.serialize()).toString('base64') },
+  })).json();
+  assert.equal(altered.reason, 'spend_authorization_changed');
+  assert.equal(calls.reserved, 0);
+  signed.message.recentBlockhash = binding.blockhash;
+  signed.sign([keypair]);
+  env.transferClient.broadcastSignedSolana = async () => { throw new Error('secret provider credentials'); };
+  const failed = await (await request({ confirmed: true, swapTicket: ticket,
+    swapAuthorization: { ...binding, signedTransaction: Buffer.from(signed.serialize()).toString('base64') },
+  })).json();
+  assert.equal(failed.signed, false);
+  assert.equal(failed.failure.code, 'broadcast_failed');
+  assert.equal(failed.failure.step, 'broadcast');
+  assert.equal(JSON.stringify(failed).includes('secret provider'), false);
+  assert.equal(calls.signed.length, 0);
+  assert.equal(calls.reserved, 1);
 });
