@@ -55,7 +55,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
   const [maxPerTransaction, setMaxPerTransaction] = useState('');
   const [celebrate, setCelebrate] = useState(false);
   const [step, setStep] = useState('name');
-  const [moreColors, setMoreColors] = useState(false);
   const [seenOpen, setSeenOpen] = useState(open);
   if (open !== seenOpen) {
     setSeenOpen(open);
@@ -72,7 +71,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     setMaxOutflow('');
     setMaxPerTransaction('');
     setStep('name');
-    setMoreColors(false);
     function onKey(event) {
       if (event.key === 'Escape') onClose();
     }
@@ -116,7 +114,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
         </div>
       ) : null}
       <form
-        className={`sheet${celebrate ? ' is-create' : ''}`}
+        className={`sheet create-agent${celebrate ? ' is-create' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-agent-title"
@@ -153,15 +151,17 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
         </div>
         {step === 'name' ? (
           <>
-            <label className="bot-name-label" htmlFor="agent-name">Name</label>
-            <input
-              id="agent-name"
-              className="bot-name"
-              value={name}
-              maxLength={64}
-              autoFocus
-              onChange={event => setName(event.target.value)}
-            />
+            <div className="create-name">
+              <label className="bot-name-label" htmlFor="agent-name">Name</label>
+              <input
+                id="agent-name"
+                className="bot-name"
+                value={name}
+                maxLength={64}
+                autoFocus
+                onChange={event => setName(event.target.value)}
+              />
+            </div>
             <div className="sheet-actions">
               <button type="button" className="ghost" onClick={onClose}>Cancel</button>
               <button type="submit" className="solid" disabled={!name.trim()}>Continue</button>
@@ -169,28 +169,29 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
           </>
         ) : (
           <>
-            <div className="bot-preview">
-              <AgentPhoto shape={shape} color={color} image={image} name={name} size={112} onImage={setImage} />
+            <div className="create-look">
+              <div className="bot-preview">
+                <AgentPhoto shape={shape} color={color} image={image} name={name} size={112} onImage={setImage} />
+              </div>
+              <div className="create-look-copy">
+                <p className="bot-look-name">{name.trim()}</p>
+                <p className="swatch-name">{colorLabel(color)}</p>
+              </div>
+              <div className="swatches" role="listbox" aria-label="Agent color">
+                {colorsForPicker(color, true).map(swatch => (
+                  <button
+                    key={swatch.id}
+                    type="button"
+                    className={swatch.value === color ? 'is-on' : ''}
+                    style={{ background: swatch.value }}
+                    aria-label={colorLabel(swatch.value)}
+                    aria-pressed={swatch.value === color}
+                    onClick={() => setColor(swatch.value)}
+                  />
+                ))}
+              </div>
             </div>
-            <p className="bot-look-name">{name.trim()}</p>
-            <p className="swatch-name">{colorLabel(color)}</p>
-            <div className="swatches" role="listbox" aria-label="Agent color">
-              {colorsForPicker(color, moreColors).map(swatch => (
-                <button
-                  key={swatch.id}
-                  type="button"
-                  className={swatch.value === color ? 'is-on' : ''}
-                  style={{ background: swatch.value }}
-                  aria-label={colorLabel(swatch.value)}
-                  aria-pressed={swatch.value === color}
-                  onClick={() => setColor(swatch.value)}
-                />
-              ))}
-            </div>
-            {moreColors ? null : (
-              <button type="button" className="ghost" onClick={() => setMoreColors(true)}>More colors</button>
-            )}
-            <details>
+            <details className="create-limits">
               <summary>Spending asset and limits</summary>
               <label className="field">
                 Asset
@@ -200,7 +201,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
                   value={asset}
                   options={SPEND_ASSETS}
                   onChange={setAsset}
-                  menuWidth={280}
+                  menuWidth={360}
                 />
               </label>
               <label className="field">
