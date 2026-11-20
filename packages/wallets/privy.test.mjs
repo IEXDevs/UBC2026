@@ -5,6 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, verify } from 'node:crypto';
+import { Keypair, VersionedTransaction } from '@solana/web3.js';
+import { buildSolanaX402Transaction } from '../transfers/transfers.mjs';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
 import { CipherSuite, DhkemP256HkdfSha256, HkdfSha256 } from '@hpke/core';
 import { ConfigError } from '@ubc2026/contracts';
@@ -108,6 +110,64 @@ function client(extra = {}) {
     ...extra,
   });
 }
+
+test('x402 partial signing binds the simulated message and leaves the facilitator signature empty without broadcasting', async () => {
+  const signer = Keypair.generate();
+  const payer = Keypair.generate();
+  const payTo = Keypair.generate().publicKey.toBase58();
+  const accepted = { scheme: 'exact', network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+    asset: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', amount: '10000000', payTo, extra: { feePayer: payer.publicKey.toBase58() } };
+  const wallet = { id: walletId, privyWalletId: walletId, ownerId: 'user_1', kind: 'main', label: 'Main', address: signer.publicKey.toBase58(), provider: 'privy', frozen: false };
+  const bot = { ...baseBot, walletId };
+  const built = buildSolanaX402Transaction({ sourceOwner: wallet.address, accepted, recentBlockhash: Keypair.generate().publicKey.toBase58() });
+  let mode = 'ok';
+  let signing = 0;
+  const privy = client({ fetcher: async (url, init) => {
+    const req = JSON.parse(init.body);
+    if (String(url).startsWith('https://api.privy.io/')) {
+      signing++;
+      assert.equal(req.method, 'signTransaction');
+      const tx = VersionedTransaction.deserialize(Buffer.from(req.params.transaction, 'base64'));
+      if (mode === 'changed') tx.message.recentBlockhash = Keypair.generate().publicKey.toBase58();
+      tx.sign(mode === 'sponsor-signed' ? [signer, payer] : [signer]);
+      if (mode === 'invalid-signature') tx.signatures[1].fill(1);
+      return Response.json({ data: { signed_transaction: Buffer.from(tx.serialize()).toString('base64'), encoding: 'base64' } });
+    }
+    if (req.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+    if (req.method === 'getAccountInfo') {
+      const source = req.params[0] === built.sourceTokenAccount;
+      return Response.json({ result: { value: mode === (source ? 'source-missing' : 'recipient-missing') ? null : {
+        owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+        data: { parsed: { type: 'account', info: { owner: source ? wallet.address : mode === 'wrong-recipient' ? wallet.address : payTo, mint: accepted.asset, state: 'initialized' } } },
+      } } });
+    }
+    assert.equal(req.method, 'simulateTransaction', 'must never broadcast');
+    assert.equal(req.params[1].sigVerify, false);
+    assert.equal(req.params[1].replaceRecentBlockhash, false);
+    return Response.json({ result: { value: { err: mode === 'simulation-error' ? { InstructionError: [2, { Custom: 1 }] } : null } } });
+  } });
+  const prepare = () => privy.prepareSolanaX402Payment({ ...built, walletAddress: wallet.address, accepted });
+  const prepared = await prepare();
+  const signed = await privy.signPreparedSolanaX402Payment({ bot, wallet, prepared });
+  const parsed = VersionedTransaction.deserialize(Buffer.from(signed.transaction, 'base64'));
+  assert.equal(parsed.signatures[0].some(byte => byte !== 0), false);
+  assert.equal(parsed.signatures[1].some(byte => byte !== 0), true);
+  await assert.rejects(privy.signPreparedSolanaX402Payment({ bot, wallet, prepared }), { code: 'simulation_required' });
+  for (mode of ['changed', 'sponsor-signed', 'invalid-signature']) {
+    await assert.rejects(privy.signPreparedSolanaX402Payment({ bot, wallet, prepared: await prepare() }), { code: 'transaction_mismatch' });
+  }
+  const before = signing;
+  for (const [bad, reason] of [['recipient-missing', 'recipient_account_not_found'], ['source-missing', 'source_account_not_found'],
+    ['wrong-recipient', 'recipient_account_not_found'], ['simulation-error', 'instruction_2_custom_1']]) {
+    mode = bad;
+    await assert.rejects(prepare(), error => error.code === 'simulation_failed' && error.simulationReason === reason);
+  }
+  mode = 'ok';
+  await assert.rejects(privy.signPreparedSolanaX402Payment({ bot, wallet: { ...wallet, frozen: true }, prepared: await prepare() }), /frozen/);
+  await assert.rejects(privy.prepareSolanaX402Payment({ ...built, walletAddress: payer.publicKey.toBase58(), accepted }), { code: 'invalid_transaction' });
+  await assert.rejects(privy.prepareSolanaX402Payment(), { code: 'invalid_transaction' });
+  assert.equal(signing, before);
+});
 
 function assertNoSecrets(value) {
   const text = typeof value === 'string' ? value : JSON.stringify(value);

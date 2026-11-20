@@ -439,7 +439,7 @@ export function profileInitials(label) {
 }
 
 export const OWNER_SPEND_PERMISSIONS = Object.freeze(['ask', 'review', 'full']);
-export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay', 'swap']);
+export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay', 'swap', 'x402']);
 export const PERMISSIONED_SPEND_PATH = '/api/spend';
 
 export function parseSpendAuthorization(value) {
@@ -600,13 +600,18 @@ export function parsePermissionedSpendBody(body) {
   const asset = solanaSpendAsset(body.asset ?? 'USDC');
   if (!asset) return null;
   const swap = action === 'swap';
+  const x402 = action === 'x402';
+  if (x402 && (asset !== 'USDC' || typeof body.lasoTicket !== 'string' || body.lasoTicket.length > 5000
+      || !/^[A-Za-z0-9_-]+\.[0-9a-f]{64}$/.test(body.lasoTicket) || body.destination != null || body.handle != null
+      || body.quote != null || body.quoteCluster != null || body.outputAsset != null)) return null;
+  if (!x402 && body.lasoTicket != null) return null;
   const outputAsset = swap ? solanaSpendAsset(body.outputAsset) : null;
   if (swap && (!outputAsset || asset === outputAsset || body.destination != null || body.handle != null
       || body.quote != null || body.quoteCluster != null || BigInt(units) > 18446744073709551615n)) return null;
   if (asset !== 'USDC' && (action === 'buy' || action === 'sell' || BigInt(units) > 18446744073709551615n)) return null;
   // A USDC buy of wrapped SOL stays in the assigned wallet. The spend is the cap asset.
   const selfCustody = action === 'buy' && !destination && !handle;
-  if (!destination && !handle && !selfCustody && !swap) return null;
+  if (!destination && !handle && !selfCustody && !swap && !x402) return null;
   if (body.quoteCluster != null && body.quoteCluster !== SOLANA_CLUSTER && body.quoteCluster !== 'mainnet') return null;
   let quote = sanitizeSpendQuote(body.quote);
   if (body.quote != null && quote == null && body.quote !== null) return null;
@@ -623,6 +628,7 @@ export function parsePermissionedSpendBody(body) {
     amount: units,
     asset,
     ...(swap ? { outputAsset } : {}),
+    ...(x402 ? { lasoTicket: body.lasoTicket } : {}),
     destination,
     handle,
     selfCustody,

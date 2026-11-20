@@ -160,15 +160,16 @@ export function isFundTool(name) {
   return FUND_TOOLS.has(name);
 }
 
-const FUND_ARGUMENTS = ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'outputAsset', 'quoteCluster', 'provider', 'domain', 'from'];
+const FUND_ARGUMENTS = ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'outputAsset', 'quoteCluster', 'provider', 'domain', 'from', 'amountUsd', 'lasoTicket'];
 
 function plainArgs(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return {};
   const next = {};
   for (const key of FUND_ARGUMENTS) {
     const value = args[key];
-    if (typeof value === 'string') next[key] = value.slice(0, 200);
+    if (typeof value === 'string') next[key] = value.slice(0, key === 'lasoTicket' ? 5000 : 200);
     else if (key === 'amount' && Number.isSafeInteger(value) && value >= 0) next[key] = String(value);
+    else if (key === 'amountUsd' && typeof value === 'number' && Number.isFinite(value)) next[key] = String(value);
   }
   return next;
 }
@@ -182,6 +183,9 @@ function stable(value) {
 
 function accessDetail(name, args) {
   if (name === 'prepare_shopping') return 'Prepare a purchase';
+  if (name === 'request_spend' && args?.action === 'x402' && AMOUNT.test(args?.amount ?? '')) {
+    return `Buy a Laso USA prepaid card for $${formatBaseUnits(args.amount)} USDC`;
+  }
   const amount = typeof args?.amount === 'string' ? args.amount.trim() : '';
   const handle = typeof args?.handle === 'string' ? args.handle.replace(/^@/, '').trim() : '';
   const address = typeof args?.destination === 'string' ? args.destination.trim() : '';
@@ -195,7 +199,7 @@ function accessDetail(name, args) {
 }
 
 export function needsBoundSpend(name, args) {
-  return name === 'request_spend' && (args?.action === 'swap' || solanaSpendAsset(args?.asset ?? 'USDC') !== 'USDC');
+  return name === 'request_spend' && (args?.action === 'x402' || args?.action === 'swap' || solanaSpendAsset(args?.asset ?? 'USDC') !== 'USDC');
 }
 
 /**
@@ -204,6 +208,7 @@ export function needsBoundSpend(name, args) {
  */
 export function toolAccessKind(mode, name, args = {}, reviewCap = null) {
   if (!isFundTool(name)) return null;
+  if (name === 'prepare_shopping' && args.provider === 'laso') return null;
   if (mode === 'ask' || needsBoundSpend(name, args)) return 'modal';
   if (SEND_TOOLS.has(name) && amountOverReviewCap(plainArgs(args).amount, reviewCap)) return 'modal';
   return null;

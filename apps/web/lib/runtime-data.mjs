@@ -300,6 +300,8 @@ function chatResult(body) {
     tokens,
     activity,
     hold,
+    ...(typeof body.claimUrl === 'string' && /^https:\/\/laso\.finance\/agent\/dashboard\/auth\?/.test(body.claimUrl)
+      ? { claimUrl: body.claimUrl } : {}),
   };
 }
 

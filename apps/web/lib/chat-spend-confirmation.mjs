@@ -79,6 +79,7 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
     provider: 'desk',
     toolRounds: 1,
     text,
+    ...(receipt && typeof result?.claimUrl === 'string' ? { claimUrl: result.claimUrl } : {}),
     ...(step ? { activity: [step] } : {}),
   };
 }

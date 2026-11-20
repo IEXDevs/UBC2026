@@ -60,6 +60,34 @@ function spendRequest(body, headers = {}) {
   });
 }
 
+test('ordinary USDC simulation errors retain the SOL hint alongside sanitized diagnostics', async () => {
+  const grant = 'ab'.repeat(32);
+  const grantHash = await sha256Hex(grant);
+  const env = spendEnv({
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-role',
+    loadSpendContext: async () => ({ bot: { ...bot, cap: { ...bot.cap, asset: 'USD' } }, wallet, ledger: { ...ledger, asset: 'USD' } }),
+    fetch: async url => {
+      assert.ok(new URL(url).pathname.endsWith('/desk_locks'));
+      return Response.json([{ grant_hash: grantHash, grant_until: new Date(NOW + 60_000).toISOString() }]);
+    },
+    ledgerApi: { reserveBudget: () => assert.fail('failed simulation must not reserve') },
+    transferClient: {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      prepareSolanaTransfer: async () => {
+        throw Object.assign(new Error('private RPC details'), { code: 'simulation_failed', simulationReason: 'insufficient_funds' });
+      },
+      signPreparedSolanaTransfer: () => assert.fail('failed simulation must not sign'),
+    },
+  });
+  const response = await worker.fetch(spendRequest({ botId: bot.id, permission: 'ask', action: 'spend', asset: 'USDC', amount: '1000', destination: DESTINATION }, { 'x-desk-grant': grant }), env);
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds',
+    hint: 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.',
+  });
+});
+
 test('USD valuation keeps precision and rounds the debit up', () => {
   assert.equal(usdMicros('1000000000', 9, '142.125'), '142125000');
   assert.equal(usdMicros('5000', 9, '142.125'), '711');

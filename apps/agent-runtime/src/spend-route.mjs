@@ -22,6 +22,7 @@ import { resolveTrustLookup } from './trust-lookup.mjs';
 import { mintForAsset, prepareApprovedSwap, previewLiveSwap, readSwapTicket } from './live-swap.mjs';
 import { isLoopSwapKey, matchesLoopSwap, useLoopSwap } from './loop-swap.mjs';
 import { valueUsdSpend } from './usd-budget.mjs';
+import { prepareLasoPayment, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
 const WALLET_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -144,7 +145,8 @@ export async function handleSpend(request, env = {}) {
   const parsed = parsePermissionedSpendBody(raw);
   if (!parsed) return json({ error: 'invalid_spend', signed: false }, 400);
   const swap = parsed.action === 'swap';
-  const assetTransfer = swap || parsed.asset !== 'USDC';
+  const laso = parsed.action === 'x402';
+  const assetTransfer = laso || swap || parsed.asset !== 'USDC';
   const overrideToken = request.headers.get('x-spend-approve-once');
   const approvalKey = supabaseConfig(env)?.key;
   const prepareAuthorization = raw.spendAuthorization === 'prepare';
@@ -181,6 +183,10 @@ export async function handleSpend(request, env = {}) {
   }
 
   const now = Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now();
+  const lasoOffer = laso ? readLasoTicket(parsed.lasoTicket, ownerId, parsed.botId, approvalKey, now) : null;
+  if (laso && (!lasoOffer || lasoOffer.amount !== parsed.amount)) return json({ error: 'laso_ticket_invalid', signed: false }, 409);
+  if (laso && (!env.transferClient?.prepareSolanaX402Payment || !env.transferClient?.signPreparedSolanaX402Payment
+      || !env.ledgerApi?.reserveBudget || !approvalKey)) return json({ error: 'laso_unavailable', signed: false }, 503);
   const usdBudget = context.bot.cap?.asset === 'USD';
   const loopSwap = isLoopSwapKey(parsed.idempotencyKey);
   const activeLoopSwap = async () => {
@@ -220,7 +226,7 @@ export async function handleSpend(request, env = {}) {
       return json({ error: 'swap_owner_authorization_required', signed: false }, 403);
     }
   }
-  if (usdBudget && !desk.ok) return json({ error: 'desk_locked', signed: false }, 403);
+  if ((usdBudget || laso) && !desk.ok) return json({ error: 'desk_locked', signed: false }, 403);
   if (usdBudget && !swap && (parsed.action === 'buy' || parsed.action === 'sell')) {
     return json({ error: 'swap_mints_required', signed: false }, 400);
   }
@@ -239,25 +245,28 @@ export async function handleSpend(request, env = {}) {
   }
   const trustUnavailable = lookedUp.unavailable === true;
   const trustScore = trustUnavailable ? undefined : lookedUp.score;
-  const recipient = swap ? context.wallet.address : (assetTransfer || usdBudget)
+  const recipient = laso ? lasoOffer.accepted.payTo : swap ? context.wallet.address : (assetTransfer || usdBudget)
     ? await transferDestination(env, parsed)
     : (parsed.destination || parsed.handle || (parsed.selfCustody ? context.wallet.address : ''));
   if (typeof recipient !== 'string' || recipient.length < 1) {
     return json({ error: assetTransfer ? 'recipient_address_missing' : 'invalid_spend', signed: false }, 400);
   }
-  const id = parsed.idempotencyKey || (assetTransfer || usdBudget ? `spend_${crypto.randomUUID()}` : `spend_${parsed.botId}`);
+  const id = lasoOffer?.purchaseId || parsed.idempotencyKey || (assetTransfer || usdBudget ? `spend_${crypto.randomUUID()}` : `spend_${parsed.botId}`);
   let prepared = null;
   let blockhash;
   let valuation = swapOffer;
   // A proposal may run the gates without an unlock or confirmation, but it cannot sign.
-  if ((usdBudget || (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset))
+  if ((laso || usdBudget || (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset))
       && !context.wallet.frozen && !context.bot.frozen) {
     if (!parsed.idempotencyKey && assetTransfer) return json({ error: 'idempotency_key_required', signed: false }, 400);
-    if (!env.ledgerApi?.reserveBudget || !env.transferClient?.signPreparedSolanaTransfer) {
+    if (!env.ledgerApi?.reserveBudget || !(laso ? env.transferClient?.signPreparedSolanaX402Payment : env.transferClient?.signPreparedSolanaTransfer)) {
       return json({ error: 'asset_transfer_unavailable', signed: false }, 503);
     }
     try {
-      if (swap) {
+      if (laso) {
+        ({ prepared, blockhash } = await prepareLasoPayment(env, context, lasoOffer, ownerAuthorization?.blockhash));
+        if (usdBudget) valuation = await valueUsdSpend(env, { mint, decimals: 6, amount: parsed.amount, feeLamports: '0', now });
+      } else if (swap) {
         blockhash = swapOffer.blockhash;
         if (ownerAuthorization && ownerAuthorization.blockhash !== blockhash) throw new Error('simulation_failed');
         prepared = await prepareApprovedSwap(env, context, parsed, swapOffer);
@@ -273,10 +282,12 @@ export async function handleSpend(request, env = {}) {
     } catch (error) {
       const known = ['unsupported_mint', 'simulation_failed', 'invalid_destination', 'usd_price_unavailable'];
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
-      const hint = code === 'simulation_failed'
+      const simulationReason = typeof error?.simulationReason === 'string'
+        && /^[a-zA-Z0-9_]{1,100}$/.test(error.simulationReason) ? error.simulationReason : null;
+      const hint = code === 'simulation_failed' && !laso
         ? 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.'
         : '';
-      return json({ error: code, ...(hint ? { hint } : {}), signed: false }, 409);
+      return json({ error: code, ...(hint ? { hint } : {}), signed: false, ...(simulationReason ? { simulationReason } : {}) }, 409);
     }
   }
   const facts = {
@@ -296,10 +307,10 @@ export async function handleSpend(request, env = {}) {
     recipient,
     quoteId: prepared ? await sha256Hex(prepared.transaction) : (parsed.quote?.pricingCluster === 'mainnet' ? 'mainnet-quote' : SOLANA_CLUSTER),
     outflow: valuation?.outflow ?? parsed.amount,
-    expectedReceive: swapOffer?.minOutput ?? parsed.amount,
-    expectedReceiveAsset: parsed.outputAsset ?? parsed.asset,
+    expectedReceive: laso ? '1' : swapOffer?.minOutput ?? parsed.amount,
+    expectedReceiveAsset: laso ? `laso:card:${parsed.amount}` : parsed.outputAsset ?? parsed.asset,
     maxFee: valuation?.maxFee ?? (parsed.asset === 'SOL' ? prepared?.feeLamports ?? '0' : '0'),
-    expiresAt: swapOffer?.expiresAt ?? now + 120_000,
+    expiresAt: lasoOffer?.expiresAt ?? swapOffer?.expiresAt ?? now + 120_000,
   };
   const grantOk = desk.ok === true;
   const approvalTerms = prepared && solHandleApproval && desk.via === 'grant'
@@ -315,15 +326,26 @@ export async function handleSpend(request, env = {}) {
   let beforeSign;
   let privyFailure;
   let authorizationChallenge;
+  let lasoReceipt;
+  let lasoFailure;
   if (prepared) {
     const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
     signSolana = async ({ bot, wallet }) => {
       try {
+        if (laso) {
+          if (lasoOffer.expiresAt <= Date.now() && !Number.isSafeInteger(env.spendNow)) throw new Error('laso_ticket_invalid');
+          const partial = await env.transferClient.signPreparedSolanaX402Payment({
+            bot, wallet, prepared, ...(ownerAuthorization ? { ownerAuthorization } : { accessToken }),
+          });
+          lasoReceipt = await settleLasoPayment(env, lasoOffer, partial.transaction);
+          return lasoReceipt;
+        }
         return await env.transferClient.signPreparedSolanaTransfer({
           bot, wallet, prepared, ...(ownerAuthorization ? { ownerAuthorization } : { accessToken }),
         });
       } catch (error) {
         privyFailure = parsePrivySigningFailure(error?.privyFailure);
+        if (laso && ['laso_settlement_unknown', 'laso_payment_rejected', 'laso_ticket_invalid'].includes(error?.message)) lasoFailure = error.message;
         throw error;
       }
     };
@@ -412,9 +434,11 @@ export async function handleSpend(request, env = {}) {
     state,
     steps: result.steps,
     signed: result.signed === true,
+    ...(laso ? { provider: 'laso' } : {}),
     cluster: SOLANA_CLUSTER,
     reason: result.reason || null,
     ...(privyFailure ? { privyFailure } : {}),
+    ...(lasoFailure ? { error: lasoFailure } : {}),
     ...(prepared ? { feeLamports: prepared.feeLamports } : {}),
     ...(overrideToken === null && approvalTerms && perTransferLimit ? { approvalTerms } : {}),
   };
@@ -423,6 +447,8 @@ export async function handleSpend(request, env = {}) {
   if (typeof result.trust?.prompt === 'string') body.prompt = result.trust.prompt;
   if (result.signed === true && grantOk) {
     body.signature = result.signature;
+    if (lasoReceipt?.card) body.card = lasoReceipt.card;
+    if (lasoReceipt?.claimUrl) body.claimUrl = lasoReceipt.claimUrl;
     if (loopSwap) await useLoopSwap(env, ownerId, parsed, result.signature);
   }
   const alert = alertFromSpend(result, parsed);

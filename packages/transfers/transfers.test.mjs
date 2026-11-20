@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Keypair, Transaction } from '@solana/web3.js';
+import { Keypair, Transaction, TransactionMessage, VersionedTransaction, ComputeBudgetInstruction } from '@solana/web3.js';
+import { decodeTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { assignBotWallet, createAdditionalWallet, createMainWallet } from '@ubc2026/wallets';
 import {
   SOLANA_GENESIS_HASH,
@@ -16,12 +17,42 @@ import {
   SPL_TOKEN_PROGRAM_ID,
   TransferError,
   buildSolanaUsdcTransaction,
+  buildSolanaX402Transaction,
   depositFromWalletAdapter,
   grabBackToMain,
   moveBetweenWallets,
   transferSolanaUsdc,
   withdrawToWalletAdapter,
 } from './transfers.mjs';
+
+test('x402 builds only bounded compute budget and exact USDC transfer with the sponsor fee payer', () => {
+  const owner = Keypair.generate().publicKey;
+  const payer = Keypair.generate().publicKey;
+  const payTo = Keypair.generate().publicKey;
+  const accepted = { scheme: 'exact', network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+    amount: '10000000', asset: SOLANA_USDC_MINT, payTo: payTo.toBase58(), extra: { feePayer: payer.toBase58() } };
+  const args = { sourceOwner: owner.toBase58(), accepted, recentBlockhash: Keypair.generate().publicKey.toBase58() };
+  const built = buildSolanaX402Transaction(args);
+  const tx = VersionedTransaction.deserialize(Buffer.from(built.transaction, 'base64'));
+  const message = TransactionMessage.decompile(tx.message);
+  assert.equal(tx.version, 0);
+  assert.equal(tx.message.header.numRequiredSignatures, 2);
+  assert.equal(message.payerKey.toBase58(), payer.toBase58());
+  assert.equal(message.instructions.length, 3);
+  assert.equal(ComputeBudgetInstruction.decodeSetComputeUnitLimit(message.instructions[0]).units, 40000);
+  assert.equal(ComputeBudgetInstruction.decodeSetComputeUnitPrice(message.instructions[1]).microLamports, 1n);
+  const transfer = decodeTransferCheckedInstruction(message.instructions[2]);
+  assert.equal(transfer.data.amount, 10000000n);
+  assert.equal(transfer.data.decimals, 6);
+  assert.equal(transfer.keys.owner.pubkey.toBase58(), owner.toBase58());
+  assert.equal(transfer.keys.source.pubkey.toBase58(), getAssociatedTokenAddressSync(transfer.keys.mint.pubkey, owner).toBase58());
+  assert.equal(transfer.keys.destination.pubkey.toBase58(), built.destinationTokenAccount);
+  assert.equal(built.destinationTokenAccount, getAssociatedTokenAddressSync(transfer.keys.mint.pubkey, payTo).toBase58());
+  for (const change of [{ asset: owner.toBase58() }, { network: 'solana:devnet' }, { scheme: 'other' }, { extra: { feePayer: owner.toBase58() } }]) {
+    assert.throws(() => buildSolanaX402Transaction({ ...args, accepted: { ...accepted, ...change } }));
+  }
+  assert.throws(() => buildSolanaX402Transaction());
+});
 
 const appId = 'app_test';
 const appSecret = 'app-secret-value';

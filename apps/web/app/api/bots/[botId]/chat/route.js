@@ -355,6 +355,7 @@ export async function POST(request, context) {
       ok: true,
       botId,
       reply: reply.text,
+      ...(assetConfirmation?.args?.action === 'x402' && reply.claimUrl ? { claimUrl: reply.claimUrl } : {}),
       ...(assetConfirmation && spendAuthorization === 'prepare' && reply.spendAuthorization
         ? { spendAuthorization: reply.spendAuthorization } : {}),
       ...(replies.length > 0 ? { replies } : {}),

@@ -23,6 +23,37 @@ const bot = {
 const ledger = { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 const recipient = 'So11111111111111111111111111111111111111112';
 
+test('Laso parses the real multi-network 402, preserves amounts and refuses incompatible terms', async () => {
+  const solana = {
+    scheme: 'exact', network: NETWORKS.mainnet, amount: '10000000',
+    asset: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    payTo: '3MZVk97x9SeRxbYpc3jhzRfU2fyA3emYutnqfn9kNfYX', maxTimeoutSeconds: 300,
+    extra: { feePayer: 'BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP' },
+  };
+  const evm = { scheme: 'exact', network: 'eip155:8453', amount: '10000000',
+    asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', payTo: '0x3291e96b3bff7ed56e3ca8364273c5b4654b2b37' };
+  for (const amountUsd of [10, '10']) for (const header of [true, false]) {
+    const body = { x402Version: 2, accepts: [evm, solana] };
+    const result = await prepareLasoTinyCardPurchase({ bot, amountUsd, fetcher: async (url, init) => {
+      assert.equal(url, 'https://laso.finance/get-card?amount=10');
+      assert.equal(init.method, 'GET');
+      return Response.json(body, { status: 402, headers: header ? { 'PAYMENT-REQUIRED': Buffer.from(JSON.stringify(body)).toString('base64') } : {} });
+    } });
+    assert.deepEqual(result.challenge.accepted, solana);
+    assert.equal(result.proposal.outflow, '10000000');
+  }
+  for (const bad of [null, [], [evm], [{ ...solana, scheme: 'other' }], [{ ...solana, network: NETWORKS.devnet }],
+    [{ ...solana, amount: '5000000' }], [{ ...solana, asset: recipient }], [{ ...solana, payTo: '1'.repeat(33) }],
+    [{ ...solana, extra: {} }], [{ ...solana, extra: { feePayer: 'not-a-key' } }], [{ ...solana, maxTimeoutSeconds: 0 }]]) {
+    await assert.rejects(prepareLasoTinyCardPurchase({ bot, amountUsd: 10, fetcher: async () => Response.json({ x402Version: 2, accepts: bad }, { status: 402 }) }), /no supported/);
+  }
+  for (const amountUsd of [null, '', 4, 1001, 'bad', 5.0000001]) {
+    await assert.rejects(prepareLasoTinyCardPurchase({ bot, amountUsd, fetcher: () => assert.fail('invalid amount fetched') }), /amount must/);
+  }
+  await assert.rejects(prepareLasoTinyCardPurchase({ bot, fetcher: async () => { throw new Error('network'); } }), /unavailable/);
+  await assert.rejects(prepareLasoTinyCardPurchase({ bot, fetcher: async () => Response.json({}) }), /expected 402/);
+});
+
 /**
  * Achieves: Price-only ranking picks the cheapest item with a lowest-price reason; empty catalogs throw.
  * Fails when: Higher price wins when quality is absent, or empty input is ranked.
