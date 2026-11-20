@@ -14,7 +14,7 @@ test('profile menu and profile sheet share logout with desk locking and Privy cl
   assert.match(menu, /id: 'logout', label: 'Log out', icon: LogOut/);
   assert.match(menu, /setOpen\(false\);\s+onPick\(item.id\)/);
   assert.match(page, /if \(id === 'logout'\) \{\s+void logOut\(\)/);
-  assert.match(page, /const logOut = useCallback\(async \(\) => \{\s+lockWallet\(\);\s+setProfileOpen\(false\);\s+try \{\s+await onLogout\(\)/);
+  assert.match(page, /const logOut = useCallback\(async \(\) => \{\s+lockWallet\(\);\s+setProfileOpen\(false\);\s+try \{\s+await flushAccountState\(\);\s+await onLogout\(\)/);
   assert.match(page, /onLogout=\{logOut\}/);
   assert.match(page, /withPrivyLogout\(window, \(\) => logout\(\)\)/);
   assert.match(page, /clearDeskSession\(localStorage, ownerId\)/);

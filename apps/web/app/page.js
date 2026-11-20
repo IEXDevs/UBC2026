@@ -1388,6 +1388,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     lockWallet();
     setProfileOpen(false);
     try {
+      await flushAccountState();
       await onLogout();
     } catch {
       toast?.('Could not log out. Please try again.');
