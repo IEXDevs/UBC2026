@@ -1,13 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { WalletAdd } from './WalletsSheet';
 import { X } from 'lucide-react';
 import AccountStats from './AccountStats';
 import { profileStats } from '../lib/statistics.mjs';
 import { motion } from 'motion/react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
-import AddressCopy from './AddressCopy';
 import ProfileMark from './ProfileMark';
 import LinkedLogins from './LinkedLogins';
 import { usePresence } from './usePresence';
@@ -20,8 +18,6 @@ export default function ProfileSheet({
   accountLabel,
   avatarUrl = null,
   profile = null,
-  glance,
-  wallets,
   voiceMs = 0,
   talks = {},
   payments = [],
@@ -31,9 +27,6 @@ export default function ProfileSheet({
   onLogin,
   onLogout,
   onSave,
-  onWallet,
-  privyLive = false,
-  expandWallets = false,
 }) {
   const { mounted, leaving } = usePresence(open);
   const [displayName, setDisplayName] = useState(profile?.displayName || accountLabel || '');
@@ -41,7 +34,6 @@ export default function ProfileSheet({
   const [note, setNote] = useState('');
   const [providers, setProviders] = useState([]);
   const [providerOpen, setProviderOpen] = useState(false);
-  const [walletsOpen, setWalletsOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -50,8 +42,7 @@ export default function ProfileSheet({
     setNote('');
     setProviders(readProviderViews(localStorage));
     setProviderOpen(false);
-    setWalletsOpen(Boolean(expandWallets));
-  }, [open, profile, accountLabel, expandWallets]);
+  }, [open, profile, accountLabel]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -135,35 +126,7 @@ export default function ProfileSheet({
           <p className="plugin-kicker">Stats</p>
           <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
           <p className="quiet">Talk time is seconds on this device. Net PnL is inflows minus outflows. devnet execution, mainnet pricing.</p>
-          <details
-            className="settings-fold"
-            open={walletsOpen}
-            onToggle={event => setWalletsOpen(event.currentTarget.open)}
-          >
-            <summary>Wallets</summary>
-            {signedIn ? (
-              <>
-                <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>
-                <p className="quiet">Devnet SOL and USDC on this wallet. devnet execution, mainnet pricing.</p>
-                <ul className="profile-wallets">
-                  {(wallets || []).map(wallet => (
-                    <li key={wallet.id}>
-                      <span className="profile-wallet-name">{wallet.label}</span>
-                      <AddressCopy address={wallet.address} />
-                    </li>
-                  ))}
-                </ul>
-                {privyLive ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
-                <button type="button" className="ghost" onClick={onWallet}>Open wallet details</button>
-                <LinkedLogins />
-              </>
-            ) : (
-              <>
-                <p className="profile-balance">Not signed in</p>
-                <p className="quiet">Connect to see your Privy wallets. No preview rows are shown while signed out.</p>
-              </>
-            )}
-          </details>
+          {signedIn ? <LinkedLogins /> : null}
           {signedIn ? (
             <button type="button" className="ghost" onClick={onLogout}>Log out</button>
           ) : null}
