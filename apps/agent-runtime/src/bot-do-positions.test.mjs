@@ -26,6 +26,7 @@ function positionBody(ownerId = 'alice') {
     },
     now: 1_700_000_000_000,
     reason: 'cron-hourly',
+    available: true,
   };
 }
 
@@ -61,7 +62,7 @@ test('owner mismatch on status is forbidden and returns no check payload', async
 test('matching owner receives positionCheck', async () => {
   const machine = new BotStateMachine();
   await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'mainnet-beta', updatedAt: 1 });
-  await machine.put('lastPositionCheck', { botId: 'bot_1', flag: 'within-cap', positions: [] });
+  await machine.put('lastPositionCheck', { botId: 'bot_1', paper: false, flag: 'within-cap', positions: [] });
 
   const res = await machine.handle(new Request('https://bot/status', {
     headers: { 'x-owner-id': 'alice' },
@@ -101,20 +102,21 @@ test('public position-check without owner is 401; forged body ownerId is 403', a
   assert.equal((await bodyForge.json()).error, 'owner_mismatch');
 });
 
-test('internal cron header can record a check; owner header can too', async () => {
+test('only the internal cron can record holdings and owners can read the check', async () => {
   const machine = new BotStateMachine();
   const internal = await machine.handle(new Request('https://bot/position-check', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       [INTERNAL_POSITION_HEADER]: INTERNAL_POSITION_VALUE,
+      'x-owner-id': 'alice',
     },
     body: JSON.stringify(positionBody('alice')),
   }));
   assert.equal(internal.status, 200);
   const saved = await machine.get('lastPositionCheck');
   assert.equal(saved.botId, 'bot_1');
-  assert.equal(saved.paper, true);
+  assert.equal(saved.paper, false);
   assert.ok(Array.isArray(saved.positions));
 
   const asOwner = await machine.handle(new Request('https://bot/position-check', {
@@ -123,7 +125,9 @@ test('internal cron header can record a check; owner header can too', async () =
       'content-type': 'application/json',
       'x-owner-id': 'alice',
     },
-    body: JSON.stringify(positionBody('alice')),
+    body: JSON.stringify({ ...positionBody('alice'), positions: [{ mint: MINT, amount: '9999999' }] }),
   }));
   assert.equal(asOwner.status, 200);
+  assert.equal((await asOwner.json()).check.positions[0].amount, '1000000000');
+  assert.deepEqual(await machine.get('lastPositionCheck'), saved);
 });

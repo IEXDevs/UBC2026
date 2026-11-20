@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ensureOwnerTradeLoop, ownerAsksForOneTrade } from './owner-trade.mjs';
+import { ensureOwnerTradeLoop, ownerAsksForOneTrade, pendingSwapHold } from './owner-trade.mjs';
+import { matchingToolGrant } from './spend-permission.mjs';
 
 test('an owner trade ask wakes the loop unless a spend tool already ran', async () => {
   assert.equal(ownerAsksForOneTrade('try finding and doing one trade right now'), true);
@@ -19,7 +20,7 @@ test('an owner trade ask wakes the loop unless a spend tool already ran', async 
   });
   assert.deepEqual(calls.map(call => call.name), ['wake_bot', 'start_task']);
   assert.equal(calls[1].args.ownerPermission, 'full');
-  assert.equal(calls[1].args.goal, 'beat inflation');
+  assert.equal(calls[1].args.goal, 'try finding and doing one trade right now\nAgent goal: beat inflation');
   assert.equal(started.loop.done, true);
 
   const skipped = await ensureOwnerTradeLoop({
@@ -30,4 +31,14 @@ test('an owner trade ask wakes the loop unless a spend tool already ran', async 
     },
   });
   assert.equal(skipped, null);
+});
+
+test('the desk uses the queued amount and id to open the existing swap confirmation', () => {
+  const intent = { botId: 'bot_1', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey: `loop_swap_${crypto.randomUUID()}` };
+  const hold = pendingSwapHold('bot_1', intent);
+  assert.equal(hold.kind, 'modal');
+  assert.equal(hold.idempotencyKey, intent.idempotencyKey);
+  assert.equal(hold.args.outputAsset, intent.outputAsset);
+  assert.equal(matchingToolGrant([hold], hold.name, hold.args), hold);
+  assert.equal(pendingSwapHold('bot_2', intent), null);
 });

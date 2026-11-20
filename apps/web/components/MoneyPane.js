@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { ExternalLink } from 'lucide-react';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { filterBotHistory } from '../lib/bot-history.mjs';
 import {
   describeHistory,
@@ -12,7 +13,7 @@ import {
   SOLSCAN_SOLANA,
 } from '../lib/money-views.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
-import { buildEarningsSeries, mergeConnectedPositions } from '../lib/earnings-chart.mjs';
+import { buildEarningsSeries, mergeWalletPositions } from '../lib/earnings-chart.mjs';
 import { linkedWalletKey } from '../lib/wallet-provision.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
 import AddressCopy from './AddressCopy';
@@ -193,6 +194,7 @@ function Wallets({ state }) {
 function Positions({ state, ownerId, getAccessToken, onWallet }) {
   const { user } = usePrivy();
   const walletsKey = linkedWalletKey(user);
+  const balancesKey = JSON.stringify((state.wallets || []).map(wallet => [wallet.address, wallet.holdings]));
   const [portfolio, setPortfolio] = useState(null);
   useEffect(() => {
     if (typeof getAccessToken !== 'function') return undefined;
@@ -201,7 +203,7 @@ function Positions({ state, ownerId, getAccessToken, onWallet }) {
       try {
         const token = await getAccessToken();
         if (stopped || !token) return;
-        const response = await fetch('/api/portfolio', {
+        const response = await fetch(`/api/portfolio?cluster=${SOLANA_CLUSTER}`, {
           headers: {
             Authorization: `Bearer ${token}`,
             ...(ownerId ? { 'x-owner-id': ownerId } : {}),
@@ -210,29 +212,26 @@ function Positions({ state, ownerId, getAccessToken, onWallet }) {
         });
         const body = await response.json().catch(() => null);
         if (stopped || !response.ok || !body || typeof body !== 'object') return;
-        setPortfolio(body);
+        setPortfolio({ ownerId, data: body });
         const enriched = await enrichPortfolio(body, {
           userId: user?.id || ownerId,
           storage: window.localStorage,
         });
-        if (!stopped) setPortfolio(enriched.portfolio);
+        if (!stopped) setPortfolio({ ownerId, data: enriched.portfolio });
       } catch {
-        // Paper lots stay on the book when the balance read fails.
+        // Owner-scoped wallet results are also available through the runtime.
       }
     })();
     return () => { stopped = true; };
-  }, [getAccessToken, ownerId, user?.id, walletsKey]);
+  }, [balancesKey, getAccessToken, ownerId, user?.id, walletsKey]);
 
-  const merged = useMemo(() => mergeConnectedPositions({
-    positions: state.positions,
+  const merged = useMemo(() => mergeWalletPositions({
     wallets: state.wallets,
-    portfolio,
-  }), [state.positions, state.wallets, portfolio]);
+    portfolio: portfolio?.ownerId === ownerId ? portfolio.data : null,
+  }), [ownerId, state.wallets, portfolio]);
   const earnings = useMemo(() => buildEarningsSeries({
-    positions: state.positions,
     payments: state.payments,
-    transfers: state.transfers,
-  }), [state.positions, state.payments, state.transfers]);
+  }), [state.payments]);
 
   return (
     <PositionBook

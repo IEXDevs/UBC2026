@@ -52,6 +52,7 @@ import {
 } from './desk-grant.mjs';
 import { spendLedgerCrossCheck, streamConfirmedPayments } from '@ubc2026/quicknode-streams';
 import { handleAccountRoute } from './account-state.mjs';
+import { SOL_MINT } from './usd-budget.mjs';
 
 const ACCOUNT_ROUTES = new Set(['state.list', 'state.write', 'recovery.status', 'recovery.issue', 'recovery.verify']);
 
@@ -1090,42 +1091,41 @@ export async function handleApiData(request, env, matched) {
     if (!supabaseConfig(env)) return json({ ok: true, source: 'unconfigured', items: [], checks: [] });
     const url = new URL(request.url);
     const botId = url.searchParams.get('botId');
-    let path = `paper_positions?owner_id=eq.${encodeURIComponent(ownerId)}&status=eq.open&select=*&order=updated_at.desc&limit=100`;
-    let checksPath = `position_checks?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,bot_id,at,reason,status,flag,unrealized_loss_micro_usd,max_loss,created_at&order=at.desc&limit=50`;
-    if (typeof botId === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(botId)) {
-      // Still filter by owner_id — never trust botId alone (cross-user IDOR).
-      path = `paper_positions?owner_id=eq.${encodeURIComponent(ownerId)}&bot_id=eq.${encodeURIComponent(botId)}&status=eq.open&select=*&order=updated_at.desc&limit=100`;
-      checksPath = `position_checks?owner_id=eq.${encodeURIComponent(ownerId)}&bot_id=eq.${encodeURIComponent(botId)}&select=id,bot_id,at,reason,status,flag,unrealized_loss_micro_usd,max_loss,created_at&order=at.desc&limit=50`;
+    if (botId != null && !WALLET_ID.test(botId)) return json({ error: 'invalid_bot' }, 400);
+    const ownerFilter = postgrestEq('owner_id', ownerId);
+    let walletId = null;
+    if (botId) {
+      const bots = await supabaseGet(env, `bots?${ownerFilter}&${postgrestEq('id', botId)}&select=id,wallet_id`, fetcher);
+      if (!Array.isArray(bots.rows)) return json({ error: 'bot_directory_unavailable' }, 503);
+      walletId = bots.rows.find(row => row.id === botId)?.wallet_id;
+      if (!walletId) return json({ ok: true, source: 'onchain', items: [], checks: [] });
     }
-    const [positions, checks] = await Promise.all([
-      supabaseGet(env, path, fetcher),
-      supabaseGet(env, checksPath, fetcher),
+    const walletFilter = walletId ? `&${postgrestEq('id', walletId)}` : '';
+    const checksFilter = botId ? `&${postgrestEq('bot_id', botId)}` : '';
+    const [wallets, checks] = await Promise.all([
+      supabaseGet(env, `wallets?${ownerFilter}${walletFilter}&select=*&order=created_at.asc`, fetcher),
+      supabaseGet(env, `position_checks?${ownerFilter}${checksFilter}&select=*&order=at.desc&limit=50`, fetcher),
     ]);
+    if (!Array.isArray(wallets.rows)) return json({ error: 'wallet_directory_unavailable' }, 503);
+    const owned = wallets.rows.map(mapWalletRow).filter(wallet => wallet?.ownerId === ownerId && (!walletId || wallet.id === walletId));
+    const balances = await withOnchainBalances(env, owned);
+    const items = balances.flatMap(wallet => wallet.holdings.filter(row => row.cluster === SOLANA_CLUSTER).map(row => ({
+      id: `wallet:${wallet.id}:${row.mint || 'native'}`, ownerId, botId, walletId: wallet.id,
+      mint: row.mint || SOL_MINT, symbol: row.mint === SOL_MINT ? 'wSOL' : row.symbol,
+      quantity: row.amount, decimals: row.decimals,
+      status: 'open', mode: 'onchain', cluster: row.cluster,
+    })));
     return json({
-      ok: true,
-      source: 'supabase',
-      items: (positions.rows || []).map((row) => ({
-        id: row.id,
-        ownerId: row.owner_id,
-        botId: row.bot_id,
-        mint: row.mint,
-        symbol: row.symbol,
-        quantity: amountText(row.quantity),
-        entryMicroUsdc: amountText(row.entry_micro_usdc),
-        realizedMicroUsdc: amountText(row.realized_micro_usdc),
-        status: row.status,
-        mode: row.mode,
-        cluster: row.cluster,
-        updatedAt: row.updated_at,
-      })).filter((row) => row.ownerId === ownerId),
-      checks: (checks.rows || []).map((row) => ({
+      ok: true, source: 'onchain', items,
+      partial: balances.some(wallet => wallet.balanceStatus !== 'ok'),
+      checks: (checks.rows || []).filter(row => row.owner_id === ownerId && row.detail?.paper === false).map(row => ({
         id: row.id,
         botId: row.bot_id,
         at: row.at,
         reason: row.reason,
         status: row.status,
         flag: row.flag,
-        unrealizedLossMicroUsd: amountText(row.unrealized_loss_micro_usd),
+        unrealizedLossMicroUsd: row.detail.lossKnown === true ? amountText(row.unrealized_loss_micro_usd) : null,
         maxLoss: amountText(row.max_loss),
       })),
     });

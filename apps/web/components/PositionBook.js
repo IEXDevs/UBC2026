@@ -1024,7 +1024,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         ) : (
           <>
             <strong>{book.summary.notionalLabel}</strong>
-            <span>{book.summary.count} positions · {book.summary.venues} venues · PnL {book.summary.pnlLabel}</span>
+            <span>{book.summary.count} positions · {book.summary.venues} venues{book.summary.pnlLabel ? ` · PnL ${book.summary.pnlLabel}` : ''}</span>
           </>
         )}
       </p>

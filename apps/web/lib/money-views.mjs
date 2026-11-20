@@ -298,15 +298,16 @@ export function describePositions(positions, bots) {
       ? position.decimals
       : USDC_DECIMALS;
     const notional = typeof position.notionalMicroUsdc === 'string' ? position.notionalMicroUsdc : null;
+    const pnl = typeof position.pnlMicroUsdc === 'string' ? position.pnlMicroUsdc : null;
     const named = bots.find(bot => bot.id === position.botId)?.name;
     const holder = typeof position.holder === 'string' && position.holder.trim() ? position.holder.trim() : null;
     return {
       id: position.id,
       asset: position.asset,
       amountLabel: `${formatBaseUnits(position.amount, decimals)} ${position.asset}`,
-      pnlLabel: `${formatBaseUnits(position.pnlMicroUsdc)} USDC`,
-      pnlDown: position.pnlMicroUsdc.startsWith('-'),
-      pnlMicroUsdc: position.pnlMicroUsdc,
+      pnlLabel: pnl == null ? null : `${formatBaseUnits(pnl)} USDC`,
+      pnlDown: pnl?.startsWith('-') === true,
+      pnlMicroUsdc: pnl,
       notionalMicroUsdc: notional,
       notionalLabel: notional ? `${formatBaseUnits(notional)} USDC` : null,
       botName: named ?? holder ?? botName(bots, position.botId),

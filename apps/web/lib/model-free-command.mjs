@@ -4,6 +4,7 @@ import { parseSolHandleSend } from './sol-handle-send.mjs';
 // These commands already have non-model routes. This only controls the chat
 // input: the existing owner, balance, approval and signing checks still apply.
 export function modelFreeCommand(message) {
+  if (typeof message === 'string' && /^review pending swap[.!]?$/i.test(message.trim())) return 'review-swap';
   if (parsePlatformSend(message)) return 'platform-send';
   if (parseSolHandleSend(message)) return 'sol-send';
   return '';

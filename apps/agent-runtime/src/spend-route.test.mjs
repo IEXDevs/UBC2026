@@ -10,6 +10,8 @@ import { sha256Hex } from './desk-grant.mjs';
 import worker from './owner-auth.fixture.mjs';
 import { handleVoiceRequest } from './voice.mjs';
 import { usdMicros } from './usd-budget.mjs';
+import { BotStateMachine } from './bot-do.mjs';
+import { createLoopSwapIntent, LOOP_SWAP_PENDING } from './loop-swap.mjs';
 
 const DESTINATION = '11111111111111111111111111111111';
 const NOW = 1_700_000_000_000;
@@ -65,7 +67,7 @@ test('USD valuation keeps precision and rounds the debit up', () => {
   assert.equal(usdMicros('1', 6, '0'), null);
 });
 
-test('a mainnet swap requires an unchanged owner-approved transaction and reserves a USD debit once', async () => {
+for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits only the approved quote and reserves USD once`, async () => {
   const sol = 'So11111111111111111111111111111111111111112';
   const grant = '12'.repeat(32);
   const grantHash = await sha256Hex(grant);
@@ -73,11 +75,24 @@ test('a mainnet swap requires an unchanged owner-approved transaction and reserv
   const usdBot = {
     ...bot, cap: { mode: 'limited', asset: 'USD', maxOutflow: '5000000', maxPerTransaction: '1200000' },
   };
+  const now = Date.now();
+  const machine = new BotStateMachine();
+  const intent = path === 'scheduled' ? createLoopSwapIntent({ bot: usdBot, wallet, now, swap: {
+    inputMint: SOLANA_USDC_MINT, outputMint: sol, inAmount: '1000000',
+  } }) : null;
+  const idempotencyKey = intent?.idempotencyKey || 'test_swap';
+  if (intent) {
+    await machine.put('meta', { botId: bot.id, ownerId: bot.ownerId, cluster: 'mainnet-beta' });
+    await machine.put('run', { botId: bot.id, step: 'decide', paused: true, pauseReason: LOOP_SWAP_PENDING, events: [],
+      checkpoints: { decide: { status: 'waiting', reason: LOOP_SWAP_PENDING, swapIntent: intent } } });
+  }
   let simulation;
   let routeSlippage = 50;
   let reserved = 0;
   let signed = 0;
   const env = spendEnv({
+    spendNow: now,
+    BOT: { idFromName: name => name, get: () => ({ fetch: request => machine.handle(request) }) },
     JUPITER_API_KEY: 'test',
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test-role',
@@ -85,7 +100,7 @@ test('a mainnet swap requires an unchanged owner-approved transaction and reserv
     loadSpendContext: async () => ({ bot: usdBot, wallet, ledger: { ...ledger, asset: 'USD' } }),
     lookupSpendPrice: async mint => ({
       mint, pricingCluster: 'mainnet', executionCluster: 'mainnet-beta',
-      priceUsd: mint === sol ? '100' : '1', fetchedAt: new Date(NOW).toISOString(),
+      priceUsd: mint === sol ? '100' : '1', fetchedAt: new Date(now).toISOString(),
     }),
     transferClient: {
       getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
@@ -107,7 +122,7 @@ test('a mainnet swap requires an unchanged owner-approved transaction and reserv
     },
     ledgerApi: {
       reserveBudget: async ({ proposal, idempotencyKey, approvalId }) => {
-        assert.equal(idempotencyKey, 'test_swap');
+        assert.equal(idempotencyKey, intent?.idempotencyKey || 'test_swap');
         assert.ok(approvalId);
         assert.equal(proposal.asset, 'USD');
         assert.equal(proposal.outflow, '1000000');
@@ -139,13 +154,13 @@ test('a mainnet swap requires an unchanged owner-approved transaction and reserv
         });
       }
       if (target.pathname.endsWith('/desk_locks')) {
-        return Response.json([{ grant_hash: grantHash, grant_until: new Date(NOW + 120_000).toISOString() }]);
+        return Response.json([{ grant_hash: grantHash, grant_until: new Date(now + 120_000).toISOString() }]);
       }
       if (target.pathname.endsWith('/approvals')) return new Response('', { status: 201 });
       return new Response('[]');
     },
   });
-  const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey: 'test_swap' };
+  const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey };
   const request = body => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
   routeSlippage = 100;
   assert.equal((await (await request()).json()).error, 'swap_quote_unavailable');
@@ -156,7 +171,7 @@ test('a mainnet swap requires an unchanged owner-approved transaction and reserv
   assert.equal(reserved, 0);
   const ticket = preview.swapPreview.ticket;
   const changed = await (await request({ confirmed: true, amount: '2000000', swapTicket: ticket, spendAuthorization: 'prepare' })).json();
-  assert.equal(changed.error, 'swap_quote_expired');
+  assert.equal(changed.error, intent ? 'swap_intent_unavailable' : 'swap_quote_expired');
   const unbound = await (await request({ confirmed: true, swapTicket: ticket })).json();
   assert.equal(unbound.error, 'swap_owner_authorization_required');
   usdBot.cap.maxPerTransaction = '1000000';
@@ -169,10 +184,23 @@ test('a mainnet swap requires an unchanged owner-approved transaction and reserv
   assert.equal(reserved, 0);
   const { payload, ...binding } = challenge.spendAuthorization;
   const spendAuthorization = { ...binding, signature: 'A'.repeat(88) };
+  if (intent) {
+    await machine.put('ownerPaused', true);
+    const paused = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization })).json();
+    assert.equal(paused.error, 'swap_intent_unavailable');
+    assert.equal(reserved, 0);
+    await machine.delete('ownerPaused');
+  }
   const approved = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization })).json();
   assert.equal(approved.signed, true);
   const replay = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization })).json();
-  assert.equal(replay.reason, 'duplicate-spend');
+  if (intent) {
+    assert.equal((await machine.get('run')).checkpoints.execute.signature, approved.signature);
+    assert.equal((await machine.get('run')).checkpoints.execute.state, 'submitted');
+    assert.equal(replay.error, 'swap_intent_unavailable');
+  } else {
+    assert.equal(replay.reason, 'duplicate-spend');
+  }
   assert.equal(signed, 1);
 });
 

@@ -15,6 +15,7 @@ import {
   listScheduledBotsFromSupabase,
   planScheduledWork,
   readSolanaUsdcBalance,
+  readSolanaWalletBalances,
   readStreamHealthFromSupabase,
   walletAddress,
 } from './schedules.mjs';
@@ -27,6 +28,7 @@ import { captureRequest, persistActivity, persistHttpActivity } from './activity
 import { botStub, rememberBotAlert } from './bot-alerts.mjs';
 import { createSupabaseRpc, supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 import { corsPreflightResponse, withCors } from './cors.mjs';
+import { SOL_MINT } from './usd-budget.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
 
@@ -204,8 +206,8 @@ function json(data, status = 200) {
 /**
  * Maelstrom agent runtime Worker.
  * Routes wake/pause/resume/status, the checkpointed bot loop, and owner-bound browser sessions to a per-bot Durable Object.
- * QuickNode Streams wake bots through /wake. Hourly cron records a paper
- * position check. A second cron re-checks mainnet-beta USDC when the stream is stale.
+ * QuickNode Streams wake bots through /wake. Hourly cron reads on-chain holdings.
+ * A second cron re-checks USDC when the stream is stale.
  * ElevenLabs speech hits /voice. The desk text agent decides. Webhook tools do not.
  */
 const routed = {
@@ -373,12 +375,25 @@ async function runScheduled(controller, rawEnv, ctx) {
       ? await env.readStreamHealth(now)
       : await readStreamHealthFromSupabase(env, env.fetch ?? fetch);
     const plan = planScheduledWork({ bots, now, cron, health });
-    const needsPrices = plan.positionChecks.some(bot => Array.isArray(bot.positions) && bot.positions.length > 0);
-    const lookup = needsPrices ? priceLookup(env) : null;
-
+    const holdingsByWallet = new Map();
+    let lookup;
     for (const bot of plan.positionChecks) {
-      const quotes = lookup ? await quotePositions(lookup, bot.positions) : {};
-      ctx.waitUntil(deliverCheck(env, bot, { reason: 'cron-hourly', quotes, balance: null, now }));
+      const address = walletAddress(bot);
+      if (address && !holdingsByWallet.has(address)) {
+        const readHoldings = env.readTradeHoldings ?? (address => readSolanaWalletBalances({
+          address, rpcUrl: configuredSolanaRpc(env), fetcher: env.fetch ?? fetch,
+        }));
+        const live = await readHoldings(address).catch(() => null);
+        holdingsByWallet.set(address, live);
+      }
+      const snapshot = holdingsByWallet.get(address);
+      const available = snapshot?.ok === true && snapshot.cluster === SOLANA_CLUSTER;
+      const positions = available ? (snapshot.holdings ?? []).map(({ mint, asset, amount, decimals }) => ({
+        mint: mint || (asset === 'SOL' ? SOL_MINT : null), amount, decimals,
+      })) : [];
+      if (positions.length && lookup === undefined) lookup = priceLookup(env);
+      const quotes = lookup && positions.length ? await quotePositions(lookup, positions) : {};
+      ctx.waitUntil(deliverCheck(env, bot, { reason: 'cron-hourly', positions, quotes, available, now }));
     }
 
     if (!plan.streamDropped) {
@@ -485,14 +500,15 @@ async function readBalance(env, address) {
   });
 }
 
-function checkPayload(bot, { reason, quotes, balance, now }) {
+function checkPayload(bot, { reason, positions, quotes, balance, available, now }) {
   return {
     botId: bot.id,
     goal: typeof bot.goal === 'string' ? bot.goal : '',
     type: bot.type ?? null,
     maxLoss: bot.maxLoss ?? bot.cap?.maxLoss ?? null,
     ownerId: typeof bot.ownerId === 'string' ? bot.ownerId : null,
-    positions: Array.isArray(bot.positions) ? bot.positions : [],
+    positions: positions ?? [],
+    available: available === true,
     quotes: quotes ?? {},
     balance: balance ?? null,
     reason,
@@ -518,6 +534,7 @@ function deliverCheck(env, bot, details) {
     balance: payload.balance,
     reason: payload.reason,
     now: payload.now,
+    available: payload.available,
   });
   const quotes = {};
   for (const [mint, quote] of Object.entries(payload.quotes ?? {})) quotes[mint] = slimQuote(quote);
@@ -533,12 +550,11 @@ function deliverCheck(env, bot, details) {
     body: JSON.stringify(payload),
   })).then(response => response, () => Response.json({ ok: false, check: recorded }));
   return response.then(async (delivered) => {
-    if (payload.ownerId) {
+    if (delivered.ok && payload.ownerId) {
       await persistPositionCheck(env, {
         ownerId: payload.ownerId,
         botId: bot.id,
         check: recorded,
-        positions: payload.positions,
       }).catch(() => {});
     }
     if ((recorded.flag === 'max-loss' || recorded.flag === 'near-max-loss') && payload.ownerId) {

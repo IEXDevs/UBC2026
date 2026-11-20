@@ -170,7 +170,7 @@ export function layoutPositionBook(positions, bots, wallets = []) {
     summary: {
       count: rows.length,
       venues: new Set(rows.map(row => row.venue)).size,
-      pnlLabel: `${formatBaseUnits(pnl.toString())} USDC`,
+      pnlLabel: rows.some(row => row.pnlMicroUsdc != null) ? `${formatBaseUnits(pnl.toString())} USDC` : null,
       notionalLabel: `${formatBaseUnits(notional.toString())} USDC`,
     },
   };

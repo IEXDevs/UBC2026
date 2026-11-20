@@ -1,4 +1,4 @@
-import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+import { configuredSolanaRpc, SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createSearch } from '@ubc2026/browser-search';
 import { createBrowserSessionService, createDefaultBrowserSessionService, ProviderError, SessionError } from '@ubc2026/browser-session';
 import { SECRET_NAMES } from '@ubc2026/contracts';
@@ -12,10 +12,12 @@ import {
   setCardLoopCooldown,
 } from '@ubc2026/contracts/card-loop';
 import { TransferError } from '@ubc2026/transfers';
+import { readSolanaWalletBalances } from '@ubc2026/wallets/balances';
 import { createEmptyRun, advanceRun, pauseRun, resumeRun } from './checkpoint.mjs';
 import { decideFromCheckpoint } from './decide.mjs';
 import { verifierFacts } from './spend-verifier.mjs';
 import { LoopEngineError, runBotLoop } from './loop-engine.mjs';
+import { INTERNAL_LOOP_SWAP, pendingLoopSwap } from './loop-swap.mjs';
 import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
@@ -28,6 +30,7 @@ const OWNER_HEADER = 'x-owner-id';
 export const INTERNAL_POSITION_HEADER = 'x-maelstrom-internal';
 export const INTERNAL_POSITION_VALUE = 'position-check';
 export const INTERNAL_CARD_LOOP_VALUE = 'card-loop';
+const SOLANA_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
 function noStore(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -83,14 +86,21 @@ function loopDeps(env) {
     verifyFn: env.verifyFn,
     lookupPrice: resolvePriceLookup(env),
     trustLookup: resolveTrustLookup(env),
-    fetch: typeof env.fetch === 'function' ? env.fetch : fetch,
-    jupiterApiKey: typeof env.JUPITER_API_KEY === 'string' && env.JUPITER_API_KEY.trim()
-      ? env.JUPITER_API_KEY.trim()
-      : null,
-    swapQuote: typeof env.swapQuote === 'function' ? env.swapQuote : null,
+    readTradeHoldings: env.readTradeHoldings ?? (address => readSolanaWalletBalances({
+      address, rpcUrl: configuredSolanaRpc(env), fetcher: env.fetch ?? fetch,
+    })),
     recentBlockhash: env.recentBlockhash,
     secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
   };
+}
+
+function replaceableSwapRun(run, now) {
+  const pending = pendingLoopSwap(run);
+  return pending ? pending.expiresAt <= now : Boolean(
+    run?.checkpoints?.decide?.proposal?.swap || run?.checkpoints?.execute?.paper
+    || run?.checkpoints?.execute?.mode === 'live-swap'
+    || ['no-trade-found', 'decide-invalid', 'use-permissioned-spend', 'swap_requires_usd_budget'].includes(run?.pauseReason),
+  );
 }
 
 async function loopContext(env, body, ownerId) {
@@ -273,16 +283,42 @@ export class BotStateMachine {
         return Response.json({ error: 'owner_forbidden' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
       }
       const run = await this.get('run');
-      const positionCheck = await this.get('lastPositionCheck');
+      const savedCheck = await this.get('lastPositionCheck');
+      const positionCheck = savedCheck?.paper === false ? savedCheck : null;
       const cardLoop = publicCardLoop(await this.get('cardLoop'));
+      const ownerPaused = await this.get('ownerPaused') === true;
+      const pendingSwap = pendingLoopSwap(run);
       return Response.json({
         ok: true,
         meta,
         run,
-        paused: await this.get('ownerPaused') === true || run?.paused === true,
+        paused: ownerPaused || run?.paused === true,
         positionCheck,
         cardLoop,
+        ...(!ownerPaused && pendingSwap?.expiresAt > now ? { pendingSwap } : {}),
       }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    if (url.pathname === '/loop-swap' && request.headers.get(INTERNAL_POSITION_HEADER) === INTERNAL_LOOP_SWAP) {
+      const meta = await this.get('meta');
+      if (!meta?.ownerId || ownerFrom(request) !== meta.ownerId) return noStore({ error: 'owner_forbidden' }, 403);
+      const run = await this.get('run');
+      const intent = pendingLoopSwap(run);
+      if (!intent || intent.botId !== meta.botId) return noStore({ error: 'swap_intent_unavailable' }, 409);
+      if (request.method === 'GET') {
+        if (await this.get('ownerPaused') === true) return noStore({ error: 'run_paused' }, 409);
+        return noStore({ intent });
+      }
+      const receipt = await request.json().catch(() => null);
+      if (request.method !== 'POST' || receipt?.idempotencyKey !== intent.idempotencyKey
+          || !SOLANA_SIGNATURE.test(receipt.signature ?? '')) return noStore({ error: 'invalid_swap_receipt' }, 409);
+      const submitted = advanceRun(resumeRun(run, now), 'execute', 'Swap submitted to Solana', now);
+      submitted.checkpoints.execute = {
+        at: now, status: 'done', mode: 'live-swap', state: 'submitted', executed: true,
+        cluster: SOLANA_CLUSTER, idempotencyKey: intent.idempotencyKey, signature: receipt.signature,
+      };
+      await this.put('run', submitted);
+      return noStore({ ok: true });
     }
 
     if (request.method === 'POST' && url.pathname === '/position-check') {
@@ -304,11 +340,12 @@ export class BotStateMachine {
         if (typeof body.ownerId === 'string' && body.ownerId.length > 0 && body.ownerId !== headerOwner) {
           return Response.json({ error: 'owner_mismatch' }, { status: 403 });
         }
+        const saved = await this.get('lastPositionCheck');
+        return noStore({ ok: true, check: saved?.paper === false ? saved : null });
       }
-      const ownerId = internal
-        ? (typeof body.ownerId === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(body.ownerId) ? body.ownerId : metaOwner)
-        : headerOwner;
-      if (ownerId && (!metaOwner || metaOwner !== ownerId)) {
+      const ownerId = headerOwner || metaOwner;
+      if (metaOwner && ownerId !== metaOwner) return noStore({ error: 'owner_forbidden' }, 403);
+      if (ownerId && !metaOwner) {
         await this.put('meta', {
           ...(meta && typeof meta === 'object' ? meta : {}),
           botId: meta?.botId || botId,
@@ -317,28 +354,20 @@ export class BotStateMachine {
           updatedAt: now,
         });
       }
-      const stored = await this.get('positions');
-      const fromBody = Array.isArray(body.positions) ? body.positions : [];
-      // Only the Worker cron (internal) or the verified owner may replace the book from the body.
-      const positions = (internal || headerOwner)
-        ? (fromBody.length > 0 ? fromBody : (Array.isArray(stored) ? stored : []))
-        : (Array.isArray(stored) ? stored : []);
       const checkedAt = Number.isSafeInteger(body.now) ? body.now : now;
       const check = assessPositions({
         bot: {
           id: botId,
           maxLoss: body.maxLoss ?? null,
         },
-        positions,
+        positions: body.positions,
         quotes: body.quotes ?? {},
         balance: body.balance ?? null,
         reason: body.reason,
         now: checkedAt,
+        available: body.available === true,
       });
       await this.put('lastPositionCheck', check);
-      if (Array.isArray(fromBody) && fromBody.length > 0 && (internal || headerOwner)) {
-        await this.put('positions', fromBody.slice(0, 30));
-      }
       const history = await this.get('positionCheckHistory');
       const prior = Array.isArray(history) ? history : [];
       await this.put('positionCheckHistory', [...prior, check].slice(-48));
@@ -396,7 +425,7 @@ export class BotStateMachine {
       if (priorOwner && !ownerId) ownerId = priorOwner;
       if (await this.get('ownerPaused') === true) return Response.json({ error: 'run_paused' }, { status: 409 });
       let run = await this.get('run');
-      if (!run || body.forceNew) {
+      if (!run || body.forceNew || (body.reason === 'owner-ask' && replaceableSwapRun(run, now))) {
         run = createEmptyRun({ runId: `run_${now}`, botId, goal, now });
       } else if (run.paused) {
         // Do not leak the full checkpoint to an unauthorized caller.
@@ -471,7 +500,7 @@ export class BotStateMachine {
       const botId = loopBotId({ ...body, bot: context.bot || body.bot }, meta);
       const goal = clipGoal(body.goal) || clipGoal(context.bot?.goal) || '';
       let run = await this.get('run');
-      if (!run) {
+      if (!run || replaceableSwapRun(run, loopNow)) {
         if (!botId) return Response.json({ error: 'no_run' }, { status: 404 });
         run = createEmptyRun({ runId: `run_${loopNow}`, botId, goal, now: loopNow });
         await this.put('run', run);
@@ -488,8 +517,6 @@ export class BotStateMachine {
       const models = loopModels(env);
       const deps = loopDeps(env);
       const input = loopInput(body);
-      const storedPositions = await this.get('positions');
-      if (!Array.isArray(input.positions) && Array.isArray(storedPositions)) input.positions = storedPositions;
       try {
         const result = await runBotLoop({
           run,
@@ -525,29 +552,6 @@ export class BotStateMachine {
             trustScore: result.run?.checkpoints?.decide?.facts?.trustScore,
             approval: approval?.automatic === true ? 'auto' : (approval?.action || 'recorded'),
           });
-        }
-        const paper = result.run?.checkpoints?.execute?.paper;
-        if (
-          paper
-          && paper.mode === 'paper'
-          && paper.broadcast === false
-          && paper.label === EXECUTION_LABEL
-          && typeof paper.mint === 'string'
-          && typeof paper.quantity === 'string'
-        ) {
-          const stored = await this.get('positions');
-          const list = Array.isArray(stored) ? stored : [];
-          const row = {
-            mint: paper.mint,
-            amount: paper.quantity,
-            decimals: Number.isInteger(paper.decimals) ? paper.decimals : 6,
-            entryPriceUsd: paper.entryPriceUsd,
-            symbol: paper.symbol,
-            mode: 'paper',
-            label: paper.label,
-          };
-          const seen = list.some(item => item && item.mint === row.mint && item.amount === row.amount && item.entryPriceUsd === row.entryPriceUsd);
-          if (!seen) await this.put('positions', [...list, row].slice(-30));
         }
         return Response.json({ ok: true, ...result });
       } catch (error) {
@@ -695,7 +699,7 @@ export class BotStateMachine {
     const ownerId = typeof meta?.ownerId === 'string' ? meta.ownerId : null;
     const botId = loop.botId;
     let run = await this.get('run');
-    if (!run && botId) {
+    if ((!run || replaceableSwapRun(run, now) || run.checkpoints?.monitor?.status === 'done') && botId) {
       run = createEmptyRun({ runId: `run_${now}`, botId, goal: loop.purpose, now });
       await this.put('run', run);
     }
@@ -709,14 +713,15 @@ export class BotStateMachine {
         wallet: context.wallet,
         ledger: context.ledger,
         ownerId,
-        input: loopInput({ goal: loop.purpose, botId }),
+        input: { goal: loop.purpose, botId, scheduled: true },
         models: loopModels(env),
         deps: loopDeps(env),
         now,
         persist: async (next) => { await this.put('run', next); },
       });
       gate = result.run?.pauseReason || (result.waiting ? 'waiting' : 'ran');
-      spent = result.run?.checkpoints?.execute?.status === 'done';
+      const execution = result.run?.checkpoints?.execute;
+      spent = execution?.at === now && typeof execution.signature === 'string';
     } catch (error) {
       gate = typeof error?.code === 'string' ? error.code : 'loop_failed';
     }

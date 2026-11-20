@@ -11,6 +11,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './owner-auth.fixture.mjs';
+import { SOLANA_GENESIS_HASH } from '@ubc2026/wallets/privy';
+
+const ALICE_WALLET = '11111111111111111111111111111111';
+const BOB_WALLET = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
 
 function envWithBots(rows, extras = {}) {
   const stubStore = new Map();
@@ -19,6 +23,7 @@ function envWithBots(rows, extras = {}) {
     PRODUCT: 'Maelstrom',
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+    QUICKNODE_MAINNET_RPC_URL: 'https://rpc.example',
     BOT: {
       idFromName: (name) => name,
       get: (id) => ({
@@ -55,15 +60,22 @@ function envWithBots(rows, extras = {}) {
           headers: { 'content-type': 'application/json' },
         });
       }
-      if (target.includes('/rest/v1/paper_positions?')) {
+      if (target.includes('/rest/v1/paper_positions?')) assert.fail('The live route must not read paper lots');
+      if (target.includes('/rest/v1/wallets?')) {
         assert.match(target, /owner_id=eq\./);
         const ownerMatch = /owner_id=eq\.([^&]+)/.exec(target);
         const owner = decodeURIComponent(ownerMatch[1]);
-        const items = (extras.positions || []).filter(row => row.owner_id === owner);
+        const items = (extras.wallets || []).filter(row => row.owner_id === owner);
         return new Response(JSON.stringify(items), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
+      }
+      if (target === 'https://rpc.example/') {
+        const { method, params } = JSON.parse(options.body);
+        const result = method === 'getGenesisHash' ? SOLANA_GENESIS_HASH
+          : { value: method === 'getBalance' ? (params[0] === ALICE_WALLET ? 1 : 9) : [] };
+        return Response.json({ result });
       }
       if (target.includes('/rest/v1/position_checks?')) {
         assert.match(target, /owner_id=eq\./);
@@ -192,9 +204,9 @@ test('alice and bob each list only their own positions when authorized', async (
   const env = envWithBots(
     [{ id: 'bot_alice', owner_id: 'alice' }, { id: 'bot_bob', owner_id: 'bob' }],
     {
-      positions: [
-        { id: 'pos:a', owner_id: 'alice', bot_id: 'bot_alice', mint: 'So11111111111111111111111111111111111111112', quantity: '1', entry_micro_usdc: '1', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'mainnet-beta', updated_at: 1 },
-        { id: 'pos:b', owner_id: 'bob', bot_id: 'bot_bob', mint: 'So11111111111111111111111111111111111111112', quantity: '9', entry_micro_usdc: '9', realized_micro_usdc: '0', status: 'open', mode: 'paper', cluster: 'mainnet-beta', updated_at: 1 },
+      wallets: [
+        { id: 'w_alice', owner_id: 'alice', address: ALICE_WALLET },
+        { id: 'w_bob', owner_id: 'bob', address: BOB_WALLET },
       ],
     },
   );
@@ -203,14 +215,14 @@ test('alice and bob each list only their own positions when authorized', async (
   }), env);
   assert.equal(alice.status, 200);
   const aliceBody = await alice.json();
-  assert.deepEqual(aliceBody.items.map(row => row.id), ['pos:a']);
+  assert.deepEqual(aliceBody.items.map(row => [row.walletId, row.quantity, row.mode]), [['w_alice', '1', 'onchain']]);
 
   const bob = await worker.fetch(new Request('https://runtime/api/positions', {
     headers: { 'x-owner-id': 'bob' },
   }), env);
   assert.equal(bob.status, 200);
   const bobBody = await bob.json();
-  assert.deepEqual(bobBody.items.map(row => row.id), ['pos:b']);
+  assert.deepEqual(bobBody.items.map(row => [row.walletId, row.quantity, row.mode]), [['w_bob', '9', 'onchain']]);
 });
 
 test('wake/pause/loop require owner and strip smuggled internal position headers', async () => {

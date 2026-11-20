@@ -18,7 +18,7 @@ test('persistPositionCheck refuses bad ids and skips when Supabase is unset', as
   const skipped = await persistPositionCheck({}, {
     ownerId: 'alice',
     botId: 'bot_1',
-    check: { at: 1, flag: 'clear', status: 'checked', unrealizedLossMicroUsd: '0' },
+    check: { paper: false, at: 1, flag: 'clear', status: 'checked', unrealizedLossMicroUsd: '0' },
   });
   assert.equal(skipped.wrote, false);
   assert.equal(skipped.reason, 'unconfigured');
@@ -54,28 +54,25 @@ test('persistPositionCheck stamps verified owner_id and redacts secret keys in d
     ownerId: 'alice',
     botId: 'bot_1',
     check: {
+      paper: false,
       at: 99,
       reason: 'cron-hourly',
       status: 'checked',
       flag: 'within-cap',
-      unrealizedLossMicroUsd: '0',
+      unrealizedLossMicroUsd: null,
       positions: [{ mint: MINT, amount: '1', decimals: 9 }],
       authorization: 'Bearer should-not-land',
     },
-    positions: [{ mint: MINT, amount: '1000', decimals: 9, entryMicroUsd: '10' }],
   });
   assert.equal(result.wrote, true);
-  assert.ok(writes.length >= 2);
+  assert.equal(writes.length, 1);
   const checkWrite = writes.find(row => row.url.includes('position_checks'));
   assert.equal(checkWrite.body.owner_id, 'alice');
   assert.equal(checkWrite.body.bot_id, 'bot_1');
   assert.equal(JSON.stringify(checkWrite.body).includes('service-role-secret'), false);
   assert.equal(JSON.stringify(checkWrite.body.detail).includes('should-not-land'), false);
-  const posWrite = writes.find(row => row.url.includes('paper_positions'));
-  assert.equal(posWrite.body.owner_id, 'alice');
-  assert.equal(posWrite.body.bot_id, 'bot_1');
-  assert.equal(posWrite.body.mode, 'paper');
-  assert.equal(posWrite.body.broadcast, undefined);
+  assert.equal(checkWrite.body.detail.paper, false);
+  assert.equal(checkWrite.body.detail.lossKnown, false);
 });
 
 test('persistPositionCheck refuses when bot is not owned by the claimed owner', async () => {
@@ -92,7 +89,7 @@ test('persistPositionCheck refuses when bot is not owned by the claimed owner', 
   const result = await persistPositionCheck(env, {
     ownerId: 'alice',
     botId: 'bot_bob',
-    check: { at: 1, flag: 'clear', status: 'checked' },
+    check: { paper: false, at: 1, flag: 'clear', status: 'checked' },
   });
   assert.equal(result.wrote, false);
   assert.equal(result.reason, 'owner_mismatch');
