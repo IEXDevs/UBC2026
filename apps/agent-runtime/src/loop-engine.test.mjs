@@ -1451,6 +1451,11 @@ test('a live swap needs the ledger and does not re-sign after signing began', as
   const first = await (await postLoop(again, deps, payload({ goal: TRADING_GOAL }))).json();
   assert.equal(first.run.pauseReason, 'rpc_failed');
   assert.equal(first.run.checkpoints.execute.signing, true);
+  const expired = { ...first.run, paused: false, pauseReason: null, checkpoints: { ...first.run.checkpoints, execute: { ...first.run.checkpoints.execute, status: 'started' } } };
+  await again.put('run', expired);
+  const late = await (await postLoop(again, deps, payload({ goal: TRADING_GOAL, now: proposal.expiresAt }))).json();
+  assert.equal(late.run.pauseReason, 'execute-unconfirmed');
+  assert.equal(late.run.checkpoints.execute.signing, true);
   failing.client.signPreparedSolanaTransfer = async (request) => {
     failing.calls.signed.push(request);
     return { cluster: 'mainnet-beta', signature: 'sig_second' };
