@@ -165,14 +165,24 @@ async function handleSpendRequest(request, env = {}) {
   if (!parsed) return json({ error: 'invalid_spend', signed: false }, 400);
   const swap = parsed.action === 'swap';
   const laso = parsed.action === 'x402';
+  const prepareMove = raw.moveAuthorization === 'prepare';
+  const signedMove = parseSwapAuthorization(raw.moveAuthorization);
+  const browserMove = raw.moveAuthorization !== undefined;
+  if (browserMove && (!['spend', 'pay'].includes(parsed.action) || !parsed.confirmed || !parsed.idempotencyKey
+      || (!prepareMove && !signedMove) || raw.spendAuthorization !== undefined)) {
+    return json({ error: 'invalid_spend_authorization', signed: false }, 400);
+  }
   const browserPayment = parseLasoBrowserPayment(raw.lasoPayment);
   if (raw.lasoPayment !== undefined && (!laso || !parsed.confirmed || !browserPayment
       || browserPayment.phase === 'prepared' || raw.spendAuthorization !== undefined)) {
     return json({ error: 'invalid_laso_payment', signed: false }, 400);
   }
-  const assetTransfer = laso || swap || parsed.asset !== 'USDC';
+  const assetTransfer = browserMove || laso || swap || parsed.asset !== 'USDC';
   const overrideToken = request.headers.get('x-spend-approve-once');
   const approvalKey = supabaseConfig(env)?.key;
+  if (browserMove && (!approvalKey || !desk.ok || desk.via !== 'grant')) {
+    return json({ error: desk.ok ? 'invalid_spend_authorization' : 'desk_locked', signed: false }, 403);
+  }
   const prepareSwap = swap && raw.swapAuthorization === 'prepare';
   const signedSwap = swap ? parseSwapAuthorization(raw.swapAuthorization) : null;
   if (raw.swapAuthorization !== undefined && (!swap || !parsed.confirmed || (!prepareSwap && !signedSwap))) {
@@ -215,6 +225,9 @@ async function handleSpendRequest(request, env = {}) {
   }
 
   const now = Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now();
+  if (signedMove && (signedMove.expiresAt <= now || signedMove.expiresAt > now + SPEND_AUTHORIZATION_TTL_MS)) {
+    return json({ error: 'spend_authorization_expired', signed: false }, 409);
+  }
   if (browserPayment?.phase === 'settle' && (browserPayment.expiresAt <= now
       || browserPayment.expiresAt > now + SPEND_AUTHORIZATION_TTL_MS
       || browserPayment.walletAddress !== context.wallet.address)) {
@@ -302,7 +315,7 @@ async function handleSpendRequest(request, env = {}) {
   if ((laso || usdBudget || (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset))
       && !context.wallet.frozen && !context.bot.frozen) {
     if (!parsed.idempotencyKey && assetTransfer) return json({ error: 'idempotency_key_required', signed: false }, 400);
-    if (!env.ledgerApi?.reserveBudget || !(laso ? (browserPayment ? env.transferClient?.verifyPreparedSolanaX402Payment : env.transferClient?.signPreparedSolanaX402Payment) : env.transferClient?.signPreparedSolanaTransfer)) {
+    if (!env.ledgerApi?.reserveBudget || !(browserMove ? env.transferClient?.broadcastSignedSolana : laso ? (browserPayment ? env.transferClient?.verifyPreparedSolanaX402Payment : env.transferClient?.signPreparedSolanaX402Payment) : env.transferClient?.signPreparedSolanaTransfer)) {
       return json({ error: 'asset_transfer_unavailable', signed: false }, 503);
     }
     try {
@@ -315,7 +328,7 @@ async function handleSpendRequest(request, env = {}) {
         prepared = await prepareApprovedSwap(env, context, parsed, swapOffer);
       } else {
         let decimals;
-        ({ prepared, blockhash, decimals } = await prepareAssetTransfer(env, parsed, context.wallet, recipient, id, ownerAuthorization?.blockhash));
+        ({ prepared, blockhash, decimals } = await prepareAssetTransfer(env, parsed, context.wallet, recipient, id, signedMove?.blockhash ?? ownerAuthorization?.blockhash));
         if (usdBudget) {
           const feeLamports = parsed.asset === 'USDC' ? prepared.maxSolCost : prepared.feeLamports;
           if (!feeLamports) throw new Error('simulation_failed');
@@ -378,6 +391,11 @@ async function handleSpendRequest(request, env = {}) {
     const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
     signSolana = async ({ bot, wallet }) => {
       try {
+        if (browserMove) {
+          const sent = await env.transferClient.broadcastSignedSolana({ signedTransaction: signedMove.signedTransaction });
+          if (sent?.cluster !== SOLANA_CLUSTER || !sent.signature) throw new Error('broadcast_failed');
+          return sent;
+        }
         if (swap) {
           try {
             const sent = await env.transferClient.broadcastSignedSolana({ signedTransaction: signedSwap.signedTransaction });
@@ -406,6 +424,17 @@ async function handleSpendRequest(request, env = {}) {
       }
     };
     beforeSign = async ({ bot, wallet, proposal, policy, approvedOnce }) => {
+      if (browserMove) {
+        const expiresAt = signedMove?.expiresAt ?? Math.min(proposal.expiresAt, now + SPEND_AUTHORIZATION_TTL_MS);
+        const proof = swapAuthorizationProof({ key: approvalKey, ownerId, bot, wallet, id, prepared, blockhash, expiresAt });
+        if (prepareMove) {
+          authorizationChallenge = { transaction: prepared.transaction, walletAddress: wallet.address, blockhash, expiresAt, proof };
+          return { state: 'awaiting-wallet-authorization' };
+        }
+        if (!validSwapSignature(signedMove, proof, prepared.transaction, wallet.address)) {
+          return { state: 'blocked', reason: 'spend_authorization_changed' };
+        }
+      }
       if (browserPayment) {
         const expiresAt = browserPayment.phase === 'settle' ? browserPayment.expiresAt
           : Math.min(proposal.expiresAt, now + SPEND_AUTHORIZATION_TTL_MS);
@@ -514,7 +543,7 @@ async function handleSpendRequest(request, env = {}) {
   }
 
   if (authorizationChallenge && result.reason === 'awaiting-wallet-authorization') {
-    return json({ signed: false, [swap ? 'swapAuthorization' : 'spendAuthorization']: authorizationChallenge });
+    return json({ signed: false, [browserMove ? 'moveAuthorization' : swap ? 'swapAuthorization' : 'spendAuthorization']: authorizationChallenge });
   }
   if (lasoChallenge && result.reason === 'awaiting-wallet-authorization') {
     return json({ signed: false, lasoPayment: lasoChallenge });
