@@ -156,6 +156,11 @@ export default function LiveViewPanel({
       await syncSessions().catch(() => null);
     } catch (caught) {
       const code = caught instanceof Error ? caught.message : 'browser_request_failed';
+      if (code === 'browser_session_expired') {
+        setSession(null);
+        setOpenCount(0);
+        shown.current = null;
+      }
       setError(browserErrorNote(code));
     } finally {
       setBusy(false);

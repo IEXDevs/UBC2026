@@ -10,6 +10,20 @@ function source(path) {
   return readFileSync(join(root, path), 'utf8');
 }
 
+test('Live View expiration clears the selected record, count and viewer before enabling a fresh open', () => {
+  const panel = source('components/LiveViewPanel.js');
+  const block = panel.match(/if \(code === 'browser_session_expired'\) \{([^}]+)\}/)?.[1];
+  assert.ok(block);
+  let session = { id: 'old', frame: { src: 'old-viewer' } };
+  let count = 1;
+  const shown = { current: 'old' };
+  new Function('setSession', 'setOpenCount', 'shown', block)(value => { session = value; }, value => { count = value; }, shown);
+  assert.equal(session, null);
+  assert.equal(count, 0);
+  assert.equal(shown.current, null);
+  assert.match(panel, /disabled=\{!ready \|\| busy \|\| Boolean\(sessionRecordId\)\}/);
+});
+
 /**
  * Achieves: verifies the right pane mirrors the active agent and keeps a computer + files stack,
  * while the full browser controls stay in the computer sheet.
