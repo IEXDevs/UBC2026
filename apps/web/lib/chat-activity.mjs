@@ -2,6 +2,7 @@
  * Public chat trace for a tool round. Titles, hosts, and queries only.
  * Live View URLs and raw tool payloads stay out.
  */
+import { parsePrivySigningFailure } from '@ubc2026/contracts';
 
 const LABELS = Object.freeze({
   web_search: 'Searched the web',
@@ -57,6 +58,12 @@ const SPEND_SIGN_MESSAGES = new Map([
   ['wallet_owner_session_required', 'Sign in again as the wallet owner to authorize the payment.'],
   ['wallet_policy_rejected', 'The Privy wallet policy rejected this payment.'],
   ['wrong_cluster', 'The signing service could not verify the Solana devnet connection.'],
+]);
+const PRIVY_TRANSPORT_MESSAGES = new Map([
+  ['network', 'The Worker could not reach Privy to sign this payment.'],
+  ['timeout', 'The Privy signing request timed out.'],
+  ['redirect', 'Privy redirected the signing request.'],
+  ['invalid-response', 'Privy did not return a readable signed transaction.'],
 ]);
 const SECRET_KEY = /key|token|secret|password|authorization|cookie|seed|phrase/i;
 const SECRET_VALUE = /eyJ[A-Za-z0-9_-]{8,}|live\.browser\.run/i;
@@ -137,8 +144,15 @@ export function spendFailureMessage(result) {
         || (!parsed.reason ? 'The spend request reached the server without an accepted confirmation.' : '');
     case 'blocked':
       return SPEND_BLOCK_MESSAGES.get(parsed.reason) || 'The spend service blocked this payment without a recognized reason.';
-    case 'sign-rejected':
-      return SPEND_SIGN_MESSAGES.get(parsed.reason) || 'The signing step returned no receipt. Check the wallet before trying again.';
+    case 'sign-rejected': {
+      const privy = parsePrivySigningFailure(parsed.privyFailure);
+      const transport = PRIVY_TRANSPORT_MESSAGES.get(privy?.transport);
+      if (transport) return transport;
+      const message = SPEND_SIGN_MESSAGES.get(parsed.reason)
+        || 'The signing step returned no receipt. Check the wallet before trying again.';
+      const details = [privy?.status && `HTTP ${privy.status}`, privy?.code].filter(Boolean).join(', ');
+      return details ? `${message}\nPrivy reported ${details}.` : message;
+    }
     default:
       return '';
   }

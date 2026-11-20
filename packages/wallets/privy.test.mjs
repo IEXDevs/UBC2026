@@ -161,7 +161,7 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
     kem: new DhkemP256HkdfSha256(), kdf: new HkdfSha256(), aead: new Chacha20Poly1305(),
   });
   const sessionKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-  let rejection = 'zero_correct_authorization_signatures';
+  let rejection = { error: { code: 'zero_correct_authorization_signatures' } };
   let exchanged = 0;
   let broadcasts = 0;
   const privy = client({ authorizationKey, fetcher: async (url, init) => {
@@ -195,7 +195,7 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
       };
       const payload = Buffer.from(canonicalizeJson({ version: 1, method: 'POST', url: String(url), body, headers: signedHeaders }));
       const signature = Buffer.from(headers.get('privy-authorization-signature'), 'base64');
-      if (verify('sha256', payload, publicKey, signature)) return Response.json({ code: rejection }, { status: 403 });
+      if (verify('sha256', payload, publicKey, signature)) return Response.json(rejection, { status: 403 });
       assert.equal(verify('sha256', payload, sessionKey.publicKey, signature), true);
       return Response.json({ method: 'signTransaction', data: { signed_transaction: signed.toString('base64'), encoding: 'base64' } });
     }
@@ -217,8 +217,15 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
   assert.equal((await send(token(privyUserId))).signature, txSignature);
   assert.equal(exchanged, 1);
   assert.equal(broadcasts, 1);
-  rejection = 'policy_violation';
+  rejection = { code: 'zero_correct_authorization_signatures', error: { code: 'policy_violation' } };
   await assert.rejects(send(token(privyUserId)), { code: 'wallet_policy_rejected' });
+  rejection = { error: 'provider detail', code: 'insufficient_app_secret_permissions', message: appSecret };
+  await assert.rejects(send(token(privyUserId)), error => {
+    assert.equal(error.code, 'privy_failed');
+    assert.deepEqual(error.privyFailure, { status: 403, code: 'insufficient_app_secret_permissions' });
+    assertNoSecrets(error.message);
+    return true;
+  });
   assert.equal(exchanged, 1);
   assert.equal(broadcasts, 1);
 });

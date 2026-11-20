@@ -4,7 +4,7 @@
  * Signing goes through the Privy devnet client from @ubc2026/wallets.
  * Responses carry a signature and a state, never a key or a signed payload.
  */
-import { parsePermissionedSpendBody } from '@ubc2026/contracts';
+import { parsePermissionedSpendBody, parsePrivySigningFailure } from '@ubc2026/contracts';
 import { mainnetQuoteBlocksSpend, runPermissionedSpend } from '@ubc2026/agent-loop';
 import { buildDevnetAssetTransaction, transferDevnetUsdc } from '@ubc2026/transfers';
 import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
@@ -181,9 +181,17 @@ export async function handleSpend(request, env = {}) {
   const grantOk = desk.ok === true;
   let signDevnet;
   let beforeSign;
+  let privyFailure;
   if (prepared) {
     const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
-    signDevnet = ({ bot, wallet }) => env.transferClient.signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken });
+    signDevnet = async ({ bot, wallet }) => {
+      try {
+        return await env.transferClient.signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken });
+      } catch (error) {
+        privyFailure = parsePrivySigningFailure(error?.privyFailure);
+        throw error;
+      }
+    };
     beforeSign = ({ bot, proposal, policy }) => reserveAssetTransfer(env, { ownerId, bot, proposal, policy, now, idempotencyKey: id });
   } else if (!assetTransfer && grantOk) {
     if (parsed.destination && env.transferClient) signDevnet = async ({ bot, wallet, memo }) => {
@@ -244,6 +252,7 @@ export async function handleSpend(request, env = {}) {
     signed: result.signed === true,
     cluster: 'devnet',
     reason: result.reason || null,
+    ...(privyFailure ? { privyFailure } : {}),
     ...(prepared ? { feeLamports: prepared.feeLamports } : {}),
   };
   if (state === 'desk_locked') body.error = 'desk_locked';

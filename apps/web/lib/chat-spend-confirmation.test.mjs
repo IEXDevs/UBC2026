@@ -90,3 +90,18 @@ test('a signing rejection explains the wallet authorization failure', async () =
   assert.match(reply.text, /Sign in again as the wallet owner/);
   assert.match(reply.activity[0].error, /^sign-rejected\nSign in again/);
 });
+
+test('a rejected signature shows the Privy status and safe code in chat', async () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
+  const invoke = createChatToolInvoker({
+    ownerId, botId, runtimeBase: 'https://runtime.example',
+    fetcher: async () => Response.json({
+      state: 'sign-rejected', reason: 'privy_failed', signed: false,
+      privyFailure: { status: 403, code: 'insufficient_app_secret_permissions', message: 'private diagnostics' },
+    }, { status: 409 }),
+  });
+  const reply = await resumeAssetSpend(hold, context, invoke, 2000);
+  assert.match(reply.text, /Privy reported HTTP 403, insufficient_app_secret_permissions/);
+  assert.match(reply.activity[0].error, /Privy reported HTTP 403, insufficient_app_secret_permissions/);
+  assert.doesNotMatch(JSON.stringify(reply), /private diagnostics/);
+});

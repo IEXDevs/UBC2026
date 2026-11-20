@@ -6,7 +6,7 @@
  * Wallet keys stay in Privy. Signing credentials stay server-side.
  */
 import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
-import { SECRET_GROUPS, requireConfig, validateWallet, ContractError } from '@ubc2026/contracts';
+import { SECRET_GROUPS, requireConfig, validateWallet, ContractError, parsePrivySigningFailure } from '@ubc2026/contracts';
 import {
   WalletError,
   assertSpendAllowed,
@@ -45,6 +45,20 @@ const USER_WALLET_AUTH_ERRORS = new Set([
 const fail = (message, code = 'wallet_error') => {
   throw new WalletError(message, code);
 };
+
+function privySigningFailure(status, body) {
+  const codes = [body?.code, body?.error_code, body?.error?.code, body?.error?.error_code, body?.error];
+  const code = codes.includes('policy_violation')
+    ? 'policy_violation'
+    : codes.find(value => parsePrivySigningFailure({ code: value }));
+  return parsePrivySigningFailure({ status, code });
+}
+
+function failSigning(message, code, diagnostic) {
+  const error = new WalletError(message, code);
+  if (diagnostic) error.privyFailure = diagnostic;
+  throw error;
+}
 
 const HPKE_B64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -527,6 +541,9 @@ export function createPrivyWalletClient({
       });
     } catch (error) {
       const aborted = error?.name === 'AbortError' || error?.name === 'TimeoutError';
+      if (walletRpc) {
+        failSigning('Could not reach the Privy signing API', code, { transport: aborted ? 'timeout' : 'network' });
+      }
       const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
       if (isForbiddenOutboundHeaderError(error)) {
         fail(`${target} request failed (forbidden_header)`, code === 'rpc_failed' ? code : 'worker_origin_forbidden');
@@ -538,23 +555,34 @@ export function createPrivyWalletClient({
     {
       const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
       if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+        if (walletRpc) failSigning('Privy redirected the signing request', code, { transport: 'redirect' });
         fail(`${target} request failed (redirect)`, code);
       }
     }
-    const text = await response.text();
+    let text;
+    try {
+      text = await response.text();
+    } catch (error) {
+      if (walletRpc) {
+        failSigning('Could not read the Privy signing response', code,
+          privySigningFailure(response.status) || { transport: 'invalid-response' });
+      }
+      throw error;
+    }
     let payload = null;
     if (text) {
       try { payload = JSON.parse(text); } catch { payload = null; }
     }
     if (!response.ok) {
       if (walletRpc) {
-        const codes = [payload?.code, payload?.error_code, payload?.error];
-        if (codes.includes('policy_violation')) {
-          fail('Privy wallet policy rejected the transaction', 'wallet_policy_rejected');
+        const diagnostic = privySigningFailure(response.status, payload);
+        if (diagnostic?.code === 'policy_violation') {
+          failSigning('Privy wallet policy rejected the transaction', 'wallet_policy_rejected', diagnostic);
         }
-        if (codes.some(value => USER_WALLET_AUTH_ERRORS.has(value))) {
-          fail('Privy requires wallet authorization', 'wallet_authorization_required');
+        if (USER_WALLET_AUTH_ERRORS.has(diagnostic?.code)) {
+          failSigning('Privy requires wallet authorization', 'wallet_authorization_required', diagnostic);
         }
+        failSigning('Privy refused the signing request', code, diagnostic);
       }
       const detail = safePrivyCode(payload);
       if (code === 'rpc_failed') {
@@ -563,7 +591,10 @@ export function createPrivyWalletClient({
       const step = safePrivyPath(url);
       fail(`Privy ${step} failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
     }
-    if (payload == null) fail(code === 'rpc_failed' ? 'QuickNode devnet RPC failed' : 'Privy request failed', code);
+    if (payload == null) {
+      if (walletRpc) failSigning('Privy returned an unreadable signing response', code, { transport: 'invalid-response' });
+      fail(code === 'rpc_failed' ? 'QuickNode devnet RPC failed' : 'Privy request failed', code);
+    }
     return payload;
   }
 
@@ -742,6 +773,9 @@ export function createPrivyWalletClient({
         body,
         walletRpc: Boolean(userAuthorization),
       }, 'privy_failed');
+      if (userAuthorization && typeof signedBody?.data?.signed_transaction !== 'string') {
+        failSigning('Privy returned no signed transaction', 'privy_failed', { transport: 'invalid-response' });
+      }
       return signedBody?.data?.signed_transaction;
     } catch (error) {
       if (error?.code !== 'wallet_authorization_required') throw error;
@@ -749,7 +783,7 @@ export function createPrivyWalletClient({
       // The local sub check scopes the request. Privy verifies the JWT and
       // enforces wallet ownership and policy during the exchange and signature.
       if (!accessToken || jwtSub(accessToken) !== ownerId) {
-        fail('The wallet owner must sign in again', 'wallet_owner_session_required');
+        failSigning('The wallet owner must sign in again', 'wallet_owner_session_required', error.privyFailure);
       }
       try {
         const { PrivyClient } = await import('@privy-io/node');
@@ -773,10 +807,11 @@ export function createPrivyWalletClient({
         });
         return result.signed_transaction;
       } catch (error) {
-        if (error?.error?.code === 'policy_violation') {
-          fail('Privy wallet policy rejected the transaction', 'wallet_policy_rejected');
+        const diagnostic = privySigningFailure(error?.status, error?.error);
+        if (diagnostic?.code === 'policy_violation') {
+          failSigning('Privy wallet policy rejected the transaction', 'wallet_policy_rejected', diagnostic);
         }
-        fail('Privy could not authorize signing with the owner session', 'wallet_authorization_failed');
+        failSigning('Privy could not authorize signing with the owner session', 'wallet_authorization_failed', diagnostic);
       }
     }
   }
