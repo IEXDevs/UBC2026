@@ -4,6 +4,24 @@ import { createSearch, createScrape, createBrowserProvider, assertPublicHttpUrl,
 
 const reply = value => async () => Response.json(value);
 
+test('session REST 404s expire views and navigation, close on release, but preserve create endpoint errors', async () => {
+  const provider = createBrowserProvider({ accountId: 'test', apiToken: 'test', fetcher: async () => new Response('', { status: 404 }) });
+  await assert.rejects(provider.createSession(), { code: 'browser_endpoint_missing', status: 502 });
+  await assert.rejects(provider.readonlyView('abc'), { code: 'browser_session_expired', status: 410 });
+  await assert.rejects(provider.openTab('abc', 'https://example.com'), { code: 'browser_session_expired', status: 410 });
+  assert.deepEqual(await provider.closeSession('abc'), { status: 'closed' });
+});
+
+test('binding missing-session errors expire views and navigation and allow release', async () => {
+  const gone = async () => { throw new Error('Session abc not found'); };
+  const provider = createBrowserProvider({ binding: {
+    acquire: async () => ({ sessionId: 'abc' }), devtools: { newTarget: gone }, getLiveView: gone, closeSession: gone,
+  } });
+  await assert.rejects(provider.readonlyView('abc', { interactive: true }), { code: 'browser_session_expired', status: 410 });
+  await assert.rejects(provider.openTab('abc', 'https://example.com'), { code: 'browser_session_expired', status: 410 });
+  assert.deepEqual(await provider.closeSession('abc'), { status: 'closed' });
+});
+
 /**
  * Achieves: Search POSTs to Firecrawl with bearer auth and drops javascript: results.
  * Fails when: Wrong URL/method/auth, query not posted, or javascript: URL is returned.

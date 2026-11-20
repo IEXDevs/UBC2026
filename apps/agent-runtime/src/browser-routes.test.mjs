@@ -1,6 +1,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BotStateMachine, createDurableStore } from './bot-do.mjs';
+import { ProviderError } from '@ubc2026/browser-session';
+
+for (const action of ['live-view', 'navigate', 'release']) {
+  test(`expired browser ${action} closes the stored session and frees capacity`, async () => {
+    const { machine, env } = machineWithBrowsers();
+    env.MAX_BROWSER_SESSIONS_PER_BOT = 1;
+    const call = (suffix = '', method = 'POST', body = {}) => machine.handle(new Request(`https://bot/id/bot_1/browser/sessions${suffix}`, {
+      method, headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+      ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
+    }), env);
+    const opened = await (await call()).json();
+    const fail = async () => { throw new ProviderError('browser_session_expired', 410); };
+    const method = action === 'live-view' ? 'readonlyView' : action === 'navigate' ? 'openTab' : 'closeSession';
+    const original = env.browsers[method];
+    env.browsers[method] = fail;
+    const result = await call(`/${opened.sessionRecordId}/${action}`, 'POST', { url: 'https://example.com' });
+    assert.equal(result.status, action === 'release' ? 200 : 410);
+    const body = await result.json();
+    if (action !== 'release') assert.equal(body.error, 'browser_session_expired');
+    else assert.equal(body.status, 'closed');
+    assert.deepEqual((await (await call('', 'GET')).json()).sessions, []);
+    env.browsers[method] = original;
+    const replacement = await (await call()).json();
+    assert.equal(replacement.status, 'open');
+    assert.notEqual(replacement.sessionRecordId, opened.sessionRecordId);
+    assert.notEqual(replacement.reused, true);
+  });
+}
 
 function browsers() {
   const closed = [];

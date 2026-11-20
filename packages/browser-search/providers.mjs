@@ -187,6 +187,10 @@ async function viaBinding(method, work) {
   try { return await work(); }
   catch (error) {
     if (error instanceof ProviderError) throw error;
+    if (method !== 'acquire' && /(?:session\b[^\n]{0,120}\b(?:not found|does not exist|expired|closed)|no such session|unknown session|failed to fetch targets)/i.test(String(error?.message))) {
+      if (method === 'closeSession') return { status: 'closed' };
+      throw new ProviderError('browser_session_expired', 410);
+    }
     console.error(`Browser binding ${method}: ${sanitizedBindingError(error?.name)}: ${sanitizedBindingError(error?.message)}`);
     if (/429|rate limit/i.test(String(error?.message))) throw new ProviderError('provider_rate_limited', 429);
     throw new ProviderError('provider_failed', 502);
@@ -285,6 +289,10 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch, bi
         last = error;
         if (!(error instanceof ProviderError) || error.code !== 'browser_endpoint_missing') throw error;
       }
+    }
+    if (last?.code === 'browser_endpoint_missing' && path.startsWith('/')) {
+      if (method === 'DELETE') return { status: 'closed' };
+      throw new ProviderError('browser_session_expired', 410);
     }
     throw last ?? new ProviderError('browser_endpoint_missing', 502);
   }

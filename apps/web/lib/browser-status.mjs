@@ -27,6 +27,7 @@ export function browserStatusNote({
 export function browserErrorNote(code) {
   const key = typeof code === 'string' ? code.trim() : '';
   if (!key) return 'Browser request failed.';
+  if (key === 'browser_session_expired') return 'That browser session ended. Open a new one.';
   if (key === 'browser_readonly_not_configured') {
     return 'Read-only Live View requires CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on the Worker. Interactive access has not been enabled.';
   }
