@@ -1390,31 +1390,47 @@ export async function handleApiData(request, env, matched) {
     if (error) return json({ error }, ownerAuthStatus(error));
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
-    const body = await request.json().catch(() => ({}));
-    const freeze = body?.frozen !== false;
+    const raw = await request.text();
+    let body;
+    try {
+      body = raw === '' ? {} : JSON.parse(raw);
+    } catch {
+      return json({ error: 'invalid_freeze_request' }, 400);
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+        || ('frozen' in body && typeof body.frozen !== 'boolean')
+        || ('botId' in body && (typeof body.botId !== 'string' || !WALLET_ID.test(body.botId)))) {
+      return json({ error: 'invalid_freeze_request' }, 400);
+    }
+    const { botId, frozen: freeze = true } = body;
+    const filter = botId ? `&id=eq.${encodeURIComponent(botId)}` : '';
     const listed = await supabaseGet(
       env,
-      `bots?owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
+      `bots?owner_id=eq.${encodeURIComponent(ownerId)}&select=id${filter}`,
       fetcher,
     );
     if (listed.status !== 200 || !Array.isArray(listed.rows)) {
       return json({ error: 'freeze_failed' }, 502);
     }
+    const targets = listed.rows.filter(row => row?.id && (!botId || row.id === botId));
+    if (botId && !targets.length) return json({ error: 'bot_not_found' }, 404);
     const rpc = createSupabaseRpc(env, fetcher);
     const fn = freeze ? 'policy_freeze_bot' : 'policy_unfreeze_bot';
     const items = [];
-    try {
-      for (const row of listed.rows) {
-        if (!row?.id) continue;
-        items.push(await rpc(fn, {
+    let failures = 0;
+    for (const row of targets) {
+      try {
+        const item = await rpc(fn, {
           payload: { ownerId, botId: row.id, now: Date.now() },
-        }));
+        });
+        if (item?.botId === row.id && item.frozen === freeze) items.push(item);
+        else failures += 1;
+      } catch {
+        failures += 1;
       }
-    } catch {
-      return json({ error: 'freeze_failed' }, 502);
     }
-    if (items.some(item => item?.state === 'blocked')) {
-      return json({ error: 'freeze_failed', frozen: freeze, items }, 409);
+    if (failures) {
+      return json({ error: 'freeze_failed', frozen: freeze, count: items.length, items }, 502);
     }
     return json({ ok: true, source: 'supabase', frozen: freeze, count: items.length, items });
   }

@@ -24,7 +24,7 @@ import { handleApiData } from './api-data.mjs';
 import { ownerAuthStatus, requestOwner, resolveOwner } from './owner-auth.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
 import { botStub, rememberBotAlert } from './bot-alerts.mjs';
-import { supabaseConfig, supabaseGet } from './supabase-rest.mjs';
+import { createSupabaseRpc, supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 import { corsPreflightResponse, withCors } from './cors.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
@@ -165,6 +165,20 @@ function forwardPrepared(stub, target, request, ownerId, body, raw = false) {
 }
 
 async function forwardBotAction(stub, target, request, ownerId, env, botId, action) {
+  if (request.method === 'POST' && (action === 'pause' || action === 'resume') && supabaseConfig(env)) {
+    // Update the spend policy before changing the checkpoint. The RPC is
+    // idempotent, so a caller can retry if the checkpoint write fails.
+    try {
+      const rpc = createSupabaseRpc(env, env.fetch ?? fetch);
+      const result = await rpc(action === 'pause' ? 'policy_pause_bot' : 'policy_resume_bot', {
+        payload: { ownerId, botId, now: Date.now() },
+      });
+      if (result?.state === 'blocked') return json({ error: result.reason }, 409);
+      if (result?.enabled !== (action === 'resume')) return json({ error: 'agent_control_failed' }, 502);
+    } catch {
+      return json({ error: 'agent_control_failed' }, 502);
+    }
+  }
   if (action === 'loop' && request.method === 'POST') {
     const read = await readLoopPayload(request);
     if (read.kind === 'raw') return forwardPrepared(stub, target, request, ownerId, read.text, true);

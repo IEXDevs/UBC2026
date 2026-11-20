@@ -36,8 +36,14 @@ function envWithBots(rows, extras = {}) {
         },
       }),
     },
-    fetch: async (url) => {
+    fetch: async (url, options) => {
       const target = String(url);
+      if (target.includes('/rpc/policy_pause_bot')) {
+        const { payload } = JSON.parse(options.body);
+        assert.equal(payload.ownerId, 'alice');
+        assert.equal(payload.botId, 'bot_alice');
+        return Response.json({ state: 'paused', enabled: false });
+      }
       if (target.includes('/rest/v1/bots?')) {
         const ownerMatch = /owner_id=eq\.([^&]+)/.exec(target);
         const idMatch = /id=eq\.([^&]+)/.exec(target);
