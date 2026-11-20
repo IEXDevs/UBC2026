@@ -240,8 +240,8 @@ export default function WalletsSheet({
                   previewPortfolio={previewBook}
                   onSend={() => openTransfer('send')}
                   onReceive={() => openTransfer('receive')}
-                  onSwap={(symbol) => {
-                    setSwapMint(tokens.find(token => token.symbol === symbol)?.mint || '');
+                  onSwap={(symbol, mint) => {
+                    setSwapMint(mint || tokens.find(token => token.symbol === symbol)?.mint || '');
                     openTransfer('swap');
                   }}
                 />

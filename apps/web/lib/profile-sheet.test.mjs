@@ -43,6 +43,8 @@ test('profile shows the wallet name and address once', () => {
   for (const component of ['TokenScreen', 'ConnectedPortfolio', 'SendPane', 'ReceivePane', 'JupiterSwap', 'TxnLog', 'TokenPane', 'LinkedLogins', 'PrivyKeyButton']) {
     assert.match(sheet, new RegExp(`<${component}[\\s>]`));
   }
+  assert.match(sheet, /onSwap=\{\(symbol, mint\) => \{\s*setSwapMint\(mint \|\|/);
+  assert.match(readFileSync(new URL('../components/TokenScreen.js', import.meta.url), 'utf8'), /onSwap\?\.\(holding\?\.symbol, selected\)/);
   assert.match(sheet, /className="wallet-overview"/);
   assert.match(sheet, /<summary>Recent activity/);
   assert.match(sheet, /<summary>Wallet settings/);
