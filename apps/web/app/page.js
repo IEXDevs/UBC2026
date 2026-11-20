@@ -983,6 +983,26 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   useEffect(() => {
     setHideWalletError(false);
   }, [walletError]);
+  const requestChatUnlock = useCallback((signal) => {
+    if (!deskLockOnRef.current || signal.aborted || lockIntentRef.current) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const intent = { type: 'chat-spend', resolve: complete };
+      function complete(value) {
+        signal.removeEventListener('abort', cancel);
+        resolve(value);
+      }
+      function cancel() {
+        if (lockIntentRef.current === intent) {
+          lockIntentRef.current = null;
+          setLockOpen(false);
+        }
+        complete(false);
+      }
+      lockIntentRef.current = intent;
+      signal.addEventListener('abort', cancel, { once: true });
+      setLockOpen(true);
+    });
+  }, []);
   const grantDesk = useCallback(() => {
     const until = deskSessionUntil(Date.now());
     unlockUntilRef.current = until;
@@ -994,11 +1014,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     lockIntentRef.current = null;
     if (intent?.type === 'wallet') setWalletsOpen(true);
     if (intent?.type === 'spend' && intent.pending) setPendingSend(intent.pending);
+    if (intent?.type === 'chat-spend') intent.resolve(true);
   }, [ownerId]);
   const dismissLock = useCallback(() => {
     const intent = lockIntentRef.current;
     lockIntentRef.current = null;
     setLockOpen(false);
+    if (intent?.type === 'chat-spend') intent.resolve(false);
     if (intent?.type === 'spend' && intent.pending) {
       appendTalk(intent.pending.botId, {
         id: `${intent.pending.lineId}-send`,
@@ -1378,6 +1400,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     unlockedRef.current = false;
     setUnlocked(false);
     setLockOpen(false);
+    if (lockIntentRef.current?.type === 'chat-spend') lockIntentRef.current.resolve(false);
     lockIntentRef.current = null;
     setWalletsOpen(false);
     setPendingSend(null);
@@ -1421,6 +1444,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     unlockedRef.current = open;
     setUnlocked(open);
     setLockOpen(false);
+    if (lockIntentRef.current?.type === 'chat-spend') lockIntentRef.current.resolve(false);
     lockIntentRef.current = null;
     setPendingSend(null);
   }, [ownerId]);
@@ -1959,6 +1983,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
               }));
             }}
             onConfirm={askSlideConfirm}
+            onDeskUnlock={requestChatUnlock}
             onSpokenConfirm={acceptSpokenConfirm}
             onVoiceLive={setVoiceLive}
             onBindAccess={(handler) => { accessRef.current = handler; }}

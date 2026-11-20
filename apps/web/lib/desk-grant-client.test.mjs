@@ -9,7 +9,44 @@ import {
   openDeskGrant,
   readDeskLockState,
   registerDeskVerifier,
+  submitChatSpend,
 } from './desk-grant-client.mjs';
+
+test('a confirmed spend reuses the same send once after a successful unlock', async () => {
+  let attempts = 0;
+  let prompts = 0;
+  const signal = new AbortController().signal;
+  const rejected = { ok: false, error: 'desk_locked' };
+  const result = await submitChatSpend({
+    signal,
+    send: async () => { attempts++; return rejected; },
+    unlock: async () => { prompts++; return true; },
+  });
+  assert.equal(result, rejected);
+  assert.equal(attempts, 2);
+  assert.equal(prompts, 1);
+});
+
+test('a dismissed or stopped unlock and other spend failures never retry', async () => {
+  for (const scenario of ['dismiss', 'stop', 'sign-rejected']) {
+    let attempts = 0;
+    let prompts = 0;
+    const controller = new AbortController();
+    const rejected = { ok: false, error: scenario === 'sign-rejected' ? scenario : 'desk_locked' };
+    const result = await submitChatSpend({
+      signal: controller.signal,
+      send: async () => { attempts++; return rejected; },
+      unlock: async () => {
+        prompts++;
+        if (scenario === 'stop') { controller.abort(); return true; }
+        return false;
+      },
+    });
+    assert.equal(result.error, { dismiss: 'unlock_cancelled', stop: 'aborted', 'sign-rejected': 'sign-rejected' }[scenario]);
+    assert.equal(attempts, 1);
+    assert.equal(prompts, scenario === 'sign-rejected' ? 0 : 1);
+  }
+});
 
 /**
  * Rigor audit — desk client missing runtime / owner

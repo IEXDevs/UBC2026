@@ -141,6 +141,11 @@ function commandLine(name, args) {
   return parts.join(' ').slice(0, 240);
 }
 
+export function spendFailureCode(result) {
+  const parsed = parseResult(result);
+  return parsed?.error || parsed?.state;
+}
+
 export function spendFailureMessage(result) {
   const parsed = parseResult(result);
   switch (parsed?.error || parsed?.state) {

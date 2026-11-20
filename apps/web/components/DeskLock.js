@@ -214,7 +214,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
         onMouseDown={event => event.stopPropagation()}
       >
         <div className="sheet-head">
-          <h2 id="desk-lock-title">{phraseGate && !replacing ? 'Reset with your seed' : (replacing ? 'Set a new wallet password' : (setting ? 'Set a password' : 'Enter Password'))}</h2>
+          <h2 id="desk-lock-title">{phraseGate && !replacing ? 'Reset with your seed' : (replacing ? 'Set a new wallet password' : (setting ? 'Set a password' : 'Enter wallet password'))}</h2>
           <button type="button" className="icon-btn" aria-label="Close" onClick={() => onClose?.()}>
             <X size={18} strokeWidth={1.75} />
           </button>
@@ -293,7 +293,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           ) : null}
           {note ? <p className="quiet" role="status">{note}</p> : null}
           <button type="submit" className="solid" disabled={record === undefined || pending || (setting && !(phraseGate && !replacing) && (!feedback.ready || !secretAcceptAllowed({ generated, copied })))}>
-            {pending ? 'Checking…' : (phraseGate && !replacing ? 'Check seed' : (replacing ? 'Set password' : (setting ? 'Set password' : 'Unlock')))}
+            {pending ? 'Checking…' : (phraseGate && !replacing ? 'Check seed' : (replacing ? 'Set password' : (setting ? 'Set password' : 'Unlock wallet')))}
           </button>
           {!setting && !phraseGate ? (
             <button

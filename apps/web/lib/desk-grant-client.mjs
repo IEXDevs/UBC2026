@@ -8,6 +8,14 @@ import {
 } from './desk-lock.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
 
+export async function submitChatSpend({ send, unlock, signal }) {
+  const result = await send();
+  if (result?.error !== 'desk_locked' || !unlock || signal.aborted) return result;
+  const unlocked = await unlock(signal);
+  if (signal.aborted) return { ok: false, error: 'aborted' };
+  return unlocked ? send() : { ok: false, error: 'unlock_cancelled' };
+}
+
 function headers(ownerId, token) {
   return {
     'content-type': 'application/json',

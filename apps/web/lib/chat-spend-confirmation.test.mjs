@@ -68,6 +68,20 @@ test('a runtime rejection ends the confirmed turn and shows the reason', async (
   assert.match(reply.activity[0].error, /per-transfer limit/);
 });
 
+test('a locked desk returns an unlock error instead of a missing receipt', async () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
+  for (const code of ['desk_locked', 'desk_lock_required']) {
+    const invoke = createChatToolInvoker({
+      ownerId, botId, runtimeBase: 'https://runtime.example',
+      fetcher: async () => Response.json({ error: code, signed: false }, { status: 403 }),
+    });
+    await assert.rejects(
+      resumeAssetSpend(hold, context, async (...inputs) => JSON.stringify(await invoke(...inputs)), 2000),
+      { code: 'desk_locked', status: 403 },
+    );
+  }
+});
+
 test('a blocked SOL send shows the runtime reason in the reply and the trace', async () => {
   const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
   const invoke = createChatToolInvoker({
