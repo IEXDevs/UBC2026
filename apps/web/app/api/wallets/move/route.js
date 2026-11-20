@@ -59,9 +59,12 @@ export async function POST(request) {
       const user = await client.readLoginUser({ accessToken, ownerId });
       if (user?.id !== ownerId) return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
       const verified = walletsForDeposit(rows, user, ownerId);
+      const signable = verified.filter(wallet => wallet?.spendable
+        && !String(wallet.id).startsWith('client_')
+        && !String(wallet.id).startsWith('linked_'));
       const observed = selectOwnedMoveRecipient(verified.filter(wallet => wallet.spendable === false), body?.from);
-      const from = selectOwnedMoveWallet(wallets, body?.from) || observed;
-      const sent = await sendWalletAsset({ client, ownerId, from, wallets: verified, destination: body.destination, asset: body.asset, amount: body.amount, decimals: body.decimals, phase: body.phase, signedTransaction: body.signedTransaction });
+      const from = selectOwnedMoveWallet(signable, body?.from) || observed;
+      const sent = await sendWalletAsset({ client, ownerId, from, wallets: verified, destination: body.destination, asset: body.asset, amount: body.amount, decimals: body.decimals, phase: body.phase, signedTransaction: body.signedTransaction, accessToken });
       return Response.json(sent, { headers: { 'Cache-Control': 'no-store' } });
     }
     let recipient = selectOwnedMoveRecipient(wallets, body?.to);

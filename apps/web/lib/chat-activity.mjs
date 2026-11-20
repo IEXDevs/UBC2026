@@ -14,6 +14,8 @@ const LABELS = Object.freeze({
   browser_live_view: 'Checked the live view',
   browser_release: 'Released the browser',
   get_price: 'Checked a price',
+  prepare_shopping: 'Shopping API',
+  request_spend: 'Spend API',
   create_loop: 'Started a loop',
   set_loop_cooldown: 'Set the loop cooldown',
   break_loop: 'Broke the loop',
@@ -164,6 +166,54 @@ export function thinkStep(text) {
   return { kind: 'think', text: clean };
 }
 
+function claimLinks(value, key = '', depth = 0, found = []) {
+  if (depth > 5 || found.length >= 2) return found;
+  if (typeof value === 'string' && /claim/i.test(key)) {
+    const page = publicUrl(value);
+    if (page) found.push(page.url);
+    return found;
+  }
+  if (!value || typeof value !== 'object') return found;
+  const entries = Array.isArray(value) ? value.map(item => ['', item]) : Object.entries(value);
+  for (const [childKey, child] of entries) {
+    if (SECRET_KEY.test(childKey)) continue;
+    claimLinks(child, childKey, depth + 1, found);
+  }
+  return found;
+}
+
+/**
+ * Owner-visible line for an API tool result. Claim links and quote fields stay.
+ * Payment headers, secrets, and Live View URLs stay out.
+ */
+export function publicApiSummary(name, result) {
+  const parsed = parseResult(result);
+  if (!parsed || (name !== 'prepare_shopping' && name !== 'request_spend')) return '';
+  if (typeof parsed.signature === 'string' && parsed.signature) return '';
+  const links = [...new Set(claimLinks(parsed))];
+  const title = name === 'prepare_shopping'
+    ? (parsed.provider === 'laso' ? 'Laso API' : 'Shopping API')
+    : 'Spend API';
+  if (links.length > 0) return `${title} returned ${links.join(' ')}`;
+  const payTo = parsed.challenge?.accepted?.payTo || parsed.proposal?.recipient || '';
+  const outflow = parsed.proposal?.outflow || '';
+  const next = parsed.next || parsed.state || '';
+  let hint = clip(parsed.hint, 240);
+  if ((parsed.error === 'simulation_failed' || parsed.state === 'simulation_failed') && !hint) {
+    hint = 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.';
+  }
+  if (typeof parsed.error === 'string' && parsed.error) {
+    return `${title}: ${hint || parsed.error}`;
+  }
+  const bits = [];
+  if (parsed.provider) bits.push(String(parsed.provider));
+  if (parsed.amountUsd != null) bits.push(`$${parsed.amountUsd}`);
+  if (outflow) bits.push(`${outflow} base units`);
+  if (payTo) bits.push(`to ${payTo}`);
+  if (next) bits.push(`next ${next}`);
+  return bits.length > 0 ? `${title}: ${bits.join(', ')}` : '';
+}
+
 function commandLine(name, args) {
   const parts = [name];
   if (!args || typeof args !== 'object' || Array.isArray(args)) return name;
@@ -237,6 +287,8 @@ export function spendFailureMessage(result) {
     case 'approval-needed':
       return SPEND_LIMIT_MESSAGES.get(parsed.reason)
         || (!parsed.reason ? 'The spend request reached the server without an accepted confirmation.' : '');
+    case 'simulation_failed':
+      return 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.';
     case 'blocked':
       return SPEND_BLOCK_MESSAGES.get(parsed.reason) || 'The spend service blocked this payment without a recognized reason.';
     case 'spend_authorization_expired':
@@ -324,11 +376,16 @@ export function toolStep(name, args, result) {
     }
   }
   const detail = tool === 'get_price' ? clip(args?.mint, 48) : '';
+  const output = publicApiSummary(tool, parsed);
+  const label = tool === 'prepare_shopping' && parsed?.provider === 'laso'
+    ? 'Laso API'
+    : (LABELS[tool] || tool.replaceAll('_', ' '));
   return withFailure({
     kind: 'tool',
     name: tool,
-    label: failed ? `${LABELS[tool] || tool.replaceAll('_', ' ')} failed` : (LABELS[tool] || tool.replaceAll('_', ' ')),
+    label: failed ? `${label} failed` : label,
     detail,
+    ...(output ? { output } : {}),
     status,
   }, tool, args, parsed, failed);
 }
@@ -383,11 +440,13 @@ export function sanitizeActivity(value) {
       const label = clip(step.label, 80);
       if (!label) continue;
       const toolStatus = step.status === 'error' ? 'error' : 'done';
+      const output = clip(step.output, 500).replace(SECRET_VALUE, '[hidden]');
       steps.push({
         kind: 'tool',
         name: clip(step.name, 64),
         label,
         detail: clip(step.detail, 80),
+        ...(output ? { output } : {}),
         status: toolStatus,
         ...(toolStatus === 'error' ? failureFields(step) : {}),
       });

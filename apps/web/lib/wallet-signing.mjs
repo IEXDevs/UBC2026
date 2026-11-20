@@ -4,6 +4,15 @@ function fail(code) {
   throw Object.assign(new Error(code), { code });
 }
 
+export function serverSignsWallet(wallet) {
+  if (!wallet || wallet.frozen === true) return false;
+  const id = typeof wallet.id === 'string' ? wallet.id : '';
+  if (!id || id.startsWith('linked_') || id.startsWith('client_')) return false;
+  if (wallet.spendable !== false) return true;
+  const client = wallet.walletClientType || wallet.wallet_client_type || '';
+  return client === 'privy' || client === 'privy-v2';
+}
+
 export function walletConnectionOptions(wallet) {
   return {
     walletChainType: 'solana-only',

@@ -70,6 +70,7 @@ export default function WalletsSheet({
   resolveRecipient = null,
   solanaBalance = null,
   onRetire = null,
+  onWalletCreated = null,
   devPreview = false,
 }) {
   const { mounted, leaving } = usePresence(open);
@@ -354,7 +355,9 @@ export default function WalletsSheet({
             <div className="wallet-fold-body wallet-settings-grid">
               <section aria-label="Manage wallets">
                 <h3>Manage wallets</h3>
-                {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to create or import a wallet.</p>}
+                {signedIn ? (
+                <WalletAdd getAccessToken={getAccessToken} ownerId={ownerId} onCreated={onWalletCreated} />
+              ) : <p className="quiet">Sign in to create or import a wallet.</p>}
                 <WalletRoster
                   rows={rows}
                   handle={handle}
@@ -527,7 +530,7 @@ function ConnectedPortfolio({ open, previewPortfolio = null }) {
   );
 }
 
-export function WalletAdd() {
+export function WalletAdd({ getAccessToken = null, ownerId = '', onCreated = null }) {
   const { createWallet } = useCreateWallet();
   const { importWallet } = useImportWallet();
   const { importSeedPhrase } = useImportSeedPhrase();
@@ -601,19 +604,47 @@ export function WalletAdd() {
             setBusy(true);
             setNote('');
             const count = embeddedSolanaCount(user);
-            const options = embeddedCreateOptions(count);
-            const run = (next) => (next ? createWallet(next) : createWallet());
-            run(options)
-              .then(() => finish('New wallet created. Maelstrom does not store its key.'))
-              .catch(() => {
-                if (count > 0) {
-                  finish('That wallet was not created.');
-                  return null;
-                }
-                return run({ walletIndex: 1 })
-                  .then(() => finish('New wallet created. Maelstrom does not store its key.'))
-                  .catch(() => finish('That wallet was not created.'));
+            const headersFor = (token) => ({
+              'content-type': 'application/json',
+              authorization: `Bearer ${token}`,
+              ...(ownerId ? { 'x-owner-id': ownerId } : {}),
+            });
+            const created = (wallet) => {
+              if (wallet) onCreated?.(wallet);
+              finish('New wallet created. Maelstrom does not store its key.');
+            };
+            (async () => {
+              const token = await getAccessToken?.();
+              if (!token) {
+                finish('Sign in again, then create a wallet.');
+                return;
+              }
+              const headers = headersFor(token);
+              const response = await fetch('/api/wallets/additional', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                  label: `Additional ${count + 1}`,
+                  idempotencyKey: `add${Date.now().toString(36)}`.slice(0, 80),
+                }),
               });
+              const body = await response.json().catch(() => ({}));
+              if (response.ok && body.wallet?.address) {
+                created(body.wallet);
+                return;
+              }
+              if (body.error === 'main_wallet_required') {
+                const provision = await fetch('/api/wallets', { method: 'POST', headers });
+                const made = await provision.json().catch(() => ({}));
+                if (provision.ok && Array.isArray(made.wallets) && made.wallets[0]?.address) {
+                  created(made.wallets);
+                  return;
+                }
+              }
+              const options = embeddedCreateOptions(Math.max(count, 1));
+              await createWallet(options);
+              created(null);
+            })().catch(() => finish('That wallet was not created.'));
           }}
         >
           <Plus size={14} strokeWidth={1.75} aria-hidden="true" />

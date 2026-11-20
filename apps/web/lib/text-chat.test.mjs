@@ -316,6 +316,62 @@ test('completeTextChat runs a tool round then answers', async () => {
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
+test('a Laso card turn shows the API result and does not open a browser', async () => {
+  const seen = [];
+  const heard = [];
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'use x402 to get the laso card',
+    permissionMode: 'full',
+    onMessage: (text) => heard.push(text),
+    tools: [{
+      type: 'function',
+      function: { name: 'prepare_shopping', description: 'Prepare', parameters: { type: 'object' } },
+    }, {
+      type: 'function',
+      function: { name: 'browser_open', description: 'Open', parameters: { type: 'object', properties: { url: { type: 'string' } } } },
+    }],
+    invokeTool: async (name) => {
+      seen.push(name);
+      return {
+        provider: 'laso',
+        amountUsd: 5,
+        next: 'await-owner-mainnet-approval',
+        proposal: { outflow: '5000000', recipient: '3MZVk97x9SeRxbYpc3jhzRfU2fyA3emYutnqfn9kNfYX' },
+        claimUrl: 'https://laso.finance/claim/card-1',
+      };
+    },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      const body = JSON.parse(options.body);
+      round += 1;
+      if (round === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [
+                { id: 'c1', type: 'function', function: { name: 'prepare_shopping', arguments: '{"provider":"laso"}' } },
+                { id: 'c2', type: 'function', function: { name: 'browser_open', arguments: '{"url":"https://laso.finance/get-card"}' } },
+              ],
+            },
+          }],
+        });
+      }
+      assert.equal(body.tools, undefined);
+      return Response.json({
+        choices: [{ finish_reason: 'stop', message: { content: 'The API returned the claim link.' } }],
+      });
+    },
+  });
+  assert.deepEqual(seen, ['prepare_shopping']);
+  assert.match(heard.join('\n'), /https:\/\/laso\.finance\/claim\/card-1/);
+  assert.match(result.messages.join('\n'), /claim\/card-1/);
+  assert.equal(result.activity.some(step => step.label === 'Laso API' && step.output.includes('claim/card-1')), true);
+});
+
 test('a repeated tool and a blocked browser stop the spin and still answer', async () => {
   const seen = [];
   let round = 0;

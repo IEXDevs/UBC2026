@@ -318,6 +318,11 @@ function accountField(account, snake, camel) {
  * until it is on the server wallet stack / delegated. Only wallets with a
  * real server wallet id can be used for acceptLogin provisioning.
  */
+function isPrivyEmbeddedClient(client, connector) {
+  if (client !== 'privy' && client !== 'privy-v2') return false;
+  return connector == null || connector === '' || connector === 'embedded';
+}
+
 function solanaEmbedded(user) {
   const accounts = Array.isArray(user?.linked_accounts)
     ? user.linked_accounts
@@ -328,7 +333,7 @@ function solanaEmbedded(user) {
       const chain = accountField(account, 'chain_type', 'chainType');
       const client = accountField(account, 'wallet_client_type', 'walletClientType');
       const connector = accountField(account, 'connector_type', 'connectorType');
-      return chain === 'solana' && client === 'privy' && connector === 'embedded';
+      return chain === 'solana' && isPrivyEmbeddedClient(client, connector);
     })
     .map(account => {
       const index = accountField(account, 'wallet_index', 'walletIndex');
@@ -511,7 +516,7 @@ function observingWallets(user, ownerId, privyUserId, taken) {
     const connector = accountField(account, 'connector_type', 'connectorType');
     const address = typeof account.address === 'string' ? account.address.trim() : '';
     if ((chain && chain !== 'solana') || !base58.test(address) || taken.has(address)) continue;
-    if (client === 'privy' && connector === 'embedded') continue;
+    if (isPrivyEmbeddedClient(client, connector)) continue;
     taken.add(address);
     out.push({
       ...createAdditionalWallet({
@@ -1173,7 +1178,9 @@ export function createPrivyWalletClient({
       const owner = assertOwnerId(ownerId);
       if (typeof label !== 'string' || !label.trim() || label.length > 64) fail('Additional wallet label is required');
       const user = await loadUser(privyUserId);
-      if (solanaEmbedded(user).length < 1) fail('Create the main Privy wallet before adding another', 'main_wallet_required');
+      const hasMain = solanaEmbedded(user).length > 0
+        || (await listSolanaWallets(privyUserId, { required: false })).length > 0;
+      if (!hasMain) fail('Create the main Privy wallet before adding another', 'main_wallet_required');
       const key = typeof callerKey === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(callerKey)
         ? callerKey
         : idempotencyKey('add', privyUserId, label);
@@ -1391,13 +1398,16 @@ export function createPrivyWalletClient({
       return { cluster: SOLANA_CLUSTER, signature, privyWalletId: walletId };
     },
 
-    async signPreparedOwnerSolana({ ownerId, wallet, prepared } = {}) {
+    async signPreparedOwnerSolana({ ownerId, wallet, prepared, accessToken } = {}) {
       validateWallet(wallet);
       if (wallet.ownerId !== assertOwnerId(ownerId)) fail('Wallet owner must match', 'owner_mismatch');
       if (wallet.frozen || wallet.spendable === false || String(wallet.id).startsWith('linked_')) fail('Wallet cannot sign', 'wallet_frozen');
       if (!simulatedTransfers.delete(prepared)) fail('Transfer simulation is required', 'simulation_required');
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
-      const signed = await signWithPrivy(walletId, prepared.transaction);
+      const ownerSession = typeof accessToken === 'string' && accessToken
+        ? { ownerId, accessToken, walletAddress: wallet.address }
+        : undefined;
+      const signed = await signWithPrivy(walletId, prepared.transaction, ownerSession);
       if (!singleSignerMessage(signed).equals(singleSignerMessage(prepared.transaction))) fail('Signed transfer differs from the simulation', 'transaction_mismatch');
       return { cluster: SOLANA_CLUSTER, signature: await sendSigned(signed, { privy: true }) };
     },

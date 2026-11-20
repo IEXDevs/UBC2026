@@ -41,11 +41,21 @@ export function planWalletMove({ from, to, amount, ownerId, env = {} } = {}) {
   };
 }
 
+function realWalletId(id) {
+  return typeof id === 'string' && id.length >= 10 && !id.startsWith('linked_') && !id.startsWith('client_');
+}
+
 export function selectOwnedMoveWallet(wallets, selection) {
-  if (typeof selection?.id !== 'string' || typeof selection.address !== 'string') return null;
-  const wallet = wallets.find(item => item?.id === selection.id && item.address === selection.address);
+  if (typeof selection?.address !== 'string') return null;
+  const list = Array.isArray(wallets) ? wallets : [];
+  const byId = typeof selection.id === 'string'
+    ? list.find(item => item?.id === selection.id && item.address === selection.address)
+    : null;
+  const wallet = byId?.spendable
+    ? byId
+    : list.find(item => item?.address === selection.address && item.spendable && realWalletId(item.id) && item.id !== selection.id);
   if (!wallet?.spendable) return null;
-  return { ...wallet, privyWalletId: wallet.id };
+  return { ...wallet, privyWalletId: wallet.privyWalletId || wallet.id };
 }
 
 export function selectOwnedMoveRecipient(wallets, selection) {

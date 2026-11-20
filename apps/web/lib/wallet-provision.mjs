@@ -107,7 +107,7 @@ export function embeddedSolanaCount(user) {
     if (typeof chain === 'string' && chain && chain !== 'solana') return false;
     const client = account.walletClientType ?? account.wallet_client_type ?? '';
     const connector = account.connectorType ?? account.connector_type ?? '';
-    return client === 'privy' || connector === 'embedded';
+    return client === 'privy' || client === 'privy-v2' || connector === 'embedded';
   }).length;
 }
 
@@ -118,7 +118,8 @@ export function embeddedSolanaCount(user) {
 export function embeddedCreateOptions(count) {
   const n = Number.isInteger(count) && count > 0 ? count : 0;
   if (n <= 0) return undefined;
-  return { walletIndex: Math.min(n, 20) };
+  // Server-wallet mode rejects walletIndex. createAdditional asks Privy for the next wallet.
+  return { createAdditional: true };
 }
 
 /** Changes when the user links or unlinks a wallet. The positions book refetches on this. */
@@ -149,7 +150,7 @@ export function walletsFromPrivyUser(user, ownerId) {
     const id = typeof idHint === 'string' && idHint.trim()
       ? idHint.trim()
       : `client_${addressText.slice(0, 8)}`;
-    const spendable = client === 'privy';
+    const spendable = client === 'privy' || client === 'privy-v2';
     out.push({
       id,
       ownerId: owner,
@@ -195,16 +196,41 @@ export function walletsFromPrivyUser(user, ownerId) {
  * Server agent wallets stay spendable. Linked external wallets are appended
  * for the portfolio and never replace the agent main wallet.
  */
+function realEmbeddedId(id) {
+  return typeof id === 'string' && !id.startsWith('linked_') && !id.startsWith('client_');
+}
+
 export function mergeObservedWallets(serverWallets, user, ownerId) {
   const server = Array.isArray(serverWallets)
     ? serverWallets.filter(wallet => wallet && typeof wallet.address === 'string' && wallet.address)
     : [];
-  const seen = new Set(server.map(wallet => wallet.address));
-  const observed = walletsFromPrivyUser(user, ownerId).filter(wallet => !seen.has(wallet.address));
-  return [
-    ...server.map(wallet => ({ ...wallet, spendable: wallet.spendable !== false })),
-    ...observed.map(wallet => ({ ...wallet, kind: 'additional' })),
-  ];
+  const observed = walletsFromPrivyUser(user, ownerId);
+  const byAddress = new Map();
+  for (const wallet of server) {
+    byAddress.set(wallet.address, { ...wallet, spendable: wallet.spendable !== false });
+  }
+  for (const wallet of observed) {
+    const current = byAddress.get(wallet.address);
+    if (!current) {
+      byAddress.set(wallet.address, { ...wallet, kind: byAddress.size > 0 ? 'additional' : wallet.kind });
+      continue;
+    }
+    const placeholder = current.spendable === false || String(current.id).startsWith('linked_');
+    if (placeholder && wallet.spendable === true && realEmbeddedId(wallet.id)) {
+      byAddress.set(wallet.address, {
+        ...wallet,
+        kind: current.kind === 'main' ? 'main' : 'additional',
+        label: current.kind === 'main' && current.label ? current.label : wallet.label,
+      });
+    }
+  }
+  const out = [];
+  for (const wallet of [...server, ...observed]) {
+    const chosen = byAddress.get(wallet.address);
+    if (!chosen || out.some(row => row.address === chosen.address)) continue;
+    out.push(chosen);
+  }
+  return out;
 }
 
 export function resolvePrivyAppId(env = {}) {

@@ -30,6 +30,10 @@ test('wallet moves take signing identity and freeze state from stored wallets', 
   assert.deepEqual(selectOwnedMoveWallet([stored], selection), { ...stored, privyWalletId: from.id });
   assert.equal(selectOwnedMoveWallet([stored], { ...selection, address: to.address }), null);
   assert.equal(selectOwnedMoveWallet([{ ...stored, spendable: false }], selection), null);
+  const real = { ...from, id: 'cm5sender1234567890abcd', spendable: true, frozen: false };
+  const picked = selectOwnedMoveWallet([real], { id: `client_${from.address.slice(0, 8)}`, address: from.address });
+  assert.equal(picked.id, real.id);
+  assert.equal(picked.privyWalletId, real.id);
 });
 
 test('connected recipients need no signing identity, but connected sources remain blocked', () => {

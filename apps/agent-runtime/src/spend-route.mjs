@@ -284,7 +284,10 @@ export async function handleSpend(request, env = {}) {
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
       const simulationReason = typeof error?.simulationReason === 'string'
         && /^[a-zA-Z0-9_]{1,100}$/.test(error.simulationReason) ? error.simulationReason : null;
-      return json({ error: code, signed: false, ...(simulationReason ? { simulationReason } : {}) }, 409);
+      const hint = code === 'simulation_failed' && !laso
+        ? 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.'
+        : '';
+      return json({ error: code, ...(hint ? { hint } : {}), signed: false, ...(simulationReason ? { simulationReason } : {}) }, 409);
     }
   }
   const facts = {

@@ -6,7 +6,7 @@ function fail(code) {
   throw Object.assign(new Error(code), { code });
 }
 
-export async function sendWalletAsset({ client, ownerId, from, wallets, destination, asset, amount, decimals, phase, signedTransaction } = {}) {
+export async function sendWalletAsset({ client, ownerId, from, wallets, destination, asset, amount, decimals, phase, signedTransaction, accessToken } = {}) {
   if (!from || from.ownerId !== ownerId) fail('wallet_not_owned');
   if (from.frozen) fail('wallet_frozen');
   if (typeof amount !== 'string' || !/^[1-9][0-9]{0,19}$/.test(amount) || BigInt(amount) > 18446744073709551615n) fail('invalid_amount');
@@ -40,7 +40,7 @@ export async function sendWalletAsset({ client, ownerId, from, wallets, destinat
   if (connected && phase === 'prepare') return { ok: true, transaction, cluster: SOLANA_CLUSTER };
   const sent = connected
     ? await client.broadcastSignedSolana({ signedTransaction })
-    : await client.signPreparedOwnerSolana({ ownerId, wallet: from, prepared });
+    : await client.signPreparedOwnerSolana({ ownerId, wallet: from, prepared, accessToken });
   if (sent?.cluster !== SOLANA_CLUSTER || typeof sent.signature !== 'string') fail('wrong_cluster');
   return { ok: true, signature: sent.signature, address: destination, asset, amount, cluster: SOLANA_CLUSTER };
 }
