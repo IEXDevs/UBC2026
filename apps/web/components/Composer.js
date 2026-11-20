@@ -17,7 +17,7 @@ import PromptBar from './PromptBar';
 import AIProvidersSheet from './AIProvidersSheet';
 import { providerStorage } from '../lib/provider-storage.mjs';
 import { canReleaseChatMessage, modelFreeCommand, needsChatModel } from '../lib/model-free-command.mjs';
-import { isLasoCardRequest, pendingLasoConfirmation } from '../lib/laso-chat.mjs';
+import { cacheSpendConfirmation, isLasoCardRequest, pendingSpendConfirmation } from '../lib/laso-chat.mjs';
 import {
   ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
   selectedModelRequest, visibleModelOptions,
@@ -162,9 +162,9 @@ export default function Composer({
   const [reviewCap, setReviewCap] = useState('');
   const [pendingSwap, setPendingSwap] = useState(null);
   const [lasoClaim, setLasoClaim] = useState(null);
-  const pendingLaso = useRef(null);
+  const pendingSpend = useRef(null);
   useEffect(() => {
-    pendingLaso.current = null;
+    pendingSpend.current = null;
     setLasoClaim(null);
   }, [ownerId, botId]);
 
@@ -600,7 +600,8 @@ export default function Composer({
   function sendMessage(text) {
     const spoken = spokenFrom(text);
     if (!spoken) return false;
-    if (needsChatModel(spoken) && !selectedModelRequest(modelStorage, modelRef.current)) {
+    if (!pendingSpendConfirmation(pendingSpend.current, spoken, { ownerId, botId: botIdRef.current })
+        && needsChatModel(spoken) && !selectedModelRequest(modelStorage, modelRef.current)) {
       pushLine('note', 'Show a model in AI Providers before sending a message.');
       setAIProvidersOpen(true);
       return false;
@@ -692,9 +693,9 @@ export default function Composer({
     }
     if (anchor && result.activity?.length) onPatchLine?.(anchor, { activity: result.activity }, botIdRef.current);
     if (result.hold?.kind === 'modal') {
+      pendingSpend.current = cacheSpendConfirmation(pendingSpend.current, result.hold, { ownerId, botId: botIdRef.current });
       if (result.hold.args?.action === 'x402') {
         setLasoClaim(null);
-        pendingLaso.current = { ownerId, botId: botIdRef.current, hold: result.hold };
       }
       const label = result.reply || result.hold.prompt || result.hold.label;
       if (label && !shown.includes(label)) {
@@ -738,12 +739,12 @@ export default function Composer({
     onThinking?.(true);
     window.clearTimeout(thinkTimer.current);
     try {
-      const pending = pendingLasoConfirmation(pendingLaso.current, spoken, { ownerId, botId: targetId });
+      const pending = pendingSpendConfirmation(pendingSpend.current, spoken, { ownerId, botId: targetId });
       if (!grants?.length && pending) {
         await settleChat({ ok: true, reply: pending.label, hold: pending }, spoken, prior, [], run, [pending.label]);
         return;
       }
-      pendingLaso.current = null;
+      pendingSpend.current = null;
       if (isLasoCardRequest(spoken) || grants?.some(hold => hold.args?.action === 'x402')) setLasoClaim(null);
       // Every turn, including non-model commands and rejected queued messages,
       // must reach the same finally block to release the queue and busy state.

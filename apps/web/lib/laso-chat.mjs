@@ -1,4 +1,4 @@
-import { dollarsToBaseUnits, toolAccessRequest } from './spend-permission.mjs';
+import { dollarsToBaseUnits, needsBoundSpend, toolAccessRequest } from './spend-permission.mjs';
 
 export const isLasoCardRequest = message => /\blaso\b|\b(?:prepaid|reloadable) card\b/i.test(message ?? '');
 
@@ -33,10 +33,23 @@ export function lasoPurchaseHold(args, result) {
   });
 }
 
-export function pendingLasoConfirmation(pending, message, { ownerId, botId }, now = Date.now()) {
-  if (pending?.ownerId !== ownerId || pending?.botId !== botId || pending.hold?.args?.action !== 'x402'
-      || !Number.isSafeInteger(pending.hold.expiresAt) || pending.hold.expiresAt <= now
-      || !/^[0-9a-f]{64}$/.test(pending.hold.proof ?? '')) return null;
+export function cacheSpendConfirmation(pending, hold, context, now = Date.now()) {
+  const next = pending?.hold === hold ? pending : {
+    ownerId: context.ownerId, botId: context.botId, hold,
+    expiresAt: hold?.expiresAt ?? now + 5 * 60 * 1000,
+  };
+  return pendingSpendConfirmation(next, 'yes', context, now) ? next : null;
+}
+
+export function pendingSpendConfirmation(pending, message, { ownerId, botId }, now = Date.now()) {
+  const hold = pending?.hold;
+  const expiresAt = hold?.expiresAt === undefined ? pending?.expiresAt : hold.expiresAt;
+  if (!ownerId || !botId || pending?.ownerId !== ownerId || pending?.botId !== botId
+      || hold?.name !== 'request_spend' || hold.kind !== 'modal' || hold.args?.botId !== botId
+      || !['spend', 'pay', 'swap', 'x402'].includes(hold.args.action ?? 'spend')
+      || !Number.isSafeInteger(expiresAt) || expiresAt <= now
+      || ((needsBoundSpend(hold.name, hold.args) || hold.proof !== undefined)
+        && (!Number.isSafeInteger(hold.expiresAt) || !/^[0-9a-f]{64}$/.test(hold.proof ?? '')))) return null;
   return typeof message === 'string' && /^(?:(?:yes|yeah|yep|ok(?:ay)?|sure|approved?|confirm(?:ed)?|proceed|go ahead|do it)[\s,!.]*)+$/i.test(message.trim())
-    ? pending.hold : null;
+    ? hold : null;
 }
