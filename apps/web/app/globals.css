@@ -399,10 +399,13 @@ button.add-agent:not(:disabled):hover {
   left: 0;
   right: 0;
   bottom: calc(100% + 8px);
-  z-index: 6;
+  z-index: 9;
   display: grid;
   gap: 2px;
   min-width: 196px;
+  max-height: calc(100dvh - 100px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: 16px;

@@ -90,6 +90,8 @@ import { blockCopy } from '../lib/block-copy.mjs';
 import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-preview.mjs';
 import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
+import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
+import { logoutAfterFlush } from '../lib/profile-logout.mjs';
 
 function readAccessToken(getAccessToken) {
   return getPrivyAccessToken(getAccessToken, window.localStorage);
@@ -163,7 +165,7 @@ function AuthedShell() {
   const getAccessToken = useCallback(() => readAccessToken(privyGetAccessToken), [privyGetAccessToken]);
 
   const onLogout = useCallback(async () => {
-    await logout?.();
+    await withPrivyLogout(window, () => logout());
   }, [logout]);
 
   useEffect(() => {
@@ -1381,6 +1383,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     setPendingSend(null);
     finishSlideConfirm(false);
   }, [ownerId, finishSlideConfirm]);
+  const logOut = useCallback(async () => {
+    lockWallet();
+    setProfileOpen(false);
+    try {
+      await logoutAfterFlush(flushAccountState, onLogout);
+    } catch {
+      toast?.('Could not log out. Please try again.');
+    }
+  }, [lockWallet, onLogout, toast]);
   useEffect(() => {
     if (!signedIn || !ownerId) return undefined;
     function onKey(event) {
@@ -1560,6 +1571,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   }
 
   function onAccount(id) {
+    if (id === 'logout') {
+      void logOut();
+      return;
+    }
     setCreateOpen(false);
     setComputerOpen(id === 'computer');
     if (id === 'profile') {
@@ -2154,7 +2169,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         signedIn={signedIn}
         loginDisabled={loginDisabled}
         onLogin={onLogin}
-        onLogout={onLogout}
+        onLogout={logOut}
         onSave={saveProfile}
       />
     </div>
