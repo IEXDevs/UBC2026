@@ -6,11 +6,15 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac, generateKeyPairSync, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GET as getBuild } from '../app/api/build/route.js';
 import { GET as getToken } from '../app/api/token/route.js';
+import { sealAssetSpendHold } from './chat-spend-confirmation.mjs';
+import { toolAccessRequest } from './spend-permission.mjs';
+import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -62,6 +66,7 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
   const signature = 'a'.repeat(88);
   const deskGrant = 'ab'.repeat(32);
   let recipient = { kind: 'handle', handle: 'hi', missing: false, address };
+  let locked = false;
   const sends = [];
   const checks = t.mock.method(globalThis, 'fetch', async (url, init) => {
     const target = new URL(url);
@@ -78,6 +83,7 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     assert.equal(init.headers['x-desk-grant'], deskGrant);
     const payload = JSON.parse(init.body);
     sends.push(payload);
+    if (locked) return Response.json({ error: 'desk_locked', signed: false }, { status: 403 });
     if (payload.destination !== recipient.address) {
       return Response.json({ signed: false, error: 'recipient_address_missing' }, { status: 400 });
     }
@@ -85,23 +91,23 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
   });
 
   const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
-  const chat = async (grants = [], message = 'Could you send 1 SOL to @Hi?') => {
+  const chat = async (grants = [], { stream = true, expectedStatus = 200 } = {}) => {
     const res = await POST(new Request('https://desk.example/api/bots/bot_1/chat', {
       method: 'POST',
       headers: {
-        accept: 'text/event-stream, application/json',
+        accept: stream ? 'text/event-stream, application/json' : 'application/json',
         authorization: 'Bearer test-owner-token',
         'x-owner-id': 'did:privy:alice',
         'x-desk-grant': deskGrant,
       },
-      body: JSON.stringify({ message, permission: 'full', grants }),
+      body: JSON.stringify({ message: 'Could you send 1 SOL to @Hi?', permission: 'full', grants }),
     }), { params: { botId: 'bot_1' } });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, expectedStatus);
     assert.equal(res.headers.get('cache-control'), 'no-store');
     const body = res.headers.get('content-type')?.includes('text/event-stream')
       ? JSON.parse((await res.text()).split('\n').find(line => line.startsWith('data: ')).slice(6))
       : await res.json();
-    assert.equal(body.provider, 'desk');
+    if (!body.error) assert.equal(body.provider, 'desk');
     return body;
   };
   const { hold, toolRounds } = await chat();
@@ -122,11 +128,15 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
   assert.equal(sends[0].destination, address);
 
   recipient = { ...recipient, address };
+  locked = true;
+  assert.deepEqual(await chat([hold]), { error: 'desk_locked' });
+  assert.deepEqual(await chat([hold], { stream: false, expectedStatus: 403 }), { error: 'desk_locked' });
+  locked = false;
   const sent = await chat([hold]);
   assert.equal(sent.toolRounds, 1);
   assert.match(sent.reply, /Sent\./);
   assert.ok(sent.reply.includes(`https://solscan.io/tx/${signature}?cluster=devnet`));
-  assert.deepEqual(sends[1], {
+  assert.deepEqual(sends[3], {
     botId: 'bot_1',
     action: 'spend',
     amount: '1000000000',
@@ -138,11 +148,91 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     permission: 'full',
     reviewCap: '30000000',
   });
+  assert.deepEqual(sends[1], sends[3]);
+  assert.deepEqual(sends[2], sends[3]);
 
   recipient = { kind: 'handle', handle: 'hi', missing: true };
   assert.match((await chat()).reply, /couldn’t find @hi/);
-  assert.equal(checks.mock.callCount(), 4);
-  assert.equal(sends.length, 2);
+  assert.equal(checks.mock.callCount(), 6);
+  assert.equal(sends.length, 4);
+});
+
+test('chat requires a second sealed slide and a verified owner to approve an over-limit SOL send', async (t) => {
+  const config = {
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://runtime.test.example',
+    META_MODEL_API_KEY: 'test-only-chat-key',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-only-runtime-key',
+    PRIVY_APP_ID: 'testprivyapp',
+  };
+  const previous = Object.fromEntries(Object.keys(config).map(key => [key, process.env[key]]));
+  Object.assign(process.env, config);
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const ownerId = 'did:privy:alice';
+  const botId = 'bot_1';
+  const terms = { walletId: 'wallet_1', walletAddress: 'So11111111111111111111111111111111111111112', policyVersion: 1, feeLamports: '5000' };
+  const args = {
+    botId, action: 'spend', amount: '1000000000', asset: 'SOL', handle: 'hi',
+    destination: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  };
+  const initial = sealAssetSpendHold(toolAccessRequest('review', 'request_spend', args), {
+    ownerId, botId, secret: config.META_MODEL_API_KEY,
+  });
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const tokenFor = sub => {
+    const input = `${encode({ alg: 'ES256', kid: 'test-key' })}.${encode({
+      iss: 'privy.io', aud: config.PRIVY_APP_ID, sub, exp: Math.floor(Date.now() / 1000) + 60,
+    })}`;
+    return `${input}.${sign('sha256', Buffer.from(input), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+  };
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const target = new URL(url);
+    if (target.origin === 'https://auth.privy.io') {
+      assert.equal(target.pathname, `/api/v1/apps/${config.PRIVY_APP_ID}/jwks.json`);
+      return Response.json({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'test-key' }] });
+    }
+    assert.equal(target.origin, config.NEXT_PUBLIC_AGENT_RUNTIME_URL);
+    assert.equal(target.pathname, '/api/spend');
+    const spend = parsePermissionedSpendBody(JSON.parse(init.body));
+    const approval = init.headers['x-spend-approve-once'];
+    calls.push({ spend, approval });
+    if (!approval) {
+      return Response.json({ state: 'approval-needed', reason: 'per-transaction', signed: false, approvalTerms: terms }, { status: 409 });
+    }
+    const binding = spendApprovalMessage({ ownerId, spend, terms, expiresAt: initial.expiresAt });
+    assert.equal(approval, `v1.${initial.expiresAt}.${createHmac('sha256', config.SUPABASE_SERVICE_ROLE_KEY).update(binding).digest('hex')}`);
+    return Response.json({ signed: true, cluster: 'devnet', signature: 'a'.repeat(88) });
+  });
+
+  const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
+  const chat = async (hold, token = tokenFor(ownerId)) => {
+    const res = await POST(new Request('https://desk.example/api/bots/bot_1/chat', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'x-owner-id': ownerId, 'x-spend-approve-once': 'client-supplied' },
+      body: JSON.stringify({ message: 'Send 1 SOL to @hi', grants: [hold], permission: 'review' }),
+    }), { params: { botId } });
+    return res.json();
+  };
+  const waiting = await chat(initial);
+  assert.match(waiting.reply, /Approve once: send 1 SOL to @hi.*0.000005 SOL fee/);
+  assert.equal(waiting.hold.idempotencyKey, initial.idempotencyKey);
+  assert.equal(waiting.hold.expiresAt, initial.expiresAt);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].approval, undefined);
+  assert.match((await chat({ ...initial, budgetOverride: terms })).reply, /invalid or expired/);
+  assert.match((await chat({ ...waiting.hold, budgetOverride: { ...terms, feeLamports: '10000' } })).reply, /invalid or expired/);
+  assert.equal((await chat(waiting.hold, tokenFor('did:privy:someone-else'))).error, 'login_required');
+  assert.equal((await chat(waiting.hold, 'invalid-token')).error, 'login_required');
+  assert.equal(calls.length, 1);
+  assert.match((await chat(waiting.hold)).reply, /Sent\./);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].spend, calls[1].spend);
 });
 
 /**

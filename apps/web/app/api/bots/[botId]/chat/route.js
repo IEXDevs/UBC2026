@@ -1,4 +1,8 @@
 import { accessTokenFromRequest } from '../../../../../lib/privy-cookie-session.mjs';
+import { createHmac } from 'node:crypto';
+import { parsePermissionedSpendBody, parseSpendApprovalTerms, spendApprovalMessage } from '@ubc2026/contracts';
+import { verifyPrivyAccessToken } from '../../../../../lib/privy-access-token.mjs';
+import { formatBaseUnits, shortAddress } from '../../../../../lib/money-views.mjs';
 import { readRootEnv } from '../../../../../lib/root-env.mjs';
 import {
   chatToolsInstruction,
@@ -40,6 +44,17 @@ function secretFrom(cfEnv, name) {
   return typeof process.env[name] === 'string' ? process.env[name].trim() : '';
 }
 
+function budgetApprovalReply(hold, gate) {
+  const terms = parseSpendApprovalTerms(gate?.approvalTerms);
+  const { action, asset, handle, destination, amount } = hold.args;
+  if (hold.budgetOverride || action !== 'spend' || asset !== 'SOL'
+    || !handle || !destination || !terms || gate.signed !== false
+    || (gate.error || gate.state) !== 'approval-needed' || gate.reason !== 'per-transaction') return null;
+  const label = `Approve once: send ${formatBaseUnits(amount, 9)} SOL to @${handle} (${shortAddress(destination)}) on Solana devnet plus a ${formatBaseUnits(terms.feeLamports, 9)} SOL fee.`;
+  const prompt = `${label} This overrides the agent’s per-transfer limit and, if needed, its remaining budget for this payment only. The limits won’t change. Slide to approve once.`;
+  return { provider: 'desk', toolRounds: 1, text: prompt, hold: { ...hold, budgetOverride: terms, label, prompt } };
+}
+
 async function chatToolEnv() {
   const cfEnv = await cloudflareWorkerEnv();
   return {
@@ -53,6 +68,8 @@ async function chatToolEnv() {
     QUICKNODE_TESTNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_TESTNET_RPC_URL'),
     JUPITER_API_KEY: secretFrom(cfEnv, 'JUPITER_API_KEY'),
     NEXT_PUBLIC_AGENT_RUNTIME_URL: secretFrom(cfEnv, 'NEXT_PUBLIC_AGENT_RUNTIME_URL'),
+    PRIVY_APP_ID: secretFrom(cfEnv, 'PRIVY_APP_ID') || secretFrom(cfEnv, 'NEXT_PUBLIC_PRIVY_APP_ID'),
+    SUPABASE_SERVICE_ROLE_KEY: secretFrom(cfEnv, 'SUPABASE_SERVICE_ROLE_KEY'),
   };
 }
 
@@ -145,6 +162,27 @@ export async function POST(request, context) {
     ownerId,
     botId,
     secret: metaModelApiKey || openrouterApiKey,
+    ...(env.SUPABASE_SERVICE_ROLE_KEY && env.PRIVY_APP_ID ? {
+      async attestBudgetApproval(hold, terms) {
+        let session;
+        try {
+          session = await verifyPrivyAccessToken(accessToken, {
+            appId: env.PRIVY_APP_ID,
+            fetcher: (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(8000) }),
+          });
+        } catch {
+          throw new TextChatError('login_required', 401);
+        }
+        const spend = parsePermissionedSpendBody({
+          ...hold.args, permission: 'ask', idempotencyKey: hold.idempotencyKey, confirmed: true,
+        });
+        if (session.sub !== ownerId || !spend || spend.botId !== botId) throw new TextChatError('login_required', 401);
+        const expiresAt = hold.expiresAt;
+        const binding = spendApprovalMessage({ ownerId, spend, terms, expiresAt });
+        const mac = createHmac('sha256', env.SUPABASE_SERVICE_ROLE_KEY).update(binding).digest('hex');
+        return `v1.${expiresAt}.${mac}`;
+      },
+    } : {}),
   };
   if (solSend) {
     const proposal = await runSolHandleSend(solSend, { botId, invoke: invokeRaw, spend });
@@ -216,9 +254,20 @@ export async function POST(request, context) {
     },
   };
 
-  function runTurn(onMessage) {
+  async function runTurn(onMessage) {
     if (assetConfirmation) {
-      return resumeAssetSpend(assetConfirmation, approvalContext, turnArgs.invokeTool);
+      let gate;
+      const reply = await resumeAssetSpend(assetConfirmation, approvalContext, async (name, args) => {
+        let approveOnce;
+        if (assetConfirmation.budgetOverride != null) {
+          const terms = parseSpendApprovalTerms(assetConfirmation.budgetOverride);
+          if (!terms || !approvalContext.attestBudgetApproval) return { error: 'invalid_spend_approval' };
+          approveOnce = await approvalContext.attestBudgetApproval(assetConfirmation, terms);
+        }
+        gate = await invokeRaw(name, stampSpendPermission(name, args, spend), { approveOnce });
+        return gate;
+      });
+      return (gate && approvalContext.attestBudgetApproval && budgetApprovalReply(assetConfirmation, gate)) || reply;
     }
     return completeTextChat({ ...turnArgs, onMessage });
   }

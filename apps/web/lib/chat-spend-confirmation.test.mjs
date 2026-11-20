@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { sanitizeActivity } from './chat-activity.mjs';
 import { createChatToolInvoker } from './chat-tools.mjs';
 import { resumeAssetSpend, sealAssetSpendHold } from './chat-spend-confirmation.mjs';
 import { stampSpendPermission } from './harness-run.mjs';
@@ -68,6 +69,20 @@ test('a runtime rejection ends the confirmed turn and shows the reason', async (
   assert.match(reply.activity[0].error, /per-transfer limit/);
 });
 
+test('a locked desk returns an unlock error instead of a missing receipt', async () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
+  for (const code of ['desk_locked', 'desk_lock_required']) {
+    const invoke = createChatToolInvoker({
+      ownerId, botId, runtimeBase: 'https://runtime.example',
+      fetcher: async () => Response.json({ error: code, signed: false }, { status: 403 }),
+    });
+    await assert.rejects(
+      resumeAssetSpend(hold, context, async (...inputs) => JSON.stringify(await invoke(...inputs)), 2000),
+      { code: 'desk_locked', status: 403 },
+    );
+  }
+});
+
 test('a blocked SOL send shows the runtime reason in the reply and the trace', async () => {
   const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
   const invoke = createChatToolInvoker({
@@ -104,4 +119,57 @@ test('a rejected signature shows the Privy status and safe code in chat', async 
   assert.match(reply.text, /Privy reported HTTP 403, insufficient_app_secret_permissions/);
   assert.match(reply.activity[0].error, /Privy reported HTTP 403, insufficient_app_secret_permissions/);
   assert.doesNotMatch(JSON.stringify(reply), /private diagnostics/);
+});
+
+test('a signing 401 includes the read-only result from the signing Worker', async () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
+  const invoke = createChatToolInvoker({
+    ownerId, botId, runtimeBase: 'https://runtime.example',
+    fetcher: async () => Response.json({
+      state: 'sign-rejected', reason: 'privy_failed', signed: false,
+      privyFailure: { status: 401, walletLookupStatus: 200 },
+    }, { status: 409 }),
+  });
+  const reply = await resumeAssetSpend(hold, context, invoke, 2000);
+  assert.match(reply.text, /Privy reported HTTP 401/);
+  assert.match(reply.text, /wallet lookup returned HTTP 200/);
+  assert.match(reply.activity[0].error, /same app credentials could read this wallet/);
+});
+
+test('a failed owner session exchange shows the full provider trace in chat and stored activity', async () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
+  const invoke = createChatToolInvoker({
+    ownerId, botId, runtimeBase: 'https://runtime.example',
+    fetcher: async () => Response.json({
+      state: 'sign-rejected', reason: 'wallet_authorization_failed', signed: false,
+      privyFailure: {
+        status: 400, at: 1700000000000, appSignature: true,
+        requests: [
+          { stage: 'app-sign', status: 401 },
+          { stage: 'wallet-lookup', status: 200, detail: 'wallet-matched' },
+          {
+            stage: 'session-exchange', status: 400, code: 'mfa_required', mfaProof: false,
+            detail: 'mfa-required', requestId: 'req_privy123456', edgeId: '1234567890abcdef-DFW',
+            body: 'private diagnostics',
+          },
+        ],
+        session: { check: 'owner-matched', audience: 'match', issuer: 'match', expiry: 'current' },
+      },
+    }, { status: 409 }),
+  });
+  const reply = await resumeAssetSpend(hold, context, invoke, 2000);
+  for (const output of [reply.text, sanitizeActivity(reply.activity)[0].error]) {
+    assert.match(output, /app signing .* returned HTTP 401/i);
+    assert.match(output, /wallet lookup .* returned HTTP 200/i);
+    assert.match(output, /Owner session key exchange \(POST \/v1\/wallets\/authenticate, HPKE\) returned HTTP 400/);
+    assert.match(output, /mfa_required/);
+    assert.match(output, /MFA proof header absent/);
+    assert.match(output, /Privy request ID req_privy123456/);
+    assert.match(output, /Cloudflare Ray ID 1234567890abcdef-DFW/);
+    assert.match(output, /Worker time 2023-11-14T22:13:20.000Z/);
+    assert.match(output, /Token audience match. Token issuer match. Token expiry current/);
+    assert.match(output, /The Worker did not send an owner-session signing request/);
+    assert.match(output, /stopped before broadcast on Solana devnet/);
+    assert.doesNotMatch(output, /private diagnostics/);
+  }
 });

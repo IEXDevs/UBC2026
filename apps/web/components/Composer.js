@@ -58,6 +58,7 @@ import { voiceConfirmDecision } from '../lib/voice-allow.mjs';
 import { canonicalFileName, displayFileName } from '../lib/file-name.mjs';
 import { rememberSessionFile } from '../lib/file-session.mjs';
 import { readDeskGrant } from '../lib/desk-lock.mjs';
+import { submitChatSpend } from '../lib/desk-grant-client.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -141,6 +142,7 @@ export default function Composer({
   onEditLine = null,
   onPatchLine = null,
   onConfirm = null,
+  onDeskUnlock = null,
   onSpokenConfirm = null,
   onVoiceLive = null,
   onBindAccess = null,
@@ -673,6 +675,7 @@ export default function Composer({
   async function runChat(spoken, prior, grants) {
     const selection = selectedModelRequest(modelStorage, modelRef.current);
     const run = ++runRef.current;
+    const targetId = botIdRef.current;
     const controller = new AbortController();
     abortRef.current = controller;
     sendingRef.current = true;
@@ -688,7 +691,7 @@ export default function Composer({
         setAIProvidersOpen(true);
         return;
       }
-      if (!ownerId || !botIdRef.current) {
+      if (!ownerId || !targetId) {
         if (run === runRef.current) {
           const note = ownerId
             ? 'Pick an agent before chatting.'
@@ -698,45 +701,52 @@ export default function Composer({
         }
         return;
       }
-      let accessToken = '';
-      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
       const shown = [];
       let firstLineId = null;
-      const result = await sendBotChat({
-        ownerId,
-        botId: botIdRef.current,
-        message: spoken,
-        history: prior,
-        name: botName,
-        goal: botGoal,
-        type: botType,
-        permission: permissionRef.current,
-        grants,
-        ...selection,
-        effort: currentEffortId(),
-        shellBots,
-        shellWallets,
-        shellBalanceLabel,
-        fileCatalog: catalogRef.current,
-        connectors: readSharedLinks(),
-        reviewCap: reviewCapRef.current || '',
-        situation: browserSituation(),
-        accessToken,
-        deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
-        signal: controller.signal,
-        onReply: (text) => {
-          if (run !== runRef.current) return;
-          const line = pushLine('agent', text);
-          if (line && !firstLineId) firstLineId = line.id;
-          shown.push(text);
-          const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
-          say(aloud || 'Sent.');
-          if (/solscan\.io\/tx\//.test(text)) {
-            setThinking(false);
-            onThinking?.(false);
-          }
-        },
-      });
+      const send = async () => {
+        let accessToken = '';
+        try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+        if (controller.signal.aborted || targetId !== botIdRef.current) return { ok: false, error: 'aborted' };
+        return sendBotChat({
+          ownerId,
+          botId: targetId,
+          message: spoken,
+          history: prior,
+          name: botName,
+          goal: botGoal,
+          type: botType,
+          permission: permissionRef.current,
+          grants,
+          ...selection,
+          effort: currentEffortId(),
+          shellBots,
+          shellWallets,
+          shellBalanceLabel,
+          fileCatalog: catalogRef.current,
+          connectors: readSharedLinks(),
+          reviewCap: reviewCapRef.current || '',
+          situation: browserSituation(),
+          accessToken,
+          deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
+          signal: controller.signal,
+          onReply: (text) => {
+            if (run !== runRef.current) return;
+            const line = pushLine('agent', text, targetId);
+            if (line && !firstLineId) firstLineId = line.id;
+            shown.push(text);
+            const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+            say(aloud || 'Sent.');
+            if (/solscan\.io\/tx\//.test(text)) {
+              setThinking(false);
+              onThinking?.(false);
+            }
+          },
+        });
+      };
+      const confirmedSpend = grants?.some(hold => hold?.name === 'request_spend' && typeof hold.proof === 'string');
+      const result = confirmedSpend
+        ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal })
+        : await send();
       if (run !== runRef.current || result?.error === 'aborted') return;
       await settleChat(result, spoken, prior, grants, run, shown, firstLineId);
     } catch {
@@ -1316,6 +1326,8 @@ function voiceFailureNote(error) {
 }
 
 function chatFailureNote(code) {
+  if (code === 'desk_locked') return 'The wallet is still locked. Unlock it before trying the payment again.';
+  if (code === 'unlock_cancelled') return 'Wallet unlock was cancelled. The payment was not sent.';
   if (code === 'openrouter_not_configured') {
     return 'Add MODEL_API_KEY=LLM_… (Meta Model API) to the root .env.local and restart Next.';
   }

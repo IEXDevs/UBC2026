@@ -7,7 +7,7 @@
  */
 import { evaluateTrust } from '@ubc2026/trust-score';
 import { reachConsensus, factsDigest, memoFromDecision } from '@ubc2026/verify-consensus';
-import { evaluateProposal, proposalDigest } from '@ubc2026/bot-policy';
+import { evaluateProposal, proposalDigest, validateApproval } from '@ubc2026/bot-policy';
 import { assertSpendAllowed } from '@ubc2026/wallets';
 
 export class LoopError extends Error {}
@@ -196,6 +196,7 @@ export async function runPermissionedSpend({
   quote = null,
   signDevnet,
   beforeSign,
+  budgetApproval,
 } = {}) {
   const steps = [];
   if (!bot || !wallet || !ledger || !proposal) fail('bot, wallet, ledger, and proposal are required');
@@ -241,7 +242,12 @@ export async function runPermissionedSpend({
 
   steps.push('approval-mode');
   const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed, reviewCap });
-  if (approvalNeeded) {
+  const approvedOnce = approvalNeeded && policy.state === 'over-budget' && confirmed
+    && typeof beforeSign === 'function' && typeof signDevnet === 'function'
+    && validateApproval({
+      bot, proposal, ledger, now, approval: budgetApproval,
+    }).state === 'ready-to-reserve';
+  if (approvalNeeded && !approvedOnce) {
     const capReason = policy.state === 'over-budget'
       ? (policy.violations?.includes('per-transaction')
         ? 'per-transaction'
@@ -271,12 +277,12 @@ export async function runPermissionedSpend({
     steps.push('reserve');
     let reserved;
     try {
-      reserved = await beforeSign({ bot, wallet, ledger, proposal, policy, memo });
+      reserved = await beforeSign({ bot, wallet, ledger, proposal, policy, memo, approvedOnce });
     } catch (error) {
       return { state: 'blocked', reason: error?.code || 'reserve-failed', steps, signed: false };
     }
     const reservedState = reserved?.state;
-    if (reservedState !== 'reserved' && reservedState !== 'ready-to-reserve') {
+    if (reservedState !== 'reserved' && (approvedOnce || reservedState !== 'ready-to-reserve')) {
       return {
         state: 'blocked',
         reason: reserved?.reason || reservedState || 'reserve-blocked',

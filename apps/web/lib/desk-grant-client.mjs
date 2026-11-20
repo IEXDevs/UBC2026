@@ -5,8 +5,17 @@
 import {
   unlockDesk,
   writeDeskGrant,
+  writeDeskLock,
 } from './desk-lock.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
+
+export async function submitChatSpend({ send, unlock, signal }) {
+  const result = await send();
+  if (result?.error !== 'desk_locked' || !unlock || signal.aborted) return result;
+  const unlocked = await unlock(signal);
+  if (signal.aborted) return { ok: false, error: 'aborted' };
+  return unlocked ? send() : { ok: false, error: 'unlock_cancelled' };
+}
 
 function headers(ownerId, token) {
   return {
@@ -44,6 +53,12 @@ export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier
   return { ok: true };
 }
 
+export async function saveDeskVerifier(fetchImpl, { localStorage, ...input }) {
+  const registered = await registerDeskVerifier(fetchImpl, input);
+  if (!registered.ok || registered.exists) return registered;
+  return { ok: writeDeskLock(localStorage, input.ownerId, input.verifier) };
+}
+
 export async function openDeskGrant(fetchImpl, { ownerId, token, password } = {}) {
   const url = shellRuntimeUrl('/api/desk/unlock');
   if (!url || !ownerId || typeof password !== 'string') return { ok: false, error: 'runtime' };
@@ -72,12 +87,15 @@ export async function acceptEnteredPassword({
   record,
   localStorage,
   sessionStorage,
+  shouldAccept = () => true,
 } = {}) {
   if (record) {
     const matches = await unlockDesk(password, record);
     if (!matches) return { ok: false, error: 'wrong_password' };
   }
+  if (!shouldAccept()) return { ok: false, error: 'unlock_cancelled' };
   const opened = await openDeskGrant(fetchImpl, { ownerId, token, password });
+  if (!shouldAccept()) return { ok: false, error: 'unlock_cancelled' };
   if (!opened.ok || !writeDeskGrant(sessionStorage, ownerId, opened.grant, opened.until)) {
     return { ok: false, error: opened.error || 'desk_locked' };
   }

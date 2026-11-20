@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import SecretDraft from './SecretDraft';
 import PasswordFeedback from './PasswordFeedback';
@@ -10,9 +10,8 @@ import {
   passwordProblem,
   readDeskLock,
   writeDeskGrant,
-  writeDeskLock,
 } from '../lib/desk-lock.mjs';
-import { acceptEnteredPassword, openDeskGrant, readDeskLockState, registerDeskVerifier } from '../lib/desk-grant-client.mjs';
+import { acceptEnteredPassword, openDeskGrant, readDeskLockState, saveDeskVerifier } from '../lib/desk-grant-client.mjs';
 import { secretAcceptAllowed } from '../lib/secret-generate.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
 import { PhraseEntry } from './RecoveryCeremony';
@@ -36,6 +35,16 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
   const [phraseGate, setPhraseGate] = useState(false);
   const [slots, setSlots] = useState(() => Array.from({ length: 12 }, () => ''));
   const [seedProof, setSeedProof] = useState('');
+  const active = useRef(false);
+  const unlockInput = useRef(null);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, [ownerId]);
+  const dismiss = useCallback(() => {
+    active.current = false;
+    onClose?.();
+  }, [onClose]);
 
   useEffect(() => {
     let stopped = false;
@@ -64,14 +73,23 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
 
   useEffect(() => {
     function onKey(event) {
-      if (event.key === 'Escape') onClose?.();
+      if (event.key === 'Escape') dismiss();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [dismiss]);
 
   const setting = replacing || (record == null && !serverLocked);
   const feedback = passwordFeedback(password, confirm, passwordProblem(password));
+
+  function clearUnlockPassword() {
+    const input = unlockInput.current;
+    if (!input || input.disabled) return;
+    input.value = '';
+    setPassword('');
+    setNote('');
+    input.focus();
+  }
 
   async function checkSeed() {
     const words = slots.map(word => word.trim().toLowerCase()).filter(Boolean);
@@ -141,32 +159,37 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
     setPending(true);
     try {
       const token = typeof getAccessToken === 'function' ? await getAccessToken() : '';
+      if (!active.current) return;
       if (setting) {
         const created = await createDeskLock(nextPassword);
+        if (!active.current) return;
         if (replacing && !seedProof) {
           setNote('Enter the 12-word seed for this account before setting a new password.');
           setPending(false);
           return;
         }
-        const registered = await registerDeskVerifier(fetch, {
+        const registered = await saveDeskVerifier(fetch, {
+          localStorage: window.localStorage,
           ownerId,
           token,
           verifier: created,
           replace: replacing,
           proof: replacing ? seedProof : '',
         });
+        if (!active.current) return;
         if (registered.exists) {
           setServerLocked(true);
           setNote('This account already has a desk password. Enter that password.');
           setPending(false);
           return;
         }
-        if (!registered.ok || !writeDeskLock(window.localStorage, ownerId, created)) {
+        if (!registered.ok) {
           setNote('The password could not be saved for spends.');
           setPending(false);
           return;
         }
         const opened = await openDeskGrant(fetch, { ownerId, token, password: nextPassword });
+        if (!active.current) return;
         if (!opened.ok || !writeDeskGrant(window.sessionStorage, ownerId, opened.grant, opened.until)) {
           setRecord(created);
           setReplacing(true);
@@ -185,7 +208,9 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           record,
           localStorage: window.localStorage,
           sessionStorage: window.sessionStorage,
+          shouldAccept: () => active.current,
         });
+        if (!active.current) return;
         if (!accepted.ok) {
           setNote(accepted.error === 'wrong_password'
             ? 'Wrong password.'
@@ -205,7 +230,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
   }
 
   return (
-    <div className="backdrop is-center desk-lock no-copy" onMouseDown={() => onClose?.()} onCopy={blockCopy} onCut={blockCopy}>
+    <div className="backdrop is-center desk-lock no-copy" onMouseDown={dismiss} onCopy={blockCopy} onCut={blockCopy}>
       <section
         className="sheet wallet-gate"
         role="dialog"
@@ -214,8 +239,8 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
         onMouseDown={event => event.stopPropagation()}
       >
         <div className="sheet-head">
-          <h2 id="desk-lock-title">{phraseGate && !replacing ? 'Reset with your seed' : (replacing ? 'Set a new wallet password' : (setting ? 'Set a password' : 'Enter Password'))}</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={() => onClose?.()}>
+          <h2 id="desk-lock-title">{phraseGate && !replacing ? 'Reset with your seed' : (replacing ? 'Set a new wallet password' : (setting ? 'Set a password' : 'Enter wallet password'))}</h2>
+          <button type="button" className="icon-btn" aria-label="Close" onClick={dismiss}>
             <X size={18} strokeWidth={1.75} />
           </button>
         </div>
@@ -247,24 +272,36 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
               onCopied={setCopied}
             />
           ) : (
-            <input
-              className="desk-unlock"
-              type="text"
-              name="maelstrom-desk-unlock"
-              aria-label="Password"
-              autoFocus
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              inputMode="text"
-              data-1p-ignore="true"
-              data-lpignore="true"
-              data-form-type="other"
-              value={password}
-              disabled={record === undefined || pending}
-              onChange={event => setPassword(event.target.value)}
-            />
+            <div className="desk-unlock-row">
+              <input
+                ref={unlockInput}
+                className="desk-unlock"
+                type="text"
+                name="maelstrom-desk-unlock"
+                aria-label="Password"
+                autoFocus
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                inputMode="text"
+                data-1p-ignore="true"
+                data-lpignore="true"
+                data-form-type="other"
+                value={password}
+                disabled={record === undefined || pending}
+                onChange={event => setPassword(event.target.value)}
+              />
+              <button
+                type="button"
+                className="ghost"
+                aria-label="Clear password"
+                disabled={record === undefined || pending}
+                onClick={clearUnlockPassword}
+              >
+                Clear
+              </button>
+            </div>
           )}
           {setting ? (
             <PasswordFeedback id="desk-password-rules" state={feedback.problem ? 'error' : (password ? 'ok' : '')}>
@@ -293,8 +330,9 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
           ) : null}
           {note ? <p className="quiet" role="status">{note}</p> : null}
           <button type="submit" className="solid" disabled={record === undefined || pending || (setting && !(phraseGate && !replacing) && (!feedback.ready || !secretAcceptAllowed({ generated, copied })))}>
-            {pending ? 'Checking…' : (phraseGate && !replacing ? 'Check seed' : (replacing ? 'Set password' : (setting ? 'Set password' : 'Unlock')))}
+            {pending ? 'Checking…' : (phraseGate && !replacing ? 'Check seed' : (replacing ? 'Set password' : (setting ? 'Set password' : 'Unlock wallet')))}
           </button>
+          <button type="button" className="quiet" onClick={dismiss}>Cancel</button>
           {!setting && !phraseGate ? (
             <button
               type="button"

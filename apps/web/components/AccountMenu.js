@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { BrainCircuit, ChartColumn, Lock, LogOut, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
+import { BrainCircuit, ChartColumn, Lock, LockOpen, LogOut, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
 import { markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
 import SpecularButton from './SpecularButton';
@@ -18,7 +18,7 @@ const ITEMS = [
   { id: 'computer', label: 'Computer', icon: Monitor },
 ];
 
-export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, holdingsLabel = '', onLogin, onPick }) {
+export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, walletLockAvailable = false, holdingsLabel = '', onLogin, onPick }) {
   const [open, setOpen] = useState(false);
   const [placement, setPlacement] = useState({});
   const rootRef = useRef(null);
@@ -76,10 +76,13 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
     );
   }
 
+  const walletAction = walletUnlocked
+    ? { id: 'lock-wallet', label: 'Lock wallet', icon: Lock }
+    : { id: 'unlock-wallet', label: 'Unlock wallet', icon: LockOpen };
   return (
     <div className={`account-menu${open ? ' is-open' : ''}`} ref={rootRef}>
       <div className="account-pop" style={placement} role="menu" aria-label="Account" inert={open ? undefined : true}>
-        {[...ITEMS, ...(walletUnlocked ? [{ id: 'lock-wallet', label: 'Lock wallet', icon: Lock }] : []), { id: 'logout', label: 'Log out', icon: LogOut }].map((item) => {
+        {[...ITEMS, ...(walletLockAvailable ? [walletAction] : []), { id: 'logout', label: 'Log out', icon: LogOut }].map((item) => {
           const Icon = item.icon;
           return (
             <button

@@ -46,12 +46,56 @@ const fail = (message, code = 'wallet_error') => {
   throw new WalletError(message, code);
 };
 
+function privyErrorCodes(body) {
+  return [body?.code, body?.error_code, body?.error?.code, body?.error?.error_code, body?.error];
+}
+
 function privySigningFailure(status, body) {
-  const codes = [body?.code, body?.error_code, body?.error?.code, body?.error?.error_code, body?.error];
+  const codes = privyErrorCodes(body);
   const code = codes.includes('policy_violation')
     ? 'policy_violation'
     : codes.find(value => parsePrivySigningFailure({ code: value }));
   return parsePrivySigningFailure({ status, code });
+}
+
+function privyResponseDetail(body) {
+  const detail = (typeof body === 'string' ? [body] : [
+    body?.code, body?.error_code, body?.error?.code, body?.error?.error_code,
+    body?.error, body?.message, body?.error?.message,
+  ]).filter(value => typeof value === 'string').map(value => value.slice(0, 512)).join(' ');
+  if (!detail) return undefined;
+  if (/missing_mfa_enrollment|mfa.{0,24}enroll/i.test(detail)) return 'mfa-enrollment-required';
+  if (/mfa_required|mfa.{0,36}(?:required|missing)|(?:required|missing).{0,36}mfa/i.test(detail)) return 'mfa-required';
+  if (/(?:jwt|token).{0,32}expired|expired.{0,32}(?:jwt|token)/i.test(detail)) return 'token-expired';
+  if (/jwt.{0,45}(?:not enabled|not configured|configuration)|(?:enable|configure).{0,36}jwt|jwks/i.test(detail)) return 'jwt-configuration';
+  if (/(?:invalid|malformed|unverifiable).{0,35}(?:jwt|token)|(?:jwt|token).{0,32}(?:invalid|malformed|unverifiable)/i.test(detail)) return 'token-invalid';
+  if (/no.{0,24}wallets|wallets.{0,24}not found/i.test(detail)) return 'no-wallets';
+  if (/(?:invalid|unsupported|missing).{0,35}(?:hpke|recipient.public.key|encryption)|(?:hpke|recipient.public.key|encryption).{0,35}(?:invalid|unsupported|missing)/i.test(detail)) return 'invalid-encryption';
+  if (/\binvalid_data\b/i.test(detail)) return 'invalid-data';
+  return 'provider-detail';
+}
+
+function recordPrivyResponse(attempt, response) {
+  attempt.status = response.status;
+  attempt.requestId = response.headers.get('privy-request-id')
+    || response.headers.get('x-privy-request-id')
+    || response.headers.get('x-request-id')
+    || response.headers.get('request-id');
+  attempt.edgeId = response.headers.get('cf-ray');
+}
+
+function recordPrivyErrorBody(attempt, body) {
+  attempt.code = privySigningFailure(attempt.status, body)?.code
+    || privyErrorCodes(body).find(code => parsePrivySigningFailure({
+      requests: [{ stage: attempt.stage, code }],
+    })?.requests[0].code);
+  attempt.detail = privyResponseDetail(body);
+  attempt.requestId ||= body?.request_id || body?.requestId || body?.error?.request_id;
+}
+
+function privyTransportFailure(error, attempt) {
+  if (error?.name === 'AbortError' || error?.name === 'TimeoutError') return 'timeout';
+  return attempt.status ? 'invalid-response' : 'network';
 }
 
 function failSigning(message, code, diagnostic) {
@@ -322,14 +366,29 @@ function base64UrlToUtf8(value) {
  * use `/users/me` (needs Origin) or an explicit owner id.
  */
 export function readPrivyAccessTokenSub(accessToken) {
+  const payload = readPrivyAccessTokenClaims(accessToken);
+  return typeof payload?.sub === 'string' ? payload.sub.trim() : '';
+}
+
+function readPrivyAccessTokenClaims(accessToken) {
   try {
     const part = String(accessToken).split('.')[1];
-    if (!part) return '';
-    const payload = JSON.parse(base64UrlToUtf8(part));
-    return typeof payload?.sub === 'string' ? payload.sub.trim() : '';
+    return part ? JSON.parse(base64UrlToUtf8(part)) : null;
   } catch {
-    return '';
+    return null;
   }
+}
+
+function ownerSessionChecks(accessToken, ownerId, appId, at) {
+  if (!accessToken) return { check: 'missing' };
+  const claims = readPrivyAccessTokenClaims(accessToken);
+  if (typeof claims?.sub !== 'string' || !claims.sub.trim()) return { check: 'unreadable' };
+  return {
+    check: claims.sub.trim() === ownerId ? 'owner-matched' : 'owner-mismatch',
+    audience: claims.aud == null ? 'missing' : [].concat(claims.aud).includes(appId) ? 'match' : 'mismatch',
+    issuer: claims.iss == null ? 'missing' : claims.iss === 'privy.io' ? 'match' : 'mismatch',
+    expiry: !Number.isFinite(claims.exp) ? 'missing' : claims.exp <= at / 1000 ? 'expired' : 'current',
+  };
 }
 
 function jwtSub(accessToken) {
@@ -526,7 +585,7 @@ export function createPrivyWalletClient({
     return controller.signal;
   }
 
-  async function fetchJson(url, { method, headers, body, walletRpc = false }, code) {
+  async function fetchJson(url, { method, headers, body, signingAttempt }, code) {
     let response;
     try {
       // Cloudflare Workers only allow redirect "follow" | "manual".
@@ -541,7 +600,7 @@ export function createPrivyWalletClient({
       });
     } catch (error) {
       const aborted = error?.name === 'AbortError' || error?.name === 'TimeoutError';
-      if (walletRpc) {
+      if (signingAttempt) {
         failSigning('Could not reach the Privy signing API', code, { transport: aborted ? 'timeout' : 'network' });
       }
       const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
@@ -552,10 +611,11 @@ export function createPrivyWalletClient({
       const cause = aborted ? 'timed out' : safeNetworkCause(error);
       fail(`${target} request ${cause}`, code);
     }
+    if (signingAttempt) recordPrivyResponse(signingAttempt, response);
     {
       const target = code === 'rpc_failed' ? 'QuickNode devnet RPC' : 'Privy';
       if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
-        if (walletRpc) failSigning('Privy redirected the signing request', code, { transport: 'redirect' });
+        if (signingAttempt) failSigning('Privy redirected the signing request', code, { transport: 'redirect' });
         fail(`${target} request failed (redirect)`, code);
       }
     }
@@ -563,9 +623,9 @@ export function createPrivyWalletClient({
     try {
       text = await response.text();
     } catch (error) {
-      if (walletRpc) {
+      if (signingAttempt) {
         failSigning('Could not read the Privy signing response', code,
-          privySigningFailure(response.status) || { transport: 'invalid-response' });
+          { ...privySigningFailure(response.status), transport: 'invalid-response' });
       }
       throw error;
     }
@@ -574,7 +634,8 @@ export function createPrivyWalletClient({
       try { payload = JSON.parse(text); } catch { payload = null; }
     }
     if (!response.ok) {
-      if (walletRpc) {
+      if (signingAttempt) {
+        recordPrivyErrorBody(signingAttempt, payload ?? text);
         const diagnostic = privySigningFailure(response.status, payload);
         if (diagnostic?.code === 'policy_violation') {
           failSigning('Privy wallet policy rejected the transaction', 'wallet_policy_rejected', diagnostic);
@@ -592,7 +653,7 @@ export function createPrivyWalletClient({
       fail(`Privy ${step} failed (${response.status}${detail ? `: ${detail}` : ''})`, code);
     }
     if (payload == null) {
-      if (walletRpc) failSigning('Privy returned an unreadable signing response', code, { transport: 'invalid-response' });
+      if (signingAttempt) failSigning('Privy returned an unreadable signing response', code, { transport: 'invalid-response' });
       fail(code === 'rpc_failed' ? 'QuickNode devnet RPC failed' : 'Privy request failed', code);
     }
     return payload;
@@ -758,6 +819,34 @@ export function createPrivyWalletClient({
     return { cluster: 'devnet' };
   }
 
+  async function checkPrivyWalletAccess(walletId, walletAddress, attempt) {
+    try {
+      const response = await fetcher(`${privyApi}/v1/wallets/${encodeURIComponent(walletId)}`, {
+        method: 'GET',
+        headers: { Authorization: basicAuth(id, secret), 'privy-app-id': id },
+        redirect: 'manual',
+        signal: abortAfter(5000),
+      });
+      recordPrivyResponse(attempt, response);
+      if (response.status === 200) {
+        const wallet = await response.json();
+        const matchesWallet = wallet?.id === walletId
+          && wallet.chain_type === 'solana'
+          && wallet.address === walletAddress;
+        attempt.detail = matchesWallet ? 'wallet-matched' : 'wallet-mismatch';
+        return matchesWallet ? 200 : null;
+      }
+      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+        attempt.transport = 'redirect';
+      }
+      await response.body?.cancel().catch(() => {});
+      return response.status;
+    } catch (error) {
+      attempt.transport = privyTransportFailure(error, attempt);
+      return null;
+    }
+  }
+
   async function signWithPrivy(walletId, transaction, userAuthorization) {
     const unsigned = decodeBase64(transaction, 'Transaction');
     if (unsigned.length > MAX_TX_BYTES) fail('Transaction exceeds the Solana packet limit', 'invalid_transaction');
@@ -766,32 +855,64 @@ export function createPrivyWalletClient({
       method: 'signTransaction',
       params: { transaction, encoding: 'base64' },
     };
+    const appAttempt = userAuthorization ? { stage: 'app-sign' } : undefined;
+    const report = appAttempt ? { at: now(), requests: [appAttempt] } : null;
     try {
+      const headers = privyHeaders({ method: 'POST', url, body });
+      if (report) report.appSignature = Boolean(headers['privy-authorization-signature']);
       const signedBody = await fetchJson(url, {
         method: 'POST',
-        headers: privyHeaders({ method: 'POST', url, body }),
+        headers,
         body,
-        walletRpc: Boolean(userAuthorization),
+        signingAttempt: appAttempt,
       }, 'privy_failed');
       if (userAuthorization && typeof signedBody?.data?.signed_transaction !== 'string') {
+        appAttempt.detail = 'missing-signed-transaction';
         failSigning('Privy returned no signed transaction', 'privy_failed', { transport: 'invalid-response' });
       }
       return signedBody?.data?.signed_transaction;
     } catch (error) {
-      if (error?.code !== 'wallet_authorization_required') throw error;
-      const { ownerId, accessToken } = userAuthorization;
+      if (!userAuthorization) throw error;
+      const { ownerId, accessToken, walletAddress } = userAuthorization;
+      let requiresOwnerAuthorization = error?.code === 'wallet_authorization_required';
+      const diagnostic = error?.privyFailure;
+      if (diagnostic?.transport) appAttempt.transport = diagnostic.transport;
+      if (!diagnostic) appAttempt.detail = 'local-failure';
+      let walletLookupStatus;
+      if (error?.code === 'privy_failed' && diagnostic?.status === 401 && !diagnostic.code) {
+        const lookup = { stage: 'wallet-lookup' };
+        report.requests.push(lookup);
+        walletLookupStatus = await checkPrivyWalletAccess(walletId, walletAddress, lookup);
+        requiresOwnerAuthorization = walletLookupStatus === 200;
+      }
+      if (requiresOwnerAuthorization) report.session = ownerSessionChecks(accessToken, ownerId, id, report.at);
+      error.privyFailure = parsePrivySigningFailure({ ...diagnostic, walletLookupStatus, ...report });
+      if (!requiresOwnerAuthorization) throw error;
       // The local sub check scopes the request. Privy verifies the JWT and
       // enforces wallet ownership and policy during the exchange and signature.
-      if (!accessToken || jwtSub(accessToken) !== ownerId) {
+      if (report.session.check !== 'owner-matched') {
         failSigning('The wallet owner must sign in again', 'wallet_owner_session_required', error.privyFailure);
       }
+      let sessionAttempt;
       try {
         const { PrivyClient } = await import('@privy-io/node');
         const client = new PrivyClient({
           appId: id, appSecret: secret, apiUrl: privyApi,
           fetch: async (url, init) => {
-            const response = await fetcher(url, { ...init, redirect: 'manual' });
+            const exchange = new URL(url).pathname.endsWith('/v1/wallets/authenticate');
+            sessionAttempt = { stage: exchange ? 'session-exchange' : 'owner-sign' };
+            if (exchange) sessionAttempt.mfaProof = new Headers(init.headers).has('privy-mfa-token');
+            report.requests.push(sessionAttempt);
+            let response;
+            try {
+              response = await fetcher(url, { ...init, redirect: 'manual' });
+            } catch (error) {
+              sessionAttempt.transport = privyTransportFailure(error, sessionAttempt);
+              throw error;
+            }
+            recordPrivyResponse(sessionAttempt, response);
             if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+              sessionAttempt.transport = 'redirect';
               fail('Privy redirected the authorization request', 'wallet_authorization_failed');
             }
             return response;
@@ -805,13 +926,26 @@ export function createPrivyWalletClient({
           transaction,
           authorization_context: { user_jwts: [accessToken] },
         });
+        if (typeof result?.signed_transaction !== 'string') {
+          sessionAttempt.detail = 'missing-signed-transaction';
+          sessionAttempt.transport = 'invalid-response';
+          fail('Privy returned no signed transaction', 'wallet_authorization_failed');
+        }
         return result.signed_transaction;
       } catch (error) {
-        const diagnostic = privySigningFailure(error?.status, error?.error);
-        if (diagnostic?.code === 'policy_violation') {
-          failSigning('Privy wallet policy rejected the transaction', 'wallet_policy_rejected', diagnostic);
+        if (!sessionAttempt) {
+          sessionAttempt = { stage: 'session-exchange', detail: 'local-failure' };
+          report.requests.push(sessionAttempt);
+        } else if (error?.status) {
+          recordPrivyErrorBody(sessionAttempt, error.error ?? error.message);
+        } else if (!sessionAttempt.transport) {
+          sessionAttempt.detail = 'local-failure';
         }
-        failSigning('Privy could not authorize signing with the owner session', 'wallet_authorization_failed', diagnostic);
+        const failure = parsePrivySigningFailure({ ...sessionAttempt, ...report });
+        if (failure?.code === 'policy_violation') {
+          failSigning('Privy wallet policy rejected the transaction', 'wallet_policy_rejected', failure);
+        }
+        failSigning('Privy could not authorize signing with the owner session', 'wallet_authorization_failed', failure);
       }
     }
   }
@@ -1021,7 +1155,11 @@ export function createPrivyWalletClient({
       if (!simulatedTransfers.delete(prepared)) fail('Transfer simulation is required', 'simulation_required');
       await assertDevnet();
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
-      const signed = await signWithPrivy(walletId, prepared.transaction, { ownerId: wallet.ownerId, accessToken });
+      const signed = await signWithPrivy(walletId, prepared.transaction, {
+        ownerId: wallet.ownerId,
+        walletAddress: wallet.address,
+        accessToken,
+      });
       if (!singleSignerMessage(signed).equals(singleSignerMessage(prepared.transaction))) {
         fail('Signed transfer differs from the simulation', 'transaction_mismatch');
       }

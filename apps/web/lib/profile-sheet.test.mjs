@@ -26,7 +26,15 @@ test('profile shows the wallet name and address once', () => {
   assert.equal(logins.includes('linkWallet'), false);
   assert.equal(logins.includes('described.wallets'), false);
   const dialog = readFileSync(new URL('../components/CreateBotDialog.js', import.meta.url), 'utf8');
+  assert.match(dialog, /className=\{`sheet create-agent/);
+  assert.match(dialog, /colorsForPicker\(color, true\)/);
+  assert.equal(dialog.includes('More colors'), false);
+  assert.match(dialog, /className="create-limits"/);
   assert.match(dialog, /ariaLabel="Spending asset"/);
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.sheet\.create-agent \{[^}]*padding:\s*24px 24px 22px/);
+  assert.match(css, /\.create-limits \{[^}]*padding:\s*16px 16px 18px/);
+  assert.match(css, /\.create-limits:not\(\[open\]\) > :not\(summary\) \{ display: none; \}/);
   assert.match(dialog, /value: 'USDC'/);
   assert.match(dialog, /value: 'SOL'/);
   assert.equal(dialog.includes('Asset (USDC, SOL, or token mint address)'), false);

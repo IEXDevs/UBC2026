@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { devnetSpendAsset } from '@ubc2026/contracts';
-import { spendFailureMessage, toolStep } from './chat-activity.mjs';
+import { spendFailureCode, spendFailureMessage, toolStep } from './chat-activity.mjs';
 import { matchingToolGrant } from './spend-permission.mjs';
+import { TextChatError } from './text-chat.mjs';
 import { txReceiptFromResult } from './tx-receipt.mjs';
 
 const HOLD_LIFETIME_MS = 5 * 60 * 1000;
@@ -14,12 +15,13 @@ function holdMac(hold, { ownerId, botId, secret }) {
   const args = Object.keys(hold.args).sort().map(key => [key, hold.args[key]]);
   const data = JSON.stringify([
     'maelstrom:chat-spend:v1', ownerId, botId, hold.name, hold.idempotencyKey, hold.expiresAt, args,
+    ...(hold.budgetOverride == null ? [] : [hold.budgetOverride]),
   ]);
   return createHmac('sha256', secret).update(data).digest();
 }
 
 export function sealAssetSpendHold(hold, context, now = Date.now()) {
-  const sealed = { ...hold, expiresAt: now + HOLD_LIFETIME_MS };
+  const sealed = { ...hold, expiresAt: hold.budgetOverride ? hold.expiresAt : now + HOLD_LIFETIME_MS };
   return { ...sealed, proof: holdMac(sealed, context).toString('hex') };
 }
 
@@ -42,6 +44,9 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
   }
 
   const result = await invokeTool(hold.name, hold.args);
+  if (['desk_locked', 'desk_lock_required'].includes(spendFailureCode(result))) {
+    throw new TextChatError('desk_locked', 403);
+  }
   const receipt = txReceiptFromResult(result);
   const step = toolStep(hold.name, hold.args, result);
   const text = receipt?.text || spendFailureMessage(result)

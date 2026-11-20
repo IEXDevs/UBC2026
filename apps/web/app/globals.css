@@ -1765,6 +1765,12 @@ button.add-agent:not(:disabled):hover {
   z-index: 80;
 }
 .backdrop.desk-lock .sheet { pointer-events: auto; }
+.desk-unlock-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
 .desk-unlock,
 .secret-mask {
   -webkit-text-security: disc;
@@ -5418,6 +5424,58 @@ body:has(.backdrop.is-cover) {
 .swatches button.is-on { box-shadow: 0 0 0 2px #1a1a1a, 0 0 0 4px #fff; }
 
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.sheet.create-agent {
+  display: grid;
+  gap: 22px;
+  padding: 24px 24px 22px;
+}
+.create-name { display: grid; gap: 10px; }
+.create-name .bot-name-label,
+.create-name .bot-name { margin: 0; }
+.create-look {
+  display: grid;
+  gap: 18px;
+  justify-items: center;
+}
+.create-look-copy { display: grid; gap: 6px; justify-items: center; }
+.create-look .bot-preview { min-height: 132px; }
+.create-look .bot-look-name,
+.create-look .swatch-name,
+.create-look .swatches { margin: 0; }
+.create-limits {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 16px 16px 18px;
+  border-radius: 16px;
+  background: #141414;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+}
+.create-limits summary {
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.create-limits:not([open]) > :not(summary) { display: none; }
+.create-limits .field { gap: 8px; margin: 0; }
+.create-limits .field input,
+.create-limits .spend-asset .glide-select__trigger {
+  width: 100%;
+  margin: 0;
+  min-height: 44px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: #1c1c1c;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+  color: #f5f5f5;
+  font: inherit;
+  box-sizing: border-box;
+}
+.create-limits .hint { margin: 0; line-height: 1.45; }
+.create-agent .sheet-actions { margin: 0; padding-top: 2px; gap: 10px; }
+.create-agent .sheet-actions .ghost,
+.create-agent .sheet-actions .solid { min-height: 42px; padding: 10px 18px; }
 
 .solid {
   border-radius: 999px;

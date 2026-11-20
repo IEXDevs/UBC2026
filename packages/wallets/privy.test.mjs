@@ -162,15 +162,25 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
   });
   const sessionKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   let rejection = { error: { code: 'zero_correct_authorization_signatures' } };
+  let signingStatus = 403;
+  let exchangeRejection;
+  let ownerRejection;
+  let lookups = 0;
   let exchanged = 0;
   let broadcasts = 0;
   const privy = client({ authorizationKey, fetcher: async (url, init) => {
     const path = new URL(url).pathname;
+    if (init.method === 'GET') {
+      assert.equal(path, `/v1/wallets/${walletId}`);
+      lookups++;
+      return Response.json({ id: walletId, chain_type: 'solana', address });
+    }
     const body = JSON.parse(init.body);
     if (path === '/v1/wallets/authenticate') {
       exchanged++;
       assert.equal(body.user_jwt, token(privyUserId));
       assert.equal(body.encryption_type, 'HPKE');
+      if (exchangeRejection) return exchangeRejection;
       const recipientPublicKey = await crypto.subtle.importKey('spki', Buffer.from(body.recipient_public_key, 'base64'),
         { name: 'ECDH', namedCurve: 'P-256' }, true, []);
       const sessionPkcs8 = sessionKey.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
@@ -195,8 +205,9 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
       };
       const payload = Buffer.from(canonicalizeJson({ version: 1, method: 'POST', url: String(url), body, headers: signedHeaders }));
       const signature = Buffer.from(headers.get('privy-authorization-signature'), 'base64');
-      if (verify('sha256', payload, publicKey, signature)) return Response.json(rejection, { status: 403 });
+      if (verify('sha256', payload, publicKey, signature)) return Response.json(rejection, { status: signingStatus });
       assert.equal(verify('sha256', payload, sessionKey.publicKey, signature), true);
+      if (ownerRejection) return ownerRejection;
       return Response.json({ method: 'signTransaction', data: { signed_transaction: signed.toString('base64'), encoding: 'base64' } });
     }
     if (body.method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
@@ -217,17 +228,127 @@ test('a prepared send uses the wallet owner session only when Privy requires it'
   assert.equal((await send(token(privyUserId))).signature, txSignature);
   assert.equal(exchanged, 1);
   assert.equal(broadcasts, 1);
+  assert.equal(lookups, 0);
+  signingStatus = 401;
+  rejection = { error: 'Unauthorized' };
+  assert.equal((await send(token(privyUserId))).signature, txSignature);
+  assert.equal(lookups, 1);
+  assert.equal(exchanged, 2);
+  assert.equal(broadcasts, 2);
   rejection = { code: 'zero_correct_authorization_signatures', error: { code: 'policy_violation' } };
   await assert.rejects(send(token(privyUserId)), { code: 'wallet_policy_rejected' });
   rejection = { error: 'provider detail', code: 'insufficient_app_secret_permissions', message: appSecret };
   await assert.rejects(send(token(privyUserId)), error => {
     assert.equal(error.code, 'privy_failed');
-    assert.deepEqual(error.privyFailure, { status: 403, code: 'insufficient_app_secret_permissions' });
+    assert.equal(error.privyFailure.status, 401);
+    assert.equal(error.privyFailure.code, 'insufficient_app_secret_permissions');
+    assert.deepEqual(error.privyFailure.requests.map(request => request.stage), ['app-sign']);
     assertNoSecrets(error.message);
     return true;
   });
-  assert.equal(exchanged, 1);
-  assert.equal(broadcasts, 1);
+  assert.equal(lookups, 1);
+  assert.equal(exchanged, 2);
+  assert.equal(broadcasts, 2);
+
+  rejection = { error: 'Unauthorized' };
+  exchangeRejection = Response.json({
+    error: { code: 'mfa_required', message: `MFA required for token ${token(privyUserId)}` },
+  }, {
+    status: 400,
+    headers: { 'x-request-id': 'req_privy123456', 'cf-ray': '1234567890abcdef-DFW' },
+  });
+  await assert.rejects(send(token(privyUserId)), error => {
+    assert.equal(error.code, 'wallet_authorization_failed');
+    assert.equal(error.privyFailure.status, 400);
+    assert.equal(error.privyFailure.appSignature, true);
+    assert.deepEqual(error.privyFailure.session, {
+      check: 'owner-matched', audience: 'missing', issuer: 'missing', expiry: 'missing',
+    });
+    assert.deepEqual(error.privyFailure.requests, [
+      { stage: 'app-sign', status: 401, detail: 'provider-detail' },
+      { stage: 'wallet-lookup', status: 200, detail: 'wallet-matched' },
+      {
+        stage: 'session-exchange', status: 400, code: 'mfa_required', detail: 'mfa-required', requestId: 'req_privy123456',
+        edgeId: '1234567890abcdef-DFW', mfaProof: false,
+      },
+    ]);
+    assert.equal(JSON.stringify(error.privyFailure).includes(token(privyUserId)), false);
+    return true;
+  });
+  exchangeRejection = null;
+  ownerRejection = Response.json({ code: 'invalid_data', request_id: 'req_owner123456', message: appSecret }, { status: 400 });
+  await assert.rejects(send(token(privyUserId)), error => {
+    assert.equal(error.code, 'wallet_authorization_failed');
+    assert.deepEqual(error.privyFailure.requests.slice(2), [
+      { stage: 'session-exchange', status: 200, mfaProof: false },
+      { stage: 'owner-sign', status: 400, code: 'invalid_data', detail: 'invalid-data', requestId: 'req_owner123456' },
+    ]);
+    assertNoSecrets(JSON.stringify(error.privyFailure));
+    return true;
+  });
+  assert.equal(lookups, 3);
+  assert.equal(exchanged, 4);
+  assert.equal(broadcasts, 2);
+});
+
+test('an unexplained signing 401 checks wallet access with the same app credentials', async () => {
+  const bytes = Buffer.alloc(80);
+  bytes[0] = 1;
+  const transaction = bytes.toString('base64');
+  const wallet = { ...createMainWallet({ ownerId: privyUserId, address, id: walletId }), privyWalletId: walletId };
+  const bot = { ...baseBot, ownerId: wallet.ownerId, walletId };
+  const privyCalls = [];
+  let lookupStatus = 200;
+  let returnedWalletId = walletId;
+  let returnedAddress = address;
+  const privy = client({ authorizationKey, fetcher: async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path.startsWith('/v1/wallets/')) {
+      assert.equal(init.headers.Authorization, `Basic ${Buffer.from(`${appId}:${appSecret}`).toString('base64')}`);
+      assert.equal(init.headers['privy-app-id'], appId);
+      privyCalls.push([init.method, path]);
+      if (init.method === 'GET') {
+        assert.equal(init.headers['privy-authorization-signature'], undefined);
+        return Response.json({ id: returnedWalletId, chain_type: 'solana', address: returnedAddress }, { status: lookupStatus });
+      }
+      return Response.json({ error: 'undocumented detail' }, { status: 401 });
+    }
+    const { method } = JSON.parse(init.body);
+    if (method === 'getGenesisHash') return Response.json({ result: DEVNET_GENESIS_HASH });
+    if (method === 'getFeeForMessage') return Response.json({ result: { value: 5000 } });
+    assert.equal(method, 'simulateTransaction', 'the signing rejection must never broadcast');
+    return Response.json({ result: { value: { err: null } } });
+  } });
+
+  const cases = [
+    {
+      status: 200, id: walletId, code: 'wallet_owner_session_required',
+      diagnostic: { status: 401, walletLookupStatus: 200 },
+    },
+    { status: 401, id: walletId, diagnostic: { status: 401, walletLookupStatus: 401 } },
+    { status: 404, id: walletId, diagnostic: { status: 401, walletLookupStatus: 404 } },
+    { status: 200, id: otherWalletId, diagnostic: { status: 401 } },
+    { status: 200, id: walletId, walletAddress: '11111111111111111111111111111111', diagnostic: { status: 401 } },
+  ];
+  for (const { status, id, walletAddress = address, code = 'privy_failed', diagnostic } of cases) {
+    lookupStatus = status;
+    returnedWalletId = id;
+    returnedAddress = walletAddress;
+    const prepared = await privy.prepareDevnetTransfer({ transaction });
+    await assert.rejects(privy.signPreparedDevnetTransfer({ bot, wallet, prepared }), error => {
+      assert.equal(error.code, code);
+      const { status, walletLookupStatus, requests, session } = error.privyFailure;
+      assert.equal(status, diagnostic.status);
+      assert.equal(walletLookupStatus, diagnostic.walletLookupStatus);
+      assert.equal(requests[1].status, lookupStatus);
+      assert.equal(session?.check, code === 'wallet_owner_session_required' ? 'missing' : undefined);
+      return true;
+    });
+  }
+  assert.deepEqual(privyCalls, cases.flatMap(() => [
+    ['POST', `/v1/wallets/${walletId}/rpc`],
+    ['GET', `/v1/wallets/${walletId}`],
+  ]));
 });
 
 /**
