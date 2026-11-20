@@ -14,7 +14,7 @@ Privy wallet assignment helpers for Maelstrom.
 
 Import server Privy helpers from `@ubc2026/wallets/privy` (not the package root). The root export stays browser-safe for bot creation / freeze helpers used by `apps/web`.
 
-`createPrivyWalletClientFromEnv` reads `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, and `SOLANA_RPC_URL`. On mainnet it accepts `QUICKNODE_MAINNET_RPC_URL` when `SOLANA_RPC_URL` is empty. `PRIVY_AUTHORIZATION_KEY` is optional (`wallet-auth:` P-256 key) and is attached only when a user wallet requires an authorization signature. Tests inject `fetcher` and never call Privy or QuickNode. Do not log or commit those values. The Next.js login screen stays in `apps/web`.
+`createPrivyWalletClientFromEnv` reads `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, and the server RPC secret. Mainnet prefers `QUICKNODE_MAINNET_RPC_URL` and falls back to `SOLANA_RPC_URL`. Devnet uses `SOLANA_RPC_URL`. `PRIVY_AUTHORIZATION_KEY` is optional (`wallet-auth:` P-256 key) and is attached only when a user wallet requires an authorization signature. Tests inject `fetcher` and never call Privy or QuickNode. Do not log or commit those values. The Next.js login screen stays in `apps/web`.
 
 ```bash
 npm test -w @ubc2026/wallets

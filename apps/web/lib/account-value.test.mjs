@@ -4,9 +4,9 @@ import { accountValueLabel } from './account-value.mjs';
 import { buildPortfolio, choosePortfolioRpc, SOL_MINT, SOLANA_USDC_MINT } from './portfolio.mjs';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 
-test('the account value uses configured execution balances even when another read endpoint exists', () => {
+test('the account value prefers the QuickNode mainnet RPC', () => {
   const env = { QUICKNODE_MAINNET_RPC_URL: 'https://portfolio.example', SOLANA_RPC_URL: 'https://execution.example' };
-  assert.equal(choosePortfolioRpc(env, SOLANA_CLUSTER).rpcUrl, 'https://execution.example');
+  assert.equal(choosePortfolioRpc(env, SOLANA_CLUSTER).rpcUrl, env.QUICKNODE_MAINNET_RPC_URL);
   assert.equal(choosePortfolioRpc({ QUICKNODE_MAINNET_RPC_URL: env.QUICKNODE_MAINNET_RPC_URL }, SOLANA_CLUSTER).rpcUrl, env.QUICKNODE_MAINNET_RPC_URL);
   assert.equal(choosePortfolioRpc(env).rpcUrl, env.QUICKNODE_MAINNET_RPC_URL);
 });

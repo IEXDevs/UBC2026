@@ -3,11 +3,15 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { configuredSolanaRpc, resolveSolanaConfig, explorerClusterQuery, SOLANA_CONFIG } from './solana.mjs';
 
-test('the existing QuickNode secret works for mainnet only, after the explicit RPC', () => {
-  const alias = { SOLANA_RPC_URL: ' ', QUICKNODE_MAINNET_RPC_URL: ' https://example.invalid/mainnet ' };
-  assert.equal(configuredSolanaRpc(alias, 'mainnet-beta'), 'https://example.invalid/mainnet');
-  assert.equal(configuredSolanaRpc(alias, 'devnet'), '');
-  assert.equal(configuredSolanaRpc({ ...alias, SOLANA_RPC_URL: 'https://example.invalid/explicit' }), 'https://example.invalid/explicit');
+test('mainnet prefers the QuickNode secret and devnet uses its execution RPC', () => {
+  const mainnet = 'https://mainnet.example.invalid';
+  const fallback = 'https://fallback.example.invalid';
+  const env = { SOLANA_RPC_URL: fallback, QUICKNODE_MAINNET_RPC_URL: ` ${mainnet} ` };
+  assert.equal(configuredSolanaRpc(env, 'mainnet-beta'), mainnet);
+  assert.equal(configuredSolanaRpc(env, 'mainnet'), mainnet);
+  assert.equal(configuredSolanaRpc(env, 'devnet'), fallback);
+  assert.equal(configuredSolanaRpc({ QUICKNODE_MAINNET_RPC_URL: mainnet }, 'devnet'), '');
+  assert.equal(configuredSolanaRpc({ ...env, QUICKNODE_MAINNET_RPC_URL: ' ' }, 'mainnet-beta'), fallback);
 });
 
 test('mainnet is the empty/default configuration with canonical chain identifiers', () => {

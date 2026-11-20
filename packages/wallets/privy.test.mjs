@@ -1261,7 +1261,12 @@ test('mainnet-beta reads and owner sweeps stay off the public client surface and
       },
     },
   ]);
-  const reader = client({ fetcher: read.fetcher });
+  const reader = createPrivyWalletClientFromEnv({
+    PRIVY_APP_ID: appId,
+    PRIVY_APP_SECRET: appSecret,
+    QUICKNODE_MAINNET_RPC_URL: rpcUrl,
+    SOLANA_RPC_URL: 'https://fallback.example.invalid',
+  }, { fetcher: read.fetcher });
   const hash = await reader.getSolanaBlockhash();
   assert.equal(hash.cluster, 'mainnet-beta');
   assert.equal(hash.blockhash, blockhash);
