@@ -15,6 +15,7 @@ const PLACE_KEY = 'maelstrom.cardPlaces';
 const DRAG_PX = 7;
 const HOME_Z = 2300;
 const SAFE_GAP = 12;
+const MIN_SAFE = 48;
 
 function readPlaces() {
   try {
@@ -741,11 +742,11 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           area.left = SAFE_GAP;
           area.right = tools.left - box.left - SAFE_GAP;
         }
-        if (area.right - area.left < width / 2) {
+        if (area.right - area.left < MIN_SAFE) {
           area.left = full.left;
           area.right = full.right;
         }
-        if (area.bottom - area.top < height / 3) {
+        if (area.bottom - area.top < MIN_SAFE) {
           area.top = full.top;
           area.bottom = full.bottom;
         }
