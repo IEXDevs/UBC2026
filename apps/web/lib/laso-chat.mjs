@@ -12,6 +12,7 @@ export function requestedLasoAmount(message) {
 }
 
 export function lasoPreparationArgs(args, message) {
+  if (/\blaso\b/i.test(message ?? '')) args = { ...args, provider: 'laso' };
   const amount = requestedLasoAmount(message);
   return args?.provider === 'laso' && amount != null ? { ...args, amountUsd: amount } : args;
 }

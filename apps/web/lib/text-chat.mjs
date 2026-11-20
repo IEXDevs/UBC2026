@@ -483,7 +483,7 @@ export async function completeTextChat({
       messages: spoken.slice(),
       provider: resolved.provider,
       toolRounds,
-      ...(hold ? { hold } : {}),
+      ...(hold && hold.kind !== 'reply' ? { hold } : {}),
       ...(activity.length > 0 ? { activity } : {}),
       ...(usage.total > 0 ? { usage } : {}),
     };
@@ -574,6 +574,12 @@ export async function completeTextChat({
           const step = toolStep(name, args, result);
           if (step && activity.length < 12) activity.push(step);
           return purchase;
+        }
+        if (name === 'prepare_shopping' && args.provider === 'laso') {
+          const prepared = typeof result === 'string' ? parseToolArgs(result) : result;
+          if (!prepared || Object.keys(prepared).length === 0 || prepared.error || prepared.ok === false) {
+            return { kind: 'reply', label: 'I could not prepare the Laso card. The card service or request validation failed. No purchase was submitted. Please try again with an amount from $5 to $1000.' };
+          }
         }
         const receipt = txReceiptFromResult(result);
         if (receipt && !seenSigs.has(receipt.signature)) {

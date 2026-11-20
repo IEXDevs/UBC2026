@@ -797,8 +797,8 @@ export function createChatToolInvoker({
 
 export function serializeToolResult(result) {
   if (result?.provider === 'laso' && result.lasoTicket) {
-    const { provider, amountUsd, proposal, policy, next, lasoTicket, instruction } = result;
-    return clipJson({ lasoTicket, instruction, provider, amountUsd, proposal, policy, next });
+    const { botId, provider, amountUsd, proposal, policy, next, lasoTicket, instruction } = result;
+    return clipJson({ lasoTicket, instruction, botId, provider, amountUsd, proposal, policy, next });
   }
   if (result && typeof result === 'object' && (result.claimUrl || result.auth)) {
     const { claimUrl: _claimUrl, auth: _auth, ...rest } = result;
