@@ -65,6 +65,7 @@ function gateFields(detail) {
   const approvalTerms = parseSpendApprovalTerms(detail.approvalTerms);
   return {
     ...(typeof detail.state === 'string' ? { state: detail.state } : {}),
+    ...(detail.failure ? { failure: detail.failure } : {}),
     ...(steps.length > 0 ? { steps } : {}),
     ...(typeof detail.signed === 'boolean' ? { signed: detail.signed } : {}),
     ...(typeof detail.reason === 'string' ? { reason: detail.reason } : {}),
