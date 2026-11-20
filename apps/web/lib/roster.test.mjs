@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DEFAULT_TRANSFER_CAP,
   LEGACY_LOOKS_KEY,
   LEGACY_ROSTER_KEY,
   adoptLegacyRoster,
   draftBot,
   draftTransferCap,
+  isTransferLimit,
   looksStorageKey,
   mergeRoster,
   readLooks,
@@ -17,6 +19,18 @@ import {
   writeLooks,
   writeRoster,
 } from './roster.mjs';
+import { formatBaseUnits } from './money-views.mjs';
+
+test('spending limits store exact base units and show the respective asset value', () => {
+  const sol = draftTransferCap('SOL', '1000000000', '1');
+  assert.equal(formatBaseUnits(sol.maxOutflow, 9), '1');
+  assert.equal(formatBaseUnits(sol.maxPerTransaction, 9), '0.000000001');
+  assert.equal(formatBaseUnits(DEFAULT_TRANSFER_CAP.maxOutflow), '1');
+  assert.equal(formatBaseUnits(DEFAULT_TRANSFER_CAP.maxPerTransaction), '1');
+  assert.equal(draftTransferCap('USDC', '0', '1'), null);
+  assert.equal(isTransferLimit('1.5'), false);
+  assert.equal(isTransferLimit('1'.repeat(41)), false);
+});
 
 test('the roster keeps the full token mint and its base-unit caps after a reload', () => {
   const store = memoryStorage();

@@ -90,7 +90,10 @@ export default function ProfileSheet({
       setEditingName(false);
       setClaiming(false);
       setNote(saved.photoSync === 'pending' ? 'Profile saved. Photo saved on this device; account sync is pending.' : 'Profile saved.');
-    } catch (error) { setNote(profileSaveNote(error)); }
+    } catch (error) {
+      if (claiming && error?.code === 'handle_taken') setAvailability({ handle: typedHandle, verdict: 'taken' });
+      setNote(profileSaveNote(error));
+    }
     finally { setSaving(false); }
   }
 

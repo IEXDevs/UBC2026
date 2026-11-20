@@ -39,7 +39,6 @@ export default function LinkedLogins() {
 
   return (
     <div className="linked-logins">
-      <h2 className="linked-logins-title">Sign-in</h2>
       <p className="quiet">Email, Google, GitHub, and Discord sign into this same account.</p>
       {linked.length ? (
         <ul className="profile-wallets">

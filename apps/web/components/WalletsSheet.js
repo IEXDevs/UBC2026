@@ -42,13 +42,18 @@ import { previewPortfolioFor } from '../lib/dev-preview.mjs';
 
 const PANES = [
   { id: 'assets', label: 'Assets' },
+  { id: 'signin', label: 'Sign-in' },
   { id: 'portfolio', label: 'Portfolio' },
+  { id: 'transfer', label: 'Transfer' },
+  { id: 'history', label: 'History' },
+  { id: 'keys', label: 'Keys' },
+];
+
+const TRANSFER = [
   { id: 'send', label: 'Send' },
   { id: 'receive', label: 'Receive' },
   { id: 'swap', label: 'Swap' },
   { id: 'tokens', label: 'Tokens' },
-  { id: 'history', label: 'History' },
-  { id: 'keys', label: 'Keys' },
 ];
 
 export default function WalletsSheet({
@@ -73,6 +78,7 @@ export default function WalletsSheet({
 }) {
   const { mounted, leaving } = usePresence(open);
   const [pane, setPane] = useState('assets');
+  const [transfer, setTransfer] = useState('send');
   const [walletId, setWalletId] = useState('');
   const [prefs, setPrefs] = useState(emptyTokenPrefs);
   const [retiring, setRetiring] = useState('');
@@ -116,6 +122,11 @@ export default function WalletsSheet({
     if (key) accountStorage.setItem(key, JSON.stringify(clean));
   }
 
+  function openTransfer(section) {
+    setTransfer(section);
+    setPane('transfer');
+  }
+
   const wallets = (state?.wallets || []).filter(wallet => wallet && !wallet.deletedAt && !wallet.deleted_at);
   const bots = state?.bots || [];
   const positions = state?.positions || [];
@@ -131,7 +142,10 @@ export default function WalletsSheet({
       !ownDestinations.some(item => item.caption.toLowerCase() === row.caption.toLowerCase())
     )),
   ];
-  const needsWallet = pane === 'send' || pane === 'receive' || pane === 'swap';
+  const needsWallet = pane === 'transfer' && (transfer === 'send' || transfer === 'receive' || transfer === 'swap');
+  const heading = pane === 'transfer'
+    ? (TRANSFER.find(item => item.id === transfer)?.label || 'Transfer')
+    : (PANES.find(item => item.id === pane)?.label);
   const previewBook = useMemo(() => (
     devPreview && activeRaw?.address
       ? previewPortfolioFor([{ kind: 'main', address: activeRaw.address, label: activeRaw.label }])
@@ -171,16 +185,14 @@ export default function WalletsSheet({
         </nav>
         <div className="wallet-body">
           <div className="sheet-head">
-            <h2>{PANES.find(item => item.id === pane)?.label}</h2>
+            <h2>{heading}</h2>
             <button type="button" className="icon-btn" aria-label="Close wallets" onClick={onClose}>
               <X size={18} strokeWidth={1.75} />
             </button>
           </div>
-          {needsWallet ? <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
           {pane === 'assets' ? (
             <>
               {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
-              {signedIn ? <LinkedLogins /> : null}
               <WalletRoster
                 rows={rows}
                 handle={handle}
@@ -208,34 +220,54 @@ export default function WalletsSheet({
                   open={open}
                   address={active.address}
                   previewPortfolio={previewBook}
-                  onSend={() => setPane('send')}
-                  onReceive={() => setPane('receive')}
-                  onSwap={() => setPane('swap')}
+                  onSend={() => openTransfer('send')}
+                  onReceive={() => openTransfer('receive')}
+                  onSwap={() => openTransfer('swap')}
                 />
               ) : null}
               {!signedIn ? <p className="quiet">Sign in to read the assets in your wallets.</p> : null}
             </>
           ) : null}
+          {pane === 'signin' ? (
+            signedIn ? <LinkedLogins /> : <p className="quiet">Sign in to link email, Google, GitHub, or Discord.</p>
+          ) : null}
           {pane === 'portfolio' ? (
             signedIn ? <ConnectedPortfolio open={open} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>
           ) : null}
-          {pane === 'send' ? (
-            <SendPane
-              active={active}
-              destinations={destinations}
-              tokens={tradeableTokens(tokens)}
-              frozen={Boolean(active?.frozen)}
-              observing={observing}
-              onSend={onSend}
-              onReceipt={onReceipt}
-              resolveRecipient={resolveRecipient}
-            />
+          {pane === 'transfer' ? (
+            <>
+              <div className="wallet-switch" role="tablist" aria-label="Transfer">
+                {TRANSFER.map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={transfer === item.id}
+                    className={transfer === item.id ? 'is-on' : ''}
+                    onClick={() => setTransfer(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {needsWallet ? <WalletPick rows={rows} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} /> : null}
+              {transfer === 'send' ? (
+                <SendPane
+                  active={active}
+                  destinations={destinations}
+                  tokens={tradeableTokens(tokens)}
+                  frozen={Boolean(active?.frozen)}
+                  observing={observing}
+                  onSend={onSend}
+                  onReceipt={onReceipt}
+                  resolveRecipient={resolveRecipient}
+                />
+              ) : null}
+              {transfer === 'receive' ? <ReceivePane active={active} handle={handle} /> : null}
+              {transfer === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} /> : null}
+              {transfer === 'tokens' ? <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} /> : null}
+            </>
           ) : null}
-          {pane === 'receive' ? (
-            <ReceivePane active={active} handle={handle} sns={prefs.sns} onSns={value => savePrefs({ ...prefs, sns: value })} />
-          ) : null}
-          {pane === 'swap' ? <SwapPane tokens={tradeableTokens(tokens)} /> : null}
-          {pane === 'tokens' ? <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} /> : null}
           {pane === 'history' ? (
             bot ? (
               <BotHistory bot={bot} bots={bots} payments={state?.payments || []} transfers={transfers} onParty={onParty} />
@@ -844,43 +876,12 @@ function targetHint(target, observing = false) {
   return 'Raw addresses are not on the platform ledger yet.';
 }
 
-function ReceivePane({ active, handle, sns, onSns }) {
-  const [draft, setDraft] = useState(sns || '');
-  const [note, setNote] = useState('');
-  useEffect(() => { setDraft(sns || ''); }, [sns]);
-
+function ReceivePane({ active, handle }) {
   return (
     <div className="wallet-form">
-      <p className="quiet">Share the address, or your @handle. A .sol name is read from SNS when someone sends to it.</p>
+      <p className="quiet">Share the address, or your @handle.</p>
       {handle ? <p className="wallet-handle">@{handle}</p> : <p className="quiet">Claim a @handle to get paid by name.</p>}
       <AddressCopy address={active?.address || ''} />
-      {sns ? <p className="wallet-handle">{sns}</p> : null}
-      <form
-        className="field"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const next = normalizeTokenPrefs({ sns: draft }).sns;
-          if (draft.trim() && !next) {
-            setNote('Use a name like richclub.sol.');
-            return;
-          }
-          setNote(next ? `Showing ${next}.` : 'Cleared.');
-          onSns?.(draft);
-        }}
-      >
-        <label>
-          SNS name
-          <input
-            value={draft}
-            placeholder="name.sol"
-            autoCapitalize="none"
-            spellCheck={false}
-            onChange={event => setDraft(event.target.value.replace(/^@/, ''))}
-          />
-        </label>
-        <button type="submit" className="ghost">Save name</button>
-      </form>
-      {note ? <p className="quiet" role="status">{note}</p> : null}
     </div>
   );
 }

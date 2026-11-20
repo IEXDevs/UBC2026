@@ -1,16 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ModalClose from './ModalClose';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
-import { draftBot, draftTransferCap } from '../lib/roster.mjs';
+import { formatBaseUnits } from '../lib/money-views.mjs';
+import { DEFAULT_TRANSFER_CAP, draftBot, draftTransferCap, isTransferLimit } from '../lib/roster.mjs';
 import { AgentPhoto } from './AgentEdit';
-import GlideSelect from './GlideSelect';
 import { usePresence } from './usePresence';
 
+const STEPS = ['name', 'look', 'asset', 'limits'];
+const STEP_TITLES = {
+  name: 'Create new agent',
+  look: 'Choose a color',
+  asset: 'Choose a spending asset',
+  limits: 'Set spending limits',
+};
 const SPEND_ASSETS = [
-  { value: 'USDC', label: 'USDC' },
-  { value: 'SOL', label: 'SOL' },
+  { value: 'USDC', decimals: 6, unit: 'micro-USDC', unitsPerCoin: '1,000,000' },
+  { value: 'SOL', decimals: 9, unit: 'lamports', unitsPerCoin: '1,000,000,000' },
 ];
 
 const SPLASH = [
@@ -44,17 +51,42 @@ const CONFETTI = Array.from({ length: 42 }, (_, i) => {
   };
 });
 
+function LimitField({ id, label, asset, value, onChange, autoFocus, exceedsTotal = false }) {
+  const units = value.trim();
+  const valid = isTransferLimit(units);
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label} ({asset.unit})</label>
+      <input
+        id={id}
+        value={value}
+        inputMode="numeric"
+        autoFocus={autoFocus}
+        aria-describedby={`${id}-conversion${exceedsTotal ? ' agent-limit-error' : ''}`}
+        aria-invalid={exceedsTotal || (Boolean(units) && !valid)}
+        onChange={event => onChange(event.target.value)}
+      />
+      <p id={`${id}-conversion`} className="hint create-conversion">
+        {valid
+          ? `= ${formatBaseUnits(units, asset.decimals)} ${asset.value}`
+          : units.length > 40 ? 'Enter up to 40 digits.' : 'Enter a positive whole number.'}
+      </p>
+    </div>
+  );
+}
+
 export default function CreateBotDialog({ open, onClose, onCreate, first = false }) {
   const { mounted, leaving } = usePresence(open);
   const [name, setName] = useState('');
   const [color, setColor] = useState('#7c5cff');
   const [image, setImage] = useState('');
   const [shape, setShape] = useState('circle');
-  const [asset, setAsset] = useState('USDC');
+  const [asset, setAsset] = useState('');
   const [maxOutflow, setMaxOutflow] = useState('');
   const [maxPerTransaction, setMaxPerTransaction] = useState('');
   const [celebrate, setCelebrate] = useState(false);
   const [step, setStep] = useState('name');
+  const stepTitle = useRef(null);
   const [seenOpen, setSeenOpen] = useState(open);
   if (open !== seenOpen) {
     setSeenOpen(open);
@@ -67,7 +99,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     setColor('#7c5cff');
     setImage('');
     setShape(randomShape());
-    setAsset('USDC');
+    setAsset('');
     setMaxOutflow('');
     setMaxPerTransaction('');
     setStep('name');
@@ -78,17 +110,37 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (open && (step === 'look' || step === 'asset')) stepTitle.current?.focus();
+  }, [open, step]);
+
   if (!mounted) return null;
-  const customCap = asset.trim().toUpperCase() !== 'USDC' || Boolean(maxOutflow || maxPerTransaction);
-  const cap = customCap ? draftTransferCap(asset, maxOutflow.trim(), maxPerTransaction.trim()) : null;
+  const stepIndex = STEPS.indexOf(step);
+  const selectedAsset = SPEND_ASSETS.find(option => option.value === asset);
+  const cap = draftTransferCap(asset, maxOutflow.trim(), maxPerTransaction.trim());
+  const perTransferTooHigh = !cap && isTransferLimit(maxOutflow.trim()) && isTransferLimit(maxPerTransaction.trim());
+  const canContinue = {
+    name: Boolean(name.trim()),
+    look: true,
+    asset: Boolean(selectedAsset),
+    limits: Boolean(cap),
+  }[step];
+
+  function selectAsset(value) {
+    if (asset === value) return;
+    setAsset(value);
+    const defaults = value === DEFAULT_TRANSFER_CAP.asset ? DEFAULT_TRANSFER_CAP : null;
+    setMaxOutflow(defaults?.maxOutflow ?? '');
+    setMaxPerTransaction(defaults?.maxPerTransaction ?? '');
+  }
 
   function submit(event) {
     event.preventDefault();
-    if (step === 'name') {
-      if (name.trim()) setStep('look');
+    if (!open || !canContinue) return;
+    if (step !== 'limits') {
+      setStep(STEPS[stepIndex + 1]);
       return;
     }
-    if (customCap && !cap) return;
     const bot = draftBot({ name, shape, color, cap });
     if (!bot) return;
     onCreate({ ...bot, image });
@@ -145,10 +197,13 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
           </>
         ) : null}
         <div className="sheet-head">
-          <h2 id="create-agent-title">{step === 'name' ? 'Create new agent' : 'Choose a color'}</h2>
+          <div>
+            <p className="create-progress">Step {stepIndex + 1} of {STEPS.length}</p>
+            <h2 id="create-agent-title" ref={stepTitle} tabIndex={-1}>{STEP_TITLES[step]}</h2>
+          </div>
         </div>
-        {step === 'name' ? (
-          <>
+        <div className="create-step" key={step}>
+          {step === 'name' && (
             <div className="create-name">
               <label className="bot-name-label" htmlFor="agent-name">Name</label>
               <input
@@ -160,13 +215,8 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
                 onChange={event => setName(event.target.value)}
               />
             </div>
-            <div className="sheet-actions">
-              <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-              <button type="submit" className="solid" disabled={!name.trim()}>Continue</button>
-            </div>
-          </>
-        ) : (
-          <>
+          )}
+          {step === 'look' && (
             <div className="create-look">
               <div className="bot-preview">
                 <AgentPhoto shape={shape} color={color} image={image} name={name} size={112} onImage={setImage} />
@@ -175,7 +225,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
                 <p className="bot-look-name">{name.trim()}</p>
                 <p className="swatch-name">{colorLabel(color)}</p>
               </div>
-              <div className="swatches" role="listbox" aria-label="Agent color">
+              <div className="swatches" role="group" aria-label="Agent color">
                 {colorsForPicker(color, true).map(swatch => (
                   <button
                     key={swatch.id}
@@ -189,35 +239,52 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
                 ))}
               </div>
             </div>
-            <details className="create-limits">
-              <summary>Spending asset and limits</summary>
-              <label className="field">
-                Asset
-                <GlideSelect
-                  className="spend-asset"
-                  ariaLabel="Spending asset"
-                  value={asset}
-                  options={SPEND_ASSETS}
-                  onChange={setAsset}
-                  menuWidth={360}
-                />
-              </label>
-              <label className="field">
-                Total limit (base units)
-                <input value={maxOutflow} inputMode="numeric" onChange={event => setMaxOutflow(event.target.value)} />
-              </label>
-              <label className="field">
-                Per-transfer limit (base units)
-                <input value={maxPerTransaction} inputMode="numeric" onChange={event => setMaxPerTransaction(event.target.value)} />
-              </label>
-              <p className="hint">1 SOL is 1,000,000,000 lamports. The SOL limit includes the network fee.</p>
-            </details>
-            <div className="sheet-actions">
-              <button type="button" className="ghost" onClick={() => setStep('name')}>Back</button>
-              <button type="submit" className="solid" disabled={!name.trim() || (customCap && !cap)}>Create</button>
+          )}
+          {step === 'asset' && (
+            <fieldset className="create-assets" aria-label="Spending asset">
+              {SPEND_ASSETS.map(option => (
+                <label key={option.value}>
+                  <span>
+                    <strong>{option.value}</strong>
+                    <span>Limits in {option.unit}</span>
+                  </span>
+                  <input
+                    type="radio"
+                    name="spending-asset"
+                    value={option.value}
+                    checked={asset === option.value}
+                    onChange={() => selectAsset(option.value)}
+                  />
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {step === 'limits' && selectedAsset && (
+            <div className="create-limits">
+              <p className="hint">
+                1 {selectedAsset.value} = {selectedAsset.unitsPerCoin} {selectedAsset.unit}.
+                {asset === 'SOL' && ' SOL limits include network fees.'}
+              </p>
+              <LimitField id="agent-total-limit" label="Total limit" asset={selectedAsset}
+                value={maxOutflow} onChange={setMaxOutflow} autoFocus />
+              <LimitField id="agent-transfer-limit" label="Per-transfer limit" asset={selectedAsset}
+                value={maxPerTransaction} onChange={setMaxPerTransaction} exceedsTotal={perTransferTooHigh} />
+              {perTransferTooHigh && (
+                <p id="agent-limit-error" className="hint create-limit-error" role="status">
+                  The per-transfer limit must be at or below the total limit.
+                </p>
+              )}
             </div>
-          </>
-        )}
+          )}
+        </div>
+        <div className="sheet-actions">
+          <button type="button" className="ghost" onClick={step === 'name' ? onClose : () => setStep(STEPS[stepIndex - 1])}>
+            {step === 'name' ? 'Cancel' : 'Back'}
+          </button>
+          <button type="submit" className="solid" disabled={!canContinue}>
+            {step === 'limits' ? 'Create agent' : 'Continue'}
+          </button>
+        </div>
       </form>
     </div>
   );
