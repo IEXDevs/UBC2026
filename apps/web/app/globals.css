@@ -1636,6 +1636,8 @@ button.add-agent:not(:disabled):hover {
 .send-to-choice { flex: 1; min-width: 0; }
 .send-to-row[aria-selected="true"] .glide-select__option { background: #303030; }
 .send-to-row .address-copy { flex: none; margin-right: 4px; font-size: 12px; }
+/* Dropdowns clip floating bubbles, so keep their copy result inside the row. */
+.send-to-row .address-copy .address-copy-feedback { position: static; transform: none; min-width: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
 @media (hover: hover) and (pointer: fine) {
   .address-copy:hover { background: #2a2a2a; }
 }
