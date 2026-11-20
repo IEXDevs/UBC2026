@@ -215,7 +215,8 @@ export default function WalletsSheet({
               ) : null}
               {signedIn && active?.address ? (
                 <TokenScreen
-                  key={`${active.id}:${balanceRevision}`}
+                  key={active.id}
+                  refreshKey={balanceRevision}
                   open={open}
                   address={active.address}
                   previewPortfolio={previewBook}

@@ -54,7 +54,7 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   assert.match(sheet, /if \(!mounted \|\| !root\) return null/);
   assert.match(sheet, /return createPortal\(/);
   assert.match(sheet, /key=\{`\$\{active\?\.id \|\| 'empty'\}:\$\{transfer\}`\}/);
-  assert.match(sheet, /key=\{`\$\{active\.id\}:\$\{balanceRevision\}`\}/);
+  assert.match(sheet, /key=\{active\.id\}\s+refreshKey=\{balanceRevision\}/);
   assert.match(sheet, /key=\{balanceRevision\} open=\{open && portfolioOpen\}/);
   assert.match(sheet, /const result = await onSend\?\.\(pending\);\s+if \(result\?\.ok\) setBalanceRevision\(value => value \+ 1\);\s+return result/);
   assert.match(sheet, /onSend=\{send\}/);
@@ -64,6 +64,9 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   assert.match(css, /\.wallet-body \{[^}]*min-height: 0;[^}]*overflow-y: auto/s);
   assert.match(sheet, /function openParty\(party\) \{\s+if \(!onParty\) return;\s+onClose\(\);\s+onParty\(party\)/);
   assert.equal((sheet.match(/onParty=\{openParty\}/g) || []).length, 2);
+  const tokenScreen = readFileSync(new URL('../components/TokenScreen.js', import.meta.url), 'utf8');
+  assert.match(tokenScreen, /previewPortfolio = null, refreshKey = 0/);
+  assert.match(tokenScreen, /\[open, accounts, getAccessToken, user\?\.id, previewPortfolio, refreshKey\]/);
 });
 
 test('agent creation shows asset and limits on their own steps after color', () => {
