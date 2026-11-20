@@ -1,18 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { usePrivy, useUnlinkWallet } from '@privy-io/react-auth';
+import { useLinkAccount, usePrivy, useUnlinkWallet } from '@privy-io/react-auth';
 import { Plus, ShieldCheck, Unlink, Wallet } from 'lucide-react';
 import AddressCopy from './AddressCopy';
 import { manageableWallets } from '../lib/wallet-management.mjs';
 
-export default function ConnectedWallets({ wallets = [] }) {
-  const { user, ready, authenticated, linkWallet } = usePrivy();
+export default function ConnectedWallets({ wallets = [], showAdd = true }) {
+  const { user, ready, authenticated } = usePrivy();
   const { unlink: unlinkWallet } = useUnlinkWallet();
   const [pending, setPending] = useState('');
   const [removing, setRemoving] = useState('');
   const [removed, setRemoved] = useState([]);
   const [note, setNote] = useState('');
+  const { linkWallet } = useLinkAccount({ onError: () => setNote('Could not link this wallet. Try again.') });
   const rows = manageableWallets(wallets, user).filter(wallet => !removed.includes(wallet.address));
   const enabled = ready && authenticated;
 
@@ -34,12 +35,12 @@ export default function ConnectedWallets({ wallets = [] }) {
     <section className="connected-wallets" aria-label="Connected wallets">
       <div className="settings-section-head">
         <div><h3>Connected wallets</h3><p className="quiet">Your agent wallet and linked Solana accounts.</p></div>
-        <button type="button" className="ghost wallet-add" disabled={!enabled || Boolean(removing)} onClick={() => {
+        {showAdd ? <button type="button" className="ghost wallet-add" disabled={!enabled || Boolean(removing)} onClick={() => {
           setNote('');
           setRemoved([]);
           try { linkWallet({ walletChainType: 'solana-only' }); }
           catch { setNote('Could not open wallet linking. Try again.'); }
-        }}><Plus size={15} />Add wallet</button>
+        }}><Plus size={15} />Add wallet</button> : null}
       </div>
       {rows.length ? <ul className="connected-wallet-list">
         {rows.map(wallet => (

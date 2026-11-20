@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { WalletAdd } from './WalletsSheet';
 import { X } from 'lucide-react';
 import AccountStats from './AccountStats';
 import { profileStats } from '../lib/statistics.mjs';
@@ -137,7 +138,8 @@ export default function ProfileSheet({
               <>
                 <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>
                 <p className="quiet">Devnet SOL and USDC on this wallet. devnet execution, mainnet pricing.</p>
-                <ConnectedWallets wallets={wallets} />
+                {privyLive ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
+                <ConnectedWallets wallets={wallets} showAdd={false} />
                 <button type="button" className="ghost" onClick={onWallet}>Open wallet details</button>
                 <LinkedLogins showWallets={false} />
               </>

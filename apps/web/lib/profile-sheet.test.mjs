@@ -4,16 +4,19 @@ import test from 'node:test';
 
 /**
  * Achieves: verifies the profile wallet block shows each wallet once, at one weight.
- * Fails when: the glance label and address are repeated above the wallet list, or the name goes back to a raw bold tag.
- * Oracle: ProfileSheet lists profile-wallet-name and does not render glance.label or a second AddressCopy before the list.
+ * Fails when: profile duplicates wallet addresses or repeats the linked-wallet list in sign-in settings.
+ * Oracle: ProfileSheet delegates wallets to ConnectedWallets once and hides LinkedLogins wallet rows.
  * Side effects / state checked: source snapshot.
  * Gaps: visual weight is checked in CSS, not a screenshot.
  */
 test('profile shows the wallet name and address once', () => {
   const profile = readFileSync(new URL('../components/ProfileSheet.js', import.meta.url), 'utf8');
+  const wallets = readFileSync(new URL('../components/ConnectedWallets.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.doesNotMatch(profile, /glance\.label/);
-  assert.equal(profile.match(/<AddressCopy/g).length, 1);
-  assert.match(profile, /profile-wallet-name/);
-  assert.match(css, /\.profile-wallets \.profile-wallet-name,\s*\.profile-wallets strong \{[\s\S]*font-weight: 560;/);
+  assert.doesNotMatch(profile, /<AddressCopy/);
+  assert.equal(profile.match(/<ConnectedWallets/g).length, 1);
+  assert.match(profile, /<LinkedLogins showWallets=\{false\}/);
+  assert.equal(wallets.match(/<AddressCopy/g).length, 1);
+  assert.match(css, /\.connected-wallet-info > strong \{[^}]*font-size: 14px;[^}]*font-weight: 550;/);
 });
