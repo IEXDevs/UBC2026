@@ -1038,6 +1038,18 @@ test('additional wallets require a main wallet and a label', async () => {
   assert.equal(created.privyWalletId, otherWalletId);
   assert.equal(ready.calls[1].init.headers['privy-idempotency-key'], 'add_did_privy_user1_trading');
   assert.equal(ready.calls[1].init.headers.Authorization.startsWith('Basic '), true);
+  assert.equal(ready.calls[1].body.additional_signers, undefined);
+
+  const signed = mockFetch([
+    { match: url => url.includes('/v1/users/'), body: userWith([embedded(walletId, 0)]) },
+    { match: url => url.endsWith('/v1/wallets'), body: { id: otherWalletId, address, chain_type: 'solana' } },
+  ]);
+  await client({ fetcher: signed.fetcher, signerId: 'keyquorum12345678' }).createAdditional({
+    privyUserId,
+    ownerId: 'user_1',
+    label: 'Trading',
+  });
+  assert.deepEqual(signed.calls[1].body.additional_signers, [{ signer_id: 'keyquorum12345678' }]);
 });
 
 /**

@@ -221,6 +221,7 @@ export async function POST(request) {
       // acceptLogin does not call RPC; allow empty and require it only for signing routes.
       rpcUrl: env.SOLANA_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
+      signerId: readRootEnv('NEXT_PUBLIC_PRIVY_SIGNER_ID') || null,
       allowUsersMeFallback: !onCloudflareWorker,
     });
     const result = await client.acceptLogin({
