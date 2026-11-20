@@ -7,14 +7,35 @@ function menuContaining(...nodes) {
   return { contains: (target) => nodes.includes(target) };
 }
 
-test('composer setting buttons share the model selector height and use neutral permissions', () => {
-  const css = readFileSync(new URL('./PromptBar.css', import.meta.url), 'utf8');
-  const bar = readFileSync(new URL('./PromptBar.jsx', import.meta.url), 'utf8');
+const css = readFileSync(new URL('./PromptBar.css', import.meta.url), 'utf8');
+const bar = readFileSync(new URL('./PromptBar.jsx', import.meta.url), 'utf8');
+
+test('composer setting buttons share the model selector height and keep the permission trigger neutral', () => {
   assert.match(css, /\.prompt-bar__glide \.glide-select__trigger,\s*\.prompt-bar__pick\s*\{\s*height: var\(--pb-control-height\)/);
   assert.match(bar, /surfaceColor="var\(--pb-control-bg\)"/);
   assert.match(bar, /className="prompt-bar__pick"\s+aria-label=\{`Permissions,/);
-  assert.match(css, /\.permit-menu button\[aria-selected='true'\][^}]*var\(--pb-control-highlight\)/);
+  assert.match(css, /\.permit-option\[aria-pressed='true'\][^}]*var\(--pb-control-highlight\)/);
   assert.doesNotMatch(css + bar, /permit-dot|--permit-color|\.is-full/);
+});
+
+test('the three permission modes change text color rather than the row background', () => {
+  assert.match(bar, /className="permit-option"\s+data-mode=\{item\.id\}/);
+  for (const [mode, color] of [['ask', '#59d686'], ['review', '#ffae5c'], ['full', '#ff8b8b']]) {
+    assert.match(css, new RegExp(`\\.permit-option\\[data-mode='${mode}'\\]\\s*\\{\\s*color: ${color};\\s*\\}`));
+  }
+});
+
+test('the permissions menu fits within the composer rather than hanging off the trigger', () => {
+  assert.match(css, /\.prompt-bar__field\s*\{[^}]*position: relative;/);
+  assert.match(css, /\.permit-menu\s*\{[^}]*right: 12px;[^}]*width: min\(280px, calc\(100% - 24px\)\);/);
+  assert.doesNotMatch(css, /\.permit\s*\{[^}]*position: relative;/);
+});
+
+test('the threshold input replaces the cap within the review row, not the active permission', () => {
+  const row = bar.slice(bar.indexOf('className="permit-choice"'), bar.indexOf('export default function PromptBar'));
+  assert.match(row, /item\.id === 'review' \? \([\s\S]*\{editing \? \([\s\S]*<input[\s\S]*\) : reviewCapDollars \? \(/);
+  assert.match(row, /onClick=\{editing \? saveCap : \(\) => setCapDraft\(reviewCapDollars \|\| ''\)\}/);
+  assert.doesNotMatch(bar, /className="permit-cap"|onPermissionChange\?\.\('review'\)/);
 });
 
 /**
@@ -46,6 +67,14 @@ test('choosing Ask every time, Review by AI, or Full permissions stays inside th
     const menu = menuContaining(option);
     assert.equal(shouldClosePermitMenu(true, option, menu), false);
   }
+});
+
+test('clicking the inline input or save button keeps the permissions menu open', () => {
+  const input = { id: 'cap' };
+  const save = { id: 'save' };
+  const menu = menuContaining(input, save);
+  assert.equal(shouldClosePermitMenu(true, input, menu), false);
+  assert.equal(shouldClosePermitMenu(true, save, menu), false);
 });
 
 /**

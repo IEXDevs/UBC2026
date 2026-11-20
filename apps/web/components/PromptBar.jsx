@@ -144,6 +144,108 @@ function SendGlyph({ busy, morphDuration, squash, tilt }) {
   );
 }
 
+function PermitMenu({ selected, reviewCapDollars, onPermissionChange, onReviewCapChange, onClose }) {
+  const [capDraft, setCapDraft] = useState(null);
+  const [capInvalid, setCapInvalid] = useState(false);
+  const capRef = useRef(null);
+  const editRef = useRef(null);
+  const editing = capDraft !== null;
+
+  useLayoutEffect(() => {
+    if (!editing) return;
+    capRef.current?.focus({ preventScroll: true });
+    capRef.current?.select();
+  }, [editing]);
+
+  function closeEditor() {
+    setCapDraft(null);
+    setCapInvalid(false);
+    editRef.current?.focus();
+  }
+
+  function saveCap() {
+    const next = dollarsToBaseUnits(capDraft);
+    if (!next) {
+      setCapInvalid(true);
+      capRef.current?.focus();
+      return;
+    }
+    onReviewCapChange?.(next);
+    closeEditor();
+  }
+
+  return (
+    <div
+      className="permit-menu"
+      role="group"
+      aria-label="Permissions"
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (editing) closeEditor();
+        else onClose();
+      }}
+    >
+      {PERMISSIONS.map(item => (
+        <div key={item.id} className="permit-choice">
+          <button
+            type="button"
+            className="permit-option"
+            data-mode={item.id}
+            aria-pressed={item.id === selected}
+            onClick={() => {
+              onPermissionChange?.(item.id);
+              if (item.id !== 'review') onClose();
+            }}
+          >
+            <span>{item.label}</span>
+            {item.id === selected ? <span className="permit-check" aria-hidden="true">✓</span> : null}
+          </button>
+          {item.id === 'review' ? (
+            <>
+              {editing ? (
+                <div className="permit-cap-field">
+                  <input
+                    ref={capRef}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={capDraft}
+                    aria-label="Review by AI threshold in USDC"
+                    aria-invalid={capInvalid || undefined}
+                    onChange={(event) => {
+                      setCapDraft(event.target.value);
+                      setCapInvalid(false);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+                      event.preventDefault();
+                      saveCap();
+                    }}
+                  />
+                  <span aria-hidden="true">USDC</span>
+                </div>
+              ) : reviewCapDollars ? (
+                <span className="permit-cap-value" title={`${reviewCapDollars} USDC`}>{reviewCapDollars} USDC</span>
+              ) : null}
+              <button
+                ref={editRef}
+                type="button"
+                className="permit-edit"
+                aria-label={`${editing ? 'Save' : 'Edit'} Review by AI threshold`}
+                onClick={editing ? saveCap : () => setCapDraft(reviewCapDollars || '')}
+              >
+                {editing ? 'Save' : 'Edit'}
+              </button>
+              {capInvalid ? <p className="permit-cap-note" role="alert">Enter a positive amount with up to 6 decimal places.</p> : null}
+            </>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PromptBar({
   placeholder = 'Ask anything',
   sources = DEFAULT_SOURCES,
@@ -240,27 +342,10 @@ export default function PromptBar({
   const plusOpen = bar === 'plus';
   const effortOpen = bar === 'effort';
   const permitOpen = bar === 'permit';
-  const [capDraft, setCapDraft] = useState(reviewCapDollars || '');
-  const [capNote, setCapNote] = useState('');
   const permitRef = useRef(null);
-  const capRef = useRef(null);
+  const permitButtonRef = useRef(null);
   const [effortLeft, setEffortLeft] = useState(0);
   const permit = permission ? permissionById(permission) : null;
-  function saveCap() {
-    const next = dollarsToBaseUnits(capDraft);
-    if (!next) {
-      setCapNote('Enter a maximum above zero.');
-      return;
-    }
-    onReviewCapChange?.(next);
-    setCapNote('Saved.');
-  }
-  useEffect(() => {
-    setCapDraft(reviewCapDollars || '');
-  }, [reviewCapDollars]);
-  useEffect(() => {
-    setCapNote('');
-  }, [permission]);
 
   const model = models.find((m) => m.key === modelKey) ?? models[0];
   const token = dismissed || bar === 'plus' || bar === 'effort' || bar === 'permit' || bar === 'model' || bar === 'context'
@@ -818,83 +903,32 @@ export default function PromptBar({
             </button>
           ) : null}
           {permit ? (
-            <span ref={permitRef} className="permit" onMouseDown={(event) => event.preventDefault()} onClick={(event) => event.stopPropagation()}>
+            <div ref={permitRef} className="permit" onClick={(event) => event.stopPropagation()}>
               <button
+                ref={permitButtonRef}
                 type="button"
                 className="prompt-bar__pick"
                 aria-label={`Permissions, ${permit.label}`}
                 aria-expanded={permitOpen}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => openOnly('permit')}
               >
                 <span>{permit.label}</span>
                 <HugeiconsIcon className="permit-chevron" icon={ArrowDown01Icon} size={11} strokeWidth={2} aria-hidden="true" />
               </button>
               {permitOpen ? (
-                <div className="permit-menu" role="listbox" aria-label="Permissions">
-                  {PERMISSIONS.map(item => (
-                    <div key={item.id} className="permit-choice">
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={item.id === permit.id}
-                        onClick={() => {
-                          onPermissionChange?.(item.id);
-                          if (item.id !== 'review') setBar(null);
-                        }}
-                      >
-                        <span>{item.label}</span>
-                        {item.id === 'review' && reviewCapDollars ? (
-                          <span className="permit-cap-value">{reviewCapDollars} USDC</span>
-                        ) : null}
-                        {item.id === permit.id ? <span className="permit-check" aria-hidden="true">✓</span> : null}
-                      </button>
-                      {item.id === 'review' ? (
-                        <button
-                          type="button"
-                          className="permit-edit"
-                          aria-label="Edit Review by AI threshold"
-                          onClick={() => {
-                            onPermissionChange?.('review');
-                            capRef.current?.focus();
-                          }}
-                        >
-                          Edit
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-                  <label className="permit-cap">
-                    <span className="permit-cap-label">
-                      Review by AI threshold (USDC)
-                      {capNote === 'Saved.' ? <b className="permit-saved">Saved</b> : null}
-                    </span>
-                    <span className="permit-cap-row">
-                      <input
-                        ref={capRef}
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={capDraft}
-                        placeholder="25"
-                        aria-label="Review by AI threshold in USDC"
-                        onChange={(event) => {
-                          setCapDraft(event.target.value);
-                          setCapNote('');
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'Enter') return;
-                          event.preventDefault();
-                          saveCap();
-                        }}
-                      />
-                      <button type="button" className="permit-edit" onClick={saveCap}>
-                        Save
-                      </button>
-                    </span>
-                  </label>
-                  {capNote && capNote !== 'Saved.' ? <p className="permit-cap-note" role="status">{capNote}</p> : null}
-                </div>
+                <PermitMenu
+                  selected={permit.id}
+                  reviewCapDollars={reviewCapDollars}
+                  onPermissionChange={onPermissionChange}
+                  onReviewCapChange={onReviewCapChange}
+                  onClose={() => {
+                    setBar(null);
+                    permitButtonRef.current?.focus({ preventScroll: true });
+                  }}
+                />
               ) : null}
-            </span>
+            </div>
           ) : null}
           {isValidElement(accessory) ? cloneElement(accessory, {
             closeSignal: contextClose,
