@@ -12,6 +12,19 @@ test('session REST 404s expire views and navigation, close on release, but prese
   assert.deepEqual(await provider.closeSession('abc'), { status: 'closed' });
 });
 
+test('session REST 410s expire views and navigation and allow release without changing create errors', async () => {
+  for (const fallback of [false, true]) {
+    const provider = createBrowserProvider({ accountId: 'test', apiToken: 'test', fetcher: async url => {
+      const status = fallback && url.includes('/browser-run/') ? 404 : 410;
+      return Response.json({ error: 'Failed to fetch targets' }, { status });
+    } });
+    await assert.rejects(provider.createSession(), { code: 'provider_rejected', status: 502 });
+    await assert.rejects(provider.readonlyView('abc'), { code: 'browser_session_expired', status: 410 });
+    await assert.rejects(provider.openTab('abc', 'https://example.com'), { code: 'browser_session_expired', status: 410 });
+    assert.deepEqual(await provider.closeSession('abc'), { status: 'closed' });
+  }
+});
+
 test('binding missing-session errors expire views and navigation and allow release', async () => {
   const gone = async () => { throw new Error('Session abc not found'); };
   const provider = createBrowserProvider({ binding: {

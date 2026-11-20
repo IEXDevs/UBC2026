@@ -155,7 +155,8 @@ export function withEnglishGoogle(target) {
   return next;
 }
 
-function browserHttpError(status) {
+function browserHttpError(status, sessionScoped) {
+  if (status === 410 && sessionScoped) return new ProviderError('browser_session_expired', 410);
   if (status === 429) return new ProviderError('provider_rate_limited', 429);
   if (status === 401 || status === 403) return new ProviderError('browser_not_configured', 503);
   if (status === 404) return new ProviderError('browser_endpoint_missing', 502);
@@ -163,11 +164,11 @@ function browserHttpError(status) {
   return new ProviderError('provider_rejected', 502);
 }
 
-async function browserRequest(fetcher, url, options) {
+async function browserRequest(fetcher, url, options, sessionScoped = false) {
   let response;
   try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(30000) }); }
   catch { throw new ProviderError('provider_unavailable'); }
-  if (!response.ok) throw browserHttpError(response.status);
+  if (!response.ok) throw browserHttpError(response.status, sessionScoped);
   const text = await response.text();
   if (!text) return {};
   try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
@@ -282,11 +283,12 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch, bi
     let last;
     for (const base of prefixes) {
       try {
-        const result = await browserRequest(fetcher, base + path, options);
+        const result = await browserRequest(fetcher, base + path, options, path.startsWith('/'));
         if (result && result.success === false) throw new ProviderError('browser_provider_failed');
         return result?.result ?? result ?? {};
       } catch (error) {
         last = error;
+        if (error?.code === 'browser_session_expired' && method === 'DELETE') return { status: 'closed' };
         if (!(error instanceof ProviderError) || error.code !== 'browser_endpoint_missing') throw error;
       }
     }
