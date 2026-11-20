@@ -79,6 +79,21 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
         assert.equal(target.searchParams.get('owner_id'), 'eq.user_2');
         return Response.json([{ address: destination }]);
       }
+      if (target.pathname === '/rest/v1/rpc/policy_reserve_budget') {
+        const parameters = JSON.parse(init.body);
+        if (!parameters.payload) return Response.json({ code: 'PGRST202' }, { status: 404 });
+        assert.deepEqual(Object.keys(parameters), ['payload']);
+        const { ownerId, now, idempotencyKey, proposal, approvalId } = parameters.payload;
+        assert.equal(ownerId, 'user_1');
+        assert.equal(now, NOW);
+        assert.equal(idempotencyKey, 'test_sol_send');
+        assert.equal(proposal.asset, 'SOL');
+        assert.equal(proposal.outflow, '1000000000');
+        assert.equal(proposal.maxFee, '5000');
+        assert.equal(proposal.quoteId, await sha256Hex(prepared.transaction));
+        assert.ok(approvalId);
+        return Response.json({ state: 'reserved', replay: reserves++ > 0 });
+      }
       assert.equal(target.pathname, '/rest/v1/approvals');
       assert.equal(JSON.parse(init.body).action, 'approve');
       approvals++;
@@ -101,17 +116,6 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
         return { cluster: 'devnet', signature: 'mock_signature' };
       },
     },
-    ledgerApi: {
-      reserveBudget: async ({ idempotencyKey, proposal, approvalId }) => {
-        assert.equal(idempotencyKey, 'test_sol_send');
-        assert.equal(proposal.asset, 'SOL');
-        assert.equal(proposal.outflow, '1000000000');
-        assert.equal(proposal.maxFee, '5000');
-        assert.equal(proposal.quoteId, await sha256Hex(prepared.transaction));
-        assert.ok(approvalId);
-        return { state: 'reserved', replay: reserves++ > 0 };
-      },
-    },
   });
   const spend = { action: 'pay', permission: 'full', botId: 'bot_1', handle: '@hi', asset: 'SOL', amount: '1000000000', idempotencyKey: 'test_sol_send' };
   const call = body => worker.fetch(spendRequest(body, { 'x-desk-grant': grant }), env);
@@ -120,6 +124,7 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
   assert.equal(held.state, 'approval-needed');
   assert.equal(prepared, undefined);
   const sent = await (await call({ ...spend, confirmed: true })).json();
+  assert.equal(sent.state, 'signed', sent.reason);
   assert.equal(sent.signed, true);
   assert.equal(sent.feeLamports, '5000');
   assert.deepEqual(sent.steps, ['trust-gate', 'verify-consensus', 'wallet-freeze', 'bot-policy', 'approval-mode', 'reserve', 'sign']);
