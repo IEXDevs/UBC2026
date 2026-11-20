@@ -177,7 +177,8 @@ async function viaBinding(work) {
   try { return await work(); }
   catch (error) {
     if (error instanceof ProviderError) throw error;
-    throw new ProviderError(/429|rate limit/i.test(String(error?.message)) ? 'provider_rate_limited' : 'provider_failed', 502);
+    if (/429|rate limit/i.test(String(error?.message))) throw new ProviderError('provider_rate_limited', 429);
+    throw new ProviderError('provider_failed', 502);
   }
 }
 

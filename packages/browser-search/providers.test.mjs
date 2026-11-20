@@ -387,6 +387,8 @@ test('the Browser Run binding opens, views and closes sessions without an API to
   await assert.rejects(provider.openTab('abc', 'javascript:alert(1)'), { code: 'invalid_navigate' });
   const failing = createBrowserProvider({ binding: { ...binding, acquire: async () => { throw new Error('boom'); } } });
   await assert.rejects(failing.createSession(), { code: 'provider_failed' });
+  const throttled = createBrowserProvider({ binding: { ...binding, acquire: async () => { throw new Error('429 Too Many Requests'); } } });
+  await assert.rejects(throttled.createSession(), { code: 'provider_rate_limited', status: 429 });
   const bad = createBrowserProvider({ binding: { ...binding, getLiveView: async () => ({ devtoolsFrontendUrl: 'https://evil.example/ui/view' }) } });
   await assert.rejects(bad.readonlyView('abc'), { code: 'invalid_provider_response' });
 });
