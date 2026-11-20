@@ -144,6 +144,17 @@ export function assertPublicHttpUrl(value) {
   return target;
 }
 
+// Browser Run egress location is not configurable, so Google may geo-localize
+// (e.g. Hong Kong, Chinese UI). Pin English / US unless the URL already says otherwise.
+const GOOGLE_HOST = /^(?:[a-z0-9-]+\.)*google\.(?:com|[a-z]{2}|com?\.[a-z]{2})$/;
+export function withEnglishGoogle(target) {
+  if (!GOOGLE_HOST.test(target.hostname)) return target;
+  const next = new URL(target.href);
+  if (!next.searchParams.has('hl')) next.searchParams.set('hl', 'en');
+  if (!next.searchParams.has('gl')) next.searchParams.set('gl', 'us');
+  return next;
+}
+
 function browserHttpError(status) {
   if (status === 429) return new ProviderError('provider_rate_limited', 429);
   if (status === 401 || status === 403) return new ProviderError('browser_not_configured', 503);
@@ -204,7 +215,7 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch }) 
      */
     async openTab(sessionId, url) {
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
-      const target = assertPublicHttpUrl(url);
+      const target = withEnglishGoogle(assertPublicHttpUrl(url));
       const result = await call(
         `/${encodeURIComponent(sessionId)}/json/new?url=${encodeURIComponent(target.href)}`,
         { method: 'PUT' },
