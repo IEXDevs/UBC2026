@@ -655,9 +655,9 @@ export default function Composer({
     if (anchor && result.activity?.length) onPatchLine?.(anchor, { activity: result.activity }, botIdRef.current);
     if (result.hold?.kind === 'modal') {
       const label = result.reply || result.hold.prompt || result.hold.label;
-      if (label && !shown.includes(label)) pushLine('agent', label);
+      if (label && !shown.includes(label)) pushLine('agent', label, botIdRef.current, 0, [], null, { mentionAddress: result.hold.args?.destination });
       sayConfirm(label);
-      const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label) : false;
+      const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label, result.hold.args?.destination) : false;
       if (run !== runRef.current) return;
       if (!accepted) {
         pushLine('note', 'That stayed unconfirmed.');
@@ -1101,7 +1101,7 @@ export default function Composer({
       <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mentionCopy ? (
-        <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} /></p>
+        <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} dotted /></p>
       ) : mention ? <p className="mention-hint" role="status">{mention}</p> : null}
       {lines.length === 0 ? (
         <div className="entry-suggestions">

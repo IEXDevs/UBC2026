@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { formatAgentOutput, linkParts } from '../lib/agent-output.mjs';
-import { copyText } from '../lib/copy-text.mjs';
-import { shortAddress } from '../lib/money-views.mjs';
+import AddressCopy from './AddressCopy';
+import AddressText from './AddressText';
 import { withHeads } from '../lib/voice-float.mjs';
 import MentionText from './MentionText';
 import { AgentTrace, Reasoning, Sources } from './ai/elements';
@@ -12,28 +12,6 @@ import { sanitizeActivity } from '../lib/chat-activity.mjs';
 import { MESSAGE_CHAR_CAP } from '../lib/context-usage.mjs';
 import { Bubble, BubbleContent } from './ui/bubble';
 import { Message, MessageContent, MessageGroup } from './ui/message';
-
-function CopyAddress({ address }) {
-  const [note, setNote] = useState('');
-
-  async function copy(event) {
-    event.stopPropagation();
-    try {
-      const ok = await copyText(address);
-      setNote(ok ? 'Copied' : 'Copy failed');
-    } catch {
-      setNote('Copy failed');
-    }
-    window.setTimeout(() => setNote(''), 1200);
-  }
-
-  return (
-    <button type="button" className="chat-address" onClick={copy} aria-label={`Copy ${address}`}>
-      {shortAddress(address)}
-      {note ? <small>{note}</small> : null}
-    </button>
-  );
-}
 
 function urlsIn(text) {
   return [...String(text || '').matchAll(/https?:\/\/[^\s)]+/g)].map((match) => match[0]);
@@ -139,7 +117,7 @@ export default function ChatBubbles({
                     <Bubble align="end" variant="secondary">
                       <BubbleContent>
                         <MentionText text={line.text} onParty={onParty} />
-                        {line.mentionAddress ? <CopyAddress address={line.mentionAddress} /> : null}
+                        {line.mentionAddress ? <AddressCopy address={line.mentionAddress} inline className="chat-address" /> : null}
                       </BubbleContent>
                     </Bubble>
                     {onEdit ? (
@@ -176,14 +154,14 @@ export default function ChatBubbles({
                   {linkParts(text).map((part, index) => (
                     part.type === 'link'
                       ? <a key={`${line.id}-link-${index}`} className="chat-link" href={part.value} target="_blank" rel="noreferrer">{part.value}</a>
-                      : <MentionText key={`${line.id}-text-${index}`} text={part.value} onParty={onParty} />
+                      : <AddressText key={`${line.id}-text-${index}`} text={part.value} addresses={[line.mentionAddress, line.access?.args?.destination]} renderText={value => <MentionText text={value} onParty={onParty} />} />
                   ))}
                 </BubbleContent>
               </Bubble>
               <Sources urls={urls} />
               {line.access?.kind === 'inline' ? (
                 <div className="access-request" role="group" aria-label={line.access.label}>
-                  <p>{line.access.label}</p>
+                  <p><AddressText text={line.access.label} addresses={[line.access.args?.destination]} /></p>
                   {hideAccessActions ? null : (
                     <>
                       <button type="button" onClick={() => onAccess?.(line, true)}>Allow</button>

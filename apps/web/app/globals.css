@@ -921,6 +921,7 @@ button.add-agent:not(:disabled):hover {
 }
 
 .you-id:hover { background: var(--hover); }
+.you-avatar-trigger { flex: none; padding: 0; border: 0; background: transparent; border-radius: 50%; cursor: pointer; }
 
 .you-id strong {
   overflow: hidden;
@@ -930,6 +931,7 @@ button.add-agent:not(:disabled):hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.you-id strong:has(.address-copy) { overflow: visible; }
 
 .you-holdings {
   flex: none;
@@ -1655,6 +1657,46 @@ button.add-agent:not(:disabled):hover {
 .address-copy small { color: #a3a3a3; font-size: 12px; }
 .address-copy.is-empty { box-shadow: none; background: transparent; padding-left: 0; }
 .address-copy.is-compact { padding: 4px 8px; background: transparent; }
+.address-copy.is-dotted { position: relative; cursor: pointer; }
+.address-copy.is-dotted .address-copy-label {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+.address-copy.is-inline {
+  display: inline-flex;
+  padding: 0;
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  vertical-align: baseline;
+}
+.address-copy.is-dotted:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+.address-copy-status { position: absolute; left: 50%; bottom: calc(100% + 6px); pointer-events: none; }
+.address-copy .address-copy-feedback {
+  display: block;
+  width: max-content;
+  transform: translateX(-50%);
+  border: 1px solid #454545;
+  border-radius: 6px;
+  background: #252525;
+  padding: 4px 8px;
+  color: #f4f4f5;
+  font: 500 12px/1.4 system-ui, sans-serif;
+  text-decoration: none;
+  animation: address-copied 180ms ease-out both;
+  z-index: 1;
+}
+@keyframes address-copied {
+  from { opacity: 0; translate: 0 4px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .address-copy .address-copy-feedback { animation: none; }
+}
 @media (hover: hover) and (pointer: fine) {
   .address-copy:hover { background: #2a2a2a; }
 }
@@ -2381,7 +2423,7 @@ button.wallet-export:not(:disabled):hover {
   color: inherit;
   font: inherit;
   font-weight: 700;
-  text-decoration: underline;
+  text-decoration: underline dotted;
   text-underline-offset: 3px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -2394,6 +2436,7 @@ button.wallet-export:not(:disabled):hover {
   text-decoration: none;
   color: #a3a3a3;
 }
+.address-copy.is-inline.chat-address { margin-left: 0.4em; font-weight: 700; }
 
 .slash-token { color: #f0c36a; }
 
