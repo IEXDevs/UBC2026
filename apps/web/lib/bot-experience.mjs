@@ -45,7 +45,7 @@ function redact(summary) {
   return summary.replace(SECRETISH, '[hidden]').replace(/\s+/g, ' ').trim();
 }
 
-function timelineSummary({ kind, summary }) {
+export function timelineSummary({ kind, summary }) {
   const clean = redact(summary);
   if (kind !== 'budget.reserved') return clean;
   const reservation = /^Reserved (0|[1-9][0-9]{0,39}) (SOL|USDC)$/.exec(clean);

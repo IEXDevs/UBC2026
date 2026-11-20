@@ -2,9 +2,15 @@
  * Transaction preview and log rows. No signing.
  */
 import { formatBaseUnits, solscanTxUrl } from './money-views.mjs';
+import { timelineSummary } from './bot-experience.mjs';
 
-const SIG = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/;
 const CLUSTER = new Set(['mainnet', 'devnet', 'testnet']);
+const MONEY_EVENTS = new Map([
+  ['payment.x402', 'Payment'],
+  ['tx.submitted', 'Transaction submitted'],
+  ['tx.confirmed', 'Transaction confirmed'],
+  ['funds.grabbed', 'Funds returned'],
+]);
 
 export function sendPreview({ from, to, amountLabel }) {
   return {
@@ -32,15 +38,6 @@ export function swapPreview({ pay, receive, from, to }) {
   };
 }
 
-export function signatureOf(detail) {
-  if (!detail || typeof detail !== 'object') return null;
-  for (const key of ['txSignature', 'signature', 'tx']) {
-    const value = detail[key];
-    if (typeof value === 'string' && SIG.test(value)) return value;
-  }
-  return null;
-}
-
 function clusterOf(value) {
   return typeof value === 'string' && CLUSTER.has(value) ? value : 'devnet';
 }
@@ -60,7 +57,7 @@ export function formatLogTime(at) {
   return `${months[date.getUTCMonth()]} ${day}, ${date.getUTCFullYear()} ${hour}:${minute} UTC`;
 }
 
-export function logRows({ receipts = [], payments = [], transfers = [], activity = [] } = {}) {
+export function logRows({ receipts = [], payments = [], transfers = [], events = [] } = {}) {
   const rows = [];
   for (const receipt of receipts) {
     if (!receipt?.id) continue;
@@ -108,21 +105,24 @@ export function logRows({ receipts = [], payments = [], transfers = [], activity
       solscanUrl: null,
     });
   }
-  for (const item of activity) {
-    if (!item?.id) continue;
-    const detail = item.detail && typeof item.detail === 'object' ? item.detail : {};
-    const signature = signatureOf(detail);
-    const cluster = clusterOf(detail.cluster);
+  const linkedTransactions = new Set(rows.map(row => row.solscanUrl).filter(Boolean));
+  for (const event of events) {
+    const title = MONEY_EVENTS.get(event?.kind);
+    if (typeof event?.id !== 'string' || !event.id || !title) continue;
+    // The QuickNode devnet stream uses the transaction signature as the event ID.
+    const solscanUrl = event.kind === 'tx.confirmed' && event.id.startsWith('stream:')
+      ? solscanTxUrl(event.id.slice('stream:'.length), 'devnet')
+      : null;
+    if (solscanUrl && linkedTransactions.has(solscanUrl)) continue;
     rows.push({
-      id: item.id,
-      at: item.at || 0,
-      title: [item.action, item.status].filter(Boolean).join(' · ') || 'Activity',
+      id: event.id,
+      at: event.at || 0,
+      title,
       lines: [
-        line('Agent', item.botId),
-        line('Source', item.source),
-        line('Signature', signature),
+        line('Details', typeof event.summary === 'string' ? timelineSummary(event) : ''),
+        line('Agent', event.botId),
       ].filter(Boolean),
-      solscanUrl: solscanTxUrl(signature, cluster),
+      solscanUrl,
     });
   }
   const seen = new Set();
