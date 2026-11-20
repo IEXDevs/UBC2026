@@ -40,6 +40,14 @@ export async function POST(request) {
     const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body), redirect: 'manual', signal: AbortSignal.timeout(15000) });
     if (!response.ok) return json({ error: 'rpc_unavailable' }, 502);
-    return json(await response.json(), 200);
+    const result = await response.json();
+    for (const [index, item] of (Array.isArray(result) ? result : [result]).entries()) {
+      const call = calls[index] || calls[0];
+      const err = item?.error?.code || item?.result?.value?.err;
+      console.log('[solana-rpc]', JSON.stringify({ method: call?.method, rpcError: item?.error?.code ?? null,
+        simErr: call?.method === 'simulateTransaction' ? (item?.result?.value?.err ?? null) : undefined,
+        logs: call?.method === 'simulateTransaction' && err ? (item?.result?.value?.logs || []).slice(-6) : undefined }));
+    }
+    return json(result, 200);
   } catch { return json({ error: 'rpc_unavailable' }, 502); }
 }
