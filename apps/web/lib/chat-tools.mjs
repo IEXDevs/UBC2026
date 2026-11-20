@@ -480,8 +480,18 @@ export function createChatToolInvoker({
 
   async function invokeBrowser(name, args = {}) {
     const openUrl = browserSessionUrl(root, botId);
+    let sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId.trim() : '';
+    if (['browser_navigate', 'browser_live_view', 'browser_release'].includes(name) && !sessionRecordId) {
+      const listed = openUrl ? await callWorker(openUrl, 'GET') : await local.listOpenSessions(identity);
+      const sessions = (Array.isArray(listed.sessions) ? listed.sessions : []).filter(session =>
+        session?.status === 'open' && typeof session.sessionRecordId === 'string' && session.sessionRecordId.trim());
+      if (sessions.length !== 1) {
+        return { error: sessions.length ? 'browser_session_ambiguous' : 'browser_session_missing' };
+      }
+      sessionRecordId = sessions[0].sessionRecordId;
+    }
     if (!openUrl) {
-      return local.invokeTool(name, args, identity);
+      return local.invokeTool(name, { ...args, sessionRecordId }, identity);
     }
     if (name === 'browser_open') {
       const body = {
@@ -538,12 +548,6 @@ export function createChatToolInvoker({
       }
     }
     if (name === 'browser_navigate') {
-      let sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
-      if (!sessionRecordId) {
-        const listed = await callWorker(openUrl, 'GET');
-        const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
-        sessionRecordId = sessions[0]?.sessionRecordId || '';
-      }
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'navigate' });
       const navigated = await callWorker(url, 'POST', {
         url: typeof args.url === 'string' ? args.url : '',
@@ -555,7 +559,6 @@ export function createChatToolInvoker({
       };
     }
     if (name === 'browser_live_view') {
-      const sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'live-view' });
       const view = await callWorker(url, 'POST', {});
       // Never return viewerUrl to the model.
@@ -572,7 +575,6 @@ export function createChatToolInvoker({
       };
     }
     if (name === 'browser_release') {
-      const sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId : '';
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'release' });
       const released = await callWorker(url, 'POST', {});
       return {

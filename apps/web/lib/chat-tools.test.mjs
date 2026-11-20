@@ -9,6 +9,41 @@ import {
 import worker from '../../agent-runtime/src/index.mjs';
 import { privySessionFixture } from '../../agent-runtime/src/owner-auth.fixture.mjs';
 
+test('session-dependent browser tools resolve exactly one open session and never POST without an ID', async () => {
+  for (const name of ['browser_navigate', 'browser_live_view', 'browser_release']) {
+    for (const count of [0, 1, 2]) {
+      const calls = [];
+      const sessions = Array.from({ length: count }, (_, index) => ({ sessionRecordId: `bs_${index}`, status: 'open' }));
+      sessions.push({ sessionRecordId: 'bs_closed', status: 'closed' });
+      const invoke = createChatToolInvoker({
+        ownerId: 'owner_1', botId: 'bot_1', runtimeBase: 'https://runtime.invalid',
+        fetcher: async (url, options) => {
+          calls.push([String(url), options.method]);
+          if (options.method === 'GET') return Response.json({ sessions });
+          assert.equal(count, 1);
+          assert.equal(String(url), `https://runtime.invalid/bots/bot_1/browser/sessions/bs_0/${name.slice(8).replace('_', '-')}`);
+          return Response.json({ sessionRecordId: 'bs_0', url: 'https://example.com/' });
+        },
+      });
+      const result = await invoke(name, { url: 'https://example.com/' });
+      assert.equal(result.error, count === 1 ? undefined : count ? 'browser_session_ambiguous' : 'browser_session_missing');
+      assert.equal(calls.length, count === 1 ? 2 : 1);
+      if (count === 1) assert.equal(result.sessionRecordId, 'bs_0');
+    }
+    const localInvoke = createChatToolInvoker({ ownerId: 'owner_1', botId: 'bot_1', runtimeBase: '', fetcher: async () => assert.fail('no remote calls') });
+    assert.deepEqual(await localInvoke(name, {}), { error: 'browser_session_missing' });
+    const explicitInvoke = createChatToolInvoker({
+      ownerId: 'owner_1', botId: 'bot_1', runtimeBase: 'https://runtime.invalid',
+      fetcher: async (url, options) => {
+        assert.equal(options.method, 'POST');
+        assert.match(String(url), /\/sessions\/bs_explicit\//);
+        return Response.json({ sessionRecordId: 'bs_explicit' });
+      },
+    });
+    assert.equal((await explicitInvoke(name, { sessionRecordId: 'bs_explicit', url: 'https://example.com/' })).sessionRecordId, 'bs_explicit');
+  }
+});
+
 test('Laso forwards numeric and string dollar amounts and keeps login links and tokens out of model results', async () => {
   const invoke = createChatToolInvoker({ ownerId: 'user_1', botId: 'bot_1', runtimeBase: 'https://runtime.invalid', fetcher: async (url, init) => {
     assert.equal(String(url), 'https://runtime.invalid/bots/bot_1/shopping/prepare');
