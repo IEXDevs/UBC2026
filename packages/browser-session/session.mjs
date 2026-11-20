@@ -327,7 +327,7 @@ export function createBrowserSessionService({
       };
       await store.put(keyFor(ownerId, botId, record.sessionRecordId), updated);
       if (record.targetId && record.targetId !== tab.targetId && typeof browsers.closeTab === 'function') {
-        await withSession(updated, () => browsers.closeTab(record.providerSessionId, record.targetId));
+        try { await browsers.closeTab(record.providerSessionId, record.targetId); } catch {}
       }
       return {
         sessionRecordId: record.sessionRecordId,

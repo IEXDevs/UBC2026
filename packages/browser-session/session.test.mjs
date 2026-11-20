@@ -49,6 +49,28 @@ test('navigation advances a public revision, closes the old target, and views th
   assert.deepEqual(calls, [['close', 'provider-private', 'target-1'], ['view', 'target-2']]);
 });
 
+test('previous target cleanup failures do not fail navigation or close the updated record', async () => {
+  for (const code of ['provider_failed', 'browser_session_expired']) {
+    const store = createMemoryStore();
+    let target = 0;
+    const svc = service({ store, browsers: {
+      createSession: async () => ({ sessionId: 'provider' }),
+      openTab: async (_, url) => ({ targetId: `target-${++target}`, url }),
+      closeTab: async () => { throw new ProviderError(code); },
+    } });
+    const identity = { ownerId: 'u1', botId: 'b1' };
+    await svc.openSession({ ...identity, url: 'https://example.com/a' });
+    const result = await svc.navigateSession({ ...identity, sessionRecordId: 'rec-1', url: 'https://example.com/b' });
+    assert.equal(result.url, 'https://example.com/b');
+    assert.equal(result.event.status, 'ok');
+    const record = await store.get('browser:u1:b1:rec-1');
+    assert.equal(record.status, 'open');
+    assert.equal(record.revision, 1);
+    assert.equal(record.targetId, 'target-2');
+    assert.equal(record.url, 'https://example.com/b');
+  }
+});
+
 test('failed navigation leaves the current viewer revision and target intact', async () => {
   const store = createMemoryStore();
   let fail = false;
