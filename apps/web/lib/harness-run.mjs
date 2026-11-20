@@ -13,9 +13,10 @@ import {
   skillsCatalogInstruction,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
+import { devnetSpendAsset } from '@ubc2026/contracts';
 import { chatToolsInstruction, createChatToolInvoker } from './chat-tools.mjs';
 import { connectorInstruction, planConnectorUse, resolveDeskConnectors } from './connector-access.mjs';
-import { effectiveReviewCap, isFundTool, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
+import { effectiveReviewCap, grantCovers, isFundTool, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
 import { readSubagentResults, recordSubagentResult } from './subagent-board.mjs';
 import { completeTextChat } from './text-chat.mjs';
 
@@ -48,7 +49,7 @@ export function harnessPrompt(connectors, skillId = '', situation = null, now = 
  * The model cannot raise the Review by AI cap. `confirmSpend` is only for a
  * text turn the owner already approved with the slide.
  */
-export function stampSpendPermission(name, args, { permissionMode = 'ask', reviewCap = null, confirmSpend = false } = {}) {
+export function stampSpendPermission(name, args, { permissionMode = 'ask', reviewCap = null, confirmSpend = false, grants = [] } = {}) {
   const next = args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {};
   if (name === 'start_task') {
     if (permissionMode === 'full') next.ownerPermission = 'full';
@@ -57,8 +58,19 @@ export function stampSpendPermission(name, args, { permissionMode = 'ask', revie
   if (isFundTool(name)) {
     next.permission = permissionMode === 'review' || permissionMode === 'full' ? permissionMode : 'ask';
     next.reviewCap = effectiveReviewCap(reviewCap);
-    if (confirmSpend && toolAccessKind(next.permission, name, next, next.reviewCap)) next.confirmed = true;
-    else delete next.confirmed;
+    delete next.idempotencyKey;
+    delete next.confirmed;
+    if (confirmSpend && toolAccessKind(next.permission, name, next, next.reviewCap)) {
+      if (name === 'request_spend' && devnetSpendAsset(next.asset ?? 'USDC') !== 'USDC') {
+        const grant = Array.isArray(grants) ? grants.find(item => grantCovers([item], name, next)) : null;
+        if (/^spend_[0-9a-f-]{36}$/.test(grant?.idempotencyKey || '')) {
+          next.idempotencyKey = grant.idempotencyKey;
+          next.confirmed = true;
+        }
+      } else {
+        next.confirmed = true;
+      }
+    }
   }
   return next;
 }

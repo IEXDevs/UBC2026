@@ -1,6 +1,7 @@
 /** Browser-only bot order and locally created agents. Not a server record. */
 
 import { randomShape, SHAPES } from './bot-look.mjs';
+import { devnetSpendAsset } from '@ubc2026/contracts';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const ID = /^bot_[a-z0-9_]{1,40}$/;
@@ -141,12 +142,21 @@ export function adoptLegacyRoster(storage, ownerId) {
   return { roster: legacyRoster, looks: legacyLooks, adopted: true };
 }
 
-export function draftBot({ name, shape, color, id } = {}) {
+export function draftTransferCap(asset, maxOutflow, maxPerTransaction) {
+  const identifier = devnetSpendAsset(asset);
+  const limit = /^[1-9][0-9]{0,39}$/;
+  if (!identifier || !limit.test(maxOutflow) || !limit.test(maxPerTransaction)) return null;
+  if (typeof maxOutflow !== 'string' || typeof maxPerTransaction !== 'string' || BigInt(maxPerTransaction) > BigInt(maxOutflow)) return null;
+  return { mode: 'limited', asset: identifier, maxOutflow, maxPerTransaction };
+}
+
+export function draftBot({ name, shape, color, id, cap } = {}) {
   const trimmed = typeof name === 'string' ? name.trim().slice(0, 64) : '';
   if (!trimmed || typeof color !== 'string' || !HEX.test(color)) return null;
   const nextShape = SHAPES.includes(shape) ? shape : (shape == null ? randomShape() : null);
   if (!nextShape) return null;
   const nextId = typeof id === 'string' && ID.test(id) ? id : `bot_${Math.random().toString(36).slice(2, 10)}`;
+  const transferCap = cap && draftTransferCap(cap.asset, cap.maxOutflow, cap.maxPerTransaction);
   return {
     id: nextId,
     name: trimmed,
@@ -156,6 +166,7 @@ export function draftBot({ name, shape, color, id } = {}) {
     status: 'idle',
     goal: 'Waiting for a goal.',
     walletId: null,
+    ...(transferCap ? { cap: transferCap } : {}),
   };
 }
 

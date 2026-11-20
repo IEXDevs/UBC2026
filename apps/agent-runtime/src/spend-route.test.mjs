@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
 import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { SystemInstruction, Transaction } from '@solana/web3.js';
+import { decodeTransferCheckedInstruction } from '@solana/spl-token';
 import { sha256Hex } from './desk-grant.mjs';
 import worker from './index.mjs';
 import { handleVoiceRequest } from './voice.mjs';
@@ -52,6 +54,130 @@ function spendRequest(body, headers = {}) {
     body: JSON.stringify(body),
   });
 }
+
+test('SOL to a handle reserves lamports plus the fee and signs the simulated transaction only once', async () => {
+  const destination = 'So11111111111111111111111111111111111111112';
+  const grant = 'ab'.repeat(32);
+  const grantHash = await sha256Hex(grant);
+  const nativeBot = { ...bot, cap: { mode: 'limited', asset: 'SOL', maxOutflow: '3000000000', maxPerTransaction: '1000010000' } };
+  let prepared;
+  let approvals = 0;
+  let reserves = 0;
+  let signs = 0;
+  const env = spendEnv({
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-role',
+    loadSpendContext: async () => ({ bot: nativeBot, wallet, ledger: { ...ledger, asset: 'SOL' } }),
+    fetch: async (url, init) => {
+      const target = new URL(url);
+      if (target.pathname.endsWith('/desk_locks')) return Response.json([{ grant_hash: grantHash, grant_until: new Date(NOW + 60000).toISOString() }]);
+      if (target.pathname.endsWith('/profiles')) {
+        assert.equal(target.searchParams.get('handle'), 'eq.hi');
+        return Response.json([{ owner_id: 'user_2' }]);
+      }
+      if (target.pathname.endsWith('/wallets')) {
+        assert.equal(target.searchParams.get('owner_id'), 'eq.user_2');
+        return Response.json([{ address: destination }]);
+      }
+      assert.equal(target.pathname, '/rest/v1/approvals');
+      assert.equal(JSON.parse(init.body).action, 'approve');
+      approvals++;
+      return new Response(null, { status: 201 });
+    },
+    transferClient: {
+      getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: DESTINATION }),
+      prepareDevnetTransfer: async ({ transaction }) => {
+        const ix = Transaction.from(Buffer.from(transaction, 'base64')).instructions[0];
+        const transfer = SystemInstruction.decodeTransfer(ix);
+        assert.equal(transfer.lamports, 1000000000n);
+        assert.equal(transfer.toPubkey.toBase58(), destination);
+        prepared = { transaction, feeLamports: '5000' };
+        return prepared;
+      },
+      signPreparedDevnetTransfer: async input => {
+        assert.equal(input.prepared, prepared);
+        assert.equal(reserves, 1);
+        signs++;
+        return { cluster: 'devnet', signature: 'mock_signature' };
+      },
+    },
+    ledgerApi: {
+      reserveBudget: async ({ idempotencyKey, proposal, approvalId }) => {
+        assert.equal(idempotencyKey, 'test_sol_send');
+        assert.equal(proposal.asset, 'SOL');
+        assert.equal(proposal.outflow, '1000000000');
+        assert.equal(proposal.maxFee, '5000');
+        assert.equal(proposal.quoteId, await sha256Hex(prepared.transaction));
+        assert.ok(approvalId);
+        return { state: 'reserved', replay: reserves++ > 0 };
+      },
+    },
+  });
+  const spend = { action: 'pay', permission: 'full', botId: 'bot_1', handle: '@hi', asset: 'SOL', amount: '1000000000', idempotencyKey: 'test_sol_send' };
+  const call = body => worker.fetch(spendRequest(body, { 'x-desk-grant': grant }), env);
+
+  const held = await (await call(spend)).json();
+  assert.equal(held.state, 'approval-needed');
+  assert.equal(prepared, undefined);
+  const sent = await (await call({ ...spend, confirmed: true })).json();
+  assert.equal(sent.signed, true);
+  assert.equal(sent.feeLamports, '5000');
+  assert.deepEqual(sent.steps, ['trust-gate', 'verify-consensus', 'wallet-freeze', 'bot-policy', 'approval-mode', 'reserve', 'sign']);
+  const replay = await (await call({ ...spend, confirmed: true })).json();
+  assert.equal(replay.reason, 'duplicate-spend');
+  assert.equal(signs, 1);
+  assert.equal(approvals, 2);
+  const wrongRecipient = await (await call({ ...spend, confirmed: true, destination: DESTINATION })).json();
+  assert.equal(wrongRecipient.error, 'recipient_address_missing');
+});
+
+test('a non-USDC transfer cannot spend a USDC budget', async () => {
+  const response = await worker.fetch(spendRequest({
+    permission: 'full', confirmed: true, botId: 'bot_1', action: 'pay', asset: 'SOL', amount: '1', destination: DESTINATION,
+  }), spendEnv());
+  const body = await response.json();
+  assert.equal(body.signed, false);
+  assert.equal(body.reason, 'accounting-asset-mismatch');
+});
+
+test('a classic SPL send uses the exact mint and devnet decimals', async () => {
+  const mint = 'So11111111111111111111111111111111111111112';
+  const splBot = { ...bot, approvalMode: 'fully-automatic', cap: { ...bot.cap, asset: mint } };
+  let reserved = false;
+  const env = spendEnv({
+    loadSpendContext: async () => ({ bot: splBot, wallet, ledger: { ...ledger, asset: mint } }),
+    transferClient: {
+      getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: DESTINATION }),
+      readDevnetMint: async input => ({ cluster: 'devnet', mint: input.mint, decimals: 9 }),
+      prepareDevnetTransfer: async ({ transaction }) => {
+        const tx = Transaction.from(Buffer.from(transaction, 'base64'));
+        const { keys, data } = decodeTransferCheckedInstruction(tx.instructions[0]);
+        assert.equal(keys.mint.pubkey.toBase58(), mint);
+        assert.equal(data.amount, 1000n);
+        assert.equal(data.decimals, 9);
+        assert.equal(tx.instructions.length, 2);
+        return { transaction, feeLamports: '5000' };
+      },
+      signPreparedDevnetTransfer: async () => {
+        assert.equal(reserved, true);
+        return { cluster: 'devnet', signature: 'mock_spl_signature' };
+      },
+    },
+    ledgerApi: { reserveBudget: async ({ proposal }) => {
+      assert.equal(proposal.asset, mint);
+      assert.equal(proposal.outflow, '1000');
+      assert.equal(proposal.maxFee, '0');
+      reserved = true;
+      return { state: 'reserved' };
+    } },
+  });
+  const request = { permission: 'review', confirmed: true, botId: 'bot_1', action: 'pay', amount: '1000', asset: mint, destination: DESTINATION, idempotencyKey: 'test_spl_send' };
+  assert.equal((await (await worker.fetch(spendRequest(request), env)).json()).signed, true);
+  env.transferClient.readDevnetMint = async () => ({ cluster: 'mainnet', mint, decimals: 9 });
+  const invalid = await (await worker.fetch(spendRequest(request), env)).json();
+  assert.equal(invalid.signed, false);
+  assert.equal(invalid.error, 'transfer_preparation_failed');
+});
 
 /**
  * Achieves: full-permission spend signs on devnet through each spend step.

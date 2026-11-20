@@ -5,6 +5,7 @@
 import { createPrivyWalletClientFromEnv, readPrivyAccessTokenSub } from '@ubc2026/wallets/privy';
 import {
   ConfigError,
+  devnetSpendAsset,
   httpsAvatarUrl,
   normalizeDisplayName,
   normalizeHandle,
@@ -798,9 +799,8 @@ export async function handleApiData(request, env, matched) {
     });
 
     const capMode = body.cap?.mode === 'unlimited' ? 'unlimited' : 'limited';
-    const capAsset = typeof body.cap?.asset === 'string' && body.cap.asset.trim()
-      ? body.cap.asset.trim().slice(0, 32)
-      : 'USDC';
+    const rawCapAsset = typeof body.cap?.asset === 'string' ? body.cap.asset.trim() : '';
+    const capAsset = devnetSpendAsset(rawCapAsset) || rawCapAsset.slice(0, 32) || 'USDC';
     const row = {
       id: botId,
       owner_id: ownerId,
@@ -839,7 +839,7 @@ export async function handleApiData(request, env, matched) {
     await supabaseWrite(env, {
       path: 'spend_ledgers',
       method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=minimal',
+      prefer: 'resolution=ignore-duplicates,return=minimal',
       body: {
         bot_id: botId,
         asset: capAsset,

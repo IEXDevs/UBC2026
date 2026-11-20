@@ -440,6 +440,13 @@ export const OWNER_SPEND_PERMISSIONS = Object.freeze(['ask', 'review', 'full']);
 export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay']);
 export const PERMISSIONED_SPEND_PATH = '/api/spend';
 
+/** Budget units are lamports for SOL, micro-USDC for USDC, or raw units for one mint. */
+export function devnetSpendAsset(value) {
+  const asset = typeof value === 'string' ? value.trim() : '';
+  if (asset.toUpperCase() === 'SOL' || asset.toUpperCase() === 'USDC') return asset.toUpperCase();
+  return base58.test(asset) ? asset : null;
+}
+
 function sanitizeSpendQuote(quote) {
   if (quote == null) return null;
   if (typeof quote !== 'object' || Array.isArray(quote)) return undefined;
@@ -483,7 +490,9 @@ export function parsePermissionedSpendBody(body) {
   const destination = typeof body.destination === 'string' && base58.test(body.destination) ? body.destination : null;
   const handle = typeof body.handle === 'string' ? normalizeHandle(body.handle) : null;
   const action = FUND_ACTIONS.includes(body.action) ? body.action : 'spend';
-  if (body.asset != null && body.asset !== 'USDC') return null;
+  const asset = devnetSpendAsset(body.asset ?? 'USDC');
+  if (!asset) return null;
+  if (asset !== 'USDC' && (action === 'buy' || action === 'sell' || BigInt(units) > 18446744073709551615n)) return null;
   // A USDC buy of wrapped SOL stays in the assigned wallet. The spend is the cap asset.
   const selfCustody = action === 'buy' && !destination && !handle;
   if (!destination && !handle && !selfCustody) return null;
@@ -501,7 +510,7 @@ export function parsePermissionedSpendBody(body) {
     botId: body.botId,
     action,
     amount: units,
-    asset: 'USDC',
+    asset,
     destination,
     handle,
     selfCustody,

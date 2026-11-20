@@ -4,6 +4,7 @@
  * for the person. Every mode uses the same spend API.
  */
 import { formatBaseUnits } from './money-views.mjs';
+import { devnetSpendAsset } from '@ubc2026/contracts';
 
 export const SPEND_PERMISSION_KEY = 'maelstrom.spendPermission';
 export const REVIEW_THRESHOLD_KEY = 'maelstrom.reviewThreshold';
@@ -159,17 +160,15 @@ export function isFundTool(name) {
   return FUND_TOOLS.has(name);
 }
 
-const ACCESS_COPY = Object.freeze({
-  prepare_shopping: 'Prepare a purchase',
-});
+const FUND_ARGUMENTS = ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'quoteCluster', 'provider', 'domain', 'from'];
 
 function plainArgs(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return {};
   const next = {};
-  for (const key of Object.keys(args).slice(0, 8)) {
+  for (const key of FUND_ARGUMENTS) {
     const value = args[key];
     if (typeof value === 'string') next[key] = value.slice(0, 200);
-    else if (value === true || value === false) next[key] = value;
+    else if (key === 'amount' && Number.isSafeInteger(value) && value >= 0) next[key] = String(value);
   }
   return next;
 }
@@ -182,23 +181,31 @@ function stable(value) {
 }
 
 function accessDetail(name, args) {
+  if (name === 'prepare_shopping') return 'Prepare a purchase';
   const amount = typeof args?.amount === 'string' ? args.amount.trim() : '';
   const handle = typeof args?.handle === 'string' ? args.handle.replace(/^@/, '').trim() : '';
-  if (name === 'request_spend' || name === 'sns_send') {
-    const who = handle ? ` to @${handle}` : '';
-    return amount ? `Move ${amount} USDC${who}` : `Move funds${who}`;
-  }
-  return ACCESS_COPY[name] || `Use ${name}`;
+  const address = typeof args?.destination === 'string' ? args.destination.trim() : '';
+  const recipient = handle && address ? `@${handle} (${address})` : (handle ? `@${handle}` : address || args?.domain);
+  const who = recipient ? ` to ${recipient}` : '';
+  const asset = devnetSpendAsset(args?.asset ?? 'USDC');
+  if (!asset || !AMOUNT.test(amount)) return `Move funds${who}`;
+  if (asset === 'USDC') return `Move ${formatBaseUnits(amount)} USDC${who}`;
+  if (asset === 'SOL') return `Send ${formatBaseUnits(amount, 9)} SOL${who}, plus the network fee`;
+  return `Send ${amount} base units of mint ${asset}${who}, plus the SOL network fee`;
+}
+
+function isNonUsdcSpend(name, args) {
+  return name === 'request_spend' && devnetSpendAsset(args?.asset ?? 'USDC') !== 'USDC';
 }
 
 /**
- * Ask confirms every fund move. Review and full still confirm a send above
- * the Review by AI maximum, including when that mode is off ($30 USDC).
+ * Ask confirms every fund move. SOL and SPL sends always require confirmation.
+ * Review and full confirm USDC sends above the Review by AI maximum.
  */
 export function toolAccessKind(mode, name, args = {}, reviewCap = null) {
   if (!isFundTool(name)) return null;
-  if (mode === 'ask') return 'modal';
-  if (SEND_TOOLS.has(name) && amountOverReviewCap(args?.amount, reviewCap)) return 'modal';
+  if (mode === 'ask' || isNonUsdcSpend(name, args)) return 'modal';
+  if (SEND_TOOLS.has(name) && amountOverReviewCap(plainArgs(args).amount, reviewCap)) return 'modal';
   return null;
 }
 
@@ -206,8 +213,9 @@ export function toolAccessRequest(mode, name, args = {}, reviewCap = null) {
   const kind = toolAccessKind(mode, name, args, reviewCap);
   if (!kind) return null;
   const plain = plainArgs(args);
+  const nonUsdc = isNonUsdcSpend(name, plain);
   let label = accessDetail(name, plain);
-  if (SEND_TOOLS.has(name) && amountOverReviewCap(plain.amount, reviewCap) && mode !== 'ask') {
+  if (!nonUsdc && SEND_TOOLS.has(name) && mode !== 'ask' && amountOverReviewCap(plain.amount, reviewCap)) {
     label = `${label}. Over ${reviewCapToDollars(effectiveReviewCap(reviewCap))} USDC`;
   }
   return {
@@ -216,6 +224,7 @@ export function toolAccessRequest(mode, name, args = {}, reviewCap = null) {
     args: plain,
     label,
     prompt: `${label}. Slide to confirm.`,
+    ...(nonUsdc ? { idempotencyKey: `spend_${crypto.randomUUID()}` } : {}),
   };
 }
 

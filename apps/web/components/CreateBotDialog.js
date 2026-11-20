@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
-import { draftBot } from '../lib/roster.mjs';
+import { draftBot, draftTransferCap } from '../lib/roster.mjs';
 import { AgentPhoto } from './AgentEdit';
 import { usePresence } from './usePresence';
 
@@ -44,6 +44,9 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
   const [color, setColor] = useState('#7c5cff');
   const [image, setImage] = useState('');
   const [shape, setShape] = useState('circle');
+  const [asset, setAsset] = useState('USDC');
+  const [maxOutflow, setMaxOutflow] = useState('');
+  const [maxPerTransaction, setMaxPerTransaction] = useState('');
   const [celebrate, setCelebrate] = useState(false);
   const [step, setStep] = useState('name');
   const [moreColors, setMoreColors] = useState(false);
@@ -59,6 +62,9 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     setColor('#7c5cff');
     setImage('');
     setShape(randomShape());
+    setAsset('USDC');
+    setMaxOutflow('');
+    setMaxPerTransaction('');
     setStep('name');
     setMoreColors(false);
     function onKey(event) {
@@ -69,6 +75,8 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
   }, [open, onClose]);
 
   if (!mounted) return null;
+  const customCap = asset.trim().toUpperCase() !== 'USDC' || Boolean(maxOutflow || maxPerTransaction);
+  const cap = customCap ? draftTransferCap(asset, maxOutflow.trim(), maxPerTransaction.trim()) : null;
 
   function submit(event) {
     event.preventDefault();
@@ -76,7 +84,8 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
       if (name.trim()) setStep('look');
       return;
     }
-    const bot = draftBot({ name, shape, color });
+    if (customCap && !cap) return;
+    const bot = draftBot({ name, shape, color, cap });
     if (!bot) return;
     onCreate({ ...bot, image });
   }
@@ -175,9 +184,25 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
             {moreColors ? null : (
               <button type="button" className="ghost" onClick={() => setMoreColors(true)}>More colors</button>
             )}
+            <details>
+              <summary>Spending asset and limits</summary>
+              <label className="field">
+                Asset (USDC, SOL, or token mint address)
+                <input value={asset} maxLength={44} onChange={event => setAsset(event.target.value)} />
+              </label>
+              <label className="field">
+                Total limit (base units)
+                <input value={maxOutflow} inputMode="numeric" onChange={event => setMaxOutflow(event.target.value)} />
+              </label>
+              <label className="field">
+                Per-transfer limit (base units)
+                <input value={maxPerTransaction} inputMode="numeric" onChange={event => setMaxPerTransaction(event.target.value)} />
+              </label>
+              <p className="hint">1 SOL is 1,000,000,000 lamports. The SOL limit includes the network fee.</p>
+            </details>
             <div className="sheet-actions">
               <button type="button" className="ghost" onClick={() => setStep('name')}>Back</button>
-              <button type="submit" className="solid" disabled={!name.trim()}>Create</button>
+              <button type="submit" className="solid" disabled={!name.trim() || (customCap && !cap)}>Create</button>
             </div>
           </>
         )}

@@ -125,7 +125,7 @@ export async function POST(request, context) {
     rpcFetch: fetch,
     situation,
   });
-  const spend = { permissionMode, reviewCap, confirmSpend: true };
+  const spend = { permissionMode, reviewCap, confirmSpend: true, grants };
   const chatModel = (typeof body.model === 'string' && /^[A-Za-z0-9_.:/-]{1,80}$/.test(body.model.trim()))
     ? body.model.trim()
     : (readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined);
