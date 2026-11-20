@@ -90,7 +90,8 @@ import { usePrivyPublic } from '../components/PrivyRoot';
 import { developerPreviewAllowed, hasRestorablePrivySession, showSessionHold, showSignInGate } from '../lib/sign-in-gate.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
 import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-preview.mjs';
-import { clearDeskGrant, clearDeskSession, deskSessionUntil, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
+import { clearDeskGrant, clearDeskSession, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
+import { restoreDeskEntry } from '../lib/desk-grant-client.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
 import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
 import { logoutAfterFlush } from '../lib/profile-logout.mjs';
@@ -163,13 +164,46 @@ function AuthedShell() {
   const [liveWallets, setLiveWallets] = useState(null);
   const [walletNote, setWalletNote] = useState('');
   const [walletError, setWalletError] = useState('');
+  const [deskEntry, setDeskEntry] = useState(null);
+  const ownerId = ownerIdFromPrivyUser(user, signedIn);
+  const deskOwner = devPreview && devAllowed ? null : ownerId;
+  const deskChecked = Boolean(deskOwner && deskEntry?.ownerId === deskOwner);
+  const deskEntered = deskChecked && deskEntry.until > 0;
   const accountsKey = linkedAccountsKey(user);
 
   const getAccessToken = useCallback(() => readAccessToken(privyGetAccessToken), [privyGetAccessToken]);
+  const deskToken = useRef(getAccessToken);
+  deskToken.current = getAccessToken;
+
+  useEffect(() => {
+    if (!deskOwner) {
+      setDeskEntry(null);
+      return undefined;
+    }
+    let stopped = false;
+    (async () => {
+      let until = 0;
+      try {
+        until = await restoreDeskEntry({
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+          ownerId: deskOwner,
+          getAccessToken: () => deskToken.current(),
+        });
+      } catch { /* require the desk password if this session cannot resume */ }
+      if (!stopped) setDeskEntry({ ownerId: deskOwner, until });
+    })();
+    return () => { stopped = true; };
+  }, [deskOwner]);
 
   const onLogout = useCallback(async () => {
+    if (ownerId) {
+      try { clearDeskSession(window.localStorage, ownerId); } catch { /* the in-memory desk still locks */ }
+      try { clearDeskGrant(window.sessionStorage, ownerId); } catch { /* the in-memory desk still locks */ }
+      setDeskEntry({ ownerId, until: 0 });
+    }
     await withPrivyLogout(window, () => logout());
-  }, [logout]);
+  }, [logout, ownerId]);
 
   useEffect(() => {
     if (!devAllowed) return undefined;
@@ -193,7 +227,7 @@ function AuthedShell() {
   }
 
   useEffect(() => {
-    if (!signedIn) {
+    if (!deskEntered) {
       setLiveWallets(null);
       setWalletNote('');
       setWalletError('');
@@ -289,7 +323,7 @@ function AuthedShell() {
       stopped = true;
       clearTimeout(release);
     };
-  }, [signedIn, user, user?.id, user?.hasAcceptedTerms, accountsKey, getAccessToken]);
+  }, [deskEntered, signedIn, user, user?.id, user?.hasAcceptedTerms, accountsKey, getAccessToken]);
 
   if (devPreview && devAllowed) {
     return (
@@ -327,9 +361,28 @@ function AuthedShell() {
     );
   }
 
+  if (!deskChecked) return <SessionHold />;
+
+  if (!deskEntered) {
+    return (
+      <DeskLock
+        key={deskOwner}
+        ownerId={deskOwner}
+        getAccessToken={getAccessToken}
+        onSignOut={onLogout}
+        onUnlock={until => {
+          try { writeDeskSession(window.localStorage, deskOwner, until); } catch { /* this tab can still enter */ }
+          setDeskEntry({ ownerId: deskOwner, until });
+        }}
+      />
+    );
+  }
+
   return (
     <Shell
-      ownerId={ownerIdFromPrivyUser(user, signedIn)}
+      key={deskOwner}
+      ownerId={deskOwner}
+      initialDeskUntil={deskEntry.until}
       user={signedIn ? user : null}
       accountLabel={signedIn ? privyAccountLabel(user) : 'You'}
       signedIn={signedIn}
@@ -400,7 +453,7 @@ function DepositSigner({ signerRef }) {
   return null;
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, privyLive = false }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, privyLive = false }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
   const [looks, setLooks] = useState({});
@@ -411,10 +464,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [paneDrag, setPaneDrag] = useState(false);
   const [activeBot, setActiveBot] = useState(null);
   const [pendingSend, setPendingSend] = useState(null);
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(initialDeskUntil > 0);
   const [lockOpen, setLockOpen] = useState(false);
-  const unlockedRef = useRef(false);
-  const unlockUntilRef = useRef(0);
+  const unlockedRef = useRef(initialDeskUntil > 0);
+  const unlockUntilRef = useRef(initialDeskUntil);
   const lockIntentRef = useRef(null);
   const deskLockOnRef = useRef(false);
     deskLockOnRef.current = signedIn && Boolean(ownerId) && !devPreview;
@@ -1014,8 +1067,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       setLockOpen(true);
     });
   }, [ownerId]);
-  const grantDesk = useCallback(() => {
-    const until = deskSessionUntil(Date.now());
+  const grantDesk = useCallback((until) => {
     unlockUntilRef.current = until;
     try { writeDeskSession(localStorage, ownerId, until); } catch { /* this tab still unlocks */ }
     unlockedRef.current = true;
@@ -1444,22 +1496,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     return () => window.removeEventListener('keydown', onKey);
   }, [signedIn, ownerId, lockWallet, toast]);
   useEffect(() => {
-    let open = false;
-    unlockUntilRef.current = 0;
-    if (ownerId) {
-      try {
-        const session = readDeskSession(localStorage, ownerId, Date.now());
-        open = Boolean(session);
-        if (session) unlockUntilRef.current = session.until;
-      } catch { open = false; }
-    }
+    const open = initialDeskUntil > Date.now();
+    unlockUntilRef.current = open ? initialDeskUntil : 0;
     unlockedRef.current = open;
     setUnlocked(open);
     setLockOpen(false);
     if (lockIntentRef.current?.type === 'chat-spend') lockIntentRef.current.resolve(false);
     lockIntentRef.current = null;
     setPendingSend(null);
-  }, [ownerId]);
+  }, [ownerId, initialDeskUntil]);
   useEffect(() => {
     if (!unlocked || !ownerId) return undefined;
     const tick = () => {

@@ -3,12 +3,13 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDeskLock, readDeskGrant, readDeskLock, unlockDesk } from './desk-lock.mjs';
+import { createDeskLock, readDeskGrant, readDeskLock, unlockDesk, writeDeskGrant, writeDeskSession } from './desk-lock.mjs';
 import {
   acceptEnteredPassword,
   openDeskGrant,
   readDeskLockState,
   registerDeskVerifier,
+  restoreDeskEntry,
   saveDeskVerifier,
   submitChatSpend,
 } from './desk-grant-client.mjs';
@@ -164,6 +165,73 @@ test('readDeskLockState maps locked flag and failure codes', async () => {
     new Response(JSON.stringify({ error: 'desk_boom' }), { status: 502 })
   ), { ownerId: 'did:privy:u1' });
   assert.deepEqual(failed, { ok: false, locked: false, error: 'desk_boom' });
+  const fresh = await readDeskLockState(async () => Response.json({ locked: false }), { ownerId: 'did:privy:u1' });
+  assert.deepEqual(fresh, { ok: true, locked: false });
+  for (const body of [{}, { locked: false, source: 'unconfigured' }]) {
+    const unavailable = await readDeskLockState(async () => Response.json(body), { ownerId: 'did:privy:u1' });
+    assert.deepEqual(unavailable, { ok: false, locked: false, error: 'desk_lock_unavailable' });
+  }
+});
+
+function deskAccessToken(ownerId, sid) {
+  const payload = Buffer.from(JSON.stringify({ iss: 'privy.io', sub: ownerId, sid })).toString('base64url');
+  return `header.${payload}.signature`;
+}
+
+test('desk entry resumes only for a current grant in the same Privy sign-in', async () => {
+  const ownerId = 'did:privy:u1';
+  const local = memoryStorage();
+  const session = memoryStorage();
+  const at = Date.now();
+  const until = at + 60_000;
+  writeDeskSession(local, ownerId, until + 1000);
+  const restore = (token, time = at) => restoreDeskEntry({
+    ownerId, localStorage: local, sessionStorage: session, getAccessToken: async () => token, now: () => time,
+  });
+  const token = deskAccessToken(ownerId, 'current-login');
+  assert.equal(await restore(token), 0);
+  writeDeskGrant(session, ownerId, 'ab'.repeat(32), until);
+  assert.equal(await restore(token), 0);
+  const opened = await acceptEnteredPassword({
+    fetchImpl: async () => Response.json({ grant: 'ab'.repeat(32), until }), ownerId,
+    token, password: 'test-password', sessionStorage: session,
+  });
+  assert.deepEqual(opened, { ok: true, until });
+  assert.equal(await restore(token), until);
+  assert.equal(await restore(deskAccessToken(ownerId, 'next-login')), 0);
+  assert.equal(await restore(deskAccessToken('did:privy:other', 'current-login')), 0);
+  assert.equal(await restore(token, until), 0);
+  assert.equal(await restoreDeskEntry({
+    ownerId, localStorage: memoryStorage(), sessionStorage: session, getAccessToken: async () => token, now: () => at,
+  }), 0);
+});
+
+test('first use saves an account verifier and unlocks even if the local verifier cache is unavailable', async () => {
+  const ownerId = 'did:privy:new';
+  const token = deskAccessToken(ownerId, 'first-login');
+  const sessionStorage = memoryStorage();
+  const verifier = await createDeskLock('test-password');
+  let registered = false;
+  const mockFetch = async (url, init) => {
+    if (url.endsWith('/desk')) return Response.json({ locked: registered });
+    const body = JSON.parse(init.body);
+    if (url.endsWith('/desk/lock')) {
+      assert.deepEqual(body, { salt: verifier.salt, hash: verifier.hash, iterations: verifier.iterations });
+      registered = true;
+      return Response.json({ ok: true });
+    }
+    assert.ok(url.endsWith('/desk/unlock'));
+    assert.ok(registered);
+    assert.equal(await unlockDesk(body.password, verifier), true);
+    return Response.json({ grant: 'bc'.repeat(32), until: Date.now() + 60_000 });
+  };
+  assert.deepEqual(await readDeskLockState(mockFetch, { ownerId, token }), { ok: true, locked: false });
+  assert.deepEqual(await saveDeskVerifier(mockFetch, { ownerId, token, verifier }), { ok: true });
+  assert.equal(readDeskGrant(sessionStorage, ownerId, Date.now()), null);
+  assert.equal((await acceptEnteredPassword({
+    fetchImpl: mockFetch, ownerId, token, password: 'test-password', sessionStorage,
+  })).ok, true);
+  assert.equal(readDeskGrant(sessionStorage, ownerId, Date.now()).sessionId, 'first-login');
 });
 
 /**
@@ -268,9 +336,9 @@ function memoryStorage() {
 }
 
 /**
- * Achieves: Enter Password does not replace a different account verifier.
- * Fails when: a wrong password is accepted, or a local match overwrites the account verifier.
- * Oracle: wrong password makes no request; a local match that the account rejects does not call lock.
+ * Achieves: Enter Password accepts the current account password after a reset on another device.
+ * Fails when: a stale browser verifier vetoes unlock, or a local match overwrites the account verifier.
+ * Oracle: the unlock endpoint decides which password matches, and unlock never calls lock.
  * Side effects: in-memory storage and stub fetch. PBKDF2 only.
  * Gaps: the React dialog is not mounted. Seed reset is the lock route with a proof.
  */
@@ -306,8 +374,8 @@ test('Enter Password does not replace the account verifier without the seed', as
     sessionStorage: session,
   });
   assert.equal(refused.ok, false);
-  assert.equal(refused.error, 'wrong_password');
-  assert.equal(calls.length, 0);
+  assert.equal(refused.error, 'desk_locked');
+  assert.equal(calls.length, 1);
 
   const accepted = await acceptEnteredPassword({
     fetchImpl,
@@ -323,4 +391,11 @@ test('Enter Password does not replace the account verifier without the seed', as
   assert.equal(await unlockDesk('older horse', account), true);
   assert.equal(await unlockDesk('fresh horse', account), false);
   assert.equal(readDeskGrant(session, ownerId, Date.now()), null);
+  const current = await acceptEnteredPassword({
+    fetchImpl, ownerId, token: 'tok', password: 'older horse', record: browserCopy,
+    localStorage: local, sessionStorage: session,
+  });
+  assert.equal(current.ok, true);
+  assert.ok(readDeskGrant(session, ownerId, Date.now()));
+  assert.ok(calls.every(call => call.url.endsWith('/desk/unlock')));
 });

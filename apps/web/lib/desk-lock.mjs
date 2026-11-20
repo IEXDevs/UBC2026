@@ -199,7 +199,13 @@ export function parseDeskGrant(value, now) {
   if (!record || typeof record !== 'object' || record.v !== 1) return null;
   if (typeof record.grant !== 'string' || !/^[0-9a-f]{64}$/.test(record.grant)) return null;
   if (!Number.isFinite(record.until) || !Number.isFinite(now) || now >= record.until) return null;
-  return { v: 1, grant: record.grant, until: record.until };
+  return {
+    v: 1,
+    grant: record.grant,
+    until: record.until,
+    ...(typeof record.sessionId === 'string' && /^[^\s]{1,256}$/.test(record.sessionId)
+      ? { sessionId: record.sessionId } : {}),
+  };
 }
 
 export function readDeskGrant(storage, ownerId, now) {
@@ -212,11 +218,11 @@ export function readDeskGrant(storage, ownerId, now) {
   }
 }
 
-export function writeDeskGrant(storage, ownerId, grant, until) {
+export function writeDeskGrant(storage, ownerId, grant, until, sessionId) {
   const key = deskGrantStorageKey(ownerId);
   if (!key || typeof grant !== 'string' || !/^[0-9a-f]{64}$/.test(grant)) return false;
   if (!Number.isFinite(until) || until <= 0 || !storage || typeof storage.setItem !== 'function') return false;
-  const body = JSON.stringify({ v: 1, grant, until });
+  const body = JSON.stringify({ v: 1, grant, until, sessionId });
   try {
     storage.setItem(key, body);
     return storage.getItem?.(key) === body;
