@@ -462,11 +462,17 @@ export function parsePrivySigningFailure(value) {
     : null;
   const code = PRIVY_SIGN_CODES.has(value?.code) ? value.code : null;
   const transport = PRIVY_SIGN_TRANSPORT.has(value?.transport) ? value.transport : null;
+  const lookup = value?.walletLookupStatus;
+  const walletLookupStatus = status === 401 && (lookup === 200
+    || Number.isInteger(lookup) && lookup >= 400 && lookup <= 599)
+    ? lookup
+    : null;
   if (!status && !code && !transport) return null;
   return {
     ...(status ? { status } : {}),
     ...(code ? { code } : {}),
     ...(transport ? { transport } : {}),
+    ...(walletLookupStatus ? { walletLookupStatus } : {}),
   };
 }
 

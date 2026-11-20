@@ -758,6 +758,25 @@ export function createPrivyWalletClient({
     return { cluster: 'devnet' };
   }
 
+  async function checkPrivyWalletAccess(walletId) {
+    try {
+      const response = await fetcher(`${privyApi}/v1/wallets/${encodeURIComponent(walletId)}`, {
+        method: 'GET',
+        headers: { Authorization: basicAuth(id, secret), 'privy-app-id': id },
+        redirect: 'manual',
+        signal: abortAfter(5000),
+      });
+      if (response.status === 200) {
+        const wallet = await response.json();
+        return wallet?.id === walletId && wallet.chain_type === 'solana' ? 200 : null;
+      }
+      await response.body?.cancel().catch(() => {});
+      return response.status;
+    } catch {
+      return null;
+    }
+  }
+
   async function signWithPrivy(walletId, transaction, userAuthorization) {
     const unsigned = decodeBase64(transaction, 'Transaction');
     if (unsigned.length > MAX_TX_BYTES) fail('Transaction exceeds the Solana packet limit', 'invalid_transaction');
@@ -778,6 +797,11 @@ export function createPrivyWalletClient({
       }
       return signedBody?.data?.signed_transaction;
     } catch (error) {
+      const diagnostic = error?.privyFailure;
+      if (userAuthorization && error?.code === 'privy_failed' && diagnostic?.status === 401 && !diagnostic.code) {
+        const walletLookupStatus = await checkPrivyWalletAccess(walletId);
+        error.privyFailure = parsePrivySigningFailure({ ...diagnostic, walletLookupStatus });
+      }
       if (error?.code !== 'wallet_authorization_required') throw error;
       const { ownerId, accessToken } = userAuthorization;
       // The local sub check scopes the request. Privy verifies the JWT and
