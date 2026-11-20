@@ -1,4 +1,5 @@
 import { SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
+import { Transaction } from '@solana/web3.js';
 
 function fail(code) {
   throw Object.assign(new Error(code), { code });
@@ -34,4 +35,24 @@ export async function signSelectedWalletTransaction({ from, transaction, signer 
   } catch { fail('wallet_approval_cancelled'); }
   if (!(signed?.signedTransaction instanceof Uint8Array) || signed.signedTransaction.length <= 64) fail('invalid_signature');
   return signed.signedTransaction;
+}
+
+export async function signWalletMoveTransaction({ wallets, transaction, signer } = {}) {
+  let current = Transaction.from(transaction);
+  const message = current.serializeMessage();
+  for (const from of wallets) {
+    const signed = await signSelectedWalletTransaction({ from, transaction: new Uint8Array(current.serialize({
+      requireAllSignatures: false, verifySignatures: false,
+    })), signer });
+    const next = Transaction.from(signed);
+    if (!next.serializeMessage().equals(message)) fail('transaction_mismatch');
+    for (const entry of current.signatures) {
+      if (entry.signature) next.addSignature(entry.publicKey, entry.signature);
+    }
+    if (!next.signatures.find(entry => entry.publicKey.toBase58() === from.address)?.signature
+        || !next.verifySignatures(false)) fail('invalid_signature');
+    current = next;
+  }
+  if (!current.verifySignatures()) fail('invalid_signature');
+  return new Uint8Array(current.serialize());
 }

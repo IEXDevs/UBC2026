@@ -17,7 +17,9 @@ export async function sendWalletAsset({ client, ownerId, from, wallets, destinat
   const ownDestination = wallets.find(wallet => wallet?.address === destination);
   if (ownDestination?.frozen) fail('wallet_frozen');
   const connected = from.spendable === false;
-  if ((connected && !['prepare', 'broadcast'].includes(phase)) || (!connected && phase !== 'send')) fail('invalid_phase');
+  const browserEmbedded = from.spendable === true && from.provider === 'privy';
+  const browserPhase = ['prepare', 'broadcast'].includes(phase);
+  if (connected ? !browserPhase : phase !== 'send' && !(browserEmbedded && browserPhase)) fail('invalid_phase');
   let signed;
   if (phase === 'broadcast') {
     try {
@@ -37,8 +39,8 @@ export async function sendWalletAsset({ client, ownerId, from, wallets, destinat
   });
   if (signed && !signed.serializeMessage().equals(Transaction.from(Buffer.from(transaction, 'base64')).serializeMessage())) fail('transaction_mismatch');
   const prepared = await client.prepareSolanaTransfer({ transaction });
-  if (connected && phase === 'prepare') return { ok: true, transaction, cluster: SOLANA_CLUSTER };
-  const sent = connected
+  if (phase === 'prepare') return { ok: true, transaction, cluster: SOLANA_CLUSTER };
+  const sent = phase === 'broadcast'
     ? await client.broadcastSignedSolana({ signedTransaction })
     : await client.signPreparedOwnerSolana({ ownerId, wallet: from, prepared, accessToken });
   if (sent?.cluster !== SOLANA_CLUSTER || typeof sent.signature !== 'string') fail('wrong_cluster');

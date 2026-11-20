@@ -1250,8 +1250,19 @@ export function createPrivyWalletClient({
       return { asset, decimals: mint.decimals, tokenProgramId: mint.tokenProgramId, accounts, amount: accounts.reduce((sum, row) => sum + BigInt(row.amount), 0n).toString() };
     },
 
-    async prepareSolanaTransfer({ transaction, accountCreationPayer } = {}) {
-      const message = singleSignerMessage(transaction);
+    async prepareSolanaTransfer({ transaction, accountCreationPayer, requiredSignerAddresses } = {}) {
+      let message;
+      if (requiredSignerAddresses) {
+        const bytes = decodeBase64(transaction, 'Transaction');
+        if (bytes.length > MAX_TX_BYTES) fail('Invalid transaction', 'invalid_transaction');
+        const parsed = Transaction.from(bytes);
+        const expected = new Set(requiredSignerAddresses);
+        if (expected.size < 1 || expected.size > 2 || parsed.signatures.length !== expected.size
+            || parsed.signatures.some(entry => !expected.has(entry.publicKey.toBase58()))) {
+          fail('Unexpected transaction signers', 'invalid_transaction');
+        }
+        message = parsed.serializeMessage();
+      } else message = singleSignerMessage(transaction);
       await assertSolana();
       const [fee, simulation] = await Promise.all([
         rpc('getFeeForMessage', [message.toString('base64'), { commitment: 'confirmed' }]),

@@ -69,6 +69,25 @@ test('native SOL sends lamports, not wrapped SOL tokens or a USDC conversion', a
   assert.equal(transaction.instructions.length, 2);
 });
 
+test('spendable Main prepares and broadcasts browser signatures without a server signer', async () => {
+  const { client, calls } = harness();
+  delete client.signPreparedOwnerSolana;
+  const args = { ...base, client, phase: 'prepare' };
+  const prepared = await sendWalletAsset(args);
+  const tx = Transaction.from(Buffer.from(prepared.transaction, 'base64'));
+  assert.equal(tx.feePayer.toBase58(), from.address);
+  assert.equal(tx.recentBlockhash, blockhash);
+  assert.equal(tx.instructions[0].data[0], 1, 'idempotent ATA creation');
+  assert.equal(tx.instructions[0].keys[0].pubkey.toBase58(), from.address);
+  await assert.rejects(sendWalletAsset({ ...args, phase: 'broadcast' }), { code: 'invalid_signature' });
+  tx.sign(source);
+  const signedTransaction = tx.serialize().toString('base64');
+  await assert.rejects(sendWalletAsset({ ...args, phase: 'broadcast', signedTransaction, amount: '1' }), { code: 'transaction_mismatch' });
+  await sendWalletAsset({ ...args, phase: 'broadcast', signedTransaction });
+  assert.equal(calls.filter(row => row === 'broadcast').length, 1);
+  assert.equal(from.spendable, true);
+});
+
 test('invalid amounts, insufficient balances, changed decimals and frozen sources never sign', async () => {
   for (const extra of [{ amount: '0' }, { amount: '18446744073709551616' }, { amount: '1234567891' }, { decimals: 9 }, { from: { ...from, frozen: true } }, { from: { ...from, ownerId: 'other' } }, { destination: from.address }, { destination: 'bad' }]) {
     const { client, calls } = harness();
