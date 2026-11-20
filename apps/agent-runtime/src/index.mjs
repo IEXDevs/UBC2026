@@ -22,7 +22,7 @@ import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs
 import { enrichEnv } from './runtime-env.mjs';
 import { handleApiData, resolveOwner } from './api-data.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
-import { rememberBotAlert } from './bot-alerts.mjs';
+import { botStub, rememberBotAlert } from './bot-alerts.mjs';
 import { supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 import { corsPreflightResponse, withCors } from './cors.mjs';
 
@@ -178,11 +178,6 @@ export { BotDurableObject };
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
-}
-
-function botStub(env, botId) {
-  const id = env.BOT.idFromName(botId);
-  return env.BOT.get(id);
 }
 
 /**
