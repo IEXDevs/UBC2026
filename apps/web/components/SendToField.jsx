@@ -40,7 +40,7 @@ export default function SendToField({ value, destinations = [], selectedId = '',
 
   function choose(index) {
     const row = options[index];
-    if (!row || row.disabled || row.spendable === false) return;
+    if (!row || row.disabled || row.frozen) return;
     setOpen(false);
     onPick?.(row);
     onChange?.(row.caption);
@@ -112,7 +112,7 @@ export default function SendToField({ value, destinations = [], selectedId = '',
         <div className="glide-select__menu" data-state="open" data-side="bottom" data-align="left">
           <div id={`${id}-list`} role="listbox" aria-label="Wallets" className="glide-select__list">
             {options.map((row, index) => {
-              const locked = row.disabled || row.spendable === false;
+              const locked = row.disabled || row.frozen;
               return (
                 <button
                   key={row.id}
@@ -127,7 +127,6 @@ export default function SendToField({ value, destinations = [], selectedId = '',
                 >
                   <span className="glide-select__name">{row.caption}</span>
                   {row.frozen ? <span className="glide-select__tag">Frozen</span> : null}
-                  {!row.frozen && row.spendable === false ? <span className="glide-select__tag">Read only</span> : null}
                 </button>
               );
             })}

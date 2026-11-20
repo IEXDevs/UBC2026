@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planConnectedDeposit, planWalletMove, selectOwnedMoveWallet } from './wallet-move.mjs';
+import { planConnectedDeposit, planWalletMove, selectOwnedMoveRecipient, selectOwnedMoveWallet } from './wallet-move.mjs';
 
 const env = {
   PRIVY_APP_ID: 'app',
@@ -30,6 +30,26 @@ test('wallet moves take signing identity and freeze state from stored wallets', 
   assert.deepEqual(selectOwnedMoveWallet([stored], selection), { ...stored, privyWalletId: from.id });
   assert.equal(selectOwnedMoveWallet([stored], { ...selection, address: to.address }), null);
   assert.equal(selectOwnedMoveWallet([{ ...stored, spendable: false }], selection), null);
+});
+
+test('connected recipients need no signing identity, but connected sources remain blocked', () => {
+  const linked = { ...to, id: `linked_${to.address}`, spendable: false };
+  const selected = selectOwnedMoveRecipient([linked], { id: linked.id, address: linked.address, spendable: true });
+  assert.equal(selected, linked);
+  assert.equal(selectOwnedMoveWallet([linked], linked), null);
+  assert.equal(selectOwnedMoveRecipient([linked], { ...linked, address: from.address }), null);
+  assert.equal(selectOwnedMoveRecipient([linked], { ...linked, id: 'unverified' }), null);
+  const plan = planWalletMove({ from, to: selected, amount: '1', ownerId: from.ownerId, env });
+  assert.equal(plan.to.address, linked.address);
+  assert.equal(plan.to.spendable, false);
+  assert.equal(planWalletMove({ from, to: { ...selected, frozen: true }, amount: '1', ownerId: from.ownerId, env }).error, 'wallet_frozen');
+});
+
+test('verified linked-wallet aliases resolve only to the matching observed address', () => {
+  const observed = { ...to, id: 'client_Hp6Qyx3K', spendable: false };
+  assert.equal(selectOwnedMoveRecipient([observed], { id: `linked_${to.address}`, address: to.address }), observed);
+  assert.equal(selectOwnedMoveRecipient([observed], { id: `linked_${to.address}`, address: from.address }), null);
+  assert.equal(selectOwnedMoveRecipient([{ ...observed, spendable: true }], { id: `linked_${to.address}`, address: to.address }), null);
 });
 
 /**

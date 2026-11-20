@@ -16,8 +16,104 @@ import { sealAssetSpendHold } from './chat-spend-confirmation.mjs';
 import { toolAccessRequest } from './spend-permission.mjs';
 import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
 import { privySessionFixture } from '../../agent-runtime/src/owner-auth.fixture.mjs';
+import { Keypair, Transaction } from '@solana/web3.js';
+import { SOLANA_GENESIS_HASH } from '@ubc2026/contracts/solana';
+import { buildSolanaUsdcTransaction } from '@ubc2026/transfers';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+test('wallet move accepts a verified connected recipient and signs only with the stored sender', async (t) => {
+  const ownerId = 'did:privy:move-recipient';
+  const session = privySessionFixture(ownerId, 'recipienttestapp');
+  const sender = Keypair.generate();
+  const phantom = Keypair.generate().publicKey.toBase58();
+  const blockhash = Keypair.generate().publicKey.toBase58();
+  const from = { id: 'cm5sender1234567890abcd', address: sender.publicKey.toBase58() };
+  const to = { id: `linked_${phantom}`, address: phantom };
+  const settings = {
+    PRIVY_APP_ID: session.appId,
+    PRIVY_APP_SECRET: 'offline-secret',
+    PRIVY_AUTHORIZATION_KEY: ' ',
+    SOLANA_RPC_URL: 'https://move-rpc.invalid',
+    SUPABASE_URL: 'https://move-store.invalid',
+    SUPABASE_SERVICE_ROLE_KEY: 'offline-store-key',
+  };
+  const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settings);
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  let frozen = false;
+  let loginOwner = ownerId;
+  const signing = [];
+  const broadcasts = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const target = String(url);
+    if (target === session.jwksUrl) return session.jwks();
+    if (target.startsWith(`${settings.SUPABASE_URL}/rest/v1/wallets?`)) {
+      return Response.json([{
+        ...from, owner_id: ownerId, kind: 'main', label: 'Main', frozen, spendable: true,
+      }]);
+    }
+    if (target === `https://api.privy.io/v1/users/${encodeURIComponent(ownerId)}`) {
+      return Response.json({ id: loginOwner, linked_accounts: [{
+        type: 'wallet', chain_type: 'solana', wallet_client_type: 'phantom', address: phantom,
+      }] });
+    }
+    const body = JSON.parse(init?.body || '{}');
+    if (target === `https://api.privy.io/v1/wallets/${from.id}/rpc`) {
+      assert.equal(body.method, 'signTransaction');
+      const transaction = Transaction.from(Buffer.from(body.params.transaction, 'base64'));
+      const expected = buildSolanaUsdcTransaction({
+        feePayer: from.address, sourceOwner: from.address, destinationOwner: phantom,
+        amount: '1000000', memo: 'wallet.move', recentBlockhash: blockhash,
+      });
+      assert.deepEqual(transaction.serializeMessage(), expected.transaction.serializeMessage());
+      assert.deepEqual(transaction.signatures.map(row => row.publicKey.toBase58()), [from.address]);
+      signing.push(target);
+      transaction.sign(sender);
+      return Response.json({ data: { signed_transaction: transaction.serialize().toString('base64') } });
+    }
+    assert.equal(target, settings.SOLANA_RPC_URL, 'all network calls must remain mocked');
+    if (body.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+    if (body.method === 'getLatestBlockhash') return Response.json({ result: { value: { blockhash, lastValidBlockHeight: 100 } } });
+    assert.equal(body.method, 'sendTransaction');
+    broadcasts.push(body);
+    return Response.json({ result: '5'.repeat(88) });
+  });
+  const { POST } = await import('../app/api/wallets/move/route.js');
+  const move = (payload) => POST(new Request('http://localhost/api/wallets/move', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}`, 'x-owner-id': ownerId },
+    body: JSON.stringify({ from, to, amount: '1000000', ...payload }),
+  }));
+  const sent = await move();
+  assert.equal(sent.status, 200, JSON.stringify(await sent.clone().json()));
+  assert.equal((await sent.json()).address, phantom);
+  assert.equal(signing.length, 1);
+  assert.equal(broadcasts.length, 1);
+
+  for (const payload of [
+    { to: { ...to, address: Keypair.generate().publicKey.toBase58() } },
+    { to: { ...to, id: 'unverified' } },
+    { from: { ...to, spendable: true }, to: from },
+    { from: { ...from, address: phantom } },
+  ]) {
+    assert.equal((await move(payload)).status, 400);
+  }
+  frozen = true;
+  const blocked = await move();
+  assert.equal(blocked.status, 400);
+  assert.equal((await blocked.json()).error, 'wallet_frozen');
+  frozen = false;
+  loginOwner = 'did:privy:someone-else';
+  assert.equal((await move()).status, 403);
+  assert.equal(signing.length, 1, 'invalid requests never sign');
+  assert.equal(broadcasts.length, 1, 'invalid requests never broadcast');
+});
 
 test('profile claims and handle lookup share the configured runtime directory', async (t) => {
   const settings = {

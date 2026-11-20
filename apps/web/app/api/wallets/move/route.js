@@ -3,11 +3,11 @@ export const runtime = 'nodejs';
 
 import { moveBetweenWallets } from '@ubc2026/transfers';
 import { createPrivyWalletClient } from '@ubc2026/wallets/privy';
-import { readStoredWallets, storedWalletRow } from '../../../../lib/connected-deposit.mjs';
+import { readStoredWallets, storedWalletRow, walletsForDeposit } from '../../../../lib/connected-deposit.mjs';
 import { accessTokenFromRequest } from '../../../../lib/privy-cookie-session.mjs';
 import { verifyPrivyAccessToken } from '../../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../../lib/root-env.mjs';
-import { planWalletMove, selectOwnedMoveWallet } from '../../../../lib/wallet-move.mjs';
+import { planWalletMove, selectOwnedMoveRecipient, selectOwnedMoveWallet } from '../../../../lib/wallet-move.mjs';
 import { resolvePrivyAppId } from '../../../../lib/wallet-provision.mjs';
 
 function env() {
@@ -41,11 +41,25 @@ export async function POST(request) {
   }
   const body = await request.json().catch(() => ({}));
   try {
+    const client = createPrivyWalletClient({
+      appId,
+      appSecret: secrets.PRIVY_APP_SECRET,
+      rpcUrl: secrets.SOLANA_RPC_URL,
+      authorizationKey: secrets.PRIVY_AUTHORIZATION_KEY || null,
+    });
     const rows = await readStoredWallets(ownerId, secrets, fetch);
-    const wallets = rows.map(row => storedWalletRow(row, ownerId));
+    const wallets = rows.map(row => storedWalletRow(row, ownerId)).filter(Boolean);
+    let recipient = selectOwnedMoveRecipient(wallets, body?.to);
+    if (!recipient) {
+      const user = await client.readLoginUser({ accessToken, ownerId });
+      if (user?.id !== ownerId) {
+        return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+      }
+      recipient = selectOwnedMoveRecipient(walletsForDeposit(rows, user, ownerId), body?.to);
+    }
     const plan = planWalletMove({
       from: selectOwnedMoveWallet(wallets, body?.from),
-      to: selectOwnedMoveWallet(wallets, body?.to),
+      to: recipient,
       amount: body?.amount,
       ownerId,
       env: secrets,
@@ -57,12 +71,6 @@ export async function POST(request) {
         { status, headers: { 'Cache-Control': 'no-store' } },
       );
     }
-    const client = createPrivyWalletClient({
-      appId,
-      appSecret: secrets.PRIVY_APP_SECRET,
-      rpcUrl: secrets.SOLANA_RPC_URL,
-      authorizationKey: secrets.PRIVY_AUTHORIZATION_KEY || null,
-    });
     const sent = await moveBetweenWallets({
       client,
       ownerId,
