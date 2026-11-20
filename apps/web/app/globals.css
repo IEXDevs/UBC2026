@@ -5373,7 +5373,9 @@ button.cta:not(:disabled):hover {
   .side { height: auto; min-height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .rail { max-height: 280px; }
   .topbar { grid-template-columns: 1fr; }
-  .dock-slot { left: 50%; }
+  .dock-slot { position: absolute; left: 50%; }
+  .stage:not(.is-book) .topbar { position: relative; min-height: 64px; padding: 0; }
+  .thread.is-chat { padding-top: 12px; }
   .topbar-side { display: none; }
   .wallet-chip { justify-self: end; }
   .thread, .composer { padding-left: 16px; padding-right: 16px; margin-left: 16px; margin-right: 16px; }
