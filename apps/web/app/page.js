@@ -55,7 +55,7 @@ import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
-import { serverSignsWallet, signSelectedWalletTransaction } from '../lib/wallet-signing.mjs';
+import { signSelectedWalletTransaction, signWalletMoveTransaction } from '../lib/wallet-signing.mjs';
 import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
   deleteOwnerBot,
@@ -1208,7 +1208,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const onWalletSend = useCallback(async (pending) => {
     let failure = {};
     const failed = (message, detail = failure) => walletSendFailure(message, detail);
-    if (deskLockOnRef.current && !unlockedRef.current) {
+    if (!pending?.walletAsset && pending?.target?.kind !== 'wallet' && deskLockOnRef.current && !unlockedRef.current) {
       lockIntentRef.current ??= { type: 'wallet' };
       setLockOpen(true);
       return failed('Enter your password to use the wallet.');
@@ -1228,12 +1228,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           return { response, body: await response.json().catch(() => ({})) };
         };
         let result;
-        if (!serverSignsWallet(from)) {
+        const signer = depositSignerRef.current;
+        const browserEmbedded = from.spendable !== false
+          && typeof signer?.signTransaction === 'function'
+          && (Array.isArray(signer.wallets) ? signer.wallets : []).some(wallet => wallet?.address === from.address);
+        if (browserEmbedded || from.spendable === false) {
           const prepared = await post({ phase: 'prepare' });
           failure = prepared.body;
           if (!prepared.response.ok || !prepared.body.transaction) return failed('The transfer was not prepared. Check the balance and SOL network fees.');
           const transaction = base64ToBytes(prepared.body.transaction);
-          const signed = await signSelectedWalletTransaction({ from, transaction, signer: depositSignerRef.current });
+          const signed = await signSelectedWalletTransaction({ from, transaction, signer });
           result = await post({ phase: 'broadcast', signedTransaction: bytesToBase64(signed) });
         } else result = await post({ phase: 'send' });
         const { response, body } = result;
@@ -1408,16 +1412,29 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             },
           };
         }
-        const response = await fetch('/api/wallets/move', {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(token ? { authorization: `Bearer ${token}` } : {}),
-            'x-owner-id': ownerId,
-          },
-          body: JSON.stringify({ from, to: dest, amount: pending.amount }),
-        });
-        const body = await response.json().catch(() => ({}));
+        const postMove = async (extra = {}) => {
+          const response = await fetch('/api/wallets/move', {
+            method: 'POST', headers: moneyHeaders(token),
+            body: JSON.stringify({ from, to: dest, amount: pending.amount, ...extra }),
+          });
+          return { response, body: await response.json().catch(() => ({})) };
+        };
+        const signer = depositSignerRef.current;
+        const available = wallet => typeof signer?.signTransaction === 'function'
+          && (Array.isArray(signer.wallets) ? signer.wallets : []).some(item => item?.address === wallet.address);
+        let result;
+        if (available(from)) {
+          const prepared = await postMove({ phase: 'prepare' });
+          failure = prepared.body;
+          if (!prepared.response.ok || !prepared.body.transaction || !Array.isArray(prepared.body.signerWallets)
+              || !prepared.body.signerWallets.length) return failed('The transfer was not prepared. Check the balance and SOL network fees.');
+          if (prepared.body.signerWallets.every(available)) {
+            const signed = await signWalletMoveTransaction({ wallets: prepared.body.signerWallets,
+              transaction: base64ToBytes(prepared.body.transaction), signer });
+            result = await postMove({ phase: 'broadcast', signedTransaction: bytesToBase64(signed) });
+          } else result = await postMove();
+        } else result = await postMove();
+        const { response, body } = result;
         failure = body;
         const where = target.caption || clipAddress(target.address);
         if (body.error === 'missing_config') {

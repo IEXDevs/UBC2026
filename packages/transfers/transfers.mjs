@@ -332,12 +332,26 @@ async function ownerMove({
   recentBlockhash,
   kind,
   accessToken,
+  phase = 'send',
+  signedTransaction,
 }) {
-  requireMethod(client, 'signAndBroadcastOwnerSolana');
+  if (!['send', 'prepare', 'broadcast'].includes(phase)) fail('Invalid move phase', 'invalid_phase');
+  requireMethod(client, phase === 'send' ? 'signAndBroadcastOwnerSolana' : 'prepareSolanaTransfer');
   const source = ownedWallet(fromWallet, ownerId);
   const payer = feePayerWallet ? ownedWallet(feePayerWallet, ownerId) : source;
+  if (phase !== 'send' && (source.frozen || payer.frozen || source.spendable === false || payer.spendable === false)) {
+    fail('Wallet cannot sign', 'wallet_frozen');
+  }
   if (source.address === toAddress) fail('Source and destination must differ', 'invalid_destination');
-  const hash = await blockhashFrom(client, recentBlockhash);
+  let signed;
+  if (phase === 'broadcast') {
+    try {
+      if (typeof signedTransaction !== 'string' || signedTransaction.length > 2000) fail('Invalid signature', 'invalid_signature');
+      signed = Transaction.from(Buffer.from(signedTransaction, 'base64'));
+      if (!signed.verifySignatures()) fail('Invalid signature', 'invalid_signature');
+    } catch { fail('Invalid signature', 'invalid_signature'); }
+  }
+  const hash = signed ? signed.recentBlockhash : await blockhashFrom(client, recentBlockhash);
   const built = buildSolanaUsdcTransaction({
     feePayer: payer.address,
     sourceOwner: source.address,
@@ -346,6 +360,19 @@ async function ownerMove({
     memo,
     recentBlockhash: hash,
   });
+  if (phase !== 'send') {
+    if (signed && !signed.serializeMessage().equals(built.transaction.serializeMessage())) {
+      fail('Signed transfer differs from request', 'transaction_mismatch');
+    }
+    const signerWallets = payer.address === source.address ? [source] : [source, payer];
+    await client.prepareSolanaTransfer({ transaction: built.transactionBase64,
+      requiredSignerAddresses: signerWallets.map(wallet => wallet.address) });
+    if (phase === 'prepare') return { cluster: SOLANA_CLUSTER, transaction: built.transactionBase64, signerWallets };
+    requireMethod(client, 'broadcastSignedSolana');
+    const sent = await client.broadcastSignedSolana({ signedTransaction });
+    if (sent?.cluster !== SOLANA_CLUSTER) fail('Wrong cluster', 'wrong_cluster');
+    return movementResult(kind, built, sent.signature);
+  }
   const sent = await client.signAndBroadcastOwnerSolana({
     ownerId,
     wallet: source,
@@ -367,8 +394,11 @@ export async function moveBetweenWallets({
   memo = 'wallet.move',
   recentBlockhash,
   accessToken,
+  phase = 'send',
+  signedTransaction,
 } = {}) {
   const destination = ownedWallet(toWallet, ownerId);
+  if (phase !== 'send' && destination.frozen) fail('Wallet is frozen', 'wallet_frozen');
   if (fromWallet?.id === destination.id) fail('Source and destination must differ', 'invalid_destination');
   return ownerMove({
     client,
@@ -381,6 +411,8 @@ export async function moveBetweenWallets({
     recentBlockhash,
     kind: 'move',
     accessToken,
+    phase,
+    signedTransaction,
   });
 }
 

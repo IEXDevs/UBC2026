@@ -65,7 +65,11 @@ export async function POST(request) {
         && !String(wallet.id).startsWith('client_')
         && !String(wallet.id).startsWith('linked_'));
       const observed = selectOwnedMoveRecipient(verified.filter(wallet => wallet.spendable === false), body?.from);
-      const from = selectOwnedMoveWallet(signable, body?.from) || observed;
+      const browserMain = ['prepare', 'broadcast'].includes(body.phase)
+        ? verified.find(wallet => wallet.kind === 'main' && wallet.spendable === true && wallet.ownerId === ownerId
+          && wallet.address === body?.from?.address && !String(wallet.id).startsWith('linked_'))
+        : null;
+      const from = browserMain || selectOwnedMoveWallet(signable, body?.from) || observed;
       const sent = await sendWalletAsset({ client, ownerId, from, wallets: verified, destination: body.destination, asset: body.asset, amount: body.amount, decimals: body.decimals, phase: body.phase, signedTransaction: body.signedTransaction, accessToken });
       return Response.json(sent, { headers: { 'Cache-Control': 'no-store' } });
     }
@@ -105,7 +109,13 @@ export async function POST(request) {
       toWallet: plan.to,
       amount: plan.amount,
       memo: plan.memo,
+      phase: body.phase,
+      signedTransaction: body.signedTransaction,
     });
+    if (body.phase === 'prepare') {
+      return Response.json({ ok: true, transaction: sent.transaction, signerWallets: sent.signerWallets,
+        cluster: sent.cluster }, { headers: { 'Cache-Control': 'no-store' } });
+    }
     return Response.json({
       ok: true,
       address: plan.to.address,
