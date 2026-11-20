@@ -89,21 +89,25 @@ export function privySessionFingerprint(storage) {
  */
 export function installAuthFetchTracker(target) {
   if (!target || typeof target.fetch !== 'function' || target.fetch.__maelstromAuthTrack) {
-    return { idle: () => true, restore() {} };
+    return { snapshot: () => 0, restore() {} };
   }
   const original = target.fetch.bind(target);
-  const pending = new Set();
+  let pending = 0;
+  let requests = 0;
   const tracked = async function trackedFetch(input, init) {
     const promise = original(input, init);
     if (!isPrivyAuthRequest(input)) return promise;
-    pending.add(promise);
-    promise.then(() => pending.delete(promise), () => pending.delete(promise));
+    pending += 1;
+    requests += 1;
+    const done = () => { pending -= 1; };
+    promise.then(done, done);
     return promise;
   };
   tracked.__maelstromAuthTrack = true;
   target.fetch = tracked;
   return {
-    idle: () => pending.size === 0,
+    // The counter also catches requests that start and finish between checks.
+    snapshot: () => pending > 0 ? null : requests,
     restore() {
       if (target.fetch === tracked) target.fetch = original;
     },
@@ -112,7 +116,7 @@ export function installAuthFetchTracker(target) {
 
 export async function waitForStablePrivySession({
   storage,
-  idle = () => true,
+  authSnapshot = () => 0,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = () => Date.now(),
   quietMs = SESSION_QUIET_MS,
@@ -120,17 +124,20 @@ export async function waitForStablePrivySession({
 } = {}) {
   const started = now();
   let last = privySessionFingerprint(storage);
+  let lastAuth = authSnapshot();
   let stableAt = started;
   while (now() - started < timeoutMs) {
     const next = privySessionFingerprint(storage);
-    if (next !== last) {
+    const auth = authSnapshot();
+    if (next !== last || auth === null || auth !== lastAuth) {
       last = next;
+      lastAuth = auth;
       stableAt = now();
     }
-    if (idle() && now() - stableAt >= quietMs) return true;
+    if (auth !== null && now() - stableAt >= quietMs) return true;
     await sleep(40);
   }
-  return idle();
+  return false;
 }
 
 export async function clearBrowserCaches({ caches, serviceWorker } = {}) {
@@ -158,6 +165,7 @@ export async function checkDeploy({
   session,
   persistent,
   settle,
+  authSnapshot = () => 0,
   caches,
   serviceWorker,
   replace,
@@ -172,23 +180,26 @@ export async function checkDeploy({
   const body = await response.json?.().catch(() => null);
   const remoteId = typeof body?.id === 'string' ? body.id.trim() : '';
   if (!buildsDiffer(localId, remoteId)) return { reload: false };
-  if (!claimReload(session, remoteId)) return { reload: false };
+  if (session?.getItem?.(RELOAD_MEMORY_KEY) === remoteId) return { reload: false };
   if (typeof settle === 'function') {
     try {
-      await settle();
+      if (!(await settle())) return { reload: false };
     } catch {
-      /* A settle that throws still yields to the new build. */
+      return { reload: false };
     }
   }
-  try {
-    lockOpenWallets(persistent);
-  } catch {
-    /* A locked wallet is the ceiling. The login stays either way. */
-  }
+  const settledAuth = authSnapshot();
+  if (settledAuth === null) return { reload: false };
   try {
     await clearBrowserCaches({ caches, serviceWorker });
   } catch {
     /* A cache the browser will not clear still yields to the cache-busted navigation. */
+  }
+  if (settledAuth !== authSnapshot() || !claimReload(session, remoteId)) return { reload: false };
+  try {
+    lockOpenWallets(persistent);
+  } catch {
+    /* A locked wallet is the ceiling. The login stays either way. */
   }
   const next = reloadUrl(href, remoteId);
   if (typeof replace === 'function') replace(next);
@@ -214,6 +225,7 @@ export function watchDeploy({
   if (!view) return () => {};
   const doc = documentRef ?? (typeof document === 'undefined' ? null : document);
   let stopped = false;
+  let checking = false;
 
   const tidy = cleanBuildQuery(href ?? view.location?.href ?? '', localId);
   if (tidy && typeof replaceState === 'function') replaceState(tidy);
@@ -222,14 +234,16 @@ export function watchDeploy({
   }
 
   const tracker = installAuthFetchTracker(view);
+  const authSnapshot = () => stopped ? null : tracker.snapshot();
   const store = persistent ?? view.localStorage;
   const waitForSession = settle ?? (() => waitForStablePrivySession({
     storage: store,
-    idle: tracker.idle,
+    authSnapshot,
   }));
 
   const tick = () => {
-    if (stopped) return;
+    if (stopped || checking) return;
+    checking = true;
     void checkDeploy({
       localId,
       fetcher,
@@ -237,10 +251,11 @@ export function watchDeploy({
       session: session ?? view.sessionStorage,
       persistent: store,
       settle: waitForSession,
+      authSnapshot,
       caches: caches ?? view.caches,
       serviceWorker: serviceWorker ?? view.navigator?.serviceWorker,
       replace: replace ?? ((next) => view.location.replace(next)),
-    });
+    }).finally(() => { checking = false; });
   };
 
   tick();
