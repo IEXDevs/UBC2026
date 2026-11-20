@@ -40,4 +40,7 @@ test('root package exposes local web deploy commands for dev and prod', () => {
   assert.equal((workflow.match(/npm ci/g) || []).length, 1);
   assert.match(workflow, /npm run deploy:web:dev/);
   assert.doesNotMatch(workflow, /npx opennextjs-cloudflare build/);
+  // A skipped comment run must not cancel a deploy in progress.
+  assert.doesNotMatch(workflow, /^concurrency:/m);
+  assert.match(workflow, /^ {4}concurrency:\n {6}group: maelstrom-web-dev\n {6}cancel-in-progress: true$/m);
 });

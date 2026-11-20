@@ -22,12 +22,12 @@ permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: maelstrom-web-dev
-  cancel-in-progress: true
-
 jobs:
   deploy:
+    # Job-level, so a skipped comment run never cancels a deploy in progress.
+    concurrency:
+      group: maelstrom-web-dev
+      cancel-in-progress: true
     if: >
       github.event_name == 'workflow_dispatch' ||
       (
