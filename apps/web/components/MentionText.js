@@ -32,7 +32,7 @@ export default function MentionText({ text, onParty }) {
   const source = typeof text === 'string' ? text : '';
   const parts = source.split(SPLIT);
   return parts.map((part, index) => {
-    const party = partyFromToken(part);
+    const party = index % 2 === 1 ? partyFromToken(part) : null;
     if (!party || typeof onParty !== 'function') return <span key={index}>{paintSlash(part, index)}</span>;
     return (
       <button key={index} type="button" className="party-link" onClick={() => onParty(party)}>
