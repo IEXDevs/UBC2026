@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import AddressCopy from './AddressCopy';
+import PasswordFeedback from './PasswordFeedback';
+import { passwordFeedback } from '../lib/password-feedback.mjs';
 import Spotlight from './bits/Spotlight';
 import {
   createRecoveryPhrase,
@@ -93,6 +95,9 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   const [retry, setRetry] = useState(0);
   const verifierRef = useRef(null);
   const finishTimer = useRef(0);
+  const passwordRules = 'Use 8 to 64 characters, with no line breaks.';
+  const normalizedPassword = normalizePassphrase(password);
+  const feedback = passwordFeedback(password, repeat, normalizedPassword ? '' : passwordRules, normalizedPassword);
 
   async function authToken() {
     try { return (await getAccessToken?.()) || ''; } catch { return ''; }
@@ -369,13 +374,19 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
           >
             <label>
               Password
-              <input type="password" name="wallet-password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} />
+              <input type="password" name="wallet-password" autoComplete="new-password" value={password} aria-describedby="recovery-password-rules" aria-invalid={Boolean(feedback.problem) || undefined} onChange={(event) => { setPassword(event.target.value); setNote(''); }} />
             </label>
+            <PasswordFeedback id="recovery-password-rules" state={feedback.problem ? 'error' : (password ? 'ok' : '')}>
+              {feedback.problem || passwordRules}
+            </PasswordFeedback>
             <label>
               Repeat password
-              <input type="password" name="wallet-password-repeat" autoComplete="new-password" value={repeat} onChange={event => setRepeat(event.target.value)} />
+              <input type="password" name="wallet-password-repeat" autoComplete="new-password" value={repeat} aria-describedby="recovery-password-match" aria-invalid={Boolean(repeat && !feedback.matches) || undefined} onChange={(event) => { setRepeat(event.target.value); setNote(''); }} />
             </label>
-            <button type="submit" className="solid">Continue</button>
+            <PasswordFeedback id="recovery-password-match" state={repeat ? (feedback.matches ? 'ok' : 'error') : ''}>
+              {feedback.confirmation || 'Re-enter your password to confirm it.'}
+            </PasswordFeedback>
+            <button type="submit" className="solid" disabled={!feedback.ready}>Continue</button>
           </form>
         ) : null}
         {step === 'save' ? (

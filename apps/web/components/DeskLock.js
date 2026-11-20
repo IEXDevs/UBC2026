@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import SecretDraft from './SecretDraft';
+import PasswordFeedback from './PasswordFeedback';
+import { passwordFeedback } from '../lib/password-feedback.mjs';
 import {
   createDeskLock,
   passwordProblem,
@@ -69,6 +71,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
   }, [onClose]);
 
   const setting = replacing || (record == null && !serverLocked);
+  const feedback = passwordFeedback(password, confirm, passwordProblem(password));
 
   async function checkSeed() {
     const words = slots.map(word => word.trim().toLowerCase()).filter(Boolean);
@@ -232,10 +235,13 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
               generated={generated}
               copied={copied}
               disabled={record === undefined || pending}
-              onValue={setPassword}
+              describedBy="desk-password-rules"
+              invalid={Boolean(feedback.problem)}
+              onValue={(next) => { setPassword(next); setNote(''); }}
               onFill={(next) => {
                 setPassword(next);
                 setConfirm(next);
+                setNote('');
               }}
               onGenerated={setGenerated}
               onCopied={setCopied}
@@ -261,6 +267,11 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
             />
           )}
           {setting ? (
+            <PasswordFeedback id="desk-password-rules" state={feedback.problem ? 'error' : (password ? 'ok' : '')}>
+              {feedback.problem || 'Use 8 to 128 characters.'}
+            </PasswordFeedback>
+          ) : null}
+          {setting ? (
             <label>
               Confirm password
               <input
@@ -268,13 +279,20 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
                 name="desk-password-confirm"
                 autoComplete="new-password"
                 value={confirm}
+                aria-describedby="desk-password-match"
+                aria-invalid={Boolean(confirm && !feedback.matches) || undefined}
                 disabled={pending}
-                onChange={event => setConfirm(event.target.value)}
+                onChange={(event) => { setConfirm(event.target.value); setNote(''); }}
               />
             </label>
           ) : null}
+          {setting ? (
+            <PasswordFeedback id="desk-password-match" state={confirm ? (feedback.matches ? 'ok' : 'error') : ''}>
+              {feedback.confirmation || 'Re-enter your password to confirm it.'}
+            </PasswordFeedback>
+          ) : null}
           {note ? <p className="quiet" role="status">{note}</p> : null}
-          <button type="submit" className="solid" disabled={record === undefined || pending || (setting && !secretAcceptAllowed({ generated, copied }))}>
+          <button type="submit" className="solid" disabled={record === undefined || pending || (setting && !(phraseGate && !replacing) && (!feedback.ready || !secretAcceptAllowed({ generated, copied })))}>
             {pending ? 'Checking…' : (phraseGate && !replacing ? 'Check seed' : (replacing ? 'Set password' : (setting ? 'Set password' : 'Unlock')))}
           </button>
           {!setting && !phraseGate ? (
