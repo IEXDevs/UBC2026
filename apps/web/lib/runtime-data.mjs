@@ -365,7 +365,6 @@ export async function sendBotChat({
   shellWallets = null,
   shellBalanceLabel = null,
   fileCatalog = null,
-  connectors = null,
   reviewCap = null,
   situation = null,
   accessToken = '',
@@ -424,7 +423,6 @@ export async function sendBotChat({
         ...(typeof shellBalanceLabel === 'string' && shellBalanceLabel.trim()
           ? { shellBalanceLabel: shellBalanceLabel.trim().slice(0, 64) }
           : {}),
-        ...(Array.isArray(connectors) ? { connectors: connectors.slice(0, 40) } : {}),
         ...(typeof reviewCap === 'string' && reviewCap ? { reviewCap } : {}),
         ...(clock ? { situation: clock } : {}),
         ...(catalog.length > 0 ? { fileCatalog: catalog } : {}),

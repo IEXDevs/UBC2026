@@ -59,6 +59,8 @@ test('the home shell does not render the demo fixture', () => {
   assert.equal(page.includes('PreviewMain'), false);
   assert.equal(page.includes('bot_meteora'), false);
   assert.equal(page.includes('Sandbox shopper'), false);
+  assert.equal(page.includes('PluginsSheet'), false);
+  assert.equal(page.includes('ConnectorsPane'), false);
 });
 
 /**

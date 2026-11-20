@@ -39,8 +39,8 @@ test('a saved provider keeps the token out of the catalog view', () => {
 });
 
 /**
- * Achieves: verifies Add Provider entry points exist in model menu and Plugins settings.
- * Fails when: PromptBar/PluginsSheet lose Add Provider, or dialog drops saveProvider/a11y title.
+ * Achieves: verifies Add Provider entry points exist in the model menu and the account menu.
+ * Fails when: PromptBar loses Add Provider, or dialog drops saveProvider/a11y title.
  * Oracle: source contains label/button and dialog wiring.
  * Side effects / state checked: component source text.
  * Gaps: source snapshot only — click/open not executed.
@@ -49,7 +49,6 @@ test('provider management has its own account entry, separate from connectors an
   const prompt = readFileSync(join(web, 'components/PromptBar.jsx'), 'utf8');
   const profile = readFileSync(join(web, 'components/ProfileSheet.js'), 'utf8');
   const wallets = readFileSync(join(web, 'components/WalletsSheet.js'), 'utf8');
-  const plugins = readFileSync(join(web, 'components/PluginsSheet.js'), 'utf8');
   const account = readFileSync(join(web, 'components/AccountMenu.js'), 'utf8');
   const sheet = readFileSync(join(web, 'components/AIProvidersSheet.js'), 'utf8');
   const providers = readFileSync(join(web, 'components/ModelProviders.js'), 'utf8');
@@ -58,7 +57,7 @@ test('provider management has its own account entry, separate from connectors an
   assert.doesNotMatch(profile, /ProviderAdd|provider-tokens/);
   assert.doesNotMatch(wallets, /ProviderAdd|provider-tokens/);
   assert.match(account, /id: 'ai-providers', label: 'AI Providers'/);
-  assert.doesNotMatch(plugins, /ModelProviders|models-tab/);
+  assert.doesNotMatch(account, /id: 'plugins'/);
   assert.match(sheet, /<ModelProviders/);
   assert.match(providers, /<ProviderAdd/);
   assert.match(providers, /providerModelGroups/);

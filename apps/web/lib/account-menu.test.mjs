@@ -11,4 +11,5 @@ test('profile menu keeps account destinations without a Computer entry', () => {
   assert.ok(destinations.includes('logs'));
   assert.ok(destinations.includes('logout'));
   assert.ok(!destinations.includes('computer'));
+  assert.ok(!destinations.includes('plugins'));
 });

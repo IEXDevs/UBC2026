@@ -19,24 +19,8 @@ function tool(name, description, required, properties) {
 
 export const HARNESS_TOOLS = Object.freeze([
   tool(
-    'list_connectors',
-    'List the apps connected for this owner. Built-in apps stay on. The owner connects the rest once on the connectors page, and every agent and subagent sees that same set.',
-    [],
-    {},
-  ),
-  tool(
-    'use_connector',
-    'Use one connected app. Search and browser apps run automatically. Other connected apps run their automatic lookup. If the app is not connected, say so. Do not claim a post, mail, or deploy finished unless the result says that action completed.',
-    ['connectorId'],
-    {
-      connectorId: { type: 'string', description: 'Connector id, such as vercel, github, or firecrawl' },
-      query: { type: 'string', description: 'What to look up' },
-      url: { type: 'string', description: 'https URL when the app should open a page' },
-    },
-  ),
-  tool(
     'delegate_task',
-    'Hand a subtask to a subagent. The subagent has the same tools, skills, and connected apps. It cannot hand work further. Use the reply, and read read_subagent_results if you need it again.',
+    'Hand a subtask to a subagent. The subagent has the same tools and skills. It cannot hand work further. Use the reply, and read read_subagent_results if you need it again.',
     ['task'],
     {
       task: { type: 'string', description: 'What the subagent should do' },
@@ -55,8 +39,7 @@ export const HARNESS_TOOL_NAMES = Object.freeze(HARNESS_TOOLS.map(item => item.n
 
 export function harnessInstruction() {
   return [
-    'You can list_connectors, use_connector, delegate_task, and read_subagent_results.',
-    'Connected apps are shared. A voice handoff uses this same set.',
+    'You can delegate_task and read_subagent_results.',
     'delegate_task is one level deep. A subagent cannot delegate again.',
     'When a subagent returns, say what it returned. Do not invent a second result.',
     'An owner situation may follow this note. Use its local time and place in search queries and browser pages when the ask depends on where or when they are.',

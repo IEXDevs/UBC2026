@@ -14,7 +14,6 @@ import {
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
 import { chatToolsInstruction, createChatToolInvoker } from './chat-tools.mjs';
-import { connectorInstruction, planConnectorUse, resolveDeskConnectors } from './connector-access.mjs';
 import { effectiveReviewCap, isFundTool, matchingToolGrant, needsBoundSpend, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
 import { readSubagentResults, recordSubagentResult } from './subagent-board.mjs';
 import { completeTextChat } from './text-chat.mjs';
@@ -29,7 +28,7 @@ export function agentToolSchemas() {
   return toOpenAiTools([...SHARED_AGENT_TOOLS, ...HARNESS_TOOLS]);
 }
 
-export function harnessPrompt(connectors, skillId = '', situation = null, now = new Date()) {
+export function harnessPrompt(_connectors, skillId = '', situation = null, now = new Date()) {
   const skill = skillById(skillId);
   const clock = situation && typeof situation.at === 'string'
     ? situation
@@ -37,7 +36,6 @@ export function harnessPrompt(connectors, skillId = '', situation = null, now = 
   return [
     harnessInstruction(),
     situationInstruction(clock),
-    connectorInstruction(connectors),
     skillsCatalogInstruction(),
     skill ? skill.instruction : '',
   ].filter(Boolean).join('\n');
@@ -87,7 +85,7 @@ export function linkedConnectorIds(value) {
 }
 
 /**
- * Turn `/vercel check the preview` into a task, or a reply when the app is off.
+ * Turn `/vercel check the preview` into a task.
  * A normal message is returned unchanged.
  */
 export function prepareOwnerTurn(message, connectors, situation = null, now = new Date()) {
@@ -102,16 +100,6 @@ export function prepareOwnerTurn(message, connectors, situation = null, now = ne
   if (!parsed.task) {
     return { error: 'task_required', reply: `Add what ${parsed.command} should do.` };
   }
-  if (parsed.needsConnector) {
-    const linked = resolveDeskConnectors(connectors);
-    if (!linked.some(row => row.id === parsed.needsConnector)) {
-      return {
-        error: 'connector_off',
-        connector: parsed.needsConnector,
-        reply: `Connect ${parsed.needsConnector} on the connectors page, then ask again.`,
-      };
-    }
-  }
   return {
     message: parsed.task,
     skillId: parsed.id,
@@ -120,30 +108,8 @@ export function prepareOwnerTurn(message, connectors, situation = null, now = ne
 }
 
 export async function dispatchHarness(name, args, ctx) {
-  if (name === 'list_connectors') {
-    return {
-      ok: true,
-      items: resolveDeskConnectors(ctx.connectors).map(row => ({ id: row.id, name: row.name, linked: true })),
-    };
-  }
   if (name === 'read_subagent_results') {
     return { ok: true, items: readSubagentResults(ctx.ownerId, ctx.botId) };
-  }
-  if (name === 'use_connector') {
-    const plan = planConnectorUse(ctx.connectors, args || {});
-    if (plan.error) return plan;
-    if (!plan.tool || typeof ctx.invokeRaw !== 'function') {
-      return { ok: true, connector: plan.connector, linked: true, automatic: false, hint: plan.hint };
-    }
-    const result = await ctx.invokeRaw(plan.tool, plan.args);
-    return {
-      ok: !result?.error,
-      connector: plan.connector,
-      automatic: true,
-      routedTo: plan.tool,
-      ...(plan.hint ? { hint: plan.hint } : {}),
-      result,
-    };
   }
   if (name === 'delegate_task') {
     if ((ctx.depth || 0) > 0) return { error: 'delegate_depth' };
@@ -156,13 +122,6 @@ export async function runDelegatedAgent(ctx, args = {}) {
   const skill = skillById(typeof args.skill === 'string' ? args.skill : '');
   const task = typeof args.task === 'string' ? args.task.trim().slice(0, 2000) : '';
   if (!task) return { error: 'task_required' };
-  if (skill?.needsConnector && !resolveDeskConnectors(ctx.connectors).some(row => row.id === skill.needsConnector)) {
-    return {
-      error: 'connector_off',
-      connector: skill.needsConnector,
-      hint: `Connect ${skill.needsConnector} on the connectors page.`,
-    };
-  }
   if (typeof ctx.complete !== 'function' || typeof ctx.invokeRaw !== 'function') {
     return { error: 'agent_not_configured' };
   }
@@ -225,7 +184,8 @@ export async function runVoiceAgentTurn({
   openrouterApiKey = '',
   model = '',
 } = {}) {
-  const desk = linkedConnectorIds(connectors);
+  const desk = [];
+  void connectors;
   const clock = normalizeSituation(situation);
   const prepared = prepareOwnerTurn(message, desk, clock, new Date(clock.at));
   if (prepared.reply) return { reply: prepared.reply, subagents: [] };

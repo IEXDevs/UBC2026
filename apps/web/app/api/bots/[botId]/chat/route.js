@@ -17,7 +17,6 @@ import { amountOverReviewCap, effectiveReviewCap, parsePermission, permissionIns
 import {
   agentToolSchemas,
   dispatchHarness,
-  linkedConnectorIds,
   ownerReviewCap,
   prepareOwnerTurn,
   stampSpendPermission,
@@ -119,7 +118,7 @@ export async function POST(request, context) {
   const solSend = assetConfirmation ? null : parseSolHandleSend(message);
   const reviewSwap = !assetConfirmation && modelFreeCommand(message) === 'review-swap';
   const noModel = solSend || assetConfirmation || reviewSwap;
-  const connectors = noModel ? [] : linkedConnectorIds(body.connectors);
+  const connectors = [];
   const situation = noModel ? null : situationFromEdge(body.situation, await visitorGeo(request));
   const prepared = situation ? prepareOwnerTurn(message, connectors, situation, new Date(situation.at)) : null;
   if (prepared?.reply) {

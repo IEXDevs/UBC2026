@@ -50,7 +50,6 @@ import {
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { fetchPendingSwap, sendBotChat } from '../lib/runtime-data.mjs';
 import { browserSituation } from '../lib/owner-situation.mjs';
-import { readSharedLinks } from '../lib/connectors.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
 import { AGENT_SKILLS, AVAILABLE_SKILLS } from '@ubc2026/agent-tools';
 import { playAgentSpeech, startVoicePipe } from '../lib/voice-pipe.mjs';
@@ -762,7 +761,6 @@ export default function Composer({
           shellWallets,
           shellBalanceLabel,
           fileCatalog: catalogRef.current,
-          connectors: readSharedLinks(),
           reviewCap: reviewCapRef.current || '',
           situation: browserSituation(),
           accessToken,
