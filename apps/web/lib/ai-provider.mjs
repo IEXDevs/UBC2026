@@ -1,5 +1,6 @@
 import { thinkingLevelsForModel } from './thinking-levels.mjs';
 import { reportedContextWindow } from './context-usage.mjs';
+import { OPENROUTER_FREE_MODEL, selectFreeOpenRouterModel } from '@ubc2026/contracts';
 
 // Only these exact API roots may receive browser-supplied credentials server-side.
 // Never follow redirects or use an arbitrary URL as an inference proxy.
@@ -9,6 +10,17 @@ export const AI_PROVIDERS = [
   { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', provider: 'openrouter' },
 ];
 export const MODEL_ID = /^[A-Za-z0-9_.:/-]{1,80}$/;
+
+export function accountProviderModels(models, provider) {
+  // Only advertise choices that account inference will actually run unchanged.
+  return models.filter(model => provider !== 'openrouter' || selectFreeOpenRouterModel(model.id) === model.id);
+}
+
+export function fallbackAccountModels(provider) {
+  return provider === 'openrouter'
+    ? [{ id: OPENROUTER_FREE_MODEL, name: 'Llama 3.3 70B (free)', levels: [], contextWindow: 0 }]
+    : [];
+}
 
 export function aiProvider(baseUrl) {
   if (typeof baseUrl !== 'string') return null;

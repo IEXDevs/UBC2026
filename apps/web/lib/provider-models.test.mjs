@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { saveProvider } from './provider-tokens.mjs';
-import { aiProvider, checkProviderModels, parseModelProvider, parseProviderModels } from './ai-provider.mjs';
+import { accountProviderModels, aiProvider, checkProviderModels, fallbackAccountModels, parseModelProvider, parseProviderModels } from './ai-provider.mjs';
 import {
   ACCOUNT_PROVIDER, forgetProviderModels, modelOptionKey, readModelCatalogs,
   saveModelCatalog, selectedModelRequest, setModelVisible, visibleModelOptions,
@@ -127,4 +127,11 @@ test('custom OpenRouter models do not weaken the free-only policy for account ke
   const reply = await completeTextChat({ modelProvider: { token, baseUrl: 'https://openrouter.ai/api/v1' }, model, message: 'Hello', fetcher });
   assert.equal(reply.model, model);
   assert.equal(reply.provider, 'openrouter');
+});
+
+test('account catalogs never advertise router aliases that inference silently remaps', () => {
+  const catalog = [{ id: 'openrouter/free' }, { id: 'vendor/chat:free' }, { id: 'vendor/paid-chat' }];
+  assert.deepEqual(accountProviderModels(catalog, 'openrouter'), [{ id: 'vendor/chat:free' }]);
+  assert.deepEqual(accountProviderModels(catalog, 'openai'), catalog);
+  assert.ok(fallbackAccountModels('openrouter')[0].id.endsWith(':free'));
 });

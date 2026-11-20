@@ -1,7 +1,7 @@
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { resolveTextChatProvider } from '../../../lib/text-chat.mjs';
 import { fallbackThinkingCatalog } from '../../../lib/thinking-levels.mjs';
-import { checkProviderModels, parseModelProvider } from '../../../lib/ai-provider.mjs';
+import { accountProviderModels, checkProviderModels, fallbackAccountModels, parseModelProvider } from '../../../lib/ai-provider.mjs';
 
 const HEADERS = { 'Cache-Control': 'no-store' };
 
@@ -12,8 +12,8 @@ export async function GET() {
   });
   const result = await checkProviderModels(resolved);
   // Account OpenRouter keys retain the existing free-only inference policy.
-  const available = result.ok ? result.models.filter(model => resolved.provider !== 'openrouter' || model.id.endsWith(':free') || model.id === 'openrouter/free') : [];
-  const models = result.ok ? available : fallbackThinkingCatalog();
+  const available = result.ok ? accountProviderModels(result.models, resolved.provider) : [];
+  const models = result.ok ? available : (resolved.provider === 'openrouter' ? fallbackAccountModels('openrouter') : fallbackThinkingCatalog());
   return Response.json({ models, checked: result.ok, ...(!result.ok ? { error: result.error } : {}) }, { headers: HEADERS });
 }
 
