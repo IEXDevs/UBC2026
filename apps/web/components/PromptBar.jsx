@@ -472,7 +472,8 @@ export default function PromptBar({
 
   const send = () => {
     if (!canSend) return;
-    latest.current.onSend?.(draft.trim(), { attachments, model, effort: level });
+    const accepted = latest.current.onSend?.(draft.trim(), { attachments, model, effort: level });
+    if (accepted === false) return;
     setDraft('');
     latest.current.onDraftChange?.('');
     setAttachments([]);

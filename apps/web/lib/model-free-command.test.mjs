@@ -9,6 +9,8 @@ test('hiding every model does not disable the existing direct-payment commands',
   assert.equal(needsChatModel('send 1 SOL to @alice'), false);
   assert.equal(needsChatModel('Explain SOL transfers'), true);
   assert.equal(needsChatModel('Summarize my activity'), true);
+  assert.equal(needsChatModel('send 1 SOL to @alice\ninvoice.pdf'), true);
+  assert.equal(needsChatModel('send 2 USDC to @alice\ninvoice.pdf'), true);
   assert.equal(needsChatModel('Buy a token', [{ name: 'request_spend', kind: 'modal', proof: 'synthetic-server-proof' }]), false);
   assert.equal(needsChatModel('Buy a token', [{ name: 'request_spend' }]), true);
 });

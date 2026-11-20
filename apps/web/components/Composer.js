@@ -552,13 +552,13 @@ export default function Composer({
     abortRef.current?.abort();
   }
 
-  async function sendMessage(text) {
+  function sendMessage(text) {
     const spoken = spokenFrom(text);
-    if (!spoken) return;
+    if (!spoken) return false;
     if (needsChatModel(spoken) && !selectedModelRequest(modelStorage, modelRef.current)) {
       pushLine('note', 'Show a model in AI Providers before sending a message.');
       setAIProvidersOpen(true);
-      return;
+      return false;
     }
     if (sendingRef.current) {
       rememberQueue(appendQueued(queueRef.current, {
@@ -567,7 +567,7 @@ export default function Composer({
         mention: mention || '',
       }));
       parkDraft();
-      return;
+      return true;
     }
     sendingRef.current = true;
     const prior = linesRef.current;
@@ -575,7 +575,8 @@ export default function Composer({
     parkDraft();
     pushLine('user', spoken);
     if (hint) pushLine('assistant', hint);
-    await runChat(spoken, prior);
+    void runChat(spoken, prior);
+    return true;
   }
 
   async function regenerate(text, prior) {
@@ -1095,7 +1096,7 @@ export default function Composer({
           efforts={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.map(level => level.label) ?? []}
           defaultEffort={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.find(level => level.default)?.label ?? ''}
           busy={thinking}
-          sendDisabled={text => models.length === 0 && needsChatModel(text)}
+          sendDisabled={text => models.length === 0 && needsChatModel(spokenFrom(text))}
           background="transparent"
           color="#f5f5f5"
           menuBackground="#27272a"
