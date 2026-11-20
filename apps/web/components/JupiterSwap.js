@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
+import { usePrivy } from '@privy-io/react-auth';
+import { useSignTransaction, useWallets, useStandardWallets } from '@privy-io/react-auth/solana';
 import { SOLANA_CLUSTER, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 import { swapFailure } from '../lib/swap-failure.mjs';
-import { signSelectedWalletTransaction } from '../lib/wallet-signing.mjs';
+import { signSelectedWalletTransaction, withLinkedSolanaWallets } from '../lib/wallet-signing.mjs';
 import {
   JUPITER_STATUS_NOTE,
   jupiterSwapStatus,
@@ -15,8 +16,11 @@ import {
 
 export default function JupiterSwap({ address = '', label = '', frozen = false, inputMint = '', onSwapped }) {
   const { wallets } = useWallets();
+  const { wallets: standardWallets } = useStandardWallets();
+  const { user } = usePrivy();
   const { signTransaction } = useSignTransaction();
-  const signer = (Array.isArray(wallets) ? wallets : []).find(wallet => wallet?.address === address) || null;
+  const linkedWallets = useMemo(() => withLinkedSolanaWallets(wallets, standardWallets, user), [wallets, standardWallets, user]);
+  const signer = linkedWallets.find(wallet => wallet?.address === address) || null;
   const status = jupiterSwapStatus({
     cluster: SOLANA_CLUSTER,
     address,
