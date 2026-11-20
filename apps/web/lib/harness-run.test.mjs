@@ -28,6 +28,24 @@ function memory() {
   };
 }
 
+test('bound spend approval stamping defaults only the bot ID and preserves the matching idempotency key', () => {
+  const botId = 'bot_current';
+  const args = { action: 'pay', asset: 'SOL', amount: '1000000000', destination: '11111111111111111111111111111111' };
+  for (const grantHasBot of [false, true]) {
+    const hold = toolAccessRequest('ask', 'request_spend', { ...args, ...(grantHasBot ? { botId } : {}) });
+    const options = { botId, permissionMode: 'ask', confirmSpend: true, grants: [hold] };
+    const approved = stampSpendPermission('request_spend', args, options);
+    assert.equal(approved.botId, botId);
+    assert.equal(approved.confirmed, true);
+    assert.equal(approved.idempotencyKey, hold.idempotencyKey);
+    for (const change of [{ botId: 'bot_other' }, { amount: '2000000000' }, { destination: '22222222222222222222222222222222' }]) {
+      const rejected = stampSpendPermission('request_spend', { ...args, ...change }, options);
+      assert.equal(rejected.confirmed, undefined);
+      assert.equal(rejected.idempotencyKey, undefined);
+    }
+  }
+});
+
 test('a non-USDC spend uses the idempotency key from its matching approval', () => {
   const sol = { botId: 'bot_test', action: 'pay', asset: 'SOL', amount: '1000000000', handle: 'alice' };
   const hold = toolAccessRequest('full', 'request_spend', sol);

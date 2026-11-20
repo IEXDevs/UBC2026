@@ -14,7 +14,7 @@ import {
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
 import { chatToolsInstruction, createChatToolInvoker } from './chat-tools.mjs';
-import { effectiveReviewCap, isFundTool, matchingToolGrant, needsBoundSpend, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
+import { effectiveReviewCap, isFundTool, matchingToolGrant, needsBoundSpend, permissionInstruction, toolAccessKind, withDefaultBotId } from './spend-permission.mjs';
 import { readSubagentResults, recordSubagentResult } from './subagent-board.mjs';
 import { completeTextChat } from './text-chat.mjs';
 
@@ -46,8 +46,8 @@ export function harnessPrompt(_connectors, skillId = '', situation = null, now =
  * The model cannot raise the Review by AI cap. `confirmSpend` is only for a
  * text turn the owner already approved with the slide.
  */
-export function stampSpendPermission(name, args, { permissionMode = 'ask', reviewCap = null, confirmSpend = false, grants = [] } = {}) {
-  const next = args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {};
+export function stampSpendPermission(name, args, { permissionMode = 'ask', reviewCap = null, confirmSpend = false, grants = [], botId } = {}) {
+  const next = withDefaultBotId(name, args && typeof args === 'object' && !Array.isArray(args) ? { ...args } : {}, botId);
   if (name === 'start_task') {
     if (permissionMode === 'full') next.ownerPermission = 'full';
     else delete next.ownerPermission;
@@ -59,7 +59,7 @@ export function stampSpendPermission(name, args, { permissionMode = 'ask', revie
     delete next.confirmed;
     if (confirmSpend && toolAccessKind(next.permission, name, next, next.reviewCap)) {
       if (needsBoundSpend(name, next)) {
-        const grant = matchingToolGrant(grants, name, next);
+        const grant = matchingToolGrant(grants, name, next, botId);
         if (grant) {
           next.idempotencyKey = grant.idempotencyKey;
           next.confirmed = true;
@@ -194,7 +194,7 @@ export async function runVoiceAgentTurn({
     return { reply: 'Open an agent, then start the call again.', subagents: [] };
   }
   const cap = ownerReviewCap(reviewCap);
-  const spend = { permissionMode, reviewCap: cap, confirmSpend: false };
+  const spend = { permissionMode, reviewCap: cap, confirmSpend: false, botId };
   const invokeRaw = createChatToolInvoker({
     ownerId,
     botId,
@@ -216,6 +216,7 @@ export async function runVoiceAgentTurn({
     complete: (opts) => completeTextChat({
       metaModelApiKey,
       openrouterApiKey,
+      botId,
       botName,
       botGoal,
       botType,

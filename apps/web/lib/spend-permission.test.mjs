@@ -4,6 +4,7 @@ import {
   netChangeSummary,
   dollarsToBaseUnits,
   grantCovers,
+  withDefaultBotId,
   managesFunds,
   parsePermission,
   permissionInstruction,
@@ -18,6 +19,30 @@ import {
   writeAcceptance,
   writeReviewCap,
 } from './spend-permission.mjs';
+
+test('only an omitted botId defaults to the current bot when matching fund approvals', () => {
+  const botId = 'bot_current';
+  const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
+  for (const grantHasBot of [false, true]) {
+    const grant = toolAccessRequest('ask', 'request_spend', { ...args, ...(grantHasBot ? { botId } : {}) });
+    for (const callHasBot of [false, true]) {
+      const call = { ...args, ...(callHasBot ? { botId } : {}) };
+      assert.equal(grantCovers([grant], 'request_spend', call, botId), true);
+    }
+    for (const change of [
+      { botId: 'bot_other' }, { botId: '' }, { botId: null },
+      { amount: '2000000' }, { destination: '22222222222222222222222222222222' },
+      { asset: 'SOL' }, { action: 'pay' }, { handle: 'alice' }, { quoteCluster: 'devnet' },
+    ]) assert.equal(grantCovers([grant], 'request_spend', { ...args, ...change }, botId), false);
+    assert.equal(grantCovers([], 'request_spend', args, botId), false);
+    assert.equal(grantCovers([grant], 'sns_send', args, botId), false);
+  }
+  const explicit = toolAccessRequest('ask', 'request_spend', { ...args, botId });
+  assert.equal(grantCovers([explicit], 'request_spend', args), false);
+  assert.deepEqual(withDefaultBotId('request_spend', args, botId), { ...args, botId });
+  assert.equal(args.botId, undefined);
+  assert.deepEqual(withDefaultBotId('get_wallets', {}, botId), {});
+});
 
 /**
  * Achieves: verifies permission modes: full manages funds; ask/review still need a person; instructions match mode.

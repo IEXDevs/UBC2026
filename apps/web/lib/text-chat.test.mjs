@@ -218,6 +218,54 @@ function turnAllowed() {
   return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
 }
 
+test('current-bot defaults produce bound holds and approved sends do not re-ask when either turn omits botId', async () => {
+  const botId = 'bot_current';
+  const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
+  for (const grantHasBot of [false, true]) {
+    for (const callHasBot of [false, true]) {
+      for (const outcome of ['success', 'error', 'unapproved']) {
+        const grant = toolAccessRequest('ask', 'request_spend', { ...args, ...(grantHasBot ? { botId } : {}) });
+        const grants = outcome === 'unapproved' ? [] : [grant];
+        let modelCalls = 0;
+        let backendCalls = 0;
+        const invoke = createChatToolInvoker({
+          ownerId: 'owner_1', botId, runtimeBase: 'https://runtime.invalid',
+          fetcher: async (url, init) => {
+            backendCalls++;
+            assert.equal(String(url), 'https://runtime.invalid/api/spend');
+            const body = JSON.parse(init.body);
+            assert.deepEqual(body, { ...args, botId, confirmed: true, permission: 'ask', reviewCap: '30000000' });
+            return Response.json(outcome === 'error'
+              ? { error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' }
+              : { signed: true, cluster: 'mainnet-beta', signature: '5'.repeat(64) });
+          },
+        });
+        const reply = await completeTextChat({
+          modelApiKey: META_KEY, botId, message: 'yes', permissionMode: 'ask', grants,
+          tools: [{ type: 'function', function: { name: 'request_spend', parameters: { type: 'object' } } }],
+          invokeTool: (name, inputs) => invoke(name, stampSpendPermission(name, inputs, { botId, permissionMode: 'ask', confirmSpend: true, grants })),
+          fetcher: async (_url, options) => {
+            if (isTurnVerify(options)) return turnAllowed();
+            if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+              id: 'send', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify({ ...args, ...(callHasBot ? { botId } : {}) }) },
+            }] } }] });
+            return Response.json({ choices: [{ message: { content: 'The spend request finished.' } }] });
+          },
+        });
+        if (outcome === 'unapproved') {
+          assert.deepEqual(reply.hold.args, { ...args, botId });
+          assert.equal(backendCalls, 0);
+          assert.equal(modelCalls, 1);
+        } else {
+          assert.equal(reply.hold, undefined);
+          assert.equal(backendCalls, 1);
+          assert.equal(modelCalls, 2);
+        }
+      }
+    }
+  }
+});
+
 test('a failed streamed follow-up retracts its preview before publishing the sanitized tool error', async () => {
   const events = [];
   let round = 0;

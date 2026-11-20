@@ -166,7 +166,7 @@ export async function POST(request, context) {
     rpcFetch: fetch,
     situation,
   });
-  const spend = { permissionMode, reviewCap, confirmSpend: true, grants };
+  const spend = { permissionMode, reviewCap, confirmSpend: true, grants, botId };
   const metaModelApiKey = readRootEnv('META_MODEL_API_KEY');
   const openrouterApiKey = readRootEnv('OPENROUTER_API_KEY');
   const approvalContext = {
@@ -235,6 +235,7 @@ export async function POST(request, context) {
     invokeRaw: (name, args) => invokeRaw(name, stampSpendPermission(name, args, spend)),
     complete: (opts) => completeTextChat({
       ...chatKeys,
+      botId,
       history: [],
       fetcher: fetch,
       turnState,
@@ -243,6 +244,7 @@ export async function POST(request, context) {
   };
 
   const turnArgs = {
+    botId,
     turnState,
     metaModelApiKey: chatKeys.metaModelApiKey,
     openrouterApiKey: chatKeys.openrouterApiKey,

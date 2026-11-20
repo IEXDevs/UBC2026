@@ -7,7 +7,7 @@ import { OPENROUTER_FREE_MODEL, parseLookupQuery, selectFreeOpenRouterModel } fr
 import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import { publicApiSummary, thinkStep, toolStep } from './chat-activity.mjs';
 import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
-import { grantCovers, isFundTool, toolAccessRequest } from './spend-permission.mjs';
+import { grantCovers, isFundTool, toolAccessRequest, withDefaultBotId } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
 import { isLasoCardRequest, lasoPreparationArgs, lasoPurchaseHold } from './laso-chat.mjs';
 import { META_SPARK_MODEL, reasoningEffortFor } from './thinking-levels.mjs';
@@ -504,6 +504,7 @@ export async function completeTextChat({
   modelApiKey = '',
   openrouterApiKey = '',
   modelProvider = null,
+  botId,
   botName,
   botGoal,
   botType,
@@ -649,7 +650,7 @@ export async function completeTextChat({
       const name = typeof call?.function?.name === 'string' ? call.function.name : '';
       if (!READ_ONLY_TOOLS.has(name)) readOnlyTurn = false;
       const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
-      const rawArgs = parseToolArgs(call?.function?.arguments);
+      const rawArgs = withDefaultBotId(name, parseToolArgs(call?.function?.arguments), botId);
       const args = name === 'prepare_shopping' && cardCheckout(latest, history) ? lasoPreparationArgs(rawArgs, latest) : rawArgs;
       const signature = toolSignature(name, args);
       const blocked = blockedBrowser(name, args);
@@ -678,14 +679,14 @@ export async function completeTextChat({
       } else if ((isLasoCardRequest(latest) || (cardCheckout(latest, history) && /^\s*(?:yes|ok(?:ay)?|approved?|go ahead)\b/i.test(latest)))
           && name === 'request_spend' && args.action !== 'x402') {
         result = { error: 'laso_requires_x402', hint: 'Never transfer to Laso payTo. Use the prepared Laso ticket with action x402.' };
-      } else if (access && !grantCovers(grants, name, args)) {
+      } else if (access && !grantCovers(grants, name, args, botId)) {
         return access;
       } else if (!validRecipientDiscovery(name, args)) {
         result = { error: name === 'lookup_recipient' ? 'invalid_recipient' : 'invalid_parameters' };
       } else if (
         isFundTool(name)
         && !(name === 'prepare_shopping' && args.provider === 'laso')
-        && !grantCovers(grants, name, args)
+        && !grantCovers(grants, name, args, botId)
         && !(await allowStep('tool', JSON.stringify({ name, args })))
       ) {
         return toolAccessRequest('ask', name, args, reviewCap);
