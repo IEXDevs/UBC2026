@@ -22,6 +22,7 @@ import {
   spokenAwayBriefing,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
+import { parsePrivySigningFailure } from '@ubc2026/contracts';
 import { ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
 import { normalizePriceMint, readAgentPriceQuote } from '@ubc2026/prices';
 import { ownerAsksForOneTrade } from './owner-trade.mjs';
@@ -58,11 +59,13 @@ function gateFields(detail) {
   const steps = Array.isArray(detail.steps)
     ? detail.steps.filter(step => typeof step === 'string').slice(0, 8)
     : [];
+  const privyFailure = parsePrivySigningFailure(detail.privyFailure);
   return {
     ...(typeof detail.state === 'string' ? { state: detail.state } : {}),
     ...(steps.length > 0 ? { steps } : {}),
     ...(typeof detail.signed === 'boolean' ? { signed: detail.signed } : {}),
     ...(typeof detail.reason === 'string' ? { reason: detail.reason } : {}),
+    ...(privyFailure ? { privyFailure } : {}),
     ...(typeof detail.prompt === 'string' ? { prompt: detail.prompt } : {}),
     ...(typeof detail.cluster === 'string' ? { cluster: detail.cluster } : {}),
   };

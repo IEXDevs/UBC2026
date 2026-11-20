@@ -149,6 +149,32 @@ test('a non-USDC transfer cannot spend a USDC budget', async () => {
   assert.equal(body.reason, 'accounting-asset-mismatch');
 });
 
+test('a confirmed send returns only public facts about a Privy signing failure', async () => {
+  const solBot = { ...bot, approvalMode: 'fully-automatic', cap: { ...bot.cap, asset: 'SOL' } };
+  const env = spendEnv({
+    loadSpendContext: async () => ({ bot: solBot, wallet, ledger: { ...ledger, asset: 'SOL' } }),
+    transferClient: {
+      getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: DESTINATION }),
+      prepareDevnetTransfer: async ({ transaction }) => ({ transaction, feeLamports: '5000' }),
+      signPreparedDevnetTransfer: async () => {
+        throw Object.assign(new Error('private provider diagnostics'), {
+          code: 'privy_failed', privyFailure: { status: 404, code: 'private-code', token: 'private token' },
+        });
+      },
+    },
+    ledgerApi: { reserveBudget: async () => ({ state: 'reserved' }) },
+  });
+  const response = await worker.fetch(spendRequest({
+    permission: 'ask', confirmed: true, botId: 'bot_1', action: 'pay',
+    asset: 'SOL', amount: '1', destination: DESTINATION, idempotencyKey: 'test_failure',
+  }), env);
+  const body = await response.json();
+  assert.equal(body.state, 'sign-rejected');
+  assert.equal(body.reason, 'privy_failed');
+  assert.deepEqual(body.privyFailure, { status: 404 });
+  assert.doesNotMatch(JSON.stringify(body), /private/i);
+});
+
 test('a classic SPL send uses the exact mint and devnet decimals', async () => {
   const mint = 'So11111111111111111111111111111111111111112';
   const splBot = { ...bot, approvalMode: 'fully-automatic', cap: { ...bot.cap, asset: mint } };

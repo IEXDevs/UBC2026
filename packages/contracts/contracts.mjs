@@ -440,6 +440,36 @@ export const OWNER_SPEND_PERMISSIONS = Object.freeze(['ask', 'review', 'full']);
 export const FUND_ACTIONS = Object.freeze(['buy', 'sell', 'spend', 'pay']);
 export const PERMISSIONED_SPEND_PATH = '/api/spend';
 
+const PRIVY_SIGN_CODES = new Set([
+  'policy_violation',
+  'insufficient_funds',
+  'transaction_broadcast_failure',
+  'missing_or_empty_authorization_header',
+  'zero_correct_authorization_signatures',
+  'insufficient_correct_authorization_signatures',
+  'incorrect_quantity_of_authorization_signatures',
+  'request_expired',
+  'no_valid_user_session_keys',
+  'user_session_keys_expired',
+  'insufficient_app_secret_permissions',
+]);
+const PRIVY_SIGN_TRANSPORT = new Set(['network', 'timeout', 'redirect', 'invalid-response']);
+
+/** Public diagnostics contain only fixed codes and the provider's HTTP status. */
+export function parsePrivySigningFailure(value) {
+  const status = Number.isInteger(value?.status) && value.status >= 400 && value.status <= 599
+    ? value.status
+    : null;
+  const code = PRIVY_SIGN_CODES.has(value?.code) ? value.code : null;
+  const transport = PRIVY_SIGN_TRANSPORT.has(value?.transport) ? value.transport : null;
+  if (!status && !code && !transport) return null;
+  return {
+    ...(status ? { status } : {}),
+    ...(code ? { code } : {}),
+    ...(transport ? { transport } : {}),
+  };
+}
+
 /** Budget units are lamports for SOL, micro-USDC for USDC, or raw units for one mint. */
 export function devnetSpendAsset(value) {
   const asset = typeof value === 'string' ? value.trim() : '';

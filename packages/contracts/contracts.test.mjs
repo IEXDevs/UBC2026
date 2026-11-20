@@ -35,10 +35,19 @@ import {
   isFreeOpenRouterModel,
   selectFreeOpenRouterModel,
   parsePermissionedSpendBody,
+  parsePrivySigningFailure,
   buildPermissionedSpendRequest,
   PERMISSIONED_SPEND_PATH,
   OWNER_SPEND_PERMISSIONS,
 } from './contracts.mjs';
+
+test('Privy signing diagnostics allow only known codes and HTTP error statuses', () => {
+  assert.deepEqual(parsePrivySigningFailure({
+    status: 403, code: 'insufficient_app_secret_permissions', message: 'private detail',
+  }), { status: 403, code: 'insufficient_app_secret_permissions' });
+  assert.deepEqual(parsePrivySigningFailure({ status: 500, code: 'unknown', transport: 'unknown' }), { status: 500 });
+  assert.equal(parsePrivySigningFailure({ status: 200, code: 'unknown' }), null);
+});
 
 const wallet = {
   id: 'w_main',
