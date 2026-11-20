@@ -14,6 +14,9 @@ export const DEPLOY_CHECK_MS = 30_000;
 export const SESSION_QUIET_MS = 350;
 export const SESSION_SETTLE_MS = 4_000;
 const PRIVY_AUTH_HOST = 'auth.privy.io';
+const PRIVY_SESSION_LOCK = 'maelstrom.privy-session';
+const PRIVY_SESSION_PATH = '/api/privy-auth/api/v1/sessions';
+const authTrackers = new WeakMap();
 const SESSION_KEY = /^privy(?::[\w-]+)?:(?:token|pat|refresh_token|id[_-]?token)$/;
 const FALLBACK_SESSION_KEYS = Object.freeze([
   'privy:token',
@@ -83,35 +86,44 @@ export function privySessionFingerprint(storage) {
   }).join('\n');
 }
 
-/**
- * Track Privy session fetches already in flight so a reload does not cut a refresh in half.
- * A half-finished refresh rotates the token and the next page deletes the login.
- */
-export function installAuthFetchTracker(target) {
-  if (!target || typeof target.fetch !== 'function' || target.fetch.__maelstromAuthTrack) {
-    return { snapshot: () => 0, restore() {} };
+function isSessionWrite(input, init, origin) {
+  if (!origin || String(init?.method ?? input?.method).toUpperCase() !== 'POST') return false;
+  try {
+    const url = new URL(requestUrl(input), origin);
+    return url.origin === origin && (url.pathname === PRIVY_SESSION_PATH || url.pathname === `${PRIVY_SESSION_PATH}/logout`);
+  } catch {
+    return false;
   }
+}
+
+export function installAuthFetchTracker(target) {
+  if (authTrackers.has(target)) return authTrackers.get(target);
+  if (!target || typeof target.fetch !== 'function') return { snapshot: () => 0 };
   const original = target.fetch.bind(target);
+  const locks = target.navigator?.locks;
   let pending = 0;
   let requests = 0;
-  const tracked = async function trackedFetch(input, init) {
-    const promise = original(input, init);
-    if (!isPrivyAuthRequest(input)) return promise;
+  target.fetch = async function trackedFetch(input, init) {
+    if (!isPrivyAuthRequest(input)) return original(input, init);
     pending += 1;
     requests += 1;
-    const done = () => { pending -= 1; };
-    promise.then(done, done);
-    return promise;
+    try {
+      if (typeof locks?.request === 'function' && isSessionWrite(input, init, target.location?.origin)) {
+        const signal = init?.signal === undefined ? input?.signal : init.signal;
+        // Dispatch only after the previous tab's Set-Cookie has been processed.
+        return await locks.request(PRIVY_SESSION_LOCK, signal ? { signal } : {}, () => original(input, init));
+      }
+      return await original(input, init);
+    } finally {
+      pending -= 1;
+    }
   };
-  tracked.__maelstromAuthTrack = true;
-  target.fetch = tracked;
-  return {
+  const tracker = {
     // The counter also catches requests that start and finish between checks.
     snapshot: () => pending > 0 ? null : requests,
-    restore() {
-      if (target.fetch === tracked) target.fetch = original;
-    },
   };
+  authTrackers.set(target, tracker);
+  return tracker;
 }
 
 export async function waitForStablePrivySession({
@@ -268,6 +280,5 @@ export function watchDeploy({
     stopped = true;
     view.clearInterval(timer);
     doc?.removeEventListener?.('visibilitychange', onVisible);
-    tracker.restore();
   };
 }

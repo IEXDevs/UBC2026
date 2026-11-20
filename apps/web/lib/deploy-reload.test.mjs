@@ -5,6 +5,12 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { resolveBuildId } from './build-id.mjs';
 import {
+  PRIVY_REFRESH_COOKIE,
+  PRIVY_SESSION_MARKER,
+  proxyPrivyAuth,
+  readRefreshCookie,
+} from './privy-auth-proxy.mjs';
+import {
   BUILD_QUERY,
   buildsDiffer,
   checkDeploy,
@@ -300,6 +306,101 @@ test('a refresh that starts and finishes between samples resets the quiet window
   assert.equal(settled, false);
 });
 
+test('two tabs restoring after a deploy use the latest HttpOnly refresh cookie in turn', async () => {
+  const origin = 'https://dev.maelstrom.example';
+  const path = '/api/v1/sessions';
+  const url = `${origin}/api/privy-auth${path}`;
+  const sent = [];
+  const cookies = new Map([[PRIVY_REFRESH_COOKIE, 'refresh-0'], [PRIVY_SESSION_MARKER, '1']]);
+  let rotated = 'refresh-0';
+  let releaseFirst;
+  const firstResponse = new Promise((resolve) => { releaseFirst = resolve; });
+  let firstSent;
+  const firstRequest = new Promise((resolve) => { firstSent = resolve; });
+  const fetch = async (input, init) => {
+    const request = new Request(input, init);
+    request.headers.set('cookie', [...cookies].map(([key, value]) => `${key}=${value}`).join('; '));
+    const response = await proxyPrivyAuth(request, path, async (_, { body }) => {
+      const { refresh_token: token } = JSON.parse(body);
+      sent.push(token);
+      if (token !== rotated) return Response.json({}, { status: 401 });
+      rotated = `refresh-${sent.length}`;
+      if (sent.length === 1) {
+        firstSent();
+        await firstResponse;
+      }
+      return Response.json({ refresh_token: rotated });
+    });
+    for (const header of response.headers.getSetCookie()) {
+      const [cookie, ...attributes] = header.split('; ');
+      const [key, value] = cookie.split('=');
+      if (attributes.includes('Max-Age=0')) cookies.delete(key);
+      else cookies.set(key, value);
+    }
+    return response;
+  };
+  let queue = Promise.resolve();
+  const locks = {
+    request: (_, __, run) => {
+      const result = queue.then(run);
+      queue = result.catch(() => {});
+      return result;
+    },
+  };
+  const tabs = [1, 2].map(() => ({
+    fetch,
+    location: { origin },
+    navigator: { locks },
+  }));
+  const trackers = tabs.map(installAuthFetchTracker);
+  const init = { method: 'POST', body: '{}' };
+  const first = tabs[0].fetch(url, init);
+  const second = tabs[1].fetch(new Request(url, init));
+  await firstRequest;
+  const whileFirstPending = trackers.map(({ snapshot }) => snapshot());
+  releaseFirst();
+  const responses = await Promise.all([first, second]);
+  assert.deepEqual(whileFirstPending, [null, null]);
+  assert.deepEqual(responses.map(({ status }) => status), [200, 200]);
+  assert.deepEqual(sent, ['refresh-0', 'refresh-1']);
+  assert.equal(readRefreshCookie(`${PRIVY_REFRESH_COOKIE}=${cookies.get(PRIVY_REFRESH_COOKIE)}`), 'refresh-2');
+  assert.equal(cookies.get(PRIVY_SESSION_MARKER), '1');
+});
+
+test('the deploy watcher reuses tracking installed before hydration even if another hook wraps fetch', async () => {
+  const view = { fetch: async () => Response.json({}) };
+  const tracker = installAuthFetchTracker(view);
+  const original = view.fetch;
+  view.fetch = (...args) => original(...args);
+  assert.equal(installAuthFetchTracker(view), tracker);
+  await view.fetch('/api/privy-auth/api/v1/sessions');
+  assert.equal(tracker.snapshot(), 1);
+});
+
+test('the session lock only applies to same-origin refresh and logout posts', async () => {
+  const origin = 'https://dev.maelstrom.example';
+  const requests = [];
+  const locks = {
+    request: (name, options, run) => {
+      requests.push({ name, signal: options.signal });
+      return run();
+    },
+  };
+  const view = { fetch: async () => Response.json({}), location: { origin }, navigator: { locks } };
+  installAuthFetchTracker(view);
+  const signal = new AbortController().signal;
+  const path = '/api/privy-auth/api/v1/sessions';
+  await view.fetch(path);
+  await view.fetch('/api/privy-auth/api/v1/siws/authenticate', { method: 'POST' });
+  await view.fetch(`https://example.org${path}`, { method: 'POST' });
+  assert.deepEqual(requests, []);
+  await view.fetch(path, { method: 'POST', signal });
+  await view.fetch(new Request(`${origin}${path}/logout`, { method: 'POST' }));
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].signal, signal);
+  assert.equal(requests[0].name, requests[1].name);
+});
+
 test('auth activity during cache cleanup defers the deploy without consuming its reload', async () => {
   const view = { fetch: async () => Response.json({}) };
   const tracker = installAuthFetchTracker(view);
@@ -333,11 +434,13 @@ test('auth activity during cache cleanup defers the deploy without consuming its
 test('the app publishes the build id and mounts the reload watcher', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const config = readFileSync(join(root, 'next.config.mjs'), 'utf8');
+  const clientInstrumentation = readFileSync(join(root, 'instrumentation-client.js'), 'utf8');
   const layout = readFileSync(join(root, 'app/layout.js'), 'utf8');
   const route = readFileSync(join(root, 'app/api/build/route.js'), 'utf8');
   const headers = readFileSync(join(root, 'public/_headers'), 'utf8');
   assert.match(config, /resolveBuildId/);
   assert.match(config, /NEXT_PUBLIC_BUILD_ID/);
+  assert.match(clientInstrumentation, /installAuthFetchTracker\(window\)/);
   assert.match(layout, /<DeployReload \/>/);
   assert.match(route, /no-store/);
   assert.match(headers, /\/api\/build/);
