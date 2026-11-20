@@ -8,7 +8,7 @@ import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 import { approvalRequirement } from '@ubc2026/agent-loop';
 import { assetByMint, createPaperBook, openPaperPosition } from '@ubc2026/paper-positions';
 import { readJupiterSwapOrder, readJupiterSwapQuote, usdPriceBaseUnits } from '@ubc2026/prices';
-import { evaluateProposal, validateApproval } from '@ubc2026/bot-policy';
+import { evaluateProposal, proposalDigest, validateApproval } from '@ubc2026/bot-policy';
 import { evaluateTrust } from '@ubc2026/trust-score';
 import { transferSolanaUsdc } from '@ubc2026/transfers';
 import { memoFromDecision, normalizeFacts, reachConsensus } from '@ubc2026/verify-consensus';
@@ -732,15 +732,17 @@ function liveSwaps(ctx) {
     && typeof client?.signPreparedSolanaTransfer === 'function';
 }
 
-async function reserveSpend(run, ctx, proposal, idempotencyKey) {
-  if (!ctx.deps.ledgerApi || typeof ctx.deps.ledgerApi.reserveBudget !== 'function') return { reservation: null };
+async function reserveSpend(run, ctx, proposal, idempotencyKey, approvalId) {
+  if (!ctx.deps.ledgerApi || typeof ctx.deps.ledgerApi.reserveBudget !== 'function') {
+    return { wait: ['reserve-unavailable', { idempotencyKey }] };
+  }
   try {
     const reservation = await ctx.deps.ledgerApi.reserveBudget({
       ownerId: ctx.ownerId,
       now: ctx.now,
       idempotencyKey,
       proposal,
-      approvalId: run.checkpoints.approval?.approvalId,
+      approvalId,
     });
     if (reservation?.state && reservation.state !== 'ready-to-reserve' && reservation.state !== 'reserved') {
       return { wait: [reservation.reason || reservation.state || 'reserve-blocked', { idempotencyKey, reservation }] };
@@ -775,10 +777,34 @@ async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
     ? ctx.deps.swapOrder
     : (fetcher ? intent => readJupiterSwapOrder({ ...intent, fetcher, apiKey: ctx.deps.jupiterApiKey ?? null }) : null);
   if (!orderFn) return waitStep(run, 'execute', 'client_missing', { idempotencyKey }, ctx.now);
-  const started = withCheckpoint(run, 'execute', { at: ctx.now, status: 'started', idempotencyKey, memo });
+  const prior = run.checkpoints.execute;
+  if (prior?.signing === true) {
+    return waitStep(run, 'execute', 'execute-unconfirmed', { idempotencyKey, signing: true }, ctx.now);
+  }
+  let approvalId = typeof prior?.approvalId === 'string' ? prior.approvalId : undefined;
+  if (approval?.automatic === false && !approvalId) {
+    if (typeof ctx.deps.saveApproval !== 'function') return waitStep(run, 'execute', 'approval-save-failed', { idempotencyKey }, ctx.now);
+    approvalId = `approve_${idempotencyKey}`;
+    let saved = false;
+    try {
+      saved = await ctx.deps.saveApproval({
+        id: approvalId,
+        ownerId: ctx.bot.ownerId,
+        botId: ctx.bot.id,
+        policyVersion: ctx.bot.policyVersion,
+        digest: proposalDigest(proposal),
+        action: approval.action,
+        expiresAt: proposal.expiresAt,
+      });
+    } catch {
+      saved = false;
+    }
+    if (saved !== true) return waitStep(run, 'execute', 'approval-save-failed', { idempotencyKey }, ctx.now);
+  }
+  const started = withCheckpoint(run, 'execute', { at: ctx.now, status: 'started', idempotencyKey, memo, ...(approvalId ? { approvalId } : {}) });
   await ctx.persist(started);
-  const reserved = await reserveSpend(started, ctx, proposal, idempotencyKey);
-  if (reserved.wait) return waitStep(started, 'execute', reserved.wait[0], reserved.wait[1], ctx.now);
+  const reserved = await reserveSpend(started, ctx, proposal, idempotencyKey, approvalId);
+  if (reserved.wait) return waitStep(started, 'execute', reserved.wait[0], { ...reserved.wait[1], ...(approvalId ? { approvalId } : {}) }, ctx.now);
   let order;
   try {
     order = await orderFn({
@@ -795,20 +821,28 @@ async function executeLiveSwap(run, ctx, proposal, memo, idempotencyKey) {
     || !/^(?:[1-9][0-9]{0,39})$/.test(order.outAmount ?? '')) {
     return waitStep(started, 'execute', 'invalid_quote', { idempotencyKey }, ctx.now);
   }
-  let sent;
+  const client = ctx.deps.transferClient;
+  let prepared;
   try {
-    const client = ctx.deps.transferClient;
-    const prepared = await client.prepareSolanaTransfer({ transaction: order.transaction });
+    prepared = await client.prepareSolanaTransfer({ transaction: order.transaction });
     if (prepared?.transaction !== order.transaction) throw Object.assign(new Error('invalid_simulation'), { code: 'invalid_simulation' });
-    sent = await client.signPreparedSolanaTransfer({ bot: ctx.bot, wallet: ctx.wallet, prepared });
   } catch (error) {
     return waitStep(started, 'execute', typeof error?.code === 'string' ? error.code : 'swap-failed', { idempotencyKey }, ctx.now);
   }
-  if (sent?.cluster !== SOLANA_CLUSTER) return waitStep(started, 'execute', 'wrong-cluster', { idempotencyKey }, ctx.now);
-  if (typeof sent.signature !== 'string' || !sent.signature) {
-    return waitStep(started, 'execute', 'execute-unconfirmed', { idempotencyKey }, ctx.now);
+  // Once signing starts, a retry could land a second swap with a fresh blockhash. It waits for a person instead.
+  const signing = withCheckpoint(started, 'execute', { ...started.checkpoints.execute, signing: true });
+  await ctx.persist(signing);
+  let sent;
+  try {
+    sent = await client.signPreparedSolanaTransfer({ bot: ctx.bot, wallet: ctx.wallet, prepared });
+  } catch (error) {
+    return waitStep(signing, 'execute', typeof error?.code === 'string' ? error.code : 'swap-failed', { idempotencyKey, signing: true }, ctx.now);
   }
-  return finishStep(started, 'execute', {
+  if (sent?.cluster !== SOLANA_CLUSTER) return waitStep(signing, 'execute', 'wrong-cluster', { idempotencyKey, signing: true }, ctx.now);
+  if (typeof sent.signature !== 'string' || !sent.signature) {
+    return waitStep(signing, 'execute', 'execute-unconfirmed', { idempotencyKey, signing: true }, ctx.now);
+  }
+  return finishStep(signing, 'execute', {
     mode: 'swap',
     signature: sent.signature,
     memo,

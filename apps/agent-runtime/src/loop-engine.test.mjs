@@ -1258,7 +1258,13 @@ function liveSwapDouble() {
       outAmount: '747000', minOutAmount: '743000', transaction: 'AQAAswapTx',
     };
   };
-  return { calls, client, swapOrder };
+  const ledgerApi = {
+    async reserveBudget(request) {
+      calls.reserved = [...(calls.reserved ?? []), request];
+      return { state: 'reserved', replay: false };
+    },
+  };
+  return { calls, client, swapOrder, ledgerApi };
 }
 
 function swapDecider(models) {
@@ -1270,9 +1276,9 @@ function swapDecider(models) {
       return {
         model: 'test',
         text: JSON.stringify({
-          summary: 'Move a slice of SOL into USDC',
-          facts: { ...facts, mint: SOL_MINT, price: '74730000', reasonSummary: 'Move SOL into USDC' },
-          proposal: { ...proposal, swap: { inputMint: SOL_MINT, outputMint: USDC_MINT, inAmount: '10000000' } },
+          summary: 'Buy a slice of SOL with USDC',
+          facts: { ...facts, mint: SOL_MINT, price: '74730000', reasonSummary: 'Buy SOL with USDC' },
+          proposal: { ...proposal, swap: { inputMint: USDC_MINT, outputMint: SOL_MINT, inAmount: '1000' } },
         }),
       };
     }
@@ -1305,6 +1311,7 @@ test('a trusted agent swap under the cap signs the simulated Jupiter transaction
     openRouter: swapDecider(scriptedOpenRouter()),
     transferClient: live.client,
     swapOrder: live.swapOrder,
+    ledgerApi: live.ledgerApi,
     search: async () => [],
     lookupPrice: swapPrice,
   }, payload({ goal: TRADING_GOAL }));
@@ -1313,7 +1320,7 @@ test('a trusted agent swap under the cap signs the simulated Jupiter transaction
   assert.equal(body.done, true);
   assert.equal(body.run.checkpoints['trust-gate'].trust.state, 'allowed');
   assert.equal(body.run.checkpoints.approval.automatic, true);
-  assert.deepEqual(live.calls.orders, [{ inputMint: SOL_MINT, outputMint: USDC_MINT, amount: '10000000', userPublicKey: wallet.address }]);
+  assert.deepEqual(live.calls.orders, [{ inputMint: USDC_MINT, outputMint: SOL_MINT, amount: '1000', userPublicKey: wallet.address }]);
   assert.deepEqual(live.calls.prepared, ['AQAAswapTx']);
   assert.equal(live.calls.signed.length, 1);
   assert.equal(live.calls.signed[0].prepared.transaction, 'AQAAswapTx');
@@ -1338,6 +1345,7 @@ test('a low-trust agent swap needs approval before any order or signature', asyn
     openRouter: swapDecider(scriptedOpenRouter()),
     transferClient: live.client,
     swapOrder: live.swapOrder,
+    ledgerApi: live.ledgerApi,
     search: async () => [],
     lookupPrice: swapPrice,
   }, payload({ goal: TRADING_GOAL, trustScore: '100', trustConfirmed: true }));
@@ -1362,6 +1370,7 @@ test('AGENT_SWAPS=paper keeps agent swaps on paper', async () => {
     openRouter: swapDecider(scriptedOpenRouter()),
     transferClient: live.client,
     swapOrder: live.swapOrder,
+    ledgerApi: live.ledgerApi,
     AGENT_SWAPS: 'paper',
     search: async () => [],
     lookupPrice: swapPrice,
@@ -1373,5 +1382,116 @@ test('AGENT_SWAPS=paper keeps agent swaps on paper', async () => {
   const body = await response.json();
   assert.equal(body.done, true);
   assert.equal(body.run.checkpoints.execute.mode, 'paper');
+  assert.equal(live.calls.orders.length + live.calls.signed.length, 0);
+});
+
+/**
+ * Achieves: an owner-approved low-trust swap saves the approval row and reserves with its id.
+ * Fails when: the reservation omits the approval id Postgres requires.
+ * Oracle: saved approval digest and the reserveBudget approvalId.
+ * Side effects: in-memory run; doubles only.
+ * Gaps: the SQL reserve function is covered by the ledger cases.
+ */
+test('an approved low-trust agent swap reserves with a saved approval', async () => {
+  const machine = new BotStateMachine();
+  const live = liveSwapDouble();
+  const saved = [];
+  const response = await postLoop(machine, {
+    openRouter: swapDecider(scriptedOpenRouter()),
+    transferClient: live.client,
+    swapOrder: live.swapOrder,
+    ledgerApi: live.ledgerApi,
+    saveApproval: async (record) => { saved.push(record); return true; },
+    search: async () => [],
+    lookupPrice: swapPrice,
+  }, payload({ goal: TRADING_GOAL, trustScore: '100', trustConfirmed: true, approval: { action: 'approve', ownerId: 'user_1' } }));
+  const body = await response.json();
+  assert.equal(body.done, true);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].action, 'approve');
+  assert.equal(live.calls.reserved[0].approvalId, saved[0].id);
+  assert.equal(live.calls.signed.length, 1);
+});
+
+/**
+ * Achieves: a live swap never signs without the Postgres reservation, and never re-signs after signing began.
+ * Fails when: a missing ledger signs, or a retry after signing builds a second swap.
+ * Oracle: reserve-unavailable and execute-unconfirmed pauses with no extra signature.
+ * Side effects: in-memory run; doubles only.
+ * Gaps: none.
+ */
+test('a live swap needs the ledger and does not re-sign after signing began', async () => {
+  const machine = new BotStateMachine();
+  const live = liveSwapDouble();
+  const noLedger = await postLoop(machine, {
+    openRouter: swapDecider(scriptedOpenRouter()),
+    transferClient: live.client,
+    swapOrder: live.swapOrder,
+    search: async () => [],
+    lookupPrice: swapPrice,
+  }, payload({ goal: TRADING_GOAL }));
+  const blocked = await noLedger.json();
+  assert.equal(blocked.run.pauseReason, 'reserve-unavailable');
+  assert.equal(live.calls.signed.length, 0);
+
+  const again = new BotStateMachine();
+  const failing = liveSwapDouble();
+  failing.client.signPreparedSolanaTransfer = async (request) => {
+    failing.calls.signed.push(request);
+    throw Object.assign(new Error('timeout'), { code: 'rpc_failed' });
+  };
+  const deps = {
+    openRouter: swapDecider(scriptedOpenRouter()),
+    transferClient: failing.client,
+    swapOrder: failing.swapOrder,
+    ledgerApi: failing.ledgerApi,
+    search: async () => [],
+    lookupPrice: swapPrice,
+  };
+  const first = await (await postLoop(again, deps, payload({ goal: TRADING_GOAL }))).json();
+  assert.equal(first.run.pauseReason, 'rpc_failed');
+  assert.equal(first.run.checkpoints.execute.signing, true);
+  failing.client.signPreparedSolanaTransfer = async (request) => {
+    failing.calls.signed.push(request);
+    return { cluster: 'mainnet-beta', signature: 'sig_second' };
+  };
+  const run = { ...first.run, paused: false, pauseReason: null, checkpoints: { ...first.run.checkpoints, execute: { ...first.run.checkpoints.execute, status: 'started' } } };
+  await again.put('run', run);
+  const second = await (await postLoop(again, deps, payload({ goal: TRADING_GOAL }))).json();
+  assert.equal(second.run.pauseReason, 'execute-unconfirmed');
+  assert.equal(failing.calls.signed.length, 1);
+});
+
+/**
+ * Achieves: a live swap whose input is not the reserved cap-asset debit never orders or signs.
+ * Fails when: a SOL-input swap signs against a USDC reservation.
+ * Oracle: swap-mismatch pause and no live calls.
+ * Side effects: in-memory run; doubles only.
+ * Gaps: none.
+ */
+test('a live swap must spend the reserved cap asset and amount', async () => {
+  const machine = new BotStateMachine();
+  const live = liveSwapDouble();
+  const models = scriptedOpenRouter();
+  const decide = models.openRouter;
+  const original = decide.complete.bind(decide);
+  decide.complete = async (input) => {
+    if (String(input?.task ?? '').includes('Role: decide')) {
+      return {
+        model: 'test',
+        text: JSON.stringify({
+          summary: 'Move SOL into USDC',
+          facts: { ...facts, mint: SOL_MINT, price: '74730000', reasonSummary: 'Move SOL into USDC' },
+          proposal: { ...proposal, swap: { inputMint: SOL_MINT, outputMint: USDC_MINT, inAmount: '10000000' } },
+        }),
+      };
+    }
+    return original(input);
+  };
+  const body = await (await postLoop(machine, {
+    openRouter: decide, transferClient: live.client, swapOrder: live.swapOrder, ledgerApi: live.ledgerApi,
+    search: async () => [], lookupPrice: swapPrice,
+  }, payload({ goal: TRADING_GOAL }))).json();
+  assert.equal(body.run.pauseReason, 'swap-mismatch');
   assert.equal(live.calls.orders.length + live.calls.signed.length, 0);
 });

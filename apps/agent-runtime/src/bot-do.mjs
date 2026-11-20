@@ -22,6 +22,7 @@ import { resolveTrustLookup } from './trust-lookup.mjs';
 import { assessPositions } from './schedules.mjs';
 import { alertFromGate, alertFromPauseReason, rememberBotAlert, rememberDecisionMemo } from './bot-alerts.mjs';
 import { enrichEnv } from './runtime-env.mjs';
+import { supabaseConfig, supabaseWrite } from './supabase-rest.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
 /** Set only by the Worker cron path that calls the DO stub directly — never from the public edge. */
@@ -90,6 +91,18 @@ function loopDeps(env) {
     swapQuote: typeof env.swapQuote === 'function' ? env.swapQuote : null,
     swapOrder: typeof env.swapOrder === 'function' ? env.swapOrder : null,
     swapMode: env.AGENT_SWAPS === 'paper' ? 'paper' : 'live',
+    saveApproval: typeof env.saveApproval === 'function'
+      ? env.saveApproval
+      : (supabaseConfig(env) ? async (record) => {
+        const saved = await supabaseWrite(env, {
+          path: 'approvals', prefer: 'return=minimal', fetcher: env.fetch,
+          body: {
+            id: record.id, owner_id: record.ownerId, bot_id: record.botId, policy_version: record.policyVersion,
+            digest: record.digest, action: record.action, expires_at: new Date(record.expiresAt).toISOString(),
+          },
+        });
+        return saved.ok === true;
+      } : null),
     recentBlockhash: env.recentBlockhash,
     secrets: SECRET_NAMES.map(name => env[name]).filter(value => typeof value === 'string' && value.length >= 8),
   };
