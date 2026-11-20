@@ -7,7 +7,6 @@ import { profileStats } from '../lib/statistics.mjs';
 import { motion } from 'motion/react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
 import ProfileMark from './ProfileMark';
-import LinkedLogins from './LinkedLogins';
 import { usePresence } from './usePresence';
 import ProviderAdd from './ProviderAdd';
 import { readProviderViews, removeProvider } from '../lib/provider-tokens.mjs';
@@ -126,7 +125,6 @@ export default function ProfileSheet({
           <p className="plugin-kicker">Stats</p>
           <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
           <p className="quiet">Talk time is seconds on this device. Net PnL is inflows minus outflows. devnet execution, mainnet pricing.</p>
-          {signedIn ? <LinkedLogins /> : null}
           {signedIn ? (
             <button type="button" className="ghost" onClick={onLogout}>Log out</button>
           ) : null}

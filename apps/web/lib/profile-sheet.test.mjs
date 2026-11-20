@@ -3,20 +3,22 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 /**
- * Achieves: verifies the wallets dialog shows each wallet once, at one weight, outside the profile sheet.
- * Fails when: the glance label and address are repeated above the wallet list, the name goes back to a raw bold tag, or wallets return to ProfileSheet.
- * Oracle: AccountWallets lists profile-wallet-name and does not render glance.label or a second AddressCopy before the list.
+ * Achieves: verifies connect, import, and the wallet sections stay on the wallet sheet, not the profile sheet.
+ * Fails when: ProfileSheet grows a wallets fold again, or WalletsSheet drops connect, import, or a section.
+ * Oracle: ProfileSheet has no WalletAdd; WalletsSheet keeps Connect, Import seed, Import key, and every section id.
  * Side effects / state checked: source snapshot.
- * Gaps: visual weight is checked in CSS, not a screenshot.
+ * Gaps: does not render the dialog.
  */
 test('profile shows the wallet name and address once', () => {
   const profile = readFileSync(new URL('../components/ProfileSheet.js', import.meta.url), 'utf8');
-  const wallets = readFileSync(new URL('../components/AccountWallets.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
-  assert.equal(profile.includes('profile-wallet-name'), false);
-  assert.equal(profile.includes('<AddressCopy'), false);
-  assert.doesNotMatch(wallets, /glance\.label/);
-  assert.equal(wallets.match(/<AddressCopy/g).length, 1);
-  assert.match(wallets, /profile-wallet-name/);
-  assert.match(css, /\.profile-wallets \.profile-wallet-name,\s*\.profile-wallets strong \{[\s\S]*font-weight: 560;/);
+  const sheet = readFileSync(new URL('../components/WalletsSheet.js', import.meta.url), 'utf8');
+  assert.equal(profile.includes('WalletAdd'), false);
+  assert.equal(profile.includes('<summary>Wallets</summary>'), false);
+  assert.match(sheet, /Connect a wallet/);
+  assert.match(sheet, /Import seed/);
+  assert.match(sheet, /Import key/);
+  assert.match(sheet, /New Wallet/);
+  for (const pane of ['assets', 'portfolio', 'send', 'receive', 'swap', 'tokens', 'history', 'keys']) {
+    assert.match(sheet, new RegExp(`id: '${pane}'`));
+  }
 });

@@ -13,7 +13,6 @@ import AccountMenu from '../components/AccountMenu';
 import PaneDock from '../components/PaneDock';
 import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
-import AccountWallets from '../components/AccountWallets';
 import ProfileSheet from '../components/ProfileSheet';
 import WalletsSheet from '../components/WalletsSheet';
 import ClaimHandle from '../components/ClaimHandle';
@@ -459,11 +458,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const [voiceLive, setVoiceLive] = useState(false);
   const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
-  const [accountWalletsOpen, setAccountWalletsOpen] = useState(false);
   const closeProfile = useCallback(() => {
     setProfileOpen(false);
   }, []);
-  const closeAccountWallets = useCallback(() => setAccountWalletsOpen(false), []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
   const closePlugins = useCallback(() => setPluginsOpen(false), []);
   const closeStats = useCallback(() => setStatsOpen(false), []);
@@ -1031,7 +1028,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   const openWallet = useCallback((walletId) => {
     setCreateOpen(false);
     setProfileOpen(false);
-    setAccountWalletsOpen(false);
     setPluginsOpen(false);
     setStatsOpen(false);
     setWalletFocus(typeof walletId === 'string' ? walletId : '');
@@ -1365,7 +1361,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     setLockOpen(false);
     lockIntentRef.current = null;
     setWalletsOpen(false);
-    setAccountWalletsOpen(false);
     setPendingSend(null);
     finishSlideConfirm(false);
   }, [ownerId, finishSlideConfirm]);
@@ -1431,7 +1426,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
   function openChat(id) {
     setCreateOpen(false);
     setWalletsOpen(false);
-    setAccountWalletsOpen(false);
     setPluginsOpen(false);
     setProfileOpen(false);
     setStatsOpen(false);
@@ -1547,7 +1541,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     setComputerOpen(id === 'computer');
     if (id === 'profile') {
       setWalletsOpen(false);
-      setAccountWalletsOpen(false);
       setPluginsOpen(false);
       setStatsOpen(false);
       setProfileOpen(true);
@@ -1556,7 +1549,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (id === 'computer') {
       setProfileOpen(false);
       setWalletsOpen(false);
-      setAccountWalletsOpen(false);
       setPluginsOpen(false);
       setStatsOpen(false);
       setComputerOpen(true);
@@ -1565,17 +1557,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (id === 'statistics') {
       setProfileOpen(false);
       setWalletsOpen(false);
-      setAccountWalletsOpen(false);
       setPluginsOpen(false);
       setStatsOpen(true);
       return;
     }
     if (id === 'wallet') {
-      setProfileOpen(false);
-      setPluginsOpen(false);
-      setStatsOpen(false);
-      setWalletsOpen(false);
-      setAccountWalletsOpen(true);
+      openWallet();
       return;
     }
     if (id === 'lock-wallet') {
@@ -1585,14 +1572,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
     if (id === 'plugins') {
       setProfileOpen(false);
       setWalletsOpen(false);
-      setAccountWalletsOpen(false);
       setStatsOpen(false);
       setPluginsOpen(true);
       return;
     }
     setProfileOpen(false);
     setWalletsOpen(false);
-    setAccountWalletsOpen(false);
     setPluginsOpen(false);
     setStatsOpen(false);
     if (id === 'security') choosePane('Security', 'right');
@@ -1773,7 +1758,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         />
         <div className="side-tools">
           <RecallSearch query={recall} hits={recallHits} onQuery={setRecall} onSelect={onRecall} />
-          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setAccountWalletsOpen(false); setPluginsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
+          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setPluginsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
         </div>
@@ -2122,15 +2107,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           </section>
         </div>
       ) : null}
-      <AccountWallets
-        open={accountWalletsOpen}
-        onClose={closeAccountWallets}
-        glance={glance}
-        wallets={wallets}
-        signedIn={signedIn}
-        privyLive={privyLive}
-        onDesk={() => openWallet()}
-      />
       <ProfileSheet
         open={profileOpen}
         onClose={closeProfile}

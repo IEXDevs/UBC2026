@@ -14,6 +14,7 @@ import SlideCommit from './bits/SlideCommit';
 import TxnLog from './TxnLog';
 import SendToField from './SendToField';
 import TxnPreview from './TxnPreview';
+import LinkedLogins from './LinkedLogins';
 import { usePresence } from './usePresence';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { partyFromToken } from '../lib/party-book.mjs';
@@ -179,6 +180,7 @@ export default function WalletsSheet({
           {pane === 'assets' ? (
             <>
               {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
+              {signedIn ? <LinkedLogins /> : null}
               <WalletRoster
                 rows={rows}
                 activeId={active?.id || ''}
