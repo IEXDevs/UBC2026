@@ -7,6 +7,7 @@ import {
   phraseProof,
   readRecoveryState,
   recoveryFailureNote,
+  recoveryStartStep,
   sealRecovery,
   shouldRetryRecovery,
   verifyRecovery,
@@ -128,4 +129,11 @@ test('issue refuses a second seed and verify separates a mismatch from a failure
   assert.deepEqual(expired, { ok: false, error: 'login_required' });
   const bad = await verifyRecovery(() => reply({}), { ownerId: 'alice', words: ['abandon'], verifier: sealed.verifier });
   assert.equal(bad.error, 'invalid_phrase');
+});
+
+test('a seed the account already holds is typed back, never shown again', () => {
+  assert.equal(recoveryStartStep('issued'), 'finish');
+  assert.equal(recoveryStartStep('confirmed'), 'restore');
+  assert.equal(recoveryStartStep('none'), 'tell');
+  assert.equal(recoveryStartStep(undefined), 'tell');
 });

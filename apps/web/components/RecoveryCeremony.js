@@ -15,7 +15,7 @@ import {
   recoveryWords,
   writeRecoveryStep,
 } from '../lib/wallet-desk.mjs';
-import { issueRecovery, openRecovery, readRecoveryState, recoveryFailureNote, sealRecovery, shouldRetryRecovery, verifyRecovery } from '../lib/recovery-vault.mjs';
+import { issueRecovery, readRecoveryState, recoveryFailureNote, recoveryStartStep, sealRecovery, shouldRetryRecovery, verifyRecovery } from '../lib/recovery-vault.mjs';
 import { SEED_CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
 
@@ -91,7 +91,6 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   const [busy, setBusy] = useState(false);
   // 'account' keeps one seed per account. 'local' is only for a desk with no account store.
   const [mode, setMode] = useState('account');
-  const [vault, setVault] = useState(null);
   const [retry, setRetry] = useState(0);
   const verifierRef = useRef(null);
   const finishTimer = useRef(0);
@@ -105,17 +104,10 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
 
   function routeFromAccount(state) {
     verifierRef.current = state.verifier ?? null;
-    if (state.state === 'issued') {
-      setVault(state.vault);
-      setNote('A seed was already started for this account. Enter the password you set to bring it back. A new one is not made.');
-      setStep('unlock');
-    } else if (state.state === 'confirmed') {
-      setNote('');
-      setStep('restore');
-    } else {
-      setNote('');
-      setStep('tell');
-    }
+    const next = recoveryStartStep(state.state);
+    setNote(next === 'finish' ? 'This account already has a seed. It is shown only once. Type the 12 words from the file you downloaded.' : '');
+    setSlots(EMPTY_SLOTS());
+    setStep(next);
   }
 
   useEffect(() => {
@@ -220,27 +212,6 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
     })();
   }, [step, words, mode, password, ownerId]);
 
-  async function unlockVault(event) {
-    event.preventDefault();
-    if (busy) return;
-    const left = normalizePassphrase(password);
-    if (!left) {
-      setNote('Enter the password you set, 8 to 64 characters.');
-      return;
-    }
-    setBusy(true);
-    const opened = await openRecovery(vault, left);
-    setBusy(false);
-    if (!opened) {
-      setNote('That password does not open this seed. A lost password cannot be recovered.');
-      return;
-    }
-    setPassword(left);
-    setWords(opened);
-    setNote('');
-    setStep('save');
-  }
-
   async function restoreSeed(event) {
     event.preventDefault();
     if (busy || leaving) return;
@@ -254,6 +225,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
       token: await authToken(),
       words: slots,
       verifier: verifierRef.current,
+      confirm: step === 'finish',
     });
     setBusy(false);
     if (checked.mismatch) {
@@ -339,7 +311,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         {step === 'tell' ? (
           <>
             <p className="quiet">
-              Your account gets one 12-word seed. Download it and keep the file. Until you confirm it, an encrypted copy that only your password opens stays with your account, so another browser shows this same seed. After you confirm, that copy is deleted.
+              Your account gets one 12-word seed, shown once. Download it and keep the file. It is never shown again, on this browser or any other.
               {handle ? ` @${handle} is the name people pay.` : ''}
             </p>
             <ul className="recovery-wallets">
@@ -391,7 +363,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         ) : null}
         {step === 'save' ? (
           <>
-            <p className="quiet">Download the seed to continue. After you confirm it, we keep no copy.</p>
+            <p className="quiet">Download the seed to continue. This is the only time it is shown.</p>
             <ol className="phrase-grid">
               {(words || []).map((word, index) => (
                 <li key={`${word}-${index}`}>
@@ -412,20 +384,11 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
             <button type="submit" className="solid" disabled={leaving || busy}>Confirm seed</button>
           </form>
         ) : null}
-        {step === 'unlock' ? (
-          <form className="field" onSubmit={unlockVault}>
-            <label>
-              Password
-              <input type="password" name="wallet-password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} />
-            </label>
-            <button type="submit" className="solid" disabled={busy}>Show my seed</button>
-          </form>
-        ) : null}
-        {step === 'restore' ? (
+        {step === 'restore' || step === 'finish' ? (
           <form className="field" onSubmit={restoreSeed}>
-            <p className="quiet">This account already saved its seed. Enter the 12 words from your file to open the desk on this browser.</p>
+            {step === 'restore' ? <p className="quiet">This account already saved its seed. Enter the 12 words from your file to open the desk on this browser.</p> : null}
             <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); }} disabled={leaving || busy} />
-            <button type="submit" className="solid" disabled={leaving || busy}>Restore seed</button>
+            <button type="submit" className="solid" disabled={leaving || busy}>{step === 'finish' ? 'Confirm seed' : 'Restore seed'}</button>
           </form>
         ) : null}
         {step === 'error' ? (

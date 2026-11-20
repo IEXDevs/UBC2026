@@ -5,6 +5,7 @@ import {
   clearDeskGrant,
   clearDeskSession,
   lockOpenWallets,
+  newAccountNote,
   createDeskLock,
   deskLockStorageKey,
   deskSessionUntil,
@@ -169,4 +170,12 @@ test('a deploy lock drops unlock windows and keeps the password verifier', () =>
   assert.equal(storage.getItem('maelstrom.desk-lock.did:privy:abc'), '{"v":1}');
   assert.equal(storage.getItem('privy:refresh_token'), '"refresh"');
   assert.equal(lockOpenWallets(memoryStorage()), 0);
+});
+
+test('a missing desk password says the account is new and names the sign-in', () => {
+  const named = newAccountNote(' sid@example.com ');
+  assert.match(named, /^This is a new Maelstrom account for sid@example\.com\./);
+  assert.match(named, /sign in the same way you did before/);
+  assert.match(newAccountNote(''), /^This is a new Maelstrom account\. /);
+  assert.match(newAccountNote('Signed in'), /^This is a new Maelstrom account\. /);
 });

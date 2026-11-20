@@ -373,6 +373,7 @@ function AuthedShell() {
       <DeskLock
         key={deskOwner}
         ownerId={deskOwner}
+        accountLabel={privyAccountLabel(user)}
         getAccessToken={getAccessToken}
         onSignOut={onLogout}
         onUnlock={until => {

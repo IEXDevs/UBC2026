@@ -2,9 +2,9 @@
  * One seed phrase per account.
  * The browser encrypts the phrase with the onboarding password (PBKDF2 then
  * AES-GCM) before the account stores it, so the server cannot read it. The
- * same vault comes back on any browser until the owner types the phrase back.
- * A PBKDF2 verifier of the phrase lets a later browser prove the owner still
- * has it after the vault is deleted. Nothing here is a signature.
+ * phrase is shown once, in the visit that issued it. A PBKDF2 verifier of the
+ * phrase lets a later browser prove the owner still has it. Nothing here is a
+ * signature.
  */
 import { recoveryWords } from './wallet-desk.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
@@ -129,6 +129,17 @@ export async function readRecoveryState(fetchImpl, { ownerId, token, allowLocal 
   } catch {
     return { ok: false, error: 'recovery_unavailable' };
   }
+}
+
+/**
+ * Where the ceremony starts for an account. The words are shown only in the
+ * visit that issued them: a seed the account already holds is typed back from
+ * the downloaded file, never shown again.
+ */
+export function recoveryStartStep(state) {
+  if (state === 'issued') return 'finish';
+  if (state === 'confirmed') return 'restore';
+  return 'tell';
 }
 
 /** A missing token during signup should be asked again. A real outage should not. */

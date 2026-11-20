@@ -56,6 +56,13 @@ export function deskOpenStorageKey(ownerId) {
   return lockKey.replace('maelstrom.desk-lock.', 'maelstrom.desk-open.');
 }
 
+/** Shown when an account has no desk password yet: it is a new account, not a reset. */
+export function newAccountNote(accountLabel) {
+  const label = typeof accountLabel === 'string' ? accountLabel.trim() : '';
+  const who = label && label !== 'Signed in' ? ` for ${label}` : '';
+  return `This is a new Maelstrom account${who}. If you already have one, sign out and sign in the same way you did before. A sign-in method not linked to your account opens a separate account with its own wallets and seed.`;
+}
+
 export function normalizePassword(password) {
   return typeof password === 'string' ? password.normalize('NFC') : '';
 }
