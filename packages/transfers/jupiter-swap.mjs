@@ -17,8 +17,10 @@ const EXACT_IN = new Map(Object.entries({
   shared_accounts_route_v2: { authority: 1, mint: 7, amountOffset: 9 },
 }).map(([name, layout]) => [createHash('sha256').update(`global:${name}`).digest('hex').slice(0, 16), layout]));
 
-function refused() {
-  throw new Error('swap_route_refused');
+function refused(code = 'swap_route_refused') {
+  const error = new Error(code);
+  error.code = code;
+  throw error;
 }
 
 function positiveU64(value) {
@@ -84,17 +86,24 @@ export async function buildJupiterSwap({
     inputMint, outputMint, amount, taker: walletAddress, slippageBps: String(SLIPPAGE_BPS),
     transactionVersion: '0', computeUnitPricePercentile: 'medium',
   });
-  const response = await fetcher(`https://api.jup.ag/swap/v2/build?${query}`, {
-    headers: { accept: 'application/json', 'x-api-key': apiKey },
-    redirect: 'manual',
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!response.ok) {
-    const error = new Error('Jupiter quote request failed');
-    error.code = `jupiter_http_${response.status}`;
-    throw error;
+  let response;
+  try {
+    response = await fetcher(`https://api.jup.ag/swap/v2/build?${query}`, {
+      headers: { accept: 'application/json', 'x-api-key': apiKey },
+      // Workers reject redirect: 'error'. Keep the API key on this origin.
+      redirect: 'manual',
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (error) {
+    refused(error?.name === 'TimeoutError' || error?.name === 'AbortError'
+      ? 'jupiter_quote_timeout' : 'jupiter_quote_transport');
   }
-  const result = await response.json();
+  if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+    refused('jupiter_redirect_refused');
+  }
+  if (!response.ok) refused(`jupiter_http_${response.status}`);
+  const result = await response.json().catch(() => null);
+  if (!result || typeof result !== 'object' || Array.isArray(result)) refused('jupiter_quote_invalid_response');
   if (result.inputMint !== inputMint || result.outputMint !== outputMint || result.inAmount !== amount
       || result.swapMode !== 'ExactIn' || result.slippageBps !== SLIPPAGE_BPS || !positiveU64(result.outAmount)
       || !positiveU64(result.otherAmountThreshold) || BigInt(result.otherAmountThreshold) > BigInt(result.outAmount)

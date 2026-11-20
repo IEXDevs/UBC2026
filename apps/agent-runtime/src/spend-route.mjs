@@ -144,6 +144,7 @@ export async function handleSpend(request, env = {}) {
   const body = await response.json();
   if (body.signed !== true && !body.swapPreview && !body.spendAuthorization && !body.swapAuthorization) {
     body.failure = swapFailure(body);
+    delete body.simulationDetails;
   }
   return json(body, response.status);
 }
@@ -271,7 +272,10 @@ async function handleSpendRequest(request, env = {}) {
         return json({ state: 'approval-needed', signed: false, swapPreview: preview });
       } catch (error) {
         const failure = swapFailure({ error: error?.code || error?.message, simulationReason: error?.simulationReason });
-        return json({ error: failure.code === 'swap_failed' ? 'swap_quote_unavailable' : failure.code, signed: false }, 409);
+        return json({
+          error: failure.code === 'swap_failed' ? 'swap_quote_unavailable' : failure.code,
+          signed: false, simulationDetails: error?.simulationDetails,
+        }, 409);
       }
     }
     if (!autoSwap && desk.ok && (desk.via !== 'grant' || (!prepareSwap && !signedSwap))) {
@@ -340,10 +344,13 @@ async function handleSpendRequest(request, env = {}) {
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
       const simulationReason = typeof error?.simulationReason === 'string'
         && /^[a-zA-Z0-9_]{1,100}$/.test(error.simulationReason) ? error.simulationReason : null;
-      const hint = code === 'simulation_failed' && !laso
+      const hint = code === 'simulation_failed' && !laso && !swap
         ? 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.'
         : '';
-      return json({ error: code, ...(hint ? { hint } : {}), signed: false, ...(simulationReason ? { simulationReason } : {}) }, 409);
+      return json({
+        error: code, ...(hint ? { hint } : {}), signed: false, ...(simulationReason ? { simulationReason } : {}),
+        ...(swap ? { simulationDetails: error?.simulationDetails } : {}),
+      }, 409);
     }
   }
   const facts = {

@@ -1,6 +1,7 @@
 import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 import { AddressLookupTableAccount, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { swapAccountSnapshot, verifySwapSimulation } from './swap-simulation.mjs';
+import { swapSimulationDetails } from './swap-diagnostics.mjs';
 /**
  * Privy Solana wallet path for Maelstrom.
  * Login provisioning (main wallet at sign-up, additional wallets) and
@@ -32,9 +33,10 @@ export function simulationFailureReason(value) {
   return 'simulation_unavailable';
 }
 
-function failSimulation(value) {
+function failSimulation(value, details) {
   const error = new WalletError('Solana transfer simulation failed', 'simulation_failed');
   error.simulationReason = simulationFailureReason(value);
+  if (details) error.simulationDetails = details;
   throw error;
 }
 
@@ -1386,7 +1388,12 @@ export function createPrivyWalletClient({
         }]),
       ]);
       const value = simulation.result?.value;
-      if (value?.err !== null) failSimulation(value);
+      if (value?.err !== null) {
+        const index = value?.err?.InstructionError?.[0];
+        const instruction = Number.isInteger(index) ? parsed.message.compiledInstructions[index] : null;
+        const details = swapSimulationDetails({ instructionProgram: addresses[instruction?.programIdIndex], logs: value?.logs });
+        failSimulation(value, details);
+      }
       const after = swapAccountSnapshot(value.accounts, walletAddress);
       if (!after) fail('Swap simulated accounts are unavailable', 'swap_simulation_unavailable');
       const effects = verifySwapSimulation({

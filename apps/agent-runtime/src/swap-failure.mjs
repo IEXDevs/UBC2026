@@ -1,3 +1,5 @@
+import { swapSimulationDetails } from '@ubc2026/wallets/swap-diagnostics';
+
 const FAILURES = {
   client_sign_required: ['client signing', 'Approve this swap in the browser with the selected wallet.'],
   aborted: ['client signing', 'The swap request was cancelled. Nothing further was submitted.'],
@@ -5,6 +7,10 @@ const FAILURES = {
   wallet_connection_required: ['client signing', 'The selected wallet is not available in this browser. Connect that exact wallet; server-only wallets cannot use browser signing.'],
   broadcast_failed: ['broadcast', 'The server could not broadcast the signed swap. Submission status may be unknown; check activity before retrying.'],
   swap_quote_unavailable: ['quote', 'Jupiter could not prepare a swap quote.'],
+  jupiter_quote_timeout: ['quote', 'Jupiter did not return a swap quote before the request timed out.'],
+  jupiter_quote_transport: ['quote', 'The Worker could not complete the request to Jupiter.'],
+  jupiter_redirect_refused: ['quote', 'Jupiter redirected the quote request. The Worker stopped before sending the API key to another URL.'],
+  jupiter_quote_invalid_response: ['quote', 'Jupiter did not return a valid swap response.'],
   swap_route_refused: ['quote validation', 'The Jupiter route failed the transaction safety checks. Try a different amount or pair.'],
   swap_mint_invalid: ['mint metadata', 'The mint address, network, or decimals could not be verified.'],
   insufficient_funds: ['simulation', 'The wallet needs enough input tokens and SOL for fees and account rent.'],
@@ -71,7 +77,11 @@ export function swapFailure(result = {}) {
   if (provider) return { code: provider, step: 'quote', message: `Swap — quote: Jupiter returned HTTP ${provider.slice(-3)}. Check API access or retry later. [${provider}]` };
   const instruction = [result.simulationReason, result.error].find(value => /^instruction_[0-9]+_(?:[A-Za-z]{1,64}|custom_[0-9]+|unknown)$/.test(value ?? ''));
   if (instruction) {
-    return { code: instruction, step: 'simulation', message: `Swap — simulation: A Solana instruction failed. [${instruction}]` };
+    const details = swapSimulationDetails(result.simulationDetails ?? result.failure?.simulationDetails);
+    const lines = [`Swap — simulation: A Solana instruction failed before broadcast. [${instruction}]`];
+    if (details?.instructionProgram) lines.push(`Instruction program ${details.instructionProgram}.`);
+    if (details) lines.push(...details.logs);
+    return { code: instruction, step: 'simulation', message: lines.join('\n'), ...(details ? { simulationDetails: details } : {}) };
   }
   const code = [result.simulationReason, result.reason, result.error, result.state, result.code]
     .find(value => Object.hasOwn(FAILURES, value)) || 'swap_failed';

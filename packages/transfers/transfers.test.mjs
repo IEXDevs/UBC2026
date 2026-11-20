@@ -57,7 +57,11 @@ test('Jupiter swap quote builds use Workers-supported manual redirects and rejec
   assert.equal(result.minOutput, '9950000');
   assert.equal(VersionedTransaction.deserialize(Buffer.from(result.transaction, 'base64')).signatures[0].every(byte => byte === 0), true);
   assert.equal(calls, 1);
-  for (const status of [302, 401, 429, 503]) {
+  await assert.rejects(buildJupiterSwap({ ...args, fetcher: async (_url, init) => {
+    assert.equal(init.redirect, 'manual');
+    return new Response(null, { status: 302, headers: { location: 'https://untrusted.example' } });
+  } }), { code: 'jupiter_redirect_refused' });
+  for (const status of [401, 429, 503]) {
     await assert.rejects(buildJupiterSwap({ ...args, fetcher: async (_url, init) => {
       assert.equal(init.redirect, 'manual');
       return new Response(null, { status, headers: { location: 'https://untrusted.example' } });

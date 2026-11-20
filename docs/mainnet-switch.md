@@ -6,7 +6,7 @@ Code defaults to **mainnet-beta and real funds**. This runbook is not a claim th
 
 `SOLANA_CLUSTER=mainnet-beta` is the server/Worker choice; optional `devnet` selects the test network. `NEXT_PUBLIC_SOLANA_CLUSTER` is the corresponding web build choice and must match. Empty values default to mainnet-beta; invalid or conflicting values fail closed. Restart/rebuild when changing clusters, including all Workers. Do not share a database, bot or Durable Object checkpoint between active networks.
 
-`SOLANA_RPC_URL` selects the HTTPS endpoint for the execution network. On mainnet, an existing `QUICKNODE_MAINNET_RPC_URL` secret also works when `SOLANA_RPC_URL` is empty. Public balance reads can use the selected Solana public endpoint. Signing requires one of the accepted secrets. Never put an API-keyed RPC in `NEXT_PUBLIC_*`, Wrangler vars, documentation or Git.
+`QUICKNODE_MAINNET_RPC_URL` selects the HTTPS endpoint for mainnet. If it is unset, mainnet uses `SOLANA_RPC_URL`. Devnet uses `SOLANA_RPC_URL`. Public balance reads can fall back to the selected network's public endpoint. Signing requires a server RPC secret. Keep API-keyed RPC URLs in server secrets.
 
 Mainnet identity: full RPC genesis `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d`; x402 CAIP-2 `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`; Circle USDC mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, 6 decimals. Privy wallet-standard chain is `solana:mainnet`; QuickNode Streams network is `solana-mainnet`. Mainnet explorer URLs omit the cluster query.
 
