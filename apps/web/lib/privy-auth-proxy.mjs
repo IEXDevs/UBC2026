@@ -3,18 +3,21 @@
  * Privy returns the refresh token in JSON, which the page can read.
  * This proxy keeps that token in an HttpOnly cookie and removes it from
  * the body. A later session refresh sends the cookie, not page storage.
- * The access token stays in the body so the open tab can keep working.
+ * The access token stays in the body for the open tab and in an HttpOnly
+ * cookie: Privy requires it alongside the refresh token after a reload.
  */
 
 export const PRIVY_AUTH_ORIGIN = 'https://auth.privy.io';
 export const PRIVY_AUTH_PROXY_PREFIX = '/api/privy-auth';
 export const PRIVY_REFRESH_COOKIE = 'maelstrom_privy_refresh';
+export const PRIVY_ACCESS_COOKIE = 'maelstrom_privy_access';
 // Page-readable flag that the HttpOnly refresh cookie exists. Not a credential.
 export const PRIVY_SESSION_MARKER = 'privy-session';
 
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 30;
 const PATH_OK = /^\/api\/v1\/[A-Za-z0-9._~/-]{1,200}$/;
 const SESSION_WRITE = new Set(['/api/v1/sessions', '/api/v1/sessions/logout']);
+const OAUTH_CALLBACK = new Set(['/api/v1/oauth/link', '/api/v1/oauth/authenticate']);
 const FORWARD_HEADERS = Object.freeze([
   'authorization',
   'content-type',
@@ -31,9 +34,9 @@ export function privyUpstreamUrl(path, search = '') {
   return `${PRIVY_AUTH_ORIGIN}${path}${query}`;
 }
 
-export function readRefreshCookie(cookieHeader) {
+function readSessionCookie(cookieHeader, name) {
   const header = typeof cookieHeader === 'string' ? cookieHeader : '';
-  const match = new RegExp(`(?:^|;\\s*)${PRIVY_REFRESH_COOKIE}=([^;]*)`).exec(header);
+  const match = new RegExp(`(?:^|;\\s*)${name}=([^;]*)`).exec(header);
   if (!match) return '';
   let value = match[1].trim();
   try {
@@ -45,11 +48,19 @@ export function readRefreshCookie(cookieHeader) {
   return value;
 }
 
-export function refreshCookieHeader(token, { secure = true, clear = false } = {}) {
+export function readRefreshCookie(cookieHeader) {
+  return readSessionCookie(cookieHeader, PRIVY_REFRESH_COOKIE);
+}
+
+function sessionCookieHeader(name, token, { secure = true, clear = false } = {}) {
   const flags = `HttpOnly; Path=${PRIVY_AUTH_PROXY_PREFIX}; SameSite=Lax${secure ? '; Secure' : ''}`;
-  if (clear) return `${PRIVY_REFRESH_COOKIE}=; ${flags}; Max-Age=0`;
+  if (clear) return `${name}=; ${flags}; Max-Age=0`;
   if (typeof token !== 'string' || !token || token.length > 4096 || /[\r\n;]/.test(token)) return '';
-  return `${PRIVY_REFRESH_COOKIE}=${encodeURIComponent(token)}; ${flags}; Max-Age=${REFRESH_MAX_AGE}`;
+  return `${name}=${encodeURIComponent(token)}; ${flags}; Max-Age=${REFRESH_MAX_AGE}`;
+}
+
+export function refreshCookieHeader(token, options) {
+  return sessionCookieHeader(PRIVY_REFRESH_COOKIE, token, options);
 }
 
 /** Readable companion to the HttpOnly refresh cookie. Path=/ so the page can see it. */
@@ -112,6 +123,10 @@ export async function proxyPrivyAuth(request, path, fetchImpl = globalThis.fetch
       headers.set(name, value);
     }
   }
+  if (method === 'POST' && (SESSION_WRITE.has(path) || OAUTH_CALLBACK.has(path)) && !headers.has('authorization')) {
+    const access = readSessionCookie(request.headers.get('cookie'), PRIVY_ACCESS_COOKIE);
+    if (access) headers.set('authorization', `Bearer ${access}`);
+  }
   const upstream = await fetchImpl(target, {
     method,
     headers,
@@ -131,12 +146,19 @@ export async function proxyPrivyAuth(request, path, fetchImpl = globalThis.fetch
   const clear = logout || refreshRejected;
   if (clear) {
     responseHeaders.append('set-cookie', refreshCookieHeader('', { secure, clear: true }));
+    responseHeaders.append('set-cookie', sessionCookieHeader(PRIVY_ACCESS_COOKIE, '', { secure, clear: true }));
     responseHeaders.append('set-cookie', sessionMarkerCookie({ secure, clear: true }));
   } else {
     const cookie = refreshCookieHeader(sealed.refreshToken, { secure });
     if (cookie) {
       responseHeaders.append('set-cookie', cookie);
       responseHeaders.append('set-cookie', sessionMarkerCookie({ secure }));
+    }
+    if (upstream.ok) {
+      let access = '';
+      try { access = JSON.parse(text)?.token; } catch { /* non-JSON response */ }
+      const accessCookie = sessionCookieHeader(PRIVY_ACCESS_COOKIE, access, { secure });
+      if (accessCookie) responseHeaders.append('set-cookie', accessCookie);
     }
   }
   return new Response(sealed.bodyText, { status: upstream.status, headers: responseHeaders });

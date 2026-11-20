@@ -48,6 +48,14 @@ export function selectOwnedMoveWallet(wallets, selection) {
   return { ...wallet, privyWalletId: wallet.id };
 }
 
+export function selectOwnedMoveRecipient(wallets, selection) {
+  if (typeof selection?.id !== 'string' || typeof selection.address !== 'string') return null;
+  return wallets.find(wallet => wallet?.address === selection.address && (
+    wallet.id === selection.id
+    || (wallet.spendable === false && selection.id === `linked_${wallet.address}`)
+  )) || null;
+}
+
 /**
  * A connected wallet signs in the browser. The destination is the main wallet.
  * This plans the move. It does not sign or broadcast.

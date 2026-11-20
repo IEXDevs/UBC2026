@@ -746,7 +746,7 @@ function SendPane({
   const target = picked?.kind === 'recent'
     ? parseSendTarget(picked.caption)
     : picked
-      ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, spendable: picked.spendable, walletKind: picked.walletKind }
+      ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, frozen: picked.frozen, walletKind: picked.walletKind }
       : parseSendTarget(to);
   const units = asset ? displayToUnits(amount, asset.decimals) : null;
   const [snsAddress, setSnsAddress] = useState('');
@@ -807,7 +807,7 @@ function SendPane({
     && target?.kind === 'wallet'
     && target.walletKind === 'main'
     && asset?.symbol === 'USDC';
-  const walletReady = target?.kind === 'wallet' && target.spendable && asset?.symbol === 'USDC';
+  const walletReady = target?.kind === 'wallet' && !target.frozen && asset?.symbol === 'USDC';
   const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
   const ready = Boolean(
     active && !frozen && target && units && asset
@@ -838,7 +838,7 @@ function SendPane({
 
   return (
     <form className="wallet-form field" onSubmit={event => event.preventDefault()}>
-      <p className="quiet">{active ? `From ${active.label}` : 'No wallet yet.'} A slide confirms the send. Nothing is signed before that.</p>
+      <p className="quiet">{active ? `From ${active.label}.` : 'No wallet yet.'} A slide confirms the send. Nothing is signed before that.</p>
       {frozen ? <p className="quiet" role="status">This wallet is frozen.</p> : null}
       <label>
         To
@@ -937,7 +937,6 @@ function targetHint(target, observing = false) {
   }
   if (!target) return 'Type a @handle or a .sol name, or pick a wallet.';
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
-  if (target.kind === 'wallet' && target.spendable === false) return 'Pick the main wallet to move funds there.';
   if (target.kind === 'wallet') return `Sends USDC to ${target.caption}.`;
   if (target.kind === 'invalid-address') return 'That address is not a valid Solana pubkey.';
   return 'Raw addresses are not on the platform ledger yet.';
