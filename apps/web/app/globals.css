@@ -1600,6 +1600,7 @@ button.add-agent:not(:disabled):hover {
 }
 .price-graph-empty { height: 72px; }
 .address-copy {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1611,10 +1612,30 @@ button.add-agent:not(:disabled):hover {
   padding: 6px 10px 6px 12px;
   font: inherit;
   font-variant-numeric: tabular-nums;
+  color: inherit;
+  cursor: copy;
+  vertical-align: baseline;
 }
-.address-copy small { color: #a3a3a3; font-size: 12px; }
+.address-copy-text { text-decoration: underline dotted; text-underline-offset: 4px; text-decoration-color: #929292; white-space: nowrap; }
+.address-copy small { color: #a3a3a3; font-size: 12px; text-decoration: none; }
+.address-copy-feedback { min-width: 46px; text-align: center; }
+.address-copy[data-state="copied"] .address-copy-feedback { color: #a8ddbe; animation: address-copied 220ms ease-out; }
+.address-copy[data-state="error"] .address-copy-feedback { color: #efb0b0; }
+.address-copy:focus-visible { outline: 2px solid #d4d4d8; outline-offset: 4px; }
+.address-copy.is-inline { display: inline; padding: 0; border-radius: 3px; background: transparent; box-shadow: none; font: inherit; }
+.address-copy.is-inline .address-copy-feedback, .address-copy.is-compact .address-copy-feedback {
+  position: absolute; z-index: 2; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%);
+  padding: 5px 8px; border: 1px solid #444; border-radius: 6px; background: #252525; white-space: nowrap; box-shadow: 0 3px 12px #0006;
+}
+.address-copy.is-inline .address-copy-feedback:empty, .address-copy.is-compact .address-copy-feedback:empty { display: none; }
+@keyframes address-copied { from { opacity: 0; translate: 0 4px; } to { opacity: 1; translate: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .address-copy[data-state="copied"] .address-copy-feedback { animation: none; } }
 .address-copy.is-empty { box-shadow: none; background: transparent; padding-left: 0; }
 .address-copy.is-compact { padding: 4px 8px; background: transparent; }
+.send-to-row { display: flex; align-items: center; min-width: 0; }
+.send-to-choice { flex: 1; min-width: 0; }
+.send-to-row[aria-selected="true"] .glide-select__option { background: #303030; }
+.send-to-row .address-copy { flex: none; margin-right: 4px; font-size: 12px; }
 @media (hover: hover) and (pointer: fine) {
   .address-copy:hover { background: #2a2a2a; }
 }

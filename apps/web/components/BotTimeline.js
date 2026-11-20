@@ -1,6 +1,7 @@
 'use client';
 
 import { TaskList } from './ai/elements';
+import AddressText from './AddressText';
 
 const KIND_LABELS = {
   'tool.call': 'Tool',
@@ -31,7 +32,7 @@ export default function BotTimeline({ entries, live, onWhy }) {
   const items = entries.map((entry) => ({
     id: entry.id,
     status: statusFor(entry.kind),
-    title: `${KIND_LABELS[entry.kind] ?? entry.kind}. ${entry.summary || ''}${formatWhen(entry.at) ? ` ${formatWhen(entry.at)}` : ''}`,
+    title: <AddressText text={`${KIND_LABELS[entry.kind] ?? entry.kind}. ${entry.summary || ''}${formatWhen(entry.at) ? ` ${formatWhen(entry.at)}` : ''}`} />,
     action: (
       <button type="button" className="text-btn" onClick={() => onWhy(entry)}>Why</button>
     ),

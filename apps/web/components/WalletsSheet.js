@@ -6,6 +6,7 @@ import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
 import { Plus, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, ChartNoAxesCombined, Coins, History, KeyRound, Layers, Wallet, X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
+import AddressText from './AddressText';
 import GlideSelect from './GlideSelect';
 import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
@@ -609,7 +610,7 @@ function WalletRoster({ rows, activeId, onSelect, onRetire, retiring }) {
 function WalletPick({ rows, activeId, onSelect }) {
   if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one in settings, or generate a new one.</p>;
   return (
-    <label className="wallet-pick-label">
+    <div className="wallet-pick-label">
       Wallet
       <GlideSelect
         className="wallet-pick"
@@ -623,12 +624,13 @@ function WalletPick({ rows, activeId, onSelect }) {
         value={activeId}
         options={rows.map(row => ({
           value: row.id,
-          label: `${row.label} · ${shortAddress(row.address)}`,
+          label: row.label,
           tag: row.kind === 'main' ? 'Main' : 'Added',
         }))}
         onChange={onSelect}
       />
-    </label>
+      <AddressCopy address={rows.find(row => row.id === activeId)?.address} compact />
+    </div>
   );
 }
 
@@ -650,7 +652,7 @@ function SendPane({
   const [resetKey, setResetKey] = useState(0);
   const [folded, setFolded] = useState(false);
   const asset = tokens.find(token => token.symbol === symbol) || tokens[0] || null;
-  const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
+  const picked = destinations.find(row => row.id === pickedId && to === (row.label || row.caption)) || null;
   const target = picked?.kind === 'recent'
     ? parseSendTarget(picked.caption)
     : picked
@@ -732,14 +734,14 @@ function SendPane({
     )
   );
   const destination = target?.kind === 'wallet'
-    ? target.caption
+    ? target.caption.replace(shortAddress(target.address), target.address)
     : target?.kind === 'handle'
-      ? `@${target.handle}`
+      ? `@${target.handle}${handleRecipient?.address ? ` (${handleRecipient.address})` : ''}`
       : target?.kind === 'sns'
-        ? (snsAddress || target.domain)
+        ? `${target.domain}${snsAddress ? ` (${snsAddress})` : ''}`
         : '';
   const preview = ready ? sendPreview({
-    from: active?.label || 'Agent wallet',
+    from: active?.address ? `${active.label} (${active.address})` : 'Agent wallet',
     to: destination,
     amountLabel: `${amount.trim()} ${asset.symbol}`,
   }) : null;
@@ -758,7 +760,7 @@ function SendPane({
           onPick={(row) => setPickedId(row?.id || '')}
         />
       </label>
-      {target?.kind === 'sns' && snsFailed ? (
+      {target?.kind === 'wallet' ? <AddressCopy address={target.address} /> : target?.kind === 'sns' && snsFailed ? (
         <p className="quiet" role="status">Failed.</p>
       ) : target?.kind === 'sns' && snsAddress ? (
         <AddressCopy address={snsAddress} prefix={target.domain} />
@@ -829,7 +831,7 @@ function SendPane({
           });
         }}
       />
-      {status ? <p className="quiet" role="status">{status}</p> : null}
+      {status ? <p className="quiet" role="status"><AddressText text={status} /></p> : null}
     </form>
   );
 }
@@ -983,7 +985,7 @@ function SwapPane({ tokens }) {
         <input value={amount} inputMode="decimal" placeholder="0.00" onChange={event => { setAmount(event.target.value); setQuote(''); }} />
       </label>
       {quote ? <p className="wallet-figure wallet-figure-sm">{quote}</p> : null}
-      {status ? <p className="quiet" role="status">{status}</p> : null}
+      {status ? <p className="quiet" role="status"><AddressText text={status} /></p> : null}
     </form>
   );
 }

@@ -1,5 +1,7 @@
 'use client';
 
+import AddressText from './AddressText';
+
 export default function TxnPreview({ preview, folded = false, onToggle }) {
   if (!preview) return null;
   if (folded) {
@@ -16,7 +18,7 @@ export default function TxnPreview({ preview, folded = false, onToggle }) {
         {preview.lines.map(row => (
           <div key={row.label}>
             <dt>{row.label}</dt>
-            <dd>{row.value}</dd>
+            <dd><AddressText text={row.value} /></dd>
           </div>
         ))}
       </dl>

@@ -69,7 +69,7 @@ export default function ChatBubbles({
     <MessageGroup className={className}>
       {rows.map((line) => {
         if (line.role === 'note') {
-          return <p key={line.id} id={`chat-line-${line.id}`} className="chat-note" data-hit={focusId === line.id ? '' : undefined} role="status">{line.text}</p>;
+          return <p key={line.id} id={`chat-line-${line.id}`} className="chat-note" data-hit={focusId === line.id ? '' : undefined} role="status"><MentionText text={line.text} onParty={onParty} /></p>;
         }
         if (line.role === 'user') {
           const editing = editingId === line.id;
@@ -158,7 +158,7 @@ export default function ChatBubbles({
               <Sources urls={urls} />
               {line.access?.kind === 'inline' ? (
                 <div className="access-request" role="group" aria-label={line.access.label}>
-                  <p>{line.access.label}</p>
+                  <p><MentionText text={line.access.label} onParty={onParty} /></p>
                   {hideAccessActions ? null : (
                     <>
                       <button type="button" onClick={() => onAccess?.(line, true)}>Allow</button>

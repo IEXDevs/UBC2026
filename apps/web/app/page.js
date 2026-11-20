@@ -30,6 +30,7 @@ import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletGlance } fro
 import { assignedWalletAddress, devnetSpendableLabel } from '../lib/devnet-balance.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { clearAcceptanceDraft, netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
+import AddressText from '../components/AddressText';
 import { CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
 import { compactLines, contextUsage, contextWindowFor } from '../lib/context-usage.mjs';
 import { applyLooks } from '../lib/bot-look.mjs';
@@ -69,7 +70,7 @@ import {
   walletProvisionSucceeded,
   walletsFromPrivyUser,
 } from '../lib/wallet-provision.mjs';
-import { SETUP_CARD_MS, accountSetupStep, clipAddress, readQuoteOut, readRecoveryAck, swapSendSettlement, writeRecoveryAck } from '../lib/wallet-desk.mjs';
+import { SETUP_CARD_MS, accountSetupStep, readQuoteOut, readRecoveryAck, swapSendSettlement, writeRecoveryAck } from '../lib/wallet-desk.mjs';
 import { readTalks, writeTalks } from '../lib/talk-store.mjs';
 import { latestInlineAllow } from '../lib/voice-allow.mjs';
 import { catalogAddition, catalogForChat, readCatalog, writeCatalog } from '../lib/file-catalog.mjs';
@@ -1092,7 +1093,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           body: JSON.stringify({ domain: target.domain, amount: pending.amount, wallet: main }),
         });
         const body = await response.json().catch(() => ({}));
-        const where = body.address ? clipAddress(body.address) : target.domain;
+        const where = body.address || target.domain;
         if (body.error === 'missing_config') {
           const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'QUICKNODE_DEVNET_RPC_URL';
           return { ok: false, message: `${target.domain} is ${where}. The devnet send needs ${names}.` };
@@ -1106,7 +1107,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
         return {
           ok: true,
-          message: `Sent ${amountLabel} to ${target.domain}(${where}).`,
+          message: `Sent ${amountLabel} to ${target.domain} (${where}).`,
           signature: body.signature,
           receipt: {
             id: `sns_${body.signature}`,
@@ -1186,7 +1187,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             body: JSON.stringify({ phase: 'broadcast', ...depositBody, signedTransaction: bytesToBase64(signedBytes) }),
           });
           const body = await response.json().catch(() => ({}));
-          const where = dest.label || clipAddress(dest.address);
+          const where = dest.label || dest.address;
           if (body.error === 'wallet_frozen') return { ok: false, message: 'That wallet is frozen.' };
           if (body.error === 'transaction_mismatch') return { ok: false, message: 'The signed transfer did not match the deposit.' };
           if (!response.ok || !body.signature) return { ok: false, message: `The send to ${where} did not post.` };
@@ -1220,7 +1221,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
           body: JSON.stringify({ from, to: dest, amount: pending.amount }),
         });
         const body = await response.json().catch(() => ({}));
-        const where = target.caption || clipAddress(target.address);
+        const where = dest.label ? `${dest.label} (${dest.address})` : dest.address;
         if (body.error === 'missing_config') {
           const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'QUICKNODE_DEVNET_RPC_URL';
           return { ok: false, message: `The devnet send needs ${names}.` };
@@ -2094,7 +2095,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
         <div className="backdrop is-center" onMouseDown={() => finishSlideConfirm(false)}>
           <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Confirm" onMouseDown={event => event.stopPropagation()}>
             <h2>Confirm</h2>
-            <p className="quiet">{slideConfirm}</p>
+            <p className="quiet"><AddressText text={slideConfirm} /></p>
             <p className="quiet">Say yes to confirm, or no to cancel.</p>
             <div className="spend-actions">
               <button type="button" className="ghost" onClick={() => finishSlideConfirm(false)}>Cancel</button>
@@ -2110,7 +2111,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
       {pendingSend && !voiceLive ? (
         <div className="backdrop is-center" onMouseDown={() => setPendingSend(null)}>
           <section className="spend-confirm" role="dialog" aria-modal="true" aria-label="Transaction summary" onMouseDown={event => event.stopPropagation()}>
-            <h2>{pendingSend.summary.title}</h2>
+            <h2><AddressText text={pendingSend.summary.title} /></h2>
             <ul>
               {pendingSend.summary.lines.map(row => (
                 <li key={`${row.label}-${row.signed}`}>

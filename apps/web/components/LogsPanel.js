@@ -79,7 +79,7 @@ export default function LogsPanel({
         <ul className="quiet-list">
           {rows.map(row => (
             <li key={row.id}>
-              <strong>{row.title}</strong>
+              <strong><MentionText text={row.title} onParty={onParty} /></strong>
               <small>{formatLogTime(row.at)}</small>
               {row.lines.map(line => (
                 <span key={`${row.id}-${line.label}`}>
