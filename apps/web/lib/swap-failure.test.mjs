@@ -25,6 +25,7 @@ test('swap failures identify each failed step without exposing raw errors', () =
   }
   assert.equal(swapFailure({ error: 'jupiter_http_401' }).step, 'quote');
   assert.equal(swapFailure({ error: 'simulation_failed', simulationReason: 'instruction_3_custom_6001' }).code, 'instruction_3_custom_6001');
+  assert.match(swapFailure({ error: 'simulation_failed', simulationReason: 'swap_output_below_minimum' }).message, /less than the quote’s minimum output/);
 });
 
 test('swap diagnostics survive a failed runtime response and appear in plain chat text', async () => {
