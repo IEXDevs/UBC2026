@@ -389,11 +389,12 @@ export function portfolioWithDex(portfolio, tokens = []) {
         mint: row.mint,
         amount: row.amount,
         decimals: row.decimals,
+        ...(row.native === undefined ? {} : { native: row.native }),
       })),
     })),
     prices: withKnownPegs(portfolio.cluster, prices),
   });
-  const paint = row => (symbols[row.mint] ? { ...row, symbol: symbols[row.mint] } : row);
+  const paint = row => (symbols[row.mint] ? { ...row, symbol: row.native === false && row.mint === 'So11111111111111111111111111111111111111112' ? 'wSOL' : symbols[row.mint] } : row);
   return {
     ...rebuilt,
     truncated: portfolio.truncated === true,

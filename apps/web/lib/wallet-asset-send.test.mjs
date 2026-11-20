@@ -7,6 +7,7 @@ import { sendWalletAsset } from './wallet-asset-send.mjs';
 import { walletSendAssets, NATIVE_SOL_MINT } from './wallet-send-assets.mjs';
 import { buildPortfolio } from './portfolio.mjs';
 import { displayToUnits } from './wallet-desk.mjs';
+import { portfolioWithDex } from './dex-token.mjs';
 
 const source = Keypair.generate();
 const destination = Keypair.generate().publicKey.toBase58();
@@ -106,6 +107,10 @@ test('Send assets come only from the selected wallet, including unpriced tokens,
   const assets = walletSendAssets(portfolio, from.address);
   assert.deepEqual(Object.fromEntries(assets.map(row => [row.id, row.amount])), { SOL: '1000000000', [NATIVE_SOL_MINT]: '2000000000', [mint]: '123456789' });
   assert.equal(assets.find(row => row.id === NATIVE_SOL_MINT).symbol, 'wSOL');
+  const enriched = walletSendAssets(portfolioWithDex(portfolio, [{ mint: NATIVE_SOL_MINT, symbol: 'SOL', priceUsd: '200' }]), from.address);
+  assert.equal(enriched.find(row => row.id === 'SOL').amount, '1000000000');
+  assert.equal(enriched.find(row => row.id === NATIVE_SOL_MINT).amount, '2000000000');
+  assert.equal(enriched.find(row => row.id === NATIVE_SOL_MINT).symbol, 'wSOL');
   assert.deepEqual(walletSendAssets(portfolio, 'not-this-wallet'), []);
   assert.equal(displayToUnits('0.000000000001', 12), '1');
   assert.equal(displayToUnits('0.000000001', 8), null);
