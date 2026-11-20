@@ -49,6 +49,39 @@ test('a dismissed or stopped unlock and other spend failures never retry', async
   }
 });
 
+test('a confirmed chat spend unlocks, authorizes the exact bytes, then submits only the proof', async () => {
+  const controller = new AbortController();
+  const binding = {
+    blockhash: '11111111111111111111111111111111', expiresAt: Date.now() + 60_000, proof: 'a'.repeat(64),
+  };
+  const payload = Buffer.from('canonical payment request').toString('base64');
+  const signature = Buffer.alloc(64, 3).toString('base64');
+  const phases = [];
+  let unlocked = false;
+  const reply = { ok: true, reply: 'Sent.' };
+  const send = async input => {
+    phases.push(input);
+    if (!unlocked) return { ok: false, error: 'desk_locked' };
+    return input === 'prepare' ? { ok: true, spendAuthorization: { ...binding, payload } } : reply;
+  };
+  const result = await submitChatSpend({
+    send, unlock: async () => { unlocked = true; return true; }, signal: controller.signal,
+    authorize: async bytes => {
+      assert.equal(Buffer.from(bytes).toString(), 'canonical payment request');
+      return { signature };
+    },
+  });
+  assert.equal(result, reply);
+  assert.deepEqual(phases, ['prepare', 'prepare', { ...binding, signature }]);
+
+  phases.length = 0;
+  const cancelled = await submitChatSpend({
+    send, signal: controller.signal, authorize: async () => { controller.abort(); return { signature }; },
+  });
+  assert.equal(cancelled.error, 'aborted');
+  assert.deepEqual(phases, ['prepare']);
+});
+
 test('a grant returned after dismissal is not stored', async () => {
   let active = true;
   let writes = 0;

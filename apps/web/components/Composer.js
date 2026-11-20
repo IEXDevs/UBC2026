@@ -131,6 +131,7 @@ export default function Composer({
   shellBalanceLabel = null,
   fileCatalog = null,
   getAccessToken = null,
+  authorizeSpend = null,
   lines = [],
   onLine,
   onThinking,
@@ -703,7 +704,7 @@ export default function Composer({
       }
       const shown = [];
       let firstLineId = null;
-      const send = async () => {
+      const send = async (spendAuthorization) => {
         let accessToken = '';
         try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
         if (controller.signal.aborted || targetId !== botIdRef.current) return { ok: false, error: 'aborted' };
@@ -717,6 +718,7 @@ export default function Composer({
           type: botType,
           permission: permissionRef.current,
           grants,
+          spendAuthorization,
           ...selection,
           effort: currentEffortId(),
           shellBots,
@@ -745,7 +747,7 @@ export default function Composer({
       };
       const confirmedSpend = grants?.some(hold => hold?.name === 'request_spend' && typeof hold.proof === 'string');
       const result = confirmedSpend
-        ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal })
+        ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal, authorize: authorizeSpend })
         : await send();
       if (run !== runRef.current || result?.error === 'aborted') return;
       await settleChat(result, spoken, prior, grants, run, shown, firstLineId);
@@ -1328,6 +1330,10 @@ function voiceFailureNote(error) {
 function chatFailureNote(code) {
   if (code === 'desk_locked') return 'The wallet is still locked. Unlock it before trying the payment again.';
   if (code === 'unlock_cancelled') return 'Wallet unlock was cancelled. The payment was not sent.';
+  if (code === 'browser_wallet_authorization_failed') {
+    return 'Privy could not authorize this payment in your browser. No payment was sent.';
+  }
+  if (code === 'spend_authorization_expired') return 'Wallet authorization expired. Ask for the payment again.';
   if (code === 'openrouter_not_configured') {
     return 'Add MODEL_API_KEY=LLM_… (Meta Model API) to the root .env.local and restart Next.';
   }

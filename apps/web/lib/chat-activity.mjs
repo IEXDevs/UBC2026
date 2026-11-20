@@ -39,6 +39,8 @@ const SPEND_BLOCK_MESSAGES = new Map([
   ['max-loss-reached', 'The agent reached its loss limit.'],
   ['quote-expired', 'The payment quote expired.'],
   ['reserve-failed', "The spend service could not reserve funds from the agent's budget."],
+  ['spend_authorization_changed', 'The payment changed after wallet authorization. Ask for the payment again.'],
+  ['wallet_authorization_failed', 'The spend service could not prepare wallet authorization. Ask for the payment again.'],
   ['rpc_policy_reserve_budget_failed', "The spend service could not reserve funds from the agent's budget."],
   ['spend-frozen', 'The agent or its wallet is frozen.'],
   ['trust-unavailable', 'The spend service could not verify the trust score.'],
@@ -76,6 +78,7 @@ const PRIVY_REQUEST_LABELS = {
   'wallet-lookup': 'Wallet lookup (GET /v1/wallets/{wallet_id})',
   'session-exchange': 'Owner session key exchange (POST /v1/wallets/authenticate, HPKE)',
   'owner-sign': 'Owner-session signing (POST /v1/wallets/{wallet_id}/rpc, signTransaction)',
+  'browser-owner-sign': 'Browser-authorized signing (POST /v1/wallets/{wallet_id}/rpc, signTransaction)',
 };
 const PRIVY_REQUEST_DETAILS = {
   'wallet-matched': 'Wallet ID, Solana chain, and sending address matched.',
@@ -220,9 +223,18 @@ export function spendFailureMessage(result) {
         || (!parsed.reason ? 'The spend request reached the server without an accepted confirmation.' : '');
     case 'blocked':
       return SPEND_BLOCK_MESSAGES.get(parsed.reason) || 'The spend service blocked this payment without a recognized reason.';
+    case 'spend_authorization_expired':
+      return 'Wallet authorization expired. Ask for the payment again.';
+    case 'invalid_spend_authorization':
+      return 'The wallet authorization was invalid. Ask for the payment again.';
+    case 'wallet_authorization_unavailable':
+      return 'The spend service could not prepare an authorization request for this wallet.';
     case 'sign-rejected': {
       const privy = parsePrivySigningFailure(parsed.privyFailure);
-      const message = SPEND_SIGN_MESSAGES.get(parsed.reason)
+      const browserAuthorized = privy?.requests?.some(request => request.stage === 'browser-owner-sign');
+      const message = (browserAuthorized && parsed.reason === 'wallet_authorization_failed'
+        ? 'Privy rejected the signing request authorized by your browser.'
+        : SPEND_SIGN_MESSAGES.get(parsed.reason))
         || 'The signing step returned no receipt. Check the wallet before trying again.';
       if (privy?.requests?.length) return `${message}\n${privyDiagnosticMessage(privy, parsed.reason)}`;
       const transport = PRIVY_TRANSPORT_MESSAGES.get(privy?.transport);

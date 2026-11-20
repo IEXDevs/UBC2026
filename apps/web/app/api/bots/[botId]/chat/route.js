@@ -1,6 +1,8 @@
 import { accessTokenFromRequest } from '../../../../../lib/privy-cookie-session.mjs';
 import { createHmac } from 'node:crypto';
-import { parsePermissionedSpendBody, parseSpendApprovalTerms, spendApprovalMessage } from '@ubc2026/contracts';
+import {
+  parsePermissionedSpendBody, parseSpendApprovalTerms, parseSpendAuthorizationSignature, spendApprovalMessage,
+} from '@ubc2026/contracts';
 import { verifyPrivyAccessToken } from '../../../../../lib/privy-access-token.mjs';
 import { formatBaseUnits, shortAddress } from '../../../../../lib/money-views.mjs';
 import { readRootEnv } from '../../../../../lib/root-env.mjs';
@@ -106,6 +108,11 @@ export async function POST(request, context) {
     ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
     : [];
   const assetConfirmation = grants.find(isAssetSpendHold);
+  const spendAuthorization = body.spendAuthorization === 'prepare'
+    ? 'prepare' : parseSpendAuthorizationSignature(body.spendAuthorization);
+  if (body.spendAuthorization !== undefined && (!assetConfirmation || !spendAuthorization)) {
+    return Response.json({ error: 'invalid_spend_authorization' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+  }
   const solSend = assetConfirmation ? null : parseSolHandleSend(message);
   const noModel = solSend || assetConfirmation;
   const connectors = noModel ? [] : linkedConnectorIds(body.connectors);
@@ -264,7 +271,7 @@ export async function POST(request, context) {
           if (!terms || !approvalContext.attestBudgetApproval) return { error: 'invalid_spend_approval' };
           approveOnce = await approvalContext.attestBudgetApproval(assetConfirmation, terms);
         }
-        gate = await invokeRaw(name, stampSpendPermission(name, args, spend), { approveOnce });
+        gate = await invokeRaw(name, stampSpendPermission(name, args, spend), { approveOnce, spendAuthorization });
         return gate;
       });
       return (gate && approvalContext.attestBudgetApproval && budgetApprovalReply(assetConfirmation, gate)) || reply;
@@ -292,6 +299,8 @@ export async function POST(request, context) {
       ok: true,
       botId,
       reply: reply.text,
+      ...(assetConfirmation && spendAuthorization === 'prepare' && reply.spendAuthorization
+        ? { spendAuthorization: reply.spendAuthorization } : {}),
       ...(replies.length > 0 ? { replies } : {}),
       ...(hold ? { hold } : {}),
       model: reply.model,

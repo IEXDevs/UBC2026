@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { devnetSpendAsset } from '@ubc2026/contracts';
+import { devnetSpendAsset, parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { spendFailureCode, spendFailureMessage, toolStep } from './chat-activity.mjs';
 import { matchingToolGrant } from './spend-permission.mjs';
 import { TextChatError } from './text-chat.mjs';
@@ -46,6 +46,10 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
   const result = await invokeTool(hold.name, hold.args);
   if (['desk_locked', 'desk_lock_required'].includes(spendFailureCode(result))) {
     throw new TextChatError('desk_locked', 403);
+  }
+  const spendAuthorization = parseSpendAuthorizationChallenge(result?.spendAuthorization);
+  if (spendAuthorization && result.signed === false) {
+    return { provider: 'desk', toolRounds: 1, spendAuthorization };
   }
   const receipt = txReceiptFromResult(result);
   const step = toolStep(hold.name, hold.args, result);

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
-import { usePrivy } from '@privy-io/react-auth';
+import { useAuthorizationSignature, usePrivy } from '@privy-io/react-auth';
 import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
@@ -153,6 +153,7 @@ function SessionHold() {
 
 function AuthedShell() {
   const { ready, authenticated, user, login, logout, getAccessToken: privyGetAccessToken } = usePrivy();
+  const { generateAuthorizationSignature } = useAuthorizationSignature();
   const signedIn = ready && authenticated;
   const hostedPreview = useHostedPreview();
   const devAllowed = developerPreviewAllowed() || hostedPreview;
@@ -339,6 +340,7 @@ function AuthedShell() {
       walletNote={walletNote}
       walletError={walletError}
       getAccessToken={getAccessToken}
+      authorizeSpend={generateAuthorizationSignature}
       onRetireWallet={(id) => {
         setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id) : current));
       }}
@@ -397,7 +399,7 @@ function DepositSigner({ signerRef }) {
   return null;
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, onRetireWallet = null, privyLive = false }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, privyLive = false }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
   const [looks, setLooks] = useState({});
@@ -1964,6 +1966,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             shellBalanceLabel={glance.balanceLabel}
             fileCatalog={fileCatalog}
             getAccessToken={getAccessToken}
+            authorizeSpend={authorizeSpend}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {
               const id = forBot || bot.id;
