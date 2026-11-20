@@ -65,7 +65,8 @@ export default function SecurityPanel({ bots, ownerId, getAccessToken, onPolicyC
   }
 
   return (
-    <section className="security-page" aria-label="Security" aria-busy={busy}>
+    <section className="panel security-page" aria-label="Security" aria-busy={busy}>
+      <h2>Security</h2>
       <div className="security-bulk">
         <button type="button" className="security-action" disabled={disabled || !agents.some(agent => !agent.draft)}
           onClick={() => setArmed({ kind: 'pause', value: true, label: 'Pause all agents?' })}>

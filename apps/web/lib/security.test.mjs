@@ -5,7 +5,7 @@ import { securityAgent, securityPauseStatus, setSecurityPause, setSecurityFreeze
 
 test('security shows bulk controls before agent rows and gives each icon an accessible name', () => {
   const source = readFileSync(new URL('../components/SecurityPanel.js', import.meta.url), 'utf8');
-  assert.match(source, /Pause all[\s\S]*Freeze all[\s\S]*<ul className="security-agent-list" aria-label="Agents">/);
+  assert.match(source, /<h2>Security<\/h2>[\s\S]*Pause all[\s\S]*Freeze all[\s\S]*<ul className="security-agent-list" aria-label="Agents">/);
   assert.match(source, /aria-label=\{playbackLabel\}/);
   assert.doesNotMatch(source, /accountLabel|security-assurance|security-overview/);
 });
