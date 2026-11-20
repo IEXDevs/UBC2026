@@ -399,7 +399,7 @@ button.add-agent:not(:disabled):hover {
   left: 0;
   right: 0;
   bottom: calc(100% + 8px);
-  z-index: 6;
+  z-index: 9;
   display: grid;
   gap: 2px;
   min-width: 196px;
