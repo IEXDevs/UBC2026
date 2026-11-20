@@ -1,4 +1,5 @@
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { parsePrivySigningFailure } from '@ubc2026/contracts';
 export const runtime = 'nodejs';
 
 import { moveBetweenWallets } from '@ubc2026/transfers';
@@ -114,7 +115,7 @@ export async function POST(request) {
     const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code)
       ? error.code
       : 'wallet_move_failed';
-    console.error('wallet_move_failed', { code });
+    console.error('wallet_move_failed', { code, privy: parsePrivySigningFailure(error?.privyFailure) });
     return Response.json({ error: code }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
   }
 }
