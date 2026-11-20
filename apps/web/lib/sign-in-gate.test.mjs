@@ -122,6 +122,18 @@ test('wallet unlock has a non-submit clear control that empties and refocuses th
   const desk = readFileSync(new URL('../components/DeskLock.js', import.meta.url), 'utf8');
   const row = desk.match(/<div className="desk-unlock-row">([\s\S]*?)<\/div>/)?.[1] ?? '';
   assert.match(row, /ref=\{unlockInput\}[\s\S]*name="maelstrom-desk-unlock"/);
-  assert.match(row, /<button\s+type="button"[\s\S]*aria-label="Clear password"\s+disabled=\{record === undefined \|\| pending\}\s+onClick=\{clearUnlockPassword\}/);
+  assert.match(row, /<button\s+type="button"[\s\S]*aria-label="Clear password"\s+disabled=\{pending\}\s+onClick=\{clearUnlockPassword\}/);
   assert.match(desk, /function clearUnlockPassword\(\) \{[^}]*input\.value = '';\s*setPassword\(''\);\s*setNote\(''\);\s*input\.focus\(\);/);
+});
+
+test('signed-in users mount the desk entry dialog before workspace or wallet provisioning', () => {
+  const page = readFileSync(new URL('../app/page.js', import.meta.url), 'utf8');
+  const desk = readFileSync(new URL('../components/DeskLock.js', import.meta.url), 'utf8');
+  const start = page.slice(page.indexOf('function AuthedShell()'), page.indexOf('function profileKey'));
+  assert.match(start, /if \(!deskEntered\) \{\s*setLiveWallets\(null\)[\s\S]*?return undefined;[\s\S]*?walletProvisionPaths\(\)/);
+  const gate = start.slice(start.indexOf('if (!deskChecked)'));
+  assert.match(gate, /if \(!deskEntered\) \{\s*return \(\s*<DeskLock[\s\S]*?onSignOut=\{onLogout\}[\s\S]*?return \(\s*<Shell/);
+  assert.doesNotMatch(gate.slice(0, gate.indexOf('<Shell')), /onClose=/);
+  assert.match(desk, /const setting = replacing \|\| status === 'missing';/);
+  assert.match(desk, /await saveDeskVerifier[\s\S]*?await acceptEnteredPassword[\s\S]*?onUnlock\?\.\(accepted.until\)/);
 });

@@ -4,7 +4,8 @@
  */
 import { parseSpendAuthorizationSignature } from '@ubc2026/contracts';
 import {
-  unlockDesk,
+  readDeskGrant,
+  readDeskSession,
   writeDeskGrant,
   writeDeskLock,
 } from './desk-lock.mjs';
@@ -47,13 +48,39 @@ function headers(ownerId, token) {
   };
 }
 
-export async function readDeskLockState(fetchImpl, { ownerId, token } = {}) {
+export async function readDeskLockState(fetchImpl, { ownerId, token, signal } = {}) {
   const url = shellRuntimeUrl('/api/desk');
   if (!url || !ownerId) return { ok: false, locked: false };
-  const response = await fetchImpl(url, { headers: headers(ownerId, token) });
+  const response = await fetchImpl(url, { headers: headers(ownerId, token), cache: 'no-store', signal });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) return { ok: false, locked: false, error: body.error || 'desk_lock_failed' };
-  return { ok: true, locked: body.locked === true };
+  if (!response.ok) return { ok: false, locked: false, error: body?.error || 'desk_lock_failed' };
+  if (body?.source === 'unconfigured' || typeof body?.locked !== 'boolean') {
+    return { ok: false, locked: false, error: 'desk_lock_unavailable' };
+  }
+  return { ok: true, locked: body.locked };
+}
+
+function privySessionId(token, ownerId) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3 || parts.some(part => !part)) return '';
+    const claims = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return claims?.iss === 'privy.io' && claims.sub === ownerId
+      && typeof claims.sid === 'string' && /^[^\s]{1,256}$/.test(claims.sid) ? claims.sid : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Resume a desk only in the tab and Privy session that unlocked it. */
+export async function restoreDeskEntry({ localStorage, sessionStorage, ownerId, getAccessToken, now = Date.now }) {
+  const at = now();
+  const session = readDeskSession(localStorage, ownerId, at);
+  const grant = readDeskGrant(sessionStorage, ownerId, at);
+  if (!session || !grant?.sessionId) return 0;
+  const token = await getAccessToken();
+  const until = Math.min(session.until, grant.until);
+  return until > now() && privySessionId(token, ownerId) === grant.sessionId ? until : 0;
 }
 
 export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier, replace = false, proof = '' } = {}) {
@@ -78,7 +105,8 @@ export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier
 export async function saveDeskVerifier(fetchImpl, { localStorage, ...input }) {
   const registered = await registerDeskVerifier(fetchImpl, input);
   if (!registered.ok || registered.exists) return registered;
-  return { ok: writeDeskLock(localStorage, input.ownerId, input.verifier) };
+  writeDeskLock(localStorage, input.ownerId, input.verifier);
+  return registered;
 }
 
 export async function openDeskGrant(fetchImpl, { ownerId, token, password } = {}) {
@@ -96,30 +124,22 @@ export async function openDeskGrant(fetchImpl, { ownerId, token, password } = {}
   return { ok: true, grant: body.grant, until: body.until };
 }
 
-/**
- * Enter Password. The browser copy is checked first. A mismatch stays
- * "wrong password". A different account verifier is not replaced here.
- * Replacing the wallet password requires the seed proof on the lock route.
- */
+/** Check the current account verifier. A password reset on another device takes effect here. */
 export async function acceptEnteredPassword({
   fetchImpl,
   ownerId,
   token,
   password,
-  record,
-  localStorage,
   sessionStorage,
   shouldAccept = () => true,
 } = {}) {
-  if (record) {
-    const matches = await unlockDesk(password, record);
-    if (!matches) return { ok: false, error: 'wrong_password' };
-  }
   if (!shouldAccept()) return { ok: false, error: 'unlock_cancelled' };
   const opened = await openDeskGrant(fetchImpl, { ownerId, token, password });
   if (!shouldAccept()) return { ok: false, error: 'unlock_cancelled' };
-  if (!opened.ok || !writeDeskGrant(sessionStorage, ownerId, opened.grant, opened.until)) {
-    return { ok: false, error: opened.error || 'desk_locked' };
+  if (!opened.ok) return opened;
+  if (!(opened.until > Date.now())
+    || !writeDeskGrant(sessionStorage, ownerId, opened.grant, opened.until, privySessionId(token, ownerId) || undefined)) {
+    return { ok: false, error: 'desk_grant_unavailable' };
   }
-  return { ok: true };
+  return { ok: true, until: opened.until };
 }
