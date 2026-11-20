@@ -27,6 +27,32 @@ export function browserSignerHasWallet(signer, wallet) {
       && item.address.toLowerCase() === wallet?.address?.toLowerCase());
 }
 
+export function browserCanSign(signer, wallet) {
+  return browserSignerHasWallet(signer, wallet) || (typeof signer?.signWithOwnerAuthorization === 'function'
+    && wallet?.provider === 'privy' && wallet.kind !== 'main' && wallet.spendable !== false && !wallet.frozen
+    && !!wallet.id && !/^(linked_|client_)/.test(wallet.id));
+}
+
+export function createOwnerAuthorizationSigner({ fetchImpl = fetch, headers, authorize }) {
+  return async ({ address, transaction }) => {
+    const post = async body => {
+      const response = await fetchImpl('/api/wallets/authorize-sign', { method: 'POST',
+        headers: typeof headers === 'function' ? await headers() : headers, body: JSON.stringify(body) });
+      const result = await response.json();
+      if (!response.ok || result.error) throw Object.assign(new Error(result.error || 'wallet_owner_authorization_failed'),
+        { code: result.error, privyFailure: result.privy });
+      return result;
+    };
+    const encoded = btoa(Array.from(transaction, byte => String.fromCharCode(byte)).join(''));
+    const request = await post({ phase: 'request', address, transaction: encoded });
+    const { signature } = await authorize(Uint8Array.from(atob(request.payload), char => char.charCodeAt(0)));
+    const result = await post({ phase: 'sign', address, transaction: encoded, expiresAt: request.expiresAt, signature });
+    const signed = Uint8Array.from(atob(result.signedTransaction), char => char.charCodeAt(0));
+    if (signed.length <= 64) fail('invalid_signature');
+    return signed;
+  };
+}
+
 export function withLinkedSolanaWallets(wallets, standardWallets, user) {
   const merged = [...wallets];
   const standard = standardWallets.find(wallet => wallet?.features?.['privy:']?.privy?.signTransaction);
@@ -49,8 +75,7 @@ export async function waitForBrowserSigner(readSigner, wallets, timeoutMs = 5000
   const deadline = Date.now() + timeoutMs;
   while (true) {
     const signer = readSigner();
-    if (signer?.ready === true && typeof signer.signTransaction === 'function'
-        && wallets.every(wallet => signer.wallets?.some(item => item?.address === wallet.address))) return signer;
+    if (wallets.every(wallet => browserCanSign(signer, wallet))) return signer;
     if (Date.now() >= deadline) return readSigner();
     await new Promise(resolve => setTimeout(resolve, Math.min(100, Math.max(0, deadline - Date.now()))));
   }
@@ -63,6 +88,17 @@ export async function signSelectedWalletTransaction({ from, transaction, signer 
   const wallet = wallets.find(item => item?.address === from.address)
     || wallets.find(item => typeof item?.address === 'string' && item.address.toLowerCase() === from.address.toLowerCase());
   if (!wallet || typeof signer?.signTransaction !== 'function') {
+    if (!wallet && from.kind !== 'main' && typeof signer?.signWithOwnerAuthorization === 'function') {
+      try {
+        const signed = await signer.signWithOwnerAuthorization({ address: from.address, transaction });
+        if (!(signed instanceof Uint8Array) || signed.length <= 64) fail('invalid_signature');
+        return signed;
+      } catch (error) {
+        throw Object.assign(new Error('wallet_owner_authorization_failed'), {
+          code: 'wallet_owner_authorization_failed', ...(error?.privyFailure ? { privyFailure: error.privyFailure } : {}),
+        });
+      }
+    }
     signer?.connectWallet?.(walletConnectionOptions(from));
     fail('wallet_connection_required');
   }

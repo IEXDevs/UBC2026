@@ -582,6 +582,7 @@ export function createPrivyWalletClient({
   appSecret,
   rpcUrl,
   authorizationKey = null,
+  signerId = null,
   fetcher = fetch,
   now = () => Date.now(),
   apiBase = PRIVY_API_BASE,
@@ -590,6 +591,9 @@ export function createPrivyWalletClient({
   allowUsersMeFallback = !isCloudflareWorkerRuntime(),
 } = {}) {
   const id = assertHeaderSafe(appId, 'Privy app id');
+  const signer = typeof signerId === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(signerId.trim()) ? signerId.trim() : null;
+  // The authorization key's key quorum, so the app can sign while the owner is away.
+  const additionalSigners = () => (signer ? { additional_signers: [{ signer_id: signer }] } : {});
   const secret = assertHeaderSafe(appSecret, 'Privy app secret');
   // RPC is required for broadcast/signing; acceptLogin / wallet create can omit it.
   const quicknode = rpcUrl == null || rpcUrl === '' ? null : assertHttps(rpcUrl, 'QuickNode mainnet-beta RPC');
@@ -794,6 +798,7 @@ export function createPrivyWalletClient({
       const created = await privy('POST', '/v1/wallets', {
         chain_type: 'solana',
         owner: { user_id: privyUserId },
+        ...additionalSigners(),
         display_name: 'Main',
       }, idempotencyKey('main-solana', privyUserId));
       return attachLinked({
@@ -1187,6 +1192,7 @@ export function createPrivyWalletClient({
       const created = await privy('POST', '/v1/wallets', {
         chain_type: 'solana',
         owner: { user_id: user.id },
+        ...additionalSigners(),
         display_name: typeof label === 'string' ? label.trim() : label,
       }, key);
       return createdRecord(created, owner, user.id, 'additional', label);
@@ -1393,6 +1399,30 @@ export function createPrivyWalletClient({
       return prepared;
     },
 
+    ownerAuthorizationPayload({ ownerId, wallet, transaction, expiresAt } = {}) {
+      if (!wallet || wallet.ownerId !== assertOwnerId(ownerId)) fail('Wallet owner must match', 'owner_mismatch');
+      if (wallet.frozen) fail('Wallet is frozen', 'wallet_frozen');
+      if (!wallet.id || /^(linked_|client_)/.test(wallet.id)) fail('Wallet is not owned', 'wallet_not_owned');
+      const bytes = decodeBase64(transaction, 'Transaction');
+      if (bytes.length <= 64 || bytes.length > MAX_TX_BYTES) fail('Invalid transaction', 'invalid_transaction');
+      try { VersionedTransaction.deserialize(bytes); } catch { fail('Invalid transaction', 'invalid_transaction'); }
+      return Buffer.from(canonicalizeJson(browserAuthorizedRequest(wallet, { transaction }, expiresAt))).toString('base64');
+    },
+
+    async signWithOwnerAuthorization({ ownerId, wallet, transaction, expiresAt, signature } = {}) {
+      this.ownerAuthorizationPayload({ ownerId, wallet, transaction, expiresAt });
+      const signed = await signWithBrowserAuthorization(wallet, { transaction }, { expiresAt, signature });
+      const bytes = decodeBase64(signed, 'Signed transaction');
+      if (bytes.length > MAX_TX_BYTES) fail('Invalid transaction', 'invalid_transaction');
+      let message;
+      try { message = VersionedTransaction.deserialize(bytes).message.serialize(); }
+      catch { fail('Invalid signed transaction', 'transaction_mismatch'); }
+      if (!Buffer.from(message).equals(Buffer.from(VersionedTransaction.deserialize(decodeBase64(transaction, 'Transaction')).message.serialize()))) {
+        fail('Signed transaction differs from request', 'transaction_mismatch');
+      }
+      return signed;
+    },
+
     formatPreparedSpendAuthorization({ bot, wallet, prepared, expiresAt } = {}) {
       assertSpendAllowed({ bot, wallet });
       if (!simulatedTransfers.has(prepared)) fail('Transfer simulation is required', 'simulation_required');
@@ -1569,5 +1599,6 @@ export function createPrivyWalletClientFromEnv(env = process.env, options = {}) 
     appSecret: values.PRIVY_APP_SECRET,
     rpcUrl: values.SOLANA_RPC_URL,
     authorizationKey: authorizationKey || null,
+    signerId: env?.PRIVY_SIGNER_ID || env?.NEXT_PUBLIC_PRIVY_SIGNER_ID || null,
   });
 }

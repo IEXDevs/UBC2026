@@ -55,7 +55,7 @@ test('app/layout.js wires CrashGuard, PrivyRoot, and hosted preview', () => {
   assert.match(layout, /<DeployReload/);
   assert.match(layout, /<HostedPreview enabled=\{hostedPreview\}>/);
   assert.match(layout, /<CrashGuard>/);
-  assert.match(layout, /<PrivyRoot appId=\{privy\.appId\} clientId=\{privy\.clientId\}>/);
+  assert.match(layout, /<PrivyRoot appId=\{privy\.appId\} clientId=\{privy\.clientId\} signerId=\{privy\.signerId\}>/);
   assert.match(layout, /html lang="en"/);
   assert.equal(/process\.env\.NEXT_PUBLIC_PRIVY_APP_ID/.test(layout), false);
 });

@@ -22,6 +22,96 @@ import { buildSolanaUsdcTransaction, buildWalletAssetTransaction } from '@ubc202
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+test('chat move adapter verifies the owner and sealed hold then forwards both phases to runtime gates', async t => {
+  const ownerId = 'did:privy:chat-move';
+  const botId = 'bot_move';
+  const session = privySessionFixture(ownerId, 'chatmoveapp');
+  const settings = { PRIVY_APP_ID: session.appId, PRIVY_APP_SECRET: 'offline-secret',
+    SOLANA_RPC_URL: 'https://unused-rpc.invalid', META_MODEL_API_KEY: 'offline-move-key',
+    NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://chat-runtime.invalid' };
+  const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settings);
+  t.after(() => { for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  } });
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', {
+    botId, action: 'spend', asset: 'USDC', amount: '1000', destination: '11111111111111111111111111111111',
+  }), { ownerId, botId, secret: settings.META_MODEL_API_KEY });
+  assert.match(hold.idempotencyKey, /^spend_/);
+  const calls = [];
+  const challenge = { transaction: Buffer.alloc(100).toString('base64'), walletAddress: 'selected',
+    blockhash: 'blockhash', expiresAt: Date.now() + 30000, proof: 'proof' };
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (String(url) === session.jwksUrl) return session.jwks();
+    assert.equal(String(url), `${settings.NEXT_PUBLIC_AGENT_RUNTIME_URL}/api/spend`, 'no RPC, server Privy signing or model call');
+    const body = JSON.parse(options.body);
+    calls.push(body);
+    assert.equal(body.confirmed, true);
+    assert.equal(body.idempotencyKey, hold.idempotencyKey);
+    assert.equal(body.spendAuthorization, undefined);
+    return Response.json(body.moveAuthorization === 'prepare' ? { signed: false, moveAuthorization: challenge }
+      : { signed: true, cluster: 'mainnet-beta', signature: '5'.repeat(64) });
+  });
+  const { POST } = await import('../app/api/wallets/move/route.js');
+  const post = async (slide = hold, phase = 'prepare', owner = ownerId) => (await POST(new Request('https://desk.invalid/api/wallets/move', {
+    method: 'POST', headers: { authorization: `Bearer ${session.token}`, 'x-owner-id': owner, 'x-desk-grant': 'a'.repeat(64) },
+    body: JSON.stringify({ phase, chatSpend: { message: 'yes', permission: 'ask', grants: [slide] },
+      moveAuthorization: challenge, ...(phase === 'broadcast' ? { signedTransaction: 'signed-by-browser' } : {}) }),
+  }))).json();
+  assert.match((await post({ ...hold, proof: '' })).reply, /invalid or expired/);
+  assert.equal((await post(hold, 'prepare', 'did:privy:wrong')).error, 'owner_mismatch');
+  assert.equal(calls.length, 0);
+  assert.deepEqual((await post()).moveAuthorization, challenge);
+  assert.match((await post(hold, 'broadcast')).reply, /^Sent\./);
+  assert.equal(calls[1].moveAuthorization.signedTransaction, 'signed-by-browser');
+  assert.equal(calls.length, 2);
+});
+
+test('sealed swap slides and auto client_sign_required stops return the original spend to the browser helper', async t => {
+  const settings = { NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://swap-runtime.invalid', META_MODEL_API_KEY: 'offline-swap-key' };
+  const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settings);
+  t.after(() => { for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  } });
+  const ownerId = 'did:privy:swap-browser';
+  const botId = 'bot_swap';
+  const idempotencyKey = `loop_swap_${crypto.randomUUID()}`;
+  const args = { botId, action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000' };
+  const hold = sealAssetSpendHold({ ...toolAccessRequest('ask', 'request_spend', args), idempotencyKey,
+    swapTicket: 'original-ticket', expiresAt: Date.now() + 60000 }, { ownerId, botId, secret: settings.META_MODEL_API_KEY });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    const body = options?.body ? JSON.parse(options.body) : null;
+    calls.push({ url: String(url), body });
+    if (String(url).includes('/status')) return Response.json({ pendingSwap: { ...args, idempotencyKey } });
+    assert.equal(String(url), `${settings.NEXT_PUBLIC_AGENT_RUNTIME_URL}/api/spend`, 'no model or signing provider call');
+    if (body.autoSwap) return Response.json({ signed: false, state: 'blocked', reason: 'client_sign_required' }, { status: 409 });
+    return Response.json({ swapPreview: { ticket: 'original-ticket', minOutput: '100', usdMicros: '1000000',
+      inputDecimals: 6, outputDecimals: 9, expiresAt: Date.now() + 60000 } });
+  });
+  const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
+  const post = async body => (await POST(new Request('https://desk.invalid/api/bots/bot_swap/chat', {
+    method: 'POST', headers: { 'x-owner-id': ownerId }, body: JSON.stringify({ permission: 'full', ...body }),
+  }), { params: { botId } })).json();
+  assert.match((await post({ message: 'yes', grants: [{ ...hold, proof: '' }] })).reply, /invalid or expired/);
+  const approved = await post({ message: 'yes', grants: [hold] });
+  assert.equal(approved.clientSwap.spend.idempotencyKey, idempotencyKey);
+  assert.equal(approved.clientSwap.swapTicket, 'original-ticket');
+  assert.equal(calls.length, 0, 'a slide must not use the old server authorization protocol');
+  const stream = await POST(new Request('https://desk.invalid/api/bots/bot_swap/chat', {
+    method: 'POST', headers: { 'x-owner-id': ownerId, accept: 'text/event-stream' },
+    body: JSON.stringify({ message: 'yes', permission: 'full', grants: [hold] }),
+  }), { params: { botId } });
+  assert.match(await stream.text(), /"clientSwap":\{"spend":/);
+  const auto = await post({ message: 'Review pending swap' });
+  assert.equal(auto.clientSwap?.spend.idempotencyKey, idempotencyKey, JSON.stringify(auto));
+  assert.equal(auto.clientSwap.spend.permission, 'full');
+  assert.equal(auto.clientSwap.swapTicket, 'original-ticket');
+  assert.equal(auto.hold, undefined);
+  assert.equal(calls.filter(call => call.body?.autoSwap === true).length, 1);
+});
+
 test('chat Laso endpoints require the sealed slide hold and carry browser prepare/settle without calling the model', async t => {
   const config = { NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://laso-runtime.invalid', META_MODEL_API_KEY: 'offline-laso-chat-key' };
   const previous = Object.fromEntries(Object.keys(config).map(key => [key, process.env[key]]));

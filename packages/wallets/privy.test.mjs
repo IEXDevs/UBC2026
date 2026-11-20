@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, verify } from 'node:crypto';
-import { Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
+import { Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { buildSolanaX402Transaction } from '../transfers/transfers.mjs';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
 import { CipherSuite, DhkemP256HkdfSha256, HkdfSha256 } from '@hpke/core';
@@ -110,6 +110,44 @@ function client(extra = {}) {
     ...extra,
   });
 }
+
+test('owner browser authorization signs legacy multi-signer and v0 messages without simulation or broadcast', async () => {
+  const owner = 'did:privy:user1';
+  const payer = Keypair.generate();
+  const agent = Keypair.generate();
+  const wallet = { id: walletId, privyWalletId: walletId, ownerId: owner, address: agent.publicKey.toBase58() };
+  const instructions = [SystemProgram.transfer({ fromPubkey: agent.publicKey, toPubkey: payer.publicKey, lamports: 1 })];
+  const legacy = new Transaction({ feePayer: payer.publicKey, recentBlockhash: SystemProgram.programId.toBase58() }).add(...instructions);
+  const v0 = new VersionedTransaction(new TransactionMessage({ payerKey: agent.publicKey, recentBlockhash: SystemProgram.programId.toBase58(), instructions }).compileToV0Message());
+  for (const tx of [legacy, v0]) {
+    const transaction = Buffer.from(tx instanceof Transaction ? tx.serialize({ requireAllSignatures: false }) : tx.serialize()).toString('base64');
+    let calls = 0;
+    const api = client({ fetcher: async (url, init) => {
+      calls++;
+      assert.match(String(url), /\/v1\/wallets\/.*\/rpc$/);
+      assert.equal(init.headers['privy-authorization-signature'], 'A'.repeat(88));
+      const signed = VersionedTransaction.deserialize(Buffer.from(JSON.parse(init.body).params.transaction, 'base64'));
+      signed.sign([agent]);
+      return Response.json({ data: { signed_transaction: Buffer.from(signed.serialize()).toString('base64') } });
+    } });
+    const input = { ownerId: owner, wallet, transaction, expiresAt: 1_700_000_030_000 };
+    const payload = JSON.parse(Buffer.from(api.ownerAuthorizationPayload(input), 'base64').toString());
+    assert.equal(payload.body.params.transaction, transaction);
+    assert.ok(await api.signWithOwnerAuthorization({ ...input, signature: 'A'.repeat(88) }));
+    assert.equal(calls, 1);
+    assert.throws(() => api.ownerAuthorizationPayload({ ...input, ownerId: 'other' }), { code: 'owner_mismatch' });
+    assert.throws(() => api.ownerAuthorizationPayload({ ...input, wallet: { ...wallet, frozen: true } }), { code: 'wallet_frozen' });
+    assert.throws(() => api.ownerAuthorizationPayload({ ...input, transaction: '' }));
+    assert.throws(() => api.ownerAuthorizationPayload({ ...input, wallet: { ...wallet, id: 'linked_wallet' } }), { code: 'wallet_not_owned' });
+    assert.throws(() => api.ownerAuthorizationPayload({ ...input, expiresAt: 1 }));
+    const mismatch = client({ fetcher: async () => {
+      const changed = VersionedTransaction.deserialize(Buffer.from(transaction, 'base64'));
+      changed.message.recentBlockhash = payer.publicKey.toBase58();
+      return Response.json({ data: { signed_transaction: Buffer.from(changed.serialize()).toString('base64') } });
+    } });
+    await assert.rejects(mismatch.signWithOwnerAuthorization({ ...input, signature: 'A'.repeat(88) }), { code: 'transaction_mismatch' });
+  }
+});
 
 test('swap preparation derives balances from requested RPC account snapshots, not transaction metadata', async () => {
   const signer = Keypair.generate().publicKey;
@@ -1000,6 +1038,18 @@ test('additional wallets require a main wallet and a label', async () => {
   assert.equal(created.privyWalletId, otherWalletId);
   assert.equal(ready.calls[1].init.headers['privy-idempotency-key'], 'add_did_privy_user1_trading');
   assert.equal(ready.calls[1].init.headers.Authorization.startsWith('Basic '), true);
+  assert.equal(ready.calls[1].body.additional_signers, undefined);
+
+  const signed = mockFetch([
+    { match: url => url.includes('/v1/users/'), body: userWith([embedded(walletId, 0)]) },
+    { match: url => url.endsWith('/v1/wallets'), body: { id: otherWalletId, address, chain_type: 'solana' } },
+  ]);
+  await client({ fetcher: signed.fetcher, signerId: 'keyquorum12345678' }).createAdditional({
+    privyUserId,
+    ownerId: 'user_1',
+    label: 'Trading',
+  });
+  assert.deepEqual(signed.calls[1].body.additional_signers, [{ signer_id: 'keyquorum12345678' }]);
 });
 
 /**

@@ -9,7 +9,7 @@ import { privyProviderProps } from '../lib/privy-config.mjs';
 import { installSiwsLoginDiagnostic } from '../lib/siws-login-diagnostic.mjs';
 import { ToastProvider } from './bits/SwipeToast';
 
-const PrivyPublicContext = createContext({ configured: false, appId: '', clientId: '' });
+const PrivyPublicContext = createContext({ configured: false, appId: '', clientId: '', signerId: '' });
 
 export function usePrivyPublic() {
   return useContext(PrivyPublicContext);
@@ -21,12 +21,13 @@ export function usePrivyPublic() {
  * App id and client id come from the server layout so the client bundle
  * and the prerender agree. A direct process.env read is empty in the browser.
  */
-export default function PrivyRoot({ appId = '', clientId = '', children }) {
+export default function PrivyRoot({ appId = '', clientId = '', signerId = '', children }) {
   const props = privyProviderProps({ appId, clientId });
   const value = {
     configured: props !== null,
     appId: props?.appId || '',
     clientId: props?.clientId || '',
+    signerId: props && typeof signerId === 'string' ? signerId.trim() : '',
   };
   // Privy keeps SIWS failures inside its modal. Record status and a safe code only.
   useEffect(() => {

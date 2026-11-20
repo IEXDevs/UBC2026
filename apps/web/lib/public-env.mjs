@@ -12,5 +12,6 @@ export function publicPrivyIds(env = process.env) {
   return {
     appId: publicEnv('NEXT_PUBLIC_PRIVY_APP_ID', env),
     clientId: publicEnv('NEXT_PUBLIC_PRIVY_CLIENT_ID', env),
+    signerId: publicEnv('NEXT_PUBLIC_PRIVY_SIGNER_ID', env),
   };
 }
