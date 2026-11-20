@@ -38,7 +38,7 @@ export default function PrivyKeyButton({
   const [revealed, setRevealed] = useState('');
   const embedded = privyEmbeddedSolanaWallet(user);
   const exportAddress = exportAddressForSheet(user, address);
-  const action = keyExportAction({ walletId, embedded });
+  const action = keyExportAction({ walletId, embedded, sheetAddress: address });
 
   async function loadServerKey() {
     if (action.mode !== 'server') return { ok: false, error: 'not_exportable' };
@@ -60,7 +60,10 @@ export default function PrivyKeyButton({
 
   function lockNote(error) {
     if (error === 'desk_lock_required') return 'Unlock the desk, then copy the key.';
-    if (error === 'not_exportable') return 'This wallet cannot be exported.';
+    if (error === 'not_exportable' || error === 'observing_wallet') return 'This wallet cannot be exported.';
+    if (error === 'wallet_not_found') return 'This wallet is not on the account.';
+    if (error === 'signer_not_configured') return 'The signing service is not configured.';
+    if (typeof error === 'string' && /^[a-z0-9_]{1,64}$/.test(error)) return `The key was not exported (${error}).`;
     return 'The key was not exported.';
   }
 

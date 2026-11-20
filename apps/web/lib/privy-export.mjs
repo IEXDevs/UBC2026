@@ -39,12 +39,25 @@ export function privyEmbeddedSolanaWallet(user) {
 
 /**
  * Server wallets copy through our export API. A client wallet with no server id
- * still opens Privy's screen.
+ * still opens Privy's screen. Public wallet rows omit privyWalletId. For a
+ * spendable server wallet the row id is the Privy wallet id the export route looks up.
  */
-export function keyExportAction({ walletId = '', embedded = null } = {}) {
-  const serverId = serverWalletId(walletId) || serverWalletId(embedded?.id);
-  if (serverId) return { mode: 'server', walletId: serverId };
-  if (typeof embedded?.address === 'string' && embedded.address) return { mode: 'client' };
+export function exportWalletIdForSheet(wallet) {
+  if (!wallet || typeof wallet !== 'object' || wallet.spendable === false) return '';
+  const rawId = typeof wallet.id === 'string' ? wallet.id.trim() : '';
+  if (rawId.startsWith('linked_') || rawId.startsWith('client_')) return '';
+  return serverWalletId(wallet.privyWalletId) || serverWalletId(rawId);
+}
+
+export function keyExportAction({ walletId = '', embedded = null, sheetAddress = '' } = {}) {
+  const fromSheet = serverWalletId(walletId);
+  if (fromSheet) return { mode: 'server', walletId: fromSheet };
+  const wanted = typeof sheetAddress === 'string' ? sheetAddress.trim() : '';
+  const embeddedAddress = typeof embedded?.address === 'string' ? embedded.address : '';
+  const embeddedId = serverWalletId(embedded?.id);
+  if (wanted && embeddedAddress && wanted !== embeddedAddress) return { mode: 'none' };
+  if (embeddedId && (!wanted || wanted === embeddedAddress)) return { mode: 'server', walletId: embeddedId };
+  if (embeddedAddress && (!wanted || wanted === embeddedAddress)) return { mode: 'client' };
   return { mode: 'none' };
 }
 

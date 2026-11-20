@@ -24,6 +24,7 @@ import { partyFromToken } from '../lib/party-book.mjs';
 import { embeddedCreateOptions, embeddedSolanaCount } from '../lib/wallet-provision.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
 import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
+import { exportWalletIdForSheet } from '../lib/privy-export.mjs';
 import { walletPickLabel, walletPickTag } from '../lib/wallet-pick.mjs';
 import { describeWallets, formatAmount, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
@@ -390,7 +391,7 @@ export default function WalletsSheet({
                   key={active?.id || 'empty'}
                   signedIn={signedIn}
                   address={active?.address || glance.address}
-                  walletId={activeRaw?.privyWalletId || ''}
+                  walletId={exportWalletIdForSheet(activeRaw)}
                   ownerId={ownerId}
                   getAccessToken={getAccessToken}
                 />

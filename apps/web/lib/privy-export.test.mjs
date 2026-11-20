@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   exportAddressForSheet,
   exportFailureNote,
+  exportWalletIdForSheet,
   keyExportAction,
   privyEmbeddedSolanaWallet,
 } from './privy-export.mjs';
@@ -101,6 +102,36 @@ test('keyExportAction skips Privy for server wallets', () => {
   });
   assert.deepEqual(keyExportAction({ walletId: '', embedded: { address: ADDRESS } }), { mode: 'client' });
   assert.deepEqual(keyExportAction({ walletId: 'short', embedded: null }), { mode: 'none' });
+  assert.deepEqual(keyExportAction({
+    walletId: '',
+    embedded,
+    sheetAddress: OTHER,
+  }), { mode: 'none' });
+  assert.deepEqual(keyExportAction({
+    walletId: '',
+    embedded,
+    sheetAddress: ADDRESS,
+  }), {
+    mode: 'server',
+    walletId: 'fmfdj6yqly31huorjqzq38zc',
+  });
+});
+
+test('exportWalletIdForSheet uses the public wallet id when privyWalletId was stripped', () => {
+  const privyId = 'fmfdj6yqly31huorjqzq38zc';
+  assert.equal(exportWalletIdForSheet({
+    id: privyId,
+    spendable: true,
+    address: ADDRESS,
+  }), privyId);
+  assert.equal(exportWalletIdForSheet({
+    id: 'local-wallet-id',
+    privyWalletId: privyId,
+    spendable: true,
+  }), privyId);
+  assert.equal(exportWalletIdForSheet({ id: `linked_${ADDRESS}`, spendable: false }), '');
+  assert.equal(exportWalletIdForSheet({ id: `client_${ADDRESS.slice(0, 8)}`, spendable: true }), '');
+  assert.equal(exportWalletIdForSheet(null), '');
 });
 
 test('exportFailureNote explains server vs embedded wallets', () => {
