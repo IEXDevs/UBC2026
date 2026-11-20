@@ -62,6 +62,10 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.wallet-overview, \.wallet-settings-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(css, /\.wallet-body \{[^}]*min-height: 0;[^}]*overflow-y: auto/s);
+  assert.equal((css.match(/\.sheet\.wallets-sheet \{/g) || []).length, 3);
+  assert.match(css, /\.backdrop\.is-center > \.sheet\.wallets-sheet \{ overflow: hidden/);
+  assert.match(css, /width: calc\(100vw - 32px\);\s+height: calc\(100dvh - 32px\)/);
+  assert.doesNotMatch(css, /\.wallet-nav/);
   assert.match(sheet, /function openParty\(party\) \{\s+if \(!onParty\) return;\s+onClose\(\);\s+onParty\(party\)/);
   assert.equal((sheet.match(/onParty=\{openParty\}/g) || []).length, 2);
   const tokenScreen = readFileSync(new URL('../components/TokenScreen.js', import.meta.url), 'utf8');
