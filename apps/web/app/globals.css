@@ -1582,8 +1582,8 @@ button.add-agent:not(:disabled):hover {
 @media (max-width: 720px) {
   .sheet.wallets-sheet {
     grid-template-columns: 1fr;
-    width: calc(100vw - 16px);
-    height: calc(100vh - 16px);
+    width: calc(100vw - 32px);
+    height: calc(100dvh - 32px);
   }
   .wallet-nav {
     flex-direction: row;
