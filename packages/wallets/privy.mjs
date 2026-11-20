@@ -1323,22 +1323,29 @@ export function createPrivyWalletClient({
 
     async signPreparedSolanaX402Payment({ bot, wallet, prepared, accessToken, ownerAuthorization } = {}) {
       assertSpendAllowed({ bot, wallet });
-      if (!simulatedX402.delete(prepared) || !simulatedTransfers.delete(prepared)) fail('Payment simulation is required', 'simulation_required');
-      const original = x402Message(prepared.transaction, wallet.address, prepared.feePayer);
+      if (!simulatedX402.has(prepared)) fail('Payment simulation is required', 'simulation_required');
       await assertSolana();
       const signed = ownerAuthorization
         ? await signWithBrowserAuthorization(wallet, prepared, ownerAuthorization)
         : await signWithPrivy(assertPrivyWalletId(wallet.privyWalletId), prepared.transaction, {
             ownerId: wallet.ownerId, walletAddress: wallet.address, accessToken,
           });
-      const parsed = x402Message(signed, wallet.address, prepared.feePayer);
+      return this.verifyPreparedSolanaX402Payment({ bot, wallet, prepared, signedTransaction: signed });
+    },
+
+    async verifyPreparedSolanaX402Payment({ bot, wallet, prepared, signedTransaction } = {}) {
+      assertSpendAllowed({ bot, wallet });
+      if (!simulatedX402.delete(prepared) || !simulatedTransfers.delete(prepared)) fail('Payment simulation is required', 'simulation_required');
+      const original = x402Message(prepared.transaction, wallet.address, prepared.feePayer);
+      await assertSolana();
+      const parsed = x402Message(signedTransaction, wallet.address, prepared.feePayer);
       const message = Buffer.from(parsed.message.serialize());
       const publicKey = createPublicKey({ key: Buffer.concat([
         Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(parsed.message.staticAccountKeys[1].toBytes()),
       ]), format: 'der', type: 'spki' });
       if (!message.equals(Buffer.from(original.message.serialize())) || parsed.signatures[0].some(byte => byte !== 0)
           || !cryptoVerify(null, message, publicKey, parsed.signatures[1])) fail('Signed payment differs from simulation', 'transaction_mismatch');
-      return { transaction: signed };
+      return { transaction: signedTransaction };
     },
 
     async prepareSolanaSwap({ transaction, walletAddress, inputMint, outputMint, amount, minOutput } = {}) {

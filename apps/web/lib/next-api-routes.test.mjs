@@ -22,6 +22,66 @@ import { buildSolanaUsdcTransaction, buildWalletAssetTransaction } from '@ubc202
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+test('chat Laso endpoints require the sealed slide hold and carry browser prepare/settle without calling the model', async t => {
+  const config = { NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://laso-runtime.invalid', META_MODEL_API_KEY: 'offline-laso-chat-key' };
+  const previous = Object.fromEntries(Object.keys(config).map(key => [key, process.env[key]]));
+  Object.assign(process.env, config);
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const ownerId = 'did:privy:laso-chat';
+  const botId = 'bot_laso';
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', {
+    botId, action: 'x402', asset: 'USDC', amount: '10000000', lasoTicket: `payload.${'a'.repeat(64)}`,
+  }), { ownerId, botId, secret: config.META_MODEL_API_KEY });
+  const payment = { phase: 'prepared', walletAddress: 'So11111111111111111111111111111111111111112',
+    blockhash: 'So11111111111111111111111111111111111111112', transaction: Buffer.alloc(200).toString('base64'),
+    expiresAt: Date.now() + 60000, proof: 'b'.repeat(64) };
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(String(url), `${config.NEXT_PUBLIC_AGENT_RUNTIME_URL}/api/spend`, 'no model, signing provider or live calls');
+    const body = JSON.parse(options.body);
+    calls.push(body);
+    assert.equal(body.confirmed, true);
+    assert.equal(body.idempotencyKey, hold.idempotencyKey);
+    assert.equal(body.lasoTicket, hold.args.lasoTicket);
+    assert.equal(body.spendAuthorization, undefined);
+    return Response.json(body.lasoPayment.phase === 'prepare' ? { signed: false, lasoPayment: payment }
+      : { signed: true, cluster: 'mainnet-beta', signature: '5'.repeat(88), card: { card_id: 'card_1', usd_amount: 10, status: 'pending' },
+        claimUrl: 'https://laso.finance/agent/dashboard/auth?token=owner-only' });
+  });
+  const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
+  const post = async (grants, lasoPayment, owner = ownerId, stream = false) => {
+    const response = await POST(new Request('https://desk.invalid/api/bots/bot_laso/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-owner-id': owner,
+        ...(stream ? { accept: 'text/event-stream' } : {}) },
+      body: JSON.stringify({ message: 'yes', permission: 'ask', grants, lasoPayment }),
+    }), { params: { botId } });
+    if (stream) return response.text();
+    return response.json();
+  };
+  assert.equal((await post([hold])).error, 'browser_wallet_required');
+  assert.equal((await post([], { phase: 'prepare' })).error, 'invalid_laso_payment');
+  assert.equal((await post([hold], payment)).error, 'invalid_laso_payment');
+  assert.match((await post([{ ...hold, proof: '' }], { phase: 'prepare' })).reply, /invalid or expired/);
+  assert.match((await post([hold], { phase: 'prepare' }, 'did:privy:other')).reply, /invalid or expired/);
+  assert.equal(calls.length, 0);
+  const prepared = await post([hold], { phase: 'prepare' });
+  assert.deepEqual(prepared.lasoPayment, payment);
+  assert.equal(prepared.reply, undefined);
+  assert.match(await post([hold], { phase: 'prepare' }, ownerId, true), /"lasoPayment":\{"phase":"prepared"/);
+  const settled = await post([hold], { ...payment, phase: 'settle' });
+  assert.match(settled.reply, /Laso card card_1/);
+  assert.match(settled.claimUrl, /owner-only/);
+  assert.equal(settled.lasoPayment, undefined);
+  assert.equal(JSON.stringify(settled.activity).includes('owner-only'), false);
+  assert.equal(JSON.stringify(settled).includes(payment.transaction), false);
+  assert.equal(calls.length, 3);
+});
+
 test('wallet move accepts a verified connected recipient and signs only with the stored sender', async (t) => {
   const ownerId = 'did:privy:move-recipient';
   const session = privySessionFixture(ownerId, 'recipienttestapp');

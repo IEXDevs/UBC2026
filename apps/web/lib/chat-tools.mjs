@@ -588,7 +588,7 @@ export function createChatToolInvoker({
 
   const apiBase = root || 'shell';
 
-  async function invokeDashboard(name, args = {}, { sessionBot = true, approveOnce, spendAuthorization, swapTicket } = {}) {
+  async function invokeDashboard(name, args = {}, { sessionBot = true, approveOnce, spendAuthorization, swapTicket, lasoPayment } = {}) {
     if (name === 'break_loop' && !ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
     const def = DASHBOARD_TOOLS.find((tool) => tool.name === name);
     if (!def?.voiceCalls?.length) return { error: 'unknown_tool' };
@@ -651,13 +651,14 @@ export function createChatToolInvoker({
       return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body, { 'x-loop-break': 'owner-asked' });
     }
     if (name === 'request_spend' && spendAuthorization) body.spendAuthorization = spendAuthorization;
+    if (name === 'request_spend' && args.action === 'x402' && lasoPayment) body.lasoPayment = lasoPayment;
     if (name === 'request_spend' && args.action === 'swap' && swapTicket) body.swapTicket = swapTicket;
     if (name === 'request_spend' && args.action === 'swap' && swapTicket && args.autoSwap === true) body.autoSwap = true;
     return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body,
       name === 'request_spend' && approveOnce ? { 'x-spend-approve-once': approveOnce } : undefined);
   }
 
-  return async function invokeTool(name, args = {}, { approveOnce, spendAuthorization, swapTicket } = {}) {
+  return async function invokeTool(name, args = {}, { approveOnce, spendAuthorization, swapTicket, lasoPayment } = {}) {
     args = applySituation(name, args, situation);
     if (isLasoCardRequest(ownerMessage)) {
       if (name === 'prepare_shopping') args = lasoPreparationArgs(args, ownerMessage);
@@ -789,7 +790,7 @@ export function createChatToolInvoker({
         });
       }
       if (DASHBOARD_NAMES.has(name)) {
-        return await invokeDashboard(name, args, { approveOnce, spendAuthorization, swapTicket });
+        return await invokeDashboard(name, args, { approveOnce, spendAuthorization, swapTicket, lasoPayment });
       }
       return await local.invokeTool(name, args, identity);
     } catch (error) {

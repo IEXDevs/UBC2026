@@ -70,7 +70,7 @@ test('Laso settles only via PAYMENT-SIGNATURE and exchanges then discards auth t
   }
 });
 
-for (const asset of ['USDC', 'USD']) test(`Laso preparation and owner-approved purchase use the shared ${asset} gates and a single reservation`, async () => {
+for (const asset of ['USDC', 'USD']) for (const browser of [false, true]) test(`Laso ${browser ? 'browser' : 'server'} purchase uses the shared ${asset} gates and a single reservation`, async () => {
   const grant = '12'.repeat(32);
   const grantHash = await sha256Hex(grant);
   const wallet = { id: 'wallet_laso', ownerId: 'user_1', kind: 'main', label: 'Main',
@@ -98,6 +98,11 @@ for (const asset of ['USDC', 'USD']) test(`Laso preparation and owner-approved p
         return { transaction: input.transaction, feeLamports: '0', maxSolCost: '0' };
       },
       signPreparedSolanaX402Payment: async ({ prepared }) => { signs++; return { transaction: prepared.transaction }; },
+      verifyPreparedSolanaX402Payment: async ({ prepared, signedTransaction }) => {
+        assert.equal(browser, true);
+        assert.equal(signedTransaction, prepared.transaction);
+        return { transaction: signedTransaction };
+      },
     },
     ledgerApi: { reserveBudget: async ({ proposal, idempotencyKey, approvalId }) => {
       assert.ok(approvalId);
@@ -140,7 +145,8 @@ for (const asset of ['USDC', 'USD']) test(`Laso preparation and owner-approved p
   assert.equal(readLasoTicket(offer.lasoTicket, 'user_1', 'bot_1', 'offline-key', now).amount, '10000000');
   const body = { permission: 'full', botId: 'bot_1', action: 'x402', asset: 'USDC', amount: '10000000', lasoTicket: offer.lasoTicket, idempotencyKey: 'test_laso' };
   const request = async (patch = {}, grantHeader = grant) => {
-    const response = await worker.fetch(new Request('https://runtime/api/spend', { method: 'POST', headers: { ...headers, 'x-desk-grant': grantHeader }, body: JSON.stringify({ ...body, ...patch }) }), env);
+    const response = await worker.fetch(new Request('https://runtime/api/spend', { method: 'POST', headers: { ...headers, 'x-desk-grant': grantHeader }, body: JSON.stringify({ ...body,
+      ...(browser && patch.confirmed ? { lasoPayment: { phase: 'prepare' } } : {}), ...patch }) }), env);
     return response.json();
   };
   assert.equal((await request()).state, 'approval-needed');
@@ -162,13 +168,45 @@ for (const asset of ['USDC', 'USD']) test(`Laso preparation and owner-approved p
   simulationError = false;
   assert.equal(signs, 0);
   assert.equal(reservations.size, 0);
-  const purchased = await request({ confirmed: true });
+  let lasoPayment;
+  if (browser) {
+    const prepared = await request({ confirmed: true });
+    assert.equal(prepared.signed, false);
+    assert.equal(prepared.lasoPayment.phase, 'prepared');
+    assert.equal(signs, 0);
+    assert.equal(paid, 0);
+    assert.equal(reservations.size, 0, 'preparing must not reserve or settle');
+    lasoPayment = { ...prepared.lasoPayment, phase: 'settle' };
+    assert.equal((await request({ confirmed: true, lasoPayment: { ...lasoPayment, proof: '0'.repeat(64) } })).signed, false);
+    bot.policyVersion++;
+    assert.equal((await request({ confirmed: true, lasoPayment })).reason, 'laso_payment_changed');
+    bot.policyVersion--;
+    bot.frozen = true;
+    assert.equal((await request({ confirmed: true, lasoPayment })).signed, false);
+    bot.frozen = false;
+    env.spendTrustScore = '0';
+    assert.equal((await request({ confirmed: true, lasoPayment })).signed, false);
+    env.spendTrustScore = '800';
+    bot.cap.maxPerTransaction = '5000000';
+    assert.equal((await request({ confirmed: true, lasoPayment })).signed, false);
+    bot.cap.maxPerTransaction = '20000000';
+    env.spendVerifyFn = async () => ({});
+    assert.equal((await request({ confirmed: true, lasoPayment })).signed, false);
+    delete env.spendVerifyFn;
+    assert.equal((await request({ confirmed: true, lasoPayment: { ...lasoPayment, expiresAt: now } })).error, 'laso_payment_expired');
+    assert.equal((await request({ confirmed: true, lasoPayment: { ...lasoPayment, transaction: Buffer.alloc(200, 1).toString('base64') } })).signed, false);
+    assert.equal((await request({ confirmed: true, lasoPayment }, '')).error, 'desk_locked');
+    assert.equal(reservations.size, 0);
+    assert.equal(paid, 0);
+  }
+  const purchased = await request({ confirmed: true, ...(lasoPayment ? { lasoPayment } : {}) });
   assert.equal(purchased.signed, true, JSON.stringify(purchased));
   assert.equal(purchased.signature, signature);
   assert.deepEqual(purchased.card, { card_id: 'card_123', usd_amount: 10, status: 'pending' });
   assert.equal(JSON.stringify(purchased).includes('never-returned'), false);
-  assert.equal((await request({ confirmed: true, idempotencyKey: 'different_client_key' })).signed, false);
-  assert.equal(signs, 1);
+  assert.equal((await request({ confirmed: true, idempotencyKey: 'different_client_key', ...(lasoPayment ? { lasoPayment } : {}) })).signed, false);
+  if (browser) assert.equal(signs, 0, 'browser payments must never call Privy server signing');
+  assert.equal(signs, browser ? 0 : 1);
   assert.equal(paid, 1);
   assert.equal(reservations.size, 1);
 });

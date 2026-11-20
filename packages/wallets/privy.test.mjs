@@ -191,6 +191,21 @@ test('x402 partial signing binds the simulated message and leaves the facilitato
     return Response.json({ result: { value: { err: mode === 'simulation-error' ? { InstructionError: [2, { Custom: 1 }] } : null } } });
   } });
   const prepare = () => privy.prepareSolanaX402Payment({ ...built, walletAddress: wallet.address, accepted });
+  const browser = VersionedTransaction.deserialize(Buffer.from(built.transaction, 'base64'));
+  browser.sign([signer]);
+  const browserTransaction = Buffer.from(browser.serialize()).toString('base64');
+  const browserPrepared = await prepare();
+  assert.deepEqual(await privy.verifyPreparedSolanaX402Payment({ bot, wallet, prepared: browserPrepared, signedTransaction: browserTransaction }), { transaction: browserTransaction });
+  assert.equal(signing, 0, 'browser verification must never call Privy signing');
+  await assert.rejects(privy.verifyPreparedSolanaX402Payment({ bot, wallet, prepared: browserPrepared, signedTransaction: browserTransaction }), { code: 'simulation_required' });
+  for (const failure of ['unsigned', 'changed', 'sponsor-signed', 'invalid-signature']) {
+    const bad = VersionedTransaction.deserialize(Buffer.from(built.transaction, 'base64'));
+    if (failure === 'changed') bad.message.recentBlockhash = Keypair.generate().publicKey.toBase58();
+    if (failure !== 'unsigned') bad.sign(failure === 'sponsor-signed' ? [signer, payer] : [signer]);
+    if (failure === 'invalid-signature') bad.signatures[1].fill(1);
+    await assert.rejects(privy.verifyPreparedSolanaX402Payment({ bot, wallet, prepared: await prepare(), signedTransaction: Buffer.from(bad.serialize()).toString('base64') }), { code: 'transaction_mismatch' });
+  }
+  assert.equal(signing, 0);
   const prepared = await prepare();
   const signed = await privy.signPreparedSolanaX402Payment({ bot, wallet, prepared });
   const parsed = VersionedTransaction.deserialize(Buffer.from(signed.transaction, 'base64'));
