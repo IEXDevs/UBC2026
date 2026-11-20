@@ -586,9 +586,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       return undefined;
     }
     if (!stateReady) return undefined;
-    const adopted = adoptLegacyRoster(localStorage, ownerId);
-    const savedRoster = withoutPlaceholderBots(adopted.adopted ? adopted.roster : readRoster(localStorage, ownerId));
-    const savedLooks = adopted.adopted ? adopted.looks : readLooks(localStorage, ownerId);
+    const adopted = adoptLegacyRoster(accountStorage, ownerId);
+    const savedRoster = withoutPlaceholderBots(adopted.adopted ? adopted.roster : readRoster(accountStorage, ownerId));
+    const savedLooks = adopted.adopted ? adopted.looks : readLooks(accountStorage, ownerId);
     const merged = mergeRoster([], savedRoster);
     setLooks(savedLooks);
     setRoster({ order: merged.order, extra: merged.extra });
@@ -614,7 +614,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     }
     if (!stateReady) return;
     try {
-      setTalks(readTalks(localStorage, ownerId));
+      setTalks(readTalks(accountStorage, ownerId));
     } catch {
       setTalks({});
     }

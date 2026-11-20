@@ -3,6 +3,7 @@
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
 import { createPrivyWalletClientFromEnv, readPrivyAccessTokenSub } from '@ubc2026/wallets/privy';
+import { verifyPrivyAccessToken } from '@ubc2026/wallets/privy-access-token';
 import {
   ConfigError,
   devnetSpendAsset,
@@ -153,6 +154,21 @@ export async function resolveOwner(request, env) {
       ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
       : undefined;
     return { ownerId: null, user: null, token, error: 'privy_failed', detail };
+  }
+}
+
+async function resolveDeletionOwner(request, env, fetcher) {
+  const appId = env.PRIVY_APP_ID?.trim();
+  if (!appId) return resolveOwner(request, env);
+  const token = bearerToken(request);
+  if (!token) return { error: 'login_required' };
+  try {
+    const { sub } = await verifyPrivyAccessToken(token, { appId, fetcher });
+    const header = ownerHeader(request);
+    if (header && header !== sub) return { error: 'owner_mismatch' };
+    return { ownerId: sub, verified: true };
+  } catch {
+    return { error: 'login_required' };
   }
 }
 
@@ -834,6 +850,7 @@ export async function handleApiData(request, env, matched) {
       body: row,
       fetcher,
     });
+    if (written.code === 'PT410') return json({ error: 'agent_deleted' }, 410);
     if (written.ok === false) return json({ error: 'persist_failed' }, 502);
 
     await supabaseWrite(env, {
@@ -857,7 +874,7 @@ export async function handleApiData(request, env, matched) {
   }
 
   if (routeId === 'bots.delete') {
-    const { ownerId, error } = await resolveOwner(request, env);
+    const { ownerId, error, verified } = await resolveDeletionOwner(request, env, fetcher);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const botId = matched?.params?.botId;
@@ -866,48 +883,49 @@ export async function handleApiData(request, env, matched) {
     }
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
 
-    const existing = await supabaseGet(
-      env,
-      `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id`,
-      fetcher,
-    );
-    if (existing.status !== 200 || !Array.isArray(existing.rows)) return json({ error: 'delete_failed' }, 502);
-    if (existing.rows.length === 0) return json({ ok: true, deleted: botId });
-
-    // Child tables reference bots(id) without ON DELETE CASCADE — clear dependents first.
-    const dependents = [
-      `budget_reservations?bot_id=eq.${encodeURIComponent(botId)}`,
-      `spend_ledgers?bot_id=eq.${encodeURIComponent(botId)}`,
-      `approvals?bot_id=eq.${encodeURIComponent(botId)}`,
-      `decision_records?bot_id=eq.${encodeURIComponent(botId)}`,
-      `timeline_events?bot_id=eq.${encodeURIComponent(botId)}`,
-      `payments?bot_id=eq.${encodeURIComponent(botId)}`,
-      `metrics?bot_id=eq.${encodeURIComponent(botId)}`,
-      `stream_events?bot_id=eq.${encodeURIComponent(botId)}`,
-      `activity_logs?bot_id=eq.${encodeURIComponent(botId)}`,
-    ];
-    for (const path of dependents) {
-      const cleared = await supabaseWrite(env, {
-        path,
-        method: 'DELETE',
+    const owner = encodeURIComponent(ownerId);
+    if (verified) {
+      const removed = await supabaseWrite(env, {
+        path: 'rpc/delete_owner_agent',
+        body: { p_owner_id: ownerId, p_bot_id: botId },
         prefer: 'return=minimal',
         fetcher,
       });
-      // 404 = table/row missing on older schemas; treat as already clear.
+      if (removed.ok) return json({ ok: true, deleted: botId, source: 'supabase' });
+      if (removed.status !== 404 || removed.code !== 'PGRST202') {
+        return json({ error: 'delete_failed' }, 502);
+      }
+    } else {
+      const deletions = await supabaseGet(env, `rpc/list_deleted_owner_agents?p_owner_id=${owner}`, fetcher);
+      if (deletions.status !== 404 || deletions.code !== 'PGRST202') {
+        return json({ error: 'agent_delete_auth_unconfigured' }, 503);
+      }
+    }
+
+    // An older database still supports deletion, but cannot record a tombstone.
+    const bot = encodeURIComponent(botId);
+    const existing = await supabaseGet(env, `bots?id=eq.${bot}&owner_id=eq.${owner}&select=id`, fetcher);
+    if (existing.status !== 200 || !Array.isArray(existing.rows)) return json({ error: 'delete_failed' }, 502);
+    if (!existing.rows.length) return json({ ok: true, deleted: botId });
+
+    const dependents = [
+      'budget_reservations', 'spend_ledgers', 'approvals', 'decision_records',
+      'timeline_events', 'payments', 'metrics', 'stream_events',
+    ].map(table => `${table}?bot_id=eq.${bot}`);
+    dependents.push(`activity_logs?bot_id=eq.${bot}&owner_id=eq.${owner}`);
+    for (const path of dependents) {
+      const cleared = await supabaseWrite(env, { path, method: 'DELETE', prefer: 'return=minimal', fetcher });
       if (cleared.configured && cleared.status >= 400 && cleared.status !== 404) {
         return json({ error: 'delete_failed', detail: path.split('?')[0] }, 502);
       }
     }
-
-    const removed = await supabaseWrite(env, {
-      path: `bots?id=eq.${encodeURIComponent(botId)}&owner_id=eq.${encodeURIComponent(ownerId)}`,
+    const legacy = await supabaseWrite(env, {
+      path: `bots?id=eq.${bot}&owner_id=eq.${owner}`,
       method: 'DELETE',
       prefer: 'return=minimal',
       fetcher,
     });
-    if (removed.ok === false && removed.status !== 204) {
-      return json({ error: 'delete_failed' }, 502);
-    }
+    if (!legacy.ok) return json({ error: 'delete_failed' }, 502);
     return json({ ok: true, deleted: botId, source: 'supabase' });
   }
 

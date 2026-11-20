@@ -173,16 +173,21 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
   }
 
   if (routeId === 'state.list') {
-    const read = await supabaseGet(
-      env,
-      `owner_state?owner_id=eq.${encodeURIComponent(ownerId)}&select=name,value,updated_at`,
-      fetcher,
-    );
+    const owner = encodeURIComponent(ownerId);
+    const [read, deletions] = await Promise.all([
+      supabaseGet(env, `owner_state?owner_id=eq.${owner}&select=name,value,updated_at`, fetcher),
+      supabaseGet(env, `rpc/list_deleted_owner_agents?p_owner_id=${owner}`, fetcher),
+    ]);
     if (read.status !== 200 || !Array.isArray(read.rows)) return json({ error: storageError(read) }, 503);
+    const deletedAgentIds = deletions.rows?.[0]?.ids;
+    const migrationMissing = deletions.status === 404 && deletions.code === 'PGRST202';
+    if (!migrationMissing && !Array.isArray(deletedAgentIds)) {
+      return json({ error: storageError(deletions) }, 503);
+    }
     const items = read.rows
       .filter(row => row && STATE_NAMES.includes(row.name) && typeof row.value === 'string')
       .map(row => ({ name: row.name, value: row.value, updatedAt: row.updated_at ?? null }));
-    return json({ ok: true, source: 'supabase', items });
+    return json({ ok: true, source: 'supabase', items, deletedAgentIds: deletedAgentIds ?? [] });
   }
 
   if (routeId === 'state.write') {

@@ -37,9 +37,10 @@ test('account reads and seed issuance fail closed when the database schema or ac
 });
 
 /** In-memory stand-in for the Supabase tables these routes touch. */
-function database() {
+function database({ deletionListStatus = 200 } = {}) {
   const state = new Map();
   const recovery = new Map();
+  const deletedAgents = new Map([['alice', ['bot_deleted']]]);
   const prefers = [];
   const calls = [];
   async function fetcher(url, init = {}) {
@@ -50,6 +51,12 @@ function database() {
     const owner = (target.searchParams.get('owner_id') || '').replace('eq.', '');
     calls.push({ table, method });
     if (table === 'users') return Response.json([], { status: 201 });
+    if (table === 'rpc/list_deleted_owner_agents') {
+      assert.equal(method, 'GET');
+      if (deletionListStatus === 404) return Response.json({ code: 'PGRST202' }, { status: 404 });
+      if (deletionListStatus !== 200) return Response.json({ code: 'PGRST002' }, { status: deletionListStatus });
+      return Response.json([{ ids: deletedAgents.get(target.searchParams.get('p_owner_id')) ?? [] }]);
+    }
     if (table === 'owner_state') {
       if (method === 'GET') {
         const rows = [...state.entries()]
@@ -106,6 +113,21 @@ function call(env, path, { method = 'GET', owner = 'alice', body } = {}) {
   }), env);
 }
 
+test('older databases still return saved desk state when the deletion-list RPC is missing', async () => {
+  const env = envFor(database({ deletionListStatus: 404 }));
+  const written = await call(env, '/api/state', { method: 'POST', body: { items: [{ name: 'roster', value: '{}' }] } });
+  assert.equal(written.status, 200);
+  const result = await call(env, '/api/state');
+  assert.equal(result.status, 200);
+  const body = await result.json();
+  assert.deepEqual(body.deletedAgentIds, []);
+  assert.deepEqual(body.items.map(({ name, value }) => ({ name, value })), [{ name: 'roster', value: '{}' }]);
+
+  const failed = await call(envFor(database({ deletionListStatus: 503 })), '/api/state');
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), { error: 'account_state_unavailable' });
+});
+
 /**
  * Achieves: state items accept only mirrored names and never a secret-shaped field.
  * Fails when: a file secret, provider key, seed field, or a malformed account id is accepted.
@@ -117,6 +139,7 @@ test('state items reject unknown names, secret fields, and a bad account id', ()
   assert.deepEqual(parseStateItem({ name: 'roster', value: '{"order":[]}' }), { name: 'roster', value: '{"order":[]}' });
   assert.deepEqual(parseStateItem({ name: 'talks', value: null }), { name: 'talks', value: null });
   assert.equal(parseStateItem({ name: 'files', value: '{}' }), null);
+  assert.equal(parseStateItem({ name: 'deletedAgentIds', value: '[]' }), null);
   assert.equal(parseStateItem({ name: 'providers', value: '[]' }), null);
   assert.equal(parseStateItem({ name: 'roster', value: '{"seedPhrase":"abandon"}' }), null);
   assert.equal(parseStateItem({ name: 'talks', value: '{"bot":[{"mnemonic":"x"}]}' }), null);
@@ -245,6 +268,8 @@ test('state written once is listed for the owner and the account id is write-onc
 
   await call(env, '/api/state', { method: 'POST', body: { items: [{ name: 'accountCode', value: '6543210987654321' }] } });
   const listed = await (await call(env, '/api/state')).json();
+  assert.deepEqual(listed.deletedAgentIds, ['bot_deleted']);
+  assert.deepEqual((await (await call(env, '/api/state', { owner: 'bob' })).json()).deletedAgentIds, []);
   const byName = Object.fromEntries(listed.items.map(item => [item.name, item.value]));
   assert.equal(byName.accountCode, '1234567890123456');
   assert.equal(byName.roster, '{"order":["a"],"extra":[]}');

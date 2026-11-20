@@ -13,7 +13,7 @@
 import { ownerAuthHeaders } from './owner-auth-headers.mjs';
 import { shellRuntimeUrl } from './runtime-data.mjs';
 import { accountStorageKey } from './account-code.mjs';
-import { looksStorageKey, rosterStorageKey } from './roster.mjs';
+import { LEGACY_LOOKS_KEY, LEGACY_ROSTER_KEY, looksStorageKey, rosterStorageKey } from './roster.mjs';
 import { talkStorageKey } from './talk-store.mjs';
 import { tokenStorageKey } from './wallet-desk.mjs';
 import { voiceTimeKey } from './voice-time.mjs';
@@ -36,6 +36,7 @@ const DESK_DEFAULTS = new Map([
   ['looks', '{}'],
   ['talks', '{}'],
 ]);
+const LEGACY_DESK_NAMES = new Map([[LEGACY_ROSTER_KEY, 'roster'], [LEGACY_LOOKS_KEY, 'looks']]);
 
 /** Every mirrored entry for one owner: account name, local key, and whether the key is shared by the browser. */
 export function mirrorEntries(ownerId) {
@@ -72,6 +73,25 @@ function safeRemove(storage, key) {
   try { storage.removeItem(key); } catch { /* ignore */ }
 }
 
+function withoutDeletedAgents(name, value, deleted) {
+  if (!deleted.size || !DESK_DEFAULTS.has(name) || typeof value !== 'string') return value;
+  let parsed;
+  try { parsed = JSON.parse(value); } catch { return value; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return value;
+  if (name === 'roster') {
+    const order = Array.isArray(parsed.order) ? parsed.order.filter(id => !deleted.has(id)) : null;
+    const extra = Array.isArray(parsed.extra) ? parsed.extra.filter(bot => !deleted.has(bot?.id)) : null;
+    if (!(order && order.length !== parsed.order.length) && !(extra && extra.length !== parsed.extra.length)) return value;
+    if (order) parsed.order = order;
+    if (extra) parsed.extra = extra;
+  } else {
+    const removed = Object.keys(parsed).filter(id => deleted.has(id));
+    if (!removed.length) return value;
+    for (const id of removed) delete parsed[id];
+  }
+  return JSON.stringify(parsed);
+}
+
 /**
  * Builds one mirror for one signed-in owner.
  * `storage` is the browser store. `storage` in the result is a drop-in that
@@ -92,6 +112,7 @@ export function createAccountMirror({
   const pending = new Map();
   // The desk saves snapshots on mount. Its unchanged startup state is not an account edit.
   const lastDeskValue = new Map(DESK_DEFAULTS);
+  let deletedAgents = new Set();
   let timer = null;
   let retries = 0;
   let live = Boolean(storage) && entries.length > 0;
@@ -161,11 +182,14 @@ export function createAccountMirror({
   }
 
   const mirrored = {
-    getItem: key => storage.getItem(key),
+    getItem(key) {
+      return withoutDeletedAgents(byKey.get(key)?.name ?? LEGACY_DESK_NAMES.get(key), storage.getItem(key), deletedAgents);
+    },
     setItem(key, value) {
-      storage.setItem(key, value);
       const entry = byKey.get(key);
-      if (entry) queue(entry.name, String(value));
+      const next = withoutDeletedAgents(entry?.name, String(value), deletedAgents);
+      storage.setItem(key, next);
+      if (entry) queue(entry.name, next);
     },
     removeItem(key) {
       storage.removeItem(key);
@@ -195,6 +219,7 @@ export function createAccountMirror({
     if (!body || body.source === 'unconfigured' || !Array.isArray(body.items)) {
       return { ok: false, error: 'unconfigured' };
     }
+    deletedAgents = new Set(Array.isArray(body.deletedAgentIds) ? body.deletedAgentIds.filter(id => typeof id === 'string') : []);
     const server = new Map();
     for (const item of body.items) {
       if (item && typeof item.name === 'string' && typeof item.value === 'string') server.set(item.name, item.value);
@@ -203,7 +228,7 @@ export function createAccountMirror({
     const accepted = server.get('acceptance') === '1' || (acceptanceKey !== '' && safeGet(storage, acceptanceKey) === '1');
     const upload = [];
     for (const entry of entries) {
-      const remote = server.get(entry.name);
+      const remote = withoutDeletedAgents(entry.name, server.get(entry.name), deletedAgents);
       if (typeof remote === 'string') {
         if (DESK_DEFAULTS.has(entry.name)) lastDeskValue.set(entry.name, remote);
         safeSet(storage, entry.key, remote);
@@ -214,7 +239,9 @@ export function createAccountMirror({
         safeRemove(storage, entry.key);
         continue;
       }
-      const local = safeGet(storage, entry.key);
+      const cached = safeGet(storage, entry.key);
+      const local = withoutDeletedAgents(entry.name, cached, deletedAgents);
+      if (local !== cached) safeSet(storage, entry.key, local);
       if (typeof local === 'string' && pushable(local) && local !== DESK_DEFAULTS.get(entry.name)) {
         upload.push({ name: entry.name, value: local });
       }

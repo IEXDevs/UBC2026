@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import worker from './index.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 import { mapBotRow, mapWalletRow, mapLedgerRow } from './supabase-rest.mjs';
@@ -798,25 +799,137 @@ test('supabase mappers turn rows into bot/wallet/ledger records', () => {
   });
 });
 
-test('deleting a missing agent is idempotent and a failed ownership lookup is not success', async () => {
-  const remove = (body, status) => worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+function deletionSession() {
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const appId = 'testapp1';
+  const ownerId = 'did:privy:alice';
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const jwt = `${encode({ alg: 'ES256', typ: 'JWT' })}.${encode({
+    sub: ownerId, iss: 'privy.io', aud: appId, exp: Math.floor(Date.now() / 1000) + 600,
+  })}`;
+  const signature = sign('sha256', Buffer.from(jwt), { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  return {
+    appId,
+    ownerId,
+    headers: { authorization: `Bearer ${jwt}.${signature.toString('base64url')}`, 'x-owner-id': ownerId },
+    fetchWithJwks: fetcher => async (url, init) => {
+      if (new URL(url).hostname === 'auth.privy.io') {
+        assert.equal(new URL(url).pathname, `/api/v1/apps/${appId}/jwks.json`);
+        return Response.json({ keys: [publicKey.export({ format: 'jwk' })] });
+      }
+      return fetcher(url, init);
+    },
+  };
+}
+
+test('agent deletion verifies the caller, passes that owner to the RPC and does not hide a storage failure', async () => {
+  const session = deletionSession();
+  const remove = (status) => worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers: session.headers,
+  }), fakeEnv({
+    PRIVY_APP_ID: session.appId,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: session.fetchWithJwks(async (url, init) => {
+      if (new URL(url).pathname.endsWith('/activity_logs')) return new Response(null, { status: 204 });
+      assert.equal(init.method, 'POST');
+      assert.equal(new URL(url).pathname, '/rest/v1/rpc/delete_owner_agent');
+      assert.deepEqual(JSON.parse(init.body), { p_owner_id: session.ownerId, p_bot_id: 'bot_1' });
+      return new Response(null, { status });
+    }),
+  }));
+  const deleted = await remove(204);
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(await deleted.json(), { ok: true, deleted: 'bot_1', source: 'supabase' });
+  const failure = await remove(503);
+  assert.equal(failure.status, 502);
+  assert.deepEqual(await failure.json(), { error: 'delete_failed' });
+
+  const deny = (headers) => worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers,
+  }), fakeEnv({
+    PRIVY_APP_ID: session.appId,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: session.fetchWithJwks(async () => new Response(null, { status: 500 })),
+  }));
+  for (const [headers, error] of [
+    [{ 'x-owner-id': session.ownerId }, 'login_required'],
+    [{ ...session.headers, 'x-owner-id': 'did:privy:bob' }, 'owner_mismatch'],
+  ]) {
+    const denied = await deny(headers);
+    assert.equal(denied.status, 401);
+    assert.deepEqual(await denied.json(), { error });
+  }
+
+  const unverified = await worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers: session.headers,
+  }), fakeEnv({
+    PRIVY_APP_ID: session.appId,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => Response.json({ keys: [] }),
+  }));
+  assert.equal(unverified.status, 401);
+  assert.deepEqual(await unverified.json(), { error: 'login_required' });
+});
+
+test('agents can still be deleted from an older database without the deletion RPC', async () => {
+  const session = deletionSession();
+  const calls = [];
+  const fetcher = async (url, init) => {
+    const target = new URL(url);
+    calls.push([init.method, target.pathname]);
+    if (target.pathname.endsWith('/rpc/delete_owner_agent')) {
+      return Response.json({ code: 'PGRST202' }, { status: 404 });
+    }
+    if (target.pathname.endsWith('/bots') || target.pathname.endsWith('/activity_logs')) {
+      assert.equal(target.searchParams.get('owner_id'), `eq.${session.ownerId}`);
+    }
+    if (init.method === 'GET') return Response.json([{ id: 'bot_1' }]);
+    return new Response(null, { status: 204 });
+  };
+  const response = await worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers: session.headers,
+  }), fakeEnv({
+    PRIVY_APP_ID: session.appId,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: session.fetchWithJwks(fetcher),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls.slice(0, 2), [
+    ['POST', '/rest/v1/rpc/delete_owner_agent'],
+    ['GET', '/rest/v1/bots'],
+  ]);
+  assert.deepEqual(calls.filter(([method]) => method === 'DELETE').slice(-2), [
+    ['DELETE', '/rest/v1/activity_logs'],
+    ['DELETE', '/rest/v1/bots'],
+  ]);
+});
+
+test('deletion on a migrated database fails closed when Privy verification is unconfigured', async () => {
+  const calls = [];
+  const response = await worker.fetch(new Request('https://runtime/api/bots/bot_1', {
     method: 'DELETE',
     headers: { 'x-owner-id': 'user_1' },
   }), fakeEnv({
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    fetch: async (url, init) => {
-      assert.equal(init.method, 'GET');
-      assert.equal(new URL(url).searchParams.get('owner_id'), 'eq.user_1');
-      return Response.json(body, { status });
+    fetch: async (url, { method }) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/activity_logs')) return new Response(null, { status: 204 });
+      calls.push([method, path]);
+      return Response.json([{ ids: [] }]);
     },
   }));
-  const absent = await remove([], 200);
-  assert.equal(absent.status, 200);
-  assert.deepEqual(await absent.json(), { ok: true, deleted: 'bot_1' });
-  const failure = await remove({ code: 'PGRST002' }, 503);
-  assert.equal(failure.status, 502);
-  assert.deepEqual(await failure.json(), { error: 'delete_failed' });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: 'agent_delete_auth_unconfigured' });
+  assert.deepEqual(calls, [['GET', '/rest/v1/rpc/list_deleted_owner_agents']]);
 });
 
 /**
@@ -928,6 +1041,7 @@ test('bots.create upserts a shell bot when the wallet belongs to the owner', asy
     if (init.method === 'POST') {
       writes.push({ href, body: JSON.parse(init.body), prefer: init.headers?.prefer });
       if (href.includes('/rest/v1/bots')) {
+        if (JSON.parse(init.body).id === 'bot_deleted') return Response.json({ code: 'PT410' }, { status: 410 });
         return new Response(JSON.stringify([JSON.parse(init.body)]), {
           status: 201,
           headers: { 'content-type': 'application/json' },
@@ -989,6 +1103,16 @@ test('bots.create upserts a shell bot when the wallet belongs to the owner', asy
   assert.equal(body.bot.walletId, 'w_main');
   assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/bots')), true);
   assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/spend_ledgers')), true);
+
+  writes.length = 0;
+  const deleted = await worker.fetch(new Request('https://runtime/api/bots', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify({ id: 'bot_deleted', name: 'Deleted', walletId: 'w_main' }),
+  }), env);
+  assert.equal(deleted.status, 410);
+  assert.deepEqual(await deleted.json(), { error: 'agent_deleted' });
+  assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/spend_ledgers')), false);
 });
 
 /**
