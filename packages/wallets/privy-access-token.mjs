@@ -8,6 +8,7 @@ const ISSUER = 'privy.io';
 const APP_ID = /^[a-z0-9]{8,64}$/;
 const OWNER = /^did:privy:[a-zA-Z0-9_-]{1,80}$/;
 const JWKS_TTL_MS = 60_000;
+const JWKS_MISS_COOLDOWN_MS = 5_000;
 const keyCache = new WeakMap();
 
 export function privyJwksUrl(appId) {
@@ -32,7 +33,7 @@ async function verifyEs256(signingInput, signature, jwk) {
   return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, signature, new TextEncoder().encode(signingInput));
 }
 
-async function loadJwks(appId, fetcher) {
+async function loadJwks(appId, fetcher, kid) {
   const url = privyJwksUrl(appId);
   if (!url) {
     const error = new Error('Privy app id is required');
@@ -40,7 +41,13 @@ async function loadJwks(appId, fetcher) {
     throw error;
   }
   const cached = keyCache.get(fetcher);
-  if (cached?.url === url && cached.expires > Date.now()) return cached.keys;
+  const now = Date.now();
+  let retryAt = 0;
+  if (cached?.url === url && cached.expires > now) {
+    if (!kid || cached.keys.some(key => key.kid === kid) || cached.retryAt > now) return cached.keys;
+    // An untrusted key id must not cause a fetch on every request.
+    retryAt = cached.retryAt = now + JWKS_MISS_COOLDOWN_MS;
+  }
   const response = await fetcher(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(5000) });
   if (!response || response.ok !== true) {
     const error = new Error('Privy JWKS was not available');
@@ -50,7 +57,7 @@ async function loadJwks(appId, fetcher) {
   const body = await response.json();
   const keys = (Array.isArray(body?.keys) ? body.keys : [])
     .filter(key => key && key.kty === 'EC' && key.crv === 'P-256' && key.use !== 'enc');
-  if (keys.length) keyCache.set(fetcher, { url, keys, expires: Date.now() + JWKS_TTL_MS });
+  if (keys.length) keyCache.set(fetcher, { url, keys, expires: Date.now() + JWKS_TTL_MS, retryAt });
   return keys;
 }
 
@@ -80,7 +87,7 @@ export async function verifyPrivyAccessToken(accessToken, { appId, fetcher = fet
     error.code = 'login_required';
     throw error;
   }
-  const keys = await loadJwks(appId, fetcher);
+  const keys = await loadJwks(appId, fetcher, header.kid);
   const jwk = header.kid ? keys.find(key => key.kid === header.kid) : (keys.length === 1 ? keys[0] : null);
   if (!jwk) {
     const error = new Error('Privy access token is required');
