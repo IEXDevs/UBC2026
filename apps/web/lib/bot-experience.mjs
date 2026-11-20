@@ -27,7 +27,7 @@ export function actionLabel(action) {
 
 export function formatBaseUnits(amount, asset) {
   if (typeof amount !== 'string' || !INT.test(amount) || typeof asset !== 'string' || asset === '') return null;
-  const decimals = asset === 'USDC' ? 6 : 0;
+  const decimals = asset === 'SOL' ? 9 : asset === 'USDC' ? 6 : 0;
   if (decimals === 0) return `${amount} ${asset}`;
   const whole = BigInt(amount);
   const scale = 10n ** BigInt(decimals);
@@ -43,6 +43,14 @@ export function shortDigest(digest) {
 
 function redact(summary) {
   return summary.replace(SECRETISH, '[hidden]').replace(/\s+/g, ' ').trim();
+}
+
+function timelineSummary({ kind, summary }) {
+  const clean = redact(summary);
+  if (kind !== 'budget.reserved') return clean;
+  const reservation = /^Reserved (0|[1-9][0-9]{0,39}) (SOL|USDC)$/.exec(clean);
+  if (!reservation) return clean;
+  return `Reserved ${formatBaseUnits(reservation[1], reservation[2])} in the agent budget`;
 }
 
 export function logsUrl(runtimeBase) {
@@ -84,7 +92,7 @@ export function timelineEntries(events, botId) {
   for (const event of events) {
     if (!event || event.botId !== botId || !EVENT_KINDS.includes(event.kind)) continue;
     if (typeof event.summary !== 'string') continue;
-    const summary = redact(event.summary);
+    const summary = timelineSummary(event);
     if (!summary || summary.length > 500) continue;
     try {
       validateTimelineEvent({ ...event, summary });
