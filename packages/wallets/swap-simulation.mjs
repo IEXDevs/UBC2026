@@ -33,33 +33,32 @@ function sumWalletTokens(entries, wallet) {
 }
 
 export function verifySwapSimulation(simulation, { wallet, inputMint, outputMint, amount, minOutput }) {
-  if (simulation?.err !== null || !Number.isSafeInteger(simulation.fee) || simulation.fee < 1
-      || !Array.isArray(simulation.preTokenBalances) || !Array.isArray(simulation.postTokenBalances)
-      || !UNITS.test(amount) || !UNITS.test(minOutput) || inputMint === outputMint) return null;
+  if (simulation?.err !== null || !Array.isArray(simulation.preTokenBalances) || !Array.isArray(simulation.postTokenBalances)
+      || !UNITS.test(amount) || !UNITS.test(minOutput) || inputMint === outputMint) return { reason: 'swap_effects_unverifiable' };
+  if (!Number.isSafeInteger(simulation.fee) || simulation.fee < 1) return { reason: 'swap_fee_unavailable' };
   const before = simulation.preBalances?.[0];
   const after = simulation.postBalances?.[0];
-  if (!Number.isSafeInteger(before) || !Number.isSafeInteger(after) || before < 0 || after < 0) return null;
+  if (!Number.isSafeInteger(before) || !Number.isSafeInteger(after) || before < 0 || after < 0) return { reason: 'swap_effects_unverifiable' };
   const fee = BigInt(simulation.fee);
   const solChange = BigInt(after) - BigInt(before);
   const beforeTokens = sumWalletTokens(simulation.preTokenBalances, wallet);
   const afterTokens = sumWalletTokens(simulation.postTokenBalances, wallet);
-  if (!beforeTokens || !afterTokens) return null;
+  if (!beforeTokens || !afterTokens) return { reason: 'swap_effects_unverifiable' };
   const delta = mint => (afterTokens.get(mint) ?? 0n) - (beforeTokens.get(mint) ?? 0n);
   for (const mint of new Set([...beforeTokens.keys(), ...afterTokens.keys()])) {
-    if (mint !== inputMint && mint !== outputMint && delta(mint) !== 0n) return null;
-    if (mint === NATIVE_MINT && delta(mint) !== 0n) return null;
+    if (delta(mint) === 0n) continue;
+    if (mint === NATIVE_MINT) return { reason: 'swap_wrapped_sol_changed' };
+    if (mint !== inputMint && mint !== outputMint) return { reason: 'swap_other_token_changed' };
   }
   const input = BigInt(amount);
   const minimum = BigInt(minOutput);
-  if (input === 0n || minimum === 0n) return null;
-  if (inputMint !== NATIVE_MINT && delta(inputMint) !== -input) return null;
-  if (outputMint !== NATIVE_MINT && delta(outputMint) < minimum) return null;
+  if (input === 0n || minimum === 0n) return { reason: 'swap_effects_unverifiable' };
+  if (inputMint !== NATIVE_MINT && delta(inputMint) !== -input) return { reason: 'swap_input_mismatch' };
+  const output = outputMint === NATIVE_MINT ? solChange + fee : delta(outputMint);
+  if (output < minimum) return { reason: 'swap_output_below_minimum' };
 
-  if (outputMint === NATIVE_MINT) {
-    if (solChange + fee < minimum || fee > MAX_EXTRA_LAMPORTS) return null;
-    return { feeLamports: fee.toString(), maxSolCost: fee.toString() };
-  }
-  const solCost = -solChange - (inputMint === NATIVE_MINT ? input : 0n);
-  if (solCost < fee || solCost > MAX_EXTRA_LAMPORTS) return null;
+  const solCost = outputMint === NATIVE_MINT ? fee : -solChange - (inputMint === NATIVE_MINT ? input : 0n);
+  if (solCost < fee) return { reason: 'swap_sol_debit_below_fee' };
+  if (solCost > MAX_EXTRA_LAMPORTS) return { reason: 'swap_sol_cost_above_limit' };
   return { feeLamports: fee.toString(), maxSolCost: solCost.toString() };
 }
