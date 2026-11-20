@@ -109,6 +109,21 @@ test('timeline is newest first and drops live-view secrets and hidden reasoning'
   assert.deepEqual(entries.map(entry => entry.at), [...entries.map(entry => entry.at)].sort((a, b) => b - a));
 });
 
+test('timeline displays stored reservations in whole asset units and only formats reservation events', () => {
+  const events = [
+    ['budget.reserved', 'Reserved 1000005000 SOL', 'Reserved 1.000005 SOL in the agent budget'],
+    ['budget.reserved', 'Reserved 1 SOL', 'Reserved 0.000000001 SOL in the agent budget'],
+    ['budget.reserved', 'Reserved 1250000 USDC', 'Reserved 1.25 USDC in the agent budget'],
+    ['budget.reserved', 'Reserved 1.000005 SOL', 'Reserved 1.000005 SOL'],
+    ['tool.call', 'Reserved 1000005000 SOL', 'Reserved 1000005000 SOL'],
+  ];
+  const rows = events.map(([kind, summary], index) => ({
+    id: `evt_${index}`, botId: 'bot_meteora', ownerId: 'demo_owner', at: 1763100300000, kind, summary,
+  }));
+  assert.deepEqual(timelineEntries(rows, 'bot_meteora').map(entry => entry.summary), events.map(([, , summary]) => summary));
+  assert.equal(rows[0].summary, 'Reserved 1000005000 SOL');
+});
+
 /**
  * Achieves: verifies why view uses the decision record and hides a mismatched memo.
  * Fails when: why view uses the decision record and hides a mismatched memo breaks (e.g. expected false, false, null).
