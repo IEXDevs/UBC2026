@@ -17,6 +17,7 @@ import PromptBar from './PromptBar';
 import AIProvidersSheet from './AIProvidersSheet';
 import { providerStorage } from '../lib/provider-storage.mjs';
 import { canReleaseChatMessage, modelFreeCommand, needsChatModel } from '../lib/model-free-command.mjs';
+import { isLasoCardRequest, pendingLasoConfirmation } from '../lib/laso-chat.mjs';
 import {
   ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
   selectedModelRequest, visibleModelOptions,
@@ -161,6 +162,11 @@ export default function Composer({
   const [reviewCap, setReviewCap] = useState('');
   const [pendingSwap, setPendingSwap] = useState(null);
   const [lasoClaim, setLasoClaim] = useState(null);
+  const pendingLaso = useRef(null);
+  useEffect(() => {
+    pendingLaso.current = null;
+    setLasoClaim(null);
+  }, [ownerId, botId]);
 
   useEffect(() => {
     setPendingSwap(null);
@@ -685,9 +691,15 @@ export default function Composer({
     }
     if (anchor && result.activity?.length) onPatchLine?.(anchor, { activity: result.activity }, botIdRef.current);
     if (result.hold?.kind === 'modal') {
+      if (result.hold.args?.action === 'x402') {
+        setLasoClaim(null);
+        pendingLaso.current = { ownerId, botId: botIdRef.current, hold: result.hold };
+      }
       const label = result.reply || result.hold.prompt || result.hold.label;
-      if (label && !shown.includes(label)) pushLine('agent', label, botIdRef.current, 0, [], null, { mentionAddress: result.hold.args?.destination });
-      sayConfirm(label);
+      if (label && !shown.includes(label)) {
+        pushLine('agent', label, botIdRef.current, 0, [], null, { mentionAddress: result.hold.args?.destination });
+        sayConfirm(label);
+      }
       setThinking(false);
       onThinking?.(false);
       const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label, result.hold.args?.destination) : false;
@@ -724,6 +736,13 @@ export default function Composer({
     onThinking?.(true);
     window.clearTimeout(thinkTimer.current);
     try {
+      const pending = pendingLasoConfirmation(pendingLaso.current, spoken, { ownerId, botId: targetId });
+      if (!grants?.length && pending) {
+        await settleChat({ ok: true, reply: pending.label, hold: pending }, spoken, prior, [], run, [pending.label]);
+        return;
+      }
+      pendingLaso.current = null;
+      if (isLasoCardRequest(spoken) || grants?.some(hold => hold.args?.action === 'x402')) setLasoClaim(null);
       // Every turn, including non-model commands and rejected queued messages,
       // must reach the same finally block to release the queue and busy state.
       if (!selection && modelFreeCommand(spoken) === 'platform-send') return;

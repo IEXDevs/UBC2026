@@ -9,6 +9,7 @@ import { publicApiSummary, thinkStep, toolStep } from './chat-activity.mjs';
 import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
 import { grantCovers, isFundTool, toolAccessRequest } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
+import { isLasoCardRequest, lasoPreparationArgs, lasoPurchaseHold } from './laso-chat.mjs';
 import { META_SPARK_MODEL, reasoningEffortFor } from './thinking-levels.mjs';
 import { MODEL_ID, parseModelProvider } from './ai-provider.mjs';
 import {
@@ -523,7 +524,8 @@ export async function completeTextChat({
     for (const call of calls.slice(0, 4)) {
       const name = typeof call?.function?.name === 'string' ? call.function.name : '';
       const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
-      const args = parseToolArgs(call?.function?.arguments);
+      const rawArgs = parseToolArgs(call?.function?.arguments);
+      const args = name === 'prepare_shopping' && cardCheckout(latest, history) ? lasoPreparationArgs(rawArgs, latest) : rawArgs;
       const signature = toolSignature(name, args);
       const blocked = blockedBrowser(name, args);
       const stayOnApi = cardCheckout(latest, history) && BROWSER_TOOLS.has(name);
@@ -545,12 +547,16 @@ export async function completeTextChat({
           error: 'use_api',
           hint: 'This purchase stays on the API. Tell the owner what the API returned. Do not open a browser.',
         };
+      } else if ((isLasoCardRequest(latest) || (cardCheckout(latest, history) && /^\s*(?:yes|ok(?:ay)?|approved?|go ahead)\b/i.test(latest)))
+          && name === 'request_spend' && args.action !== 'x402') {
+        result = { error: 'laso_requires_x402', hint: 'Never transfer to Laso payTo. Use the prepared Laso ticket with action x402.' };
       } else if (access && !grantCovers(grants, name, args)) {
         return access;
       } else if (!validRecipientDiscovery(name, args)) {
         result = { error: name === 'lookup_recipient' ? 'invalid_recipient' : 'invalid_parameters' };
       } else if (
         isFundTool(name)
+        && !(name === 'prepare_shopping' && args.provider === 'laso')
         && !grantCovers(grants, name, args)
         && !(await allowStep('tool', JSON.stringify({ name, args })))
       ) {
@@ -563,6 +569,12 @@ export async function completeTextChat({
           result = { error: typeof error?.code === 'string' ? error.code : 'tool_failed' };
         }
         result = withSolscanUrl(result);
+        const purchase = name === 'prepare_shopping' && lasoPurchaseHold(args, result);
+        if (purchase) {
+          const step = toolStep(name, args, result);
+          if (step && activity.length < 12) activity.push(step);
+          return purchase;
+        }
         const receipt = txReceiptFromResult(result);
         if (receipt && !seenSigs.has(receipt.signature)) {
           seenSigs.add(receipt.signature);

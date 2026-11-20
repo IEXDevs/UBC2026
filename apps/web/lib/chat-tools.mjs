@@ -35,6 +35,7 @@ import {
 } from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
+import { isLasoCardRequest, lasoPreparationArgs } from './laso-chat.mjs';
 
 const MAX_TOOL_RESULT = 6000;
 const DASHBOARD_NAMES = new Set(DASHBOARD_TOOLS.map((tool) => tool.name));
@@ -655,6 +656,12 @@ export function createChatToolInvoker({
 
   return async function invokeTool(name, args = {}, { approveOnce, spendAuthorization, swapTicket } = {}) {
     args = applySituation(name, args, situation);
+    if (isLasoCardRequest(ownerMessage)) {
+      if (name === 'prepare_shopping') args = lasoPreparationArgs(args, ownerMessage);
+      if (name === 'request_spend' && args.action !== 'x402') {
+        return { error: 'laso_requires_x402', hint: 'Use action x402 with the prepared lasoTicket, never a plain transfer to Laso payTo.' };
+      }
+    }
     if (name === 'create_loop' || name === 'set_loop_cooldown' || name === 'break_loop') {
       args = { ...args, botId };
       delete args.ownerAsked;
