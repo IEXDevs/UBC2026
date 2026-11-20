@@ -4,6 +4,37 @@ import { createSearch, createScrape, createBrowserProvider, assertPublicHttpUrl,
 
 const reply = value => async () => Response.json(value);
 
+test('closeTab closes only a validated target through REST, including binding sessions', async () => {
+  const calls = [];
+  const options = { accountId: 'account', apiToken: 'token', fetcher: async (url, init) => {
+    calls.push([url, init.method]);
+    return Response.json({ message: 'Target is closing' });
+  } };
+  for (const binding of [undefined, { acquire() {}, devtools: { newTarget() {} } }]) {
+    const provider = createBrowserProvider({ ...options, binding });
+    await provider.closeTab('session', 'TARGET');
+    await assert.rejects(provider.closeTab('session', '../escape'), { code: 'invalid_target' });
+  }
+  assert.equal(calls.length, 2);
+  for (const [url, method] of calls) {
+    assert.equal(url, 'https://api.cloudflare.com/client/v4/accounts/account/browser-run/devtools/browser/session/json/close/TARGET');
+    assert.equal(method, 'GET');
+  }
+});
+
+test('browser HTTP failures expose status and canonical reasons, never upstream secrets', async () => {
+  for (const status of [403, 404, 410, 500]) {
+    const provider = createBrowserProvider({ accountId: 'account', apiToken: 'token', fetcher: async () =>
+      Response.json({ error: 'Failed to fetch targets https://live.browser.run/ui/view?token=private Bearer secret' }, { status }) });
+    await assert.rejects(provider.readonlyView('session'), error => {
+      assert.equal(error.providerStatus, status);
+      assert.equal(error.providerReason, 'targets_unavailable');
+      assert.doesNotMatch(JSON.stringify(error), /private|Bearer|live\.browser/);
+      return true;
+    });
+  }
+});
+
 test('session REST 404s expire views and navigation, close on release, but preserve create endpoint errors', async () => {
   const provider = createBrowserProvider({ accountId: 'test', apiToken: 'test', fetcher: async () => new Response('', { status: 404 }) });
   await assert.rejects(provider.createSession(), { code: 'browser_endpoint_missing', status: 502 });

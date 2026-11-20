@@ -1,6 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { browserSessionUrl, liveViewFrame, pickOpenSession } from './live-view.mjs';
+import { browserSessionUrl, liveViewFrame, pickOpenSession, reconcileLiveSession, liveSessionKey } from './live-view.mjs';
+
+test('navigation revisions invalidate the viewer, unchanged polling retains it and empty lists clear it', () => {
+  const current = { id: 'rec_1', revision: 0, frame: { src: 'private' }, control: 'agent' };
+  const listing = revision => ({ sessions: [{ sessionRecordId: 'rec_1', revision, status: 'open' }] });
+  assert.equal(reconcileLiveSession(current, listing(0)), current);
+  const navigated = reconcileLiveSession(current, listing(1));
+  assert.deepEqual(navigated, { id: 'rec_1', revision: 1 });
+  assert.notEqual(liveSessionKey(navigated), liveSessionKey(current));
+  assert.equal(reconcileLiveSession(current, { sessions: [] }), null);
+  assert.equal(reconcileLiveSession(current, null), null);
+  assert.equal(liveSessionKey(null), null);
+  assert.deepEqual(reconcileLiveSession(null, { sessions: [{ sessionRecordId: 'legacy' }] }), { id: 'legacy', revision: 0 });
+});
 
 /**
  * Achieves: verifies browser session URLs stay on runtime origin, encode path segments, and reject empty/javascript.

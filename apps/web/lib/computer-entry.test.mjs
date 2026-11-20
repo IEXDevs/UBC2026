@@ -20,10 +20,14 @@ test('Live View expiration clears the selected record, count and viewer before e
   let session = { id: 'old', frame: { src: 'old-viewer' } };
   let count = 1;
   const shown = { current: 'old' };
-  new Function('setSession', 'setOpenCount', 'shown', block)(value => { session = value; }, value => { count = value; }, shown);
+  const started = { current: true };
+  new Function('setSession', 'setOpenCount', 'shown', 'started', block)(value => { session = value; }, value => { count = value; }, shown, started);
   assert.equal(session, null);
   assert.equal(count, 0);
   assert.equal(shown.current, null);
+  assert.equal(started.current, false);
+  assert.match(panel, /setInterval\(sync, 8000\)/);
+  assert.match(panel, /refreshAt\.current = Date\.now\(\) \+ 60_000/);
   assert.match(panel, /disabled=\{!ready \|\| busy \|\| Boolean\(sessionRecordId\)\}/);
 });
 

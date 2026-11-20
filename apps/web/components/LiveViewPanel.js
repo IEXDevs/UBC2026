@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { browserErrorNote, browserStatusNote } from '../lib/browser-status.mjs';
-import { browserSessionUrl, liveViewFrame, pickOpenSession } from '../lib/live-view.mjs';
+import { browserSessionUrl, liveViewFrame, liveSessionKey, reconcileLiveSession } from '../lib/live-view.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import LatticeLoader from './bits/LatticeLoader';
 import HoldButton from './HoldButton';
@@ -21,7 +21,10 @@ async function ownerFetch(url, ownerId, getAccessToken, method, body) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = typeof data.error === 'string' ? data.error : 'browser_request_failed';
-    throw new Error(code);
+    const error = new Error(code);
+    error.providerStatus = data.providerStatus;
+    error.providerReason = data.providerReason;
+    throw error;
   }
   return data;
 }
@@ -42,12 +45,18 @@ export default function LiveViewPanel({
 }) {
   const [session, setSession] = useState(null);
   const sessionRecordId = session?.id;
+  const sessionKey = liveSessionKey(session);
   const frame = session?.frame;
   const [openCount, setOpenCount] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const shown = useRef(null);
   const started = useRef(false);
+  const inFlight = useRef(false);
+  const refreshAt = useRef(0);
+  const resumeUrl = useRef(null);
+  const activeSession = useRef(session);
+  activeSession.current = session;
   const sessionUrl = browserSessionUrl(runtimeBase, botId);
   const status = browserStatusNote({
     ownerId,
@@ -66,48 +75,54 @@ export default function LiveViewPanel({
     const listed = await ownerFetch(sessionUrl, ownerId, getAccessToken, 'GET');
     const sessions = Array.isArray(listed.sessions) ? listed.sessions : [];
     setOpenCount(sessions.length);
-    const id = pickOpenSession(listed)?.sessionRecordId ?? null;
-    setSession(current => {
-      if (!id) return null;
-      return current?.id === id ? current : { id };
-    });
+    const next = reconcileLiveSession(null, listed);
+    const id = next?.id ?? null;
+    const row = sessions.find(item => item.sessionRecordId === id);
+    if (typeof row?.url === 'string') resumeUrl.current = row.url;
+    setSession(current => reconcileLiveSession(current, listed));
     return id;
   }, [ownerId, sessionUrl, getAccessToken]);
 
   useEffect(() => {
     let stopped = false;
-    (async () => {
+    async function sync() {
       let id = null;
       try {
         if (stopped) return;
         id = await syncSessions();
       } catch (caught) {
-        if (!stopped && autoStart) {
+        if (!stopped) {
           const code = caught instanceof Error ? caught.message : 'browser_request_failed';
-          setError(browserErrorNote(code));
+          setError(browserErrorNote(code, caught?.providerStatus, caught?.providerReason));
         }
         return;
       }
-      if (stopped || !autoStart || id || started.current) return;
+      if (stopped) return;
+      if (id) {
+        if (activeSession.current?.id === id && (!activeSession.current.frame || Date.now() >= refreshAt.current)) run('view');
+        return;
+      }
+      if (!autoStart || started.current) return;
       started.current = true;
       run('open');
-    })();
-    const timer = setInterval(() => {
-      syncSessions().catch(() => {});
-    }, 8000);
+    }
+    sync();
+    const timer = setInterval(sync, 8000);
     return () => {
       stopped = true;
       clearInterval(timer);
     };
-  }, [syncSessions]);
+  }, [syncSessions, sessionKey]);
 
   useEffect(() => {
-    if (shown.current === sessionRecordId) return;
-    shown.current = sessionRecordId;
+    if (shown.current === sessionKey) return;
+    shown.current = sessionKey;
     if (sessionRecordId) run('view');
-  }, [sessionRecordId]);
+  }, [sessionKey]);
 
   async function run(action) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setError('');
     setBusy(true);
     try {
@@ -116,8 +131,11 @@ export default function LiveViewPanel({
         if (existing) return;
         try {
           const url = browserSessionUrl(runtimeBase, botId);
-          const opened = await ownerFetch(url, ownerId, getAccessToken, 'POST', { purpose: 'browse' });
-          setSession({ id: opened.sessionRecordId });
+          const opened = await ownerFetch(url, ownerId, getAccessToken, 'POST', {
+            purpose: 'browse',
+            ...(resumeUrl.current ? { url: resumeUrl.current } : {}),
+          });
+          setSession({ id: opened.sessionRecordId, revision: 0 });
           setOpenCount(current => Math.max(current, 1));
           return;
         } catch (caught) {
@@ -130,7 +148,8 @@ export default function LiveViewPanel({
         }
       }
       if (action === 'view' || action === 'owner' || action === 'agent') {
-        let id = sessionRecordId;
+        const viewingKey = liveSessionKey(activeSession.current);
+        let id = activeSession.current?.id;
         if (!id) {
           id = await syncSessions();
         }
@@ -139,8 +158,10 @@ export default function LiveViewPanel({
         const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'live-view' });
         const view = await ownerFetch(url, ownerId, getAccessToken, 'POST', next ? { control: next } : {});
         const nextFrame = liveViewFrame(view);
-        setSession(current => current?.id === id
-          ? { id, frame: nextFrame, control: view.control }
+        if (!nextFrame.src) throw new Error('invalid_provider_response');
+        refreshAt.current = Date.now() + 60_000;
+        setSession(current => current?.id === id && liveSessionKey(current) === viewingKey
+          ? { ...current, frame: nextFrame, control: view.control }
           : current);
         return;
       }
@@ -151,6 +172,8 @@ export default function LiveViewPanel({
       if (!id) throw new Error('session_not_found');
       const url = browserSessionUrl(runtimeBase, botId, { sessionRecordId: id, action: 'release' });
       await ownerFetch(url, ownerId, getAccessToken, 'POST', {});
+      started.current = true;
+      resumeUrl.current = null;
       setSession(current => current?.id === id ? null : current);
       setOpenCount(0);
       await syncSessions().catch(() => null);
@@ -160,9 +183,12 @@ export default function LiveViewPanel({
         setSession(null);
         setOpenCount(0);
         shown.current = null;
+        started.current = false;
       }
-      setError(browserErrorNote(code));
+      refreshAt.current = Date.now() + 60_000;
+      setError(browserErrorNote(code, caught?.providerStatus, caught?.providerReason));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -183,6 +209,7 @@ export default function LiveViewPanel({
                 title="Browser live view"
                 src={frame.src}
                 referrerPolicy={frame.referrerPolicy}
+                onError={() => setError(browserErrorNote('browser_viewer_failed'))}
               />
             ) : (busy ? <LatticeLoader label="Browser" /> : null)}
             <button
@@ -210,6 +237,7 @@ export default function LiveViewPanel({
             title="Browser live view"
             src={frame.src}
             referrerPolicy={frame.referrerPolicy}
+            onError={() => setError(browserErrorNote('browser_viewer_failed'))}
           />
         ) : null}
         {frame?.src ? (

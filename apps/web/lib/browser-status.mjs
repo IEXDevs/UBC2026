@@ -24,7 +24,29 @@ export function browserStatusNote({
   return 'No browser session yet.';
 }
 
-export function browserErrorNote(code) {
+export function browserErrorNote(code, providerStatus, providerReason) {
+  const codes = new Set([
+    'browser_session_expired', 'browser_readonly_not_configured', 'browser_not_configured',
+    'search_not_configured', 'scrape_not_configured', 'concurrency_limit', 'owner_required',
+    'forbidden', 'bot_not_found', 'bot_directory_unavailable', 'not_found', 'session_not_found',
+    'browser_request_failed', 'browser_endpoint_missing', 'browser_provider_failed',
+    'provider_rejected', 'provider_failed', 'provider_rate_limited', 'provider_unavailable',
+    'invalid_provider_response', 'browser_viewer_failed', 'browser_failed', 'owner_has_control',
+    'invalid_identity', 'invalid_navigate', 'invalid_session', 'invalid_target', 'invalid_purpose',
+  ]);
+  const key = codes.has(code) ? code : 'browser_request_failed';
+  const status = Number.isInteger(providerStatus) && providerStatus >= 400 && providerStatus <= 599 ? providerStatus : null;
+  const reasons = {
+    targets_unavailable: 'Failed to fetch targets',
+    binding_session_expired: 'binding session expired',
+    binding_failed: 'browser binding unavailable or failed',
+  };
+  const reason = Object.hasOwn(reasons, providerReason) ? reasons[providerReason] : '';
+  const detail = [status, reason || (status === 401 || status === 403 ? 'API token rejected' : '')].filter(Boolean).join(' ');
+  return `Cloudflare Browser Run: ${key}${detail ? ` (${detail})` : ''}. ${browserErrorHint(key)}`;
+}
+
+function browserErrorHint(code) {
   const key = typeof code === 'string' ? code.trim() : '';
   if (!key) return 'Browser request failed.';
   if (key === 'browser_session_expired') return 'That browser session ended. Open a new one.';

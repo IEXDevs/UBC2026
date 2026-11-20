@@ -38,7 +38,11 @@ function noStore(data, status = 200) {
 
 function browserFailure(error) {
   if (error instanceof SessionError || error instanceof ProviderError) {
-    return noStore({ error: error.code }, error.status);
+    return noStore({
+      error: error.code,
+      ...(Number.isInteger(error.providerStatus) ? { providerStatus: error.providerStatus } : {}),
+      ...(['targets_unavailable', 'binding_session_expired', 'binding_failed'].includes(error.providerReason) ? { providerReason: error.providerReason } : {}),
+    }, error.status);
   }
   return noStore({ error: 'browser_failed' }, 500);
 }

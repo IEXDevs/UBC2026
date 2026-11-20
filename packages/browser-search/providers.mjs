@@ -168,7 +168,13 @@ async function browserRequest(fetcher, url, options, sessionScoped = false) {
   let response;
   try { response = await fetcher(url, { ...options, signal: AbortSignal.timeout(30000) }); }
   catch { throw new ProviderError('provider_unavailable'); }
-  if (!response.ok) throw browserHttpError(response.status, sessionScoped);
+  if (!response.ok) {
+    const error = browserHttpError(response.status, sessionScoped);
+    error.providerStatus = response.status;
+    const body = await response.text();
+    if (sessionScoped && /failed to fetch targets/i.test(body)) error.providerReason = 'targets_unavailable';
+    throw error;
+  }
   const text = await response.text();
   if (!text) return {};
   try { return JSON.parse(text); } catch { throw new ProviderError('invalid_provider_response'); }
@@ -190,11 +196,15 @@ async function viaBinding(method, work) {
     if (error instanceof ProviderError) throw error;
     if (method !== 'acquire' && /(?:session\b[^\n]{0,120}\b(?:not found|does not exist|expired|closed)|no such session|unknown session|failed to fetch targets)/i.test(String(error?.message))) {
       if (method === 'closeSession') return { status: 'closed' };
-      throw new ProviderError('browser_session_expired', 410);
+      const expired = new ProviderError('browser_session_expired', 410);
+      expired.providerReason = 'binding_session_expired';
+      throw expired;
     }
     console.error(`Browser binding ${method}: ${sanitizedBindingError(error?.name)}: ${sanitizedBindingError(error?.message)}`);
     if (/429|rate limit/i.test(String(error?.message))) throw new ProviderError('provider_rate_limited', 429);
-    throw new ProviderError('provider_failed', 502);
+    const failed = new ProviderError('provider_failed', 502);
+    failed.providerReason = 'binding_failed';
+    throw failed;
   }
 }
 
@@ -252,6 +262,10 @@ function createBindingBrowserProvider(binding, restProvider) {
       }
       return checkedViewer(await viaBinding('getLiveView', () => binding.getLiveView(sessionId, liveViewOptions({ targetId, interactive: true }))), true);
     },
+    async closeTab(sessionId, targetId) {
+      if (!restProvider) throw new ProviderError('browser_readonly_not_configured', 503);
+      return restProvider.closeTab(sessionId, targetId);
+    },
     async closeSession(sessionId) {
       assertSessionId(sessionId);
       const result = await viaBinding('closeSession', () => binding.closeSession(sessionId));
@@ -294,7 +308,10 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch, bi
     }
     if (last?.code === 'browser_endpoint_missing' && path.startsWith('/')) {
       if (method === 'DELETE') return { status: 'closed' };
-      throw new ProviderError('browser_session_expired', 410);
+      const expired = new ProviderError('browser_session_expired', 410);
+      expired.providerStatus = last.providerStatus;
+      expired.providerReason = last.providerReason;
+      throw expired;
     }
     throw last ?? new ProviderError('browser_endpoint_missing', 502);
   }
@@ -305,6 +322,11 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch, bi
       // Do not return provider CDP URLs or privileged default viewer links to the frontend.
       // New sessions start on about:blank until openTab navigates.
       return { sessionId: result.sessionId };
+    },
+    async closeTab(sessionId, targetId) {
+      assertSessionId(sessionId);
+      if (typeof targetId !== 'string' || !TARGET_ID.test(targetId)) throw new ProviderError('invalid_target', 400);
+      return call(`/${encodeURIComponent(sessionId)}/json/close/${encodeURIComponent(targetId)}`, { method: 'GET' });
     },
     /**
      * Open a tab and navigate. Sessions otherwise stay on about:blank.

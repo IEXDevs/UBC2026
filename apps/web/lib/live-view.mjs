@@ -3,6 +3,18 @@ import { shellRuntimeUrl } from './runtime-data.mjs';
 const LIVE_VIEW_PATHS = new Set(['/ui/view', '/ui/inspector']);
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 
+export function reconcileLiveSession(current, listed) {
+  const row = pickOpenSession(listed);
+  if (!row) return null;
+  const revision = row.revision ?? 0;
+  if (current?.id === row.sessionRecordId && current.revision === revision) return current;
+  return { id: row.sessionRecordId, revision };
+}
+
+export function liveSessionKey(session) {
+  return session ? `${session.id}:${session.revision ?? 0}` : null;
+}
+
 export function browserSessionUrl(runtimeBase, botId, { sessionRecordId, action } = {}) {
   if (runtimeBase === 'shell') {
     if (typeof botId !== 'string' || !BOT_ID.test(botId)) return null;

@@ -278,6 +278,7 @@ export function createBrowserSessionService({
         status: 'open',
         url: pageUrl,
         targetId,
+        revision: 0,
         createdAt: clock(),
         updatedAt: clock(),
       };
@@ -321,9 +322,13 @@ export function createBrowserSessionService({
         ...record,
         url: tab.url,
         targetId: tab.targetId,
+        revision: (record.revision ?? 0) + 1,
         updatedAt: clock(),
       };
       await store.put(keyFor(ownerId, botId, record.sessionRecordId), updated);
+      if (record.targetId && record.targetId !== tab.targetId && typeof browsers.closeTab === 'function') {
+        try { await browsers.closeTab(record.providerSessionId, record.targetId); } catch {}
+      }
       return {
         sessionRecordId: record.sessionRecordId,
         url: tab.url,
@@ -394,12 +399,13 @@ export function createBrowserSessionService({
       if (![ownerId, botId].every(idOk)) fail('invalid_identity');
       const rows = (await store.list(prefixFor(ownerId, botId)))
         .filter(row => row.status === 'open')
-        .map(({ sessionRecordId, purpose, createdAt, updatedAt, status, url }) => ({
+        .map(({ sessionRecordId, purpose, createdAt, updatedAt, status, url, revision }) => ({
           sessionRecordId,
           purpose,
           createdAt,
           updatedAt,
           status,
+          revision: revision ?? 0,
           url: typeof url === 'string' ? url : null,
         }));
       return { sessions: rows, maxSessionsPerBot };
