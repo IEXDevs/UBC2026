@@ -259,6 +259,15 @@ test('config reader reports missing secret names and never invents values', () =
  * Side effects: none.
  * Gaps: Exhaustive live-route coverage is the next test.
  */
+test('the configured Solana balance endpoint is guarded and has no legacy devnet route', () => {
+  assert.deepEqual(matchApiRoute('GET', '/api/solana-balance'), {
+    route: { id: 'solana.balance', method: 'GET', path: '/api/solana-balance', phase: 1, auth: 'privy', status: 'guarded' },
+    params: {},
+  });
+  assert.equal(matchApiRoute('POST', '/api/solana-balance'), null);
+  assert.equal(matchApiRoute('GET', '/api/devnet-balance'), null);
+});
+
 test('API route contracts match concrete paths and keep cron off the HTTP matcher', () => {
   const ids = API_ROUTES.map(route => route.id);
   assert.equal(new Set(ids).size, ids.length);
