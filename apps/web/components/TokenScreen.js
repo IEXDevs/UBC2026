@@ -133,7 +133,7 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
       transition={{ duration: 0.4, ease }}
     >
       {holdings.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
-      {loading ? <p className="quiet">Reading mainnet-beta balances.</p> : null}
+      {loading ? <p className="quiet">Reading balances.</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
       <ul className="token-rows">
         {holdings.map(row => (
@@ -172,7 +172,7 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
         const row = book.tokens[0] || null;
         if (!row?.symbol && row?.priceUsd == null && !row?.fromCache) {
           setError(book.rateLimited
-            ? 'DexScreener is limiting this network. No saved details for this token yet.'
+            ? 'DexScreener is rate-limiting requests. No saved details for this token yet.'
             : 'DexScreener has no pair for this token.');
           return;
         }
@@ -269,7 +269,6 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
       </div>
       <dl className="token-info">
         <div><dt>Name</dt><dd>{view?.name || symbol}</dd></div>
-        <div><dt>Network</dt><dd>Solana</dd></div>
         {liquidity ? <div><dt>Liquidity</dt><dd>{liquidity}</dd></div> : null}
         {marketCap ? <div><dt>Market cap</dt><dd>{marketCap}</dd></div> : null}
       </dl>

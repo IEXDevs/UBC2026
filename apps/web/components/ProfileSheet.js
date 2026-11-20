@@ -2,7 +2,6 @@
 
 import AddressText from './AddressText';
 
-import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Copy, LockKeyhole, Pencil, X } from 'lucide-react';
@@ -164,7 +163,6 @@ export default function ProfileSheet({
         <div className="profile-settings">
           <p className="plugin-kicker">Activity</p>
           <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
-          <p className="quiet profile-context">{EXECUTION_LABEL}</p>
           {signedIn ? <button type="button" className="ghost" onClick={onLogout}>Log out</button> : null}
         </div>
       </motion.section>

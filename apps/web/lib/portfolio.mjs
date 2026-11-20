@@ -167,13 +167,8 @@ export function portfolioErrorNote(body = {}) {
   return 'The portfolio could not be read.';
 }
 
-export function portfolioNote(cluster) {
-  const where = cluster === 'mainnet'
-    ? 'Read-only mainnet balances from QuickNode.'
-    : cluster === 'testnet'
-      ? 'Testnet balances from QuickNode.'
-      : 'Solana balances from QuickNode. Set QUICKNODE_MAINNET_RPC_URL to graph mainnet holdings.';
-  return `${where} Dollar values use mainnet prices and do not authorize a transaction. ${PRICE_LABEL}.`;
+function portfolioNote() {
+  return 'Read-only balances from QuickNode. Dollar values are estimates and do not authorize a transaction.';
 }
 
 /**
@@ -249,7 +244,7 @@ export function buildPortfolio({ cluster, wallets, prices = {} }) {
     slices,
     wallets: walletRows,
     unpriced,
-    note: portfolioNote(cluster),
+    note: portfolioNote(),
   };
 }
 

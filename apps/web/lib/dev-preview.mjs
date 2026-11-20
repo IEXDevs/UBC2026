@@ -1,5 +1,4 @@
 
-import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Sample balances for the local developer preview.
  * Dollar values are filled by a live DexScreener read in the browser.
@@ -81,6 +80,6 @@ export function samplePortfolio() {
         { mint: BONK, symbol: 'BONK', amount: '100000000000', decimals: 5, usdMicro: '0' },
       ],
     }],
-    note: `Developer preview. Sample balances. DexScreener prices this browser. ${EXECUTION_LABEL}. This does not authorize a transaction.`,
+    note: 'Developer preview. Sample balances. Prices from DexScreener. This does not authorize a transaction.',
   };
 }

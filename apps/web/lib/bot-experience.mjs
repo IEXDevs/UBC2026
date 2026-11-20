@@ -48,6 +48,7 @@ function redact(summary) {
 
 export function timelineSummary({ kind, summary }) {
   const clean = redact(summary);
+  if (kind === 'verify.settled') return clean.replace(/(?:^| )(?:mainnet(?:-beta)?|devnet|testnet) execution, mainnet pricing\.$/i, '');
   if (kind !== 'budget.reserved') return clean;
   const reservation = /^Reserved (0|[1-9][0-9]{0,39}) (SOL|USDC)$/.exec(clean);
   if (!reservation) return clean;
@@ -393,7 +394,7 @@ export function demoBotExperiences(ownerId = 'demo_owner') {
     bot_positions: {
       preview: null,
       events: [
-        event('evt_guard_check', 'bot_positions', owner, 'tool.call', 'Hourly paper PnL check on mainnet prices', 1763080000000),
+        event('evt_guard_check', 'bot_positions', owner, 'tool.call', 'Hourly paper PnL check', 1763080000000),
         event('evt_guard_mismatch', 'bot_positions', owner, 'verify.mismatch', 'Verifier still disagrees on price after five attempts', 1763080300000),
       ],
       decision: decision({
