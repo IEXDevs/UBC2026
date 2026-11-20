@@ -100,7 +100,8 @@ test('a selected custom model uses its key and endpoint with the existing turn v
 test('custom OpenRouter models do not weaken the free-only policy for account keys', async () => {
   const model = 'vendor/paid-chat';
   const fetcher = async (_url, init) => Response.json({ choices: [{ message: { content: init.body.includes('Role: turn-verify') ? '{"allow":true}' : 'Hello' } }] });
-  await assert.rejects(completeTextChat({ openrouterApiKey: token, model, message: 'Hello', fetcher }), error => error.code === 'openrouter_paid_model');
+  const accountReply = await completeTextChat({ openrouterApiKey: token, model, message: 'Hello', fetcher });
+  assert.ok(accountReply.model.endsWith(':free'));
   const reply = await completeTextChat({ modelProvider: { token, baseUrl: 'https://openrouter.ai/api/v1' }, model, message: 'Hello', fetcher });
   assert.equal(reply.model, model);
   assert.equal(reply.provider, 'openrouter');
