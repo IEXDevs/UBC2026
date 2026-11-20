@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChartColumn, Lock, LogOut, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
 import { markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
 import SpecularButton from './SpecularButton';
+import { accountMenuPlacement } from '../lib/account-menu-placement.mjs';
 
 const ITEMS = [
   { id: 'profile', label: 'Profile', icon: UserRound },
@@ -18,8 +19,24 @@ const ITEMS = [
 
 export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, holdingsLabel = '', onLogin, onPick }) {
   const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState({});
   const rootRef = useRef(null);
   const triggerRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    function placeMenu() {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (rect) setPlacement(accountMenuPlacement(rect, window.innerHeight));
+    }
+    placeMenu();
+    window.addEventListener('resize', placeMenu);
+    window.addEventListener('scroll', placeMenu, true);
+    return () => {
+      window.removeEventListener('resize', placeMenu);
+      window.removeEventListener('scroll', placeMenu, true);
+    };
+  }, [open]);
 
   function closeMenu() {
     const pop = rootRef.current?.querySelector('.account-pop');
@@ -60,7 +77,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
 
   return (
     <div className={`account-menu${open ? ' is-open' : ''}`} ref={rootRef}>
-      <div className="account-pop" role="menu" aria-label="Account" inert={open ? undefined : true}>
+      <div className="account-pop" style={placement} role="menu" aria-label="Account" inert={open ? undefined : true}>
         {[...ITEMS, ...(walletUnlocked ? [{ id: 'lock-wallet', label: 'Lock wallet', icon: Lock }] : []), { id: 'logout', label: 'Log out', icon: LogOut }].map((item) => {
           const Icon = item.icon;
           return (
