@@ -187,6 +187,13 @@ export async function handleSpend(request, env = {}) {
     const pending = await useLoopSwap(env, ownerId, parsed);
     return matchesLoopSwap(pending?.intent, parsed, context, Number.isSafeInteger(env.spendNow) ? now : Date.now());
   };
+  // A queued agent swap runs without the slide only on the same terms as an agent send:
+  // Full or Review permission, within the review cap, trusted, and through the same desk check.
+  const autoSwap = raw.autoSwap === true;
+  if (autoSwap && (!swap || !loopSwap || (parsed.permission !== 'full' && parsed.permission !== 'review')
+      || typeof raw.swapTicket !== 'string' || raw.spendAuthorization !== undefined || overrideToken !== null)) {
+    return json({ error: 'invalid_auto_swap', signed: false }, 400);
+  }
   if (loopSwap && (!swap || !await activeLoopSwap())) {
     return json({ error: 'swap_intent_unavailable', signed: false }, 409);
   }
@@ -201,7 +208,7 @@ export async function handleSpend(request, env = {}) {
         || !env.transferClient?.signPreparedSolanaTransfer || !env.ledgerApi?.reserveBudget) {
       return json({ error: 'swap_unavailable', signed: false }, 503);
     }
-    if (!parsed.confirmed) {
+    if (!parsed.confirmed && !autoSwap) {
       try {
         const preview = await previewLiveSwap(env, context, parsed, approvalKey, now);
         return json({ state: 'approval-needed', signed: false, swapPreview: preview });
@@ -209,7 +216,7 @@ export async function handleSpend(request, env = {}) {
         return json({ error: 'swap_quote_unavailable', signed: false }, 409);
       }
     }
-    if (desk.ok && (desk.via !== 'grant' || (!prepareAuthorization && !ownerAuthorization))) {
+    if (!autoSwap && desk.ok && (desk.via !== 'grant' || (!prepareAuthorization && !ownerAuthorization))) {
       return json({ error: 'swap_owner_authorization_required', signed: false }, 403);
     }
   }
@@ -377,8 +384,8 @@ export async function handleSpend(request, env = {}) {
           mint,
         }),
       now,
-      ownerPermission: assetTransfer ? 'ask' : parsed.permission,
-      confirmed: parsed.confirmed,
+      ownerPermission: assetTransfer && !autoSwap ? 'ask' : parsed.permission,
+      confirmed: autoSwap ? false : parsed.confirmed,
       reviewCap: parsed.reviewCap,
       quote: parsed.quote,
       signSolana,
