@@ -27,6 +27,7 @@ import ComputerSheet from '../components/ComputerSheet';
 import FileStage from '../components/FileStage';
 import RecallSearch from '../components/RecallSearch';
 import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletGlance } from '../lib/money-views.mjs';
+import { mentionSuggestions } from '../lib/mention-handles.mjs';
 import { assignedWalletAddress, devnetSpendableLabel } from '../lib/devnet-balance.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { clearAcceptanceDraft, netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
@@ -1986,6 +1987,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, devPreview = fals
             onThinking={on => setThinkingBot(on ? bot.id : null)}
             onVoiceSpan={addVoice}
             resolveMention={resolveMention}
+            mentionHandles={mentionSuggestions({
+              handle: profile?.handle,
+              displayName: profile?.displayName,
+              transfers,
+              payments,
+              lines: talks[bot.id] ?? [],
+            })}
             onContextWindow={setContextLimit}
             usage={contextUsage(talks[bot.id] ?? [], contextLimit)}
             onEditLine={onEditLine}

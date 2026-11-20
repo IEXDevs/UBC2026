@@ -142,6 +142,7 @@ export default function Composer({
   onVoiceLive = null,
   onBindAccess = null,
   onContextWindow = null,
+  mentionHandles = [],
 }) {
   const [presence, setPresence] = useState('off');
   const [mode, setMode] = useState('full');
@@ -1063,6 +1064,7 @@ export default function Composer({
           placeholder={`Message ${botName}`}
           label={`Message ${botName}`}
           sources={PROMPT_SOURCES}
+          handles={mentionHandles}
           commands={PROMPT_COMMANDS}
           models={models}
           defaultModel={chatModel}
