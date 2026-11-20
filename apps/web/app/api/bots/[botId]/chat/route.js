@@ -1,4 +1,5 @@
 import { accessTokenFromRequest } from '../../../../../lib/privy-cookie-session.mjs';
+import { swapFailure } from '../../../../../lib/swap-failure.mjs';
 import { createHmac } from 'node:crypto';
 import {
   parsePermissionedSpendBody, parseSpendApprovalTerms, parseSpendAuthorizationSignature, spendApprovalMessage,
@@ -290,8 +291,15 @@ export async function POST(request, context) {
 
   /** A queued agent swap runs on the terms an agent send would: Full or Review, within the review cap. The runtime re-checks trust, policy and the desk. */
   async function autoLoopSwap(hold, swapHold, swapPreview) {
-    if ((permissionMode !== 'full' && permissionMode !== 'review') || !hold.idempotencyKey?.startsWith('loop_swap_')
-        || amountOverReviewCap(swapPreview.usdMicros, reviewCap)) return null;
+    const approvalReason = (permissionMode !== 'full' && permissionMode !== 'review') ? 'owner_approval_required'
+      : amountOverReviewCap(swapPreview.usdMicros, reviewCap) ? 'approval-needed' : null;
+    if (approvalReason) {
+      const message = swapFailure({ error: approvalReason }).message;
+      swapHold.prompt = `${message} ${swapHold.prompt}`;
+      swapHold.label = `${message} ${swapHold.label}`;
+      return null;
+    }
+    if (!hold.idempotencyKey?.startsWith('loop_swap_')) return null;
     const sent = await invokeRaw('request_spend', {
       ...hold.args, botId, permission: permissionMode, reviewCap: effectiveReviewCap(reviewCap),
       idempotencyKey: hold.idempotencyKey, autoSwap: true,
@@ -302,7 +310,11 @@ export async function POST(request, context) {
     // Only a swap stopped before its reservation can still go to the slide under the same key.
     const beforeReserve = sent?.state === 'approval-needed' || sent?.state === 'trust-confirmation-required'
       || sent?.error === 'desk_locked';
-    return beforeReserve ? null : 'The automatic swap did not complete. Check activity before trying again.';
+    if (beforeReserve) {
+      swapHold.prompt = `${swapFailure(sent).message} ${swapHold.prompt}`;
+      swapHold.label = `${swapFailure(sent).message} ${swapHold.label}`;
+    }
+    return beforeReserve ? null : swapFailure(sent).message;
   }
 
   async function loadPendingSwapHold() {
@@ -341,8 +353,8 @@ export async function POST(request, context) {
         : swapHold
         ? { ...reply, text: swapHold.label, hold: swapHold }
         : { ...reply, text: preview?.error === 'swap_requires_usd_budget'
-          ? 'Live swaps need an agent with USD spending limits.'
-          : 'I could not prepare a live swap quote. No funds moved.', hold: null };
+          ? swapFailure({ error: 'swap_requires_usd_budget' }).message
+          : swapFailure(preview).message, hold: null };
     }
     const assetHold = isAssetSpendHold(reply.hold);
     const hold = assetHold

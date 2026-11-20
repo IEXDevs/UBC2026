@@ -1,4 +1,5 @@
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { swapFailure } from './swap-failure.mjs';
 
 /**
  * Public chat trace for a tool round. Titles, hosts, and queries only.
@@ -270,6 +271,7 @@ function privyDiagnosticMessage(privy, reason) {
 
 export function spendFailureMessage(result) {
   const parsed = parseResult(result);
+  if (parsed?.failure) return swapFailure(parsed).message;
   if (parsed?.error === 'swap_intent_unavailable' || parsed?.reason === 'swap_intent_unavailable') {
     return 'This swap is no longer pending. Ask the agent to find another trade.';
   }

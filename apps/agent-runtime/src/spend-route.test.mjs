@@ -191,7 +191,7 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
   const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey };
   const request = body => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
   routeSlippage = 100;
-  assert.equal((await (await request()).json()).error, 'swap_quote_unavailable');
+  assert.equal((await (await request()).json()).error, 'swap_route_refused');
   routeSlippage = 50;
   const preview = await (await request()).json();
   assert.equal(preview.swapPreview?.usdMicros, '1000500');
@@ -1306,8 +1306,10 @@ test('an auto agent swap signs only within the review cap and with the desk unlo
   const over = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '1000000' })).json();
   assert.equal(over.signed, false);
   assert.equal(over.state, 'approval-needed');
+  assert.equal(over.failure.step, 'approval');
   const locked = await (await request({ autoSwap: true, swapTicket: ticket }, {})).json();
   assert.equal(locked.signed, false);
+  assert.equal(locked.failure.code, 'desk_locked');
   const ask = await (await request({ autoSwap: true, swapTicket: ticket, permission: 'ask' })).json();
   assert.equal(ask.error, 'invalid_auto_swap');
   assert.equal(calls.signed.length, 0);
@@ -1328,5 +1330,16 @@ test('an auto agent swap of an untrusted token waits for the owner', async () =>
   const { calls, request, ticket } = await autoSwapSetup({ trust: '100' });
   const low = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
   assert.equal(low.signed, false);
+  assert.equal(calls.signed.length, 0);
+});
+
+test('an owner-reviewed low-trust swap can prepare wallet authorization without auto-signing', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ trust: '100' });
+  const held = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
+  assert.equal(held.failure.step, 'trust');
+  assert.equal(held.failure.code, 'trust-confirmation-required');
+  const reviewed = await (await request({ confirmed: true, swapTicket: ticket, spendAuthorization: 'prepare' })).json();
+  assert.ok(reviewed.spendAuthorization);
+  assert.equal(reviewed.failure, undefined);
   assert.equal(calls.signed.length, 0);
 });
