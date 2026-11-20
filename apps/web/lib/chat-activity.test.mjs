@@ -131,6 +131,7 @@ test('repeated searches and a bare search query stay out of the log', () => {
   const noisy = toolStep('web_search', { query: 'search' }, { results: [] });
   assert.equal(noisy.query, '');
   assert.equal(toolStep('browser_open', { url: 'https://x.com' }, { error: 'repeated_tool' }), null);
+  assert.equal(toolStep('browser_open', { url: 'https://www.apple.com/iphone/' }, { error: 'search_first' }), null);
   const blocked = toolStep('browser_navigate', { url: 'https://x.com' }, { error: 'site_blocked', host: 'x.com' });
   assert.equal(blocked.label, 'Skipped a blocked site');
   const steps = sanitizeActivity([

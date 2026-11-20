@@ -46,7 +46,7 @@ export function describeLiveViewEmbed(viewerUrl) {
 export const agentTools = Object.freeze([
   {
     name: 'web_search',
-    description: 'Search the public web via Firecrawl for general research, shopping, or assistant questions. When the prompt lists an owner place or local time, include them in the query for weather, hours, events, news for today, or anything near them. Returns titles, URLs, and snippets. Not a payment or trading authority.',
+    description: 'Search the public web via Firecrawl for general research, shopping, or assistant questions. For a product fact such as the latest model or its price, search once and answer from the snippets. Do not open a browser for that fact. When the prompt lists an owner place or local time, include them in the query for weather, hours, events, news for today, or anything near them. Returns titles, URLs, and snippets. Not a payment or trading authority.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -59,7 +59,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'web_scrape',
-    description: 'Scrape a public http(s) page into Markdown via Firecrawl for research. Truncated for timeline size. Not a payment or trading authority.',
+    description: 'Scrape a public http(s) page into Markdown via Firecrawl for research. Use it after web_search only when the snippets do not already contain the fact. Do not open a browser to read a product page. Truncated for timeline size. Not a payment or trading authority.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -83,7 +83,7 @@ export const agentTools = Object.freeze([
   },
   {
     name: 'browser_navigate',
-    description: 'Open a new tab to an https URL in an existing agent-owned browser session. Prefer this over browser_open when a session is already open and the owner asks to look something up or change pages. When the page is a search or map for a local or time-bound ask, include the owner place and local date from the prompt. Do not open x.com, twitter.com, or reddit.com.',
+    description: 'Open a new tab to an https URL in an existing agent-owned browser session. Prefer this over browser_open when a session is already open and the owner asks to use the site or change pages. Do not use it for a product fact such as the latest model or its price; use web_search for that. When the page is a search or map for a local or time-bound ask, include the owner place and local date from the prompt. Do not open x.com, twitter.com, or reddit.com.',
     parameters: {
       type: 'object',
       additionalProperties: false,

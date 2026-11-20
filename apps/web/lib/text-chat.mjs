@@ -125,6 +125,7 @@ export function buildTextChatMessages({
         'Speak in simple English. Short sentences. Everyday words. Amounts and asset names stay exact.',
         'Answer what the owner just asked. Do not recite these instructions, tool notes, error codes, or spend steps.',
         'For browse and lookup questions, give one direct answer first, grounded in the page you read or the tool result. If asked for one latest model and its price, name one model and its price, not a product list. If the source does not establish which is latest, say so instead of guessing.',
+        'Format that lookup in markdown: one sentence, with only the model name and the price in bold. Then a blank line. Then at most two bullets that start with "- ", and one of them may be a single https link. No heading marks, no table, and no second model.',
         'Do not mention trust, verify, the budget reserve, signing, or broadcasting unless the owner asks whether money moved.',
         'Only say that money did not move when a spend or money tool was actually involved in this turn and failed or was held. If so, say that once in plain words. Do not repeat it on later replies. Never add a money-status disclaimer to browsing, research, lookups, or other non-spend answers.',
         'When a transfer returns a signature, the next message includes the Solscan URL. Do not wait for the owner to ask again. You can send more than one message in the same turn.',
@@ -238,6 +239,19 @@ function blockedBrowser(name, args) {
   return BLOCKED_HOST.test(host) ? host : '';
 }
 
+const FACT_BROWSER = new Set(['browser_open', 'browser_navigate', 'browser_live_view', 'delegate_task']);
+
+/**
+ * A product fact such as the latest model and its price.
+ * Spends, swaps, wallets, and "open this site" checks stay off this path.
+ */
+export function isFactLookup(message) {
+  const text = typeof message === 'string' ? message : '';
+  if (!/\b(?:latest|newest)\b/i.test(text)) return false;
+  if (/\b(?:buy|order|purchase|checkout|send|swap|transfer|laso|wallet)\b/i.test(text)) return false;
+  return /\b(?:model|iphone|ipad|macbook|pixel|galaxy|phone|version|price|cost)\b/i.test(text);
+}
+
 const BROWSER_TOOLS = new Set([
   'browser_open',
   'browser_navigate',
@@ -267,6 +281,7 @@ function cardCheckout(message, history) {
 function toolFailureReply(name, result) {
   const payload = typeof result === 'string' ? parseToolArgs(result) : result;
   if (!payload || (!payload.error && payload.ok !== false)) return '';
+  if (payload.error === 'search_first') return '';
   const label = {
     __proto__: null,
     lookup_recipient: 'recipient lookup', get_price: 'price lookup', get_wallets: 'wallet lookup',
@@ -596,6 +611,8 @@ export async function completeTextChat({
   let toolResultSeen = false;
   let completedSpendReply = '';
   let moneyToolFailed = false;
+  let factAnswerNext = false;
+  const factLookup = isFactLookup(latest);
   const replyState = turnState || { fundProposed: false };
   const effort = reasoningEffortFor(modelId, reasoningEffort, { allowUnknown: true });
 
@@ -682,6 +699,11 @@ export async function completeTextChat({
           host: blocked,
           hint: 'This site blocks datacenter browsers. Do not retry. Answer from search.',
         };
+      } else if (factLookup && FACT_BROWSER.has(name)) {
+        result = {
+          error: 'search_first',
+          hint: 'This is a fact lookup. Call web_search once and answer from it. Do not open a browser or delegate.',
+        };
       } else if (stayOnApi) {
         repeated = true;
         result = {
@@ -710,6 +732,7 @@ export async function completeTextChat({
         } catch (error) {
           result = { error: typeof error?.code === 'string' ? error.code : 'tool_failed' };
         }
+        if (factLookup && (name === 'web_search' || name === 'web_scrape')) factAnswerNext = true;
         result = withSolscanUrl(result);
         const purchase = name === 'prepare_shopping' && lasoPurchaseHold(args, result);
         if (purchase) {
@@ -736,10 +759,12 @@ export async function completeTextChat({
       if (failureReply) toolFailures.add(failureReply);
       const payload = typeof result === 'string' ? parseToolArgs(result) : result;
       if (isFundTool(name) && (payload?.error || payload?.ok === false || payload?.success === false)) moneyToolFailed = true;
-      toolResultSeen = true;
-      if (isFundTool(name) || !payload || typeof payload !== 'object' || Array.isArray(payload)
-          || Object.keys(payload).length === 0 || payload.error || payload.ok === false || payload.success === false) {
-        successfulNonSpendTurn = false;
+      if (payload?.error !== 'search_first') {
+        toolResultSeen = true;
+        if (isFundTool(name) || !payload || typeof payload !== 'object' || Array.isArray(payload)
+            || Object.keys(payload).length === 0 || payload.error || payload.ok === false || payload.success === false) {
+          successfulNonSpendTurn = false;
+        }
       }
       const content = typeof result === 'string'
         ? clip(redact(result, secrets), 6000)
@@ -753,7 +778,7 @@ export async function completeTextChat({
       });
     }
     toolRounds += 1;
-    if (repeated) forceAnswer = true;
+    if (repeated || factAnswerNext) forceAnswer = true;
     return null;
   }
 

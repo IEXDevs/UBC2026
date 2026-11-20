@@ -64,6 +64,30 @@
   word-break: break-all;
 }
 
+[data-slot='bubble-content'] .chat-heading {
+  margin: 0 0 0.35em;
+  font-weight: 650;
+}
+
+[data-slot='bubble-content'] .chat-paragraph {
+  margin: 0;
+}
+
+[data-slot='bubble-content'] .chat-paragraph + .chat-paragraph,
+[data-slot='bubble-content'] .chat-heading + .chat-paragraph,
+[data-slot='bubble-content'] .chat-list {
+  margin-top: 0.55em;
+}
+
+[data-slot='bubble-content'] .chat-list {
+  margin-bottom: 0;
+  padding-left: 1.25em;
+}
+
+[data-slot='bubble-content'] ul.chat-list { list-style: disc; }
+[data-slot='bubble-content'] ol.chat-list { list-style: decimal; }
+[data-slot='bubble-content'] .chat-list li { margin: 0.15em 0; }
+
 .chat-note {
   margin: 6px 0;
   color: #a3a3a3;

@@ -161,6 +161,8 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.match(sharedToolsInstruction(), /Do not wait for the owner to ask again/);
   assert.match(sharedToolsInstruction(), /Never web_search for \.sol/);
   assert.match(sharedToolsInstruction(), /Prefer a direct URL over searching/);
+  assert.match(sharedToolsInstruction(), /call web_search once and answer from that result/);
+  assert.match(sharedToolsInstruction(), /Do not call browser_open, browser_navigate, browser_live_view, or delegate_task for that fact/);
   assert.match(sharedToolsInstruction(), /owner situation/);
   assert.match(sharedToolsInstruction(), /Do not invent a city/);
   const lookup = DASHBOARD_TOOLS.find((tool) => tool.name === 'lookup_recipient');

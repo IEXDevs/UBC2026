@@ -48,6 +48,19 @@ test('speech keeps words and prices, not markdown markers or URLs', () => {
   assert.equal(replySpeechText('Latest](https://apple.com/)'), 'Latest');
 });
 
+test('lookup answers render a heading, a paragraph, and a real list', () => {
+  const html = render('# Latest\n\n**iPhone 17 Pro** is $1199.\n\n- From $1199\n- [Apple](https://www.apple.com/iphone/)');
+  assert.match(html, /<p class="chat-heading">Latest<\/p>/);
+  assert.match(html, /<p class="chat-paragraph"><strong>iPhone 17 Pro<\/strong> is \$1199\.<\/p>/);
+  assert.match(html, /<ul class="chat-list"><li>From \$1199<\/li><li><a class="chat-link" href="https:\/\/www\.apple\.com\/iphone\/" target="_blank" rel="noopener">Apple<\/a><\/li><\/ul>/);
+  assert.match(render('1. First\n2. Second'), /<ol class="chat-list"><li>First<\/li><li>Second<\/li><\/ol>/);
+  assert.equal(render('- [Click](javascript:alert)'), '<ul class="chat-list"><li>Click</li></ul>');
+  assert.equal(replySpeechText('# Latest\n\n**iPhone 17 Pro** is $1199.\n\n- From $1199\n- [Apple](https://apple.com/iphone)'),
+    'Latest iPhone 17 Pro is $1199. From $1199 Apple');
+  assert.deepEqual(replyLinks('- [Apple](https://www.apple.com/iphone/)\n\nhttps://example.com'),
+    ['https://www.apple.com/iphone/', 'https://example.com']);
+});
+
 test('chat renderer preserves the address and mention rendering hook inside bold text', () => {
   assert.equal(renderToStaticMarkup(createElement(ChatMarkdown, {
     text: '**@owner** sent it', renderText: value => createElement('span', null, value),

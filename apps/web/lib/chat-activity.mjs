@@ -349,7 +349,7 @@ export function toolStep(name, args, result) {
   const parsed = parseResult(result);
   const failed = (typeof parsed?.error === 'string' && parsed.error.length > 0) || parsed?.ok === false;
   const status = failed ? 'error' : 'done';
-  if (parsed?.error === 'repeated_tool') return null;
+  if (parsed?.error === 'repeated_tool' || parsed?.error === 'search_first') return null;
   if (parsed?.error === 'site_blocked') {
     return withFailure({
       kind: 'tool',

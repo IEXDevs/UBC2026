@@ -10,6 +10,7 @@ import {
   OPENROUTER_SPARK_MODEL,
   buildTextChatMessages,
   completeTextChat,
+  isFactLookup,
   resolveTextChatProvider,
   TextChatError,
 } from './text-chat.mjs';
@@ -224,6 +225,7 @@ test('browse guidance asks for one sourced direct answer and limits money discla
   assert.match(instructions, /give one direct answer first, grounded in the page you read or the tool result/);
   assert.match(instructions, /name one model and its price, not a product list/);
   assert.match(instructions, /source does not establish which is latest, say so instead of guessing/);
+  assert.match(instructions, /at most two bullets that start with "- "/);
   assert.match(instructions, /money tool was actually involved in this turn and failed or was held/);
   assert.doesNotMatch(instructions, /If money did not move, say that once/);
 });
@@ -307,6 +309,45 @@ test('a failed money tool may say no money moved while a successful receipt cann
     });
     assert.equal(reply.text, failed ? 'The wallet is frozen. No money moved.' : 'Sent.');
   }
+});
+
+test('a latest-model question searches once and does not open a browser', async () => {
+  const seen = [];
+  let round = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'what is the latest iPhone model and its price',
+    tools: [
+      { type: 'function', function: { name: 'browser_open' } },
+      { type: 'function', function: { name: 'web_search' } },
+      { type: 'function', function: { name: 'delegate_task' } },
+    ],
+    invokeTool: async name => {
+      seen.push(name);
+      return { results: [{ title: 'iPhone 17 Pro', url: 'https://www.apple.com/iphone/', snippet: 'From $1199' }] };
+    },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      const body = JSON.parse(options.body);
+      if (++round === 1) {
+        return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [
+          { id: 'open', type: 'function', function: { name: 'browser_open', arguments: '{"url":"https://www.apple.com/iphone/"}' } },
+          { id: 'hand', type: 'function', function: { name: 'delegate_task', arguments: '{"task":"find the latest iphone"}' } },
+          { id: 'find', type: 'function', function: { name: 'web_search', arguments: '{"query":"latest iPhone model price"}' } },
+        ] } }] });
+      }
+      assert.equal(body.tools, undefined);
+      return streamedCompletion([{ content: '**iPhone 17 Pro** starts at $1199.' }]);
+    },
+  });
+  assert.deepEqual(seen, ['web_search']);
+  assert.equal(round, 2);
+  assert.equal(reply.text, '**iPhone 17 Pro** starts at $1199.');
+  assert.equal(reply.toolRounds, 1);
+  assert.equal(isFactLookup('Check example.com'), false);
+  assert.equal(isFactLookup('Check the page and my prices'), false);
+  assert.equal(isFactLookup('buy the latest iPhone'), false);
+  assert.equal(isFactLookup('what is the latest iPhone model and its price'), true);
 });
 
 test('browser and research replies bypass final verification for successful, empty and failed results', async () => {
