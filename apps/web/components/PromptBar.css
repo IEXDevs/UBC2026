@@ -605,8 +605,6 @@
   transform-origin: 50% 50%;
 }
 
-.permit { position: relative; }
-
 .permit-menu button {
   display: inline-flex;
   align-items: center;
@@ -650,15 +648,15 @@
   position: absolute;
   z-index: 30;
   bottom: calc(100% + 8px);
-  left: 0;
+  right: 12px;
   display: grid;
   gap: 4px;
-  width: 280px;
+  width: min(280px, calc(100% - 24px));
   padding: 6px;
   border-radius: 12px;
   background: var(--pb-control-bg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  transform-origin: bottom left;
+  transform-origin: bottom right;
   animation: prompt-bar-pop 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -752,14 +750,6 @@
   color: #ff8b8b;
   font-size: 11px;
   font-weight: 600;
-}
-
-@media (max-width: 720px) {
-  .permit { position: static; }
-
-  .permit-menu {
-    max-width: 100%;
-  }
 }
 
 .spend-confirm {

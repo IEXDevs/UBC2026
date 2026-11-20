@@ -25,6 +25,12 @@ test('the three permission modes change text color rather than the row backgroun
   }
 });
 
+test('the permissions menu fits within the composer rather than hanging off the trigger', () => {
+  assert.match(css, /\.prompt-bar__field\s*\{[^}]*position: relative;/);
+  assert.match(css, /\.permit-menu\s*\{[^}]*right: 12px;[^}]*width: min\(280px, calc\(100% - 24px\)\);/);
+  assert.doesNotMatch(css, /\.permit\s*\{[^}]*position: relative;/);
+});
+
 test('the threshold input replaces the cap within the review row, not the active permission', () => {
   const row = bar.slice(bar.indexOf('className="permit-choice"'), bar.indexOf('export default function PromptBar'));
   assert.match(row, /item\.id === 'review' \? \([\s\S]*\{editing \? \([\s\S]*<input[\s\S]*\) : reviewCapDollars \? \(/);
