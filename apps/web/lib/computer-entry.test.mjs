@@ -87,8 +87,11 @@ test('the right pane mirrors the agent and the computer sheet keeps the browser'
 });
 
 test('sidebar Computer stays visible and opens the sheet for healthy, idle and failed sessions', () => {
-  const panel = source('components/LiveViewPanel.js');
-  const screenBranch = panel.slice(panel.indexOf('  if (screen) {'), panel.indexOf('\n  return (\n    <div className={`live-view'));
+  const panel = source('components/LiveViewPanel.js').replaceAll('\r\n', '\n');
+  const start = panel.indexOf('  if (screen) {');
+  const end = panel.indexOf('\n  return (\n    <div className={`live-view', start);
+  assert.ok(start >= 0 && end > start, 'Could not find the sidebar render branch');
+  const screenBranch = panel.slice(start, end);
   const { code } = transformSync(`function renderScreen({ sessionRecordId, frame, error = '', busy = false, onExpand }) {
     const screen = true;
     const framed = Boolean(frame?.embed && frame.src);
