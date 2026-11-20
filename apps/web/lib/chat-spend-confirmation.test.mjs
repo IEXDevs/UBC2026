@@ -15,6 +15,29 @@ const args = {
 };
 const signature = '5'.repeat(64);
 
+test('Laso preparation needs no slide; its ticket-bound purchase does, and returns only the owner login link separately', async () => {
+  assert.equal(toolAccessRequest('ask', 'prepare_shopping', { provider: 'laso', amountUsd: 10 }), null);
+  const ticket = `payload.${'a'.repeat(64)}`;
+  const args = { botId, action: 'x402', amount: '10000000', asset: 'USDC', lasoTicket: ticket };
+  const hold = sealAssetSpendHold(toolAccessRequest('full', 'request_spend', args), context, 1000);
+  assert.match(hold.label, /Buy a Laso.*\$10/);
+  assert.equal(hold.args.lasoTicket, ticket);
+  const changed = await resumeAssetSpend({ ...hold, args: { ...args, lasoTicket: 'changed' } }, context, () => assert.fail('changed ticket invoked'), 2000);
+  assert.match(changed.text, /invalid or expired/);
+  const claimUrl = 'https://laso.finance/agent/dashboard/auth?token=owner-only';
+  const reply = await resumeAssetSpend(hold, context, async (name, inputs) => {
+    assert.equal(name, 'request_spend');
+    assert.equal(inputs.lasoTicket, ticket);
+    return { signed: true, cluster: 'mainnet-beta', signature, card: { card_id: 'card_123', usd_amount: 10, status: 'pending' }, claimUrl };
+  }, 2000);
+  assert.match(reply.text, /Laso card card_123: \$10, pending/);
+  assert.equal(reply.claimUrl, claimUrl);
+  assert.equal(JSON.stringify(reply.activity).includes('owner-only'), false);
+  assert.equal(reply.text.includes('owner-only'), false);
+  const failed = await resumeAssetSpend(hold, context, async () => ({ error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' }), 2000);
+  assert.match(failed.text, /insufficient_funds/);
+});
+
 test('USDC swaps display confirmed minimum output and bind the quote ticket to the slide', async () => {
   const args = { botId, action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000' };
   const hold = toolAccessRequest('full', 'request_spend', args);

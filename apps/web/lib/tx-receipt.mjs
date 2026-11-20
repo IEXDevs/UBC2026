@@ -33,7 +33,11 @@ export function txReceiptFromResult(result) {
     signature,
     cluster,
     url,
-    text: `Sent. ${url}`,
+    text: parsed.card && typeof parsed.card.card_id === 'string'
+      ? `Laso card ${parsed.card.card_id}: $${parsed.card.usd_amount}, ${parsed.card.status}. ${url}`
+      : parsed.provider === 'laso'
+        ? `Laso payment settled, but card details are unavailable. Check Laso before buying again. ${url}`
+        : `Sent. ${url}`,
   };
 }
 

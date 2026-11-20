@@ -160,6 +160,7 @@ export default function Composer({
   const [permission, setPermission] = useState('ask');
   const [reviewCap, setReviewCap] = useState('');
   const [pendingSwap, setPendingSwap] = useState(null);
+  const [lasoClaim, setLasoClaim] = useState(null);
 
   useEffect(() => {
     setPendingSwap(null);
@@ -660,6 +661,7 @@ export default function Composer({
 
   async function settleChat(result, spoken, prior, grants, run, shown = [], firstLineId = null) {
     if (run !== runRef.current) return;
+    if (result?.claimUrl) setLasoClaim({ botId: botIdRef.current, url: result.claimUrl });
     if (!result?.ok) {
       if (result?.error === 'aborted') return;
       if (shown.length > 0) return;
@@ -1128,6 +1130,12 @@ export default function Composer({
       {stageNode}
       {floatNode}
       {settingsNode}
+      {lasoClaim?.botId === botId ? (
+        <p className="voice-note" role="status">
+          <a href={lasoClaim.url} target="_blank" rel="noreferrer">View your Laso card</a>
+          {' · One-time login link, expires in 15 minutes.'}
+        </p>
+      ) : null}
       <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mentionCopy ? (

@@ -9,6 +9,23 @@ import {
 import worker from '../../agent-runtime/src/index.mjs';
 import { privySessionFixture } from '../../agent-runtime/src/owner-auth.fixture.mjs';
 
+test('Laso forwards numeric and string dollar amounts and keeps login links and tokens out of model results', async () => {
+  const invoke = createChatToolInvoker({ ownerId: 'user_1', botId: 'bot_1', runtimeBase: 'https://runtime.invalid', fetcher: async (url, init) => {
+    assert.equal(String(url), 'https://runtime.invalid/bots/bot_1/shopping/prepare');
+    assert.deepEqual(JSON.parse(init.body), { provider: 'laso', amountUsd: '10' });
+    return Response.json({ provider: 'laso', amountUsd: 10, lasoTicket: 'complete-ticket', instruction: 'not a purchase', challenge: { body: 'x'.repeat(7000) } });
+  } });
+  for (const amountUsd of [10, '10']) {
+    const prepared = await invoke('prepare_shopping', { botId: 'bot_1', provider: 'laso', amountUsd });
+    assert.equal(JSON.parse(serializeToolResult(prepared)).lasoTicket, 'complete-ticket');
+  }
+  const text = serializeToolResult({ signed: true, card: { card_id: 'card_1' }, claimUrl: 'owner-only', auth: { id_token: 'secret-token' } });
+  assert.equal(text.includes('owner-only'), false);
+  assert.equal(text.includes('secret-token'), false);
+  assert.equal(JSON.parse(text).card.card_id, 'card_1');
+  assert.match(chatToolsInstruction(), /NEVER send a plain transfer/);
+});
+
 test('the agent tool resolves another signed-in user’s handle to their main wallet', async () => {
   const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const session = privySessionFixture('did:privy:alice');

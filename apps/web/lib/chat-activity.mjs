@@ -224,6 +224,14 @@ export function spendFailureMessage(result) {
     return 'This swap is no longer pending. Ask the agent to find another trade.';
   }
   switch (parsed?.error || parsed?.state) {
+    case 'simulation_failed':
+      return `Payment simulation failed${/^[a-zA-Z0-9_]{1,100}$/.test(parsed.simulationReason ?? '') ? `: ${parsed.simulationReason}` : ''}. No payment was submitted.`;
+    case 'laso_ticket_invalid':
+      return 'The Laso purchase expired or its details changed. Prepare a fresh card purchase.';
+    case 'laso_payment_rejected':
+      return 'Laso rejected the x402 payment. Check the wallet and purchase status before preparing another purchase.';
+    case 'laso_settlement_unknown':
+      return 'Laso did not return a complete settlement receipt. Payment may have settled. Do not pay again; check Laso and the wallet first.';
     case 'invalid_spend_approval':
       return 'The payment approval expired or the payment details changed. Ask for the payment again.';
     case 'approval-needed':

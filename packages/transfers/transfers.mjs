@@ -6,7 +6,7 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
  * Every transaction is a USDC transfer followed by a memo.
  * This module never opens a Solana connection and never broadcasts.
  */
-import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
+import { PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -26,6 +26,30 @@ if (SOLANA_USDC_MINT !== X402_SOLANA_USDC_MINT) {
 
 export { SOLANA_USDC_MINT };
 export { buildJupiterSwap } from './jupiter-swap.mjs';
+
+export function buildSolanaX402Transaction({ sourceOwner, accepted, recentBlockhash } = {}) {
+  if (SOLANA_CLUSTER !== 'mainnet-beta' || accepted?.scheme !== 'exact'
+      || accepted.network !== 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'
+      || accepted.asset !== SOLANA_USDC_MINT || accepted.extra?.memo != null) fail('Unsupported x402 terms', 'invalid_payment');
+  const source = pubkey(sourceOwner, 'source wallet');
+  const payer = pubkey(accepted.extra?.feePayer, 'fee payer');
+  const destination = pubkey(accepted.payTo, 'recipient');
+  if (source.equals(payer) || source.equals(destination)) fail('Invalid x402 payer', 'invalid_payment');
+  pubkey(recentBlockhash, 'blockhash');
+  const sourceAccount = tokenAccount(source);
+  const destinationAccount = tokenAccount(destination);
+  const message = new TransactionMessage({ payerKey: payer, recentBlockhash, instructions: [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 40_000 }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1 }),
+    createTransferCheckedInstruction(sourceAccount, pubkey(SOLANA_USDC_MINT, 'mint'), destinationAccount,
+      source, positiveAmount(accepted.amount), 6, [], TOKEN_PROGRAM_ID),
+  ] }).compileToV0Message();
+  return {
+    transaction: Buffer.from(new VersionedTransaction(message).serialize()).toString('base64'),
+    sourceTokenAccount: sourceAccount.toBase58(),
+    destinationTokenAccount: destinationAccount.toBase58(),
+  };
+}
 
 export const SPL_TOKEN_PROGRAM_ID = TOKEN_PROGRAM_ID.toBase58();
 export const MEMO_PROGRAM_ID = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';

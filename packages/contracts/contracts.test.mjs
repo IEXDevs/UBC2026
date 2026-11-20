@@ -537,6 +537,16 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
   );
 });
 
+test('x402 spends require a bounded ticket and forbid transfer or swap overrides', () => {
+  const body = { permission: 'ask', botId: 'bot_laso', action: 'x402', amount: '10000000', asset: 'USDC', lasoTicket: `fixture.${'a'.repeat(64)}` };
+  assert.equal(parsePermissionedSpendBody(body).lasoTicket, body.lasoTicket);
+  for (const extra of [{ lasoTicket: '' }, { lasoTicket: 'bad' }, { lasoTicket: 'a'.repeat(5001) }, { asset: 'SOL' },
+    { destination: '11111111111111111111111111111111' }, { handle: 'hi' }, { quoteCluster: 'mainnet' }, { outputAsset: 'SOL' },
+    { action: 'spend', destination: '11111111111111111111111111111111' }]) {
+    assert.equal(parsePermissionedSpendBody({ ...body, ...extra }), null);
+  }
+});
+
 /**
  * Achieves: httpsAvatarUrl / normalizeDisplayName / CLUSTERS enforce https-only, trim rules, and hackathon clusters.
  * Fails when: http avatars accepted, newline names pass, or mainnet appears in CLUSTERS.

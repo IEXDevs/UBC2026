@@ -67,6 +67,8 @@ function gateFields(detail) {
     ...(steps.length > 0 ? { steps } : {}),
     ...(typeof detail.signed === 'boolean' ? { signed: detail.signed } : {}),
     ...(typeof detail.reason === 'string' ? { reason: detail.reason } : {}),
+    ...(typeof detail.simulationReason === 'string' && /^[a-zA-Z0-9_]{1,100}$/.test(detail.simulationReason)
+      ? { simulationReason: detail.simulationReason } : {}),
     ...(privyFailure ? { privyFailure } : {}),
     ...(approvalTerms ? { approvalTerms } : {}),
     ...(typeof detail.prompt === 'string' ? { prompt: detail.prompt } : {}),
@@ -628,6 +630,7 @@ export function createChatToolInvoker({
       let raw = args[key];
       if (key === 'cooldownMinutes' && Number.isInteger(raw)) raw = String(raw);
       if (key === 'amount' && typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0) raw = String(raw);
+      if (key === 'amountUsd' && typeof raw === 'number' && Number.isFinite(raw)) raw = String(raw);
       if (typeof raw === 'string' && raw.trim()) body[key] = raw.trim();
     }
     if (args.confirmed === true) body.confirmed = true;
@@ -786,6 +789,14 @@ export function createChatToolInvoker({
 }
 
 export function serializeToolResult(result) {
+  if (result?.provider === 'laso' && result.lasoTicket) {
+    const { provider, amountUsd, proposal, policy, next, lasoTicket, instruction } = result;
+    return clipJson({ lasoTicket, instruction, provider, amountUsd, proposal, policy, next });
+  }
+  if (result && typeof result === 'object' && (result.claimUrl || result.auth)) {
+    const { claimUrl: _claimUrl, auth: _auth, ...rest } = result;
+    return serializeToolResult(rest);
+  }
   if (result && typeof result === 'object' && result.viewerUrl) {
     const { viewerUrl: _viewerUrl, ...rest } = result;
     return clipJson(rest);

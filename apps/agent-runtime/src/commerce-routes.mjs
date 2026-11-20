@@ -1,4 +1,5 @@
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
+import { issueLasoTicket } from './laso-payment.mjs';
 /**
  * Isaac / 6B + 6C Worker routes:
  * - Shopping sandbox prep/settle + Laso tiny-card challenge
@@ -90,6 +91,8 @@ async function handleShoppingPrepare(request, env, botId, owner) {
     if (!context) return json({ error: 'bot_not_found' }, 404);
     const { bot, ledger } = context;
     if (body.provider === 'laso') {
+      const approvalKey = supabaseConfig(env)?.key;
+      if (!approvalKey) return json({ error: 'laso_unavailable' }, 503);
       const result = await prepareLasoTinyCardPurchase({
         bot,
         ledger,
@@ -97,7 +100,11 @@ async function handleShoppingPrepare(request, env, botId, owner) {
         fetcher: env.fetch || fetch,
         baseUrl: env.LASO_BASE_URL,
       });
-      return json({ ok: true, botId, ...result });
+      return json({
+        ok: true, botId, ...result,
+        lasoTicket: issueLasoTicket(result, owner, botId, approvalKey, Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now()),
+        instruction: 'This is NOT a purchase. Buy with request_spend action=x402, asset=USDC, amount=proposal.outflow and lasoTicket. Never send a plain spend/pay to payTo. Owner confirmation is required.',
+      });
     }
     const result = await prepareSandboxPurchase({
       bot,

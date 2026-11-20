@@ -108,17 +108,19 @@ export const DASHBOARD_TOOLS = Object.freeze([
     call('GET', '/api/bots'),
     call('POST', '/bots/:botId/pause'),
   ]),
-  dashboard('prepare_shopping', 'Prepare an x402 sandbox or Laso shopping purchase. Does not sign.', ['botId'], {
+  dashboard('prepare_shopping', 'Prepare a purchase, not a payment. For Laso pass the requested amountUsd ($5–$1000). Buy only with request_spend action x402 and the returned lasoTicket; NEVER send a plain transfer to Laso payTo.', ['botId'], {
     botId,
     provider: { type: 'string', description: 'sandbox or laso' },
-  }, [call('POST', '/bots/:botId/shopping/prepare', { body: ['provider'] })]),
+    amountUsd: { type: ['number', 'string'], description: 'Requested Laso card value in USD, $5–$1000. Defaults to 5 only when omitted.' },
+  }, [call('POST', '/bots/:botId/shopping/prepare', { body: ['provider', 'amountUsd'] })]),
   dashboard(
     'request_spend',
     'Use swap for a live Solana trade in the agent’s assigned wallet. Pass the input asset, exact input amount in base units, and outputAsset. The owner sees the quote and approves it in the desk. Use pay or spend with a destination for transfers. USD budgets account for SOL and routable token mints.',
     ['botId', 'action', 'amount', 'asset'],
     {
       botId,
-      action: { type: 'string', description: 'swap, spend, or pay' },
+      action: { type: 'string', description: 'swap, spend, pay, or x402. Laso cards MUST use x402 with lasoTicket, never a plain spend/pay to payTo. Always requires owner confirmation.' },
+      lasoTicket: { type: 'string', description: 'Exact signed ticket returned by prepare_shopping for a Laso card. For x402 use USDC and its proposal outflow as amount; omit destination.' },
       amount: { type: 'string', description: 'Integer base units of the asset. Use lamports for SOL (1 SOL = 1000000000). Use the verified mint decimals for an SPL token.' },
       destination: { type: 'string', description: 'Destination Solana address' },
       handle: { type: 'string', description: 'Maelstrom handle without @' },
@@ -126,7 +128,7 @@ export const DASHBOARD_TOOLS = Object.freeze([
       outputAsset: { type: 'string', description: 'For swaps only. Use USDC, SOL, or the exact output token mint.' },
       quoteCluster: { type: 'string', description: 'mainnet or solana. A mainnet quote never authorizes a transaction.' },
     },
-    [call('POST', '/api/spend', { body: ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'outputAsset', 'quoteCluster', 'idempotencyKey'] })],
+    [call('POST', '/api/spend', { body: ['botId', 'action', 'amount', 'destination', 'handle', 'asset', 'outputAsset', 'quoteCluster', 'idempotencyKey', 'lasoTicket'] })],
   ),
   dashboard(
     'lookup_recipient',
@@ -205,6 +207,7 @@ export function sharedToolsInstruction() {
     `For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled ${EXECUTION_LABEL}. It does not sign, broadcast, or authorize a transaction. Execution stays on the configured Solana network.`,
     'Use get_price to research an exact mint. For a specific live trade call request_spend with action swap, the input amount in base units, and both asset identifiers. Use start_task when the owner asks you to find a trade. The desk quotes and confirms those real swaps with the owner. Report a swap as submitted only if the spend API returned a transaction signature.',
     'request_spend posts the shared spend route. A locked desk is not an approval hold and does not replace trust, verify, reserve, or the permission gate. Fully-automatic still runs those gates. 1000000 is 1 USDC in base units. For swaps the output goes to the assigned wallet. Do not pass a destination, handle, or price quote for a swap.',
+    'For a Laso prepaid card call prepare_shopping with provider laso and the requested amountUsd. Preparation is NOT a purchase. Buy only with request_spend action x402, asset USDC, the exact proposed amount and lasoTicket; the owner confirms the purchase. NEVER send a plain transfer to Laso payTo. Only report a purchase after a settlement signature is returned. A pending card is not ready yet; the owner can use the separate Laso dashboard link.',
     'When the owner names a .sol SNS domain, an @handle, or a wallet address, call lookup_recipient with q set to that token. It hits GET /api/profiles/lookup (SNS resolve or handle directory). Never web_search for .sol names or handles. Speak the resolved address as first5...last5.',
     'When the owner asks you to open or use a specific website: browser_open, then browser_navigate to that https URL. Prefer a direct URL over searching. The owner watches Live View for form entry.',
     'When the owner asks for open-web research (not a .sol, handle, or wallet): call web_search first, pick a real https result url, then web_scrape. search_not_configured and client_missing mean FIRECRAWL_API_KEY or the research client is not configured. provider_failed means Firecrawl returned a server error. Do not invent search results.',

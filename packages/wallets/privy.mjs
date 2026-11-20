@@ -8,7 +8,7 @@ import { verifySwapSimulation } from './swap-simulation.mjs';
  * broadcast on Solana mainnet-beta through SOLANA_RPC_URL.
  * Wallet keys stay in Privy. Signing credentials stay server-side.
  */
-import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
 import { SECRET_GROUPS, requireConfig, validateWallet, ContractError, parsePrivySigningFailure } from '@ubc2026/contracts';
 import {
   WalletError,
@@ -18,6 +18,25 @@ import {
 } from './wallets.mjs';
 
 export { WalletError };
+
+export function simulationFailureReason(value) {
+  const err = value?.err;
+  if (err === 'AccountNotFound') return 'account_not_found';
+  if (err === 'InsufficientFundsForFee' || err === 'InsufficientFundsForRent') return 'insufficient_funds';
+  const instruction = err?.InstructionError;
+  if (Array.isArray(instruction) && Number.isSafeInteger(instruction[0])) {
+    const code = typeof instruction[1] === 'string' && /^[A-Za-z]{1,64}$/.test(instruction[1])
+      ? instruction[1] : Number.isSafeInteger(instruction[1]?.Custom) ? `custom_${instruction[1].Custom}` : 'unknown';
+    return `instruction_${instruction[0]}_${code}`;
+  }
+  return 'simulation_unavailable';
+}
+
+function failSimulation(value) {
+  const error = new WalletError('Solana transfer simulation failed', 'simulation_failed');
+  error.simulationReason = simulationFailureReason(value);
+  throw error;
+}
 
 /**
  * Full Solana-mainnet-beta genesis hash from getGenesisHash.
@@ -1022,6 +1041,18 @@ export function createPrivyWalletClient({
   }
 
   const simulatedTransfers = new WeakSet();
+  const simulatedX402 = new WeakSet();
+
+  function x402Message(transaction, walletAddress, feePayer) {
+    let parsed;
+    try { parsed = VersionedTransaction.deserialize(decodeBase64(transaction, 'Transaction')); } catch { fail('Invalid x402 transaction', 'invalid_transaction'); }
+    const keys = parsed.message.staticAccountKeys;
+    if (SOLANA_CLUSTER !== 'mainnet-beta' || parsed.version !== 0 || parsed.message.header.numRequiredSignatures !== 2
+        || keys[0]?.toBase58() !== feePayer || keys[1]?.toBase58() !== walletAddress || walletAddress === feePayer) {
+      fail('x402 requires the ticket fee payer and wallet signer', 'invalid_transaction');
+    }
+    return parsed;
+  }
 
   function singleSignerMessage(transaction) {
     const bytes = decodeBase64(transaction, 'Transaction');
@@ -1219,7 +1250,7 @@ export function createPrivyWalletClient({
         rpc('getFeeForMessage', [message.toString('base64'), { commitment: 'confirmed' }]),
         rpc('simulateTransaction', [transaction, { encoding: 'base64', commitment: 'confirmed', sigVerify: false, replaceRecentBlockhash: false }]),
       ]);
-      if (simulation.result?.value?.err !== null) fail('Solana transfer simulation failed', 'simulation_failed');
+      if (simulation.result?.value?.err !== null) failSimulation(simulation.result?.value);
       const lamports = fee.result?.value;
       if (!Number.isSafeInteger(lamports) || lamports < 0) fail('Solana transaction fee unavailable', 'rpc_rejected');
       let maxSolCost;
@@ -1229,12 +1260,67 @@ export function createPrivyWalletClient({
         const post = simulation.result.value.postBalances?.[0];
         if (parsed.message.staticAccountKeys[0]?.toBase58() !== accountCreationPayer
             || !Number.isSafeInteger(pre) || !Number.isSafeInteger(post) || post < 0
-            || pre - post < lamports || pre - post > 5_000_000) fail('Could not verify account creation costs', 'simulation_failed');
+            || pre - post < lamports || pre - post > 5_000_000) {
+          const error = new WalletError('Could not verify account creation costs', 'simulation_failed');
+          error.simulationReason = 'invalid_balance_metadata';
+          throw error;
+        }
         maxSolCost = String(pre - post);
       }
       const prepared = Object.freeze({ transaction, feeLamports: String(lamports), ...(maxSolCost ? { maxSolCost } : {}) });
       simulatedTransfers.add(prepared);
       return prepared;
+    },
+
+    async prepareSolanaX402Payment({ transaction, walletAddress, accepted, sourceTokenAccount, destinationTokenAccount } = {}) {
+      const parsed = x402Message(transaction, walletAddress, accepted?.extra?.feePayer);
+      await assertSolana();
+      const sourceAccount = await rpc('getAccountInfo', [sourceTokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+      const sourceValue = sourceAccount.result?.value;
+      const sourceInfo = sourceValue?.data?.parsed?.info;
+      if (sourceValue?.owner !== CLASSIC_TOKEN_PROGRAM || sourceValue?.data?.parsed?.type !== 'account'
+          || sourceInfo?.owner !== walletAddress || sourceInfo?.mint !== SOLANA_USDC_MINT || sourceInfo?.state !== 'initialized') {
+        const error = new WalletError('Source USDC account is unavailable', 'simulation_failed');
+        error.simulationReason = 'source_account_not_found';
+        throw error;
+      }
+      const account = await rpc('getAccountInfo', [destinationTokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+      const value = account.result?.value;
+      const info = value?.data?.parsed?.info;
+      if (value?.owner !== CLASSIC_TOKEN_PROGRAM || value?.data?.parsed?.type !== 'account'
+          || info?.owner !== accepted.payTo || info?.mint !== SOLANA_USDC_MINT || info?.state !== 'initialized') {
+        const error = new WalletError('Laso recipient token account is unavailable', 'simulation_failed');
+        error.simulationReason = 'recipient_account_not_found';
+        throw error;
+      }
+      const simulation = await rpc('simulateTransaction', [transaction, {
+        encoding: 'base64', commitment: 'confirmed', sigVerify: false, replaceRecentBlockhash: false,
+      }]);
+      if (simulation.result?.value?.err !== null) failSimulation(simulation.result?.value);
+      const prepared = Object.freeze({ transaction, walletAddress, feePayer: parsed.message.staticAccountKeys[0].toBase58(), feeLamports: '0', maxSolCost: '0' });
+      simulatedTransfers.add(prepared);
+      simulatedX402.add(prepared);
+      return prepared;
+    },
+
+    async signPreparedSolanaX402Payment({ bot, wallet, prepared, accessToken, ownerAuthorization } = {}) {
+      assertSpendAllowed({ bot, wallet });
+      if (!simulatedX402.delete(prepared) || !simulatedTransfers.delete(prepared)) fail('Payment simulation is required', 'simulation_required');
+      const original = x402Message(prepared.transaction, wallet.address, prepared.feePayer);
+      await assertSolana();
+      const signed = ownerAuthorization
+        ? await signWithBrowserAuthorization(wallet, prepared, ownerAuthorization)
+        : await signWithPrivy(assertPrivyWalletId(wallet.privyWalletId), prepared.transaction, {
+            ownerId: wallet.ownerId, walletAddress: wallet.address, accessToken,
+          });
+      const parsed = x402Message(signed, wallet.address, prepared.feePayer);
+      const message = Buffer.from(parsed.message.serialize());
+      const publicKey = createPublicKey({ key: Buffer.concat([
+        Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(parsed.message.staticAccountKeys[1].toBytes()),
+      ]), format: 'der', type: 'spki' });
+      if (!message.equals(Buffer.from(original.message.serialize())) || parsed.signatures[0].some(byte => byte !== 0)
+          || !cryptoVerify(null, message, publicKey, parsed.signatures[1])) fail('Signed payment differs from simulation', 'transaction_mismatch');
+      return { transaction: signed };
     },
 
     async prepareSolanaSwap({ transaction, walletAddress, inputMint, outputMint, amount, minOutput } = {}) {
