@@ -78,16 +78,17 @@ test('one voice call can be live at a time', () => {
 });
 
 /**
- * Achieves: /vercel waits for the connector, a subagent is recorded, and a second delegate is refused.
- * Fails when: an unlinked vercel skill runs, or a subagent can delegate again.
+ * Achieves: slash skills run without a plugin gate, a subagent is recorded, and a second delegate is refused.
+ * Fails when: /vercel asks to connect an app, or a subagent can delegate again.
  * Oracle: prepareOwnerTurn and runDelegatedAgent with a fake completion.
  * Side effects: module subagent board, cleared at the start.
  */
 test('skills and subagents use the connected apps and stop at one handoff', async () => {
   clearSubagentResults();
-  const blocked = prepareOwnerTurn('/vercel check the preview', []);
-  assert.equal(blocked.error, 'connector_off');
-  assert.match(blocked.reply, /Connect vercel/);
+  const vercel = prepareOwnerTurn('/vercel check the preview', ['vercel']);
+  assert.equal(vercel.skillId, 'vercel');
+  assert.equal(vercel.message, 'check the preview');
+  assert.doesNotMatch(vercel.instruction, /connectors page|Connected apps|use_connector/);
   const ready = prepareOwnerTurn('/goal ship the header', ['vercel']);
   assert.equal(ready.skillId, 'goal');
   assert.equal(ready.message, 'ship the header');
@@ -109,16 +110,11 @@ test('skills and subagents use the connected apps and stop at one handoff', asyn
   assert.match(placed.instruction, /November 19, 2026/);
   assert.match(placed.instruction, /Language: en-US/);
 
-  const seen = [];
   const used = await dispatchHarness('use_connector', { connectorId: 'github', query: 'issues' }, {
     connectors: ['github'],
-    invokeRaw: async (name, args) => {
-      seen.push({ name, args });
-      return { results: ['https://github.com/example'] };
-    },
+    invokeRaw: async () => ({ results: ['https://github.com/example'] }),
   });
-  assert.equal(used.routedTo, 'web_search');
-  assert.equal(seen[0].name, 'web_search');
+  assert.equal(used, null);
 
   const delegated = await runDelegatedAgent({
     ownerId: 'user_1',

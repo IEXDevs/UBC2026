@@ -23,7 +23,6 @@ import ClaimHandle from '../components/ClaimHandle';
 import RecoveryCeremony from '../components/RecoveryCeremony';
 import SlideCommit from '../components/bits/SlideCommit';
 import PartySheet from '../components/PartySheet';
-import PluginsSheet from '../components/PluginsSheet';
 import AIProvidersSheet from '../components/AIProvidersSheet';
 import StatisticsSheet from '../components/StatisticsSheet';
 import AgentDetail from '../components/AgentDetail';
@@ -66,7 +65,7 @@ import {
   shellRuntimeUrl,
   upsertOwnerBot,
 } from '../lib/runtime-data.mjs';
-import { isPlaceholderBotId, SHELL_PANES, shellConnectors, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
+import { isPlaceholderBotId, SHELL_PANES, withoutPlaceholderBots } from '../lib/shell-chrome.mjs';
 import { buildPermissionedSpendRequest, lookupHandleKey, parseLookupQuery, privyAvatarUrl } from '@ubc2026/contracts';
 import { addVoiceMs, readVoiceMs, voiceTimeKey } from '../lib/voice-time.mjs';
 import {
@@ -106,8 +105,6 @@ import { logoutAfterFlush } from '../lib/profile-logout.mjs';
 function readAccessToken(getAccessToken) {
   return getPrivyAccessToken(getAccessToken, window.localStorage);
 }
-
-const CONNECTORS = shellConnectors();
 
 export default function HomePage() {
   const { configured } = usePrivyPublic();
@@ -488,7 +485,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const [walletsOpen, setWalletsOpen] = useState(false);
   const [walletFocus, setWalletFocus] = useState('');
   const [retiredIds, setRetiredIds] = useState([]);
-  const [pluginsOpen, setPluginsOpen] = useState(false);
   const [aiProvidersOpen, setAIProvidersOpen] = useState(false);
   const [talks, setTalks] = useState({});
   const talksRef = useRef(talks);
@@ -542,7 +538,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setProfileOpen(false);
   }, []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
-  const closePlugins = useCallback(() => setPluginsOpen(false), []);
   const closeAIProviders = useCallback(() => setAIProvidersOpen(false), []);
   const closeStats = useCallback(() => setStatsOpen(false), []);
   const closeComputer = useCallback(() => setComputerOpen(false), []);
@@ -1173,7 +1168,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setAIProvidersOpen(false);
     setCreateOpen(false);
     setProfileOpen(false);
-    setPluginsOpen(false);
     setStatsOpen(false);
     setWalletFocus(typeof walletId === 'string' ? walletId : '');
     if (deskLockOnRef.current && !unlockedRef.current) {
@@ -1616,7 +1610,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   function choosePane(next, direction) {
     setAIProvidersOpen(false);
     if (next === pane) return;
-    setPluginsOpen(false);
     setSlide(direction);
     setPane(next);
     if (next === 'Main') setActiveBot(current => current ?? bots[0]?.id ?? null);
@@ -1626,7 +1619,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setAIProvidersOpen(false);
     setCreateOpen(false);
     setWalletsOpen(false);
-    setPluginsOpen(false);
     setProfileOpen(false);
     setStatsOpen(false);
     setActiveBot(id);
@@ -1751,7 +1743,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setComputerOpen(id === 'computer');
     if (id === 'profile') {
       setWalletsOpen(false);
-      setPluginsOpen(false);
       setStatsOpen(false);
       setProfileOpen(true);
       return;
@@ -1759,7 +1750,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (id === 'computer') {
       setProfileOpen(false);
       setWalletsOpen(false);
-      setPluginsOpen(false);
       setStatsOpen(false);
       setComputerOpen(true);
       return;
@@ -1767,7 +1757,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (id === 'statistics') {
       setProfileOpen(false);
       setWalletsOpen(false);
-      setPluginsOpen(false);
       setStatsOpen(true);
       return;
     }
@@ -1783,16 +1772,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       setLockOpen(true);
       return;
     }
-    if (id === 'plugins' || id === 'ai-providers') {
+    if (id === 'ai-providers') {
       setProfileOpen(false);
       setWalletsOpen(false);
       setStatsOpen(false);
-      setPluginsOpen(id === 'plugins');
       return;
     }
     setProfileOpen(false);
     setWalletsOpen(false);
-    setPluginsOpen(false);
     setStatsOpen(false);
     if (id === 'security') choosePane('Security', 'right');
     if (id === 'logs') choosePane('Logs', 'right');
@@ -1971,7 +1958,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         />
         <div className="side-tools">
           <RecallSearch query={recall} hits={recallHits} onQuery={setRecall} onSelect={onRecall} />
-          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setPluginsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
+          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
         </div>
@@ -2277,7 +2264,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         onClose={() => setParty(null)}
         resolve={resolveMention}
       />
-      <PluginsSheet open={pluginsOpen} onClose={closePlugins} connectors={CONNECTORS} />
       <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={closeAIProviders} />
       <ComputerSheet open={computerOpen} onClose={closeComputer} bot={bot} ownerId={ownerId} getAccessToken={getAccessToken} />
       {viewFile ? <FileStage file={viewFile} ownerId={ownerId} getAccessToken={getAccessToken} onMissing={onMissingFile} onClose={() => setViewFile(null)} /> : null}

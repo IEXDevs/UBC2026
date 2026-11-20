@@ -27,7 +27,7 @@ test('slash skills parse to the harness and ignore normal chat', () => {
   assert.equal(goal.needsConnector, null);
   assert.match(skillInstruction('goal'), /aihero\.dev/);
   const vercel = parseSkillCommand('/vercel  check the preview');
-  assert.equal(vercel.needsConnector, 'vercel');
+  assert.equal(vercel.needsConnector, null);
   assert.equal(vercel.task, 'check the preview');
   assert.equal(parseSkillCommand('ship the header'), null);
   assert.equal(parseSkillCommand('/nope do a thing'), null);
@@ -67,6 +67,7 @@ test('slash skills parse to the harness and ignore normal chat', () => {
   assert.match(called.instruction, /Skill \/domain-modeling/);
   assert.equal(skillsCatalogInstruction().includes(called.instruction), false);
   assert.match(harnessInstruction(), /delegate_task/);
-  assert.ok(HARNESS_TOOL_NAMES.includes('use_connector'));
+  assert.equal(HARNESS_TOOL_NAMES.includes('use_connector'), false);
+  assert.equal(HARNESS_TOOL_NAMES.includes('list_connectors'), false);
   assert.ok(HARNESS_TOOL_NAMES.includes('read_subagent_results'));
 });
