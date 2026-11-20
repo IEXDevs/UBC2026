@@ -27,6 +27,9 @@ export function browserStatusNote({
 export function browserErrorNote(code) {
   const key = typeof code === 'string' ? code.trim() : '';
   if (!key) return 'Browser request failed.';
+  if (key === 'browser_readonly_not_configured') {
+    return 'Read-only Live View requires CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on the Worker. Interactive access has not been enabled.';
+  }
   if (key === 'browser_not_configured') {
     return 'Browser Rendering is not configured. Put CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on the Worker (wrangler secret put), redeploy, then retry.';
   }
