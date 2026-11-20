@@ -5,6 +5,7 @@ import { animate, useMotionValue, useMotionValueEvent, useReducedMotion } from '
 import { HugeiconsIcon } from '@hugeicons/react';
 import { MESSAGE_CHAR_CAP } from '../lib/context-usage.mjs';
 import {
+  ArrowDown01Icon,
   Attachment01Icon,
   Calendar03Icon,
   Cancel01Icon,
@@ -784,6 +785,8 @@ export default function PromptBar({
                 align="left"
                 ariaLabel="Choose model"
                 textColor={color}
+                surfaceColor="var(--pb-control-bg)"
+                highlightColor="var(--pb-control-highlight)"
                 menuAction={onAddProvider ? { label: 'Add Provider', onSelect: onAddProvider } : null}
               />
             </span>
@@ -795,8 +798,6 @@ export default function PromptBar({
               className="prompt-bar__pick"
               aria-label="Choose effort"
               aria-expanded={effortOpen}
-              data-on={effortOpen ? '' : undefined}
-              data-max={maxed ? '' : undefined}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 const root = rootRef.current;
@@ -820,31 +821,27 @@ export default function PromptBar({
             <span ref={permitRef} className="permit" onMouseDown={(event) => event.preventDefault()} onClick={(event) => event.stopPropagation()}>
               <button
                 type="button"
-                className={`permit-chip${permit.id === 'full' ? ' is-full' : ''}${permitOpen ? ' is-open' : ''}`}
+                className="prompt-bar__pick"
                 aria-label={`Permissions, ${permit.label}`}
                 aria-expanded={permitOpen}
-                style={{ '--permit-color': permit.color }}
                 onClick={() => openOnly('permit')}
               >
-                <i className="permit-dot" aria-hidden="true" />
                 <span>{permit.label}</span>
+                <HugeiconsIcon className="permit-chevron" icon={ArrowDown01Icon} size={11} strokeWidth={2} aria-hidden="true" />
               </button>
               {permitOpen ? (
                 <div className="permit-menu" role="listbox" aria-label="Permissions">
                   {PERMISSIONS.map(item => (
-                    <div key={item.id} className={`permit-choice${item.id === permit.id ? ' is-on' : ''}`}>
+                    <div key={item.id} className="permit-choice">
                       <button
                         type="button"
                         role="option"
-                        className={`${item.id === 'full' ? 'is-full' : ''}${item.id === permit.id ? ' is-on' : ''}`}
                         aria-selected={item.id === permit.id}
-                        style={{ '--permit-color': item.color }}
                         onClick={() => {
                           onPermissionChange?.(item.id);
                           if (item.id !== 'review') setBar(null);
                         }}
                       >
-                        <i className="permit-dot" aria-hidden="true" />
                         <span>{item.label}</span>
                         {item.id === 'review' && reviewCapDollars ? (
                           <span className="permit-cap-value">{reviewCapDollars} USDC</span>
