@@ -236,7 +236,7 @@ export default function SecurityPanel({
               <span>{page.summary.botCount}</span>
             </div>
             {page.bots.length ? (
-              <ul className="security-agent-list">
+              <ul className="security-agent-list" tabIndex={0} aria-label="Agent statuses">
                 {page.bots.map((bot) => {
                   const status = securityAgentStatus(bot);
                   return (

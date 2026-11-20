@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   applySecurityActionLocal,
   buildSecurityPage,
@@ -8,6 +9,11 @@ import {
   securityAgentStatus,
 } from './security.mjs';
 import { getDemoShellState } from './demo-state.mjs';
+
+test('the scrollable agent statuses remain reachable with a keyboard', () => {
+  const source = readFileSync(new URL('../components/SecurityPanel.js', import.meta.url), 'utf8');
+  assert.match(source, /<ul className="security-agent-list" tabIndex=\{0\} aria-label="Agent statuses">/);
+});
 
 /**
  * Achieves: verifies security page lists kill-switch actions and never echoes secrets in notes.
