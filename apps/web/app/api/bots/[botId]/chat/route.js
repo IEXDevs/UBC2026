@@ -22,6 +22,7 @@ import { readSubagentResults } from '../../../../../lib/subagent-board.mjs';
 import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
 import { ensureOwnerTradeLoop } from '../../../../../lib/owner-trade.mjs';
 import { cloudflareWorkerEnv } from '../../../../../lib/wallets-cloudflare.mjs';
+import { parseSolHandleSend, runSolHandleSend } from '../../../../../lib/sol-handle-send.mjs';
 import {
   isAssetSpendHold,
   resumeAssetSpend,
@@ -84,18 +85,21 @@ export async function POST(request, context) {
 
   const permissionMode = parsePermission(body.permission);
   const reviewCap = ownerReviewCap(body.reviewCap);
-  const connectors = linkedConnectorIds(body.connectors);
-  const situation = situationFromEdge(body.situation, await visitorGeo(request));
-  const prepared = prepareOwnerTurn(message, connectors, situation, new Date(situation.at));
-  if (prepared.reply) {
+  const grants = Array.isArray(body.grants)
+    ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
+    : [];
+  const assetConfirmation = grants.find(isAssetSpendHold);
+  const solSend = assetConfirmation ? null : parseSolHandleSend(message);
+  const noModel = solSend || assetConfirmation;
+  const connectors = noModel ? [] : linkedConnectorIds(body.connectors);
+  const situation = noModel ? null : situationFromEdge(body.situation, await visitorGeo(request));
+  const prepared = situation ? prepareOwnerTurn(message, connectors, situation, new Date(situation.at)) : null;
+  if (prepared?.reply) {
     return Response.json(
       { ok: true, botId, reply: prepared.reply, provider: 'desk', toolRounds: 0 },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   }
-  const grants = Array.isArray(body.grants)
-    ? body.grants.slice(0, 4).filter(item => item && typeof item.name === 'string')
-    : [];
   const accessToken = accessTokenFromRequest(request)
     || (typeof body.accessToken === 'string' ? body.accessToken.trim() : '');
   const env = await chatToolEnv();
@@ -113,6 +117,10 @@ export async function POST(request, context) {
       ? request.headers.get('x-desk-grant')
       : '',
     fetcher: async (url, init) => {
+      if (noModel) {
+        const options = init?.method === 'GET' ? { ...init, signal: AbortSignal.timeout(8000) } : init;
+        return fetchAgentRuntime(url, options);
+      }
       try {
         return await fetchAgentRuntime(url, init);
       } catch {
@@ -131,12 +139,32 @@ export async function POST(request, context) {
     situation,
   });
   const spend = { permissionMode, reviewCap, confirmSpend: true, grants };
+  const metaModelApiKey = readRootEnv('META_MODEL_API_KEY');
+  const openrouterApiKey = readRootEnv('OPENROUTER_API_KEY');
+  const approvalContext = {
+    ownerId,
+    botId,
+    secret: metaModelApiKey || openrouterApiKey,
+  };
+  if (solSend) {
+    const proposal = await runSolHandleSend(solSend, { botId, invoke: invokeRaw, spend });
+    const reply = proposal.hold && !approvalContext.secret
+      ? { reply: 'SOL confirmation is not available right now.' }
+      : {
+          reply: proposal.reply,
+          ...(proposal.hold ? { hold: sealAssetSpendHold(proposal.hold, approvalContext) } : {}),
+        };
+    return Response.json(
+      { ok: true, botId, provider: 'desk', toolRounds: 0, ...reply },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
   const chatModel = (typeof body.model === 'string' && /^[A-Za-z0-9_.:/-]{1,80}$/.test(body.model.trim()))
     ? body.model.trim()
     : (readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined);
   const chatKeys = {
-    metaModelApiKey: readRootEnv('META_MODEL_API_KEY'),
-    openrouterApiKey: readRootEnv('OPENROUTER_API_KEY'),
+    metaModelApiKey,
+    openrouterApiKey,
     botName: typeof body.name === 'string' ? body.name : 'Agent',
     botGoal: typeof body.goal === 'string' ? body.goal : '',
     botType: typeof body.type === 'string' ? body.type : 'trading',
@@ -145,12 +173,6 @@ export async function POST(request, context) {
     grants,
     model: chatModel,
     reasoningEffort: typeof body.effort === 'string' ? body.effort : '',
-  };
-  const assetConfirmation = grants.find(isAssetSpendHold);
-  const approvalContext = {
-    ownerId,
-    botId,
-    secret: chatKeys.metaModelApiKey || chatKeys.openrouterApiKey,
   };
   const harnessCtx = {
     ownerId,
@@ -175,11 +197,11 @@ export async function POST(request, context) {
     botGoal: typeof body.goal === 'string' ? body.goal : '',
     botType: typeof body.type === 'string' ? body.type : 'trading',
     history: Array.isArray(body.history) ? body.history.slice(-400) : [],
-    message: prepared.message,
+    message: prepared?.message ?? message,
     model: chatModel,
     reasoningEffort: chatKeys.reasoningEffort,
     tools: agentToolSchemas(),
-    toolsInstruction: [chatToolsInstruction(), prepared.instruction].join('\n'),
+    toolsInstruction: [chatToolsInstruction(), prepared?.instruction].filter(Boolean).join('\n'),
     permission: chatKeys.permission,
     fileCatalog: Array.isArray(body.fileCatalog) ? body.fileCatalog.slice(0, 40) : [],
     permissionMode,
