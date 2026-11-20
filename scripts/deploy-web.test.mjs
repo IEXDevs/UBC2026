@@ -41,3 +41,24 @@ test('root package exposes local web deploy commands for dev and prod', () => {
   assert.match(workflow, /npm run deploy:web:dev/);
   assert.doesNotMatch(workflow, /npx opennextjs-cloudflare build/);
 });
+
+/**
+ * Achieves: each PR into dev gets its own preview version of the dev Worker without deploying it.
+ * Fails when: the preview workflow deploys, drops the per-PR alias, loses the fork guard, or cancels builds from skipped runs.
+ * Oracle: pr-preview.yml runs upload:dev with --preview-alias pr-<n>, never deploy; concurrency is on the job.
+ * Side effects / state checked: source snapshot of apps/web/package.json and the preview workflow.
+ * Gaps: does not call Cloudflare.
+ */
+test('PR preview workflow uploads a per-PR preview of the dev Worker', () => {
+  const web = JSON.parse(readFileSync(join(root, 'apps/web/package.json'), 'utf8'));
+  assert.equal(web.scripts['upload:dev'], 'npm run build:worker && opennextjs-cloudflare upload -- --env=dev');
+
+  const workflow = readFileSync(join(root, '.github/workflows/pr-preview.yml'), 'utf8');
+  assert.match(workflow, /pull_request_target:/);
+  assert.match(workflow, /head\.repo\.full_name == github\.repository/);
+  assert.match(workflow, /npm run upload:dev -w @ubc2026\/web -- --preview-alias "pr-\$PR"/);
+  assert.doesNotMatch(workflow, /deploy:web|deploy:worker|opennextjs-cloudflare deploy|wrangler deploy/);
+  assert.equal((workflow.match(/npm ci/g) || []).length, 1);
+  assert.doesNotMatch(workflow, /^concurrency:/m);
+  assert.match(workflow, /^ {4}concurrency:/m);
+});
