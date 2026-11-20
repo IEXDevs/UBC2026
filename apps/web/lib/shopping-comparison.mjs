@@ -2,7 +2,7 @@
  * View model for the shopping panel's ranked proposal.
  * Prepare may return a 402 challenge. Settlement is a separate confirm.
  */
-const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+import { SOLANA_CLUSTER, SOLANA_CAIP2 } from '@ubc2026/contracts/solana';
 
 function acceptedTerms(result) {
   const fromBody = result?.challenge?.body?.accepts?.[0];
@@ -15,17 +15,14 @@ function acceptedTerms(result) {
  * Laso and mainnet terms never settle from this panel.
  */
 export function sandboxSettleBody(result, bot) {
+  if (SOLANA_CLUSTER === 'mainnet-beta') return null;
   if (!result || result.provider === 'laso' || result.next === 'blocked') return null;
   if (!bot || typeof bot.id !== 'string' || !bot.id) return null;
   const itemId = result.pick?.item?.id;
   if (typeof itemId !== 'string' || !itemId) return null;
   const accepted = acceptedTerms(result);
   if (!accepted || accepted.scheme !== 'exact') return null;
-  if (typeof accepted.network === 'string' && (
-    accepted.network.includes(MAINNET_GENESIS)
-    || accepted.network === 'mainnet'
-    || accepted.network === 'solana-mainnet'
-  )) return null;
+  if (accepted.network !== SOLANA_CAIP2) return null;
   const walletId = bot.walletId || bot.record?.walletId || null;
   return {
     itemId,

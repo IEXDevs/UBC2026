@@ -1,8 +1,9 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Pure decision-loop orchestration.
  * Permissioned spend order: trust gate, verify-consensus, wallet freeze,
  * bot-policy, approval mode, then sign. A refusal stops at that step.
- * Signing is an injected devnet call into @ubc2026/wallets. This module
+ * Signing is an injected mainnet-beta call into @ubc2026/wallets. This module
  * does not hold keys and does not broadcast.
  */
 import { evaluateTrust } from '@ubc2026/trust-score';
@@ -194,7 +195,7 @@ export async function runPermissionedSpend({
   confirmed = false,
   reviewCap = null,
   quote = null,
-  signDevnet,
+  signSolana,
   beforeSign,
   budgetApproval,
 } = {}) {
@@ -243,7 +244,7 @@ export async function runPermissionedSpend({
   steps.push('approval-mode');
   const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed, reviewCap });
   const approvedOnce = approvalNeeded && policy.state === 'over-budget' && confirmed
-    && typeof beforeSign === 'function' && typeof signDevnet === 'function'
+    && typeof beforeSign === 'function' && typeof signSolana === 'function'
     && validateApproval({
       bot, proposal, ledger, now, approval: budgetApproval,
     }).state === 'ready-to-reserve';
@@ -261,7 +262,7 @@ export async function runPermissionedSpend({
       ...(capReason ? { reason: capReason } : {}),
     };
   }
-  if (proposal.cluster !== 'devnet') {
+  if (proposal.cluster !== SOLANA_CLUSTER) {
     return { state: 'wrong-cluster', steps, signed: false };
   }
   if (mainnetQuoteBlocksSpend(quote)) {
@@ -292,7 +293,7 @@ export async function runPermissionedSpend({
     }
     reservedOk = true;
   }
-  if (typeof signDevnet !== 'function') {
+  if (typeof signSolana !== 'function') {
     return {
       state: reservedOk ? 'reserved' : 'signer-not-configured',
       steps,
@@ -303,12 +304,12 @@ export async function runPermissionedSpend({
   steps.push('sign');
   let signed;
   try {
-    signed = await signDevnet({ bot, wallet, proposal, memo, cluster: 'devnet' });
+    signed = await signSolana({ bot, wallet, proposal, memo, cluster: SOLANA_CLUSTER });
   } catch (error) {
     const reason = SIGN_FAILURE_REASONS.has(error?.code) ? error.code : null;
     return { state: 'sign-rejected', steps, signed: false, ...(reason ? { reason } : {}) };
   }
-  if (!signed || signed.cluster !== 'devnet' || typeof signed.signature !== 'string' || signed.signature.length < 1) {
+  if (!signed || signed.cluster !== SOLANA_CLUSTER || typeof signed.signature !== 'string' || signed.signature.length < 1) {
     return { state: 'sign-rejected', steps, signed: false };
   }
   return {
@@ -316,7 +317,7 @@ export async function runPermissionedSpend({
     steps,
     signed: true,
     signature: signed.signature,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     memo,
   };
 }

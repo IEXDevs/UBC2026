@@ -1,15 +1,16 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
  * Checkpointed bot loop:
  * research → decide → trust gate → verify → bot-policy → approval → execute → memo → monitor.
  * Each completed or waiting step is persisted before the next one starts.
- * Signing goes through an injected devnet transfer client. This module does not call x402.
+ * Signing goes through an injected mainnet-beta transfer client. This module does not call x402.
  */
 import { approvalRequirement } from '@ubc2026/agent-loop';
 import { assetByMint, createPaperBook, openPaperPosition } from '@ubc2026/paper-positions';
 import { readJupiterSwapQuote, usdPriceBaseUnits } from '@ubc2026/prices';
 import { evaluateProposal, validateApproval } from '@ubc2026/bot-policy';
 import { evaluateTrust } from '@ubc2026/trust-score';
-import { transferDevnetUsdc } from '@ubc2026/transfers';
+import { transferSolanaUsdc } from '@ubc2026/transfers';
 import { memoFromDecision, normalizeFacts, reachConsensus } from '@ubc2026/verify-consensus';
 import { parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import { assertSpendAllowed } from '@ubc2026/wallets';
@@ -132,8 +133,8 @@ function capAssetSpend(raw, bot) {
 
 function proposalFrom(raw, bot, run) {
   if (!raw || typeof raw !== 'object') return null;
-  const cluster = raw.cluster == null ? 'devnet' : raw.cluster;
-  if (cluster !== 'devnet' && cluster !== 'testnet') return { rejectedCluster: String(cluster).slice(0, 32) };
+  const cluster = raw.cluster == null ? SOLANA_CLUSTER : raw.cluster;
+  if (cluster !== SOLANA_CLUSTER) return { rejectedCluster: String(cluster).slice(0, 32) };
   const spend = raw.asset === bot.cap?.asset ? null : capAssetSpend(raw, bot);
   if (raw.asset !== bot.cap?.asset && !spend) return { assetMismatch: true };
   const asset = spend ? bot.cap.asset : raw.asset;
@@ -240,23 +241,23 @@ export function decideTask(goal, bot) {
     'When a Jupiter trust lookup is configured, the platform replaces trustScore with the Jupiter Tokens API v2 score before the trust gate. A model-invented score does not pass that gate.',
     'When a mainnet price lookup is configured, the platform replaces price with that paper quote before verify. A price quote does not sign, broadcast, or authorize a transaction.',
     'proposal fields: asset, recipient, outflow, expectedReceive, expectedReceiveAsset, maxFee, expiresAt, cluster.',
-    'cluster must be devnet or testnet. Amounts are integer strings in base units.',
+    `cluster must be ${SOLANA_CLUSTER}. Amounts are integer strings in base units.`,
     'Do not invent an API key or a signature.',
   ];
   if (isTradingGoal(goal, bot)) {
     lines.push(
       'The goal is trading. Long-term trading to beat USD inflation is in scope.',
-      'Propose one concrete Solana devnet trade in proposal. Do not stop after a summary.',
-      'Use the bot cap asset and the assigned wallet. cluster is devnet or testnet only.',
-      'Do not propose mainnet, a meme coin, or a day trade. Do not sign or broadcast.',
+      `Propose one concrete Solana ${SOLANA_CLUSTER} trade in proposal. Do not stop after a summary.`,
+      'Use the bot cap asset and the assigned wallet. cluster is the configured Solana cluster only.',
+      'Do not propose a different cluster, a meme coin, or a day trade. Do not sign or broadcast.',
       'For that one trade, include swap with inputMint, outputMint, and inAmount.',
       'inputMint and outputMint are wrapped SOL, USDC, or USDT. inAmount is base units of inputMint.',
       'A move of SOL into USDC uses wrapped SOL as inputMint and USDC as outputMint.',
       'A buy of wrapped SOL spends the cap asset: inputMint is that asset and outputMint is wrapped SOL.',
       'inAmount is base units of the cap asset and must stay at or under the per-transaction cap.',
       'A mainnet price is paper only. It is not the spend and it does not raise the cap.',
-      'Do not include a swap transaction. The platform quotes Jupiter, signs on devnet only, and marks the paper position from the mainnet price.',
-      'The platform gate still blocks a failed trust check, a failed verify, a policy or cap block, and any non-devnet trade.',
+      `Do not include a swap transaction. The platform quotes Jupiter, signs on ${SOLANA_CLUSTER} only, and marks the paper position from the mainnet price.`,
+      'The platform gate still blocks a failed trust check, a failed verify, a policy or cap block, and any trade outside the configured cluster.',
     );
     if (typeof bot?.cap?.asset === 'string' && bot.cap.asset) {
       lines.push(`The accounting asset is ${String(bot.cap.asset).slice(0, 32)}.`);
@@ -461,8 +462,8 @@ function publicQuote(quote) {
     priceUsd: typeof quote.priceUsd === 'string' ? quote.priceUsd : null,
     quoteSource: typeof quote.quoteSource === 'string' ? quote.quoteSource.slice(0, 64) : null,
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
-    label: quote.label === 'devnet execution, mainnet pricing' ? quote.label : 'devnet execution, mainnet pricing',
+    executionCluster: SOLANA_CLUSTER,
+    label: quote.label === EXECUTION_LABEL ? quote.label : EXECUTION_LABEL,
     paperPnl: true,
     authorizesTransaction: false,
   };
@@ -630,8 +631,8 @@ function publicSwapQuote(swap, outAmount) {
     outAmount,
     quoteSource: 'jupiter-swap-v1',
     pricingCluster: 'mainnet',
-    executionCluster: 'devnet',
-    label: 'devnet execution, mainnet pricing',
+    executionCluster: SOLANA_CLUSTER,
+    label: EXECUTION_LABEL,
     broadcast: false,
     authorizesTransaction: false,
   };
@@ -639,7 +640,7 @@ function publicSwapQuote(swap, outAmount) {
 
 /**
  * Jupiter quote, then a paper lot marked with the mainnet price.
- * The quote is not a transaction. Signing stays on the devnet transfer below.
+ * The quote is not a transaction. Signing stays on the mainnet-beta transfer below.
  */
 async function tradeQuoteAndPaper(swap, ctx, idempotencyKey) {
   const fetcher = typeof ctx.deps.fetch === 'function' ? ctx.deps.fetch : null;
@@ -665,7 +666,7 @@ async function tradeQuoteAndPaper(swap, ctx, idempotencyKey) {
     !quoted
     || quoted.authorizesTransaction === true
     || quoted.broadcast === true
-    || quoted.executionCluster !== 'devnet'
+    || quoted.executionCluster !== SOLANA_CLUSTER
     || quoted.swapTransaction != null
     || quoted.serializedTransaction != null
   ) {
@@ -680,7 +681,7 @@ async function tradeQuoteAndPaper(swap, ctx, idempotencyKey) {
   } catch (error) {
     return { error: priceErrorCode(error) };
   }
-  if (!priceQuote || priceQuote.label !== 'devnet execution, mainnet pricing' || priceQuote.mint !== swap.outputMint) {
+  if (!priceQuote || priceQuote.label !== EXECUTION_LABEL || priceQuote.mint !== swap.outputMint) {
     return { error: 'invalid_quote' };
   }
   const fetchedAt = Date.parse(priceQuote.fetchedAt);
@@ -695,13 +696,13 @@ async function tradeQuoteAndPaper(swap, ctx, idempotencyKey) {
       quote: priceQuote,
       now: markedAt,
       idempotencyKey,
-      cluster: 'devnet',
+      cluster: SOLANA_CLUSTER,
     });
   } catch (error) {
     const code = typeof error?.code === 'string' ? error.code : 'paper_failed';
     return { error: code === 'live_trade_refused' || code === 'mainnet_trade_refused' ? 'mainnet_trade_refused' : code };
   }
-  if (opened.fill?.broadcast !== false || opened.position?.mode !== 'paper' || opened.position?.label !== 'devnet execution, mainnet pricing') {
+  if (opened.fill?.broadcast !== false || opened.position?.mode !== 'paper' || opened.position?.label !== EXECUTION_LABEL) {
     return { error: 'mainnet_trade_refused' };
   }
   return {
@@ -726,13 +727,20 @@ async function performExecute(run, ctx) {
   const proposal = run.checkpoints.decide?.proposal;
   if (typeof memo !== 'string' || !memo || !proposal) return waitStep(run, 'execute', 'memo-missing', {}, ctx.now);
   const idempotencyKey = run.runId;
-  let swapQuote = null;
-  let paper = null;
-  if (ctx.bot?.type === 'trading' && proposal.swap) {
+  if (proposal.swap) {
     const traded = await tradeQuoteAndPaper(proposal.swap, ctx, idempotencyKey);
     if (traded.error) return waitStep(run, 'execute', traded.error, { idempotencyKey }, ctx.now);
-    swapQuote = traded.swapQuote;
-    paper = traded.paper;
+    return finishStep(run, 'execute', {
+      mode: 'paper',
+      memo,
+      idempotencyKey,
+      cluster: SOLANA_CLUSTER,
+      executed: false,
+      broadcast: false,
+      reserved: false,
+      swapQuote: traded.swapQuote,
+      paper: traded.paper,
+    }, ctx.now);
   }
   if (!ctx.deps.transferClient && typeof ctx.deps.execute !== 'function') {
     return waitStep(run, 'execute', 'signer-not-configured', { idempotencyKey }, ctx.now);
@@ -770,7 +778,7 @@ async function performExecute(run, ctx) {
   }
 
   const result = ctx.deps.transferClient
-    ? await transferDevnetUsdc({
+    ? await transferSolanaUsdc({
       client: ctx.deps.transferClient,
       bot: ctx.bot,
       wallet: ctx.wallet,
@@ -787,7 +795,7 @@ async function performExecute(run, ctx) {
       idempotencyKey,
     });
   const cluster = result?.cluster;
-  if (cluster !== 'devnet' && cluster !== 'testnet') {
+  if (cluster !== SOLANA_CLUSTER) {
     return waitStep(started, 'execute', 'wrong-cluster', { idempotencyKey }, ctx.now);
   }
   if (result.memo != null && result.memo !== memo) {
@@ -804,8 +812,6 @@ async function performExecute(run, ctx) {
     cluster,
     executed: true,
     reserved: reservation?.state === 'reserved' || reservation?.ok === true,
-    ...(swapQuote ? { swapQuote } : {}),
-    ...(paper ? { paper } : {}),
   }, ctx.now);
 }
 
@@ -823,7 +829,7 @@ async function performMonitor(run, ctx) {
   const completion = await ctx.models.complete({
     role: 'monitor',
     goal: goalFor(run, ctx.bot),
-    task: 'Role: monitor\nThe devnet execution finished. Write a one-line watch note. Do not propose a new spend.',
+    task: 'Role: monitor\nThe mainnet-beta execution finished. Write a one-line watch note. Do not propose a new spend.',
   });
   if (!(await acceptTurn(ctx, 'monitor', completion.text))) {
     return waitStep(run, 'monitor', 'verifier-blocked', { model: completion.model }, ctx.now);

@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Shared Maelstrom data shapes for bots, wallets, events, and approvals.
  * Pure validators only — no I/O, no signing, no secrets.
@@ -20,7 +21,7 @@ const pubkey = value => {
 
 export const BOT_TYPES = Object.freeze(['trading', 'shopping', 'position-management']);
 export const APPROVAL_MODES = Object.freeze(['fully-automatic', 'capped-automatic', 'ask']);
-export const CLUSTERS = Object.freeze(['devnet', 'testnet']);
+export const CLUSTERS = Object.freeze([SOLANA_CLUSTER]);
 export const BUILTIN_TEMPLATES = Object.freeze(['trading', 'shopping', 'position-management']);
 
 export const EVENT_KINDS = Object.freeze([
@@ -86,7 +87,7 @@ export function validateSpendLedger(ledger) {
 
 export function validateDecisionRecord(record) {
   if (!record || !idOk(record.id) || !idOk(record.botId) || !idOk(record.runId)) fail('Decision record ids are required');
-  if (!CLUSTERS.includes(record.cluster)) fail('Hackathon execution must use devnet or testnet');
+  if (!CLUSTERS.includes(record.cluster)) fail('Execution must use the configured Solana cluster');
   if (!text(record.factsDigest, 64) || !/^[a-f0-9]{64}$/.test(record.factsDigest)) fail('factsDigest must be sha256 hex');
   if (!text(record.proposalDigest, 64) || !/^[a-f0-9]{64}$/.test(record.proposalDigest)) fail('proposalDigest must be sha256 hex');
   if (!Number.isSafeInteger(record.createdAt) || record.createdAt <= 0) fail('createdAt is required');
@@ -123,7 +124,7 @@ export function validatePayment(payment) {
   if (payment.protocol !== 'x402') fail('Only x402 payments are supported');
   amount(payment.amount);
   if (!text(payment.asset, 64)) fail('Payment asset is required');
-  if (!CLUSTERS.includes(payment.cluster)) fail('Hackathon execution must use devnet or testnet');
+  if (!CLUSTERS.includes(payment.cluster)) fail('Execution must use the configured Solana cluster');
   if (payment.txSignature != null && (typeof payment.txSignature !== 'string' || payment.txSignature.length > 128)) {
     fail('Invalid transaction signature');
   }
@@ -167,7 +168,7 @@ export const SECRET_NAMES = Object.freeze([
   'META_MODEL_API_KEY',
   'OPENROUTER_API_KEY',
   'FIRECRAWL_API_KEY',
-  'QUICKNODE_DEVNET_RPC_URL',
+  'SOLANA_RPC_URL',
   'QUICKNODE_MAINNET_RPC_URL',
   'QUICKNODE_TESTNET_RPC_URL',
   'QUICKNODE_WEBHOOK_SECRET',
@@ -180,6 +181,7 @@ export const SECRET_NAMES = Object.freeze([
 ]);
 
 export const PUBLIC_CONFIG_NAMES = Object.freeze([
+  'NEXT_PUBLIC_SOLANA_CLUSTER',
   'NEXT_PUBLIC_PRIVY_APP_ID',
   'NEXT_PUBLIC_AGENT_RUNTIME_URL',
 ]);
@@ -193,13 +195,13 @@ export const SECRET_GROUPS = Object.freeze({
   metaModel: Object.freeze(['META_MODEL_API_KEY']),
   openrouter: Object.freeze(['OPENROUTER_API_KEY']),
   firecrawl: Object.freeze(['FIRECRAWL_API_KEY']),
-  quicknode: Object.freeze(['QUICKNODE_DEVNET_RPC_URL']),
+  quicknode: Object.freeze(['SOLANA_RPC_URL']),
   quicknodePortfolio: Object.freeze(['QUICKNODE_MAINNET_RPC_URL']),
   quicknodeTestnet: Object.freeze(['QUICKNODE_TESTNET_RPC_URL']),
   quicknodeWebhook: Object.freeze(['QUICKNODE_WEBHOOK_SECRET']),
   elevenlabs: Object.freeze(['ELEVENLABS_API_KEY', 'ELEVENLABS_AGENT_ID', 'ELEVENLABS_WEBHOOK_SECRET']),
   googleDrive: Object.freeze(['GOOGLE_DRIVE_CLIENT_ID', 'GOOGLE_DRIVE_CLIENT_SECRET', 'GOOGLE_DRIVE_REFRESH_TOKEN']),
-  serverSigning: Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']),
+  serverSigning: Object.freeze(['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'SOLANA_RPC_URL']),
 });
 
 /** OpenRouter fallback. The id ends with :free so a low-balance key is not billed. */
@@ -546,7 +548,7 @@ export function parsePrivySigningFailure(value) {
 }
 
 /** Budget units are lamports for SOL, micro-USDC for USDC, or raw units for one mint. */
-export function devnetSpendAsset(value) {
+export function solanaSpendAsset(value) {
   const asset = typeof value === 'string' ? value.trim() : '';
   if (asset.toUpperCase() === 'SOL' || asset.toUpperCase() === 'USDC') return asset.toUpperCase();
   return base58.test(asset) ? asset : null;
@@ -555,8 +557,8 @@ export function devnetSpendAsset(value) {
 function sanitizeSpendQuote(quote) {
   if (quote == null) return null;
   if (typeof quote !== 'object' || Array.isArray(quote)) return undefined;
-  const pricingCluster = quote.pricingCluster === 'mainnet' || quote.pricingCluster === 'devnet' ? quote.pricingCluster : null;
-  const cluster = quote.cluster === 'mainnet' || quote.cluster === 'devnet' ? quote.cluster : null;
+  const pricingCluster = quote.pricingCluster === 'mainnet' || quote.pricingCluster === SOLANA_CLUSTER ? quote.pricingCluster : null;
+  const cluster = quote.cluster === 'mainnet' || quote.cluster === SOLANA_CLUSTER ? quote.cluster : null;
   if (quote.pricingCluster != null && !pricingCluster) return undefined;
   if (quote.cluster != null && !cluster) return undefined;
   return {
@@ -572,13 +574,13 @@ function spendUnits(value) {
   return value;
 }
 
-/** A devnet quote does not authorize. A mainnet quote stays paper and never signs. */
+/** A mainnet-beta quote does not authorize. A mainnet quote stays paper and never signs. */
 function quoteFromCluster(cluster) {
   if (cluster === 'mainnet') {
     return { pricingCluster: 'mainnet', paperPnl: true, authorizesTransaction: false };
   }
-  if (cluster === 'devnet') {
-    return { pricingCluster: 'devnet', cluster: 'devnet', authorizesTransaction: false };
+  if (cluster === SOLANA_CLUSTER) {
+    return { pricingCluster: SOLANA_CLUSTER, cluster: SOLANA_CLUSTER, authorizesTransaction: false };
   }
   return null;
 }
@@ -595,13 +597,13 @@ export function parsePermissionedSpendBody(body) {
   const destination = typeof body.destination === 'string' && base58.test(body.destination) ? body.destination : null;
   const handle = typeof body.handle === 'string' ? normalizeHandle(body.handle) : null;
   const action = FUND_ACTIONS.includes(body.action) ? body.action : 'spend';
-  const asset = devnetSpendAsset(body.asset ?? 'USDC');
+  const asset = solanaSpendAsset(body.asset ?? 'USDC');
   if (!asset) return null;
   if (asset !== 'USDC' && (action === 'buy' || action === 'sell' || BigInt(units) > 18446744073709551615n)) return null;
   // A USDC buy of wrapped SOL stays in the assigned wallet. The spend is the cap asset.
   const selfCustody = action === 'buy' && !destination && !handle;
   if (!destination && !handle && !selfCustody) return null;
-  if (body.quoteCluster != null && body.quoteCluster !== 'devnet' && body.quoteCluster !== 'mainnet') return null;
+  if (body.quoteCluster != null && body.quoteCluster !== SOLANA_CLUSTER && body.quoteCluster !== 'mainnet') return null;
   let quote = sanitizeSpendQuote(body.quote);
   if (body.quote != null && quote == null && body.quote !== null) return null;
   if (quote == null && body.quoteCluster != null) quote = quoteFromCluster(body.quoteCluster);
@@ -641,7 +643,7 @@ export function parseSpendApprovalTerms(value) {
 
 export function spendApprovalMessage({ ownerId, spend, terms, expiresAt }) {
   return JSON.stringify([
-    'maelstrom:sol-devnet:approve-once:v1', ownerId, spend.botId,
+    'maelstrom:sol-solana:approve-once:v1', ownerId, spend.botId,
     spend.idempotencyKey, spend.action, spend.asset, spend.amount, spend.handle, spend.destination,
     terms.walletId, terms.walletAddress, terms.policyVersion, terms.feeLamports, expiresAt,
   ]);
@@ -654,6 +656,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'routes.list', method: 'GET', path: '/api/routes', phase: 0, auth: 'none', status: 'live' },
   { id: 'me', method: 'GET', path: '/api/me', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.list', method: 'GET', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'solana.balance', method: 'GET', path: '/api/solana-balance', phase: 1, auth: 'privy', status: 'guarded' },
   { id: 'wallets.create', method: 'POST', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.persist', method: 'POST', path: '/api/wallets/persist', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.sign', method: 'POST', path: '/api/wallets/:walletId/sign', phase: 1, auth: 'privy', status: 'live' },

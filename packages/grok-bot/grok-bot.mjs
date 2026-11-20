@@ -1,5 +1,6 @@
+import { SOLANA_CLUSTER, SOLANA_USDC_MINT, explorerClusterQuery } from '@ubc2026/contracts/solana';
 /**
- * Grok Bot on X: draft posts for notable Solana devnet events, and export the chat.
+ * Grok Bot on X: draft posts for notable Solana mainnet-beta events, and export the chat.
  * This module does not read credentials and does not call the network.
  * Live posting stays withheld until an X secret exists outside this build.
  */
@@ -72,10 +73,9 @@ const STREAM_LABEL = Object.freeze({
 });
 
 const PUBKEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
-const CLUSTERS = new Set(['devnet', 'testnet', 'mainnet']);
-const EXECUTION_CLUSTERS = new Set(['devnet', 'testnet']);
+const CLUSTERS = new Set([SOLANA_CLUSTER, 'testnet', 'mainnet']);
+const EXECUTION_CLUSTERS = new Set([SOLANA_CLUSTER]);
 
 const SECRET_ASSIGNMENT = /\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[A-Z0-9_]*)=([^\s'"]+)/g;
 const BEARER = /\bBearer\s+[A-Za-z0-9._\-+/=]{8,}/gi;
@@ -87,7 +87,7 @@ const WALLET_AUTH = /\bwallet-auth:[A-Za-z0-9+/=_-]{8,}/g;
  * Grok Bot drafts on-chain posts and keeps the chat record. It does not post live.
  */
 export const GROK_BOT_ROLE = [
-  'Grok Bot on X watches Maelstrom\'s notable Solana devnet activity: confirmed transactions, settled x402 payments, fund grab-backs, and stop-all memos.',
+  'Grok Bot on X watches Maelstrom\'s notable Solana mainnet-beta activity: confirmed transactions, settled x402 payments, fund grab-backs, and stop-all memos.',
   'Each notable event becomes a post draft with an explorer link, and that draft stays off the network because this build does not read an X credential or send a request.',
   'The chat that reviewed those drafts exports to JSON and Markdown, and secret-shaped strings are removed before the file is written.',
   'Grok Bot is the part of Maelstrom that surfaces on-chain activity and keeps the chat record for the bounty.',
@@ -116,7 +116,7 @@ function moneyLabel(event) {
 }
 
 function explorerUrl(signature, cluster) {
-  return `https://explorer.solana.com/tx/${signature}?cluster=${cluster}`;
+  return `https://explorer.solana.com/tx/${signature}${explorerClusterQuery(cluster)}`;
 }
 
 function assertEvent(event) {
@@ -158,7 +158,7 @@ function isStreamRow(event) {
 
 function streamAsset(token, amount) {
   if (amount == null) return { asset: null, amount: null };
-  if (token === 'USDC' || token === DEVNET_USDC_MINT) return { asset: 'USDC', amount };
+  if (token === 'USDC' || token === SOLANA_USDC_MINT) return { asset: 'USDC', amount };
   return { asset: null, amount: null };
 }
 
@@ -172,7 +172,7 @@ function normalizeStreamRow(raw) {
   if (raw.token != null && (typeof raw.token !== 'string' || raw.token.length < 1 || raw.token.length > 64 || /[\r\n]/.test(raw.token))) {
     fail('Invalid token');
   }
-  const cluster = raw.cluster ?? 'devnet';
+  const cluster = raw.cluster ?? SOLANA_CLUSTER;
   if (!CLUSTERS.has(cluster)) fail('Unknown cluster');
   if (raw.botId != null && (typeof raw.botId !== 'string' || !ID.test(raw.botId))) fail('Invalid bot id');
   if (!STREAM_LABEL[raw.type] || !EXECUTION_CLUSTERS.has(cluster)) return null;
@@ -234,7 +234,7 @@ function draftText(event) {
 }
 
 /**
- * Keep the newest notable devnet/testnet events that carry a signature.
+ * Keep the newest notable mainnet-beta/testnet events that carry a signature.
  * Returns them oldest-first, capped at 20. Does not post.
  */
 export function selectNotableOnchainEvents(events) {

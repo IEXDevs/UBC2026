@@ -1,11 +1,12 @@
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 /**
- * Devnet x402 price and trust Worker.
- * Unpaid reads get a v2 PAYMENT-REQUIRED challenge for Circle devnet USDC.
- * A bound confirmDevnetPayment must accept the bot's devnet transfer before
+ * Solana x402 price and trust Worker.
+ * Unpaid reads get a v2 PAYMENT-REQUIRED challenge for Circle mainnet-beta USDC.
+ * A bound confirmSolanaPayment must accept the bot's mainnet-beta transfer before
  * the quote or score is returned. This module never opens a network connection.
  */
 import {
-  DEVNET_USDC_MINT,
+  SOLANA_USDC_MINT,
   NETWORKS,
   buildPaymentRequired,
   buildPaymentResponse,
@@ -15,7 +16,7 @@ import { evaluateTrust } from '@ubc2026/trust-score';
 
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const LOW_TRUST_MINT = 'SysvarRent111111111111111111111111111111111';
-const PRICE_LABEL = 'devnet execution, mainnet pricing';
+const PRICE_LABEL = EXECUTION_LABEL;
 const MINT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const USD = /^(0|[1-9]\d*)(\.\d+)?$/;
 const POSITIVE = /^[1-9][0-9]{0,39}$/;
@@ -23,11 +24,11 @@ const POSITIVE = /^[1-9][0-9]{0,39}$/;
 export const CATALOG = Object.freeze({
   prices: Object.freeze({
     [SOL_MINT]: Object.freeze({ priceUsd: '150.25', quoteSource: 'catalog' }),
-    [DEVNET_USDC_MINT]: Object.freeze({ priceUsd: '1.00', quoteSource: 'catalog' }),
+    [SOLANA_USDC_MINT]: Object.freeze({ priceUsd: '1.00', quoteSource: 'catalog' }),
   }),
   trust: Object.freeze({
     [SOL_MINT]: Object.freeze({ score: '900', source: 'catalog' }),
-    [DEVNET_USDC_MINT]: Object.freeze({ score: '980', source: 'catalog' }),
+    [SOLANA_USDC_MINT]: Object.freeze({ score: '980', source: 'catalog' }),
     [LOW_TRUST_MINT]: Object.freeze({ score: '120', source: 'catalog' }),
   }),
 });
@@ -54,8 +55,8 @@ function reasonCode(value, fallback) {
 
 export function createPriceTrustHandler(options = {}) {
   return async function handle(request, env = {}) {
-    const cluster = configured(options.cluster) ?? configured(env.CLUSTER) ?? 'devnet';
-    if (cluster !== 'devnet') return json({ error: 'wrong_cluster' }, 403);
+    const cluster = configured(options.cluster) ?? configured(env.SOLANA_CLUSTER) ?? SOLANA_CLUSTER;
+    if (cluster !== SOLANA_CLUSTER) return json({ error: 'wrong_cluster' }, 403);
 
     const url = new URL(request.url);
     if (url.pathname === '/health' && request.method === 'GET') {
@@ -64,7 +65,7 @@ export function createPriceTrustHandler(options = {}) {
       return json({
         ok: true,
         product: 'x402-price-trust',
-        cluster: 'devnet',
+        cluster: SOLANA_CLUSTER,
         configured: Boolean(payTo && feePayer),
       });
     }
@@ -134,11 +135,11 @@ export function createPriceTrustHandler(options = {}) {
       return settlement(false, { errorMessage: 'invalid_payment' });
     }
     const accepted = parsed.accepted;
-    if (accepted.amount !== amount || accepted.asset !== DEVNET_USDC_MINT || accepted.payTo !== payTo) {
+    if (accepted.amount !== amount || accepted.asset !== SOLANA_USDC_MINT || accepted.payTo !== payTo) {
       return settlement(false, { errorMessage: 'payment_terms_mismatch' });
     }
 
-    const confirm = options.confirmPayment ?? env.confirmDevnetPayment;
+    const confirm = options.confirmPayment ?? env.confirmSolanaPayment;
     let confirmed = { ok: false, reason: 'settlement_unconfirmed' };
     if (typeof confirm === 'function') {
       try {
@@ -159,8 +160,8 @@ export function createPriceTrustHandler(options = {}) {
 
     const paid = {
       amount,
-      asset: DEVNET_USDC_MINT,
-      network: NETWORKS.devnet,
+      asset: SOLANA_USDC_MINT,
+      network: NETWORKS.solana,
       transaction: parsed.payload.signature,
     };
     if (kind === 'price') {
@@ -171,7 +172,7 @@ export function createPriceTrustHandler(options = {}) {
           priceUsd: row.priceUsd,
           quoteSource: typeof row.quoteSource === 'string' ? row.quoteSource : 'catalog',
           pricingCluster: 'mainnet',
-          executionCluster: 'devnet',
+          executionCluster: SOLANA_CLUSTER,
           label: PRICE_LABEL,
           paid,
         },
@@ -188,7 +189,7 @@ export function createPriceTrustHandler(options = {}) {
         score: decision.score,
         source: typeof row.source === 'string' ? row.source : 'catalog',
         decision,
-        executionCluster: 'devnet',
+        executionCluster: SOLANA_CLUSTER,
         paid,
       },
     });

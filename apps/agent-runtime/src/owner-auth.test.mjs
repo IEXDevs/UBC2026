@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import worker from './index.mjs';
+import { SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 
 const appId = 'testapp1';
 const owner = 'did:privy:fixture_a';
 const otherOwner = 'did:privy:fixture_b';
-const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const address = SOLANA_USDC_MINT;
 const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
 

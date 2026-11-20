@@ -13,7 +13,7 @@ import {
   skillsCatalogInstruction,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
-import { devnetSpendAsset } from '@ubc2026/contracts';
+import { solanaSpendAsset } from '@ubc2026/contracts';
 import { chatToolsInstruction, createChatToolInvoker } from './chat-tools.mjs';
 import { connectorInstruction, planConnectorUse, resolveDeskConnectors } from './connector-access.mjs';
 import { effectiveReviewCap, isFundTool, matchingToolGrant, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
@@ -61,7 +61,7 @@ export function stampSpendPermission(name, args, { permissionMode = 'ask', revie
     delete next.idempotencyKey;
     delete next.confirmed;
     if (confirmSpend && toolAccessKind(next.permission, name, next, next.reviewCap)) {
-      if (name === 'request_spend' && devnetSpendAsset(next.asset ?? 'USDC') !== 'USDC') {
+      if (name === 'request_spend' && solanaSpendAsset(next.asset ?? 'USDC') !== 'USDC') {
         const grant = matchingToolGrant(grants, name, next);
         if (grant) {
           next.idempotencyKey = grant.idempotencyKey;

@@ -172,7 +172,7 @@ export function positionsFromBook(items, marks = []) {
       pnlMicroUsdc: mark && SIGNED.test(mark.pnlMicroUsdc) ? mark.pnlMicroUsdc : realized,
       quoteSource: mark?.quoteSource || 'paper book',
       ...(mark?.venue ? { venue: mark.venue } : {}),
-      market: mark?.market || (row.cluster === 'mainnet' ? 'mainnet price' : 'devnet book'),
+      market: mark?.market || (row.cluster === 'mainnet' ? 'mainnet price' : 'mainnet-beta book'),
       side: mark?.side || (typeof row.mode === 'string' && row.mode.trim() ? row.mode.trim().slice(0, 16) : 'supply'),
       ...(mark?.mark ? { mark: mark.mark } : {}),
       notionalMicroUsdc: entry || mark?.notionalMicroUsdc || null,

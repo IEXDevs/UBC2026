@@ -35,7 +35,7 @@ import {
 } from './wallet-desk.mjs';
 import { BIP39_ENGLISH } from './bip39-english.mjs';
 
-const ADDRESS = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const PHRASE = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima'];
 
 /**
@@ -88,9 +88,9 @@ test('desk tokens use the platform USDC book and hide nothing by default', () =>
 });
 
 /**
- * Achieves: desk SOL and USDC follow the confirmed devnet read, and a token with no ledger row stays listed.
+ * Achieves: desk SOL and USDC follow the confirmed mainnet-beta read, and a token with no ledger row stays listed.
  * Fails when: the platform book hides the faucet amount, or an on-wallet token is dropped.
- * Oracle: 20 USDC and 1 SOL from devnet; BONK row present with empty positions and transfers.
+ * Oracle: 20 USDC and 1 SOL from solana; BONK row present with empty positions and transfers.
  * Side effects / state checked: N/A.
  * Gaps: does not call RPC.
  */
@@ -98,10 +98,10 @@ test('desk tokens show unavailable labels on rpc_failed instead of inventing zer
   const rows = deskTokens({
     transfers: [],
     positions: [],
-    devnet: {
+    solana: {
       ok: false,
       code: 'rpc_failed',
-      cluster: 'devnet',
+      cluster: 'mainnet-beta',
       solLamports: null,
       usdcAmount: null,
       tokens: [],
@@ -122,10 +122,10 @@ test('desk tokens show partial known SOL with unavailable USDC', () => {
   const rows = deskTokens({
     transfers: [],
     positions: [],
-    devnet: {
+    solana: {
       ok: false,
       code: 'rpc_failed',
-      cluster: 'devnet',
+      cluster: 'mainnet-beta',
       solLamports: '2500000000',
       usdcAmount: null,
       tokens: [],
@@ -140,14 +140,14 @@ test('desk tokens show partial known SOL with unavailable USDC', () => {
   assert.equal(rows[1].amountKnown, true);
 });
 
-test('desk tokens show devnet SOL and USDC even when the ledger is empty', () => {
+test('desk tokens show mainnet-beta SOL and USDC even when the ledger is empty', () => {
   const bonk = 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
   const rows = deskTokens({
     transfers: [{ asset: 'USDC', amount: '4000000', direction: 'in' }],
     positions: [],
-    devnet: {
+    solana: {
       ok: true,
-      cluster: 'devnet',
+      cluster: 'mainnet-beta',
       solLamports: '1000000000',
       usdcAmount: '20000000',
       tokens: [
@@ -260,7 +260,7 @@ test('recovery phrases are confirmed in order and never stored in the ack', () =
     handle: 'alex',
   });
   assert.match(card, /alpha bravo/);
-  assert.match(card, /Main: 4zMMC/);
+  assert.match(card, /Main: EPjFW/);
   assert.match(card, /@alex/);
   const plain = recoveryCard({ wallets: [{ label: 'Main', address: ADDRESS }] });
   assert.match(plain, /Not a seed phrase/);
@@ -367,7 +367,7 @@ test('swap quotes skip restricted tokens and signup claims a handle before recov
   assert.equal(settled.amount, '1000000');
   assert.equal(settled.broadcast, false);
   assert.equal(settled.authorizesTransaction, false);
-  assert.equal(settled.label, 'devnet execution, mainnet pricing');
+  assert.equal(settled.label, 'mainnet-beta execution, mainnet pricing');
   assert.equal(swapSendSettlement({ inputSymbol: 'SOL', quoteOut: '1000000', quote: { ...priced, broadcast: true } }).error, 'quote_not_authorization');
   assert.equal(swapSendSettlement({ inputSymbol: 'USDC', quoteOut: '1000000', quote: priced }).error, 'invalid_quote');
   const base = {

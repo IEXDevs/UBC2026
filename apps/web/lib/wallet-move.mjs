@@ -1,5 +1,5 @@
 /**
- * Plan a devnet USDC move between two Privy wallets on the same desk.
+ * Plan a mainnet-beta USDC move between two Privy wallets on the same desk.
  * This file does not sign or broadcast.
  */
 import { validateWallet } from '@ubc2026/contracts';
@@ -25,7 +25,7 @@ export function planWalletMove({ from, to, amount, ownerId, env = {} } = {}) {
   if (source.id === dest.id || source.address === dest.address) return { error: 'invalid_destination' };
   if (typeof amount !== 'string' || !AMOUNT.test(amount)) return { error: 'invalid_amount' };
   const missing = [];
-  for (const key of ['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']) {
+  for (const key of ['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'SOLANA_RPC_URL']) {
     const value = typeof env[key] === 'string' ? env[key].trim() : '';
     const pub = key === 'PRIVY_APP_ID' && typeof env.NEXT_PUBLIC_PRIVY_APP_ID === 'string'
       ? env.NEXT_PUBLIC_PRIVY_APP_ID.trim()
@@ -58,7 +58,7 @@ export function planConnectedDeposit({ from, to, amount, ownerId, env = {} } = {
   if (source.id === dest.id || source.address === dest.address) return { error: 'invalid_destination' };
   if (typeof amount !== 'string' || !AMOUNT.test(amount)) return { error: 'invalid_amount' };
   const missing = [];
-  for (const key of ['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'QUICKNODE_DEVNET_RPC_URL']) {
+  for (const key of ['PRIVY_APP_ID', 'PRIVY_APP_SECRET', 'SOLANA_RPC_URL']) {
     const value = typeof env[key] === 'string' ? env[key].trim() : '';
     const pub = key === 'PRIVY_APP_ID' && typeof env.NEXT_PUBLIC_PRIVY_APP_ID === 'string'
       ? env.NEXT_PUBLIC_PRIVY_APP_ID.trim()

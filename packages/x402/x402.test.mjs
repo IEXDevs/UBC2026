@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  NETWORKS, DEVNET_USDC_MINT, X402Error,
+  NETWORKS, SOLANA_USDC_MINT, X402Error,
   buildPaymentRequired, parsePaymentSignature, buildPaymentSignature, buildPaymentResponse, paymentFeedEntry,
   createSandboxStoreClient,
 } from './x402.mjs';
@@ -10,13 +10,13 @@ const payTo = 'So11111111111111111111111111111111111111112';
 const feePayer = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
 /**
- * Achieves: buildPaymentRequired returns 402 with base64 v2 accepts on solana-devnet USDC exact scheme.
+ * Achieves: buildPaymentRequired returns 402 with base64 v2 accepts on solana-mainnet USDC exact scheme.
  * Fails when: Wrong version/network/asset/scheme or missing feePayer.
  * Oracle: x402 v2 PAYMENT-REQUIRED header contract.
  * Side effects: none
  * Gaps: none meaningful
  */
-test('402 challenge encodes v2 PAYMENT-REQUIRED for Solana devnet USDC', () => {
+test('402 challenge encodes v2 PAYMENT-REQUIRED for Solana mainnet-beta USDC', () => {
   const challenge = buildPaymentRequired({
     resourceUrl: 'https://api.example.com/trust-score',
     description: 'Paid trust score lookup',
@@ -27,8 +27,8 @@ test('402 challenge encodes v2 PAYMENT-REQUIRED for Solana devnet USDC', () => {
   assert.equal(challenge.status, 402);
   const decoded = JSON.parse(Buffer.from(challenge.headers['PAYMENT-REQUIRED'], 'base64').toString('utf8'));
   assert.equal(decoded.x402Version, 2);
-  assert.equal(decoded.accepts[0].network, NETWORKS.devnet);
-  assert.equal(decoded.accepts[0].asset, DEVNET_USDC_MINT);
+  assert.equal(decoded.accepts[0].network, NETWORKS.solana);
+  assert.equal(decoded.accepts[0].asset, SOLANA_USDC_MINT);
   assert.equal(decoded.accepts[0].scheme, 'exact');
   assert.equal(decoded.accepts[0].extra.feePayer, feePayer);
 });
@@ -36,13 +36,13 @@ test('402 challenge encodes v2 PAYMENT-REQUIRED for Solana devnet USDC', () => {
 /**
  * Achieves: Mainnet network and decimal amounts throw from buildPaymentRequired.
  * Fails when: Mainnet challenges are built, or decimal amounts accepted.
- * Oracle: Devnet-only builder policy for default helpers.
+ * Oracle: Solana-only builder policy for default helpers.
  * Side effects: none
  * Gaps: Laso mainnet path is separate (shopping).
  */
 test('mainnet challenges and malformed amounts are rejected', () => {
   assert.throws(() => buildPaymentRequired({
-    resourceUrl: 'https://api.example.com/x', description: 'x', amount: '1', payTo, feePayer, network: NETWORKS.mainnet,
+    resourceUrl: 'https://api.example.com/x', description: 'x', amount: '1', payTo, feePayer, network: NETWORKS.devnet,
   }));
   assert.throws(() => buildPaymentRequired({
     resourceUrl: 'https://api.example.com/x', description: 'x', amount: '1.5', payTo, feePayer,
@@ -50,52 +50,52 @@ test('mainnet challenges and malformed amounts are rejected', () => {
 });
 
 /**
- * Achieves: build/parsePaymentSignature round-trip on devnet; mainnet accepted terms throw.
+ * Achieves: build/parsePaymentSignature round-trip on solana; mainnet accepted terms throw.
  * Fails when: Mainnet signatures build successfully.
  * Oracle: PAYMENT-SIGNATURE header encode/decode.
  * Side effects: none
  * Gaps: none meaningful
  */
-test('payment signature header round-trips on devnet and rejects mainnet', () => {
-  const accepted = { scheme: 'exact', network: NETWORKS.devnet, amount: '10000', asset: DEVNET_USDC_MINT, payTo };
+test('payment signature header round-trips on mainnet-beta and rejects mainnet', () => {
+  const accepted = { scheme: 'exact', network: NETWORKS.solana, amount: '10000', asset: SOLANA_USDC_MINT, payTo };
   const header = buildPaymentSignature({ accepted, signature: 'sig' });
   assert.equal(parsePaymentSignature(header).payload.signature, 'sig');
   assert.throws(() => buildPaymentSignature({
-    accepted: { ...accepted, network: NETWORKS.mainnet },
+    accepted: { ...accepted, network: NETWORKS.devnet },
     signature: 'sig',
   }));
 });
 
 /**
- * Achieves: Parsed headers require exact+devnet; mainnet accepted in payload throws.
+ * Achieves: Parsed headers require exact+solana; mainnet accepted in payload throws.
  * Fails when: Mainnet payloads parse as valid.
  * Oracle: parsePaymentSignature network/scheme gate.
  * Side effects: none
  * Gaps: Wrong scheme (non-exact) rejection is untested.
  */
-test('payment signature must target exact scheme on Solana devnet', () => {
+test('payment signature must target exact scheme on Solana mainnet-beta', () => {
   const payload = {
     x402Version: 2,
-    accepted: { scheme: 'exact', network: NETWORKS.devnet, amount: '10000', asset: DEVNET_USDC_MINT, payTo },
+    accepted: { scheme: 'exact', network: NETWORKS.solana, amount: '10000', asset: SOLANA_USDC_MINT, payTo },
     payload: { signature: 'sig' },
   };
   const header = Buffer.from(JSON.stringify(payload)).toString('base64');
   assert.equal(parsePaymentSignature(header).accepted.amount, '10000');
-  const mainnet = { ...payload, accepted: { ...payload.accepted, network: NETWORKS.mainnet } };
+  const mainnet = { ...payload, accepted: { ...payload.accepted, network: NETWORKS.devnet } };
   assert.throws(() => parsePaymentSignature(Buffer.from(JSON.stringify(mainnet)).toString('base64')));
 });
 
 /**
- * Achieves: PAYMENT-RESPONSE encodes success on devnet; feed entries require known status and x402-v2 protocol.
+ * Achieves: PAYMENT-RESPONSE encodes success on solana; feed entries require known status and x402-v2 protocol.
  * Fails when: Unknown statuses accepted or network flips.
  * Oracle: paymentFeedEntry status enum + network label.
  * Side effects: none
  * Gaps: none meaningful
  */
-test('settlement response and payment feed stay on devnet', () => {
+test('settlement response and payment feed stay on mainnet-beta', () => {
   const ok = buildPaymentResponse({ success: true, transaction: '5'.repeat(64) });
   assert.ok(ok.headers['PAYMENT-RESPONSE']);
-  assert.equal(ok.body.network, NETWORKS.devnet);
+  assert.equal(ok.body.network, NETWORKS.solana);
   const entry = paymentFeedEntry({
     id: 'p1', botId: 'b1', recipient: payTo, amount: '10000', resourceUrl: 'https://api.example.com/trust-score',
     transaction: '5'.repeat(64), status: 'verified', createdAt: 1,
@@ -171,10 +171,10 @@ test('X402Error is thrown for malformed payment artifacts', () => {
   assert.throws(() => parsePaymentSignature('%%%'), X402Error);
   assert.throws(
     () => buildPaymentSignature({
-      accepted: { scheme: 'exact', network: NETWORKS.mainnet, amount: '1', asset: DEVNET_USDC_MINT, payTo },
+      accepted: { scheme: 'exact', network: NETWORKS.devnet, amount: '1', asset: SOLANA_USDC_MINT, payTo },
       signature: 'sig',
     }),
     X402Error,
   );
-  assert.throws(() => buildPaymentResponse({ success: true, transaction: '', network: NETWORKS.devnet }), X402Error);
+  assert.throws(() => buildPaymentResponse({ success: true, transaction: '', network: NETWORKS.solana }), X402Error);
 });

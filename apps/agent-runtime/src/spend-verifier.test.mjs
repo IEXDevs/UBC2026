@@ -2,18 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { verifierFacts } from './spend-verifier.mjs';
 
-const mint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const facts = {
   asset: 'USDC',
   mint,
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   price: '1000000',
   amount: '1000',
   trustScore: '800',
-  reasonSummary: 'pay 1000 USDC on devnet',
+  reasonSummary: 'pay 1000 USDC on mainnet-beta',
 };
 const proposal = {
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   asset: 'USDC',
   recipient: mint,
   outflow: '1000',
@@ -35,7 +35,7 @@ test('verifier agrees when the proposal matches the spend', () => {
     mint,
   });
   assert.equal(verified.amount, '1000');
-  assert.equal(verified.cluster, 'devnet');
+  assert.equal(verified.cluster, 'mainnet-beta');
   assert.equal(verified.asset, 'USDC');
 });
 

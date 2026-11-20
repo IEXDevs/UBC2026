@@ -35,12 +35,12 @@ test('a message can name a handle or an SNS name', () => {
   assert.equal(mentionIn('send it to @Alex'), '@Alex');
   assert.equal(mentionIn('pay @richclub.sol today'), '@richclub.sol');
   assert.equal(mentionIn('hello'), null);
-  assert.equal(recipientHint({ kind: 'handle', handle: 'alex', displayName: 'Alex', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' }), 'Alex (4zMMC...DncDU)');
-  assert.equal(recipientHint({ kind: 'handle', handle: 'hi', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' }), '@hi (4zMMC...DncDU)');
+  assert.equal(recipientHint({ kind: 'handle', handle: 'alex', displayName: 'Alex', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' }), 'Alex (EPjFW...TDt1v)');
+  assert.equal(recipientHint({ kind: 'handle', handle: 'hi', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' }), '@hi (EPjFW...TDt1v)');
   assert.equal(recipientHint({ kind: 'handle', handle: 'alex', missing: true }), '@alex is not on Maelstrom');
   assert.equal(recipientHint({ kind: 'handle', handle: 'royce', missing: false, self: true }), '@royce');
   assert.equal(recipientHint({ kind: 'handle', handle: 'royce', missing: false }), '@royce does not have a wallet yet.');
-  assert.equal(recipientHint({ kind: 'sns', domain: 'richclub.sol', address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU' }), 'richclub.sol (4zMMC...DncDU)');
+  assert.equal(recipientHint({ kind: 'sns', domain: 'richclub.sol', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' }), 'richclub.sol (EPjFW...TDt1v)');
   assert.equal(recipientHint({ kind: 'sns', domain: 'richclub.sol', error: 'sns_not_found' }), 'Failed.');
   assert.equal(profileRailLabel({ handle: 'sid', displayName: 'Sid Chevvan' }), '@sid');
   assert.equal(profileRailLabel({ handle: '  @sid ', displayName: 'Sid Chevvan' }), '@sid');
@@ -62,7 +62,7 @@ test('send blocks a handle until lookup finds a wallet', () => {
     kind: 'handle',
     handle: 'alex',
     missing: false,
-    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   }), true);
   assert.equal(sendHandleHint(null, { looking: true, handle: 'alex' }), 'Looking up @alex.');
   assert.equal(sendHandleHint({ kind: 'handle', handle: 'alex', missing: true }), '@alex is not on Maelstrom');

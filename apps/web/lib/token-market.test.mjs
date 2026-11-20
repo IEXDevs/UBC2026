@@ -25,7 +25,7 @@ const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 test('chart ranges and solscan links stay on the token page', () => {
   assert.deepEqual(CHART_RANGES, ['1H', '1D', '1W', '1M', 'YTD', '1Y', 'All']);
   assert.equal(solscanTokenUrl(USDC), `https://solscan.io/token/${USDC}`);
-  assert.match(solscanTokenUrl(USDC, 'devnet'), /cluster=devnet$/);
+  assert.equal(new URL(solscanTokenUrl(USDC, 'mainnet-beta')).search, '');
   assert.equal(solscanTokenUrl('nope'), null);
   assert.equal(formatCompactUsd(2_500_000), '$2.50M');
 });

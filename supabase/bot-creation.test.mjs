@@ -7,7 +7,7 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 const owner = 'user_1';
 const now = 1_700_000_000_000;
-const mainAddress = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const mainAddress = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const extraAddress = 'So11111111111111111111111111111111111111112';
 
 function parseResult(value) {

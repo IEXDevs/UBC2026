@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createHash } from 'node:crypto';
 
 export class ConsensusError extends Error {}
@@ -20,7 +21,7 @@ const score = (value, unavailable = false) => {
 /** Canonical trade facts the main agent and verify agent must agree on before any preview reaches the user. */
 export function normalizeFacts(facts) {
   if (!facts || !required(facts.asset) || !required(facts.mint) || !required(facts.cluster) || !required(facts.reasonSummary)) fail('Incomplete trade facts');
-  if (!['devnet', 'testnet'].includes(facts.cluster)) fail('Hackathon execution must use devnet or testnet');
+  if (![SOLANA_CLUSTER].includes(facts.cluster)) fail('Execution must use the configured Solana cluster');
   if (typeof facts.reasonSummary !== 'string' || facts.reasonSummary.length > 2000) fail('Reasoning summary is required and must stay short');
   const unavailable = facts.trustUnavailable === true;
   const normalized = {

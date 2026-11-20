@@ -85,7 +85,7 @@ test('mapWalletRow / mapBotRow / mapLedgerRow normalize rows', () => {
     owner_id: 'u1',
     kind: 'additional',
     label: 'Shop',
-    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     deleted_at: '2026-11-19T00:00:00.000Z',
   }), null);
   const linked = mapWalletRow({
@@ -232,7 +232,7 @@ test('loadOwnerLoopContext requires bot+wallet rows', async () => {
     if (String(url).includes('/wallets?')) {
       return Response.json([{
         id: 'w1', owner_id: 'u1', kind: 'main', label: 'Main',
-        address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU', provider: 'privy',
+        address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', provider: 'privy',
       }]);
     }
     return Response.json([{ bot_id: 'b1', asset: 'USDC', spent: '0', reserved: '0', realized_loss: '0' }]);

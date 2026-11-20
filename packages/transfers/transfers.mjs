@@ -1,6 +1,7 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
- * Devnet USDC movement for Maelstrom.
- * Privy signs bot transfers and owner moves, then the existing devnet
+ * Solana USDC movement for Maelstrom.
+ * Privy signs bot transfers and owner moves, then the existing solana
  * broadcaster sends them. A Wallet Adapter signs deposits locally.
  * Every transaction is a USDC transfer followed by a memo.
  * This module never opens a Solana connection and never broadcasts.
@@ -15,19 +16,19 @@ import {
 } from '@solana/spl-token';
 import { ContractError, validateWallet } from '@ubc2026/contracts';
 import { assertSpendAllowed } from '@ubc2026/wallets';
-import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
-import { DEVNET_USDC_MINT as X402_DEVNET_USDC_MINT } from '@ubc2026/x402';
+import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
+import { SOLANA_USDC_MINT as X402_SOLANA_USDC_MINT } from '@ubc2026/x402';
 
-if (DEVNET_USDC_MINT !== X402_DEVNET_USDC_MINT) {
-  throw new Error('Devnet USDC mint does not match @ubc2026/x402');
+if (SOLANA_USDC_MINT !== X402_SOLANA_USDC_MINT) {
+  throw new Error('Solana USDC mint does not match @ubc2026/x402');
 }
 
-export { DEVNET_USDC_MINT };
+export { SOLANA_USDC_MINT };
 
 export const SPL_TOKEN_PROGRAM_ID = TOKEN_PROGRAM_ID.toBase58();
 export const MEMO_PROGRAM_ID = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
 export const ASSOCIATED_TOKEN_PROGRAM = ASSOCIATED_TOKEN_PROGRAM_ID.toBase58();
-export const DEVNET_USDC_DECIMALS = 6;
+export const SOLANA_USDC_DECIMALS = 6;
 export const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 const U64_MAX = 18446744073709551615n;
@@ -97,7 +98,7 @@ function adapterAddress(adapter) {
 }
 
 function requireMethod(client, name) {
-  if (!client || typeof client[name] !== 'function') fail(`Devnet signing helper ${name} is required`, 'missing_signer');
+  if (!client || typeof client[name] !== 'function') fail(`Solana signing helper ${name} is required`, 'missing_signer');
 }
 
 async function blockhashFrom(client, recentBlockhash) {
@@ -105,16 +106,16 @@ async function blockhashFrom(client, recentBlockhash) {
     pubkey(recentBlockhash, 'blockhash');
     return recentBlockhash;
   }
-  requireMethod(client, 'getDevnetBlockhash');
-  const loaded = await client.getDevnetBlockhash();
-  if (!loaded || loaded.cluster !== 'devnet') fail('Refusing to build a transfer outside Solana devnet', 'wrong_cluster');
+  requireMethod(client, 'getSolanaBlockhash');
+  const loaded = await client.getSolanaBlockhash();
+  if (!loaded || loaded.cluster !== SOLANA_CLUSTER) fail('Refusing to build a transfer outside Solana mainnet-beta', 'wrong_cluster');
   pubkey(loaded.blockhash, 'blockhash');
   return loaded.blockhash;
 }
 
 function tokenAccount(owner) {
   return getAssociatedTokenAddressSync(
-    pubkey(DEVNET_USDC_MINT, 'mint'),
+    pubkey(SOLANA_USDC_MINT, 'mint'),
     owner,
     false,
     TOKEN_PROGRAM_ID,
@@ -124,18 +125,18 @@ function tokenAccount(owner) {
 
 /**
  * Unsigned legacy transaction: create the destination USDC account if needed,
- * transfer devnet USDC, then write the memo. Nothing is signed or sent.
+ * transfer mainnet-beta USDC, then write the memo. Nothing is signed or sent.
  */
-export function buildDevnetUsdcTransaction({
+export function buildSolanaUsdcTransaction({
   feePayer,
   sourceOwner,
   destinationOwner,
   amount: rawAmount,
   memo,
   recentBlockhash,
-  cluster = 'devnet',
+  cluster = SOLANA_CLUSTER,
 } = {}) {
-  if (cluster !== 'devnet') fail('Hackathon transfers must use Solana devnet', 'wrong_cluster');
+  if (cluster !== SOLANA_CLUSTER) fail('Hackathon transfers must use Solana mainnet-beta', 'wrong_cluster');
   const units = positiveAmount(rawAmount);
   const memoData = memoBytes(memo);
   const payer = pubkey(feePayer, 'fee payer');
@@ -146,7 +147,7 @@ export function buildDevnetUsdcTransaction({
 
   const sourceTokenAccount = tokenAccount(source);
   const destinationTokenAccount = tokenAccount(destination);
-  const mint = pubkey(DEVNET_USDC_MINT, 'mint');
+  const mint = pubkey(SOLANA_USDC_MINT, 'mint');
   const transaction = new Transaction({ feePayer: payer, recentBlockhash });
   transaction.add(
     createAssociatedTokenAccountIdempotentInstruction(
@@ -163,7 +164,7 @@ export function buildDevnetUsdcTransaction({
       destinationTokenAccount,
       source,
       units,
-      DEVNET_USDC_DECIMALS,
+      SOLANA_USDC_DECIMALS,
       [],
       TOKEN_PROGRAM_ID,
     ),
@@ -178,8 +179,8 @@ export function buildDevnetUsdcTransaction({
     verifySignatures: false,
   }).toString('base64');
   return {
-    cluster: 'devnet',
-    mint: DEVNET_USDC_MINT,
+    cluster: SOLANA_CLUSTER,
+    mint: SOLANA_USDC_MINT,
     amount: units.toString(),
     memo,
     feePayer,
@@ -193,7 +194,7 @@ export function buildDevnetUsdcTransaction({
 }
 
 /** Native SOL or a classic SPL token with an existing destination token account. */
-export function buildDevnetAssetTransaction({ asset, decimals, sourceOwner, destinationOwner, amount: rawAmount, memo, recentBlockhash } = {}) {
+export function buildSolanaAssetTransaction({ asset, decimals, sourceOwner, destinationOwner, amount: rawAmount, memo, recentBlockhash } = {}) {
   const units = positiveAmount(rawAmount);
   const source = pubkey(sourceOwner, 'source wallet');
   const destination = pubkey(destinationOwner, 'destination wallet');
@@ -220,7 +221,7 @@ export function buildDevnetAssetTransaction({ asset, decimals, sourceOwner, dest
 function movementResult(kind, built, signature) {
   return {
     kind,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     mint: built.mint,
     amount: built.amount,
     memo: built.memo,
@@ -232,7 +233,7 @@ function movementResult(kind, built, signature) {
   };
 }
 
-export async function transferDevnetUsdc({
+export async function transferSolanaUsdc({
   client,
   bot,
   wallet,
@@ -241,11 +242,11 @@ export async function transferDevnetUsdc({
   memo,
   recentBlockhash,
 } = {}) {
-  requireMethod(client, 'signAndBroadcastDevnet');
+  requireMethod(client, 'signAndBroadcastSolana');
   assertSpendAllowed({ bot, wallet });
   if (wallet.address === destination) fail('Source and destination must differ', 'invalid_destination');
   const hash = await blockhashFrom(client, recentBlockhash);
-  const built = buildDevnetUsdcTransaction({
+  const built = buildSolanaUsdcTransaction({
     feePayer: wallet.address,
     sourceOwner: wallet.address,
     destinationOwner: destination,
@@ -253,12 +254,12 @@ export async function transferDevnetUsdc({
     memo,
     recentBlockhash: hash,
   });
-  const sent = await client.signAndBroadcastDevnet({
+  const sent = await client.signAndBroadcastSolana({
     bot,
     wallet,
     transaction: built.transactionBase64,
   });
-  if (!sent || sent.cluster !== 'devnet') fail('Refusing to broadcast outside Solana devnet', 'wrong_cluster');
+  if (!sent || sent.cluster !== SOLANA_CLUSTER) fail('Refusing to broadcast outside Solana mainnet-beta', 'wrong_cluster');
   return movementResult('transfer', built, sent.signature);
 }
 
@@ -272,11 +273,11 @@ async function ownerMove({
   recentBlockhash,
   kind,
 }) {
-  requireMethod(client, 'signAndBroadcastOwnerDevnet');
+  requireMethod(client, 'signAndBroadcastOwnerSolana');
   const source = ownedWallet(fromWallet, ownerId);
   if (source.address === toAddress) fail('Source and destination must differ', 'invalid_destination');
   const hash = await blockhashFrom(client, recentBlockhash);
-  const built = buildDevnetUsdcTransaction({
+  const built = buildSolanaUsdcTransaction({
     feePayer: source.address,
     sourceOwner: source.address,
     destinationOwner: toAddress,
@@ -284,12 +285,12 @@ async function ownerMove({
     memo,
     recentBlockhash: hash,
   });
-  const sent = await client.signAndBroadcastOwnerDevnet({
+  const sent = await client.signAndBroadcastOwnerSolana({
     ownerId,
     wallet: source,
     transaction: built.transactionBase64,
   });
-  if (!sent || sent.cluster !== 'devnet') fail('Refusing to broadcast outside Solana devnet', 'wrong_cluster');
+  if (!sent || sent.cluster !== SOLANA_CLUSTER) fail('Refusing to broadcast outside Solana mainnet-beta', 'wrong_cluster');
   return movementResult(kind, built, sent.signature);
 }
 
@@ -350,8 +351,8 @@ export async function depositFromWalletAdapter({
   memo = 'deposit',
   recentBlockhash,
 } = {}) {
-  requireMethod(client, 'assertDevnetCluster');
-  requireMethod(client, 'broadcastSignedDevnet');
+  requireMethod(client, 'assertSolanaCluster');
+  requireMethod(client, 'broadcastSignedSolana');
   const main = ownedWallet(mainWallet, ownerId);
   if (main.kind !== 'main') fail('Deposits go to the main wallet', 'invalid_wallet');
   if (!adapter || typeof adapter.signTransaction !== 'function') {
@@ -359,7 +360,7 @@ export async function depositFromWalletAdapter({
   }
   const external = adapterAddress(adapter);
   const hash = await blockhashFrom(client, recentBlockhash);
-  const built = buildDevnetUsdcTransaction({
+  const built = buildSolanaUsdcTransaction({
     feePayer: external,
     sourceOwner: external,
     destinationOwner: main.address,
@@ -367,7 +368,7 @@ export async function depositFromWalletAdapter({
     memo,
     recentBlockhash: hash,
   });
-  await client.assertDevnetCluster();
+  await client.assertSolanaCluster();
   let signed;
   try {
     signed = await adapter.signTransaction(built.transaction);
@@ -382,22 +383,22 @@ export async function depositFromWalletAdapter({
   } catch {
     fail('Wallet adapter did not sign the deposit', 'invalid_signature');
   }
-  const sent = await client.broadcastSignedDevnet({ signedTransaction: transactionBase64 });
-  if (!sent || sent.cluster !== 'devnet') fail('Refusing to broadcast outside Solana devnet', 'wrong_cluster');
+  const sent = await client.broadcastSignedSolana({ signedTransaction: transactionBase64 });
+  if (!sent || sent.cluster !== SOLANA_CLUSTER) fail('Refusing to broadcast outside Solana mainnet-beta', 'wrong_cluster');
   return movementResult('deposit', built, sent.signature);
 }
 
 async function balanceOf(client, wallet, balances) {
   if (balances != null) {
     if (typeof balances !== 'object' || !Object.hasOwn(balances, wallet.id)) {
-      fail('A devnet USDC balance is required for each wallet', 'missing_balance');
+      fail('A mainnet-beta USDC balance is required for each wallet', 'missing_balance');
     }
     return amount(balances[wallet.id]);
   }
-  requireMethod(client, 'getDevnetUsdcBalance');
-  const read = await client.getDevnetUsdcBalance({ address: wallet.address });
-  if (!read || read.cluster !== 'devnet' || read.mint !== DEVNET_USDC_MINT || read.address !== wallet.address) {
-    fail('Refusing to read a balance outside Solana devnet USDC', 'wrong_cluster');
+  requireMethod(client, 'getSolanaUsdcBalance');
+  const read = await client.getSolanaUsdcBalance({ address: wallet.address });
+  if (!read || read.cluster !== SOLANA_CLUSTER || read.mint !== SOLANA_USDC_MINT || read.address !== wallet.address) {
+    fail('Refusing to read a balance outside Solana mainnet-beta USDC', 'wrong_cluster');
   }
   return amount(read.amount);
 }
@@ -442,5 +443,5 @@ export async function grabBackToMain({
       throw wrapped;
     }
   }
-  return { kind: 'grab-back', cluster: 'devnet', memo, moves };
+  return { kind: 'grab-back', cluster: SOLANA_CLUSTER, memo, moves };
 }

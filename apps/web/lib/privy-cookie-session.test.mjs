@@ -61,7 +61,7 @@ test('spend and login routes accept the HttpOnly session cookie', () => {
     '../app/api/files/[secret]/route.js',
     '../app/api/runtime/[...path]/route.js',
     './connected-deposit.mjs',
-    './devnet-balance-read.mjs',
+    './solana-balance-read.mjs',
   ];
   for (const file of files) {
     const source = readFileSync(join(root, file), 'utf8');

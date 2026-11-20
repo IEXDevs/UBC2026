@@ -8,7 +8,7 @@ import { enrichEnv } from './runtime-env.mjs';
 function baseEnv(extra = {}) {
   return {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ...extra,
   };
 }
@@ -26,7 +26,7 @@ test('enrichEnv is a no-op for non-objects and idempotent for objects', () => {
   assert.equal(enrichEnv(undefined), undefined);
   assert.equal(enrichEnv('x'), 'x');
 
-  const transferClient = { signAndBroadcastDevnet: async () => ({}) };
+  const transferClient = { signAndBroadcastSolana: async () => ({}) };
   const loadLoopContext = async () => ({});
   const signShoppingPayment = async () => 'sig';
   const executeSnsTransfer = async () => ({ signature: 's' });
@@ -61,8 +61,8 @@ test('enrichEnv leaves transferClient null without Privy and wraps injectables',
   assert.equal(bare.executeSnsTransfer, null);
 
   const client = {
-    getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: 'bh' }),
-    signAndBroadcastDevnet: async () => ({ cluster: 'devnet', signature: 'sig' }),
+    getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: 'bh' }),
+    signAndBroadcastSolana: async () => ({ cluster: 'mainnet-beta', signature: 'sig' }),
   };
   const wired = enrichEnv(baseEnv({ transferClient: client }));
   assert.equal(typeof wired.signShoppingPayment, 'function');

@@ -1,3 +1,5 @@
+
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 export default Object.freeze({
   "id": "crypto-research",
   "command": "/crypto-research",
@@ -7,5 +9,5 @@ export default Object.freeze({
   "needsConnector": null,
   "description": "Research a token or protocol from primary pages.",
   "order": 21,
-  "instruction": "Skill /crypto-research. Group: Crypto.\nThe owner text names the token, protocol, or question.\nSearch and read the project page or the data page. Quote the figure with its source.\nLabel a price as devnet execution, mainnet pricing.\nDo not invent a contract address, a holder count, or a partnership.\nDo not spend."
+  "instruction": `Skill /crypto-research. Group: Crypto.\nThe owner text names the token, protocol, or question.\nSearch and read the project page or the data page. Quote the figure with its source.\nLabel a price as ${EXECUTION_LABEL}.\nDo not invent a contract address, a holder count, or a partnership.\nDo not spend.`
 });

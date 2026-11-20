@@ -31,7 +31,7 @@ test('chat formats agent and assistant replies at render time and leaves user te
 });
 
 test('link parts keep a Solscan URL as its own anchor', () => {
-  const url = 'https://solscan.io/tx/abc?cluster=devnet';
+  const url = 'https://solscan.io/tx/abc';
   assert.deepEqual(linkParts(`Sent. ${url}`), [
     { type: 'text', value: 'Sent. ' },
     { type: 'link', value: url },

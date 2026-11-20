@@ -6,7 +6,7 @@ import { createPrivyWalletClientFromEnv } from '@ubc2026/wallets/privy';
 import { ownerAuthStatus, resolveOwner } from './owner-auth.mjs';
 import {
   ConfigError,
-  devnetSpendAsset,
+  solanaSpendAsset,
   httpsAvatarUrl,
   normalizeDisplayName,
   normalizeHandle,
@@ -276,7 +276,7 @@ function tokensLabel(tokens) {
   return labels.length ? labels.join(' · ') : null;
 }
 
-/** Attach whatever non-zero SOL/SPL balances exist on Solana-devnet and Solana-testnet. */
+/** Attach whatever non-zero SOL/SPL balances exist on Solana-mainnet-beta and Solana-testnet. */
 async function withOnchainBalances(env, wallets) {
   const list = Array.isArray(wallets) ? wallets : [];
   // Always hit Solana over public HTTPS (or the injected test double). Never
@@ -313,7 +313,7 @@ async function withOnchainBalances(env, wallets) {
       cluster: bal.cluster || null,
       clusters: bal.clusters
         ? {
-          devnet: bal.clusters.devnet?.ok === true,
+          solana: bal.clusters.solana?.ok === true,
           testnet: bal.clusters.testnet?.ok === true,
         }
         : null,
@@ -622,8 +622,8 @@ export async function handleApiData(request, env, matched) {
         return json({ error: 'bot_not_found' }, 404);
       }
       const sent = bot
-        ? await client.signAndBroadcastDevnet({ bot, wallet, transaction: body.transaction })
-        : await client.signAndBroadcastOwnerDevnet({ ownerId, wallet, transaction: body.transaction });
+        ? await client.signAndBroadcastSolana({ bot, wallet, transaction: body.transaction })
+        : await client.signAndBroadcastOwnerSolana({ ownerId, wallet, transaction: body.transaction });
       return json({ ok: true, ...sent });
     } catch (err) {
       const code = err instanceof WalletError ? err.code : err?.code || 'sign_failed';
@@ -723,7 +723,7 @@ export async function handleApiData(request, env, matched) {
 
     const capMode = body.cap?.mode === 'unlimited' ? 'unlimited' : 'limited';
     const rawCapAsset = typeof body.cap?.asset === 'string' ? body.cap.asset.trim() : '';
-    const capAsset = devnetSpendAsset(rawCapAsset) || rawCapAsset.slice(0, 32) || 'USDC';
+    const capAsset = solanaSpendAsset(rawCapAsset) || rawCapAsset.slice(0, 32) || 'USDC';
     const row = {
       id: botId,
       owner_id: ownerId,

@@ -5,7 +5,7 @@ import { BIP39_ENGLISH } from './bip39-english.mjs';
 import { redactForLog, redactLogText } from './activity-log.mjs';
 
 const SEED = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const PUBKEY = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const PUBKEY = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 /**
  * Achieves: redactForLog/redactLogText keep safe fields and scrub seeds, keys, grants, bearer, long hex.

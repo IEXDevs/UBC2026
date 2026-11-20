@@ -10,10 +10,10 @@ import {
 } from './sns.mjs';
 
 const dest = 'So11111111111111111111111111111111111111112';
-const from = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const from = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 /**
- * Achieves: resolveSnsOwner hits sdk-proxy.sns.id, returns the proxy pubkey with mainnet-read/devnet-exec labels, and maps errors to SnsError.
+ * Achieves: resolveSnsOwner hits sdk-proxy.sns.id, returns the proxy pubkey with mainnet-read/mainnet-beta-exec labels, and maps errors to SnsError.
  * Fails when: Wrong host is called, proxy errors succeed, or executionCluster becomes mainnet.
  * Oracle: SNS proxy JSON {s,result} contract.
  * Side effects: Injected fetcher.
@@ -21,7 +21,7 @@ const from = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
  */
 test('safe-resolve returns whichever owner the SNS proxy sends', async () => {
   const richclub = 'Hp6Qyx3K9McpE1w2V7LbNU1NpwjwpqRiiggrcveNrtHF';
-  const other = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const other = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const calls = [];
   const fetcher = async (url) => {
     const href = String(url);
@@ -50,7 +50,7 @@ test('safe-resolve returns whichever owner the SNS proxy sends', async () => {
 });
 
 /**
- * Achieves: createSnsResolver normalizes case and returns executionCluster=devnet; invalid pubkeys throw.
+ * Achieves: createSnsResolver normalizes case and returns executionCluster=solana; invalid pubkeys throw.
  * Fails when: Case folding fails, executionCluster is mainnet, or junk resolver returns are accepted.
  * Oracle: Injectable resolver contract for tests/runtime.
  * Side effects: none
@@ -65,13 +65,13 @@ test('resolves .sol names through an injected resolver', async () => {
   });
   const result = await resolve('Alex.sol');
   assert.equal(result.address, dest);
-  assert.equal(result.executionCluster, 'devnet');
+  assert.equal(result.executionCluster, 'mainnet-beta');
   const bad = createSnsResolver({ resolveFn: async () => 'not-a-pubkey' });
   await assert.rejects(() => bad('alex.sol'), SnsError);
 });
 
 /**
- * Achieves: buildSnsTransferIntent returns unsigned sns-transfer on devnet; bad domains/amounts/pubkeys throw.
+ * Achieves: buildSnsTransferIntent returns unsigned sns-transfer on solana; bad domains/amounts/pubkeys throw.
  * Fails when: Intent is marked signed/submitted, or invalid domains/amounts/pubkeys are accepted.
  * Oracle: Unsigned intent shape before owner/signer approval.
  * Side effects: none
@@ -83,7 +83,7 @@ test('builds an unsigned SNS transfer intent', () => {
   });
   assert.equal(intent.type, 'sns-transfer');
   assert.equal(intent.status, 'unsigned');
-  assert.equal(intent.cluster, 'devnet');
+  assert.equal(intent.cluster, 'mainnet-beta');
   assert.throws(() => buildSnsTransferIntent({
     from, to: dest, domain: 'not-a-domain', amount: '1', botId: 'bot_1',
   }), SnsError);
@@ -96,13 +96,13 @@ test('builds an unsigned SNS transfer intent', () => {
 });
 
 /**
- * Achieves: Without executeTransfer → await-owner-or-signer; with devnet signature → submitted; mainnet execute refused.
+ * Achieves: Without executeTransfer → await-owner-or-signer; with mainnet-beta signature → submitted; mainnet execute refused.
  * Fails when: Mainnet execute is accepted, or unsigned path claims submitted.
- * Oracle: prepareSnsSend next-state + cluster===devnet execute gate.
+ * Oracle: prepareSnsSend next-state + cluster===mainnet-beta execute gate.
  * Side effects: Injected resolver/executeTransfer.
  * Gaps: none meaningful
  */
-test('prepareSnsSend resolves and optionally executes on devnet', async () => {
+test('prepareSnsSend resolves and optionally executes on mainnet-beta', async () => {
   const resolver = createSnsResolver({ resolveFn: async () => dest });
   const unsigned = await prepareSnsSend({
     from, domain: 'alex.sol', amount: '1000', botId: 'bot_1', resolver,
@@ -112,7 +112,7 @@ test('prepareSnsSend resolves and optionally executes on devnet', async () => {
 
   const submitted = await prepareSnsSend({
     from, domain: 'alex.sol', amount: '1000', botId: 'bot_1', resolver,
-    executeTransfer: async () => ({ signature: 'sig_sns_1', cluster: 'devnet' }),
+    executeTransfer: async () => ({ signature: 'sig_sns_1', cluster: 'mainnet-beta' }),
   });
   assert.equal(submitted.next, 'submitted');
   assert.equal(submitted.intent.signature, 'sig_sns_1');

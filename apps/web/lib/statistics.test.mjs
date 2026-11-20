@@ -18,7 +18,7 @@ test('statistics keeps voice minutes with the owner rollup', () => {
   assert.equal(view.ownerRows[0].value, 2);
   assert.equal(view.agents[0].label, 'Meteora');
   assert.equal(view.agents[0].rows.find(row => row.key === 'decisions').value, 2);
-  assert.match(view.note, /devnet execution, mainnet pricing/);
+  assert.match(view.note, /mainnet-beta execution, mainnet pricing/);
   assert.equal(view.source, 'local');
 });
 

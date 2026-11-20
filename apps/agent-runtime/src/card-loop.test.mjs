@@ -10,7 +10,7 @@ const wallet = {
   ownerId: 'user_1',
   kind: 'main',
   label: 'Main',
-  address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   frozen: false,
   provider: 'privy',
 };
@@ -94,7 +94,7 @@ test('the card loop stores a purpose and rejects a short cooldown', async () => 
  * Fails when: the signer or model runs before the gate, or a future loop wakes early.
  * Oracle: transfer client and model spies stay empty; pause reason is spend-frozen.
  * Side effects: in-memory run checkpoint.
- * Gaps: a passing gate's devnet broadcast is covered by the loop engine tests.
+ * Gaps: a passing gate's mainnet-beta broadcast is covered by the loop engine tests.
  */
 test('a loop wake goes through the decision gate before any spend', async () => {
   const machine = new BotStateMachine();
@@ -108,14 +108,14 @@ test('a loop wake goes through the decision gate before any spend', async () => 
   const stored = await machine.get('cardLoop');
   await machine.put('cardLoop', { ...stored, nextWakeAt: NOW + 60_000 });
   const env = {
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     loadLoopContext: async () => ({
       bot: { ...bot, frozen: true },
       wallet: { ...wallet, frozen: true },
       ledger,
     }),
     openRouter: { async complete() { models.push('called'); return { text: 'no' }; } },
-    transferClient: { async signAndBroadcastDevnet(request) { signs.push(request); } },
+    transferClient: { async signAndBroadcastSolana(request) { signs.push(request); } },
   };
   const early = await machine.handle(post('/card-loop/tick', { now: NOW }, {
     [INTERNAL_POSITION_HEADER]: INTERNAL_CARD_LOOP_VALUE,
@@ -153,7 +153,7 @@ test('a loop wake goes through the decision gate before any spend', async () => 
 test('public card-loop routes require the owner', async () => {
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     BOT: {
       idFromName: (name) => name,
       get: () => ({ fetch: async () => Response.json({ ok: true }) }),

@@ -9,7 +9,7 @@ import {
 import { createMemoryWalletKv } from '@ubc2026/quicknode-streams';
 
 const secret = 'qn_secret';
-const wallet = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const wallet = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 /**
  * Achieves: webhook rejects bad HMAC and wakes bot on valid signature.

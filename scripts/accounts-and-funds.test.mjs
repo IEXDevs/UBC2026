@@ -4,12 +4,12 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SECRET_NAMES } from '../packages/contracts/contracts.mjs';
-import { DEVNET_USDC_MINT } from '../packages/x402/x402.mjs';
+import { SOLANA_USDC_MINT } from '../packages/x402/x402.mjs';
 import {
   ACCOUNT_VENDORS,
   AccountsFundsError,
-  DEVNET_USDC_MINT_ADDRESS,
-  PUBLIC_DEVNET_RPC,
+  SOLANA_USDC_MINT_ADDRESS,
+  PUBLIC_SOLANA_RPC,
   SOL_FAUCET_URL,
   USDC_FAUCET_URL,
   assertSecretNamesCovered,
@@ -21,7 +21,7 @@ import {
   runAccountsAndFunds,
 } from './accounts-and-funds.mjs';
 
-const ADDRESS = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SECRET_VALUE = 'super-secret-value-do-not-print';
 
 /**
@@ -45,25 +45,25 @@ test('solana address check accepts a 32-byte pubkey and rejects junk', () => {
  * Side effects: Reads process.env PRIVY/QUICKNODE test values.
  * Gaps: Does not unset env in finally (test process local).
  */
-test('plan lists every secret name and both faucets without reading values', () => {
+test('plan lists every secret name and real funding steps without reading values', () => {
   process.env.PRIVY_APP_SECRET = SECRET_VALUE;
-  process.env.QUICKNODE_DEVNET_RPC_URL = 'https://example.invalid/secret-rpc';
+  process.env.SOLANA_RPC_URL = 'https://example.invalid/secret-rpc';
   const plan = buildAccountsAndFundsPlan();
   const listed = ACCOUNT_VENDORS.flatMap(vendor => vendor.names);
   for (const name of SECRET_NAMES) assert.ok(listed.includes(name), name);
   assert.equal(plan.storesValues, false);
   assert.equal(plan.networkCalls, false);
   assert.equal(plan.wallet, null);
-  assert.equal(plan.funds.sol.url, SOL_FAUCET_URL);
-  assert.equal(plan.funds.usdc.url, USDC_FAUCET_URL);
-  assert.equal(plan.funds.usdc.mint, DEVNET_USDC_MINT);
-  assert.equal(DEVNET_USDC_MINT_ADDRESS, DEVNET_USDC_MINT);
+  assert.equal(plan.funds.sol.url, null);
+  assert.equal(plan.funds.usdc.url, null);
+  assert.equal(plan.funds.usdc.mint, SOLANA_USDC_MINT);
+  assert.equal(SOLANA_USDC_MINT_ADDRESS, SOLANA_USDC_MINT);
   const text = formatAccountsAndFunds(plan);
-  assert.match(text, /faucet\.solana\.com/);
-  assert.match(text, /faucet\.circle\.com/);
-  assert.match(text, new RegExp(PUBLIC_DEVNET_RPC.replace(/[.]/g, '\\.')));
-  assert.match(text, /HTTP 410/);
-  assert.match(text, /\$QUICKNODE_DEVNET_RPC_URL/);
+  assert.match(text, /real mainnet SOL/);
+  assert.match(text, /real Solana mainnet USDC/);
+  assert.doesNotMatch(text, /solana airdrop|faucet\.solana\.com|faucet\.circle\.com/);
+  assert.match(text, new RegExp(PUBLIC_SOLANA_RPC.replace(/[.]/g, '\\.')));
+  assert.match(text, /\$SOLANA_RPC_URL/);
   assert.equal(text.includes(SECRET_VALUE), false);
   assert.equal(text.includes('https://example.invalid/secret-rpc'), false);
   for (const name of [...SECRET_NAMES, 'NEXT_PUBLIC_PRIVY_APP_ID', 'NEXT_PUBLIC_PRIVY_CLIENT_ID']) {
@@ -120,7 +120,7 @@ test('cli prints json with no secrets in the environment', () => {
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.wallet, ADDRESS);
   assert.equal(plan.networkCalls, false);
-  assert.equal(plan.funds.usdc.mint, DEVNET_USDC_MINT);
+  assert.equal(plan.funds.usdc.mint, SOLANA_USDC_MINT);
   assert.equal(result.stdout.includes(SECRET_VALUE), false);
   const refused = spawnSync(process.execPath, ['scripts/accounts-and-funds.mjs', '--address', 'nope'], {
     cwd: fileURLToPath(new URL('..', import.meta.url)),

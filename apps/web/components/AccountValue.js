@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { SOLANA_CLUSTER, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 import { accountValueLabel } from '../lib/account-value.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
@@ -22,7 +23,7 @@ export default function AccountValue({ ownerId, getAccessToken, wallets = [], de
         if (devPreview) {
           body = previewPortfolioFor(walletKey.split(',').filter(Boolean).map(address => ({ address })));
         } else {
-          const response = await fetch('/api/portfolio?cluster=devnet', {
+          const response = await fetch(`/api/portfolio?cluster=${SOLANA_CLUSTER}`, {
             headers: await ownerAuthHeaders(ownerId, getAccessToken),
             cache: 'no-store',
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
@@ -43,6 +44,6 @@ export default function AccountValue({ ownerId, getAccessToken, wallets = [], de
   const partial = Number(portfolio?.unpriced) > 0;
   const title = !portfolio
     ? 'Account value unavailable'
-    : `Total across connected Solana wallets · devnet execution, mainnet pricing${partial ? ' · Some assets have no price' : ''}`;
+    : `Total across connected Solana wallets · ${EXECUTION_LABEL}${partial ? ' · Some assets have no price' : ''}`;
   return <span aria-label="Account value in USD" title={title}>{accountValueLabel(portfolio)}</span>;
 }

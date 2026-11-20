@@ -1,3 +1,6 @@
+
+import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * Browser DexScreener reads for token details and USD prices.
  * Longer chart ranges use GeckoTerminal candle closes for that window.
@@ -357,15 +360,15 @@ export function dexTokenView({ mint, range = '1D', cluster = 'mainnet', token = 
     quoteSource: 'dexscreener',
     fromCache: cached,
     note: drawn
-      ? 'GeckoTerminal history. DexScreener price. devnet execution, mainnet pricing. This does not authorize a transaction.'
+      ? `GeckoTerminal history. DexScreener price. ${EXECUTION_LABEL}. This does not authorize a transaction.`
       : cached
-        ? 'Saved token details. The price waits on DexScreener. devnet execution, mainnet pricing. This does not authorize a transaction.'
-        : 'DexScreener price. devnet execution, mainnet pricing. This does not authorize a transaction.',
+        ? `Saved token details. The price waits on DexScreener. ${EXECUTION_LABEL}. This does not authorize a transaction.`
+        : `DexScreener price. ${EXECUTION_LABEL}. This does not authorize a transaction.`,
   };
 }
 
 export function portfolioWithDex(portfolio, tokens = []) {
-  if (!portfolio || (portfolio.cluster !== 'mainnet' && portfolio.cluster !== 'devnet' && portfolio.cluster !== 'testnet')) {
+  if (!portfolio || (portfolio.cluster !== 'mainnet' && portfolio.cluster !== SOLANA_CLUSTER && portfolio.cluster !== 'testnet')) {
     return portfolio;
   }
   const prices = {};

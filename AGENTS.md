@@ -12,11 +12,11 @@ Rules for coding agents working in Maelstrom (`UBC2026`). Read this before editi
 
 ## Money and chain
 
-- Execution, broadcasts, and x402 challenges are Solana **devnet**. Fact validators also allow `testnet`. Reject mainnet proposals.
-- Mainnet price reads are paper PnL. Label them `devnet execution, mainnet pricing`. A mainnet quote never authorizes a transaction.
+- Execution, broadcasts, and x402 challenges use `SOLANA_CLUSTER` (default **mainnet-beta**; optional `devnet`). Set `NEXT_PUBLIC_SOLANA_CLUSTER` to the same value at web build time. Fact/proposal validators reject every other cluster. Mainnet transfers spend real funds.
+- Mainnet price reads are paper PnL. Label them `<configured cluster> execution, mainnet pricing`. A price quote never authorizes a transaction, even when its network matches execution.
 - Spend follows this order: trust gate, verify-consensus, wallet freeze check, bot-policy, approval mode, then sign. Skipping a step is a bug.
 - A passing `runDecisionGate` may return a memo string. Submitting that memo, signing, or broadcasting is a separate chunk and stays out of `@ubc2026/agent-loop`, `@ubc2026/verify-consensus`, `@ubc2026/bot-policy`, and `@ubc2026/x402`.
-- `@ubc2026/wallets` is the only package that signs. It signs through Privy and broadcasts only after the QuickNode genesis hash is Solana devnet. A frozen wallet never broadcasts.
+- `@ubc2026/wallets` is the only package that signs. It signs through Privy and broadcasts only after the RPC genesis hash matches the full configured-cluster genesis hash. A frozen wallet never broadcasts. Mainnet has no faucet or airdrop.
 - Amounts are unsigned integer strings in one asset's base units, matching `^(0|[1-9][0-9]{0,39})$`. Trust scores are integer strings from 0 to 1000.
 - Ledger totals come from Postgres (or the in-memory test double). Model output is not a balance.
 - A policy digest, a decision digest, and a memo string are not signatures. Bind the exact serialized transaction and its simulation before signing.
@@ -78,7 +78,7 @@ If a Notion search does not show "UBC Conference AIgent idea", ask for the board
 - A Laso reloadable card belongs to the human principal. That person completes signup, KYC, the issuer one-time code, and issuer terms. The agent may hand over the claim URL and poll status. It must not open the claim URL or submit identity for the user.
 - For this hackathon, the principal is in Austin, Texas and is at least 18. Mainnet execution is planned and is not enabled.
 - Onboarding explains Ask, Review by AI, and Full permissions, and stores a Review by AI USDC maximum. A hidden server verifier must match amount, asset, cluster, and recipient before approval mode. At or under the cap the spend can continue. Above the cap the owner confirms. Ask and Full still require the confirm slide.
-- Privy Solana addresses are cluster-agnostic and are the user's mainnet address. Broadcasts require the Solana devnet genesis hash. Sends, receives, and cards are meant to use that same address on mainnet later. Laso card funding settles only on Solana mainnet or Base and cannot complete on devnet.
+- Privy Solana addresses are cluster-agnostic and are the user's mainnet address. Broadcasts require the Solana mainnet-beta genesis hash. Sends, receives, and cards are meant to use that same address on mainnet later. Laso card funding settles only on Solana mainnet or Base and cannot complete on mainnet-beta.
 - A reloadable-card load checks the merchant list and advises the owner before any transfer. The Solana payment uses the exact amount and the exact payTo from the quote. The second agent must approve before approval mode.
 - Signup requires an SNS domain claim. Wallet addresses show the first 5 and last 5 characters and copy on click. Owners can add external wallets to fund the Maelstrom wallet.
 - Logs may include activity other than private keys and seed phrases. Row access stays limited to that owner.

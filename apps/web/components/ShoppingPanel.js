@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { sandboxSettleBody, shoppingComparisonView } from '../lib/shopping-comparison.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
@@ -70,7 +71,7 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
             cap: bot.record?.cap || { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
           },
           ledger: { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },
-          recipient: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+          recipient: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         };
       const response = await fetch(url, {
         method: 'POST',
@@ -143,10 +144,10 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
       <h2>Shopping</h2>
       <p className="hint">
         Compare the x402 sandbox catalog on price and quality, or open a tiny Laso mainnet card challenge.
-        The result is a proposal. Nothing is bought until you approve.
+        The result is a proposal. Nothing is bought until you approve. Sandbox purchases are disabled on mainnet.
       </p>
       <div className="live-actions">
-        <button className="cta" type="button" disabled={busy} onClick={() => prepare('sandbox')}>
+        <button className="cta" type="button" disabled={busy || SOLANA_CLUSTER === 'mainnet-beta'} onClick={() => prepare('sandbox')}>
           {busy ? 'Working…' : 'Compare catalog'}
         </button>
         <button className="ghost" type="button" disabled={busy} onClick={() => prepare('laso')}>

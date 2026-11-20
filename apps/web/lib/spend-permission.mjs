@@ -4,7 +4,7 @@
  * for the person. Every mode uses the same spend API.
  */
 import { formatBaseUnits } from './money-views.mjs';
-import { devnetSpendAsset } from '@ubc2026/contracts';
+import { solanaSpendAsset } from '@ubc2026/contracts';
 
 export const SPEND_PERMISSION_KEY = 'maelstrom.spendPermission';
 export const REVIEW_THRESHOLD_KEY = 'maelstrom.reviewThreshold';
@@ -187,7 +187,7 @@ function accessDetail(name, args) {
   const address = typeof args?.destination === 'string' ? args.destination.trim() : '';
   const recipient = handle && address ? `@${handle} (${address})` : (handle ? `@${handle}` : address || args?.domain);
   const who = recipient ? ` to ${recipient}` : '';
-  const asset = devnetSpendAsset(args?.asset ?? 'USDC');
+  const asset = solanaSpendAsset(args?.asset ?? 'USDC');
   if (!asset || !AMOUNT.test(amount)) return `Move funds${who}`;
   if (asset === 'USDC') return `Move ${formatBaseUnits(amount)} USDC${who}`;
   if (asset === 'SOL') return `Send ${formatBaseUnits(amount, 9)} SOL${who}, plus the network fee`;
@@ -195,7 +195,7 @@ function accessDetail(name, args) {
 }
 
 function isNonUsdcSpend(name, args) {
-  return name === 'request_spend' && devnetSpendAsset(args?.asset ?? 'USDC') !== 'USDC';
+  return name === 'request_spend' && solanaSpendAsset(args?.asset ?? 'USDC') !== 'USDC';
 }
 
 /**
@@ -245,9 +245,9 @@ export function grantCovers(grants, name, args) {
 export function permissionInstruction(id) {
   const mode = parsePermission(id);
   const quiet = ' This is for you, not the owner. Do not repeat the check order. Do not say that trust, verify, the budget reserve, or signing did not run, unless the owner asks whether money moved.';
-  const shared = `Fund movements go through the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.${quiet}`;
+  const shared = `Fund movements go through the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on configured Solana network. A mainnet price quote never authorizes a transaction.${quiet}`;
   if (mode === 'full') {
-    return `Permissions are fully granted. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay, unless the send is over the review maximum. That maximum still asks for a confirm, including when Review by AI is off. The default maximum is 30 USDC. Follow your goal, and infer the action and call the spend API. Fund movements go through the platform gate, and the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.${quiet}`;
+    return `Permissions are fully granted. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay, unless the send is over the review maximum. That maximum still asks for a confirm, including when Review by AI is off. The default maximum is 30 USDC. Follow your goal, and infer the action and call the spend API. Fund movements go through the platform gate, and the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on configured Solana network. A mainnet price quote never authorizes a transaction.${quiet}`;
   }
   if (mode === 'review') {
     return `Permission is review by AI. At or under the owner's review threshold, continue after the server check. Above that threshold, state what would change and wait. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. ${shared}`;

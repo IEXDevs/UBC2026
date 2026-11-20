@@ -31,7 +31,7 @@ function positionBody(ownerId = 'alice') {
 
 test('unauthenticated status never returns positionCheck or run', async () => {
   const machine = new BotStateMachine();
-  await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'devnet', updatedAt: 1 });
+  await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'mainnet-beta', updatedAt: 1 });
   await machine.put('lastPositionCheck', { botId: 'bot_1', positions: [{ mint: MINT, amount: '1' }], flag: 'within-cap' });
   await machine.put('run', { runId: 'secret-run', goal: 'do not leak' });
 
@@ -46,7 +46,7 @@ test('unauthenticated status never returns positionCheck or run', async () => {
 
 test('owner mismatch on status is forbidden and returns no check payload', async () => {
   const machine = new BotStateMachine();
-  await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'devnet', updatedAt: 1 });
+  await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'mainnet-beta', updatedAt: 1 });
   await machine.put('lastPositionCheck', { botId: 'bot_1', flag: 'max-loss', positions: [{ amount: '9' }] });
 
   const res = await machine.handle(new Request('https://bot/status', {
@@ -60,7 +60,7 @@ test('owner mismatch on status is forbidden and returns no check payload', async
 
 test('matching owner receives positionCheck', async () => {
   const machine = new BotStateMachine();
-  await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'devnet', updatedAt: 1 });
+  await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'mainnet-beta', updatedAt: 1 });
   await machine.put('lastPositionCheck', { botId: 'bot_1', flag: 'within-cap', positions: [] });
 
   const res = await machine.handle(new Request('https://bot/status', {
@@ -73,7 +73,7 @@ test('matching owner receives positionCheck', async () => {
 
 test('public position-check without owner is 401; forged body ownerId is 403', async () => {
   const machine = new BotStateMachine();
-  await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'devnet', updatedAt: 1 });
+  await machine.put('meta', { botId: 'bot_1', ownerId: 'alice', cluster: 'mainnet-beta', updatedAt: 1 });
 
   const denied = await machine.handle(new Request('https://bot/position-check', {
     method: 'POST',

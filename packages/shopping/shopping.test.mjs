@@ -8,7 +8,7 @@ import {
   settleSandboxPurchase,
   prepareLasoTinyCardPurchase,
 } from './shopping.mjs';
-import { NETWORKS, buildPaymentRequired, DEVNET_USDC_MINT } from '@ubc2026/x402';
+import { NETWORKS, buildPaymentRequired, SOLANA_USDC_MINT } from '@ubc2026/x402';
 
 const bot = {
   id: 'bot_shop',
@@ -156,7 +156,7 @@ test('prepareSandboxPurchase proposes the quality pick and does not settle', asy
 /**
  * Achieves: After signPayment, sandbox buy receives PAYMENT-SIGNATURE and returns settled order; mainnet accepted terms throw.
  * Fails when: Signs mainnet terms, skips signature, or order id missing still succeeds.
- * Oracle: x402 PAYMENT-SIGNATURE settlement on Solana devnet.
+ * Oracle: x402 PAYMENT-SIGNATURE settlement on configured Solana network.
  * Side effects: Injected storeClient + signPayment.
  * Gaps: none meaningful
  */
@@ -196,7 +196,7 @@ test('settleSandboxPurchase signs and confirms an order', async () => {
     () => settleSandboxPurchase({
       bot,
       itemId: 'sku_lo',
-      accepted: { ...accepted, network: NETWORKS.mainnet },
+      accepted: { ...accepted, network: NETWORKS.devnet },
       storeClient,
       signPayment: async () => 'sig',
     }),
@@ -243,5 +243,5 @@ test('prepareLasoTinyCardPurchase surfaces a mainnet owner gate', async () => {
   assert.equal(result.next, 'await-owner-mainnet-approval');
   assert.equal(result.proposal.outflow, '5000000');
   assert.equal(result.challenge.accepted.payTo, recipient);
-  assert.ok(DEVNET_USDC_MINT);
+  assert.ok(SOLANA_USDC_MINT);
 });

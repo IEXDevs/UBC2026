@@ -31,11 +31,11 @@ test('a voice handoff does not call a model', async () => {
       ownerPermission: 'ask',
       reviewCap: '25000000',
       connectors: ['vercel'],
-      messages: [{ role: 'user', content: '/search solana devnet status' }],
+      messages: [{ role: 'user', content: '/search solana mainnet-beta status' }],
     }),
   }), {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     ELEVENLABS_WEBHOOK_SECRET: SECRET,
     META_MODEL_API_KEY: 'LLM_test_secret_value_here',
     voiceFetcher: fetcher,

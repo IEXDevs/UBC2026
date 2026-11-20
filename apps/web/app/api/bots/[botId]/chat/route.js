@@ -52,7 +52,7 @@ function budgetApprovalReply(hold, gate) {
   if (hold.budgetOverride || action !== 'spend' || asset !== 'SOL'
     || !handle || !destination || !terms || gate.signed !== false
     || (gate.error || gate.state) !== 'approval-needed' || gate.reason !== 'per-transaction') return null;
-  const label = `Approve once: send ${formatBaseUnits(amount, 9)} SOL to @${handle} (${shortAddress(destination)}) on Solana devnet plus a ${formatBaseUnits(terms.feeLamports, 9)} SOL fee.`;
+  const label = `Approve once: send ${formatBaseUnits(amount, 9)} SOL to @${handle} (${shortAddress(destination)}) on Solana mainnet-beta plus a ${formatBaseUnits(terms.feeLamports, 9)} SOL fee.`;
   const prompt = `${label} This overrides the agent’s per-transfer limit and, if needed, its remaining budget for this payment only. The limits won’t change. Slide to approve once.`;
   return { provider: 'desk', toolRounds: 1, text: prompt, hold: { ...hold, budgetOverride: terms, label, prompt } };
 }
@@ -66,7 +66,7 @@ async function chatToolEnv() {
     // Text-chat get_wallets enriches shell wallet addresses via QuickNode when
     // Supabase rows are missing — same secret the Worker uses. Prefer the
     // Cloudflare binding over root .env so hosted OpenNext sees the secret.
-    QUICKNODE_DEVNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_DEVNET_RPC_URL'),
+    SOLANA_RPC_URL: secretFrom(cfEnv, 'SOLANA_RPC_URL'),
     QUICKNODE_TESTNET_RPC_URL: secretFrom(cfEnv, 'QUICKNODE_TESTNET_RPC_URL'),
     JUPITER_API_KEY: secretFrom(cfEnv, 'JUPITER_API_KEY'),
     NEXT_PUBLIC_AGENT_RUNTIME_URL: secretFrom(cfEnv, 'NEXT_PUBLIC_AGENT_RUNTIME_URL'),

@@ -23,7 +23,7 @@ const wallet = {
   ownerId: 'user_1',
   kind: 'main',
   label: 'Main',
-  address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   frozen: false,
   provider: 'privy',
 };
@@ -46,7 +46,7 @@ const ledger = { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', reali
 const proposal = {
   id: 'p1',
   botId: 'bot_1',
-  cluster: 'devnet',
+  cluster: 'mainnet-beta',
   asset: 'USDC',
   recipient: 'Alex111111111111111111111111111111111111111',
   quoteId: 'q1',
@@ -59,8 +59,8 @@ const proposal = {
 
 const facts = {
   asset: 'USDC',
-  mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-  cluster: 'devnet',
+  mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  cluster: 'mainnet-beta',
   price: '1000000',
   amount: '1000',
   trustScore: '800',
@@ -267,7 +267,7 @@ test('approval requirement follows the bot mode and still holds over-budget', ()
  */
 test('mainnetQuoteBlocksSpend blocks mainnet, paper, and authorize flags', () => {
   assert.equal(mainnetQuoteBlocksSpend(null), false);
-  assert.equal(mainnetQuoteBlocksSpend({ pricingCluster: 'devnet' }), false);
+  assert.equal(mainnetQuoteBlocksSpend({ pricingCluster: 'mainnet-beta' }), false);
   assert.equal(mainnetQuoteBlocksSpend({ pricingCluster: 'mainnet' }), true);
   assert.equal(mainnetQuoteBlocksSpend({ cluster: 'mainnet' }), true);
   assert.equal(mainnetQuoteBlocksSpend({ paperPnl: true }), true);
@@ -277,9 +277,9 @@ test('mainnetQuoteBlocksSpend blocks mainnet, paper, and authorize flags', () =>
 
 /**
  * Achieves: Full permissions sign on-chain only after the ordered gate; mainnet quotes never sign.
- * Fails when: Sign runs before verify, or mainnet quote still invokes signDevnet.
+ * Fails when: Sign runs before verify, or mainnet quote still invokes signSolana.
  * Oracle: Call-order spy + PERMISSIONED_SPEND_STEPS constant; empty sign calls for quote path.
- * Side effects: none (signDevnet injected).
+ * Side effects: none (signSolana injected).
  * Gaps: sign-rejected and wrong-cluster covered separately.
  */
 test('full permissions manage funds and a mainnet quote never signs', async () => {
@@ -295,12 +295,12 @@ test('full permissions manage funds and a mainnet quote never signs', async () =
     mainFn: async () => { seen.push('verify-consensus'); return facts; },
     verifyFn: async () => facts,
     now: Date.now(),
-    signDevnet: async () => { seen.push('sign'); return { cluster: 'devnet', signature: 'sig_devnet_1' }; },
+    signSolana: async () => { seen.push('sign'); return { cluster: 'mainnet-beta', signature: 'sig_mainnet-beta_1' }; },
   });
   assert.equal(signed.state, 'signed');
   assert.deepEqual(signed.steps, [...PERMISSIONED_SPEND_STEPS]);
   assert.deepEqual(seen, ['verify-consensus', 'sign']);
-  assert.equal(signed.signature, 'sig_devnet_1');
+  assert.equal(signed.signature, 'sig_mainnet-beta_1');
 
   const calls = [];
   const quoted = await runPermissionedSpend({
@@ -315,7 +315,7 @@ test('full permissions manage funds and a mainnet quote never signs', async () =
     mainFn: async () => facts,
     verifyFn: async () => facts,
     now: Date.now(),
-    signDevnet: async () => { calls.push('sign'); return { cluster: 'devnet', signature: 'nope' }; },
+    signSolana: async () => { calls.push('sign'); return { cluster: 'mainnet-beta', signature: 'nope' }; },
   });
   assert.equal(quoted.state, 'quote-not-authorization');
   assert.equal(quoted.signed, false);
@@ -333,7 +333,7 @@ test('full permissions manage funds and a mainnet quote never signs', async () =
     mainFn: async () => facts,
     verifyFn: async () => facts,
     now: Date.now(),
-    signDevnet: async () => { throw new Error('should not sign'); },
+    signSolana: async () => { throw new Error('should not sign'); },
   });
   assert.equal(asking.state, 'approval-needed');
   assert.equal(asking.steps.at(-1), 'approval-mode');
@@ -350,9 +350,9 @@ test('full permissions manage funds and a mainnet quote never signs', async () =
     mainFn: async () => facts,
     verifyFn: async () => facts,
     now: Date.now(),
-    signDevnet: async () => {
+    signSolana: async () => {
       unconfirmedSigned = true;
-      return { cluster: 'devnet', signature: 'sig_full_unconfirmed' };
+      return { cluster: 'mainnet-beta', signature: 'sig_full_unconfirmed' };
     },
   });
   assert.equal(unconfirmed.state, 'signed');
@@ -373,7 +373,7 @@ test('full permissions manage funds and a mainnet quote never signs', async () =
     mainFn: async () => { throw new Error('verify should not run'); },
     verifyFn: async () => { throw new Error('verify should not run'); },
     now: Date.now(),
-    signDevnet: async () => { lowSigned = true; return { cluster: 'devnet', signature: 'no' }; },
+    signSolana: async () => { lowSigned = true; return { cluster: 'mainnet-beta', signature: 'no' }; },
   });
   assert.equal(low.state, 'trust-confirmation-required');
   assert.equal(low.signed, false);
@@ -441,7 +441,7 @@ test('capped-automatic asks above autoApproveCap and executes at the boundary', 
 /**
  * Achieves: Signer throw / bad signature / missing signer never report signed=true.
  * Fails when: Failed sign returns state signed, or steps include sign after rejection without signed flag.
- * Oracle: Injected signDevnet outcomes; signed flag must stay false.
+ * Oracle: Injected signSolana outcomes; signed flag must stay false.
  * Side effects: none.
  * Gaps: Does not cover network broadcast failures (signing is injected; no broadcast here).
  */
@@ -464,7 +464,7 @@ test('permissioned spend rejects missing, throwing, or invalid signers', async (
 
   const threw = await runPermissionedSpend({
     ...base,
-    signDevnet: async () => { throw new Error('hardware denied'); },
+    signSolana: async () => { throw new Error('hardware denied'); },
   });
   assert.equal(threw.state, 'sign-rejected');
   assert.equal(threw.signed, false);
@@ -473,7 +473,7 @@ test('permissioned spend rejects missing, throwing, or invalid signers', async (
 
   const policyDenied = await runPermissionedSpend({
     ...base,
-    signDevnet: async () => {
+    signSolana: async () => {
       throw Object.assign(new Error('private provider diagnostics'), { code: 'wallet_policy_rejected' });
     },
   });
@@ -483,28 +483,28 @@ test('permissioned spend rejects missing, throwing, or invalid signers', async (
 
   const badCluster = await runPermissionedSpend({
     ...base,
-    signDevnet: async () => ({ cluster: 'mainnet', signature: 'sig' }),
+    signSolana: async () => ({ cluster: 'mainnet', signature: 'sig' }),
   });
   assert.equal(badCluster.state, 'sign-rejected');
   assert.equal(badCluster.signed, false);
 
   const emptySig = await runPermissionedSpend({
     ...base,
-    signDevnet: async () => ({ cluster: 'devnet', signature: '' }),
+    signSolana: async () => ({ cluster: 'mainnet-beta', signature: '' }),
   });
   assert.equal(emptySig.state, 'sign-rejected');
 });
 
 /**
- * Achieves: Non-devnet proposals never reach the signer even with full confirmed permission.
- * Fails when: testnet/mainnet proposals invoke signDevnet.
+ * Achieves: Non-mainnet-beta proposals never reach the signer even with full confirmed permission.
+ * Fails when: testnet/mainnet proposals invoke signSolana.
  * Oracle: Call-order spy must stay empty; state wrong-cluster.
  * Side effects: none.
  * Gaps: Policy may also reject mainnet earlier — either stop is acceptable; this asserts sign never runs.
  */
-test('non-devnet proposals stop before signing', async () => {
+test('non-mainnet-beta proposals stop before signing', async () => {
   const calls = [];
-  const result = await runPermissionedSpend({
+  await assert.rejects(() => runPermissionedSpend({
     bot: { ...bot, approvalMode: 'fully-automatic' },
     wallet,
     ledger,
@@ -515,15 +515,10 @@ test('non-devnet proposals stop before signing', async () => {
     mainFn: async () => facts,
     verifyFn: async () => facts,
     now: Date.now(),
-    signDevnet: async () => { calls.push('sign'); return { cluster: 'devnet', signature: 'x' }; },
-  });
+    signSolana: async () => { calls.push('sign'); return { cluster: 'mainnet-beta', signature: 'x' }; },
+  }), /configured Solana cluster/);
   // Policy may block mainnet/testnet before we get here; if it passes, loop must still refuse to sign.
-  assert.notEqual(result.state, 'signed');
   assert.deepEqual(calls, []);
-  if (result.state === 'wrong-cluster') {
-    assert.equal(result.signed, false);
-    assert.equal(result.steps.includes('sign'), false);
-  }
 });
 
 /**
@@ -546,7 +541,7 @@ test('review permission auto-continues only inside the owner threshold', async (
     mainFn: async () => facts,
     verifyFn: async () => facts,
     now: Date.now(),
-    signDevnet: async () => ({ cluster: 'devnet', signature: 'sig_review' }),
+    signSolana: async () => ({ cluster: 'mainnet-beta', signature: 'sig_review' }),
   });
   assert.equal(under.state, 'signed');
   assert.equal(under.signature, 'sig_review');
@@ -563,7 +558,7 @@ test('review permission auto-continues only inside the owner threshold', async (
     mainFn: async () => facts,
     verifyFn: async () => facts,
     now: Date.now(),
-    signDevnet: async () => ({ cluster: 'devnet', signature: 'sig_should_not' }),
+    signSolana: async () => ({ cluster: 'mainnet-beta', signature: 'sig_should_not' }),
   });
   assert.equal(over.state, 'approval-needed');
   assert.equal(over.signed, false);
@@ -572,15 +567,15 @@ test('review permission auto-continues only inside the owner threshold', async (
 /**
  * Achieves: a missing trust score forces confirmation for fully-automatic and still runs the later gates.
  * Fails when: verify is skipped, an invented score signs, or a mainnet quote signs after confirmation.
- * Oracle: unconfirmed stays at trust-confirmation-required after verify; confirmed devnet signs once.
- * Side effects: none. signDevnet is injected.
+ * Oracle: unconfirmed stays at trust-confirmation-required after verify; confirmed mainnet-beta signs once.
+ * Side effects: none. signSolana is injected.
  * Gaps: the spend route covers Jupiter fetch failures.
  */
 test('unavailable trust forces confirmation without skipping the spend gates', async () => {
   const openFacts = {
     asset: 'USDC',
-    mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-    cluster: 'devnet',
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    cluster: 'mainnet-beta',
     price: '1000000',
     amount: '1000',
     trustUnavailable: true,
@@ -602,7 +597,7 @@ test('unavailable trust forces confirmation without skipping the spend gates', a
     verifyFn: async () => openFacts,
     now: Date.now(),
     beforeSign: async () => { reserves += 1; return { state: 'reserved' }; },
-    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_should_not' }; },
+    signSolana: async () => { signs += 1; return { cluster: 'mainnet-beta', signature: 'sig_should_not' }; },
   });
   assert.equal(held.state, 'trust-confirmation-required');
   assert.equal(held.signed, false);
@@ -630,11 +625,11 @@ test('unavailable trust forces confirmation without skipping the spend gates', a
     verifyFn: async () => openFacts,
     now: Date.now(),
     beforeSign: async () => { reserves += 1; return { state: 'reserved' }; },
-    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_devnet_open' }; },
+    signSolana: async () => { signs += 1; return { cluster: 'mainnet-beta', signature: 'sig_mainnet-beta_open' }; },
   });
   assert.equal(passed.state, 'signed');
-  assert.equal(passed.signature, 'sig_devnet_open');
-  assert.equal(passed.cluster, 'devnet');
+  assert.equal(passed.signature, 'sig_mainnet-beta_open');
+  assert.equal(passed.cluster, 'mainnet-beta');
   assert.equal(reserves, 1);
   assert.equal(signs, 1);
   assert.equal(passed.steps.includes('reserve'), true);
@@ -652,7 +647,7 @@ test('unavailable trust forces confirmation without skipping the spend gates', a
     mainFn: async () => openFacts,
     verifyFn: async () => openFacts,
     now: Date.now(),
-    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_mainnet' }; },
+    signSolana: async () => { signs += 1; return { cluster: 'mainnet-beta', signature: 'sig_mainnet' }; },
   });
   assert.equal(quoted.state, 'quote-not-authorization');
   assert.equal(quoted.signed, false);
@@ -669,7 +664,7 @@ test('unavailable trust forces confirmation without skipping the spend gates', a
     mainFn: async () => openFacts,
     verifyFn: async () => openFacts,
     now: Date.now(),
-    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_frozen' }; },
+    signSolana: async () => { signs += 1; return { cluster: 'mainnet-beta', signature: 'sig_frozen' }; },
   });
   assert.equal(frozen.state, 'blocked');
   assert.equal(frozen.reason, 'spend-frozen');
@@ -686,7 +681,7 @@ test('unavailable trust forces confirmation without skipping the spend gates', a
     mainFn: async () => openFacts,
     verifyFn: async () => openFacts,
     now: Date.now(),
-    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_loss' }; },
+    signSolana: async () => { signs += 1; return { cluster: 'mainnet-beta', signature: 'sig_loss' }; },
   });
   assert.equal(loss.state, 'blocked');
   assert.equal(loss.reason, 'max-loss-reached');
@@ -704,7 +699,7 @@ test('unavailable trust forces confirmation without skipping the spend gates', a
     verifyFn: async () => ({ ...openFacts, amount: '60000' }),
     now: Date.now(),
     beforeSign: async () => { reserves += 1; return { state: 'reserved' }; },
-    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_cap' }; },
+    signSolana: async () => { signs += 1; return { cluster: 'mainnet-beta', signature: 'sig_cap' }; },
   });
   assert.equal(overCap.state, 'approval-needed');
   assert.equal(overCap.reason, 'per-transaction');
@@ -724,7 +719,7 @@ test('unavailable trust forces confirmation without skipping the spend gates', a
     mainFn: async () => { lowVerified = true; return facts; },
     verifyFn: async () => facts,
     now: Date.now(),
-    signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_low' }; },
+    signSolana: async () => { signs += 1; return { cluster: 'mainnet-beta', signature: 'sig_low' }; },
   });
   assert.equal(low.state, 'trust-confirmation-required');
   assert.equal(low.signed, false);
@@ -745,7 +740,7 @@ test('unavailable trust forces confirmation without skipping the spend gates', a
       mainFn: async () => facts,
       verifyFn: async () => facts,
       now: Date.now(),
-      signDevnet: async () => { signs += 1; return { cluster: 'devnet', signature: 'sig_invented' }; },
+      signSolana: async () => { signs += 1; return { cluster: 'mainnet-beta', signature: 'sig_invented' }; },
     }),
     /cannot be invented/,
   );

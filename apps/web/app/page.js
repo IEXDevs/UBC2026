@@ -1,4 +1,5 @@
 'use client';
+import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN, EXECUTION_LABEL } from '@ubc2026/contracts/solana';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
@@ -31,7 +32,7 @@ import FileStage from '../components/FileStage';
 import RecallSearch from '../components/RecallSearch';
 import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { mentionSuggestions } from '../lib/mention-handles.mjs';
-import { assignedWalletAddress, devnetSpendableLabel } from '../lib/devnet-balance.mjs';
+import { assignedWalletAddress, solanaSpendableLabel } from '../lib/solana-balance.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
 import { clearAcceptanceDraft, netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
 import { CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
@@ -512,7 +513,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const [claimWelcome, setClaimWelcome] = useState(false);
   const [confirmedHandle, setConfirmedHandle] = useState(undefined);
   const [transfers, setTransfers] = useState([]);
-  const [devnetBalance, setDevnetBalance] = useState(null);
+  const [solanaBalance, setSolanaBalance] = useState(null);
   const [receipts, setReceipts] = useState([]);
   const pushReceipt = useCallback((receipt) => {
     if (!receipt || typeof receipt.id !== 'string' || !receipt.id) return;
@@ -970,7 +971,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const walletAddress = assignedWalletAddress(wallets);
   useEffect(() => {
     if (devPreview || !signedIn || !walletAddress) {
-      setDevnetBalance(null);
+      setSolanaBalance(null);
       return undefined;
     }
     let stop = false;
@@ -979,11 +980,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       try { token = (await getAccessToken?.()) || ''; } catch { token = ''; }
       if (stop) return;
       if (!token) {
-        setDevnetBalance(null);
+        setSolanaBalance(null);
         return;
       }
       try {
-        const response = await fetch(`/api/devnet-balance?address=${encodeURIComponent(walletAddress)}`, {
+        const response = await fetch(`/api/solana-balance?address=${encodeURIComponent(walletAddress)}`, {
           headers: {
             authorization: `Bearer ${token}`,
             ...(ownerId ? { 'x-owner-id': ownerId } : {}),
@@ -992,14 +993,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         });
         const body = await response.json().catch(() => null);
         if (stop) return;
-        if (response.ok && body?.ok === true && body.cluster === 'devnet' && body.address === walletAddress) {
-          setDevnetBalance({ ...body, asOf: new Date().toISOString(), stale: false });
+        if (response.ok && body?.ok === true && body.cluster === SOLANA_CLUSTER && body.address === walletAddress) {
+          setSolanaBalance({ ...body, asOf: new Date().toISOString(), stale: false });
         } else if (body && typeof body === 'object') {
           // Keep failed reads distinct from an empty funded wallet (0 SOL / 0 USDC).
-          setDevnetBalance({
+          setSolanaBalance({
             ok: false,
             code: typeof body.code === 'string' ? body.code : `http_${response.status}`,
-            cluster: 'devnet',
+            cluster: SOLANA_CLUSTER,
             address: walletAddress,
             solLamports: null,
             usdcAmount: null,
@@ -1008,10 +1009,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             stale: body.stale === true,
           });
         } else {
-          setDevnetBalance({
+          setSolanaBalance({
             ok: false,
             code: `http_${response.status}`,
-            cluster: 'devnet',
+            cluster: SOLANA_CLUSTER,
             address: walletAddress,
             solLamports: null,
             usdcAmount: null,
@@ -1020,10 +1021,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         }
       } catch {
         if (!stop) {
-          setDevnetBalance({
+          setSolanaBalance({
             ok: false,
             code: 'rpc_failed',
-            cluster: 'devnet',
+            cluster: SOLANA_CLUSTER,
             address: walletAddress,
             solLamports: null,
             usdcAmount: null,
@@ -1049,8 +1050,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     : bots.filter(bot => bot.name.toLowerCase().includes(recallNeedle) || matchedBots.has(bot.id));
   const bot = bots.find(item => item.id === activeBot) ?? null;
   const money = moneyPane(pane);
-  const chainLabel = devnetSpendableLabel(devnetBalance);
-  const glance = walletGlance(wallets, positions, transfers, chainLabel, devnetBalance);
+  const chainLabel = solanaSpendableLabel(solanaBalance);
+  const glance = walletGlance(wallets, positions, transfers, chainLabel, solanaBalance);
   const setupStep = devPreview ? null : accountSetupStep({
     signedIn,
     profileReady,
@@ -1202,8 +1203,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         const body = await response.json().catch(() => ({}));
         const where = body.address ? clipAddress(body.address) : target.domain;
         if (body.error === 'missing_config') {
-          const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'QUICKNODE_DEVNET_RPC_URL';
-          return { ok: false, message: `${target.domain} is ${where}. The devnet send needs ${names}.` };
+          const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'SOLANA_RPC_URL';
+          return { ok: false, message: `${target.domain} is ${where}. The mainnet-beta send needs ${names}.` };
         }
         if (body.error === 'sns_not_found' || body.error === 'sns_failed') {
           return { ok: false, message: 'Failed.' };
@@ -1224,10 +1225,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
               { label: 'To', value: `${target.domain} (${where})` },
               { label: 'Amount', value: amountLabel },
               { label: 'Signature', value: body.signature },
-              { label: 'Network', value: 'devnet execution, mainnet pricing' },
+              { label: 'Network', value: EXECUTION_LABEL },
             ],
             signature: body.signature,
-            cluster: 'devnet',
+            cluster: SOLANA_CLUSTER,
           },
         };
       } catch {
@@ -1245,7 +1246,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         const token = await getAccessToken?.();
         if (from.spendable === false) {
           if (dest.kind !== 'main') {
-            return { ok: false, message: 'A connected wallet sends devnet USDC to the main wallet.' };
+            return { ok: false, message: 'A connected wallet sends mainnet-beta USDC to the main wallet.' };
           }
           const headers = {
             'content-type': 'application/json',
@@ -1279,7 +1280,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             const signed = await signer.signTransaction({
               transaction: unsigned,
               wallet,
-              chain: 'solana:devnet',
+              chain: SOLANA_PRIVY_CHAIN,
             });
             signedBytes = signed?.signedTransaction;
           } catch {
@@ -1311,10 +1312,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
                 { label: 'To', value: 'Main wallet' },
                 { label: 'Amount', value: amountLabel },
                 { label: 'Signature', value: body.signature },
-                { label: 'Network', value: 'devnet execution, mainnet pricing' },
+                { label: 'Network', value: EXECUTION_LABEL },
               ],
               signature: body.signature,
-              cluster: 'devnet',
+              cluster: SOLANA_CLUSTER,
             },
           };
         }
@@ -1330,8 +1331,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         const body = await response.json().catch(() => ({}));
         const where = target.caption || clipAddress(target.address);
         if (body.error === 'missing_config') {
-          const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'QUICKNODE_DEVNET_RPC_URL';
-          return { ok: false, message: `The devnet send needs ${names}.` };
+          const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'SOLANA_RPC_URL';
+          return { ok: false, message: `The mainnet-beta send needs ${names}.` };
         }
         if (body.error === 'wallet_frozen') return { ok: false, message: 'That wallet is frozen.' };
         if (body.error === 'invalid_destination') return { ok: false, message: 'Pick a different wallet.' };
@@ -1349,10 +1350,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
               { label: 'To', value: where },
               { label: 'Amount', value: amountLabel },
               { label: 'Signature', value: body.signature },
-              { label: 'Network', value: 'devnet execution, mainnet pricing' },
+              { label: 'Network', value: EXECUTION_LABEL },
             ],
             signature: body.signature,
-            cluster: 'devnet',
+            cluster: SOLANA_CLUSTER,
           },
         };
       } catch {
@@ -1430,9 +1431,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             { label: 'To', value: `@${body.transfer.handle}` },
             { label: 'Amount', value: amountLabel },
             ...(pricedFrom ? [{ label: 'Priced from', value: `${pricedFrom} · quote not broadcast` }] : []),
-            { label: 'Network', value: 'Platform ledger · devnet execution, mainnet pricing' },
+            { label: 'Network', value: `Platform ledger · ${EXECUTION_LABEL}` },
           ],
-          cluster: 'devnet',
+          cluster: SOLANA_CLUSTER,
         },
       };
     } catch {
@@ -1811,12 +1812,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           lines: [
             { label: 'To', value: `@${pending.command.handle}` },
             { label: 'Amount', value: amountLabel },
-            { label: 'Network', value: 'Solana devnet' },
+            { label: 'Network', value: 'Solana mainnet-beta' },
           ],
           signature: body.signature,
-          cluster: 'devnet',
+          cluster: SOLANA_CLUSTER,
         });
-        reply(`Sent ${amountLabel} to @${pending.command.handle} on devnet.`);
+        reply(`Sent ${amountLabel} to @${pending.command.handle} on solana.`);
         toast?.(`Sent ${amountLabel} to @${pending.command.handle}`);
         return;
       }
@@ -1880,9 +1881,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       lines: [
         { label: 'To', value: `@${body.transfer.handle}` },
         { label: 'Amount', value: amountLabel },
-        { label: 'Network', value: 'Platform ledger · devnet execution, mainnet pricing' },
+        { label: 'Network', value: `Platform ledger · ${EXECUTION_LABEL}` },
       ],
-      cluster: 'devnet',
+      cluster: SOLANA_CLUSTER,
     });
     reply(`Sent ${amountLabel} to @${body.transfer.handle}. It is in their wallet.`);
     toast?.(`Sent ${amountLabel} to @${body.transfer.handle}`);
@@ -2199,7 +2200,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         onReceipt={pushReceipt}
         getAccessToken={getAccessToken}
         resolveRecipient={resolveMention}
-        devnetBalance={devnetBalance}
+        solanaBalance={solanaBalance}
         onRetire={retireWallet}
       />
       <PartySheet

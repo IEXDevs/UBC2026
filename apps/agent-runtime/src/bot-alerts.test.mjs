@@ -12,7 +12,7 @@ import {
 } from './bot-alerts.mjs';
 
 const at = 1_700_000_000_000;
-const mint = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 /**
  * Achieves: alert builders emit EVENT_KINDS events scoped to the given botId only.
@@ -183,7 +183,7 @@ test('a max-loss check and a verify mismatch land on that bot timeline only', as
       proposal: {
         id: 'p1',
         botId: 'bot_1',
-        cluster: 'devnet',
+        cluster: 'mainnet-beta',
         asset: 'USDC',
         recipient: 'Alex111111111111111111111111111111111111111',
         quoteId: 'q1',
@@ -196,7 +196,7 @@ test('a max-loss check and a verify mismatch land on that bot timeline only', as
       facts: {
         asset: 'USDC',
         mint,
-        cluster: 'devnet',
+        cluster: 'mainnet-beta',
         price: '1000000',
         amount: '1001',
         trustScore: '800',
@@ -228,7 +228,7 @@ test('an over-cap spend attempt is an unapproved alert on that bot', async () =>
   const machines = new Map();
   const env = {
     PRODUCT: 'Maelstrom',
-    CLUSTER: 'devnet',
+    SOLANA_CLUSTER: 'mainnet-beta',
     spendNow: at,
     trustLookup: null,
     loadSpendContext: async () => ({
@@ -257,7 +257,7 @@ test('an over-cap spend attempt is an unapproved alert on that bot', async () =>
       ledger: { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },
     }),
     transferClient: {
-      async signAndBroadcastDevnet() {
+      async signAndBroadcastSolana() {
         throw new Error('should not sign');
       },
     },

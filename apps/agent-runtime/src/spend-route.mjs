@@ -1,7 +1,8 @@
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * POST /api/spend — the permissioned spend voice, the glass UI, and Grok Bot share.
  * Order is trust, verify, freeze, policy, approval, then sign.
- * Signing goes through the Privy devnet client from @ubc2026/wallets.
+ * Signing goes through the Privy mainnet-beta client from @ubc2026/wallets.
  * Responses carry a signature and a state, never a key or a signed payload.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -10,8 +11,8 @@ import {
 } from '@ubc2026/contracts';
 import { mainnetQuoteBlocksSpend, runPermissionedSpend } from '@ubc2026/agent-loop';
 import { proposalDigest } from '@ubc2026/bot-policy';
-import { buildDevnetAssetTransaction, transferDevnetUsdc } from '@ubc2026/transfers';
-import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
+import { buildSolanaAssetTransaction, transferSolanaUsdc } from '@ubc2026/transfers';
+import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 import { loadOwnerLoopContext, supabaseConfig, supabaseGet, supabaseWrite } from './supabase-rest.mjs';
 import { alertFromSpend, publishBotAlert } from './bot-alerts.mjs';
 import { deskSpendAllowed, sha256Hex } from './desk-grant.mjs';
@@ -42,7 +43,7 @@ async function spendTrustScore(env, mint) {
     }
   }
   if (typeof env.spendTrustScore === 'string') return { score: env.spendTrustScore };
-  return mint === DEVNET_USDC_MINT ? { score: '800' } : { unavailable: true };
+  return mint === SOLANA_USDC_MINT ? { score: '800' } : { unavailable: true };
 }
 
 async function transferDestination(env, parsed) {
@@ -58,21 +59,21 @@ async function transferDestination(env, parsed) {
 async function prepareAssetTransfer(env, parsed, wallet, destination, id, blockhash) {
   const client = env.transferClient;
   if (!blockhash) {
-    const block = await client.getDevnetBlockhash();
-    if (block?.cluster !== 'devnet') throw new Error('wrong_cluster');
+    const block = await client.getSolanaBlockhash();
+    if (block?.cluster !== SOLANA_CLUSTER) throw new Error('wrong_cluster');
     blockhash = block.blockhash;
   }
   let decimals;
   if (parsed.asset !== 'SOL') {
-    const mint = await client.readDevnetMint({ mint: parsed.asset });
-    if (mint?.cluster !== 'devnet' || mint.mint !== parsed.asset) throw new Error('wrong_mint');
+    const mint = await client.readSolanaMint({ mint: parsed.asset });
+    if (mint?.cluster !== SOLANA_CLUSTER || mint.mint !== parsed.asset) throw new Error('wrong_mint');
     decimals = mint.decimals;
   }
-  const transaction = buildDevnetAssetTransaction({
+  const transaction = buildSolanaAssetTransaction({
     asset: parsed.asset, decimals, sourceOwner: wallet.address, destinationOwner: destination,
     amount: parsed.amount, memo: `maelstrom:spend:${id}`, recentBlockhash: blockhash,
   });
-  const prepared = await client.prepareDevnetTransfer({ transaction });
+  const prepared = await client.prepareSolanaTransfer({ transaction });
   if (prepared?.transaction !== transaction || !/^(0|[1-9]\d{0,19})$/.test(prepared.feeLamports || '')) throw new Error('invalid_simulation');
   return { prepared, blockhash };
 }
@@ -174,7 +175,7 @@ export async function handleSpend(request, env = {}) {
     || ownerAuthorization.expiresAt > now + SPEND_AUTHORIZATION_TTL_MS)) {
     return json({ error: 'spend_authorization_expired', signed: false }, 409);
   }
-  const mint = parsed.asset === 'USDC' ? DEVNET_USDC_MINT : (parsed.asset === 'SOL' ? SOL_TRUST_MINT : parsed.asset);
+  const mint = parsed.asset === 'USDC' ? SOLANA_USDC_MINT : (parsed.asset === 'SOL' ? SOL_TRUST_MINT : parsed.asset);
   const lookedUp = await spendTrustScore(env, mint);
   const trustUnavailable = lookedUp.unavailable === true;
   const trustScore = trustUnavailable ? undefined : lookedUp.score;
@@ -190,7 +191,7 @@ export async function handleSpend(request, env = {}) {
   // A proposal may run the gates without an unlock or confirmation, but it cannot sign.
   if (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset && !context.wallet.frozen && !context.bot.frozen) {
     if (!parsed.idempotencyKey) return json({ error: 'idempotency_key_required', signed: false }, 400);
-    if (!env.ledgerApi?.reserveBudget || !env.transferClient?.signPreparedDevnetTransfer) {
+    if (!env.ledgerApi?.reserveBudget || !env.transferClient?.signPreparedSolanaTransfer) {
       return json({ error: 'asset_transfer_unavailable', signed: false }, 503);
     }
     try {
@@ -203,19 +204,19 @@ export async function handleSpend(request, env = {}) {
   const facts = {
     asset: parsed.asset,
     mint,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     price: assetTransfer ? '0' : '1000000',
     amount: parsed.amount,
     ...(trustUnavailable ? { trustUnavailable: true } : { trustScore }),
-    reasonSummary: `${parsed.action} ${parsed.amount} ${parsed.asset} on devnet`,
+    reasonSummary: `${parsed.action} ${parsed.amount} ${parsed.asset} on mainnet-beta`,
   };
   const proposal = {
     id,
     botId: parsed.botId,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     asset: parsed.asset,
     recipient,
-    quoteId: prepared ? await sha256Hex(prepared.transaction) : (parsed.quote?.pricingCluster === 'mainnet' ? 'mainnet-quote' : 'devnet'),
+    quoteId: prepared ? await sha256Hex(prepared.transaction) : (parsed.quote?.pricingCluster === 'mainnet' ? 'mainnet-quote' : SOLANA_CLUSTER),
     outflow: parsed.amount,
     expectedReceive: parsed.amount,
     expectedReceiveAsset: parsed.asset,
@@ -232,15 +233,15 @@ export async function handleSpend(request, env = {}) {
   if (overrideToken !== null && approvalTerms && !budgetApproval) {
     return json({ error: 'invalid_spend_approval', signed: false }, 403);
   }
-  let signDevnet;
+  let signSolana;
   let beforeSign;
   let privyFailure;
   let authorizationChallenge;
   if (prepared) {
     const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
-    signDevnet = async ({ bot, wallet }) => {
+    signSolana = async ({ bot, wallet }) => {
       try {
-        return await env.transferClient.signPreparedDevnetTransfer({
+        return await env.transferClient.signPreparedSolanaTransfer({
           bot, wallet, prepared, ...(ownerAuthorization ? { ownerAuthorization } : { accessToken }),
         });
       } catch (error) {
@@ -270,8 +271,8 @@ export async function handleSpend(request, env = {}) {
       });
     };
   } else if (!assetTransfer && grantOk) {
-    if (parsed.destination && env.transferClient) signDevnet = async ({ bot, wallet, memo }) => {
-      const sent = await transferDevnetUsdc({
+    if (parsed.destination && env.transferClient) signSolana = async ({ bot, wallet, memo }) => {
+      const sent = await transferSolanaUsdc({
         client: env.transferClient,
         bot,
         wallet,
@@ -311,7 +312,7 @@ export async function handleSpend(request, env = {}) {
       confirmed: parsed.confirmed,
       reviewCap: parsed.reviewCap,
       quote: parsed.quote,
-      signDevnet,
+      signSolana,
       beforeSign,
       budgetApproval,
     });
@@ -332,7 +333,7 @@ export async function handleSpend(request, env = {}) {
     state,
     steps: result.steps,
     signed: result.signed === true,
-    cluster: 'devnet',
+    cluster: SOLANA_CLUSTER,
     reason: result.reason || null,
     ...(privyFailure ? { privyFailure } : {}),
     ...(prepared ? { feeLamports: prepared.feeLamports } : {}),

@@ -3,7 +3,7 @@
 Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 
 - `POST /bots/:id/wake` — start or continue research step
-- `POST /bots/:id/loop` — full loop, checkpointed per step: research → decide → trust gate → verify → bot-policy → approval → execute → memo → monitor. Requires `x-owner-id`. Models go through OpenRouter with the locked platform prompt. No API key is written into the prompt. Without `META_MODEL_API_KEY` (or the `OPENROUTER_API_KEY` fallback) the step returns `openrouter_not_configured` and does not call the network. Execute signs through Privy when `PRIVY_APP_ID` / `PRIVY_APP_SECRET` / `QUICKNODE_DEVNET_RPC_URL` are set (or an injected `transferClient`); otherwise the run waits at `signer-not-configured`. With Supabase, execute reserves budget via `policy_reserve_budget` before broadcasting.
+- `POST /bots/:id/loop` — full loop, checkpointed per step: research → decide → trust gate → verify → bot-policy → approval → execute → memo → monitor. Requires `x-owner-id`. Models go through OpenRouter with the locked platform prompt. No API key is written into the prompt. Without `META_MODEL_API_KEY` (or the `OPENROUTER_API_KEY` fallback) the step returns `openrouter_not_configured` and does not call the network. Execute signs through Privy when `PRIVY_APP_ID` / `PRIVY_APP_SECRET` / `SOLANA_RPC_URL` are set (or an injected `transferClient`); otherwise the run waits at `signer-not-configured`. With Supabase, execute reserves budget via `policy_reserve_budget` before broadcasting.
 - `POST /bots/:id/decide` — trust → verify → policy gate (pauses on approval)
 - `POST /bots/:id/pause|resume|advance`
 - `GET /bots/:id/status`
@@ -23,11 +23,11 @@ Cloudflare Worker + per-bot Durable Object for live run checkpoints.
 - `POST /voice/tools/:name` — retired ElevenLabs webhook tools (410 after webhook authentication).
 - `GET /api/routes` — contract route list and secret names (no values)
 - `GET /api/me`, `/api/wallets`, `/api/bots`, `/api/events`, `/api/decisions`, `/api/payments`, `/api/metrics` — live Supabase reads when `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set (empty `source: unconfigured` otherwise).
-- `POST /api/wallets` — Privy `acceptLogin` + optional Supabase persist (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `QUICKNODE_DEVNET_RPC_URL`)
-- `POST /api/wallets/:walletId/sign` — Privy `signAndBroadcastDevnet` / owner sweep when secrets are present
+- `POST /api/wallets` — Privy `acceptLogin` + optional Supabase persist (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `SOLANA_RPC_URL`)
+- `POST /api/wallets/:walletId/sign` — Privy `signAndBroadcastSolana` / owner sweep when secrets are present
 - Loop execute, shopping settle, SNS execute, and grab-back use a Privy `transferClient` built from those same secrets when one is not injected. Loop also calls `policy_reserve_budget` through Supabase when the service role is set. QuickNode auto-`/loop` loads bot/wallet/ledger from Supabase via `loadLoopContext`.
 - Hourly cron `0 * * * *` — paper position check for trading and position-management bots. Shopping bots are skipped. The check is stored on the bot Durable Object and does not start a research or spend loop. Prices use `lookupPrice` when a bot has positions; otherwise DexScreener (no key). With `lookupPrice: null`, marks are left unpriced.
-- Stream-fallback cron `5,20,35,50 * * * *` — if Supabase `stream_events` has no delivery in the last hour (or Supabase is not configured), re-read each bot wallet's devnet USDC with `QUICKNODE_DEVNET_RPC_URL`. The RPC URL is not written into the check. A non-devnet genesis hash is refused. The same re-check also runs on the hourly cron when the stream is stale.
+- Stream-fallback cron `5,20,35,50 * * * *` — if Supabase `stream_events` has no delivery in the last hour (or Supabase is not configured), re-read each bot wallet's mainnet-beta USDC with `SOLANA_RPC_URL`. The RPC URL is not written into the check. A non-mainnet-beta genesis hash is refused. The same re-check also runs on the hourly cron when the stream is stale.
 
 Business data (wallets, ledger, approvals) stays in Supabase. This Worker holds checkpointed run state only. Prefer `META_MODEL_API_KEY` for Muse Spark. Optional model id overrides, not secrets: `OPENROUTER_MODEL_RESEARCH`, `OPENROUTER_MODEL_DECIDE`, `OPENROUTER_MODEL_VERIFY`, `OPENROUTER_MODEL_MONITOR`, `OPENROUTER_MODEL_VISION`, `OPENROUTER_MODEL_VOICE`. Default for every role and voice is `muse-spark-1.3-contributor`.
 

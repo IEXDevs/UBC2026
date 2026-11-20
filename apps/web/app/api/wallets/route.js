@@ -66,7 +66,7 @@ function rootWalletEnv() {
   return {
     PRIVY_APP_ID: readRootEnv('PRIVY_APP_ID'),
     PRIVY_APP_SECRET: readRootEnv('PRIVY_APP_SECRET'),
-    QUICKNODE_DEVNET_RPC_URL: readRootEnv('QUICKNODE_DEVNET_RPC_URL'),
+    SOLANA_RPC_URL: readRootEnv('SOLANA_RPC_URL'),
     PRIVY_AUTHORIZATION_KEY: readRootEnv('PRIVY_AUTHORIZATION_KEY'),
     NEXT_PUBLIC_PRIVY_APP_ID: readRootEnv('NEXT_PUBLIC_PRIVY_APP_ID'),
   };
@@ -219,7 +219,7 @@ export async function POST(request) {
       appId,
       appSecret: env.PRIVY_APP_SECRET,
       // acceptLogin does not call RPC; allow empty and require it only for signing routes.
-      rpcUrl: env.QUICKNODE_DEVNET_RPC_URL || null,
+      rpcUrl: env.SOLANA_RPC_URL || null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
       allowUsersMeFallback: !onCloudflareWorker,
     });

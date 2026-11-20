@@ -22,7 +22,7 @@ import { getDemoShellState } from './demo-state.mjs';
 /**
  * Achieves: verifies approval preview is the first bot-page section.
  * Fails when: approval preview is the first bot-page section breaks (e.g. expected [...BOT_PAGE_SECTIONS], 'approval-preview', 'approval-needed'); failure/null paths flip.
- * Oracle: assert.equal(page.sections[0].id, 'approval-preview'); assert.equal(page.sections[0].preview.state, 'approval-needed'); assert.equal(page.sections[0].preview.outflowLabel, '5 USDC'); assert.equal(page.sections[0].preview.recipient, 'alex.sol'); assert.equal(page.sections[0].preview.cluster, 'devnet'); assert.equal(page.sections[1].entries[0].kind, 'approval.requested')
+ * Oracle: assert.equal(page.sections[0].id, 'approval-preview'); assert.equal(page.sections[0].preview.state, 'approval-needed'); assert.equal(page.sections[0].preview.outflowLabel, '5 USDC'); assert.equal(page.sections[0].preview.recipient, 'alex.sol'); assert.equal(page.sections[0].preview.cluster, 'mainnet-beta'); assert.equal(page.sections[1].entries[0].kind, 'approval.requested')
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
@@ -35,7 +35,7 @@ test('approval preview is the first bot-page section', () => {
   assert.deepEqual(page.sections[0].preview.actions, ['approve']);
   assert.equal(page.sections[0].preview.outflowLabel, '5 USDC');
   assert.equal(page.sections[0].preview.recipient, 'alex.sol');
-  assert.equal(page.sections[0].preview.cluster, 'devnet');
+  assert.equal(page.sections[0].preview.cluster, 'mainnet-beta');
   assert.equal(page.sections[1].entries[0].kind, 'approval.requested');
   assert.equal(page.sections[3].why.showsChainOfThought, false);
   assert.equal(page.sections[3].why.memo.includes(experience.decision.decisionDigest), true);
@@ -235,17 +235,17 @@ test('a listed decision becomes a why view only when the digests and status are 
     factsDigest: FACTS,
     proposalDigest: PROPOSAL,
     status: 'approved',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
   });
   assert.equal(why.title, 'Why did it do this?');
-  assert.match(why.lines[0], /approved on devnet/);
+  assert.match(why.lines[0], /approved on mainnet-beta/);
   assert.match(why.lines[1], /Facts digest/);
   assert.equal(whyFromListedDecision({ factsDigest: FACTS, proposalDigest: PROPOSAL, status: 'approved', cluster: 'mainnet' }), null);
-  assert.equal(whyFromListedDecision({ status: 'approved', cluster: 'devnet' }), null);
+  assert.equal(whyFromListedDecision({ status: 'approved', cluster: 'mainnet-beta' }), null);
   assert.match(whyFromListedDecision({
     factsDigest: FACTS,
     proposalDigest: PROPOSAL,
     status: 'mismatch',
-    cluster: 'devnet',
+    cluster: 'mainnet-beta',
   }).lines[0], /unsigned/);
 });

@@ -100,7 +100,7 @@ test('BotStateMachine control plane works without Cloudflare DO runtime', async 
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
     body: JSON.stringify({ botId: 'bot_1', goal: 'watch', ownerId: 'user_1' }),
-  }), { CLUSTER: 'devnet' });
+  }), { SOLANA_CLUSTER: 'mainnet-beta' });
   assert.equal(wake.status, 200);
 
   const advanced = await machine.handle(new Request('https://bot/advance', {

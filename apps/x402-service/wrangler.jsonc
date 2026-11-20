@@ -5,10 +5,10 @@
   "compatibility_date": "2026-11-13",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "CLUSTER": "devnet",
+    "SOLANA_CLUSTER": "mainnet-beta",
     "X402_PRICE_AMOUNT": "10000",
     "X402_TRUST_AMOUNT": "5000"
-    // X402_PAY_TO and X402_FEE_PAYER are devnet pubkeys. Not secrets. Leave them unset in git.
-    // Bind env.confirmDevnetPayment to accept a payment. This worker does not call RPC.
+    // X402_PAY_TO and X402_FEE_PAYER are mainnet-beta pubkeys. Not secrets. Leave them unset in git.
+    // Bind env.confirmSolanaPayment to accept a payment. This worker does not call RPC.
   }
 }

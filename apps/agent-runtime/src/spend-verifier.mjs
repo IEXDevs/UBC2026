@@ -1,3 +1,4 @@
+import { SOLANA_CLUSTER, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 /**
  * Server-side spend check. It rebuilds the trade facts from the proposal
  * and the parsed spend. It does not read a client-supplied verifier payload,
@@ -17,7 +18,7 @@ export function verifierFacts({ facts, proposal, parsed, trustScore, mint, trust
   const unavailable = trustUnavailable === true || facts?.trustUnavailable === true;
   const proposedAmount = units(proposal?.outflow);
   const requested = units(parsed?.amount ?? facts?.amount);
-  const cluster = proposal?.cluster === 'devnet' || proposal?.cluster === 'testnet' ? proposal.cluster : '';
+  const cluster = proposal?.cluster === SOLANA_CLUSTER ? proposal.cluster : '';
   const expectedAsset = parsed?.asset ?? facts?.asset ?? 'USDC';
   const asset = proposal?.asset === expectedAsset ? expectedAsset : '';
   const recipient = typeof proposal?.recipient === 'string' ? proposal.recipient : '';
@@ -40,8 +41,8 @@ export function verifierFacts({ facts, proposal, parsed, trustScore, mint, trust
   );
   const verified = {
     asset: expectedAsset,
-    mint: token || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-    cluster: cluster || 'devnet',
+    mint: token || SOLANA_USDC_MINT,
+    cluster: cluster || SOLANA_CLUSTER,
     price,
     amount: aligned ? requested : (facts?.amount === '1' ? '0' : '1'),
     reasonSummary: aligned

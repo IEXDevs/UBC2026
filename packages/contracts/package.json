@@ -5,8 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./contracts.mjs",
-    "./card-loop": "./card-loop.mjs"
+    "./card-loop": "./card-loop.mjs",
+    "./solana": "./solana.mjs"
   },
-  "scripts": { "test": "node --test contracts.test.mjs card-loop.test.mjs" },
+  "scripts": { "test": "node --test contracts.test.mjs card-loop.test.mjs solana.test.mjs" },
   "engines": { "node": ">=20" }
 }

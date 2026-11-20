@@ -1,8 +1,9 @@
 import { normalizeHandle } from '@ubc2026/contracts';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { formatBaseUnits, shortAddress } from './money-views.mjs';
 import { toolAccessRequest } from './spend-permission.mjs';
 
-const COMMAND = /^(?:(?:can|could|would) you +)?(?:please +)?(?:send|pay|transfer) +([0-9]+(?:\.[0-9]+)?) +sol +to +(@[a-z0-9_]+)(?: +on +(?:solana +)?devnet)?(?: +please)?[.!?]?$/i;
+const COMMAND = /^(?:(?:can|could|would) you +)?(?:please +)?(?:send|pay|transfer) +([0-9]+(?:\.[0-9]+)?) +sol +to +(@[a-z0-9_]+)(?: +on +(?:solana +)?solana)?(?: +please)?[.!?]?$/i;
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export function parseSolHandleSend(message) {
@@ -35,6 +36,6 @@ export async function runSolHandleSend({ handle, amount }, { botId, invoke, spen
   const args = { botId, action: 'spend', amount, asset: 'SOL', handle: resolved, destination: recipient.address };
   const amountLabel = `${formatBaseUnits(amount, 9)} SOL`;
   const hold = toolAccessRequest(spend.permissionMode, name, args, spend.reviewCap);
-  const label = `Send ${amountLabel} to @${resolved} (${shortAddress(recipient.address)}) on Solana devnet, plus the network fee`;
+  const label = `Send ${amountLabel} to @${resolved} (${shortAddress(recipient.address)}) on Solana ${SOLANA_CLUSTER}, plus the network fee`;
   return { reply: label, hold: { ...hold, label, prompt: `${label}. Slide to confirm.` } };
 }
