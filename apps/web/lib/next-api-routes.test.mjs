@@ -209,6 +209,42 @@ test('profile claims and handle lookup share the configured runtime directory', 
   ]);
 });
 
+test('wallet export proxy forwards only well-formed desk grants with owner authentication', async (t) => {
+  const previous = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
+  process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = 'https://runtime.test.example';
+  t.after(() => {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
+    else process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = previous;
+  });
+  const grant = 'cd'.repeat(32);
+  let expectedGrant;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    assert.equal(String(url), 'https://runtime.test.example/api/wallets/fmfdj6yqly31huorjqzq38zc/export');
+    assert.equal(init.redirect, 'manual');
+    assert.equal(init.headers.get('authorization'), 'Bearer offline-token');
+    assert.equal(init.headers.get('x-owner-id'), 'did:privy:alice');
+    assert.equal(init.headers.get('x-desk-grant'), expectedGrant);
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(init.body)), { recipientPublicKey: 'synthetic-recipient' });
+    return expectedGrant
+      ? Response.json({ encryptionType: 'HPKE', encapsulatedKey: 'enc', ciphertext: 'ct' })
+      : Response.json({ error: 'desk_locked' }, { status: 403 });
+  });
+  const { POST } = await import('../app/api/runtime/[...path]/route.js');
+  for (const value of [grant, '', 'invalid', 'a'.repeat(65)]) {
+    expectedGrant = value === grant ? grant : null;
+    const response = await POST(new Request('https://desk.example/api/runtime/api/wallets/fmfdj6yqly31huorjqzq38zc/export', {
+      method: 'POST',
+      headers: { authorization: 'Bearer offline-token', 'x-owner-id': 'did:privy:alice', 'x-desk-grant': value },
+      body: JSON.stringify({ recipientPublicKey: 'synthetic-recipient' }),
+    }), { params: Promise.resolve({ path: ['api', 'wallets', 'fmfdj6yqly31huorjqzq38zc', 'export'] }) });
+    assert.equal(response.status, expectedGrant ? 200 : 403);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await response.json(), expectedGrant
+      ? { encryptionType: 'HPKE', encapsulatedKey: 'enc', ciphertext: 'ct' }
+      : { error: 'desk_locked' });
+  }
+});
+
 test('chat sends SOL to a handle without a model call and binds approval to the resolved wallet', async (t) => {
   const runtime = 'https://runtime.test.example';
   const previous = { runtime: process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL, modelKey: process.env.META_MODEL_API_KEY };

@@ -59,12 +59,14 @@ async function proxy(request, context) {
   const auth = request.headers.get('authorization') || (cookieToken ? `Bearer ${cookieToken}` : '');
   const owner = request.headers.get('x-owner-id');
   const contentType = request.headers.get('content-type');
+  const deskGrant = request.headers.get('x-desk-grant');
   // Privy users/me on the Worker needs a browser Origin (wallet create).
   const origin = request.headers.get('origin');
   const referer = request.headers.get('referer');
   if (auth && auth.length < 12000) headers.set('authorization', auth);
   if (owner && owner.length < 300) headers.set('x-owner-id', owner);
   if (contentType && contentType.length < 200) headers.set('content-type', contentType);
+  if (deskGrant && /^[a-f0-9]{64}$/.test(deskGrant)) headers.set('x-desk-grant', deskGrant);
   if (origin && origin.length < 300 && !/[\r\n]/.test(origin)) {
     headers.set('origin', origin);
     headers.set('x-maelstrom-origin', origin);
