@@ -9,7 +9,77 @@ import {
   openDeskGrant,
   readDeskLockState,
   registerDeskVerifier,
+  saveDeskVerifier,
+  submitChatSpend,
 } from './desk-grant-client.mjs';
+
+test('a confirmed spend reuses the same send once after a successful unlock', async () => {
+  let attempts = 0;
+  let prompts = 0;
+  const signal = new AbortController().signal;
+  const rejected = { ok: false, error: 'desk_locked' };
+  const result = await submitChatSpend({
+    signal,
+    send: async () => { attempts++; return rejected; },
+    unlock: async () => { prompts++; return true; },
+  });
+  assert.equal(result, rejected);
+  assert.equal(attempts, 2);
+  assert.equal(prompts, 1);
+});
+
+test('a dismissed or stopped unlock and other spend failures never retry', async () => {
+  for (const scenario of ['dismiss', 'stop', 'sign-rejected']) {
+    let attempts = 0;
+    let prompts = 0;
+    const controller = new AbortController();
+    const rejected = { ok: false, error: scenario === 'sign-rejected' ? scenario : 'desk_locked' };
+    const result = await submitChatSpend({
+      signal: controller.signal,
+      send: async () => { attempts++; return rejected; },
+      unlock: async () => {
+        prompts++;
+        if (scenario === 'stop') { controller.abort(); return true; }
+        return false;
+      },
+    });
+    assert.equal(result.error, { dismiss: 'unlock_cancelled', stop: 'aborted', 'sign-rejected': 'sign-rejected' }[scenario]);
+    assert.equal(attempts, 1);
+    assert.equal(prompts, scenario === 'sign-rejected' ? 0 : 1);
+  }
+});
+
+test('a grant returned after dismissal is not stored', async () => {
+  let active = true;
+  let writes = 0;
+  const result = await acceptEnteredPassword({
+    ownerId: 'did:privy:u1',
+    password: 'test-password',
+    fetchImpl: async () => {
+      active = false;
+      return Response.json({ grant: 'a'.repeat(64), until: Date.now() + 60_000 });
+    },
+    sessionStorage: { setItem() { writes++; } },
+    shouldAccept: () => active,
+  });
+  assert.deepEqual(result, { ok: false, error: 'unlock_cancelled' });
+  assert.equal(writes, 0);
+});
+
+test('a completed password reset synchronizes the verifier even after the dialog is dismissed', async () => {
+  const ownerId = 'did:privy:u1';
+  const verifier = await createDeskLock('new-test-password');
+  const map = new Map();
+  const localStorage = { setItem: (key, value) => map.set(key, value), getItem: key => map.get(key) ?? null };
+  let complete;
+  const pending = saveDeskVerifier(() => new Promise(resolve => { complete = resolve; }), {
+    ownerId, localStorage, verifier, replace: true, proof: 'b'.repeat(64),
+  });
+  assert.equal(readDeskLock(localStorage, ownerId), null);
+  complete(Response.json({ ok: true }));
+  assert.deepEqual(await pending, { ok: true });
+  assert.equal(await unlockDesk('new-test-password', readDeskLock(localStorage, ownerId)), true);
+});
 
 /**
  * Rigor audit — desk client missing runtime / owner

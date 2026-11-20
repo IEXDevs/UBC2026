@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { devnetSpendAsset } from '@ubc2026/contracts';
-import { spendFailureMessage, toolStep } from './chat-activity.mjs';
+import { spendFailureCode, spendFailureMessage, toolStep } from './chat-activity.mjs';
 import { matchingToolGrant } from './spend-permission.mjs';
+import { TextChatError } from './text-chat.mjs';
 import { txReceiptFromResult } from './tx-receipt.mjs';
 
 const HOLD_LIFETIME_MS = 5 * 60 * 1000;
@@ -42,6 +43,9 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
   }
 
   const result = await invokeTool(hold.name, hold.args);
+  if (['desk_locked', 'desk_lock_required'].includes(spendFailureCode(result))) {
+    throw new TextChatError('desk_locked', 403);
+  }
   const receipt = txReceiptFromResult(result);
   const step = toolStep(hold.name, hold.args, result);
   const text = receipt?.text || spendFailureMessage(result)

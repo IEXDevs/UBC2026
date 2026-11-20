@@ -62,6 +62,7 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
   const signature = 'a'.repeat(88);
   const deskGrant = 'ab'.repeat(32);
   let recipient = { kind: 'handle', handle: 'hi', missing: false, address };
+  let locked = false;
   const sends = [];
   const checks = t.mock.method(globalThis, 'fetch', async (url, init) => {
     const target = new URL(url);
@@ -78,6 +79,7 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     assert.equal(init.headers['x-desk-grant'], deskGrant);
     const payload = JSON.parse(init.body);
     sends.push(payload);
+    if (locked) return Response.json({ error: 'desk_locked', signed: false }, { status: 403 });
     if (payload.destination !== recipient.address) {
       return Response.json({ signed: false, error: 'recipient_address_missing' }, { status: 400 });
     }
@@ -85,23 +87,23 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
   });
 
   const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
-  const chat = async (grants = [], message = 'Could you send 1 SOL to @Hi?') => {
+  const chat = async (grants = [], { stream = true, expectedStatus = 200 } = {}) => {
     const res = await POST(new Request('https://desk.example/api/bots/bot_1/chat', {
       method: 'POST',
       headers: {
-        accept: 'text/event-stream, application/json',
+        accept: stream ? 'text/event-stream, application/json' : 'application/json',
         authorization: 'Bearer test-owner-token',
         'x-owner-id': 'did:privy:alice',
         'x-desk-grant': deskGrant,
       },
-      body: JSON.stringify({ message, permission: 'full', grants }),
+      body: JSON.stringify({ message: 'Could you send 1 SOL to @Hi?', permission: 'full', grants }),
     }), { params: { botId: 'bot_1' } });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, expectedStatus);
     assert.equal(res.headers.get('cache-control'), 'no-store');
     const body = res.headers.get('content-type')?.includes('text/event-stream')
       ? JSON.parse((await res.text()).split('\n').find(line => line.startsWith('data: ')).slice(6))
       : await res.json();
-    assert.equal(body.provider, 'desk');
+    if (!body.error) assert.equal(body.provider, 'desk');
     return body;
   };
   const { hold, toolRounds } = await chat();
@@ -122,11 +124,15 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
   assert.equal(sends[0].destination, address);
 
   recipient = { ...recipient, address };
+  locked = true;
+  assert.deepEqual(await chat([hold]), { error: 'desk_locked' });
+  assert.deepEqual(await chat([hold], { stream: false, expectedStatus: 403 }), { error: 'desk_locked' });
+  locked = false;
   const sent = await chat([hold]);
   assert.equal(sent.toolRounds, 1);
   assert.match(sent.reply, /Sent\./);
   assert.ok(sent.reply.includes(`https://solscan.io/tx/${signature}?cluster=devnet`));
-  assert.deepEqual(sends[1], {
+  assert.deepEqual(sends[3], {
     botId: 'bot_1',
     action: 'spend',
     amount: '1000000000',
@@ -138,11 +144,13 @@ test('chat sends SOL to a handle without a model call and binds approval to the 
     permission: 'full',
     reviewCap: '30000000',
   });
+  assert.deepEqual(sends[1], sends[3]);
+  assert.deepEqual(sends[2], sends[3]);
 
   recipient = { kind: 'handle', handle: 'hi', missing: true };
   assert.match((await chat()).reply, /couldn’t find @hi/);
-  assert.equal(checks.mock.callCount(), 4);
-  assert.equal(sends.length, 2);
+  assert.equal(checks.mock.callCount(), 6);
+  assert.equal(sends.length, 4);
 });
 
 /**
