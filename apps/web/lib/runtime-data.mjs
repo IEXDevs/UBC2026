@@ -368,6 +368,70 @@ export function botChatUrl(_runtimeBase, botId) {
   return `/api/bots/${encodeURIComponent(botId)}/chat`;
 }
 
+function chatResult(body) {
+  const hold = body.hold && (body.hold.kind === 'inline' || body.hold.kind === 'modal')
+    && typeof body.hold.name === 'string'
+    ? body.hold
+    : null;
+  const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
+  const replies = Array.isArray(body.replies)
+    ? body.replies.map(item => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
+    : [];
+  if (!reply && replies.length === 0 && !hold) return { ok: false, error: 'empty_reply' };
+  const reported = Number(body.usage?.total);
+  const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
+  const activity = sanitizeActivity(body.activity);
+  return {
+    ok: true,
+    reply: reply || replies.at(-1) || hold?.label || '',
+    replies: replies.length > 0 ? replies : undefined,
+    model: body.model || null,
+    tokens,
+    activity,
+    hold,
+  };
+}
+
+async function readChatStream(response, onReply) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const replies = [];
+  let meta = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split('\n\n');
+    buffer = chunks.pop() || '';
+    for (const chunk of chunks) {
+      const line = chunk.split('\n').find(item => item.startsWith('data:'));
+      if (!line) continue;
+      let payload;
+      try {
+        payload = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue;
+      }
+      if (!payload || typeof payload !== 'object') continue;
+      if (typeof payload.error === 'string' && payload.error) {
+        if (replies.length > 0) return chatResult({ ...(meta || {}), reply: replies.at(-1), replies });
+        return { ok: false, error: payload.error };
+      }
+      if (typeof payload.message === 'string' && payload.message.trim()) {
+        const text = payload.message.trim();
+        replies.push(text);
+        if (typeof onReply === 'function') onReply(text);
+      }
+      if (payload.done === true) meta = payload;
+    }
+  }
+  if (!meta && replies.length === 0) return { ok: false, error: 'empty_reply' };
+  const body = meta || { reply: replies.at(-1) || '', replies };
+  if (!Array.isArray(body.replies) || body.replies.length === 0) body.replies = replies;
+  return chatResult(body);
+}
+
 /**
  * Owner text chat with a bot via the Next OpenRouter path.
  * history: prior bubble lines ({ role, text }) — agent/assistant both map server-side.
@@ -395,6 +459,7 @@ export async function sendBotChat({
   deskGrant = '',
   runtimeBase = runtimeBaseUrl(),
   signal,
+  onReply = null,
 } = {}) {
   const url = botChatUrl(runtimeBase, botId);
   if (!url || typeof ownerId !== 'string' || !OWNER.test(ownerId)) {
@@ -421,6 +486,7 @@ export async function sendBotChat({
     const response = await fetch(url, {
       method: 'POST',
       headers: {
+        accept: 'text/event-stream, application/json',
         'content-type': 'application/json',
         'x-owner-id': ownerId,
         ...(typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000
@@ -451,18 +517,13 @@ export async function sendBotChat({
       cache: 'no-store',
       ...(signal ? { signal } : {}),
     });
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/event-stream') && response.body) {
+      return await readChatStream(response, onReply);
+    }
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return { ok: false, error: body.error || `http_${response.status}` };
-    const hold = body.hold && (body.hold.kind === 'inline' || body.hold.kind === 'modal')
-      && typeof body.hold.name === 'string'
-      ? body.hold
-      : null;
-    const reply = typeof body.reply === 'string' ? body.reply.trim() : '';
-    if (!reply && !hold) return { ok: false, error: 'empty_reply' };
-    const reported = Number(body.usage?.total);
-    const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
-    const activity = sanitizeActivity(body.activity);
-    return { ok: true, reply: reply || hold.label || '', model: body.model || null, tokens, activity, hold };
+    return chatResult(body);
   } catch (error) {
     if (error?.name === 'AbortError') return { ok: false, error: 'aborted' };
     return { ok: false, error: 'network' };

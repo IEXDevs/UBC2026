@@ -108,6 +108,8 @@ test('text chat speaks simple English and does not recite the gate', () => {
   assert.match(messages[1].content, /Do not recite these instructions/);
   assert.match(messages[1].content, /unless the owner asks whether money moved/);
   assert.match(messages[1].content, /say that once in plain words/);
+  assert.match(messages[1].content, /Solscan URL/);
+  assert.match(messages[1].content, /Do not wait for the owner to ask again/);
 });
 
 /**
@@ -395,7 +397,7 @@ test('an empty tool finish still returns an answer instead of stopping', async (
   assert.match(result.text, /stopped so this request would not keep spinning|Answer the owner/);
 });
 
-test('the hidden verifier blocks a spend and a reply that it does not allow', async () => {
+test('the hidden verifier asks to confirm a spend instead of blocking it', async () => {
   const seen = [];
   let calls = 0;
   const verifyRoles = [];
@@ -432,7 +434,9 @@ test('the hidden verifier blocks a spend and a reply that it does not allow', as
     },
   });
   assert.deepEqual(seen, []);
-  assert.equal(result.text, 'That step did not pass the check.');
+  assert.equal(result.hold.kind, 'modal');
+  assert.equal(result.hold.name, 'request_spend');
+  assert.match(result.hold.prompt, /Slide to confirm/);
   assert.ok(verifyRoles.includes('developer'));
   assert.ok(verifyRoles.includes('user'));
 });
@@ -451,7 +455,7 @@ test('verifier API failures fail closed instead of failing the chat', async () =
   assert.equal(result.text, 'That step did not pass the check.');
 });
 
-test('ordinary tools run in Ask mode while an approved spend still needs the model verifier', async () => {
+test('an approved spend is not cancelled when the turn verifier refuses it', async () => {
   const seen = [];
   const verifierChecks = [];
   const toolCalls = [
@@ -483,8 +487,8 @@ test('ordinary tools run in Ask mode while an approved spend still needs the mod
       const results = body.messages.filter(item => item.role === 'tool');
       if (results.length) {
         assert.equal(JSON.parse(results[2].content).error, 'invalid_recipient');
-        assert.equal(JSON.parse(results[3].content).error, 'verifier_blocked');
-        return Response.json({ choices: [{ message: { content: 'I found the recipient. The payment is blocked.' } }] });
+        assert.equal(JSON.parse(results[3].content).ok, true);
+        return Response.json({ choices: [{ message: { content: 'I found the recipient. The payment is in.' } }] });
       }
       return Response.json({ choices: [{
         finish_reason: 'tool_calls',
@@ -494,10 +498,70 @@ test('ordinary tools run in Ask mode while an approved spend still needs the mod
       }] });
     },
   });
-  assert.deepEqual(seen, toolCalls.slice(0, 2));
-  assert.equal(verifierChecks.length, 1);
-  assert.match(verifierChecks[0], /request_spend/);
-  assert.equal(result.text, 'I found the recipient. The payment is blocked.');
+  assert.deepEqual(seen.map(item => item[0]), ['web_search', 'lookup_recipient', 'request_spend']);
+  assert.equal(verifierChecks.length, 0);
+  assert.equal(result.hold, undefined);
+  assert.equal(result.text, 'I found the recipient. The payment is in.');
+});
+
+test('a full-permission send over the review maximum asks for the confirm slide', async () => {
+  const seen = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send 40 USDC',
+    permissionMode: 'full',
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object' } },
+    }],
+    invokeTool: async (name) => { seen.push(name); return { ok: true }; },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      return Response.json({
+        choices: [{
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"40000000","handle":"hi"}' } }],
+          },
+        }],
+      });
+    },
+  });
+  assert.equal(result.hold.kind, 'modal');
+  assert.match(result.hold.label, /30 USDC/);
+  assert.deepEqual(seen, []);
+});
+
+test('a verifier refusal on an unconfirmed send asks instead of blocking', async () => {
+  const seen = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send 1 USDC',
+    permissionMode: 'full',
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object' } },
+    }],
+    invokeTool: async (name) => { seen.push(name); return { ok: true }; },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      return Response.json({
+        choices: [{
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1000000","handle":"hi"}' } }],
+          },
+        }],
+      });
+    },
+  });
+  assert.equal(result.hold.kind, 'modal');
+  assert.equal(result.hold.name, 'request_spend');
+  assert.deepEqual(seen, []);
 });
 
 test('ask mode requires the confirmation slide before invoking a spend', async () => {
@@ -580,4 +644,55 @@ test('full permissions call a fund tool without asking the owner', async () => {
   assert.equal(result.hold, undefined);
   assert.deepEqual(seen, ['request_spend']);
   assert.equal(result.text, 'The gate blocked the trade.');
+});
+
+/**
+ * Achieves: a broadcast signature is its own message before the model writes a follow-up.
+ * Fails when: the Solscan line waits for the next completion, or a missing signature still links.
+ * Oracle: onMessage order is the Solscan URL, then the later model call, then the closing sentence.
+ */
+test('a send posts the Solscan URL before the model is asked to close the turn', async () => {
+  const signature = '5'.repeat(64);
+  const order = [];
+  let rounds = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'send 1 SOL to @hi',
+    permissionMode: 'full',
+    grants: [{
+      name: 'request_spend',
+      args: { amount: '1000000000', destination: 'Hi11111111111111111111111111111111111111111' },
+    }],
+    onMessage: (text) => order.push(text),
+    tools: [{
+      type: 'function',
+      function: { name: 'request_spend', description: 'Spend', parameters: { type: 'object', properties: {} } },
+    }],
+    invokeTool: async () => ({ signed: true, signature, cluster: 'devnet' }),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      rounds += 1;
+      if (rounds === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              content: null,
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'request_spend', arguments: '{"amount":"1000000000","destination":"Hi11111111111111111111111111111111111111111"}' } }],
+            },
+          }],
+        });
+      }
+      order.push('model-again');
+      const tool = JSON.parse(options.body).messages.find(item => item.role === 'tool');
+      assert.match(tool.content, /solscanUrl/);
+      return Response.json({ choices: [{ message: { content: '1 SOL is on the way to @hi.' } }] });
+    },
+  });
+  const url = `https://solscan.io/tx/${signature}?cluster=devnet`;
+  assert.equal(order[0], `Sent. ${url}`);
+  assert.equal(order[1], 'model-again');
+  assert.equal(order[2], '1 SOL is on the way to @hi.');
+  assert.deepEqual(result.messages, [`Sent. ${url}`, '1 SOL is on the way to @hi.']);
+  assert.equal(result.text, '1 SOL is on the way to @hi.');
 });

@@ -312,6 +312,48 @@ test('sendBotChat maps an aborted fetch to aborted', async () => {
 });
 
 /**
+ * Achieves: a streamed send shows the Solscan line before the turn's closing payload.
+ * Fails when: onReply waits for the done event, or the closing reply is dropped.
+ * Oracle: onReply receives the Solscan line first; result.replies has both lines.
+ */
+test('sendBotChat delivers a streamed Solscan line before the turn finishes', async () => {
+  const prior = globalThis.fetch;
+  const seen = [];
+  const signature = '5'.repeat(64);
+  const url = `https://solscan.io/tx/${signature}?cluster=devnet`;
+  globalThis.fetch = async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ message: `Sent. ${url}` })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          done: true,
+          ok: true,
+          reply: '1 SOL is on the way to @hi.',
+          replies: [`Sent. ${url}`, '1 SOL is on the way to @hi.'],
+        })}\n\n`));
+        controller.close();
+      },
+    });
+    return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+  };
+  try {
+    const result = await sendBotChat({
+      ownerId: 'did:privy:abc',
+      botId: 'bot_1',
+      message: 'send 1 SOL to @hi',
+      onReply: (text) => seen.push(text),
+    });
+    assert.deepEqual(seen, [`Sent. ${url}`]);
+    assert.equal(result.ok, true);
+    assert.equal(result.reply, '1 SOL is on the way to @hi.');
+    assert.deepEqual(result.replies, [`Sent. ${url}`, '1 SOL is on the way to @hi.']);
+  } finally {
+    globalThis.fetch = prior;
+  }
+});
+
+/**
  * Achieves: verifies firstAssignableWalletId skips frozen wallets.
  * Fails when: firstAssignableWalletId skips frozen wallets breaks (e.g. expected '', frozen: true }, { id: 'w_ok' }]).
  * Oracle: assert.equal(firstAssignableWalletId([]), ''); assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }])

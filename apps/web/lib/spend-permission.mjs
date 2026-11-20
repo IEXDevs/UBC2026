@@ -139,6 +139,21 @@ export function writeAcceptance(storage, ownerId, { permission, reviewCap } = {}
 }
 
 const FUND_TOOLS = new Set(['request_spend', 'sns_send', 'prepare_shopping']);
+const SEND_TOOLS = new Set(['request_spend', 'sns_send']);
+/** 30 USDC. Used when Review by AI is off and no owner maximum is stored. */
+export const DEFAULT_REVIEW_CAP = '30000000';
+
+export function effectiveReviewCap(reviewCap) {
+  return typeof reviewCap === 'string' && AMOUNT.test(reviewCap) && reviewCap !== '0'
+    ? reviewCap
+    : DEFAULT_REVIEW_CAP;
+}
+
+export function amountOverReviewCap(amount, reviewCap) {
+  const cap = effectiveReviewCap(reviewCap);
+  if (typeof amount !== 'string' || !AMOUNT.test(amount)) return false;
+  return BigInt(amount) > BigInt(cap);
+}
 
 export function isFundTool(name) {
   return FUND_TOOLS.has(name);
@@ -176,19 +191,29 @@ function accessDetail(name, args) {
   return ACCESS_COPY[name] || `Use ${name}`;
 }
 
-/** Ask mode requires the confirmation slide for fund tools. */
-export function toolAccessKind(mode, name) {
-  return isFundTool(name) && mode === 'ask' ? 'modal' : null;
+/**
+ * Ask confirms every fund move. Review and full still confirm a send above
+ * the Review by AI maximum, including when that mode is off ($30 USDC).
+ */
+export function toolAccessKind(mode, name, args = {}, reviewCap = null) {
+  if (!isFundTool(name)) return null;
+  if (mode === 'ask') return 'modal';
+  if (SEND_TOOLS.has(name) && amountOverReviewCap(args?.amount, reviewCap)) return 'modal';
+  return null;
 }
 
-export function toolAccessRequest(mode, name, args = {}) {
-  const kind = toolAccessKind(mode, name);
+export function toolAccessRequest(mode, name, args = {}, reviewCap = null) {
+  const kind = toolAccessKind(mode, name, args, reviewCap);
   if (!kind) return null;
-  const label = accessDetail(name, plainArgs(args));
+  const plain = plainArgs(args);
+  let label = accessDetail(name, plain);
+  if (SEND_TOOLS.has(name) && amountOverReviewCap(plain.amount, reviewCap) && mode !== 'ask') {
+    label = `${label}. Over ${reviewCapToDollars(effectiveReviewCap(reviewCap))} USDC`;
+  }
   return {
     kind,
     name,
-    args: plainArgs(args),
+    args: plain,
     label,
     prompt: `${label}. Slide to confirm.`,
   };
@@ -205,7 +230,7 @@ export function permissionInstruction(id) {
   const quiet = ' This is for you, not the owner. Do not repeat the check order. Do not say that trust, verify, the budget reserve, or signing did not run, unless the owner asks whether money moved.';
   const shared = `Fund movements go through the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.${quiet}`;
   if (mode === 'full') {
-    return `Permissions are fully granted. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay. Follow your goal, and Infer the action and call the spend API. Fund movements go through the platform gate, and the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.${quiet}`;
+    return `Permissions are fully granted. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay, unless the send is over the review maximum. That maximum still asks for a confirm, including when Review by AI is off. The default maximum is 30 USDC. Follow your goal, and infer the action and call the spend API. Fund movements go through the platform gate, and the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on Solana devnet. A mainnet price quote never authorizes a transaction.${quiet}`;
   }
   if (mode === 'review') {
     return `Permission is review by AI. At or under the owner's review threshold, continue after the server check. Above that threshold, state what would change and wait. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. ${shared}`;

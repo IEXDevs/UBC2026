@@ -157,29 +157,31 @@ export async function POST(request, context) {
     }),
   };
 
-  try {
-    const reply = await completeTextChat({
-      metaModelApiKey: readRootEnv('META_MODEL_API_KEY'),
-      openrouterApiKey: readRootEnv('OPENROUTER_API_KEY'),
-      botName: typeof body.name === 'string' ? body.name : 'Agent',
-      botGoal: typeof body.goal === 'string' ? body.goal : '',
-      botType: typeof body.type === 'string' ? body.type : 'trading',
-      history: Array.isArray(body.history) ? body.history.slice(-400) : [],
-      message: prepared.message,
-      model: chatModel,
-      reasoningEffort: chatKeys.reasoningEffort,
-      tools: agentToolSchemas(),
-      toolsInstruction: [chatToolsInstruction(), prepared.instruction].join('\n'),
-      permission: chatKeys.permission,
-      fileCatalog: Array.isArray(body.fileCatalog) ? body.fileCatalog.slice(0, 40) : [],
-      permissionMode,
-      grants,
-      invokeTool: async (name, args) => {
-        const hit = await dispatchHarness(name, args, harnessCtx);
-        if (hit) return serializeToolResult(hit);
-        return serializeToolResult(await invokeRaw(name, stampSpendPermission(name, args, spend)));
-      },
-    });
+  const turnArgs = {
+    metaModelApiKey: readRootEnv('META_MODEL_API_KEY'),
+    openrouterApiKey: readRootEnv('OPENROUTER_API_KEY'),
+    botName: typeof body.name === 'string' ? body.name : 'Agent',
+    botGoal: typeof body.goal === 'string' ? body.goal : '',
+    botType: typeof body.type === 'string' ? body.type : 'trading',
+    history: Array.isArray(body.history) ? body.history.slice(-400) : [],
+    message: prepared.message,
+    model: chatModel,
+    reasoningEffort: chatKeys.reasoningEffort,
+    tools: agentToolSchemas(),
+    toolsInstruction: [chatToolsInstruction(), prepared.instruction].join('\n'),
+    permission: chatKeys.permission,
+    fileCatalog: Array.isArray(body.fileCatalog) ? body.fileCatalog.slice(0, 40) : [],
+    permissionMode,
+    reviewCap,
+    grants,
+    invokeTool: async (name, args) => {
+      const hit = await dispatchHarness(name, args, harnessCtx);
+      if (hit) return serializeToolResult(hit);
+      return serializeToolResult(await invokeRaw(name, stampSpendPermission(name, args, spend)));
+    },
+  };
+
+  async function finishTurn(reply) {
     const trade = await ensureOwnerTradeLoop({
       message,
       goal: typeof body.goal === 'string' ? body.goal : '',
@@ -188,32 +190,68 @@ export async function POST(request, context) {
       invoke: invokeRaw,
     });
     const tradeLoop = trade?.loop && typeof trade.loop === 'object' ? trade.loop : null;
-    return Response.json(
-      {
-        ok: true,
-        botId,
-        reply: reply.text,
-        ...(reply.hold ? { hold: reply.hold } : {}),
-        model: reply.model,
-        provider: reply.provider,
-        toolRounds: reply.toolRounds ?? 0,
-        ...(readSubagentResults(ownerId, botId).length > 0
-          ? { subagents: readSubagentResults(ownerId, botId) }
-          : {}),
-        ...(Array.isArray(reply.activity) && reply.activity.length > 0 ? { activity: reply.activity } : {}),
-        ...(reply.usage ? { usage: reply.usage } : {}),
-        ...(tradeLoop ? {
-          trade: {
-            ok: tradeLoop.ok === true && tradeLoop.error == null,
-            done: tradeLoop.done === true,
-            waiting: tradeLoop.waiting === true,
-            pauseReason: tradeLoop.run?.pauseReason || tradeLoop.error || null,
-            signed: tradeLoop.run?.checkpoints?.execute?.executed === true,
-          },
-        } : {}),
+    const replies = Array.isArray(reply.messages)
+      ? reply.messages.filter(item => typeof item === 'string' && item.trim())
+      : [];
+    return {
+      ok: true,
+      botId,
+      reply: reply.text,
+      ...(replies.length > 0 ? { replies } : {}),
+      ...(reply.hold ? { hold: reply.hold } : {}),
+      model: reply.model,
+      provider: reply.provider,
+      toolRounds: reply.toolRounds ?? 0,
+      ...(readSubagentResults(ownerId, botId).length > 0
+        ? { subagents: readSubagentResults(ownerId, botId) }
+        : {}),
+      ...(Array.isArray(reply.activity) && reply.activity.length > 0 ? { activity: reply.activity } : {}),
+      ...(reply.usage ? { usage: reply.usage } : {}),
+      ...(tradeLoop ? {
+        trade: {
+          ok: tradeLoop.ok === true && tradeLoop.error == null,
+          done: tradeLoop.done === true,
+          waiting: tradeLoop.waiting === true,
+          pauseReason: tradeLoop.run?.pauseReason || tradeLoop.error || null,
+          signed: tradeLoop.run?.checkpoints?.execute?.executed === true,
+        },
+      } : {}),
+    };
+  }
+
+  const wantsStream = (request.headers.get('accept') || '').includes('text/event-stream');
+  if (wantsStream) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (payload) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        };
+        try {
+          const reply = await completeTextChat({
+            ...turnArgs,
+            onMessage: (text) => send({ message: text }),
+          });
+          send({ done: true, ...(await finishTurn(reply)) });
+        } catch (error) {
+          const code = error instanceof TextChatError ? error.code : 'chat_failed';
+          send({ error: code });
+        } finally {
+          controller.close();
+        }
       },
-      { headers: { 'Cache-Control': 'no-store' } },
-    );
+    });
+    return new Response(stream, {
+      headers: {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+      },
+    });
+  }
+
+  try {
+    const reply = await completeTextChat(turnArgs);
+    return Response.json(await finishTurn(reply), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = error instanceof TextChatError ? error.code : 'chat_failed';
     const status = error instanceof TextChatError ? error.status : 502;

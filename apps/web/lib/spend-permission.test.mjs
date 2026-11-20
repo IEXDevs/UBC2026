@@ -54,6 +54,10 @@ test('full permissions manages funds and the other modes still wait', () => {
   assert.equal(toolAccessKind('ask', 'prepare_shopping'), 'modal');
   assert.equal(toolAccessKind('full', 'web_search'), null);
   assert.equal(toolAccessKind('full', 'request_spend'), null);
+  assert.equal(toolAccessKind('full', 'request_spend', { amount: '5000000' }), null);
+  assert.equal(toolAccessKind('full', 'request_spend', { amount: '40000000' }), 'modal');
+  assert.equal(toolAccessKind('review', 'request_spend', { amount: '5000000' }, '25000000'), null);
+  assert.equal(toolAccessKind('review', 'request_spend', { amount: '40000000' }, '25000000'), 'modal');
   assert.equal(toolAccessKind('review', 'web_search'), null);
   assert.equal(toolAccessKind('', 'web_search'), null);
   assert.equal(toolAccessRequest('ask', 'web_search', { query: 'USDC rates' }), null);
@@ -63,6 +67,10 @@ test('full permissions manages funds and the other modes still wait', () => {
   assert.equal(grantCovers([hold], 'request_spend', { amount: '5000000', handle: 'bob' }), true);
   assert.equal(grantCovers([hold], 'request_spend', { amount: '5000000', handle: 'other' }), false);
   assert.equal(toolAccessRequest('full', 'request_spend', { amount: '5000000', handle: 'bob' }), null);
+  const over = toolAccessRequest('full', 'request_spend', { amount: '40000000', handle: 'bob' });
+  assert.equal(over.kind, 'modal');
+  assert.match(over.prompt, /Slide to confirm/);
+  assert.match(over.label, /30 USDC/);
 });
 
 /**

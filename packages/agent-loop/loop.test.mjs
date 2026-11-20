@@ -220,6 +220,21 @@ test('approval requirement follows the bot mode and still holds over-budget', ()
   ), false);
   assert.equal(approvalRequirement(
     { approvalMode: 'fully-automatic' },
+    { state: 'ready-to-reserve', debit: '40000000' },
+    { ownerPermission: 'full', confirmed: false },
+  ), true);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'fully-automatic' },
+    { state: 'ready-to-reserve', debit: '40000000' },
+    { ownerPermission: 'full', confirmed: true },
+  ), false);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'fully-automatic' },
+    { state: 'ready-to-reserve', debit: '40000000' },
+    { ownerPermission: 'full', reviewCap: '50000000' },
+  ), false);
+  assert.equal(approvalRequirement(
+    { approvalMode: 'fully-automatic' },
     { state: 'over-budget', debit: '1000' },
     { ownerPermission: 'full' },
   ), true);

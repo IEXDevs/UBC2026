@@ -141,4 +141,18 @@ test('skills and subagents use the connected apps and stop at one handoff', asyn
   });
   assert.equal(ask.confirmed, true);
   assert.equal(ask.permission, 'ask');
+  assert.equal(ask.reviewCap, '30000000');
+  const fullOver = stampSpendPermission('request_spend', { amount: '40000000' }, {
+    permissionMode: 'full',
+    confirmSpend: true,
+  });
+  assert.equal(fullOver.confirmed, true);
+  assert.equal(fullOver.reviewCap, '30000000');
+  const fullUnder = stampSpendPermission('request_spend', { amount: '5000000' }, {
+    permissionMode: 'full',
+    reviewCap: '25000000',
+    confirmSpend: true,
+  });
+  assert.equal(fullUnder.confirmed, undefined);
+  assert.equal(fullUnder.reviewCap, '25000000');
 });

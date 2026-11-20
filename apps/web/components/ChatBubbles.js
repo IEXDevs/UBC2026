@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
-import { formatAgentOutput } from '../lib/agent-output.mjs';
+import { formatAgentOutput, linkParts } from '../lib/agent-output.mjs';
 import { withHeads } from '../lib/voice-float.mjs';
 import MentionText from './MentionText';
 import { AgentTrace, Reasoning, Sources } from './ai/elements';
@@ -148,7 +148,11 @@ export default function ChatBubbles({
               <AgentTrace steps={steps} />
               <Bubble align="start" variant="secondary">
                 <BubbleContent>
-                  <MentionText text={text} onParty={onParty} />
+                  {linkParts(text).map((part, index) => (
+                    part.type === 'link'
+                      ? <a key={`${line.id}-link-${index}`} className="chat-link" href={part.value} target="_blank" rel="noreferrer">{part.value}</a>
+                      : <MentionText key={`${line.id}-text-${index}`} text={part.value} onParty={onParty} />
+                  ))}
                 </BubbleContent>
               </Bubble>
               <Sources urls={urls} />

@@ -624,7 +624,7 @@ export function createChatToolInvoker({
     if (args.permission === 'ask' || args.permission === 'review' || args.permission === 'full') {
       body.permission = args.permission;
     }
-    if (name === 'request_spend' && args.permission === 'review' && typeof args.reviewCap === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(args.reviewCap) && args.reviewCap !== '0') {
+    if ((name === 'request_spend' || name === 'sns_send') && typeof args.reviewCap === 'string' && /^(0|[1-9][0-9]{0,39})$/.test(args.reviewCap) && args.reviewCap !== '0') {
       body.reviewCap = args.reviewCap;
     }
     if (name === 'start_task' && args.ownerPermission === 'full') body.ownerPermission = 'full';

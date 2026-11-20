@@ -560,13 +560,14 @@ export default function Composer({
 
   function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = [], access = null) {
     const spoken = typeof text === 'string' ? text.trim() : '';
-    if (!spoken) return;
+    if (!spoken) return null;
     const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
     if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
     if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
     if (access && access.kind === 'inline' && typeof access.name === 'string') line.access = access;
     if (targetId === botIdRef.current) threadRef.current = [...threadRef.current, line];
     onLine?.(line, targetId);
+    return line;
   }
 
   function say(text) {
@@ -586,18 +587,34 @@ export default function Composer({
     say(/say yes to confirm/i.test(line) ? line : `${line} ${cue}`);
   }
 
-  async function settleChat(result, spoken, prior, grants, run) {
+  async function settleChat(result, spoken, prior, grants, run, shown = [], firstLineId = null) {
     if (run !== runRef.current) return;
     if (!result?.ok) {
       if (result?.error === 'aborted') return;
+      if (shown.length > 0) return;
       const note = chatFailureNote(result?.error);
       pushLine('agent', note);
       say(note);
       return;
     }
+    const holdLabel = result.hold ? (result.reply || result.hold.prompt || result.hold.label || '') : '';
+    const lines = Array.isArray(result.replies) && result.replies.length > 0
+      ? result.replies
+      : (result.reply && !result.hold ? [result.reply] : []);
+    let anchor = firstLineId;
+    for (const text of lines) {
+      if (!text || shown.includes(text) || text === holdLabel) continue;
+      const line = pushLine('agent', text);
+      if (line && !anchor) anchor = line.id;
+      shown.push(text);
+      const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+      say(aloud || 'Sent.');
+    }
+    if (anchor && result.activity?.length) onPatchLine?.(anchor, { activity: result.activity }, botIdRef.current);
     if (result.hold?.kind === 'modal') {
-      if (result.reply) pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
-      sayConfirm(result.reply || result.hold.prompt || result.hold.label);
+      const label = result.reply || result.hold.prompt || result.hold.label;
+      if (label && !shown.includes(label)) pushLine('agent', label);
+      sayConfirm(label);
       const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label) : false;
       if (run !== runRef.current) return;
       if (!accepted) {
@@ -610,12 +627,11 @@ export default function Composer({
     }
     if (result.hold?.kind === 'inline') {
       const line = result.reply || result.hold.label;
-      pushLine('agent', line, botIdRef.current, result.tokens, result.activity, result.hold);
+      if (line && !shown.includes(line)) {
+        pushLine('agent', line, botIdRef.current, result.tokens, [], result.hold);
+      }
       sayConfirm(line);
-      return;
     }
-    pushLine('agent', result.reply, botIdRef.current, result.tokens, result.activity);
-    say(result.reply);
   }
 
   async function continueChat(spoken, prior, grants) {
@@ -643,6 +659,8 @@ export default function Composer({
       }
       let accessToken = '';
       try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+      const shown = [];
+      let firstLineId = null;
       const result = await sendBotChat({
         ownerId,
         botId: botIdRef.current,
@@ -665,9 +683,21 @@ export default function Composer({
         accessToken,
         deskGrant: readDeskGrant(window.sessionStorage, ownerId, Date.now())?.grant || '',
         signal: controller.signal,
+        onReply: (text) => {
+          if (run !== runRef.current) return;
+          const line = pushLine('agent', text);
+          if (line && !firstLineId) firstLineId = line.id;
+          shown.push(text);
+          const aloud = text.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+          say(aloud || 'Sent.');
+          if (/solscan\.io\/tx\//.test(text)) {
+            setThinking(false);
+            onThinking?.(false);
+          }
+        },
       });
       if (run !== runRef.current || result?.error === 'aborted') return;
-      await settleChat(result, spoken, prior, grants, run);
+      await settleChat(result, spoken, prior, grants, run, shown, firstLineId);
     } catch {
       if (run === runRef.current && stopHold.current !== run) {
         const note = chatFailureNote('network');

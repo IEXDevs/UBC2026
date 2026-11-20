@@ -211,6 +211,7 @@ export function sharedToolsInstruction() {
     'Never claim you lack a browser while these tools are available.',
     'browser_live_view never returns a viewer URL to you — the owner Live View panel shows it.',
     'Fund movements use request_spend. Execution stays on Solana devnet.',
+    'When request_spend or sns_send returns a signature, the next message includes the Solscan URL on solscanUrl. Send that message in the same turn. Do not wait for the owner to ask again.',
     'Do not raise limits or freeze wallets from tools.',
     'If a tool is not set up, say which setting is missing in plain words. Otherwise leave the error code out of the reply.',
   ].join('\n');

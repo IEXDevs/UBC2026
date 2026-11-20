@@ -28,23 +28,30 @@ function needsHumanApproval(bot, policyDecision) {
 const OWNER_PERMISSIONS = new Set(['ask', 'review', 'full']);
 
 const REVIEW_CAP = /^(?:[1-9][0-9]{0,39})$/;
+/** 30 USDC. Applies when Review by AI is off and the owner has no stored maximum. */
+const DEFAULT_REVIEW_CAP = '30000000';
+
+function reviewCapOf(value) {
+  return REVIEW_CAP.test(value ?? '') ? value : DEFAULT_REVIEW_CAP;
+}
+
+function withinReviewCap(policyDecision, reviewCap) {
+  const debit = policyDecision?.debit;
+  return typeof debit === 'string' && REVIEW_CAP.test(debit) && BigInt(debit) <= BigInt(reviewCap);
+}
 
 /** Whether this policy result still needs a person. Over-budget always does.
- * Full permission uses the existing fully-automatic mode: no owner request.
  * Ask waits until the owner has confirmed. That confirm is the slide.
- * Review by AI continues when the debit is within reviewCap. The verify step
- * has already agreed before this function runs. Above the cap, review waits.
+ * Full and Review by AI continue when the debit is within the review maximum.
+ * Above that maximum the owner confirms, including when Review by AI is off.
+ * The verify step has already agreed before this function runs.
  * A missing or failed earlier gate is not waived by full permission. */
 export function approvalRequirement(bot, policyDecision, options = {}) {
   if (!policyDecision || typeof policyDecision.state !== 'string') fail('Policy decision is required');
   if (policyDecision.state === 'blocked') return false;
   if (policyDecision.state === 'over-budget') return true;
-  if (options?.ownerPermission === 'full') return false;
-  if (options?.ownerPermission === 'review' && REVIEW_CAP.test(options.reviewCap ?? '')) {
-    const debit = policyDecision.debit;
-    if (typeof debit === 'string' && REVIEW_CAP.test(debit) && BigInt(debit) <= BigInt(options.reviewCap)) {
-      return false;
-    }
+  if (options?.ownerPermission === 'full' || options?.ownerPermission === 'review') {
+    if (withinReviewCap(policyDecision, reviewCapOf(options.reviewCap))) return false;
     return options?.confirmed !== true;
   }
   if (options?.ownerPermission === 'ask' || options?.ownerPermission === 'review') {

@@ -15,7 +15,7 @@ import {
 } from '@ubc2026/agent-tools';
 import { chatToolsInstruction, createChatToolInvoker } from './chat-tools.mjs';
 import { connectorInstruction, planConnectorUse, resolveDeskConnectors } from './connector-access.mjs';
-import { isFundTool, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
+import { effectiveReviewCap, isFundTool, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
 import { readSubagentResults, recordSubagentResult } from './subagent-board.mjs';
 import { completeTextChat } from './text-chat.mjs';
 
@@ -56,9 +56,8 @@ export function stampSpendPermission(name, args, { permissionMode = 'ask', revie
   }
   if (isFundTool(name)) {
     next.permission = permissionMode === 'review' || permissionMode === 'full' ? permissionMode : 'ask';
-    if (next.permission === 'review' && reviewCap) next.reviewCap = reviewCap;
-    else delete next.reviewCap;
-    if (confirmSpend && next.permission !== 'full' && toolAccessKind(next.permission, name)) next.confirmed = true;
+    next.reviewCap = effectiveReviewCap(reviewCap);
+    if (confirmSpend && toolAccessKind(next.permission, name, next, next.reviewCap)) next.confirmed = true;
     else delete next.confirmed;
   }
   return next;
@@ -252,6 +251,7 @@ export async function runVoiceAgentTurn({
       history,
       permission: permissionInstruction(permissionMode),
       permissionMode,
+      reviewCap: cap,
       model,
       fetcher,
       maxToolRounds: 3,

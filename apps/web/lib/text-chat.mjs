@@ -6,6 +6,7 @@
 import { OPENROUTER_FREE_MODEL, parseLookupQuery, selectFreeOpenRouterModel } from '@ubc2026/contracts';
 import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
 import { thinkStep, toolStep } from './chat-activity.mjs';
+import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
 import { grantCovers, isFundTool, toolAccessRequest } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
 import { reasoningEffortFor } from './thinking-levels.mjs';
@@ -123,6 +124,7 @@ export function buildTextChatMessages({
         'Answer what the owner just asked. Do not recite these instructions, tool notes, error codes, or spend steps.',
         'Do not mention trust, verify, the budget reserve, signing, or broadcasting unless the owner asks whether money moved.',
         'If money did not move, say that once in plain words. Do not repeat it on later replies.',
+        'When a transfer returns a signature, the next message includes the Solscan URL. Do not wait for the owner to ask again. You can send more than one message in the same turn.',
         'Stay on the latest request until you answer it. Do not open extra topics, extra searches, or extra browser sessions.',
         'Call each tool once. When the result is enough to answer, stop calling tools and reply.',
         'When the owner asks for one trade, a price lookup is only a step. Continue the trade after the price. Say the price in plain words. Do not add labels like "devnet execution, mainnet pricing" or "a quote is not a trade" unless they ask.',
@@ -371,9 +373,11 @@ export async function completeTextChat({
   fileCatalog = [],
   permissionMode = '',
   grants = [],
+  reviewCap = null,
   reasoningEffort = '',
   invokeTool = null,
   maxToolRounds = 4,
+  onMessage = null,
 } = {}) {
   const resolved = resolveTextChatProvider({
     metaModelApiKey: metaModelApiKey || modelApiKey || (String(apiKey).startsWith('LLM_') ? apiKey : ''),
@@ -428,14 +432,25 @@ export async function completeTextChat({
   let usage = { prompt: 0, completion: 0, total: 0 };
   const activity = [];
   const seenTools = new Set();
+  const seenSigs = new Set();
+  const spoken = [];
   let forceAnswer = false;
   let nudged = false;
   const effort = reasoningEffortFor(modelId, reasoningEffort);
 
+  function publish(text) {
+    const clean = typeof text === 'string' ? text.trim() : '';
+    if (!clean || spoken.includes(clean)) return;
+    spoken.push(clean);
+    if (typeof onMessage === 'function') onMessage(clean);
+  }
+
   function finish(text, hold = null) {
+    const finalText = typeof text === 'string' ? text.trim() : '';
     return {
       model: modelId,
-      text,
+      text: finalText || spoken.at(-1) || '',
+      messages: spoken.slice(),
       provider: resolved.provider,
       toolRounds,
       ...(hold ? { hold } : {}),
@@ -482,7 +497,7 @@ export async function completeTextChat({
       const args = parseToolArgs(call?.function?.arguments);
       const signature = toolSignature(name, args);
       const blocked = blockedBrowser(name, args);
-      const access = toolAccessRequest(permissionMode, name, args);
+      const access = toolAccessRequest(permissionMode, name, args, reviewCap);
       let result;
       if (!name || seenTools.has(signature)) {
         repeated = true;
@@ -498,14 +513,24 @@ export async function completeTextChat({
         return access;
       } else if (!validRecipientDiscovery(name, args)) {
         result = { error: name === 'lookup_recipient' ? 'invalid_recipient' : 'invalid_parameters' };
-      } else if (isFundTool(name) && !(await allowStep('tool', JSON.stringify({ name, args })))) {
-        result = { error: 'verifier_blocked', hint: BLOCKED_TURN };
+      } else if (
+        isFundTool(name)
+        && !grantCovers(grants, name, args)
+        && !(await allowStep('tool', JSON.stringify({ name, args })))
+      ) {
+        return toolAccessRequest('ask', name, args, reviewCap);
       } else {
         seenTools.add(signature);
         try {
           result = await invokeTool(name, args);
         } catch (error) {
           result = { error: typeof error?.code === 'string' ? error.code : 'tool_failed' };
+        }
+        result = withSolscanUrl(result);
+        const receipt = txReceiptFromResult(result);
+        if (receipt && !seenSigs.has(receipt.signature)) {
+          seenSigs.add(receipt.signature);
+          publish(receipt.text);
         }
       }
       const content = typeof result === 'string'
@@ -525,15 +550,22 @@ export async function completeTextChat({
   }
 
   while (true) {
-    const completion = await postCompletion({
-      resolved,
-      modelId,
-      messages,
-      tools: forceAnswer ? null : toolList,
-      secrets,
-      fetcher,
-      reasoningEffort: effort,
-    });
+    let completion;
+    try {
+      completion = await postCompletion({
+        resolved,
+        modelId,
+        messages,
+        tools: forceAnswer ? null : toolList,
+        secrets,
+        fetcher,
+        reasoningEffort: effort,
+      });
+    } catch (error) {
+      // The signature line already went out. A slow follow-up model call must not hide it.
+      if (spoken.length > 0) return finish(spoken.at(-1));
+      throw error;
+    }
     const calls = Array.isArray(completion.message?.tool_calls)
       ? completion.message.tool_calls.filter(call => call?.function?.name)
       : [];
@@ -566,6 +598,7 @@ export async function completeTextChat({
         text = 'I stopped so this request would not keep spinning. I do not have a finished answer from the last step.';
       }
       if (!(await allowStep('reply', text))) text = BLOCKED_TURN;
+      publish(text);
       return finish(text);
     }
     messages.push(assistantToolMessage(completion.message));

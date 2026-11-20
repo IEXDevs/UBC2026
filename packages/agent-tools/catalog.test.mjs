@@ -157,6 +157,8 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.match(sharedToolsInstruction(), /decision gate before any spend/);
   assert.match(sharedToolsInstruction(), /Do not break a loop on your own/);
   assert.match(sharedToolsInstruction(), /lookup_recipient/);
+  assert.match(sharedToolsInstruction(), /solscanUrl/);
+  assert.match(sharedToolsInstruction(), /Do not wait for the owner to ask again/);
   assert.match(sharedToolsInstruction(), /Never web_search for \.sol/);
   assert.match(sharedToolsInstruction(), /Prefer a direct URL over searching/);
   assert.match(sharedToolsInstruction(), /owner situation/);

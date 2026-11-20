@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatAgentOutput } from './agent-output.mjs';
+import { formatAgentOutput, linkParts } from './agent-output.mjs';
 
 test('agent output truncates decimals toward zero without padding or rounding', () => {
   assert.equal(
@@ -20,6 +20,16 @@ test('chat formats agent and assistant replies at render time and leaves user te
   const bubbles = readFileSync(new URL('../components/ChatBubbles.js', import.meta.url), 'utf8');
   assert.match(bubbles, /<MentionText text=\{line\.text\}/);
   assert.match(bubbles, /line\.role === 'agent' \|\| line\.role === 'assistant'\s*\? formatAgentOutput\(line\.text\)\s*: line\.text/);
-  assert.match(bubbles, /<MentionText text=\{text\}/);
+  assert.match(bubbles, /linkParts\(text\)/);
+  assert.match(bubbles, /className="chat-link"/);
   assert.match(bubbles, /const urls = urlsIn\(line\.text\)/);
+});
+
+test('link parts keep a Solscan URL as its own anchor', () => {
+  const url = 'https://solscan.io/tx/abc?cluster=devnet';
+  assert.deepEqual(linkParts(`Sent. ${url}`), [
+    { type: 'text', value: 'Sent. ' },
+    { type: 'link', value: url },
+  ]);
+  assert.deepEqual(linkParts('No link'), [{ type: 'text', value: 'No link' }]);
 });
