@@ -8,10 +8,21 @@ import {
   profileAfterDirectoryRead,
   profileRailLabel,
   profileSaveResult,
+  profileSaveNote,
   recipientHint,
   sendHandleHint,
   sendHandleReady,
 } from './profile.mjs';
+
+test('profile failures explain the safe reason without a false local-save claim or provider text', () => {
+  assert.match(profileSaveNote({ code: 'handle_taken', status: 409 }), /another account/);
+  assert.equal(profileSaveResult(409, { error: 'profile_not_registered' }).error, 'profile_not_registered');
+  assert.match(profileSaveNote({ code: '42501', status: 502 }), /502 42501/);
+  assert.match(profileSaveNote({ status: 401 }), /session expired/);
+  assert.match(profileSaveNote(new Error('private token sk-test-secret')), /Could not reach/);
+  assert.equal(profileSaveNote({ code: 'private token sk-test-secret' }).includes('sk-test-secret'), false);
+  assert.equal(profileSaveNote({ code: 'PGRST205', status: 502 }).includes('Saved on this device'), false);
+});
 
 /**
  * Achieves: verifies a message can name a handle or an SNS name.

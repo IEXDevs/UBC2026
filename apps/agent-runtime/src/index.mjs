@@ -21,10 +21,11 @@ import {
 import { handleVoiceRequest } from './voice.mjs';
 import { matchCommerceRoute, dispatchCommerceRoute } from './commerce-routes.mjs';
 import { enrichEnv } from './runtime-env.mjs';
-import { handleApiData, resolveOwner } from './api-data.mjs';
+import { handleApiData } from './api-data.mjs';
+import { ownerAuthStatus, requestOwner, resolveOwner } from './owner-auth.mjs';
 import { captureRequest, persistActivity, persistHttpActivity } from './activity-log.mjs';
-import { rememberBotAlert } from './bot-alerts.mjs';
-import { supabaseConfig, supabaseGet } from './supabase-rest.mjs';
+import { botStub, rememberBotAlert } from './bot-alerts.mjs';
+import { createSupabaseRpc, supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 import { corsPreflightResponse, withCors } from './cors.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
@@ -57,8 +58,7 @@ function isOwnerBotAction(action) {
 async function assertBotOwner(request, env, botId) {
   const { ownerId, error } = await resolveOwner(request, env);
   if (error && !ownerId) {
-    const status = error === 'owner_mismatch' ? 403 : 401;
-    return { ok: false, status, error, ownerId: null };
+    return { ok: false, status: ownerAuthStatus(error), error, ownerId: null };
   }
   if (!ownerId) return { ok: false, status: 401, error: 'owner_required', ownerId: null };
   if (!supabaseConfig(env)) return { ok: true, ownerId };
@@ -116,6 +116,12 @@ async function readLoopPayload(request) {
 
 async function enrichLoopPayload(body, env, botId, ownerId) {
   const next = { ...body };
+  if (supabaseConfig(env)) {
+    delete next.bot;
+    delete next.wallet;
+    delete next.ledger;
+    next.botId = botId;
+  }
   if (!LOOP_BOT_ID.test(typeof next.botId === 'string' ? next.botId : '')) next.botId = botId;
   const suppliedGoal = clipLoopGoal(next.goal);
   if (suppliedGoal) next.goal = suppliedGoal;
@@ -160,6 +166,20 @@ function forwardPrepared(stub, target, request, ownerId, body, raw = false) {
 }
 
 async function forwardBotAction(stub, target, request, ownerId, env, botId, action) {
+  if (request.method === 'POST' && (action === 'pause' || action === 'resume') && supabaseConfig(env)) {
+    // Update the spend policy before changing the checkpoint. The RPC is
+    // idempotent, so a caller can retry if the checkpoint write fails.
+    try {
+      const rpc = createSupabaseRpc(env, env.fetch ?? fetch);
+      const result = await rpc(action === 'pause' ? 'policy_pause_bot' : 'policy_resume_bot', {
+        payload: { ownerId, botId, now: Date.now() },
+      });
+      if (result?.state === 'blocked') return json({ error: result.reason }, 409);
+      if (result?.enabled !== (action === 'resume')) return json({ error: 'agent_control_failed' }, 502);
+    } catch {
+      return json({ error: 'agent_control_failed' }, 502);
+    }
+  }
   if (action === 'loop' && request.method === 'POST') {
     const read = await readLoopPayload(request);
     if (read.kind === 'raw') return forwardPrepared(stub, target, request, ownerId, read.text, true);
@@ -179,11 +199,6 @@ export { BotDurableObject };
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
-}
-
-function botStub(env, botId) {
-  const id = env.BOT.idFromName(botId);
-  return env.BOT.get(id);
 }
 
 /**
@@ -404,6 +419,7 @@ const worker = {
       response = json({ error: 'internal' }, 500);
     }
     if (logging) {
+      if (captured) captured.ownerId = requestOwner(request);
       const pending = persistHttpActivity(env, { captured, response, started }).catch(() => {});
       if (typeof ctx?.waitUntil === 'function') ctx.waitUntil(pending);
       else await pending;

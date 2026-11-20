@@ -15,15 +15,17 @@ import { buildSignalOffer, settleSignalSale, CommerceError } from '@ubc2026/agen
 import { createSnsResolver, prepareSnsSend, resolveSnsOwner, SnsError } from '@ubc2026/sns';
 import { grabBackToMain, TransferError } from '@ubc2026/transfers';
 import { SOLANA_USDC_MINT } from '@ubc2026/x402';
+import { ownerAuthStatus, resolveOwner, testOwnerAuth } from './owner-auth.mjs';
+import { loadOwnerLoopContext, mapWalletRow, supabaseConfig, supabaseGet } from './supabase-rest.mjs';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-function ownerId(request) {
-  const value = request.headers.get('x-owner-id');
-  if (typeof value !== 'string' || !/^[a-zA-Z0-9:_-]{1,128}$/.test(value)) return null;
-  return value;
+async function commerceContext(env, ownerId, botId, fixture) {
+  if (!supabaseConfig(env) && typeof env[testOwnerAuth] === 'function') return fixture;
+  if (!supabaseConfig(env)) return null;
+  return loadOwnerLoopContext(env, { botId, ownerId }, env.fetch ?? fetch);
 }
 
 function err(error) {
@@ -77,14 +79,16 @@ function shoppingBotFrom(body, botId, owner) {
 }
 
 /** POST /bots/:botId/shopping/prepare */
-export async function handleShoppingPrepare(request, env, botId) {
-  const owner = ownerId(request);
-  if (!owner) return json({ error: 'owner_required' }, 401);
+async function handleShoppingPrepare(request, env, botId, owner) {
   const body = await readBody(request);
   if (SOLANA_CLUSTER === 'mainnet-beta' && body.provider !== 'laso') return json({ error: 'sandbox_disabled_on_mainnet' }, 409);
-  const bot = shoppingBotFrom(body, botId, owner);
-  const ledger = body.ledger || { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
   try {
+    const context = await commerceContext(env, owner, botId, {
+      bot: shoppingBotFrom(body, botId, owner),
+      ledger: body.ledger || { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },
+    });
+    if (!context) return json({ error: 'bot_not_found' }, 404);
+    const { bot, ledger } = context;
     if (body.provider === 'laso') {
       const result = await prepareLasoTinyCardPurchase({
         bot,
@@ -111,15 +115,17 @@ export async function handleShoppingPrepare(request, env, botId) {
   }
 }
 
-/** POST /bots/:botId/shopping/settle — sandbox only (solana). */
-export async function handleShoppingSettle(request, env, botId) {
-  const owner = ownerId(request);
-  if (!owner) return json({ error: 'owner_required' }, 401);
+/** POST /bots/:botId/shopping/settle — sandbox only (configured test network). */
+async function handleShoppingSettle(request, env, botId, owner) {
   if (SOLANA_CLUSTER === 'mainnet-beta') return json({ error: 'sandbox_disabled_on_mainnet' }, 409);
   const body = await readBody(request);
   try {
-    const bot = body.bot || { id: botId };
-    const wallet = body.wallet || null;
+    const context = await commerceContext(env, owner, botId, {
+      bot: body.bot || { id: botId },
+      wallet: body.wallet || null,
+    });
+    if (!context) return json({ error: 'bot_not_found' }, 404);
+    const { bot, wallet } = context;
     const baseSigner = typeof env.signShoppingPayment === 'function'
       ? env.signShoppingPayment
       : body.dryRun
@@ -256,14 +262,15 @@ export async function handleSignalSettle(request, env, botId, signalId) {
 }
 
 /** POST /bots/:botId/sns/send */
-export async function handleSnsSend(request, env, botId) {
-  if (!ownerId(request)) return json({ error: 'owner_required' }, 401);
+async function handleSnsSend(request, env, botId, owner) {
   const body = await readBody(request);
   try {
     const resolver = defaultResolver(env);
-    const bot = body.bot || null;
-    const wallet = body.wallet || null;
-    const executeTransfer = body.execute === true && typeof env.executeSnsTransfer === 'function'
+    const context = await commerceContext(env, owner, botId, { bot: body.bot || null, wallet: body.wallet || null });
+    if (!context) return json({ error: 'bot_not_found' }, 404);
+    const { bot, wallet } = context;
+    const execute = body.execute === true && typeof env.executeSnsTransfer === 'function';
+    const executeTransfer = execute
       ? async (args) => env.executeSnsTransfer({
         ...args,
         bot,
@@ -272,7 +279,7 @@ export async function handleSnsSend(request, env, botId) {
       })
       : null;
     const result = await prepareSnsSend({
-      from: body.from || wallet?.address,
+      from: execute ? wallet?.address : body.from || wallet?.address,
       domain: body.domain,
       amount: body.amount,
       asset: body.asset || 'USDC',
@@ -288,17 +295,21 @@ export async function handleSnsSend(request, env, botId) {
 }
 
 /** POST /security/grab-back — owner sweep additional wallets to main (Alex transfers helper). */
-export async function handleGrabBack(request, env) {
-  const owner = ownerId(request);
-  if (!owner) return json({ error: 'owner_required' }, 401);
+async function handleGrabBack(request, env, owner) {
   const body = await readBody(request);
-  if (!body.mainWallet || !Array.isArray(body.wallets)) {
-    return json({ error: 'wallets_required' }, 400);
-  }
-  if (!env.transferClient && !body.dryRun) {
-    return json({ error: 'signer_not_configured' }, 503);
-  }
   try {
+    let { mainWallet, wallets } = body;
+    if (supabaseConfig(env)) {
+      const stored = await supabaseGet(env, `wallets?owner_id=eq.${encodeURIComponent(owner)}&select=*`, env.fetch ?? fetch);
+      if (stored.status !== 200 || !Array.isArray(stored.rows)) return json({ error: 'wallets_unavailable' }, 503);
+      const owned = stored.rows.map(mapWalletRow).filter(wallet => wallet?.spendable && wallet.ownerId === owner);
+      mainWallet = owned.find(wallet => wallet.kind === 'main');
+      wallets = owned.filter(wallet => wallet.kind === 'additional');
+    } else if (typeof env[testOwnerAuth] !== 'function') {
+      return json({ error: 'wallets_unavailable' }, 503);
+    }
+    if (!mainWallet || !Array.isArray(wallets)) return json({ error: 'wallets_required' }, 400);
+    if (!env.transferClient && !body.dryRun) return json({ error: 'signer_not_configured' }, 503);
     if (body.dryRun) {
       return json({
         ok: true,
@@ -306,17 +317,16 @@ export async function handleGrabBack(request, env) {
         kind: 'grab-back',
         cluster: SOLANA_CLUSTER,
         memo: 'funds.grabbed',
-        moves: body.wallets
+        moves: wallets
           .filter((w) => w.kind === 'additional')
-          .map((w) => ({ from: w.address, to: body.mainWallet.address, status: 'planned' })),
+          .map((w) => ({ from: w.address, to: mainWallet.address, status: 'planned' })),
       });
     }
     const result = await grabBackToMain({
       client: env.transferClient,
       ownerId: owner,
-      mainWallet: body.mainWallet,
-      wallets: body.wallets,
-      balances: body.balances || null,
+      mainWallet,
+      wallets,
       recentBlockhash: body.recentBlockhash,
     });
     return json({ ok: true, ...result });
@@ -346,13 +356,15 @@ export function matchCommerceRoute(method, pathname) {
 }
 
 export async function dispatchCommerceRoute(request, env, matched) {
+  if (matched.kind === 'signal-offer') return handleSignalOffer(request, env, matched.botId, matched.signalId);
+  if (matched.kind === 'signal-settle') return handleSignalSettle(request, env, matched.botId, matched.signalId);
+  const { ownerId, error } = await resolveOwner(request, env);
+  if (error) return json({ error }, ownerAuthStatus(error));
   switch (matched.kind) {
-    case 'shopping-prepare': return handleShoppingPrepare(request, env, matched.botId);
-    case 'shopping-settle': return handleShoppingSettle(request, env, matched.botId);
-    case 'signal-offer': return handleSignalOffer(request, env, matched.botId, matched.signalId);
-    case 'signal-settle': return handleSignalSettle(request, env, matched.botId, matched.signalId);
-    case 'sns-send': return handleSnsSend(request, env, matched.botId);
-    case 'grab-back': return handleGrabBack(request, env);
+    case 'shopping-prepare': return handleShoppingPrepare(request, env, matched.botId, ownerId);
+    case 'shopping-settle': return handleShoppingSettle(request, env, matched.botId, ownerId);
+    case 'sns-send': return handleSnsSend(request, env, matched.botId, ownerId);
+    case 'grab-back': return handleGrabBack(request, env, ownerId);
     default: return json({ error: 'not_found' }, 404);
   }
 }

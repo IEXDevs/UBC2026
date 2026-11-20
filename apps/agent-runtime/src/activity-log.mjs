@@ -132,7 +132,6 @@ export async function captureRequest(request) {
     method: request.method,
     path: url.pathname,
     query: redactLogText(url.search.startsWith('?') ? url.search.slice(1) : url.search) || '',
-    ownerId: ownerIdOf(request.headers.get('x-owner-id')),
     botId: botIdFromPath(url.pathname),
     contentType: request.headers.get('content-type')?.slice(0, 80) ?? null,
     body: redactForLog(body),

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import ModalClose from './ModalClose';
 import ConnectorsPane from './ConnectorsPane';
 import { usePresence } from './usePresence';
 
@@ -34,9 +34,7 @@ export default function PluginsSheet({ open, onClose, connectors = [] }) {
         aria-labelledby="plugins-title"
         onMouseDown={event => event.stopPropagation()}
       >
-        <button type="button" className="plugins-close" aria-label="Close plugins" onClick={onClose}>
-          <X size={18} strokeWidth={1.75} />
-        </button>
+        <ModalClose className="plugins-close" label="Close plugins" onClick={onClose} />
         <div className="integration-panel">
           <ConnectorsPane connectors={connectors} />
         </div>

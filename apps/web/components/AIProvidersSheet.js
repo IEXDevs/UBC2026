@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import ModalClose from './ModalClose';
 import ModelProviders from './ModelProviders';
 import { usePresence } from './usePresence';
 
@@ -35,7 +35,7 @@ export default function AIProvidersSheet({ open, onClose, ownerId }) {
   return createPortal(
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section className="ai-providers-modal" ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="ai-providers-title" onMouseDown={event => event.stopPropagation()}>
-        <button type="button" className="plugins-close" aria-label="Close AI Providers" onClick={onClose}><X size={18} /></button>
+        <ModalClose className="plugins-close" label="Close AI Providers" onClick={onClose} />
         <ModelProviders key={ownerId || 'signed-out'} ownerId={ownerId} />
       </section>
     </div>, root,

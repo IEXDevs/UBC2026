@@ -1,5 +1,7 @@
 'use client';
 
+import ModalClose from './ModalClose';
+
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -150,6 +152,7 @@ function ImageLightbox({ images, index, onIndex, onClose }) {
 
   return createPortal(
     <div className={`image-lightbox${shown ? ' is-open' : ''}`} role="dialog" aria-modal="true" aria-label={image.name} onMouseDown={onClose}>
+      <ModalClose label="Close images" onMouseDown={event => event.stopPropagation()} onClick={onClose} />
       {images.length > 1 ? (
         <button type="button" className="image-lightbox-nav is-prev" aria-label="Previous image" onMouseDown={event => event.stopPropagation()} onClick={() => onIndex((index - 1 + images.length) % images.length)}>
           <ChevronLeft size={22} strokeWidth={1.75} />

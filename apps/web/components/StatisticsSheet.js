@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import ModalClose from './ModalClose';
 import AccountStats from './AccountStats';
 import { pickOwnerRollup } from '../lib/overview.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
@@ -85,7 +86,7 @@ export default function StatisticsSheet({
     };
   }, [open, ownerId, getAccessToken]);
 
-  if (!mounted) return null;
+  if (!mounted || typeof document === 'undefined') return null;
 
   const view = statisticsView({
     bots,
@@ -112,7 +113,7 @@ export default function StatisticsSheet({
     })),
   ];
 
-  return (
+  return createPortal(
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section
         className="stats-modal"
@@ -123,9 +124,7 @@ export default function StatisticsSheet({
       >
         <div className="stats-head">
           <h2 id="statistics-title">Statistics</h2>
-          <button type="button" className="icon-btn" aria-label="Close statistics" onClick={onClose}>
-            <X size={18} strokeWidth={1.75} />
-          </button>
+          <ModalClose label="Close statistics" onClick={onClose} />
         </div>
         <p className="stats-note">{view.note}</p>
         <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
@@ -143,6 +142,6 @@ export default function StatisticsSheet({
         </div>
         <p className="quiet">{bots.length} agents on this account.</p>
       </section>
-    </div>
+    </div>, document.body,
   );
 }

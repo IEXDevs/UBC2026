@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSearch, createScrape, createBrowserProvider, assertPublicHttpUrl, ProviderError } from './providers.mjs';
+import { createSearch, createScrape, createBrowserProvider, assertPublicHttpUrl, ProviderError, withEnglishGoogle } from './providers.mjs';
 
 const reply = value => async () => Response.json(value);
 
@@ -237,17 +237,17 @@ test('openTab navigates with PUT json/new and rejects unsafe urls', async () => 
     apiToken: 'b',
     fetcher: async (url, options) => {
       assert.equal(options.method, 'PUT');
-      assert.match(url, /\/browser\/abc\/json\/new\?url=https%3A%2F%2Fwww\.google\.com%2F$/);
+      assert.match(url, /\/browser\/abc\/json\/new\?url=https%3A%2F%2Fwww\.google\.com%2F%3Fhl%3Den%26gl%3Dus$/);
       return Response.json({
         id: 'TAB123',
         type: 'page',
-        url: 'https://www.google.com/',
+        url: 'https://www.google.com/?hl=en&gl=us',
         title: 'Google',
       });
     },
   });
   const tab = await provider.openTab('abc', 'https://www.google.com/');
-  assert.deepEqual(tab, { targetId: 'TAB123', url: 'https://www.google.com/', title: 'Google' });
+  assert.deepEqual(tab, { targetId: 'TAB123', url: 'https://www.google.com/?hl=en&gl=us', title: 'Google' });
   await assert.rejects(provider.openTab('abc', 'javascript:alert(1)'), { code: 'invalid_navigate' });
 });
 
@@ -354,4 +354,41 @@ test('assertPublicHttpUrl accepts public http(s) and rejects unsafe schemes', ()
   assert.throws(() => assertPublicHttpUrl('https://user:pass@example.com/'), ProviderError);
   assert.throws(() => assertPublicHttpUrl('not a url'), ProviderError);
   assert.throws(() => assertPublicHttpUrl('a'.repeat(2001)), ProviderError);
+});
+
+test('Google pages open in English / US unless the url already sets hl or gl', () => {
+  const pin = value => withEnglishGoogle(new URL(value)).href;
+  assert.equal(pin('https://www.google.com/search?q=sf+weather'), 'https://www.google.com/search?q=sf+weather&hl=en&gl=us');
+  assert.equal(pin('https://www.google.com.hk/'), 'https://www.google.com.hk/?hl=en&gl=us');
+  assert.equal(pin('https://maps.google.com/?q=cafe'), 'https://maps.google.com/?q=cafe&hl=en&gl=us');
+  assert.equal(pin('https://scholar.google.com/scholar?q=x'), 'https://scholar.google.com/scholar?q=x&hl=en&gl=us');
+  assert.equal(pin('https://books.google.co.uk/'), 'https://books.google.co.uk/?hl=en&gl=us');
+  assert.equal(pin('https://www.google.com/search?q=x&hl=fr&gl=ca'), 'https://www.google.com/search?q=x&hl=fr&gl=ca');
+  assert.equal(pin('https://example.com/?q=google.com'), 'https://example.com/?q=google.com');
+  assert.equal(pin('https://google.com.evil.example/'), 'https://google.com.evil.example/');
+});
+
+test('the Browser Run binding opens, views and closes sessions without an API token', async () => {
+  const calls = [];
+  const binding = {
+    acquire: async options => { calls.push(['acquire', options]); return { sessionId: 'abc' }; },
+    devtools: { newTarget: async (id, url) => { calls.push(['newTarget', id, url]); return { id: 'TAB123', type: 'page', url, title: 'Google' }; } },
+    getLiveView: async (id, options) => { calls.push(['getLiveView', id, options]); return { devtoolsFrontendUrl: 'https://live.browser.run/ui/view?token=t' }; },
+    closeSession: async id => { calls.push(['closeSession', id]); return 'closing'; },
+  };
+  const provider = createBrowserProvider({ binding, fetcher: async () => assert.fail('REST must not be called') });
+  assert.deepEqual(await provider.createSession(), { sessionId: 'abc' });
+  assert.deepEqual(await provider.openTab('abc', 'https://www.google.com/'), { targetId: 'TAB123', url: 'https://www.google.com/?hl=en&gl=us', title: 'Google' });
+  const view = await provider.readonlyView('abc', { targetId: 'TAB123' });
+  assert.equal(view.viewerUrl, 'https://live.browser.run/ui/view?token=t');
+  assert.equal(view.mode, 'readonly');
+  assert.deepEqual(await provider.closeSession('abc'), { status: 'closing' });
+  assert.deepEqual(calls[2][2], { mode: 'tab', expiresInMs: calls[2][2].expiresInMs, guardrails: { mode: 'readonly' }, targetId: 'TAB123' });
+  await assert.rejects(provider.openTab('abc', 'javascript:alert(1)'), { code: 'invalid_navigate' });
+  const failing = createBrowserProvider({ binding: { ...binding, acquire: async () => { throw new Error('boom'); } } });
+  await assert.rejects(failing.createSession(), { code: 'provider_failed' });
+  const throttled = createBrowserProvider({ binding: { ...binding, acquire: async () => { throw new Error('429 Too Many Requests'); } } });
+  await assert.rejects(throttled.createSession(), { code: 'provider_rate_limited', status: 429 });
+  const bad = createBrowserProvider({ binding: { ...binding, getLiveView: async () => ({ devtoolsFrontendUrl: 'https://evil.example/ui/view' }) } });
+  await assert.rejects(bad.readonlyView('abc'), { code: 'invalid_provider_response' });
 });

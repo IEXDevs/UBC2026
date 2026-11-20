@@ -1,8 +1,10 @@
 export const runtime = 'nodejs';
 
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { choosePortfolioRpc, loadPortfolio, PortfolioError } from '../../../lib/portfolio.mjs';
 import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
+import { verifyPrivyAccessToken } from '../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
 import { cloudflareWorkerEnv } from '../../../lib/wallets-cloudflare.mjs';
 import { missingWalletSecrets, resolvePrivyAppId, walletsFromPrivyUser } from '../../../lib/wallet-provision.mjs';
@@ -72,7 +74,8 @@ export async function GET(request) {
       { status: 503, headers: { 'Cache-Control': 'no-store' } },
     );
   }
-  const rpc = choosePortfolioRpc(env);
+  const requestedCluster = new URL(request.url).searchParams.get('cluster') || '';
+  const rpc = choosePortfolioRpc(env, requestedCluster);
   if (!rpc.rpcUrl) {
     return Response.json(
       { error: 'missing_config', missing: rpc.missing },
@@ -80,24 +83,31 @@ export async function GET(request) {
     );
   }
 
+  const appId = resolvePrivyAppId(env);
+  let ownerId;
+  try {
+    ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
+  } catch {
+    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
+  const ownerHeader = request.headers.get('x-owner-id');
+  if (ownerHeader !== null && ownerHeader !== ownerId) {
+    return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+  }
   try {
     const client = createPrivyWalletClient({
-      appId: resolvePrivyAppId(env),
+      appId,
       appSecret: env.PRIVY_APP_SECRET,
       rpcUrl: null,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY || null,
       // Workers cannot set Origin on /users/me. Identity comes from the JWT sub.
       allowUsersMeFallback: !onCloudflareWorker,
     });
-    const ownerHeader = request.headers.get('x-owner-id');
     const user = await client.readLoginUser({
       accessToken,
       origin: onCloudflareWorker ? undefined : requestOrigin(request),
-      ownerId: typeof ownerHeader === 'string' && ownerHeader.trim() ? ownerHeader.trim() : undefined,
+      ownerId,
     });
-    const ownerId = typeof user?.id === 'string' && user.id.trim()
-      ? user.id.trim()
-      : (typeof ownerHeader === 'string' ? ownerHeader.trim() : '');
     const wallets = walletsFromPrivyUser(user, ownerId);
     // DexScreener prices are read in the browser so the limit applies to the visitor IP.
     const portfolio = await loadPortfolio({
@@ -106,6 +116,7 @@ export async function GET(request) {
       // Public HTTPS only. A service-binding fetch turns QuickNode into a Worker 404.
       fetcher: globalThis.fetch.bind(globalThis),
     });
+    if (requestedCluster === SOLANA_CLUSTER && portfolio.cluster !== (SOLANA_CLUSTER === 'mainnet-beta' ? 'mainnet' : SOLANA_CLUSTER)) throw new PortfolioError('unsupported_cluster');
     return Response.json(portfolio, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = error instanceof PortfolioError ? error.code : walletErrorCode(error);

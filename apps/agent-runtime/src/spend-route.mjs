@@ -16,6 +16,7 @@ import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 import { loadOwnerLoopContext, supabaseConfig, supabaseGet, supabaseWrite } from './supabase-rest.mjs';
 import { alertFromSpend, publishBotAlert } from './bot-alerts.mjs';
 import { deskSpendAllowed, sha256Hex } from './desk-grant.mjs';
+import { ownerAuthStatus, resolveSpendOwner } from './owner-auth.mjs';
 import { verifierFacts } from './spend-verifier.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
 
@@ -118,18 +119,10 @@ function json(body, status = 200) {
   return Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
 }
 
-function ownerIdFrom(request) {
-  const value = request.headers.get('x-owner-id');
-  if (typeof value !== 'string') return '';
-  const owner = value.trim();
-  if (!/^[a-zA-Z0-9:_.-]{1,256}$/.test(owner)) return '';
-  return owner;
-}
-
 export async function handleSpend(request, env = {}) {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
-  const ownerId = ownerIdFrom(request);
-  if (!ownerId) return json({ error: 'owner_required', signed: false }, 401);
+  const { ownerId, error } = await resolveSpendOwner(request, env);
+  if (error) return json({ error, signed: false }, ownerAuthStatus(error));
   const desk = await deskSpendAllowed(env, request, ownerId, env.fetch ?? fetch, Number.isSafeInteger(env.spendNow) ? env.spendNow : Date.now());
   // A locked desk (missing or expired grant) is not a substitute for the gates
   // and must not answer before them. No lock row, or a lock store that cannot

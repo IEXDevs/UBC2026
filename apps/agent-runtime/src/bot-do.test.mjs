@@ -13,6 +13,27 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BotStateMachine, createDurableStore } from './bot-do.mjs';
 
+test('an idle agent stays paused across instances and refuses forced wakes until resumed', async () => {
+  const storage = new Map();
+  const request = (path, body, method = 'POST') => new Request(`https://bot/${path}`, {
+    method,
+    headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const first = new BotStateMachine(storage);
+  const pause = await first.handle(request('pause'));
+  assert.equal(pause.status, 200);
+  assert.equal((await pause.json()).paused, true);
+  const reloaded = new BotStateMachine(storage);
+  const status = await reloaded.handle(request('status', null, 'GET'));
+  assert.equal((await status.json()).paused, true);
+  const wake = () => reloaded.handle(request('wake', { botId: 'bot_1', forceNew: true }));
+  assert.equal((await wake()).status, 409);
+  const resume = await reloaded.handle(request('resume'));
+  assert.equal((await resume.json()).paused, false);
+  assert.equal((await wake()).status, 200);
+});
+
 /**
  * Achieves: createDurableStore pages list results and clones on get/put.
  * Fails when: start-exclusive paging drops keys, or get returns shared mutable refs.

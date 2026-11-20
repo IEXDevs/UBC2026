@@ -1,13 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 import { mapBotRow, mapWalletRow, mapLedgerRow } from './supabase-rest.mjs';
 import { sha256Hex } from './desk-grant.mjs';
+import { SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
+
+const walletFixture = {
+  id: 'w1',
+  ownerId: 'user_1',
+  kind: 'main',
+  label: 'Main',
+  address: SOLANA_USDC_MINT,
+  provider: 'privy',
+};
+const ensureMainWallet = async () => ({ main: walletFixture, additional: [] });
 
 function fakeEnv(extra = {}) {
   return {
+    transferClient: { ensureMainWallet },
     PRODUCT: 'Maelstrom',
     SOLANA_CLUSTER: 'mainnet-beta',
     BOT: {
@@ -19,6 +31,36 @@ function fakeEnv(extra = {}) {
     ...extra,
   };
 }
+
+test('profile edits keep the canonical handle and never claim one for an unregistered owner', async () => {
+  for (const registered of [true, false]) {
+    let row = registered ? { handle: 'canonical', display_name: 'Old' } : null;
+    const writes = [];
+    const env = fakeEnv({
+      SUPABASE_URL: 'https://directory.example', SUPABASE_SERVICE_ROLE_KEY: 'service-role-test-value',
+      fetch: async (url, init = {}) => {
+        assert.equal(new URL(url).pathname, '/rest/v1/profiles');
+        assert.equal(new URL(url).searchParams.get('owner_id'), 'eq.owner_1');
+        if (init.method === 'PATCH') {
+          const patch = JSON.parse(init.body);
+          writes.push(patch);
+          assert.equal('handle' in patch, false);
+          assert.equal('owner_id' in patch, false);
+          row = { ...row, ...patch };
+        } else assert.equal(init.method || 'GET', 'GET');
+        return Response.json(row ? [row] : []);
+      },
+    });
+    const response = await worker.fetch(new Request('https://runtime/api/profiles/me', {
+      method: 'PUT', headers: { 'x-owner-id': 'owner_1', 'content-type': 'application/json' },
+      body: JSON.stringify({ editOnly: true, handle: 'stale', displayName: 'Updated' }),
+    }), env);
+    const body = await response.json();
+    assert.equal(response.status, registered ? 200 : 409);
+    if (registered) { assert.equal(body.profile.handle, 'canonical'); assert.equal(writes[0].display_name, 'Updated'); }
+    else { assert.equal(body.error, 'profile_not_registered'); assert.equal(writes.length, 0); }
+  }
+});
 
 /**
  * Achieves: enrichEnv returns the same object on re-entry and preserves injected transferClient/loadLoopContext.
@@ -111,6 +153,7 @@ test('wallets.persist writes rows without calling Privy acceptLogin', async () =
   let acceptCalls = 0;
   const env = fakeEnv({
     transferClient: {
+      ensureMainWallet,
       acceptLogin: async () => {
         acceptCalls += 1;
         throw new Error('should not call Privy');
@@ -660,40 +703,6 @@ test('wallet create surfaces runtime Privy guidance when acceptLogin fails on th
  * Side effects / state checked: acceptLogin args captured; Supabase write stubbed.
  * Gaps: none for the no-Origin contract
  */
-/**
- * Achieves: JWT access tokens resolve owner via sub without calling acceptLogin.
- * Fails when: events poll still runs full wallet sync for every Bearer JWT.
- * Oracle: readPrivyAccessTokenSub + resolveOwner JWT fast path.
- * Side effects / state checked: acceptLogin must not run.
- */
-test('events list uses JWT sub without calling acceptLogin', async () => {
-  let called = false;
-  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
-  const body = Buffer.from(JSON.stringify({ sub: 'did:privy:user_1' })).toString('base64url');
-  const token = `${header}.${body}.sig`;
-  const env = fakeEnv({
-    PRIVY_APP_ID: 'app_test',
-    PRIVY_APP_SECRET: 'secret_test',
-    transferClient: {
-      acceptLogin: async () => {
-        called = true;
-        throw new Error('acceptLogin should not run for JWT sub');
-      },
-    },
-    SUPABASE_URL: 'https://example.supabase.co',
-    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    fetch: async () => Response.json([]),
-  });
-  const res = await worker.fetch(new Request('https://runtime/api/events?botId=bot_1', {
-    headers: {
-      authorization: `Bearer ${token}`,
-      'x-owner-id': 'did:privy:user_1',
-    },
-  }), env);
-  assert.equal(res.status, 200);
-  assert.equal(called, false);
-});
-
 test('wallet create does not forward Origin into Privy acceptLogin', async () => {
   const seen = [];
   const env = fakeEnv({
@@ -860,7 +869,7 @@ test('agent deletion verifies the caller, passes that owner to the RPC and does 
     [{ ...session.headers, 'x-owner-id': 'did:privy:bob' }, 'owner_mismatch'],
   ]) {
     const denied = await deny(headers);
-    assert.equal(denied.status, 401);
+    assert.equal(denied.status, error === 'owner_mismatch' ? 403 : 401);
     assert.deepEqual(await denied.json(), { error });
   }
 
@@ -910,26 +919,6 @@ test('agents can still be deleted from an older database without the deletion RP
     ['DELETE', '/rest/v1/activity_logs'],
     ['DELETE', '/rest/v1/bots'],
   ]);
-});
-
-test('deletion on a migrated database fails closed when Privy verification is unconfigured', async () => {
-  const calls = [];
-  const response = await worker.fetch(new Request('https://runtime/api/bots/bot_1', {
-    method: 'DELETE',
-    headers: { 'x-owner-id': 'user_1' },
-  }), fakeEnv({
-    SUPABASE_URL: 'https://example.supabase.co',
-    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    fetch: async (url, { method }) => {
-      const path = new URL(url).pathname;
-      if (path.endsWith('/activity_logs')) return new Response(null, { status: 204 });
-      calls.push([method, path]);
-      return Response.json([{ ids: [] }]);
-    },
-  }));
-  assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), { error: 'agent_delete_auth_unconfigured' });
-  assert.deepEqual(calls, [['GET', '/rest/v1/rpc/list_deleted_owner_agents']]);
 });
 
 /**

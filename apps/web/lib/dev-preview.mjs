@@ -40,13 +40,15 @@ export function previewWallets() {
   ];
 }
 
-export function previewBot() {
-  return draftBot({
+export function previewBot(records = []) {
+  const sample = draftBot({
     id: 'bot_preview',
     name: 'Preview',
     shape: 'circle',
     color: '#7c5cff',
   });
+  const saved = records.find((bot) => bot.id === sample.id);
+  return saved ? { ...sample, ...saved } : sample;
 }
 
 /** Sample balances addressed to the preview wallet the sheet is showing. */

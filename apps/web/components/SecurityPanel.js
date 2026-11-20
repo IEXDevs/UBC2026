@@ -1,213 +1,124 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  applySecurityActionLocal,
-  buildSecurityPage,
-} from '../lib/security.mjs';
+import { useEffect, useState } from 'react';
+import { Pause, Play, Snowflake } from 'lucide-react';
+import { securityAgent, securityPauseStatus, setSecurityPause, setSecurityFreeze } from '../lib/security.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
-import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
-import AnimatedList from './AnimatedList';
 import SlideCommit from './bits/SlideCommit';
-import { listLook } from './listLook';
+import './SecurityPanel.css';
 
-export default function SecurityPanel({
-  bots,
-  ownerId = null,
-  getAccessToken = null,
-  accountLabel = null,
-  onBotsChange,
-  wallets = null,
-  walletUnlocked = false,
-  onWalletLocked,
-}) {
-  const [pending, setPending] = useState(null);
+export default function SecurityPanel({ bots, ownerId, getAccessToken, onPolicyChange }) {
+  const [paused, setPaused] = useState({});
+  const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(null);
-  const [message, setMessage] = useState(null);
-  const page = buildSecurityPage({ ownerId, accountLabel, bots });
+  const [message, setMessage] = useState('');
+  const agents = bots.map(securityAgent);
+  const activeIds = JSON.stringify(agents.filter(agent => !agent.draft).map(agent => agent.id));
+  const disabled = busy || !ownerId;
 
-  async function runAction(action) {
+  useEffect(() => {
+    if (!ownerId) return;
+    const controller = new AbortController();
+    async function load() {
+      const headers = await ownerAuthHeaders(ownerId, getAccessToken);
+      const entries = await Promise.all(JSON.parse(activeIds).map(async id => (
+        [id, await securityPauseStatus(id, headers, controller.signal)]
+      )));
+      if (controller.signal.aborted) return;
+      setPaused(current => ({
+        ...Object.fromEntries(entries.filter(([, value]) => value !== null)),
+        ...current,
+      }));
+    }
+    load();
+    return () => controller.abort();
+  }, [activeIds, ownerId, getAccessToken]);
+
+  async function runAction({ kind, agent, value }) {
     setArmed(null);
-    setPending(action.id);
-    setMessage(null);
-
-    if (action.id === 'pause-all' && ownerId) {
-      const results = [];
-      for (const bot of bots) {
-        if (bot.status === 'draft') continue;
-        const url = shellRuntimeUrl(`/bots/${encodeURIComponent(bot.id)}/pause`);
-        if (!url) continue;
-        try {
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: await ownerAuthHeaders(ownerId, getAccessToken, {
-              'content-type': 'application/json',
-            }),
-            body: JSON.stringify({ reason: 'kill.stop-all' }),
-          });
-          results.push(response.status);
-        } catch {
-          results.push(0);
-        }
-      }
-      setMessage(`Pause requested for ${results.length} agent(s).`);
-    } else if (action.id === 'request-grab-back') {
-      if (ownerId) {
-        try {
-          const list = Array.isArray(wallets) ? wallets : [];
-          const mainWallet = list.find((w) => w.kind === 'main') || null;
-          if (!mainWallet) {
-            setMessage('Grab-back needs a provisioned main wallet.');
-            setPending(null);
-            return;
-          }
-          const response = await fetch(shellRuntimeUrl('/security/grab-back'), {
-            method: 'POST',
-            headers: await ownerAuthHeaders(ownerId, getAccessToken, {
-              'content-type': 'application/json',
-            }),
-            body: JSON.stringify({
-              dryRun: false,
-              mainWallet,
-              wallets: list.filter((w) => w.kind === 'additional'),
-            }),
-          });
-          const data = await response.json();
-          if (!response.ok) setMessage(`Grab-back: ${data.error || response.status}`);
-          else setMessage(data.dryRun
-            ? `Grab-back planned for ${data.moves?.length ?? 0} wallet(s). Connect wallets to sign.`
-            : `Grab-back submitted: ${data.moves?.length ?? 0} move(s).`);
-        } catch (err) {
-          setMessage(`Grab-back failed: ${err?.message || 'network'}`);
-        }
+    setBusy(true);
+    setMessage('');
+    try {
+      const headers = await ownerAuthHeaders(ownerId, getAccessToken, {
+        'content-type': 'application/json',
+      });
+      const verb = kind === 'pause' ? (value ? 'pause' : 'resume') : (value ? 'freeze' : 'unfreeze');
+      let ok;
+      let count;
+      if (kind === 'pause') {
+        const targets = agent ? [agent.id] : agents.filter(item => !item.draft).map(item => item.id);
+        const result = await setSecurityPause(targets, value, headers);
+        setPaused(current => ({ ...current, ...Object.fromEntries(result.ids.map(id => [id, value])) }));
+        if (result.ids.length) onPolicyChange(result.ids.map(botId => ({ botId, enabled: !value })));
+        ({ ok } = result);
+        count = result.ids.length;
       } else {
-        setMessage('Grab-back needs runtime URL and sign-in.');
+        const result = await setSecurityFreeze(agent?.id, value, headers);
+        if (result.items.length) onPolicyChange(result.items);
+        ({ ok } = result);
+        count = result.items.length;
       }
-    } else if (action.id === 'freeze-all-bots' || action.id === 'unfreeze-all-bots') {
-      const freeze = action.id === 'freeze-all-bots';
-      if (!ownerId) {
-        setMessage('Sign in before freezing agents.');
-        setPending(null);
-        return;
-      }
-      const url = shellRuntimeUrl('/api/bots/freeze');
-      if (!url) {
-        setMessage('Freeze needs the agent runtime.');
-        setPending(null);
-        return;
-      }
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: await ownerAuthHeaders(ownerId, getAccessToken, {
-            'content-type': 'application/json',
-          }),
-          body: JSON.stringify({ frozen: freeze }),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          setMessage(freeze ? 'The freeze did not save.' : 'The unfreeze did not save.');
-          setPending(null);
-          return;
-        }
-        setMessage(freeze
-          ? `Froze ${data.count ?? 0} agent(s). New spends stay blocked until you unfreeze them.`
-          : `Unfroze ${data.count ?? 0} agent(s). A paused agent stays paused until you resume it.`);
-      } catch {
-        setMessage(freeze ? 'The freeze did not save.' : 'The unfreeze did not save.');
-        setPending(null);
-        return;
-      }
+      if (!ok) setMessage(count ? `Could only ${verb} ${count} agents.` : `Could not ${verb} ${agent?.name || 'agents'}.`);
+    } finally {
+      setBusy(false);
     }
-
-    if (typeof onBotsChange === 'function') {
-      onBotsChange(applySecurityActionLocal(bots, action.id));
-    }
-    setPending(null);
   }
 
   return (
-    <div className="security-page">
-      <header className="bot-heading">
-        <div className="pill">● Security · {page.signedIn ? 'owner' : 'signed out'}</div>
-        <h1>{page.subtitle}</h1>
-      </header>
+    <section className="security-page" aria-label="Security" aria-busy={busy}>
+      <div className="security-bulk">
+        <button type="button" className="security-action" disabled={disabled || !agents.some(agent => !agent.draft)}
+          onClick={() => setArmed({ kind: 'pause', value: true, label: 'Pause all agents?' })}>
+          <Pause size={16} aria-hidden="true" /> Pause all
+        </button>
+        <button type="button" className="security-action security-freeze" disabled={disabled || !agents.some(agent => !agent.draft && !agent.frozen)}
+          onClick={() => setArmed({ kind: 'freeze', value: true, label: 'Block spending for all agents?' })}>
+          <Snowflake size={16} aria-hidden="true" /> Freeze all
+        </button>
+      </div>
 
-      <section className="panel" aria-label="Account">
-        <h2>Account</h2>
-        <dl className="approval-facts">
-          <div>
-            <dt>Signed in as</dt>
-            <dd>{page.accountLabel}</dd>
-          </div>
-          <div>
-            <dt>Cluster</dt>
-            <dd>{page.cluster}</dd>
-          </div>
-          <div>
-            <dt>Agents</dt>
-            <dd>{page.summary.enabled} enabled · {page.summary.paused} paused · {page.summary.frozen} frozen</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="panel security-actions" aria-label="Kill switch">
-        <h2>Kill switch</h2>
-        <div className="live-actions">
-          {page.actions.map((action) => (
-            <button
-              key={action.id}
-              type="button"
-              className={action.kind === 'danger' ? 'cta danger' : action.kind === 'warn' ? 'ghost warn' : 'ghost'}
-              disabled={pending != null}
-              onClick={() => setArmed(action)}
-            >
-              {pending === action.id ? 'Working…' : action.label}
-            </button>
-          ))}
+      {armed && (
+        <div className="security-confirm" role="group" aria-label={armed.label}>
+          <p>{armed.label}</p>
+          <SlideCommit key={armed.label} label="Slide to confirm" disabled={busy} onCommit={() => runAction(armed)} />
+          <button type="button" className="security-action" onClick={() => setArmed(null)}>Cancel</button>
         </div>
-        {armed ? (
-          <div className="security-confirm">
-            <p>{armed.confirm}</p>
-            <SlideCommit
-              label="Slide to confirm"
-              doneLabel="Working"
-              resetKey={armed.id}
-              onCommit={() => {
-                if (armed.id === 'request-grab-back' && walletUnlocked !== true) {
-                  setArmed(null);
-                  onWalletLocked?.();
-                  return;
-                }
-                runAction(armed);
-              }}
-            />
-            <button type="button" className="ghost" onClick={() => setArmed(null)}>Cancel</button>
-          </div>
-        ) : null}
-        {message ? <p className="hint" role="status">{message}</p> : null}
-      </section>
+      )}
+      {message && <p className="security-notice" role="status">{message}</p>}
 
-      <section className="panel" aria-label="Agent freezes">
-        <h2>Agent freezes</h2>
-        <AnimatedList
-          {...listLook({ maxHeight: 320 })}
-          items={page.bots.map((bot) => ({
-            id: bot.id,
-            title: bot.name,
-            description: bot.status,
-            meta: bot.frozen ? 'Frozen' : bot.enabled ? 'Enabled' : 'Disabled',
-          }))}
-        />
-      </section>
-
-      <section className="panel" aria-label="Notes">
-        <h2>Guarantees</h2>
-        <AnimatedList
-          {...listLook({ maxHeight: 280, selectOnHover: false })}
-          items={page.notes.map((note, index) => ({ id: index, title: note }))}
-        />
-      </section>
-    </div>
+      {agents.length ? (
+        <ul className="security-agent-list" aria-label="Agents">
+          {agents.map(agent => {
+            const isPaused = agent.disabled || paused[agent.id] === true;
+            const Playback = isPaused ? Play : Pause;
+            const playbackLabel = `${isPaused ? 'Resume' : 'Pause'} ${agent.name}`;
+            const freezeLabel = agent.frozen ? 'Unfreeze' : 'Freeze';
+            const unavailable = disabled || agent.draft;
+            return (
+              <li key={agent.id}>
+                <strong>{agent.name}</strong>
+                <div className="security-row-actions">
+                  <button type="button" className="security-action security-playback" aria-label={playbackLabel}
+                    title={agent.frozen ? `Unfreeze ${agent.name} before resuming` : playbackLabel}
+                    disabled={unavailable || agent.frozen}
+                    onClick={() => runAction({ kind: 'pause', agent, value: !isPaused })}>
+                    <Playback size={17} aria-hidden="true" />
+                  </button>
+                  <button type="button" className={`security-action ${agent.frozen ? '' : 'security-freeze'}`}
+                    aria-label={`${freezeLabel} ${agent.name}`} disabled={unavailable}
+                    onClick={() => {
+                      const action = { kind: 'freeze', agent, value: !agent.frozen };
+                      if (agent.frozen) setArmed({ ...action, label: `Allow ${agent.name} to spend again?` });
+                      else runAction(action);
+                    }}>
+                    <Snowflake size={16} aria-hidden="true" /> {freezeLabel}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : <p className="security-notice">No agents yet.</p>}
+    </section>
   );
 }

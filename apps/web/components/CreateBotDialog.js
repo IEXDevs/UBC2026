@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import ModalClose from './ModalClose';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import { DEFAULT_TRANSFER_CAP, draftBot, draftTransferCap, isTransferLimit } from '../lib/roster.mjs';
@@ -114,7 +115,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     if (open && (step === 'look' || step === 'asset')) stepTitle.current?.focus();
   }, [open, step]);
 
-  if (!mounted) return null;
+  if (!mounted || typeof document === 'undefined') return null;
   const stepIndex = STEPS.indexOf(step);
   const selectedAsset = SPEND_ASSETS.find(option => option.value === asset);
   const cap = draftTransferCap(asset, maxOutflow.trim(), maxPerTransaction.trim());
@@ -146,7 +147,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     onCreate({ ...bot, image });
   }
 
-  return (
+  return createPortal(
     <div className={`backdrop is-center${first ? ' is-cover' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={onClose}>
       {celebrate ? (
         <div className="create-splash" aria-hidden="true">
@@ -173,6 +174,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
         onMouseDown={event => event.stopPropagation()}
         onSubmit={submit}
       >
+        <ModalClose label="Close create agent" onClick={onClose} />
         {celebrate ? (
           <>
             <div className="create-scrim" aria-hidden="true" />
@@ -200,9 +202,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
             <p className="create-progress">Step {stepIndex + 1} of {STEPS.length}</p>
             <h2 id="create-agent-title" ref={stepTitle} tabIndex={-1}>{STEP_TITLES[step]}</h2>
           </div>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            <X size={18} strokeWidth={1.75} />
-          </button>
         </div>
         <div className="create-step" key={step}>
           {step === 'name' && (
@@ -288,6 +287,6 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
           </button>
         </div>
       </form>
-    </div>
+    </div>, document.body,
   );
 }

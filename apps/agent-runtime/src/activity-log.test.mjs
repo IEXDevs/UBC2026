@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import { BIP39_ENGLISH } from './bip39-english.mjs';
 import { redactForLog, redactLogText } from './activity-log.mjs';
 

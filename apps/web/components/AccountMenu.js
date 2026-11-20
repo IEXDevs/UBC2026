@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { BrainCircuit, ChartColumn, Lock, LockOpen, LogOut, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
+import { BrainCircuit, ChartColumn, Lock, LockOpen, LogOut, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
 import { markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
 import SpecularButton from './SpecularButton';
@@ -15,7 +15,6 @@ const ITEMS = [
   { id: 'ai-providers', label: 'AI Providers', icon: BrainCircuit },
   { id: 'security', label: 'Security', icon: Shield },
   { id: 'logs', label: 'Logs', icon: ScrollText },
-  { id: 'computer', label: 'Computer', icon: Monitor },
 ];
 
 export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed = false, signedIn = false, loginDisabled = false, walletUnlocked = false, walletLockAvailable = false, holdingsLabel = '', onLogin, onPick }) {
@@ -115,7 +114,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
         >
           <ProfileMark src={avatarUrl} label={accountLabel} className="you-mark is-round" />
           {collapsed ? null : <strong>{accountLabel}</strong>}
-          {/* Assigned wallet mainnet-beta SOL and USDC when the chain read is in. Otherwise the shared USDC book. */}
+          {/* Read-only USD value across the account's connected wallets. */}
           {collapsed || !holdingsLabel ? null : <span className="you-holdings">{holdingsLabel}</span>}
         </button>
       </div>

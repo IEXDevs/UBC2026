@@ -11,10 +11,12 @@ import AgentThread from '../components/AgentThread';
 import SecurityPanel from '../components/SecurityPanel';
 import LogsPanel from '../components/LogsPanel';
 import AccountMenu from '../components/AccountMenu';
+import AccountValue from '../components/AccountValue';
 import PaneDock from '../components/PaneDock';
 import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
 import ProfileSheet from '../components/ProfileSheet';
+import ProfileConnections, { LiveProfileConnections } from '../components/ProfileConnections';
 import WalletsSheet from '../components/WalletsSheet';
 import ClaimHandle from '../components/ClaimHandle';
 import RecoveryCeremony from '../components/RecoveryCeremony';
@@ -28,7 +30,7 @@ import HoldButton from '../components/HoldButton';
 import ComputerSheet from '../components/ComputerSheet';
 import FileStage from '../components/FileStage';
 import RecallSearch from '../components/RecallSearch';
-import { formatBaseUnits, moneyPane, registeredHoldingsLabel, walletGlance } from '../lib/money-views.mjs';
+import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs';
 import { mentionSuggestions } from '../lib/mention-handles.mjs';
 import { assignedWalletAddress, solanaSpendableLabel } from '../lib/solana-balance.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
@@ -48,6 +50,7 @@ import {
 } from '../lib/roster.mjs';
 import { ownerIdFromPrivyUser, privyAccountLabel, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '../lib/profile.mjs';
+import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile-photo.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
@@ -458,6 +461,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const toast = useToast();
   const depositSignerRef = useRef(null);
   const [looks, setLooks] = useState({});
+  const [savedPhoto, setSavedPhoto] = useState(null);
   const [roster, setRoster] = useState({ order: [], extra: [] });
   const [ready, setReady] = useState(false);
   const [sideWidth, setSideWidth] = useState(300);
@@ -487,7 +491,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const [talksReady, setTalksReady] = useState(false);
   const [rosterReady, setRosterReady] = useState(false);
   const [thinkingBot, setThinkingBot] = useState(null);
-  const [botRecords, setBotRecords] = useState([]);
   const [removedAgents, setRemovedAgents] = useState(() => new Map());
   const [agentRemoval] = useState(() => createAgentRemoval(setRemovedAgents));
   const currentOwner = useRef(ownerId);
@@ -508,6 +511,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   accessTokenRef.current = getAccessToken;
   const [hideWalletError, setHideWalletError] = useState(false);
   const [claimWelcome, setClaimWelcome] = useState(false);
+  const [confirmedHandle, setConfirmedHandle] = useState(undefined);
   const [transfers, setTransfers] = useState([]);
   const [solanaBalance, setSolanaBalance] = useState(null);
   const [receipts, setReceipts] = useState([]);
@@ -526,7 +530,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const [viewFile, setViewFile] = useState(null);
   const [voiceMs, setVoiceMs] = useState(0);
   const [voiceLive, setVoiceLive] = useState(false);
-  const avatarUrl = profile?.avatarUrl || privyAvatarUrl(user);
+  const avatarUrl = (savedPhoto?.ownerId === ownerId ? savedPhoto.image : '') || profilePhoto(looks) || profile?.avatarUrl || privyAvatarUrl(user);
   const closeCreate = useCallback(() => setCreateOpen(false), []);
   const closeProfile = useCallback(() => {
     setProfileOpen(false);
@@ -676,6 +680,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (!key) {
       profileOwnerRef.current = '';
       setProfile(null);
+      setConfirmedHandle(undefined);
       setProfileReady(false);
       return undefined;
     }
@@ -683,6 +688,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     const sameOwner = profileOwnerRef.current === ownerId;
     if (!sameOwner) {
       profileOwnerRef.current = ownerId;
+      setConfirmedHandle(undefined);
       setProfileReady(false);
     }
     let local = null;
@@ -711,6 +717,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         ]);
         const body = await response.json();
         if (stop) return;
+        if (response.ok && body.source === 'supabase' && body.ok !== false) setConfirmedHandle(body.profile?.handle || null);
         const next = profileAfterDirectoryRead(local, body);
         if (next.persist === 'write' && next.profile) {
           setProfile(next.profile);
@@ -821,18 +828,23 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, getAccessToken, agentRemoval]);
 
   const saveProfile = useCallback(async (next) => {
-    const stored = { ...next, avatarUrl: next.avatarUrl || privyAvatarUrl(user) || null };
+    const { photo, editOnly, ...details } = next;
+    const stored = { ...details, handle: editOnly ? (profile?.handle || details.handle) : details.handle, avatarUrl: profile?.avatarUrl || details.avatarUrl || privyAvatarUrl(user) || null };
+    if (photo !== undefined && !withProfilePhoto({}, photo)) throw Object.assign(new Error('invalid_photo'), { code: 'invalid_photo' });
     const key = profileKey(ownerId);
     const profileUrl = ownerId ? shellRuntimeUrl('/api/profiles/me') : null;
     if (profileUrl && ownerId) {
       const response = await fetch(profileUrl, {
         method: 'PUT',
         headers: await ownerAuthHeaders(ownerId, getAccessToken, { 'content-type': 'application/json' }),
-        body: JSON.stringify(stored),
+        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify({ ...stored, ...(editOnly ? { editOnly: true } : {}) }),
       });
       const body = await response.json().catch(() => ({}));
-      const saved = profileSaveResult(response.status, body, stored.handle);
+      const saved = profileSaveResult(response.status, body, editOnly ? '' : stored.handle);
+      if (currentOwner.current !== ownerId) throw Object.assign(new Error('account_changed'), { code: 'account_changed' });
       if (!saved.ok) {
+        if (saved.error === 'profile_not_registered') setConfirmedHandle(null);
         const error = new Error(saved.error);
         error.code = saved.error;
         error.status = saved.status;
@@ -845,13 +857,24 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         avatarUrl: saved.profile.avatarUrl || stored.avatarUrl || null,
       };
       setProfile(confirmed);
-      if (key) localStorage.setItem(key, JSON.stringify(confirmed));
-      return { ok: true, source: body.source || 'supabase', profile: confirmed };
+      setConfirmedHandle(confirmed.handle);
+      try { if (key) localStorage.setItem(key, JSON.stringify(confirmed)); } catch { /* The directory confirmed the save. */ }
+      let photoSync = null;
+      if (photo !== undefined) {
+        const synced = await saveProfilePhoto({ ownerId, getAccessToken, image: photo });
+        if (currentOwner.current !== ownerId) throw Object.assign(new Error('account_changed'), { code: 'account_changed' });
+        photoSync = synced ? 'synced' : 'failed';
+        if (synced) {
+          writeLooks(localStorage, ownerId, withProfilePhoto(readLooks(localStorage, ownerId), photo));
+          setSavedPhoto({ ownerId, image: photo });
+        }
+      }
+      return { ok: true, source: body.source || 'supabase', profile: confirmed, photoSync };
     }
     setProfile(stored);
     if (key) localStorage.setItem(key, JSON.stringify(stored));
     return { ok: true, source: 'local' };
-  }, [ownerId, user, getAccessToken]);
+  }, [ownerId, user, getAccessToken, profile]);
 
   const resolveMention = useCallback(async (token) => {
     const parsed = parseLookupQuery(token);
@@ -885,7 +908,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const removedIds = removedAgents.get(ownerId);
   const localRoster = useMemo(() => mergeRoster([], withoutPlaceholderBots(roster)), [roster]);
   const seedBots = useMemo(() => {
-    const overlay = new Map(botRecords.map((bot) => [bot.id, bot]));
     const byId = new Map();
     for (const bot of remoteBots) byId.set(bot.id, bot);
     for (const bot of localRoster.bots) {
@@ -897,8 +919,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     const order = [];
     for (const id of localRoster.order) if (byId.has(id)) order.push(id);
     for (const bot of remoteBots) if (!order.includes(bot.id)) order.push(bot.id);
-    return order.filter(id => !removedIds?.has(id)).map((id) => ({ ...byId.get(id), ...(overlay.get(id) || {}) }));
-  }, [botRecords, localRoster, remoteBots, removedIds]);
+    return order.filter(id => !removedIds?.has(id)).map(id => byId.get(id));
+  }, [localRoster, remoteBots, removedIds]);
   const styled = useMemo(() => {
     const looked = applyLooks(seedBots, looks);
     if (!devPreview || looked.length > 0) return looked;
@@ -1636,7 +1658,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     }
     toast?.(`${name} removed`);
     setRemoteLists(current => ({ ...current, bots: current.bots.filter(item => item.id !== id) }));
-    setBotRecords(current => current.filter(item => item.id !== id));
     setRoster(current => ({
       order: withoutId(current.order, id),
       extra: current.extra.filter(item => item.id !== id),
@@ -1904,7 +1925,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         <footer className="you">
           <AccountMenu
             accountLabel={profileRailLabel({
-              handle: profile?.handle,
+              handle: confirmedHandle === undefined ? profile?.handle : confirmedHandle,
               displayName: profile?.displayName,
               fallback: accountLabel,
             })}
@@ -1913,7 +1934,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             loginDisabled={loginDisabled}
             walletUnlocked={unlocked}
             walletLockAvailable={deskLockOnRef.current}
-            holdingsLabel={registeredHoldingsLabel({ wallets, positions, transfers, bots, chainLabel })}
+            holdingsLabel={<AccountValue key={ownerId} ownerId={ownerId} getAccessToken={getAccessToken} wallets={wallets} devPreview={devPreview} refreshKey={`${listsTick}:${transfers.length}:${walletsOpen}`} />}
             onLogin={onLogin}
             onPick={onAccount}
           />
@@ -1991,11 +2012,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
                 bots={bots}
                 ownerId={ownerId}
                 getAccessToken={getAccessToken}
-                accountLabel={accountLabel}
-                wallets={wallets}
-                walletUnlocked={unlocked}
-                onWalletLocked={() => setLockOpen(true)}
-                onBotsChange={(next) => setBotRecords(next)}
+                onPolicyChange={(items) => {
+                  const byId = new Map(items.map(item => [item.botId, item]));
+                  setRemoteLists(current => ({
+                    ...current,
+                    bots: current.bots.map(row => {
+                      const item = byId.get(row.id);
+                      return item ? { ...row, frozen: item.frozen ?? row.frozen, enabled: item.enabled } : row;
+                    }),
+                  }));
+                }}
               />
             ) : null}
           </article>
@@ -2258,11 +2284,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         </div>
       ) : null}
       <ProfileSheet
+        key={ownerId || 'signed-out'}
         open={profileOpen}
         onClose={closeProfile}
         accountLabel={profile?.displayName || accountLabel}
         avatarUrl={avatarUrl}
-        profile={profile}
+        profile={confirmedHandle === undefined ? profile : { ...profile, handle: confirmedHandle || '' }}
+        ownerId={ownerId}
+        getAccessToken={getAccessToken}
+        connections={privyLive ? <LiveProfileConnections /> : <ProfileConnections user={user} />}
         voiceMs={voiceMs}
         talks={talks}
         payments={payments}

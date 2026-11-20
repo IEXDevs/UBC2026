@@ -2,11 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EVENT_KINDS } from '@ubc2026/contracts';
 import { BotStateMachine } from './bot-do.mjs';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import {
   alertFromSpend,
   botAlertEvent,
   rememberBotAlert,
+  readBotAlerts,
+  BOT_LOCATION_HINT,
 } from './bot-alerts.mjs';
 
 const at = 1_700_000_000_000;
@@ -296,4 +298,20 @@ test('an over-cap spend attempt is an unapproved alert on that bot', async () =>
     headers: { 'x-owner-id': 'user_1' },
   }), env);
   assert.deepEqual((await other.json()).items, []);
+});
+
+test('bot Durable Objects are created with a Western North America location hint', async () => {
+  const calls = [];
+  const env = {
+    BOT: {
+      idFromName: name => `id:${name}`,
+      get: (id, options) => {
+        calls.push({ id, options });
+        return { fetch: async () => Response.json({ alerts: [] }) };
+      },
+    },
+  };
+  await readBotAlerts(env, 'bot-1', 'owner-1');
+  assert.deepEqual(calls, [{ id: 'id:bot-1', options: { locationHint: 'wnam' } }]);
+  assert.equal(BOT_LOCATION_HINT, 'wnam');
 });

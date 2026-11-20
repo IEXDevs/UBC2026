@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEV_PREVIEW_OWNER, previewBot, previewPortfolioFor, previewWallets } from './dev-preview.mjs';
+import { securityAgent } from './security.mjs';
 
 /**
  * Achieves: verifies the preview wallet is owner-scoped, read-only, and non-spendable.
@@ -24,4 +25,10 @@ test('the preview wallet is visible and cannot spend', () => {
   const book = previewPortfolioFor(wallets);
   assert.equal(book.wallets[0].address, wallets[0].address);
   assert.equal(book.authorizesTransaction, false);
+});
+
+test('developer preview shows its draft agent without enabling security controls', () => {
+  assert.deepEqual(securityAgent(previewBot()), {
+    id: 'bot_preview', name: 'Preview', draft: true, frozen: false, disabled: false,
+  });
 });

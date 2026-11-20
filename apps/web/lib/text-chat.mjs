@@ -10,7 +10,7 @@ import { thinkStep, toolStep } from './chat-activity.mjs';
 import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
 import { grantCovers, isFundTool, toolAccessRequest } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
-import { reasoningEffortFor } from './thinking-levels.mjs';
+import { META_SPARK_MODEL, reasoningEffortFor } from './thinking-levels.mjs';
 import { MODEL_ID, parseModelProvider } from './ai-provider.mjs';
 import {
   clipOwnerMessage,
@@ -25,7 +25,7 @@ export { OPENROUTER_FREE_MODEL };
 
 export const META_MODEL_BASE = 'https://api.meta.ai/v1';
 export const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
-export const META_SPARK_MODEL = 'muse-spark-1.3-contributor';
+export { META_SPARK_MODEL };
 /** Paid OpenRouter slug. Not sent. */
 export const OPENROUTER_SPARK_MODEL = 'meta/muse-spark-1.3-contributor';
 export const TEXT_CHAT_MODEL = META_SPARK_MODEL;
@@ -410,6 +410,7 @@ export async function completeTextChat({
   if (!latest) throw new TextChatError('message_required', 400);
   const secrets = [resolved.apiKey];
   let modelId = typeof model === 'string' && model.trim() ? model.trim() : resolved.model;
+  if (resolved.provider === 'meta') modelId = META_SPARK_MODEL;
   if (custom && !MODEL_ID.test(modelId || '')) throw new TextChatError('model_required', 400);
   if (resolved.provider === 'openrouter' && !custom) {
     const selected = selectFreeOpenRouterModel(modelId);

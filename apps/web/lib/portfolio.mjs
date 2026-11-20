@@ -71,9 +71,10 @@ export function assertPortfolioRpc(url) {
   return parsed.toString();
 }
 
-export function choosePortfolioRpc(env = {}) {
+export function choosePortfolioRpc(env = {}, cluster = '') {
   const mainnet = typeof env.QUICKNODE_MAINNET_RPC_URL === 'string' ? env.QUICKNODE_MAINNET_RPC_URL.trim() : '';
   const solana = typeof env.SOLANA_RPC_URL === 'string' ? env.SOLANA_RPC_URL.trim() : '';
+  if (cluster === SOLANA_CLUSTER) return { rpcUrl: solana, missing: solana ? [] : ['SOLANA_RPC_URL'] };
   if (mainnet) return { rpcUrl: mainnet, missing: [] };
   if (solana) return { rpcUrl: solana, missing: [] };
   return { rpcUrl: '', missing: ['QUICKNODE_MAINNET_RPC_URL', 'SOLANA_RPC_URL'] };

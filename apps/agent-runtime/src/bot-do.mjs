@@ -279,6 +279,7 @@ export class BotStateMachine {
         ok: true,
         meta,
         run,
+        paused: await this.get('ownerPaused') === true || run?.paused === true,
         positionCheck,
         cardLoop,
       }, { headers: { 'Cache-Control': 'no-store' } });
@@ -393,6 +394,7 @@ export class BotStateMachine {
       }
       // Stream wakes may omit owner — never wipe a bound ownerId with null.
       if (priorOwner && !ownerId) ownerId = priorOwner;
+      if (await this.get('ownerPaused') === true) return Response.json({ error: 'run_paused' }, { status: 409 });
       let run = await this.get('run');
       if (!run || body.forceNew) {
         run = createEmptyRun({ runId: `run_${now}`, botId, goal, now });
@@ -416,20 +418,26 @@ export class BotStateMachine {
       const ownerGate = await this.requireBoundOwner(request);
       if (ownerGate) return ownerGate;
       let run = await this.get('run');
-      if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
-      run = pauseRun(run, body.reason ?? 'owner-pause', now);
-      await this.put('run', run);
-      return Response.json({ ok: true, run });
+      await this.put('ownerPaused', true);
+      if (run && !run.paused) {
+        run = pauseRun(run, body.reason ?? 'owner-pause', now);
+        await this.put('run', run);
+      }
+      return Response.json({ ok: true, run, paused: true });
     }
 
     if (request.method === 'POST' && url.pathname === '/resume') {
       const ownerGate = await this.requireBoundOwner(request);
       if (ownerGate) return ownerGate;
       let run = await this.get('run');
-      if (!run) return Response.json({ error: 'no_run' }, { status: 404 });
-      run = resumeRun(run, now);
-      await this.put('run', run);
-      return Response.json({ ok: true, run });
+      if (run?.paused) {
+        run = resumeRun(run, now);
+        await this.put('run', run);
+      }
+      await this.delete('ownerPaused');
+      const loop = await this.get('cardLoop');
+      if (loop?.active) await this.armAlarm(Math.max(now, loop.nextWakeAt));
+      return Response.json({ ok: true, run, paused: false });
     }
 
     if (request.method === 'POST' && url.pathname === '/advance') {
@@ -452,6 +460,7 @@ export class BotStateMachine {
       if (!ownerId) return Response.json({ error: 'owner_required' }, { status: 401 });
       const ownerGate = await this.requireBoundOwner(request);
       if (ownerGate) return ownerGate;
+      if (await this.get('ownerPaused') === true) return Response.json({ error: 'run_paused' }, { status: 409 });
       const body = await request.json().catch(() => null);
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
         return Response.json({ error: 'invalid_json' }, { status: 400 });
@@ -680,6 +689,7 @@ export class BotStateMachine {
   async wakeCardLoop(env, now) {
     const loop = await this.get('cardLoop');
     if (!loop?.active) return { woke: false, reason: 'no_loop', spent: false };
+    if (await this.get('ownerPaused') === true) return { woke: false, reason: 'run_paused', spent: false };
     if (!cardLoopDue(loop, now)) return { woke: false, reason: 'cooling', spent: false };
     const meta = await this.get('meta');
     const ownerId = typeof meta?.ownerId === 'string' ? meta.ownerId : null;

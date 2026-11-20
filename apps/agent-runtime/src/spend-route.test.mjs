@@ -7,7 +7,7 @@ import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
 import { SystemInstruction, Transaction } from '@solana/web3.js';
 import { decodeTransferCheckedInstruction } from '@solana/spl-token';
 import { sha256Hex } from './desk-grant.mjs';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import { handleVoiceRequest } from './voice.mjs';
 
 const DESTINATION = '11111111111111111111111111111111';

@@ -99,8 +99,8 @@ test('the stage header has no USDC chip and the detail chip is the agent wallet'
   assert.match(detail, /FileLibrary/);
   assert.match(detail, /<LiveViewPanel\b[^>]*\bscreen\b/);
   assert.match(detail, /BotMark/);
-  assert.match(page, /holdingsLabel=\{registeredHoldingsLabel\(\{ wallets, positions, transfers, bots, chainLabel \}\)\}/);
-  assert.match(menu, /Assigned wallet mainnet-beta SOL and USDC when the chain read is in\./);
+  assert.match(page, /holdingsLabel=\{<AccountValue\b/);
+  assert.match(menu, /Read-only USD value across the account's connected wallets\./);
   assert.match(menu, /className="you-holdings"/);
   assert.equal(menu.includes('aria-hidden={!open}'), false);
   assert.match(menu, /triggerRef\.current\?\.focus\(\)/);

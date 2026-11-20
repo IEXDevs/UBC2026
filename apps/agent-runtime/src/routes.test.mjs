@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import { API_ROUTES, SECRET_NAMES } from '@ubc2026/contracts';
 
 function fakeEnv(extra = {}) {

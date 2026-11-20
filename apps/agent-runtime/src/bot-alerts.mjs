@@ -213,13 +213,22 @@ export async function rememberDecisionMemo(env, storage, input, fetcher = env?.f
   return event;
 }
 
+// Bot Durable Objects (and the Browser Run sessions they open) are created in
+// Western North America instead of near whichever colo sees the first request.
+// Hints only apply when an object is first created; existing objects stay put.
+export const BOT_LOCATION_HINT = 'wnam';
+
+export function botStub(env, botId) {
+  return env.BOT.get(env.BOT.idFromName(botId), { locationHint: BOT_LOCATION_HINT });
+}
+
 export async function publishBotAlert(env, input, fetcher = env?.fetch ?? fetch) {
   const event = await rememberBotAlert(env, null, input, fetcher);
   if (!event || !env?.BOT || typeof env.BOT.idFromName !== 'function' || typeof env.BOT.get !== 'function') {
     return event;
   }
   try {
-    const stub = env.BOT.get(env.BOT.idFromName(event.botId));
+    const stub = botStub(env, event.botId);
     await stub.fetch(new Request('https://bot/alert', {
       method: 'POST',
       headers: {
@@ -246,7 +255,7 @@ export async function readBotAlerts(env, botId, ownerId) {
   if (typeof botId !== 'string' || !/^[a-zA-Z0-9:_.-]{1,256}$/.test(botId)) return [];
   if (typeof ownerId !== 'string' || ownerId.length < 1) return [];
   try {
-    const stub = env.BOT.get(env.BOT.idFromName(botId));
+    const stub = botStub(env, botId);
     const response = await stub.fetch(new Request('https://bot/alerts', {
       headers: { 'x-owner-id': ownerId },
     }));

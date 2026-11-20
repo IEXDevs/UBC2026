@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import worker from './index.mjs';
+import worker from './owner-auth.fixture.mjs';
 import { passwordMatches } from './desk-grant.mjs';
 import { createDeskLock } from '../../web/lib/desk-lock.mjs';
 
@@ -63,6 +63,37 @@ test('freeze all bots calls policy for each owned bot', async () => {
   assert.equal(body.count, 2);
   assert.deepEqual(frozen, ['bot_1', 'bot_2']);
   assert.equal(JSON.stringify(body).includes('service-role'), false);
+});
+
+test('freeze and unfreeze can target one owned agent without touching other agents', async () => {
+  const catalog = new Map([['bot_1', 'user_1'], ['bot_2', 'user_1'], ['bot_3', 'user_2']]);
+  const calls = [];
+  const env = {
+    ...SUPABASE,
+    fetch: async (input, init) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith('/bots')) {
+        assert.equal(url.searchParams.get('owner_id'), 'eq.user_1');
+        const id = url.searchParams.get('id')?.slice(3);
+        return Response.json(catalog.get(id) === 'user_1' ? [{ id }] : []);
+      }
+      const { payload } = JSON.parse(init.body);
+      assert.equal(payload.ownerId, 'user_1');
+      const frozen = url.pathname.endsWith('/policy_freeze_bot');
+      calls.push([payload.botId, frozen]);
+      return Response.json({ botId: payload.botId, frozen, enabled: false });
+    },
+  };
+  const send = body => worker.fetch(new Request('https://runtime/api/bots/freeze', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+    body: JSON.stringify(body),
+  }), env);
+  assert.equal((await send({ botId: 'bot_1', frozen: true })).status, 200);
+  assert.equal((await send({ botId: 'bot_1', frozen: false })).status, 200);
+  assert.equal((await send({ botId: 'bot_3', frozen: true })).status, 404);
+  assert.equal((await send({ botId: null, frozen: true })).status, 400);
+  assert.deepEqual(calls, [['bot_1', true], ['bot_1', false]]);
 });
 
 /**

@@ -23,6 +23,38 @@ function ownerFrom(href) {
   return value;
 }
 
+test('profile editing patches only the owner metadata and ignores a stale handle', async () => {
+  let row = { handle: 'canonical', display_name: 'Old', avatar_url: null };
+  const writes = [];
+  const response = await localProfileResponse(claim({ editOnly: true, handle: 'stale', displayName: 'Updated' }), {
+    env: ENV,
+    fetcher: async (url, init) => {
+      assert.equal(new URL(url).searchParams.get('owner_id'), 'eq.did:privy:user_1');
+      if (init.method === 'PATCH') {
+        const patch = JSON.parse(init.body);
+        writes.push(patch);
+        assert.equal('handle' in patch, false);
+        assert.equal('owner_id' in patch, false);
+        row = { ...row, ...patch };
+      } else assert.equal(init.method, 'GET');
+      return Response.json([row]);
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).profile.handle, 'canonical');
+  assert.equal(writes[0].display_name, 'Updated');
+});
+
+test('an edit cannot claim a handle for an account with no directory row', async () => {
+  let writes = 0;
+  const response = await localProfileResponse(claim({ editOnly: true, handle: 'sid', displayName: 'Sid' }), {
+    env: ENV, fetcher: async (_url, init) => { if (init.method !== 'GET') writes += 1; return Response.json([]); },
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, 'profile_not_registered');
+  assert.equal(writes, 0);
+});
+
 /**
  * Achieves: verifies a handle claim writes the directory and keeps the service role out of the response.
  * Fails when: a handle claim writes the directory and keeps the service role out of the response breaks (e.g. expected 200, 'supabase', 'alex01'); failure/null paths flip.

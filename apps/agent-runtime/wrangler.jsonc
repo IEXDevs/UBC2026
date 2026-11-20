@@ -6,6 +6,7 @@
   "preview_urls": false,
   "compatibility_date": "2026-11-13",
   "compatibility_flags": ["nodejs_compat"],
+  "browser": { "binding": "BROWSER" },
   "durable_objects": {
     "bindings": [
       { "name": "BOT", "class_name": "BotDurableObject" }
