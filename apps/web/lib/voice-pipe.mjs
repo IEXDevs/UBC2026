@@ -347,7 +347,7 @@ export async function playAgentSpeech({
 export function splitSpeechSentences(text, { final = false, minLength = 24 } = {}) {
   const sentences = [];
   let start = 0;
-  const boundaries = /[.!?](?=\s|$)|\n/g;
+  const boundaries = final ? /[.!?](?=\s|$)|\n/g : /[.!?](?=\s)|\n/g;
   for (const match of text.matchAll(boundaries)) {
     const end = match.index + 1;
     if (text.slice(start, end).trim().length < minLength) continue;
