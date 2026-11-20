@@ -4806,6 +4806,11 @@ button.chat-edit:disabled:focus-visible {
   animation: page-arrive 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Retaining the completed transform animation makes the shell the containing
+   block for fixed dialogs. Release it so overlays share viewport positioning
+   and keep their existing sibling stacking order. */
+.shell:not(.is-claim) { animation-fill-mode: backwards; }
+
 @media (prefers-reduced-motion: reduce) {
   .legal-body,
   .thanks-body,

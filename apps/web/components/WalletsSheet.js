@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
 import { Plus, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, ChartNoAxesCombined, Coins, History, KeyRound, Layers, Wallet, X } from 'lucide-react';
@@ -146,11 +145,9 @@ export default function WalletsSheet({
     devnet: devnetBalance,
   });
 
-  if (!mounted || typeof document === 'undefined') return null;
+  if (!mounted) return null;
 
-  // The animated shell creates a containing block for fixed-position children.
-  // Keep this overlay anchored to the viewport, including on long mobile desks.
-  return createPortal(
+  return (
     <div className={`backdrop is-center ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section
         className="sheet wallets-sheet"
@@ -285,8 +282,7 @@ export default function WalletsSheet({
           ) : null}
         </div>
       </section>
-    </div>,
-    document.body
+    </div>
   );
 }
 
