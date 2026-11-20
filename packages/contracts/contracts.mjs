@@ -607,6 +607,21 @@ export function buildPermissionedSpendRequest(input) {
   return { method: 'POST', path: PERMISSIONED_SPEND_PATH, body: parsed };
 }
 
+export function parseSpendApprovalTerms(value) {
+  if (!value || !idOk(value.walletId) || typeof value.walletAddress !== 'string' || !base58.test(value.walletAddress)
+    || !Number.isSafeInteger(value.policyVersion) || value.policyVersion < 1
+    || typeof value.feeLamports !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(value.feeLamports)) return null;
+  return { walletId: value.walletId, walletAddress: value.walletAddress, policyVersion: value.policyVersion, feeLamports: value.feeLamports };
+}
+
+export function spendApprovalMessage({ ownerId, spend, terms, expiresAt }) {
+  return JSON.stringify([
+    'maelstrom:sol-devnet:approve-once:v1', ownerId, spend.botId,
+    spend.idempotencyKey, spend.action, spend.asset, spend.amount, spend.handle, spend.destination,
+    terms.walletId, terms.walletAddress, terms.policyVersion, terms.feeLamports, expiresAt,
+  ]);
+}
+
 export const API_ROUTES = Object.freeze([
   { id: 'health', method: 'GET', path: '/health', phase: 1, auth: 'none', status: 'live' },
   { id: 'routes.list', method: 'GET', path: '/api/routes', phase: 0, auth: 'none', status: 'live' },

@@ -15,12 +15,13 @@ function holdMac(hold, { ownerId, botId, secret }) {
   const args = Object.keys(hold.args).sort().map(key => [key, hold.args[key]]);
   const data = JSON.stringify([
     'maelstrom:chat-spend:v1', ownerId, botId, hold.name, hold.idempotencyKey, hold.expiresAt, args,
+    ...(hold.budgetOverride == null ? [] : [hold.budgetOverride]),
   ]);
   return createHmac('sha256', secret).update(data).digest();
 }
 
 export function sealAssetSpendHold(hold, context, now = Date.now()) {
-  const sealed = { ...hold, expiresAt: now + HOLD_LIFETIME_MS };
+  const sealed = { ...hold, expiresAt: hold.budgetOverride ? hold.expiresAt : now + HOLD_LIFETIME_MS };
   return { ...sealed, proof: holdMac(sealed, context).toString('hex') };
 }
 

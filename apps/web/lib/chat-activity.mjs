@@ -213,6 +213,8 @@ function privyDiagnosticMessage(privy, reason) {
 export function spendFailureMessage(result) {
   const parsed = parseResult(result);
   switch (parsed?.error || parsed?.state) {
+    case 'invalid_spend_approval':
+      return 'The payment approval expired or the payment details changed. Ask for the payment again.';
     case 'approval-needed':
       return SPEND_LIMIT_MESSAGES.get(parsed.reason)
         || (!parsed.reason ? 'The spend request reached the server without an accepted confirmation.' : '');

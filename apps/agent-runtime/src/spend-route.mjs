@@ -4,8 +4,9 @@
  * Signing goes through the Privy devnet client from @ubc2026/wallets.
  * Responses carry a signature and a state, never a key or a signed payload.
  */
-import { parsePermissionedSpendBody, parsePrivySigningFailure } from '@ubc2026/contracts';
+import { parsePermissionedSpendBody, parsePrivySigningFailure, spendApprovalMessage } from '@ubc2026/contracts';
 import { mainnetQuoteBlocksSpend, runPermissionedSpend } from '@ubc2026/agent-loop';
+import { proposalDigest } from '@ubc2026/bot-policy';
 import { buildDevnetAssetTransaction, transferDevnetUsdc } from '@ubc2026/transfers';
 import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
 import { loadOwnerLoopContext, supabaseConfig, supabaseGet, supabaseWrite } from './supabase-rest.mjs';
@@ -68,15 +69,17 @@ async function prepareAssetTransfer(env, parsed, wallet, destination, id) {
   return prepared;
 }
 
-async function reserveAssetTransfer(env, { ownerId, bot, proposal, policy, now, idempotencyKey }) {
+async function reserveAssetTransfer(env, { ownerId, bot, proposal, policy, now, idempotencyKey, budgetApproval }) {
   let approvalId;
-  if (bot.approvalMode === 'ask' || (bot.approvalMode === 'capped-automatic' && BigInt(policy.debit) > BigInt(bot.autoApproveCap ?? '0'))) {
+  if (budgetApproval || bot.approvalMode === 'ask' || (bot.approvalMode === 'capped-automatic' && BigInt(policy.debit) > BigInt(bot.autoApproveCap ?? '0'))) {
     approvalId = `approve_${crypto.randomUUID()}`;
     const saved = await supabaseWrite(env, {
       path: 'approvals', prefer: 'return=minimal', fetcher: env.fetch,
       body: {
         id: approvalId, owner_id: ownerId, bot_id: bot.id, policy_version: bot.policyVersion,
-        digest: policy.digest, action: 'approve', expires_at: new Date(proposal.expiresAt).toISOString(),
+        digest: policy.digest,
+        action: budgetApproval?.action ?? 'approve',
+        expires_at: new Date(budgetApproval?.expiresAt ?? proposal.expiresAt).toISOString(),
       },
     });
     if (!saved.ok) return { state: 'blocked', reason: 'approval-save-failed' };
@@ -85,6 +88,22 @@ async function reserveAssetTransfer(env, { ownerId, bot, proposal, policy, now, 
   if (reserved?.replay === true) return { state: 'blocked', reason: 'duplicate-spend' };
   if (reserved?.state === 'ready-to-reserve') return { state: 'blocked', reason: 'reserve-failed' };
   return reserved;
+}
+
+async function verifyBudgetApproval(token, key, { ownerId, spend, terms, now, proposal }) {
+  const match = /^v1\.([0-9]{13})\.([0-9a-f]{64})$/.exec(token);
+  if (!match) return null;
+  const expiresAt = Number(match[1]);
+  if (expiresAt <= now || expiresAt > now + 300_000) return null;
+  const encoder = new TextEncoder();
+  const secret = await crypto.subtle.importKey('raw', encoder.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+  const signature = Uint8Array.from(match[2].match(/../g), byte => Number.parseInt(byte, 16));
+  const message = spendApprovalMessage({ ownerId, spend, terms, expiresAt });
+  if (!await crypto.subtle.verify('HMAC', secret, signature, encoder.encode(message))) return null;
+  return {
+    ownerId, botId: spend.botId, policyVersion: terms.policyVersion,
+    action: 'approve-once', expiresAt: Math.min(expiresAt, proposal.expiresAt), digest: proposalDigest(proposal),
+  };
 }
 
 function json(body, status = 200) {
@@ -115,6 +134,13 @@ export async function handleSpend(request, env = {}) {
   const parsed = parsePermissionedSpendBody(raw);
   if (!parsed) return json({ error: 'invalid_spend', signed: false }, 400);
   const assetTransfer = parsed.asset !== 'USDC';
+  const overrideToken = request.headers.get('x-spend-approve-once');
+  const approvalKey = supabaseConfig(env)?.key;
+  const solHandleApproval = approvalKey && parsed.asset === 'SOL' && parsed.action === 'spend'
+    && parsed.confirmed && parsed.handle && parsed.destination && parsed.idempotencyKey;
+  if (overrideToken !== null && (!solHandleApproval || (desk.ok && desk.via !== 'grant'))) {
+    return json({ error: 'invalid_spend_approval', signed: false }, 403);
+  }
   if (assetTransfer && mainnetQuoteBlocksSpend(parsed.quote)) return json({ state: 'quote-not-authorization', signed: false }, 409);
 
   let context = null;
@@ -179,6 +205,15 @@ export async function handleSpend(request, env = {}) {
     expiresAt: now + 120_000,
   };
   const grantOk = desk.ok === true;
+  const approvalTerms = prepared && solHandleApproval && desk.via === 'grant'
+    ? { walletId: context.wallet.id, walletAddress: context.wallet.address, policyVersion: context.bot.policyVersion, feeLamports: prepared.feeLamports }
+    : null;
+  const budgetApproval = overrideToken && approvalTerms
+    ? await verifyBudgetApproval(overrideToken, approvalKey, { ownerId, spend: parsed, terms: approvalTerms, now, proposal })
+    : null;
+  if (overrideToken !== null && approvalTerms && !budgetApproval) {
+    return json({ error: 'invalid_spend_approval', signed: false }, 403);
+  }
   let signDevnet;
   let beforeSign;
   let privyFailure;
@@ -192,7 +227,9 @@ export async function handleSpend(request, env = {}) {
         throw error;
       }
     };
-    beforeSign = ({ bot, proposal, policy }) => reserveAssetTransfer(env, { ownerId, bot, proposal, policy, now, idempotencyKey: id });
+    beforeSign = ({ bot, proposal, policy, approvedOnce }) => reserveAssetTransfer(env, {
+      ownerId, bot, proposal, policy, now, idempotencyKey: id, budgetApproval: approvedOnce ? budgetApproval : null,
+    });
   } else if (!assetTransfer && grantOk) {
     if (parsed.destination && env.transferClient) signDevnet = async ({ bot, wallet, memo }) => {
       const sent = await transferDevnetUsdc({
@@ -237,13 +274,15 @@ export async function handleSpend(request, env = {}) {
       quote: parsed.quote,
       signDevnet,
       beforeSign,
+      budgetApproval,
     });
   } catch {
     return json({ error: 'spend_failed', signed: false }, 400);
   }
 
   let state = result.state;
-  if (!grantOk && state === 'signer-not-configured') state = 'desk_locked';
+  const perTransferLimit = result.state === 'approval-needed' && result.reason === 'per-transaction';
+  if (!grantOk && (state === 'signer-not-configured' || (solHandleApproval && perTransferLimit))) state = 'desk_locked';
   else if (state === 'signer-not-configured' && !assetTransfer && !parsed.destination && !parsed.selfCustody) state = 'recipient_address_missing';
   const body = {
     ok: result.signed === true,
@@ -254,6 +293,7 @@ export async function handleSpend(request, env = {}) {
     reason: result.reason || null,
     ...(privyFailure ? { privyFailure } : {}),
     ...(prepared ? { feeLamports: prepared.feeLamports } : {}),
+    ...(overrideToken === null && approvalTerms && perTransferLimit ? { approvalTerms } : {}),
   };
   if (state === 'desk_locked') body.error = 'desk_locked';
   if (typeof result.trust?.prompt === 'string') body.prompt = result.trust.prompt;
