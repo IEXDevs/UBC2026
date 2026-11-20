@@ -2372,6 +2372,29 @@ button.wallet-export:not(:disabled):hover {
 
 .party-link:hover { color: #fff; }
 
+.chat-address {
+  display: inline;
+  margin-left: 0.4em;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.chat-address small {
+  margin-left: 0.35em;
+  font-weight: 500;
+  font-size: 11px;
+  text-decoration: none;
+  color: #a3a3a3;
+}
+
 .slash-token { color: #f0c36a; }
 
 .party-sheet { width: min(560px, calc(100vw - 32px)); }

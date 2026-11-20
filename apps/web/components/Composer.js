@@ -550,7 +550,7 @@ export default function Composer({
     abortRef.current?.abort();
     runRef.current += 1;
     const history = threadRef.current.slice();
-    postUser(taken.item.text, taken.item.mention);
+    postUser(taken.item.text, taken.item.mention, taken.item.mentionAddress);
     void runChat(taken.item.text, history);
   }
 
@@ -573,6 +573,7 @@ export default function Composer({
         id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         text: spoken,
         mention: mention || '',
+        mentionAddress: mentionCopy?.address || '',
       }));
       parkDraft();
       return true;
@@ -580,8 +581,9 @@ export default function Composer({
     sendingRef.current = true;
     const prior = linesRef.current;
     const hint = mention;
+    const address = mentionCopy?.address || '';
     parkDraft();
-    postUser(spoken, hint);
+    postUser(spoken, hint, address);
     void runChat(spoken, prior);
     return true;
   }
@@ -592,10 +594,11 @@ export default function Composer({
     await runChat(spoken, prior);
   }
 
-  function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = [], access = null) {
+  function pushLine(role, text, targetId = botIdRef.current, tokens = 0, activity = [], access = null, extra = null) {
     const spoken = typeof text === 'string' ? text.trim() : '';
     if (!spoken) return null;
     const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
+    if (typeof extra?.mentionAddress === 'string' && extra.mentionAddress) line.mentionAddress = extra.mentionAddress;
     if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
     if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
     if (access && access.kind === 'inline' && typeof access.name === 'string') line.access = access;
@@ -604,9 +607,9 @@ export default function Composer({
     return line;
   }
 
-  function postUser(text, hint, targetId = botIdRef.current) {
-    pushLine('user', text, targetId);
-    if (hint) pushLine('assistant', hint, targetId);
+  function postUser(text, hint, address, targetId = botIdRef.current) {
+    pushLine('user', text, targetId, 0, [], null, { mentionAddress: address || '' });
+    if (hint && !address) pushLine('assistant', hint, targetId);
   }
 
   function say(text) {
@@ -777,7 +780,7 @@ export default function Composer({
       if (!stopped && released.next) {
         rememberQueue(released.queue);
         const history = threadRef.current.slice();
-        postUser(released.next.text, released.next.mention);
+        postUser(released.next.text, released.next.mention, released.next.mentionAddress);
         void runChat(released.next.text, history);
         return;
       }
