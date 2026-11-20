@@ -250,6 +250,7 @@ const READ_ONLY_TOOLS = new Set([
   'list_bots', 'get_bot_status', 'get_wallets', 'get_overview', 'get_activity',
   'what_happened_while_away', 'why_decision', 'get_payment_feed', 'list_browser_sessions',
   'get_price', 'lookup_recipient',
+  ...BROWSER_TOOLS,
 ]);
 
 function cardCheckout(message, history) {
@@ -590,6 +591,9 @@ export async function completeTextChat({
   let nudged = false;
   let readOnlyTurn = true;
   let readOnlyToolRan = false;
+  let successfulNonSpendTurn = true;
+  let toolResultSeen = false;
+  let completedSpendReply = '';
   const replyState = turnState || { fundProposed: false };
   const effort = reasoningEffortFor(modelId, reasoningEffort, { allowUnknown: true });
 
@@ -640,7 +644,7 @@ export async function completeTextChat({
       usage = addUsage(usage, completion.usage);
       return parseTurnVerdict(content).allow;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -712,6 +716,7 @@ export async function completeTextChat({
           }
         }
         const receipt = txReceiptFromResult(result);
+        if (receipt && isFundTool(name)) completedSpendReply = receipt.text;
         if (receipt && !seenSigs.has(receipt.signature)) {
           seenSigs.add(receipt.signature);
           publish(receipt.text);
@@ -721,6 +726,12 @@ export async function completeTextChat({
       }
       const failureReply = toolFailureReply(name, result);
       if (failureReply) toolFailures.add(failureReply);
+      const payload = typeof result === 'string' ? parseToolArgs(result) : result;
+      toolResultSeen = true;
+      if (isFundTool(name) || !payload || typeof payload !== 'object' || Array.isArray(payload)
+          || Object.keys(payload).length === 0 || payload.error || payload.ok === false || payload.success === false) {
+        successfulNonSpendTurn = false;
+      }
       const content = typeof result === 'string'
         ? clip(redact(result, secrets), 6000)
         : clip(redact(JSON.stringify(result), secrets), 6000);
@@ -812,9 +823,15 @@ export async function completeTextChat({
         }
         text = 'I stopped so this request would not keep spinning. I do not have a finished answer from the last step.';
       }
-      if (!(readOnlyTurn && readOnlyToolRan && !replyState.fundProposed) && !(await allowStep('reply', text))) {
-        retract(true);
-        text = BLOCKED_TURN;
+      if (!(readOnlyTurn && readOnlyToolRan && !replyState.fundProposed)) {
+        const verdict = await allowStep('reply', text);
+        if (verdict !== true && completedSpendReply) {
+          retract(true);
+          text = completedSpendReply;
+        } else if (verdict === false || (verdict === null && !(successfulNonSpendTurn && toolResultSeen && !replyState.fundProposed))) {
+          retract(true);
+          text = BLOCKED_TURN;
+        }
       }
       if (preview && preview.trim() !== text) retract();
       publish(text);

@@ -218,6 +218,128 @@ function turnAllowed() {
   return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
 }
 
+test('browser and research replies bypass final verification for successful, empty and failed results', async () => {
+  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+    for (const result of [{ ok: true }, { items: [] }, { error: 'provider_unavailable' }]) {
+      let round = 0;
+      let verified = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'Check example.com',
+        tools: [{ type: 'function', function: { name, parameters: { type: 'object' } } }],
+        invokeTool: async () => result,
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) { verified++; return Response.json({}, { status: 503 }); }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'browse', type: 'function', function: { name, arguments: '{"url":"https://example.com"}' },
+          }] } }] });
+          return streamedCompletion([{ content: 'Here is what the service returned.' }]);
+        },
+      });
+      assert.equal(verified, 0, name);
+      assert.equal(reply.text, 'Here is what the service returned.');
+    }
+  }
+});
+
+test('a completed spend keeps its authoritative receipt when final verification refuses or fails', async () => {
+  const signature = '5'.repeat(64);
+  const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
+  for (const verdict of ['refuse', 'http', 'network']) {
+    for (const result of [
+      { signed: true, signature, cluster: 'mainnet-beta' },
+      JSON.stringify({ signature, cluster: 'mainnet-beta' }),
+      { signed: true, signature, cluster: 'mainnet-beta', card: { card_id: 'card_1', usd_amount: 1, status: 'pending' } },
+    ]) {
+      const messages = [];
+      let round = 0;
+      let verified = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'send 1 USDC', permissionMode: 'ask',
+        grants: [toolAccessRequest('ask', 'request_spend', args)],
+        tools: [{ type: 'function', function: { name: 'request_spend', parameters: { type: 'object' } } }],
+        invokeTool: async () => result, onMessage: text => messages.push(text),
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) {
+            assert.match(JSON.parse(options.body).messages[0].content, /Kind: reply/);
+            verified++;
+            if (verdict === 'network') throw new Error('offline verifier');
+            return verdict === 'http' ? Response.json({}, { status: 503 })
+              : Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+          }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'spend', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify(args) },
+          }] } }] });
+          return Response.json({ choices: [{ message: { content: 'An unverified summary of the payment.' } }] });
+        },
+      });
+      assert.equal(verified, 1);
+      assert.equal(reply.text, `${typeof result === 'object' && result.card ? 'Laso card card_1: $1, pending.' : 'Sent.'} https://solscan.io/tx/${signature}`);
+      assert.deepEqual(messages, [reply.text]);
+      assert.deepEqual(reply.messages, messages);
+    }
+  }
+});
+
+test('only successful non-spend turns retain replies during verifier outages; explicit refusals still block mutations', async () => {
+  for (const verdict of ['allow', 'refuse', 'outage']) {
+    for (const result of [{ ok: true }, JSON.stringify({ status: 'paused' }), {}, null, { error: 'pause_failed' }, { ok: false }, { success: false }]) {
+      let round = 0;
+      let verified = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'pause the agent',
+        tools: [{ type: 'function', function: { name: 'pause_bot', parameters: { type: 'object' } } }],
+        invokeTool: async () => result,
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) {
+            verified++;
+            return verdict === 'outage' ? Response.json({}, { status: 503 })
+              : Response.json({ choices: [{ message: { content: JSON.stringify({ allow: verdict === 'allow' }) } }] });
+          }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'pause', type: 'function', function: { name: 'pause_bot', arguments: '{}' },
+          }] } }] });
+          return Response.json({ choices: [{ message: { content: 'The pause request finished.' } }] });
+        },
+      });
+      const succeeded = typeof result === 'string' || result?.ok === true;
+      assert.equal(verified, 1);
+      assert.equal(reply.text, verdict === 'allow' || (verdict === 'outage' && succeeded)
+        ? 'The pause request finished.' : 'That step did not pass the check.');
+    }
+  }
+});
+
+test('spends without receipts still verify replies and pre-action verifier outages still require approval', async () => {
+  const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
+  for (const approved of [false, true]) {
+    for (const result of [{ ok: true }, {}, { error: 'simulation_failed' }, { signed: false, signature: '5'.repeat(64), cluster: 'mainnet-beta' }]) {
+      let round = 0;
+      let invoked = 0;
+      const verified = [];
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'send 1 USDC', permissionMode: 'full',
+        grants: approved ? [toolAccessRequest('ask', 'request_spend', args)] : [],
+        tools: [{ type: 'function', function: { name: 'request_spend', parameters: { type: 'object' } } }],
+        invokeTool: async () => { invoked++; return result; },
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) {
+            verified.push(JSON.parse(options.body).messages[0].content.match(/Kind: (\w+)/)[1]);
+            return Response.json({}, { status: 503 });
+          }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'spend', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify(args) },
+          }] } }] });
+          return Response.json({ choices: [{ message: { content: 'The payment is complete.' } }] });
+        },
+      });
+      assert.equal(invoked, approved ? 1 : 0);
+      assert.deepEqual(verified, approved ? ['reply'] : ['tool']);
+      if (approved) assert.equal(reply.text, 'That step did not pass the check.');
+      else assert.equal(reply.hold.name, 'request_spend');
+    }
+  }
+});
+
 test('current-bot defaults produce bound holds and approved sends do not re-ask when either turn omits botId', async () => {
   const botId = 'bot_current';
   const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
