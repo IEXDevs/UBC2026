@@ -3,6 +3,7 @@
  * Without secrets, returns empty items with source: 'unconfigured' (not a fake DB).
  */
 import { createPrivyWalletClientFromEnv, readPrivyAccessTokenSub } from '@ubc2026/wallets/privy';
+import { verifyPrivyAccessToken } from '@ubc2026/wallets/privy-access-token';
 import {
   ConfigError,
   devnetSpendAsset,
@@ -153,6 +154,21 @@ export async function resolveOwner(request, env) {
       ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 180)
       : undefined;
     return { ownerId: null, user: null, token, error: 'privy_failed', detail };
+  }
+}
+
+async function resolveDeletionOwner(request, env, fetcher) {
+  const appId = env.PRIVY_APP_ID?.trim();
+  if (!appId) return resolveOwner(request, env);
+  const token = bearerToken(request);
+  if (!token) return { error: 'login_required' };
+  try {
+    const { sub } = await verifyPrivyAccessToken(token, { appId, fetcher });
+    const header = ownerHeader(request);
+    if (header && header !== sub) return { error: 'owner_mismatch' };
+    return { ownerId: sub, verified: true };
+  } catch {
+    return { error: 'login_required' };
   }
 }
 
@@ -858,7 +874,7 @@ export async function handleApiData(request, env, matched) {
   }
 
   if (routeId === 'bots.delete') {
-    const { ownerId, error } = await resolveOwner(request, env);
+    const { ownerId, error, verified } = await resolveDeletionOwner(request, env, fetcher);
     if (error && !ownerId) return json({ error }, 401);
     if (!ownerId) return json({ error: 'owner_required' }, 401);
     const botId = matched?.params?.botId;
@@ -867,15 +883,17 @@ export async function handleApiData(request, env, matched) {
     }
     if (!supabaseConfig(env)) return json({ error: 'unconfigured' }, 503);
 
-    const removed = await supabaseWrite(env, {
-      path: 'rpc/delete_owner_agent',
-      body: { p_owner_id: ownerId, p_bot_id: botId },
-      prefer: 'return=minimal',
-      fetcher,
-    });
-    if (removed.ok) return json({ ok: true, deleted: botId, source: 'supabase' });
-    if (removed.status !== 404 || removed.code !== 'PGRST202') {
-      return json({ error: 'delete_failed' }, 502);
+    if (verified) {
+      const removed = await supabaseWrite(env, {
+        path: 'rpc/delete_owner_agent',
+        body: { p_owner_id: ownerId, p_bot_id: botId },
+        prefer: 'return=minimal',
+        fetcher,
+      });
+      if (removed.ok) return json({ ok: true, deleted: botId, source: 'supabase' });
+      if (removed.status !== 404 || removed.code !== 'PGRST202') {
+        return json({ error: 'delete_failed' }, 502);
+      }
     }
 
     // An older database still supports deletion, but cannot record a tombstone.

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import worker from './index.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 import { mapBotRow, mapWalletRow, mapLedgerRow } from './supabase-rest.mjs';
@@ -798,19 +799,45 @@ test('supabase mappers turn rows into bot/wallet/ledger records', () => {
   });
 });
 
-test('agent deletion passes the resolved owner to the RPC and does not hide a storage failure', async () => {
+function deletionSession() {
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const appId = 'testapp1';
+  const ownerId = 'did:privy:alice';
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const jwt = `${encode({ alg: 'ES256', typ: 'JWT' })}.${encode({
+    sub: ownerId, iss: 'privy.io', aud: appId, exp: Math.floor(Date.now() / 1000) + 600,
+  })}`;
+  const signature = sign('sha256', Buffer.from(jwt), { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  return {
+    appId,
+    ownerId,
+    headers: { authorization: `Bearer ${jwt}.${signature.toString('base64url')}`, 'x-owner-id': ownerId },
+    fetchWithJwks: fetcher => async (url, init) => {
+      if (new URL(url).hostname === 'auth.privy.io') {
+        assert.equal(new URL(url).pathname, `/api/v1/apps/${appId}/jwks.json`);
+        return Response.json({ keys: [publicKey.export({ format: 'jwk' })] });
+      }
+      return fetcher(url, init);
+    },
+  };
+}
+
+test('agent deletion verifies the caller, passes that owner to the RPC and does not hide a storage failure', async () => {
+  const session = deletionSession();
   const remove = (status) => worker.fetch(new Request('https://runtime/api/bots/bot_1', {
     method: 'DELETE',
-    headers: { 'x-owner-id': 'user_1' },
+    headers: session.headers,
   }), fakeEnv({
+    PRIVY_APP_ID: session.appId,
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    fetch: async (url, init) => {
+    fetch: session.fetchWithJwks(async (url, init) => {
+      if (new URL(url).pathname.endsWith('/activity_logs')) return new Response(null, { status: 204 });
       assert.equal(init.method, 'POST');
       assert.equal(new URL(url).pathname, '/rest/v1/rpc/delete_owner_agent');
-      assert.deepEqual(JSON.parse(init.body), { p_owner_id: 'user_1', p_bot_id: 'bot_1' });
+      assert.deepEqual(JSON.parse(init.body), { p_owner_id: session.ownerId, p_bot_id: 'bot_1' });
       return new Response(null, { status });
-    },
+    }),
   }));
   const deleted = await remove(204);
   assert.equal(deleted.status, 200);
@@ -818,9 +845,40 @@ test('agent deletion passes the resolved owner to the RPC and does not hide a st
   const failure = await remove(503);
   assert.equal(failure.status, 502);
   assert.deepEqual(await failure.json(), { error: 'delete_failed' });
+
+  const deny = (headers) => worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers,
+  }), fakeEnv({
+    PRIVY_APP_ID: session.appId,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: session.fetchWithJwks(async () => new Response(null, { status: 500 })),
+  }));
+  for (const [headers, error] of [
+    [{ 'x-owner-id': session.ownerId }, 'login_required'],
+    [{ ...session.headers, 'x-owner-id': 'did:privy:bob' }, 'owner_mismatch'],
+  ]) {
+    const denied = await deny(headers);
+    assert.equal(denied.status, 401);
+    assert.deepEqual(await denied.json(), { error });
+  }
+
+  const unverified = await worker.fetch(new Request('https://runtime/api/bots/bot_1', {
+    method: 'DELETE',
+    headers: session.headers,
+  }), fakeEnv({
+    PRIVY_APP_ID: session.appId,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
+    fetch: async () => Response.json({ keys: [] }),
+  }));
+  assert.equal(unverified.status, 401);
+  assert.deepEqual(await unverified.json(), { error: 'login_required' });
 });
 
 test('agents can still be deleted from an older database without the deletion RPC', async () => {
+  const session = deletionSession();
   const calls = [];
   const fetcher = async (url, init) => {
     const target = new URL(url);
@@ -829,18 +887,19 @@ test('agents can still be deleted from an older database without the deletion RP
       return Response.json({ code: 'PGRST202' }, { status: 404 });
     }
     if (target.pathname.endsWith('/bots') || target.pathname.endsWith('/activity_logs')) {
-      assert.equal(target.searchParams.get('owner_id'), 'eq.user_1');
+      assert.equal(target.searchParams.get('owner_id'), `eq.${session.ownerId}`);
     }
     if (init.method === 'GET') return Response.json([{ id: 'bot_1' }]);
     return new Response(null, { status: 204 });
   };
   const response = await worker.fetch(new Request('https://runtime/api/bots/bot_1', {
     method: 'DELETE',
-    headers: { 'x-owner-id': 'user_1' },
+    headers: session.headers,
   }), fakeEnv({
+    PRIVY_APP_ID: session.appId,
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-test',
-    fetch: fetcher,
+    fetch: session.fetchWithJwks(fetcher),
   }));
   assert.equal(response.status, 200);
   assert.deepEqual(calls.slice(0, 2), [

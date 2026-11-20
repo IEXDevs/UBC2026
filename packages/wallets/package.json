@@ -6,6 +6,7 @@
   "exports": {
     ".": "./wallets.mjs",
     "./privy": "./privy.mjs",
+    "./privy-access-token": "./privy-access-token.mjs",
     "./balances": "./balances.mjs"
   },
   "scripts": { "test": "node --test wallets.test.mjs privy.test.mjs privy.worker-login.test.mjs balances.test.mjs" },
