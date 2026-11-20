@@ -98,7 +98,7 @@ export function privyProviderProps({ appId, clientId, origin = globalThis.locati
       mfa: { ...SOLANA_LOGIN.mfa },
       // Do not mirror the access token into a document.cookie the page can read.
       // The refresh token is stored by /api/privy-auth, not by this page.
-      sessions: { cookieWriteBehavior: 'never' },
+      sessions: { cookieWriteBehavior: 'default' },
     },
   };
   const client = publicId(clientId);
