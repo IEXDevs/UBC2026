@@ -36,7 +36,9 @@ export default function ProviderAdd({ open, onClose, onSaved }) {
 
   function submit(event) {
     event.preventDefault();
-    const result = saveProvider(localStorage, draft);
+    let result;
+    try { result = saveProvider(localStorage, draft); }
+    catch { setNote('Browser storage is unavailable. Allow storage and try again.'); return; }
     if (!result.ok) {
       setNote(noteFor(result.reason));
       return;
@@ -55,18 +57,19 @@ export default function ProviderAdd({ open, onClose, onSaved }) {
         onMouseDown={event => event.stopPropagation()}
         onSubmit={submit}
       >
-        <h2 id="provider-add-title">Add provider</h2>
+        <p className="plugin-kicker">Model providers</p>
+        <h2 id="provider-add-title">Add API provider</h2>
         <p className="quiet">The token stays on this device. Chat still uses the signed-in model key.</p>
         <label>
-          Name
-          <input aria-label="Provider name" placeholder="Provider name" value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} />
+          Provider name
+          <input aria-label="Provider name" autoFocus required maxLength={41} placeholder="e.g. OpenRouter" value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} />
         </label>
         <label>
           API token
-          <input aria-label="API token" type="password" autoComplete="off" placeholder="API token" value={draft.token} onChange={event => setDraft(current => ({ ...current, token: event.target.value }))} />
+          <input aria-label="API token" type="password" autoComplete="off" required maxLength={256} spellCheck={false} placeholder="Enter API token" value={draft.token} onChange={event => setDraft(current => ({ ...current, token: event.target.value }))} />
         </label>
         <label>
-          URL
+          Base URL (optional)
           <input aria-label="Provider URL" placeholder="https://api.example.com" value={draft.baseUrl} onChange={event => setDraft(current => ({ ...current, baseUrl: event.target.value }))} />
         </label>
         {note ? <p className="voice-note" role="status">{note}</p> : null}

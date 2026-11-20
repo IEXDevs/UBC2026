@@ -6,12 +6,10 @@ import AccountStats from './AccountStats';
 import { profileStats } from '../lib/statistics.mjs';
 import { motion } from 'motion/react';
 import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
-import AddressCopy from './AddressCopy';
 import ProfileMark from './ProfileMark';
 import LinkedLogins from './LinkedLogins';
 import { usePresence } from './usePresence';
-import ProviderAdd from './ProviderAdd';
-import { readProviderViews, removeProvider } from '../lib/provider-tokens.mjs';
+import ConnectedWallets from './ConnectedWallets';
 
 export default function ProfileSheet({
   open,
@@ -35,16 +33,12 @@ export default function ProfileSheet({
   const [displayName, setDisplayName] = useState(profile?.displayName || accountLabel || '');
   const [handle, setHandle] = useState(profile?.handle || '');
   const [note, setNote] = useState('');
-  const [providers, setProviders] = useState([]);
-  const [providerOpen, setProviderOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setDisplayName(profile?.displayName || accountLabel || '');
     setHandle(profile?.handle || '');
     setNote('');
-    setProviders(readProviderViews(localStorage));
-    setProviderOpen(false);
   }, [open, profile, accountLabel]);
 
   useEffect(() => {
@@ -117,7 +111,6 @@ export default function ProfileSheet({
                   onChange={event => setHandle(event.target.value.replace(/^@/, ''))}
                 />
               </label>
-              <p className="quiet">@{handle || 'alex'} pays this account. @richclub.sol goes through SNS, not this directory.</p>
               {note ? <p className="voice-note" role="status">{note}</p> : null}
               <button type="submit" className="solid">Save profile</button>
             </form>
@@ -129,22 +122,11 @@ export default function ProfileSheet({
           <p className="plugin-kicker">Stats</p>
           <AccountStats rows={profileStats({ voiceMs, talks, payments, transfers })} />
           <p className="quiet">Talk time is seconds on this device. Net PnL is inflows minus outflows. devnet execution, mainnet pricing.</p>
-          <p className="plugin-kicker">Wallet</p>
+          <p className="plugin-kicker">Wallets</p>
           {signedIn ? (
             <>
-              <p className="profile-balance">{wallets?.length ? glance.balanceLabel : 'No wallet'}</p>
-              <p className="quiet">{wallets?.length ? glance.label : 'Sign-in provisions the main Privy wallet'}</p>
-              <AddressCopy address={glance.address} />
-              <p className="quiet">Balance is from live positions when bots open them. devnet execution, mainnet pricing.</p>
-              <ul className="profile-wallets">
-                {(wallets || []).map(wallet => (
-                  <li key={wallet.id}>
-                    <strong>{wallet.label}</strong>
-                    <AddressCopy address={wallet.address} />
-                  </li>
-                ))}
-              </ul>
-              <LinkedLogins />
+              <ConnectedWallets wallets={wallets} />
+              <LinkedLogins showWallets={false} />
             </>
           ) : (
             <>
@@ -155,32 +137,7 @@ export default function ProfileSheet({
           {signedIn ? (
             <button type="button" className="ghost" onClick={onLogout}>Log out</button>
           ) : null}
-          <p className="plugin-kicker">Providers</p>
-          {providers.length ? (
-            <ul className="provider-list">
-              {providers.map(item => (
-                <li key={item.id}>
-                  <span>
-                    <strong>{item.name}</strong>
-                    <span className="quiet">{item.hint ? `Token ${item.hint}` : 'Custom provider'}</span>
-                  </span>
-                  <button type="button" className="provider-remove" onClick={() => {
-                    removeProvider(localStorage, item.id);
-                    setProviders(readProviderViews(localStorage));
-                  }}>Remove</button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="quiet">No custom providers on this device.</p>
-          )}
-          <button type="button" className="ghost" onClick={() => setProviderOpen(true)}>Add Provider</button>
         </div>
-        <ProviderAdd
-          open={providerOpen}
-          onClose={() => setProviderOpen(false)}
-          onSaved={() => setProviders(readProviderViews(localStorage))}
-        />
       </motion.section>
     </div>
   );

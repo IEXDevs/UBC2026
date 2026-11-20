@@ -31,12 +31,21 @@ test('a saved provider keeps the token out of the catalog view', () => {
   assert.equal(publicProvider(null), null);
 });
 
-test('Add Provider opens from the model menu and profile settings', () => {
+test('provider management lives in Plugins, not profile or wallet settings', () => {
   const prompt = readFileSync(join(web, 'components/PromptBar.jsx'), 'utf8');
   const profile = readFileSync(join(web, 'components/ProfileSheet.js'), 'utf8');
+  const wallets = readFileSync(join(web, 'components/WalletsSheet.js'), 'utf8');
+  const plugins = readFileSync(join(web, 'components/PluginsSheet.js'), 'utf8');
+  const providers = readFileSync(join(web, 'components/ModelProviders.js'), 'utf8');
   const dialog = readFileSync(join(web, 'components/ProviderAdd.js'), 'utf8');
   assert.match(prompt, /label: 'Add Provider'/);
-  assert.match(profile, />Add Provider</);
+  assert.doesNotMatch(profile, /ProviderAdd|provider-tokens|@richclub\.sol/);
+  assert.doesNotMatch(wallets, /ProviderAdd|provider-tokens/);
+  assert.match(plugins, />Model providers</);
+  assert.match(plugins, /<ModelProviders/);
+  assert.match(providers, /<ProviderAdd/);
+  assert.match(providers, /readProviderViews/);
+  assert.match(providers, /removeProvider/);
   assert.match(dialog, /saveProvider/);
   assert.match(dialog, /aria-labelledby="provider-add-title"/);
 });

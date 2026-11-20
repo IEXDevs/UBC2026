@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppWindow, BadgeDollarSign, Check, ChevronRight, Fingerprint, Search } from 'lucide-react';
 import { PLUGIN_CHIPS, pluginCatalog, readSharedLinks, withSharedLinks, writeSharedLinks } from '../lib/connectors.mjs';
-import { readProviderViews, removeProvider } from '../lib/provider-tokens.mjs';
-import ProviderAdd from './ProviderAdd';
 import Spotlight from './bits/Spotlight';
 import './bits/Spotlight.css';
 
@@ -50,19 +48,14 @@ export default function ConnectorsPane({ connectors = [] }) {
   const [connectedOnly, setConnectedOnly] = useState(false);
   const [showAllRecommended, setShowAllRecommended] = useState(false);
   const [extra, setExtra] = useState([]);
-  const [providers, setProviders] = useState([]);
-  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     setExtra(readSharedLinks());
-    setProviders(readProviderViews(localStorage));
   }, []);
 
   const rows = useMemo(() => {
-    const catalog = withSharedLinks(connectors, extra);
-    const known = new Set(catalog.map(item => item.id));
-    return [...providers.filter(item => !known.has(item.id)), ...catalog];
-  }, [connectors, extra, providers]);
+    return withSharedLinks(connectors, extra);
+  }, [connectors, extra]);
   const linked = rows.filter(row => row.linked);
   const sections = useMemo(
     () => pluginCatalog(rows, { query, chip, connectedOnly, showAllRecommended }),
@@ -72,18 +65,11 @@ export default function ConnectorsPane({ connectors = [] }) {
   function remember(next) {
     setExtra(next);
     writeSharedLinks(next);
-    setProviders(readProviderViews(localStorage));
   }
 
   function toggle(item) {
     if (item.builtin) return;
-    if (item.custom) {
-      removeProvider(localStorage, item.id);
-      remember(extra.filter(id => id !== item.id));
-      return;
-    }
     if (item.linked) {
-      removeProvider(localStorage, item.id);
       remember(extra.filter(id => id !== item.id));
       return;
     }
@@ -180,16 +166,6 @@ export default function ConnectorsPane({ connectors = [] }) {
           </div>
         </section>
       ))}
-      <div className="provider-add">
-        <button type="button" className="app-view-all" onClick={() => setAdding(true)}>
-          Add Provider
-        </button>
-      </div>
-      <ProviderAdd
-        open={adding}
-        onClose={() => setAdding(false)}
-        onSaved={() => setProviders(readProviderViews(localStorage))}
-      />
       </div>
     </section>
   );

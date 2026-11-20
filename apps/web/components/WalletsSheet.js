@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
-import { X } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, ChartNoAxesCombined, Coins, History, KeyRound, Layers, Wallet, X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
 import PortfolioGraph from './PortfolioGraph';
 import PrivyKeyButton from './PrivyKeyButton';
 import TokenScreen from './TokenScreen';
+import ConnectedWallets from './ConnectedWallets';
 import SlideCommit from './bits/SlideCommit';
 import TxnLog from './TxnLog';
 import TxnPreview from './TxnPreview';
@@ -31,14 +32,15 @@ import {
 import { sendPreview, swapPreview } from '../lib/txn-preview.mjs';
 
 const PANES = [
-  { id: 'assets', label: 'Assets' },
-  { id: 'portfolio', label: 'Portfolio' },
-  { id: 'send', label: 'Send' },
-  { id: 'receive', label: 'Receive' },
-  { id: 'swap', label: 'Swap' },
-  { id: 'tokens', label: 'Tokens' },
-  { id: 'history', label: 'History' },
-  { id: 'keys', label: 'Keys' },
+  { id: 'assets', label: 'Overview', icon: Layers, description: 'Your balances and assets, at a glance.' },
+  { id: 'wallets', label: 'Connections', icon: Wallet, description: 'Manage your connected Solana wallets.' },
+  { id: 'portfolio', label: 'Portfolio', icon: ChartNoAxesCombined, description: 'See how your assets are distributed.' },
+  { id: 'send', label: 'Send', icon: ArrowUpRight, description: 'Transfer funds from your agent wallet.' },
+  { id: 'receive', label: 'Receive', icon: ArrowDownLeft, description: 'Your wallet address and payment details.' },
+  { id: 'swap', label: 'Swap', icon: ArrowLeftRight, description: 'Review a token swap before confirming.' },
+  { id: 'tokens', label: 'Tokens', icon: Coins, description: 'Choose which tokens appear in your wallet.' },
+  { id: 'history', label: 'Activity', icon: History, description: 'Your recent transactions.' },
+  { id: 'keys', label: 'Security', icon: KeyRound, description: 'Manage your wallet keys securely with Privy.' },
 ];
 
 export default function WalletsSheet({
@@ -118,7 +120,7 @@ export default function WalletsSheet({
         onMouseDown={event => event.stopPropagation()}
       >
         <nav className="wallet-nav" aria-label="Wallet sections">
-          <strong id="wallets-title">Wallet</strong>
+          <strong id="wallets-title"><Wallet size={19} />Wallets</strong>
           {PANES.map(item => (
             <button
               key={item.id}
@@ -127,17 +129,20 @@ export default function WalletsSheet({
               aria-current={pane === item.id ? 'page' : undefined}
               onClick={() => setPane(item.id)}
             >
+              <item.icon size={17} strokeWidth={1.7} />
               {item.label}
             </button>
           ))}
+          <span className="wallet-network"><i />Solana devnet</span>
         </nav>
         <div className="wallet-body">
           <div className="sheet-head">
-            <h2>{PANES.find(item => item.id === pane)?.label}</h2>
+            <div><p className="plugin-kicker">Wallets</p><h2>{PANES.find(item => item.id === pane)?.label}</h2><p className="quiet">{PANES.find(item => item.id === pane)?.description}</p></div>
             <button type="button" className="icon-btn" aria-label="Close wallets" onClick={onClose}>
               <X size={18} strokeWidth={1.75} />
             </button>
           </div>
+          {pane === 'wallets' ? <ConnectedWallets wallets={wallets} /> : null}
           {rows.length > 1 ? (
             <div className="wallet-switch" role="tablist" aria-label="Wallets">
               {rows.map(row => (
@@ -158,6 +163,13 @@ export default function WalletsSheet({
             <>
               {note ? <p className="quiet">{note}</p> : null}
               {signedIn ? (
+                <>
+                <div className="wallet-quick-actions">
+                  <button type="button" onClick={() => setPane('send')}><ArrowUpRight size={18} /><span>Send</span></button>
+                  <button type="button" onClick={() => setPane('receive')}><ArrowDownLeft size={18} /><span>Receive</span></button>
+                  <button type="button" onClick={() => setPane('swap')}><ArrowLeftRight size={18} /><span>Swap</span></button>
+                  <button type="button" onClick={() => setPane('wallets')}><Wallet size={18} /><span>Wallets</span></button>
+                </div>
                 <TokenScreen
                   open={open}
                   preview={devPreview}
@@ -165,6 +177,7 @@ export default function WalletsSheet({
                   onReceive={() => setPane('receive')}
                   onSwap={() => setPane('swap')}
                 />
+                </>
               ) : <p className="quiet">Sign in to see tokens, the chart, and send or receive.</p>}
             </>
           ) : null}
