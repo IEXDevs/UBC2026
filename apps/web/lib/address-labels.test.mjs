@@ -9,8 +9,22 @@ const short = 'EPjFW...TDt1v';
 test('copy targets use the full address behind an exact shortened label', () => {
   assert.equal(addressForLabel(short, [address, address]), address);
   assert.deepEqual(addressTextParts(`Send to (${short}), then ${short}.`, [address]), [
-    { text: 'Send to (' }, { text: short, address }, { text: '), then ' },
-    { text: short, address }, { text: '.' },
+    { text: 'Send to (' }, { text: short, address, punctuation: '),' }, { text: ' then ' },
+    { text: short, address, punctuation: '.' },
+  ]);
+});
+
+test('trailing punctuation stays with the label without changing the copy target or surrounding text', () => {
+  for (const punctuation of ['.', ',', '!?', ');', '”', '…', '\"']) {
+    assert.deepEqual(addressTextParts(`Wallet ${short}${punctuation} Next`, [address]), [
+      { text: 'Wallet ' }, { text: short, address, punctuation }, { text: ' Next' },
+    ]);
+  }
+  assert.deepEqual(addressTextParts(`${short} .`, [address]), [
+    { text: short, address }, { text: ' .' },
+  ]);
+  assert.deepEqual(addressTextParts(`${short},${short}.`, [address]), [
+    { text: short, address, punctuation: ',' }, { text: short, address, punctuation: '.' },
   ]);
 });
 

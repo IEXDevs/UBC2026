@@ -85,7 +85,14 @@ function addressText(node, text, address) {
       timer = window.setTimeout(() => status.replaceChildren(), 1200);
     };
     button.append(label, status);
-    node.append(button);
+    if (part.punctuation) {
+      const token = document.createElement('span');
+      token.className = 'address-copy-token';
+      token.append(button, document.createTextNode(part.punctuation));
+      node.append(token);
+    } else {
+      node.append(button);
+    }
   }
 }
 

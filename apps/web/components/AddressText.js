@@ -5,6 +5,8 @@ import AddressCopy from './AddressCopy';
 
 export default function AddressText({ text, addresses = [], renderText = value => value }) {
   return addressTextParts(text, addresses).map((part, index) => part.address
-    ? <AddressCopy key={index} address={part.address} inline />
+    ? part.punctuation
+      ? <span key={index} className="address-copy-token"><AddressCopy address={part.address} inline />{part.punctuation}</span>
+      : <AddressCopy key={index} address={part.address} inline />
     : <span key={index}>{renderText(part.text)}</span>);
 }

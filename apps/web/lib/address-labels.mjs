@@ -18,8 +18,10 @@ export function addressTextParts(text, addresses = []) {
     const address = addressForLabel(match[0], addresses);
     if (!address) continue;
     if (match.index > end) parts.push({ text: value.slice(end, match.index) });
-    parts.push({ text: match[0], address });
     end = match.index + match[0].length;
+    const punctuation = value.slice(end).match(/^[\p{Pe}\p{Pf}.,!?;:…'"]+/u)?.[0] || '';
+    parts.push({ text: match[0], address, ...(punctuation ? { punctuation } : {}) });
+    end += punctuation.length;
   }
   if (end < value.length) parts.push({ text: value.slice(end) });
   return parts;
