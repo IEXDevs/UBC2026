@@ -37,6 +37,8 @@ npm test -w @ubc2026/agent-runtime
 
 Browser calls from the Next shell (`http://localhost:3000`) need CORS. The Worker allowlists that origin (and `127.0.0.1:3000`) by default and answers `OPTIONS` preflights for `x-owner-id`. Add more origins with a comma-separated `CORS_ORIGINS` Worker var / secret after you deploy the web app.
 
+Deploying the agent-deletion API before applying `20261119010000_agent_deletions.sql` leaves existing deletion and sync behavior in place. With the migration, deletions are recorded by owner and agent ID, including agents that only existed in a browser. Earlier deletions cannot be reconstructed.
+
 Deploy (after secrets):
 
 ```bash

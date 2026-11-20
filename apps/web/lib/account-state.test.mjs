@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createAccountMirror, mirrorEntries } from './account-state.mjs';
 import { catalogStorageKey } from './file-catalog.mjs';
 import { acceptanceStorageKey, REVIEW_THRESHOLD_KEY, SPEND_PERMISSION_KEY } from './spend-permission.mjs';
-import { looksStorageKey, rosterStorageKey, writeLooks, writeRoster } from './roster.mjs';
+import { adoptLegacyRoster, LEGACY_ROSTER_KEY, looksStorageKey, rosterStorageKey, writeLooks, writeRoster } from './roster.mjs';
 import { talkStorageKey, writeTalks } from './talk-store.mjs';
 import { accountStorageKey } from './account-code.mjs';
 
@@ -17,14 +17,14 @@ function memory(seed = {}) {
   };
 }
 
-function harness({ server = [], listStatus = 200, source = 'supabase', ownerId = 'alice', local = {} } = {}) {
+function harness({ server = [], deletedAgentIds = [], listStatus = 200, source = 'supabase', ownerId = 'alice', local = {} } = {}) {
   const storage = memory(local);
   const posts = [];
   const timers = [];
   const fetchImpl = async (url, init = {}) => {
     if ((init.method || 'GET') === 'GET') {
       if (listStatus !== 200) return Response.json({ error: 'x' }, { status: listStatus });
-      return Response.json({ ok: true, source, items: server });
+      return Response.json({ ok: true, source, items: server, deletedAgentIds });
     }
     const body = JSON.parse(init.body);
     posts.push(body);
@@ -96,6 +96,38 @@ test('hydrate does not import cached empty startup defaults from older builds', 
     },
   });
   await mirror.hydrate();
+  assert.deepEqual(posts, []);
+});
+
+test('account hydration hides deleted agents in stale shared and device-only desk data', async () => {
+  const deleted = { id: 'bot_deleted', name: 'Deleted' };
+  const retained = { id: 'bot_retained', name: 'Retained' };
+  const roster = { order: [deleted.id, retained.id], extra: [deleted, retained] };
+  const looks = { [deleted.id]: { name: deleted.name }, [retained.id]: { name: retained.name } };
+  const talks = { [deleted.id]: [{ id: 'l1', role: 'user', text: 'removed' }], [retained.id]: [{ id: 'l2', role: 'user', text: 'kept' }] };
+  const { mirror, storage, posts } = harness({
+    deletedAgentIds: [deleted.id],
+    server: [
+      { name: 'roster', value: JSON.stringify(roster) },
+      { name: 'looks', value: JSON.stringify(looks) },
+    ],
+    local: { [talkStorageKey('alice')]: JSON.stringify(talks) },
+  });
+  assert.equal((await mirror.hydrate()).ok, true);
+  assert.deepEqual(JSON.parse(storage.getItem(rosterStorageKey('alice'))), { order: [retained.id], extra: [retained] });
+  assert.deepEqual(JSON.parse(storage.getItem(looksStorageKey('alice'))), { [retained.id]: looks[retained.id] });
+  assert.deepEqual(JSON.parse(storage.getItem(talkStorageKey('alice'))), { [retained.id]: talks[retained.id] });
+  assert.deepEqual(JSON.parse(posts[0].items[0].value), { [retained.id]: talks[retained.id] });
+});
+
+test('desk hydration does not re-adopt a deleted agent from legacy storage', async () => {
+  const { mirror, posts } = harness({
+    deletedAgentIds: ['bot_deleted'],
+    local: { [LEGACY_ROSTER_KEY]: '{"order":["bot_deleted"],"extra":[]}' },
+  });
+  await mirror.hydrate();
+  assert.equal(adoptLegacyRoster(mirror.storage, 'alice').adopted, false);
+  await mirror.flush();
   assert.deepEqual(posts, []);
 });
 
