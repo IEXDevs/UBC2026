@@ -206,7 +206,8 @@ export default function GlideSelect({
   const rowAt = (y) => {
     const drag = scrub.current;
     if (!drag) return null;
-    return glideRowAt(y, { top: drag.list.getBoundingClientRect().top, scrollTop: drag.list.scrollTop, padding: PAD, step, count: items.length });
+    const { top, bottom } = drag.list.getBoundingClientRect();
+    return glideRowAt(y, { top, bottom, scrollTop: drag.list.scrollTop, step, count: items.length });
   };
   const onListDown = (event) => {
     if (scrub.current) return;

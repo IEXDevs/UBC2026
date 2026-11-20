@@ -1,4 +1,5 @@
-export function glideRowAt(clientY, { top, scrollTop = 0, padding = 4, step, count }) {
-  const index = Math.floor((clientY - top + scrollTop - padding) / step);
+export function glideRowAt(clientY, { top, bottom, scrollTop = 0, step, count }) {
+  if (clientY < top || clientY >= bottom) return null;
+  const index = Math.floor((clientY - top + scrollTop) / step);
   return index >= 0 && index < count ? index : null;
 }
