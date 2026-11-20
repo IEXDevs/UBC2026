@@ -700,6 +700,17 @@ test('POST /api/wallets without bearer returns login_required before Privy', asy
   assert.equal((await res.json()).error, 'login_required');
 });
 
+test('POST /api/wallets/additional without bearer returns login_required', async () => {
+  const { POST } = await import('../app/api/wallets/additional/route.js');
+  const res = await POST(new Request('http://localhost/api/wallets/additional', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ label: 'Additional 2' }),
+  }));
+  assert.equal(res.status, 401);
+  assert.equal((await res.json()).error, 'login_required');
+});
+
 /**
  * Rigor audit — POST /api/wallets missing Privy config
  * Achieves: bearer present but no Privy secrets → 503 missing_config with env names only.

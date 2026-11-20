@@ -54,7 +54,7 @@ import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
-import { signSelectedWalletTransaction } from '../lib/wallet-signing.mjs';
+import { serverSignsWallet, signSelectedWalletTransaction } from '../lib/wallet-signing.mjs';
 import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
   deleteOwnerBot,
@@ -403,6 +403,18 @@ function AuthedShell() {
       onRetireWallet={(id) => {
         setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id) : current));
       }}
+      onWalletCreated={(wallet) => {
+        const incoming = Array.isArray(wallet) ? wallet : [wallet];
+        setLiveWallets((current) => {
+          const list = Array.isArray(current) ? [...current] : [];
+          for (const item of incoming) {
+            if (!item?.address || list.some((row) => row?.id === item.id || row?.address === item.address)) continue;
+            list.push(item);
+          }
+          return list.length ? list : incoming.filter((item) => item?.address);
+        });
+        setWalletError('');
+      }}
     />
   );
 }
@@ -459,7 +471,7 @@ function DepositSigner({ signerRef }) {
   return null;
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, privyLive = false }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, onWalletCreated = null, privyLive = false }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
   const [looks, setLooks] = useState({});
@@ -1210,7 +1222,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           return { response, body: await response.json().catch(() => ({})) };
         };
         let result;
-        if (from.spendable === false) {
+        if (!serverSignsWallet(from)) {
           const prepared = await post({ phase: 'prepare' });
           if (!prepared.response.ok || !prepared.body.transaction) return { ok: false, message: 'The transfer was not prepared. Check the balance and SOL network fees.' };
           const transaction = base64ToBytes(prepared.body.transaction);
@@ -1222,9 +1234,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           const messages = {
             insufficient_balance: 'Amount exceeds this wallet’s balance.',
             wallet_frozen: 'That wallet is frozen.',
+            wallet_not_owned: 'That wallet is not ready to send. Sign out and sign in again.',
             unsupported_mint: 'This token’s transfer rules are not supported.',
             simulation_failed: 'The send could not be simulated. Check the token balance and SOL for fees or token-account rent.',
             asset_changed: 'Token details changed. Reload your wallet balances before sending.',
+            wallet_authorization_failed: 'Privy did not sign the send. Sign in again, then slide once more.',
+            privy_failed: 'Privy did not sign the send. Sign in again, then slide once more.',
           };
           return { ok: false, message: messages[body.error] || 'The asset send did not post. Nothing was marked sent.' };
         }
@@ -2255,6 +2270,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         resolveRecipient={resolveMention}
         solanaBalance={solanaBalance}
         onRetire={retireWallet}
+        onWalletCreated={onWalletCreated}
       />
       <PartySheet
         open={Boolean(party)}

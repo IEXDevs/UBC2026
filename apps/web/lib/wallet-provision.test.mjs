@@ -286,7 +286,7 @@ test('wallet provision notes stay actionable and secret-free', () => {
 /**
  * Achieves: a second embedded Solana wallet asks Privy for the next HD index, and external wallets do not count.
  * Fails when: the first wallet passes an index, or a Phantom address increments the count.
- * Oracle: count 0 → undefined options; one privy wallet → walletIndex 1; phantom-only count is 0.
+ * Oracle: count 0 → undefined options; one privy wallet → createAdditional; phantom-only count is 0.
  * Side effects / state checked: none.
  * Gaps: does not call Privy.
  */
@@ -307,8 +307,31 @@ test('another embedded wallet uses the next HD index', () => {
       { type: 'wallet', address: '0xabc', chainType: 'ethereum', walletClientType: 'privy' },
     ],
   }), 1);
-  assert.deepEqual(embeddedCreateOptions(1), { walletIndex: 1 });
-  assert.deepEqual(embeddedCreateOptions(40), { walletIndex: 20 });
+  assert.deepEqual(embeddedCreateOptions(1), { createAdditional: true });
+  assert.deepEqual(embeddedCreateOptions(40), { createAdditional: true });
+  assert.equal(embeddedSolanaCount({
+    linkedAccounts: [
+      { type: 'wallet', address: embedded, chainType: 'solana', walletClientType: 'privy-v2', connectorType: 'embedded' },
+    ],
+  }), 1);
+  const v2 = walletsFromPrivyUser({
+    linkedAccounts: [
+      { type: 'wallet', id: 'cm5addwallet1234567890abcd', address: embedded, chainType: 'solana', walletClientType: 'privy-v2' },
+    ],
+  }, 'did:privy:user1');
+  assert.equal(v2[0].spendable, true);
+  const replaced = mergeObservedWallets(
+    [{ id: `linked_${embedded}`, kind: 'additional', label: 'Linked', address: embedded, frozen: false, provider: 'privy', spendable: false }],
+    {
+      linkedAccounts: [
+        { type: 'wallet', id: 'cm5addwallet1234567890abcd', address: embedded, chainType: 'solana', walletClientType: 'privy-v2' },
+      ],
+    },
+    'did:privy:user1',
+  );
+  assert.equal(replaced.length, 1);
+  assert.equal(replaced[0].id, 'cm5addwallet1234567890abcd');
+  assert.equal(replaced[0].spendable, true);
 });
 
 test('walletConfigFlags reports alignment without leaking app ids', async () => {

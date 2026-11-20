@@ -822,6 +822,31 @@ test('login keeps an existing main wallet and maps later embedded wallets as add
  * Side effects: mocked fetch call list inspected where present.
  * Gaps: see assertion strength in body; strengthen if a defect could still pass.
  */
+test('login treats a privy-v2 embedded wallet as the spendable main wallet', async () => {
+  const phantom = 'So11111111111111111111111111111111111111112';
+  const { fetcher, calls } = mockFetch([
+    {
+      match: url => url.includes('/v1/users/'),
+      body: userWith([
+        { ...embedded(walletId, 0), wallet_client_type: 'privy-v2' },
+        { type: 'wallet', address: phantom, chain_type: 'solana', wallet_client_type: 'phantom', connector_type: 'solana_adapter', id: 'phantomwalletid1234567890' },
+      ]),
+    },
+  ]);
+  const result = await client({ fetcher }).acceptLogin({
+    accessToken,
+    ownerId: 'user_1',
+    origin: 'http://localhost:3000',
+  });
+  assert.equal(result.created, false);
+  assert.equal(result.main.id, walletId);
+  assert.equal(result.main.spendable, true);
+  assert.equal(result.additional.length, 1);
+  assert.equal(result.additional[0].address, phantom);
+  assert.equal(result.additional[0].spendable, false);
+  assert.equal(calls.some(call => call.init.method === 'POST'), false);
+});
+
 test('additional wallets require a main wallet and a label', async () => {
   const empty = mockFetch([
     { match: url => url.includes('/v1/users/'), body: userWith([]) },

@@ -663,6 +663,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'wallets.list', method: 'GET', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
   { id: 'solana.balance', method: 'GET', path: '/api/solana-balance', phase: 1, auth: 'privy', status: 'guarded' },
   { id: 'wallets.create', method: 'POST', path: '/api/wallets', phase: 1, auth: 'privy', status: 'live' },
+  { id: 'wallets.additional', method: 'POST', path: '/api/wallets/additional', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.persist', method: 'POST', path: '/api/wallets/persist', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.sign', method: 'POST', path: '/api/wallets/:walletId/sign', phase: 1, auth: 'privy', status: 'live' },
   { id: 'wallets.export', method: 'POST', path: '/api/wallets/:walletId/export', phase: 1, auth: 'privy', status: 'live' },
