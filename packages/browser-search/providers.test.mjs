@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSearch, createScrape, createBrowserProvider, assertPublicHttpUrl, ProviderError } from './providers.mjs';
+import { createSearch, createScrape, createBrowserProvider, assertPublicHttpUrl, ProviderError, withEnglishGoogle } from './providers.mjs';
 
 const reply = value => async () => Response.json(value);
 
@@ -237,17 +237,17 @@ test('openTab navigates with PUT json/new and rejects unsafe urls', async () => 
     apiToken: 'b',
     fetcher: async (url, options) => {
       assert.equal(options.method, 'PUT');
-      assert.match(url, /\/browser\/abc\/json\/new\?url=https%3A%2F%2Fwww\.google\.com%2F$/);
+      assert.match(url, /\/browser\/abc\/json\/new\?url=https%3A%2F%2Fwww\.google\.com%2F%3Fhl%3Den%26gl%3Dus$/);
       return Response.json({
         id: 'TAB123',
         type: 'page',
-        url: 'https://www.google.com/',
+        url: 'https://www.google.com/?hl=en&gl=us',
         title: 'Google',
       });
     },
   });
   const tab = await provider.openTab('abc', 'https://www.google.com/');
-  assert.deepEqual(tab, { targetId: 'TAB123', url: 'https://www.google.com/', title: 'Google' });
+  assert.deepEqual(tab, { targetId: 'TAB123', url: 'https://www.google.com/?hl=en&gl=us', title: 'Google' });
   await assert.rejects(provider.openTab('abc', 'javascript:alert(1)'), { code: 'invalid_navigate' });
 });
 
@@ -354,4 +354,14 @@ test('assertPublicHttpUrl accepts public http(s) and rejects unsafe schemes', ()
   assert.throws(() => assertPublicHttpUrl('https://user:pass@example.com/'), ProviderError);
   assert.throws(() => assertPublicHttpUrl('not a url'), ProviderError);
   assert.throws(() => assertPublicHttpUrl('a'.repeat(2001)), ProviderError);
+});
+
+test('Google pages open in English / US unless the url already sets hl or gl', () => {
+  const pin = value => withEnglishGoogle(new URL(value)).href;
+  assert.equal(pin('https://www.google.com/search?q=sf+weather'), 'https://www.google.com/search?q=sf+weather&hl=en&gl=us');
+  assert.equal(pin('https://www.google.com.hk/'), 'https://www.google.com.hk/?hl=en&gl=us');
+  assert.equal(pin('https://maps.google.com/?q=cafe'), 'https://maps.google.com/?q=cafe&hl=en&gl=us');
+  assert.equal(pin('https://www.google.com/search?q=x&hl=fr&gl=ca'), 'https://www.google.com/search?q=x&hl=fr&gl=ca');
+  assert.equal(pin('https://example.com/?q=google.com'), 'https://example.com/?q=google.com');
+  assert.equal(pin('https://google.com.evil.example/'), 'https://google.com.evil.example/');
 });
