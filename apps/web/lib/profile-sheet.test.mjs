@@ -2,6 +2,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+test('Send recipients do not require signing access and sender copy ends with a period', () => {
+  const picker = readFileSync(new URL('../components/SendToField.jsx', import.meta.url), 'utf8');
+  const sheet = readFileSync(new URL('../components/WalletsSheet.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(picker, /spendable|Read only/);
+  assert.match(picker, /if \(!row \|\| row\.disabled \|\| row\.frozen\) return/);
+  assert.match(picker, /const locked = row\.disabled \|\| row\.frozen/);
+  assert.match(sheet, /const walletReady = target\?\.kind === 'wallet' && !target\.frozen && asset\?\.symbol === 'USDC'/);
+  assert.doesNotMatch(sheet, /target\.spendable/);
+  assert.match(sheet, /`From \$\{active\.label\}\.`/);
+});
+
 /**
  * Achieves: keeps wallet management together without restoring the section sidebar.
  * Fails when: ProfileSheet grows wallet management, or the unified wallet drops an existing capability.
