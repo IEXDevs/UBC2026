@@ -29,6 +29,11 @@ export async function POST(request) {
   }
   const secrets = env();
   const appId = resolvePrivyAppId(secrets);
+  const missing = ['PRIVY_APP_SECRET', 'SOLANA_RPC_URL'].filter(name => !secrets[name]);
+  if (!appId) missing.unshift('PRIVY_APP_ID');
+  if (missing.length) {
+    return Response.json({ error: 'missing_config', missing }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+  }
   let ownerId;
   try {
     ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));

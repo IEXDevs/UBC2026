@@ -113,6 +113,13 @@ test('wallet move accepts a verified connected recipient and signs only with the
   assert.equal((await move()).status, 403);
   assert.equal(signing.length, 1, 'invalid requests never sign');
   assert.equal(broadcasts.length, 1, 'invalid requests never broadcast');
+  for (const name of ['PRIVY_APP_SECRET', 'SOLANA_RPC_URL']) {
+    delete process.env[name];
+    const unconfigured = await move();
+    assert.equal(unconfigured.status, 503);
+    assert.deepEqual(await unconfigured.json(), { error: 'missing_config', missing: [name] });
+    process.env[name] = settings[name];
+  }
 });
 
 test('profile claims and handle lookup share the configured runtime directory', async (t) => {
