@@ -1765,6 +1765,12 @@ button.add-agent:not(:disabled):hover {
   z-index: 80;
 }
 .backdrop.desk-lock .sheet { pointer-events: auto; }
+.desk-unlock-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
 .desk-unlock,
 .secret-mask {
   -webkit-text-security: disc;

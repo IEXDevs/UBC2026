@@ -36,6 +36,7 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
   const [slots, setSlots] = useState(() => Array.from({ length: 12 }, () => ''));
   const [seedProof, setSeedProof] = useState('');
   const active = useRef(false);
+  const unlockInput = useRef(null);
   useLayoutEffect(() => {
     active.current = true;
     return () => { active.current = false; };
@@ -80,6 +81,15 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
 
   const setting = replacing || (record == null && !serverLocked);
   const feedback = passwordFeedback(password, confirm, passwordProblem(password));
+
+  function clearUnlockPassword() {
+    const input = unlockInput.current;
+    if (!input || input.disabled) return;
+    input.value = '';
+    setPassword('');
+    setNote('');
+    input.focus();
+  }
 
   async function checkSeed() {
     const words = slots.map(word => word.trim().toLowerCase()).filter(Boolean);
@@ -262,24 +272,36 @@ export default function DeskLock({ ownerId, onUnlock, onClose, getAccessToken })
               onCopied={setCopied}
             />
           ) : (
-            <input
-              className="desk-unlock"
-              type="text"
-              name="maelstrom-desk-unlock"
-              aria-label="Password"
-              autoFocus
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              inputMode="text"
-              data-1p-ignore="true"
-              data-lpignore="true"
-              data-form-type="other"
-              value={password}
-              disabled={record === undefined || pending}
-              onChange={event => setPassword(event.target.value)}
-            />
+            <div className="desk-unlock-row">
+              <input
+                ref={unlockInput}
+                className="desk-unlock"
+                type="text"
+                name="maelstrom-desk-unlock"
+                aria-label="Password"
+                autoFocus
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                inputMode="text"
+                data-1p-ignore="true"
+                data-lpignore="true"
+                data-form-type="other"
+                value={password}
+                disabled={record === undefined || pending}
+                onChange={event => setPassword(event.target.value)}
+              />
+              <button
+                type="button"
+                className="ghost"
+                aria-label="Clear password"
+                disabled={record === undefined || pending}
+                onClick={clearUnlockPassword}
+              >
+                Clear
+              </button>
+            </div>
           )}
           {setting ? (
             <PasswordFeedback id="desk-password-rules" state={feedback.problem ? 'error' : (password ? 'ok' : '')}>
