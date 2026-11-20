@@ -271,7 +271,8 @@ export default function PromptBar({
     return [];
   }, [open, query, sources, commands]);
   const cursor = Math.min(active, Math.max(0, list.length - 1));
-  const canSend = !sendDisabled && (draft.trim().length > 0 || attachments.length > 0 || extraReady);
+  const blocked = typeof sendDisabled === 'function' ? sendDisabled(draft) : sendDisabled;
+  const canSend = !blocked && (draft.trim().length > 0 || attachments.length > 0 || extraReady);
   const armed = busy || canSend;
   const level = efforts[effortIndex] ?? '';
   const maxed = efforts.length > 1 && effortIndex === efforts.length - 1;

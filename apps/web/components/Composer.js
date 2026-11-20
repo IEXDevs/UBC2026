@@ -16,6 +16,7 @@ import GlideSelect from './GlideSelect';
 import PromptBar from './PromptBar';
 import AIProvidersSheet from './AIProvidersSheet';
 import { providerStorage } from '../lib/provider-storage.mjs';
+import { modelFreeCommand, needsChatModel } from '../lib/model-free-command.mjs';
 import {
   ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
   selectedModelRequest, visibleModelOptions,
@@ -554,7 +555,7 @@ export default function Composer({
   async function sendMessage(text) {
     const spoken = spokenFrom(text);
     if (!spoken) return;
-    if (!selectedModelRequest(modelStorage, modelRef.current)) {
+    if (needsChatModel(spoken) && !selectedModelRequest(modelStorage, modelRef.current)) {
       pushLine('note', 'Show a model in AI Providers before sending a message.');
       setAIProvidersOpen(true);
       return;
@@ -665,7 +666,12 @@ export default function Composer({
 
   async function runChat(spoken, prior, grants) {
     const selection = selectedModelRequest(modelStorage, modelRef.current);
-    if (!selection) {
+    if (!selection && modelFreeCommand(spoken) === 'platform-send') {
+      // onLine already opened the existing USDC approval flow in the shell.
+      sendingRef.current = false;
+      return;
+    }
+    if (!selection && needsChatModel(spoken, grants)) {
       sendingRef.current = false;
       pushLine('note', 'Show a model in AI Providers before sending a message.');
       setAIProvidersOpen(true);
@@ -1089,7 +1095,7 @@ export default function Composer({
           efforts={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.map(level => level.label) ?? []}
           defaultEffort={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.find(level => level.default)?.label ?? ''}
           busy={thinking}
-          sendDisabled={models.length === 0}
+          sendDisabled={text => models.length === 0 && needsChatModel(text)}
           background="transparent"
           color="#f5f5f5"
           menuBackground="#27272a"
