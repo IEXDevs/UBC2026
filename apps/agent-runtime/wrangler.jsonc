@@ -41,6 +41,8 @@
   // "kv_namespaces": [{ "binding": "STREAM_DEDUPE", "id": "<namespace-id>" }]
   // Secret names only (wrangler secret put). Values are never committed.
   // PRIVY_APP_ID, PRIVY_APP_SECRET, PRIVY_AUTHORIZATION_KEY (optional),
+  // PRIVY_SIGNER_ID or NEXT_PUBLIC_PRIVY_SIGNER_ID (public key quorum id; lets
+  // the app key sign and co-own user wallets),
   // SUPABASE_URL, SUPABASE_ANON_KEY,
   // SUPABASE_SERVICE_ROLE_KEY, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN,
   // META_MODEL_API_KEY, OPENROUTER_API_KEY, FIRECRAWL_API_KEY,

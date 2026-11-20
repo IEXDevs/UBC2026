@@ -186,7 +186,7 @@ function AuthedShell() {
   const signerTried = useRef(new Set());
 
   useEffect(() => {
-    if (!signedIn || !deskEntered) return undefined;
+    if (!signedIn) return undefined;
     const pending = walletsNeedingSigner(user, signerId).filter((address) => !signerTried.current.has(address));
     if (!pending.length) return undefined;
     (async () => {
@@ -200,7 +200,7 @@ function AuthedShell() {
       }
     })();
     return undefined;
-  }, [signedIn, deskEntered, accountsKey, signerId, addSigners]);
+  }, [signedIn, accountsKey, signerId, addSigners]);
 
   useEffect(() => {
     if (!deskOwner) {

@@ -68,6 +68,7 @@ export async function POST(request) {
       appSecret: secrets.PRIVY_APP_SECRET,
       rpcUrl: secrets.SOLANA_RPC_URL,
       authorizationKey: secrets.PRIVY_AUTHORIZATION_KEY || null,
+      signerId: readRootEnv('NEXT_PUBLIC_PRIVY_SIGNER_ID') || null,
     });
     const { main } = await client.ensureMainWallet({ privyUserId: ownerId, ownerId });
     if (!main || main.id !== plan.wallet.id || main.address !== plan.wallet.address) {

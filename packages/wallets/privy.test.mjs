@@ -1071,6 +1071,231 @@ test('additional wallets require a main wallet and a label', async () => {
   assert.deepEqual(signed.calls[1].body.additional_signers, [{ signer_id: 'keyquorum12345678' }]);
 });
 
+const signerQuorumId = 'keyquorum12345678';
+const ownerQuorumId = 'ownerquorum1234567890ab';
+const ownerToken = `eyJhbGciOiJFUzI1NiJ9.${Buffer.from(JSON.stringify({ sub: privyUserId })).toString('base64url')}.test`;
+
+/**
+ * Mock the owner-session HPKE exchange and verify PATCH authorization
+ * signatures with the exchanged session key, mirroring the owner-sign suite.
+ */
+function signerSyncFetcher({ walletSigners = [], quorumNested = [], quorumKeys = [], walletPatchStatus = 200, onPatch }) {
+  const suite = new CipherSuite({
+    kem: new DhkemP256HkdfSha256(), kdf: new HkdfSha256(), aead: new Chacha20Poly1305(),
+  });
+  const sessionKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const counts = { exchanges: 0, walletPatches: 0, quorumPatches: 0, walletGets: 0, quorumGets: 0 };
+  const patches = [];
+  const fetcher = async (url, init) => {
+    const path = new URL(url).pathname;
+    const method = init.method;
+    const body = init.body ? JSON.parse(init.body) : null;
+    if (method === 'GET' && path.startsWith('/v1/users/')) {
+      return Response.json(userWith([embedded(walletId, 0)]));
+    }
+    if (method === 'GET' && path === `/v1/wallets/${walletId}`) {
+      counts.walletGets++;
+      return Response.json({
+        id: walletId, chain_type: 'solana', address,
+        owner_id: ownerQuorumId, additional_signers: walletSigners,
+      });
+    }
+    if (method === 'GET' && path === `/v1/key_quorums/${ownerQuorumId}`) {
+      counts.quorumGets++;
+      return Response.json({
+        id: ownerQuorumId, user_ids: [privyUserId], authorization_keys: quorumKeys,
+        authorization_threshold: 1, key_quorum_ids: quorumNested,
+      });
+    }
+    if (method === 'POST' && path === '/v1/wallets/authenticate') {
+      counts.exchanges++;
+      assert.equal(body.user_jwt, ownerToken);
+      assert.equal(body.encryption_type, 'HPKE');
+      const recipientPublicKey = await crypto.subtle.importKey('spki', Buffer.from(body.recipient_public_key, 'base64'),
+        { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+      const sessionPkcs8 = sessionKey.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
+      const { enc, ct } = await suite.seal({ recipientPublicKey }, Buffer.from(sessionPkcs8));
+      return Response.json({
+        encrypted_authorization_key: {
+          encryption_type: 'HPKE',
+          encapsulated_key: Buffer.from(enc).toString('base64'),
+          ciphertext: Buffer.from(ct).toString('base64'),
+        },
+        expires_at: Date.now() + 60000,
+      });
+    }
+    if (method === 'PATCH' && (path === `/v1/wallets/${walletId}` || path === `/v1/key_quorums/${ownerQuorumId}`)) {
+      const headers = new Headers(init.headers);
+      const payload = Buffer.from(canonicalizeJson({
+        version: 1,
+        method: 'PATCH',
+        url: String(url),
+        body,
+        headers: {
+          'privy-app-id': headers.get('privy-app-id'),
+          'privy-request-expiry': headers.get('privy-request-expiry'),
+        },
+      }));
+      assert.equal(verify('sha256', payload, sessionKey.publicKey, Buffer.from(headers.get('privy-authorization-signature'), 'base64')), true);
+      patches.push({ path, body });
+      if (path === `/v1/wallets/${walletId}`) {
+        counts.walletPatches++;
+        if (walletPatchStatus !== 200) return Response.json({ error: { code: 'forbidden' } }, { status: walletPatchStatus });
+        return Response.json({ id: walletId, chain_type: 'solana', address, owner_id: ownerQuorumId, additional_signers: body.additional_signers });
+      }
+      counts.quorumPatches++;
+      return Response.json({ id: ownerQuorumId, ...body, authorization_keys: quorumKeys });
+    }
+    if (onPatch) return onPatch(url, init, body);
+    return Response.json({ error: 'unmocked' }, { status: 500 });
+  };
+  return { fetcher, counts, patches };
+}
+
+/**
+ * Rigor audit — login makes the app key a signer and a 1-of-k owner member
+ * Achieves: existing wallets get additional_signers plus the nested owner
+ * quorum, both PATCHes authorized by the owner session key, user stays owner.
+ * Fails when: sync is skipped, PATCHes are app-key-only, threshold != 1, the
+ * user is dropped from the quorum, or a second login repeats the updates.
+ * Oracle: Privy wallet / key-quorum update contracts (owner authorization).
+ * Side effects: mocked fetch counts and PATCH bodies inspected.
+ */
+test('login adds the app key as signer and owner-quorum member on existing wallets', async () => {
+  const { fetcher, counts, patches } = signerSyncFetcher({});
+  const privy = client({ authorizationKey, signerId: signerQuorumId, fetcher });
+  const result = await privy.acceptLogin({ accessToken: ownerToken, ownerId: privyUserId });
+  assert.equal(result.created, false);
+  assert.deepEqual(result.signerSync, [{ walletId, signer: 'added', owner: 'added' }]);
+  assert.equal(counts.exchanges, 1);
+  assert.equal(counts.walletPatches, 1);
+  assert.equal(counts.quorumPatches, 1);
+  const walletPatch = patches.find(patch => patch.path === `/v1/wallets/${walletId}`);
+  assert.deepEqual(walletPatch.body.additional_signers, [{ signer_id: signerQuorumId }]);
+  const quorumPatch = patches.find(patch => patch.path === `/v1/key_quorums/${ownerQuorumId}`);
+  assert.deepEqual(quorumPatch.body.user_ids, [privyUserId]);
+  assert.deepEqual(quorumPatch.body.key_quorum_ids, [signerQuorumId]);
+  assert.equal(quorumPatch.body.authorization_threshold, 1);
+
+  const again = await privy.acceptLogin({ accessToken: ownerToken, ownerId: privyUserId });
+  assert.deepEqual(again.signerSync, [{ walletId, signer: 'present', owner: 'present' }]);
+  assert.equal(counts.walletPatches, 1);
+  assert.equal(counts.quorumPatches, 1);
+  assert.equal(counts.exchanges, 1);
+});
+
+/**
+ * Rigor audit — already-configured wallets are not patched again
+ * Achieves: signer present on the wallet and nested in the owner quorum means
+ * reads only; no JWT exchange and no PATCH.
+ * Fails when: sync re-adds the signer or re-writes the quorum on every login.
+ * Oracle: Privy update contracts; idempotent provisioning decision.
+ * Side effects: mocked fetch counts inspected.
+ */
+test('login skips signer updates when the wallet and owner quorum already include the app key', async () => {
+  const { fetcher, counts } = signerSyncFetcher({
+    walletSigners: [{ signer_id: signerQuorumId }],
+    quorumNested: [signerQuorumId],
+  });
+  const result = await client({ authorizationKey, signerId: signerQuorumId, fetcher })
+    .acceptLogin({ accessToken: ownerToken, ownerId: privyUserId });
+  assert.deepEqual(result.signerSync, [{ walletId, signer: 'present', owner: 'present' }]);
+  assert.equal(counts.walletGets, 1);
+  assert.equal(counts.quorumGets, 1);
+  assert.equal(counts.exchanges, 0);
+  assert.equal(counts.walletPatches, 0);
+  assert.equal(counts.quorumPatches, 0);
+});
+
+/**
+ * Rigor audit — no owner session means no signer sync, never a failed login
+ * Achieves: ensureMainWallet (no access token) provisions without PATCHes;
+ * a rejected PATCH still returns the wallet record with a safe failure code.
+ * Fails when: sync runs without a session, or a sync failure throws into login.
+ * Oracle: owner-only update authorization; best-effort provisioning decision.
+ * Side effects: mocked fetch counts inspected.
+ */
+test('signer sync needs an owner session and never blocks login on failure', async () => {
+  const noSession = signerSyncFetcher({});
+  const provisioned = await client({ authorizationKey, signerId: signerQuorumId, fetcher: noSession.fetcher })
+    .ensureMainWallet({ privyUserId, ownerId: privyUserId });
+  assert.equal(provisioned.main.privyWalletId, walletId);
+  assert.equal(provisioned.signerSync, undefined);
+  assert.equal(noSession.counts.walletGets, 0);
+  assert.equal(noSession.counts.exchanges, 0);
+
+  const rejected = signerSyncFetcher({ walletPatchStatus: 403 });
+  const result = await client({ authorizationKey, signerId: signerQuorumId, fetcher: rejected.fetcher })
+    .acceptLogin({ accessToken: ownerToken, ownerId: privyUserId });
+  assert.equal(result.main.privyWalletId, walletId);
+  assert.deepEqual(result.signerSync, [{ walletId, signer: 'failed', owner: 'failed', code: 'privy_failed', status: 403 }]);
+  assert.equal(rejected.counts.quorumPatches, 0);
+});
+
+/**
+ * Rigor audit — additional wallet creation upgrades the owner quorum
+ * Achieves: createAdditional with an owner session keeps the create-time
+ * signer and nests the app quorum into the new wallet's owner quorum.
+ * Fails when: the owner upgrade is skipped, or the wallet is PATCHed again
+ * for a signer it already has.
+ * Oracle: Privy create/update contracts; owner authorization.
+ * Side effects: mocked fetch counts and PATCH bodies inspected.
+ */
+test('createAdditional upgrades the new wallet owner quorum with the owner session', async () => {
+  const { fetcher, counts, patches } = signerSyncFetcher({
+    walletSigners: [{ signer_id: signerQuorumId }],
+    onPatch: async (url, init, body) => {
+      const path = new URL(url).pathname;
+      if (init.method === 'POST' && path === '/v1/wallets') {
+        assert.deepEqual(body.additional_signers, [{ signer_id: signerQuorumId }]);
+        return Response.json({ id: walletId, address, chain_type: 'solana', owner_id: ownerQuorumId });
+      }
+      return Response.json({ error: 'unmocked' }, { status: 500 });
+    },
+  });
+  const created = await client({ authorizationKey, signerId: signerQuorumId, fetcher }).createAdditional({
+    privyUserId,
+    ownerId: privyUserId,
+    label: 'Trading',
+    accessToken: ownerToken,
+  });
+  assert.equal(created.privyWalletId, walletId);
+  assert.deepEqual(created.signerSync, [{ walletId, signer: 'present', owner: 'added' }]);
+  assert.equal(counts.walletPatches, 0);
+  assert.equal(counts.quorumPatches, 1);
+  assert.equal(counts.exchanges, 1);
+  assert.deepEqual(patches[0].body.key_quorum_ids, [signerQuorumId]);
+});
+
+/**
+ * Rigor audit — sync preserves existing signers and quorum members
+ * Achieves: other additional signers, nested quorums, and public-key members
+ * survive the update; the app quorum is appended, threshold stays 1.
+ * Fails when: the update replaces instead of extends the signer/member lists.
+ * Oracle: Privy update semantics (included fields replace the list).
+ * Side effects: PATCH bodies inspected.
+ */
+test('signer sync preserves existing signers and owner-quorum members', async () => {
+  const otherSigner = 'otherquorum1234567890ab';
+  const nestedQuorum = 'nestedquorum1234567890a';
+  const memberKey = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEPENJ/AtHhl633kqqSPzFaAXOA7ztvYdUv0bjUoJ9RMItvmfduAn1QZ9ZYXWCr+gq3ET3fOa0VcH6+sF0qMbkSQ==';
+  const { fetcher, patches } = signerSyncFetcher({
+    walletSigners: [{ signer_id: otherSigner }],
+    quorumNested: [nestedQuorum],
+    quorumKeys: [{ public_key: memberKey, display_name: null }],
+  });
+  const result = await client({ authorizationKey, signerId: signerQuorumId, fetcher })
+    .acceptLogin({ accessToken: ownerToken, ownerId: privyUserId });
+  assert.deepEqual(result.signerSync, [{ walletId, signer: 'added', owner: 'added' }]);
+  const walletPatch = patches.find(patch => patch.path === `/v1/wallets/${walletId}`);
+  assert.deepEqual(walletPatch.body.additional_signers, [{ signer_id: otherSigner }, { signer_id: signerQuorumId }]);
+  const quorumPatch = patches.find(patch => patch.path === `/v1/key_quorums/${ownerQuorumId}`);
+  assert.deepEqual(quorumPatch.body.key_quorum_ids, [nestedQuorum, signerQuorumId]);
+  assert.deepEqual(quorumPatch.body.user_ids, [privyUserId]);
+  assert.deepEqual(quorumPatch.body.public_keys, [memberKey]);
+  assert.equal(quorumPatch.body.authorization_threshold, 1);
+});
+
 /**
  * Rigor audit — server signing broadcasts only after mainnet-beta genesis matches
  * Achieves: behavior named in the test title (see assertions).

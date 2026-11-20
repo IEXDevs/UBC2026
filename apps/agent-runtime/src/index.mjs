@@ -245,6 +245,8 @@ async function dispatch(request, env, rawEnv = env) {
           PRIVY_APP_ID: flag('PRIVY_APP_ID'),
           PRIVY_APP_SECRET: flag('PRIVY_APP_SECRET'),
           PRIVY_AUTHORIZATION_KEY: flag('PRIVY_AUTHORIZATION_KEY'),
+          PRIVY_SIGNER_ID: flag('PRIVY_SIGNER_ID'),
+          NEXT_PUBLIC_PRIVY_SIGNER_ID: flag('NEXT_PUBLIC_PRIVY_SIGNER_ID'),
           SOLANA_RPC_URL: flag('SOLANA_RPC_URL'),
           QUICKNODE_MAINNET_RPC_URL: flag('QUICKNODE_MAINNET_RPC_URL'),
           SUPABASE_URL: flag('SUPABASE_URL'),

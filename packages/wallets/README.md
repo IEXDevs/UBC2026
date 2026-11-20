@@ -7,6 +7,7 @@ Privy wallet assignment helpers for Maelstrom.
 - Freeze gates for bots and wallets before spend
 - Privy login provisioning: `acceptLogin` reads the Privy user and creates the Solana main wallet when sign-up has none
 - Additional Privy wallets via `createAdditional`
+- Server signer + co-owner: with `PRIVY_SIGNER_ID` (or `NEXT_PUBLIC_PRIVY_SIGNER_ID`) set, new wallets are created with the app key quorum as an additional signer, and login / wallet create sync it into the wallet's owner quorum as a 1-of-k member (user OR app key). The user stays an owner, so export and client-side signing keep working. The sync is owner-authorized (user JWT), best-effort, and never blocks login; wallets whose owner never signs in again cannot be upgraded
 - Server signing: Privy `signTransaction`, then `sendTransaction` on Solana mainnet-beta through `SOLANA_RPC_URL`
 - Owner moves: `signAndBroadcastOwnerSolana` uses the same mainnet-beta gate without the bot freeze check, so grab-back can sweep a frozen wallet
 - Wallet Adapter deposits: `broadcastSignedSolana` sends an already-signed transaction only after the genesis hash matches mainnet-beta

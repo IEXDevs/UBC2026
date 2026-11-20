@@ -109,6 +109,7 @@ export async function POST(request) {
       ownerId,
       label,
       idempotencyKey,
+      accessToken,
     });
     try {
       await persistWallet(created, ownerId, secrets);

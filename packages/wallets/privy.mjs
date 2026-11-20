@@ -596,6 +596,8 @@ export function createPrivyWalletClient({
   const signer = typeof signerId === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(signerId.trim()) ? signerId.trim() : null;
   // The authorization key's key quorum, so the app can sign while the owner is away.
   const additionalSigners = () => (signer ? { additional_signers: [{ signer_id: signer }] } : {});
+  // Wallet ids whose signer + owner quorum were already verified in this instance.
+  const signerSynced = new Set();
   const secret = assertHeaderSafe(appSecret, 'Privy app secret');
   // RPC is required for broadcast/signing; acceptLogin / wallet create can omit it.
   const quicknode = rpcUrl == null || rpcUrl === '' ? null : assertHttps(rpcUrl, 'QuickNode mainnet-beta RPC');
@@ -782,19 +784,122 @@ export function createPrivyWalletClient({
     return recordsFromEmbedded(wallets, ownerId, privyUserId);
   }
 
+  /**
+   * Owner-authorized update client. The user JWT is exchanged for a session
+   * authorization key (the same HPKE flow as owner signing) and the SDK signs
+   * wallet / key-quorum PATCHes with it. One client is shared per sync batch.
+   */
+  async function ownerUpdateClient() {
+    const { PrivyClient } = await import('@privy-io/node');
+    return new PrivyClient({
+      appId: id, appSecret: secret, apiUrl: privyApi,
+      fetch: async (url, init) => {
+        const response = await fetcher(url, { ...init, redirect: 'manual' });
+        if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+          fail('Privy redirected the wallet update', 'privy_failed');
+        }
+        return response;
+      },
+      timeout: 15000,
+      maxRetries: 0,
+      logLevel: 'off',
+      requestExpiry: { defaultMs: REQUEST_TTL_MS },
+    });
+  }
+
+  /**
+   * Make the app authorization key an additional signer AND a member of the
+   * wallet's 1-of-k owner quorum, authorized by the owner's live session.
+   * The user stays an owner member, so export and client-side signing keep
+   * working; the app key alone can then sign and update the wallet offline.
+   * Only the owner can authorize these updates, so this runs when a session
+   * token is available (login / wallet create) and is best-effort.
+   */
+  async function syncServerSigner(sdk, walletId, accessToken, privyUserId) {
+    if (signerSynced.has(walletId)) return { walletId, signer: 'present', owner: 'present' };
+    const wallet = await privy('GET', `/v1/wallets/${encodeURIComponent(walletId)}`);
+    const signers = Array.isArray(wallet?.additional_signers) ? wallet.additional_signers : [];
+    const status = { walletId, signer: 'present', owner: 'skipped' };
+    if (!signers.some(entry => entry?.signer_id === signer)) {
+      await sdk.wallets().update(walletId, {
+        additional_signers: [
+          ...signers.filter(entry => entry?.signer_id).map(entry => ({
+            signer_id: entry.signer_id,
+            ...(entry.override_policy_ids ? { override_policy_ids: entry.override_policy_ids } : {}),
+          })),
+          { signer_id: signer },
+        ],
+        authorization_context: { user_jwts: [accessToken] },
+      });
+      status.signer = 'added';
+    }
+    const ownerQuorumId = typeof wallet?.owner_id === 'string' && privyWalletIdPattern.test(wallet.owner_id)
+      ? wallet.owner_id : '';
+    if (ownerQuorumId) {
+      const quorum = await privy('GET', `/v1/key_quorums/${encodeURIComponent(ownerQuorumId)}`);
+      const nested = Array.isArray(quorum?.key_quorum_ids) ? quorum.key_quorum_ids : [];
+      if (!nested.includes(signer)) {
+        const userIds = Array.isArray(quorum?.user_ids) && quorum.user_ids.length ? quorum.user_ids : [privyUserId];
+        const publicKeys = (Array.isArray(quorum?.authorization_keys) ? quorum.authorization_keys : [])
+          .map(key => key?.public_key).filter(key => typeof key === 'string' && key);
+        await sdk.keyQuorums().update(ownerQuorumId, {
+          user_ids: userIds,
+          key_quorum_ids: [...nested, signer],
+          ...(publicKeys.length ? { public_keys: publicKeys } : {}),
+          // 1-of-k: the user alone OR the app key alone satisfies the owner quorum.
+          authorization_threshold: 1,
+          authorization_context: { user_jwts: [accessToken] },
+        });
+        status.owner = 'added';
+      } else status.owner = 'present';
+    }
+    // Cache only fully verified wallets; a skipped owner quorum retries next login.
+    if (status.owner !== 'skipped') signerSynced.add(walletId);
+    return status;
+  }
+
+  function signerSyncFailure(walletId, error) {
+    const status = Number.isInteger(error?.status) ? error.status : undefined;
+    return {
+      walletId,
+      signer: 'failed',
+      owner: 'failed',
+      code: error instanceof WalletError ? error.code : 'privy_failed',
+      ...(status ? { status } : {}),
+    };
+  }
+
+  /** Best-effort signer + owner sync for every Privy wallet in a login record. */
+  async function syncRecordSigners(record, accessToken) {
+    if (!signer || typeof accessToken !== 'string' || !accessToken) return record;
+    const wallets = [record.main, ...(record.additional || [])].filter(wallet => wallet?.privyWalletId);
+    if (!wallets.length) return record;
+    let sdk;
+    const results = [];
+    for (const wallet of wallets) {
+      try {
+        sdk ||= await ownerUpdateClient();
+        results.push(await syncServerSigner(sdk, wallet.privyWalletId, accessToken, record.privyUserId));
+      } catch (error) {
+        results.push(signerSyncFailure(wallet.privyWalletId, error));
+      }
+    }
+    return { ...record, signerSync: results };
+  }
+
   async function syncWallets(user, ownerId, accessToken = '') {
     const resolved = resolvePrivyUserId(user, accessToken, ownerId);
     const privyUserId = assertOwnerId(resolved || user?.id);
     const owner = assertOwnerId(ownerId || resolved || user?.id);
     const embedded = solanaEmbedded(user);
     const existing = recordsFromEmbedded(embedded, owner, privyUserId);
-    if (existing) return attachLinked({ privyUserId, ...existing, created: false }, user);
+    if (existing) return syncRecordSigners(attachLinked({ privyUserId, ...existing, created: false }, user), accessToken);
 
     // createOnLogin may have linked a wallet with id:null — recover via Wallet API.
     // List is best-effort: a 403 here (auth signature / permissions) must not block create.
     const listed = await listSolanaWallets(privyUserId, { required: false });
     const fromList = recordsFromServerWallets(listed, owner, privyUserId);
-    if (fromList) return attachLinked({ privyUserId, ...fromList, created: false }, user);
+    if (fromList) return syncRecordSigners(attachLinked({ privyUserId, ...fromList, created: false }, user), accessToken);
 
     try {
       const created = await privy('POST', '/v1/wallets', {
@@ -803,19 +908,19 @@ export function createPrivyWalletClient({
         ...additionalSigners(),
         display_name: 'Main',
       }, idempotencyKey('main-solana', privyUserId));
-      return attachLinked({
+      return syncRecordSigners(attachLinked({
         privyUserId,
         main: createdRecord(created, owner, privyUserId, 'main'),
         additional: [],
         created: true,
-      }, user);
+      }, user), accessToken);
     } catch (error) {
       const retry = recordsFromServerWallets(
         await listSolanaWallets(privyUserId, { required: false }),
         owner,
         privyUserId,
       );
-      if (retry) return attachLinked({ privyUserId, ...retry, created: false }, user);
+      if (retry) return syncRecordSigners(attachLinked({ privyUserId, ...retry, created: false }, user), accessToken);
       if (
         error instanceof WalletError
         && error.code === 'privy_failed'
@@ -1181,7 +1286,7 @@ export function createPrivyWalletClient({
       return loadUser(privyUserId).then(user => syncWallets(user, ownerId ?? user?.id));
     },
 
-    async createAdditional({ privyUserId, ownerId, label, idempotencyKey: callerKey } = {}) {
+    async createAdditional({ privyUserId, ownerId, label, idempotencyKey: callerKey, accessToken } = {}) {
       const owner = assertOwnerId(ownerId);
       if (typeof label !== 'string' || !label.trim() || label.length > 64) fail('Additional wallet label is required');
       const user = await loadUser(privyUserId);
@@ -1197,7 +1302,15 @@ export function createPrivyWalletClient({
         ...additionalSigners(),
         display_name: typeof label === 'string' ? label.trim() : label,
       }, key);
-      return createdRecord(created, owner, user.id, 'additional', label);
+      const record = createdRecord(created, owner, user.id, 'additional', label);
+      if (!signer || typeof accessToken !== 'string' || !accessToken) return record;
+      // The signer ships with the create; the owner-quorum upgrade needs the owner session.
+      try {
+        const sdk = await ownerUpdateClient();
+        return { ...record, signerSync: [await syncServerSigner(sdk, record.privyWalletId, accessToken, user.id)] };
+      } catch (error) {
+        return { ...record, signerSync: [signerSyncFailure(record.privyWalletId, error)] };
+      }
     },
 
     async assertSolanaCluster() {
