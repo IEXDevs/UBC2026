@@ -48,6 +48,7 @@ const SPEND_BLOCK_MESSAGES = new Map([
   ['wrong-owner', 'The agent belongs to a different account.'],
 ]);
 const SPEND_SIGN_MESSAGES = new Map([
+  ['invalid_authorization_key', 'The Worker could not use its configured Privy authorization key.'],
   ['invalid_wallet', "The agent's wallet is missing a valid Privy signing ID."],
   ['privy_failed', 'Privy rejected the signing request.'],
   ['rpc_failed', 'The devnet RPC did not return a receipt. Check the wallet before trying again.'],
@@ -70,6 +71,34 @@ const PRIVY_WALLET_LOOKUP_MESSAGES = new Map([
   [401, 'Privy also rejected the signing Worker’s app credentials on a read-only wallet lookup.'],
   [404, 'Privy could not find the sending wallet under this app’s credentials.'],
 ]);
+const PRIVY_REQUEST_LABELS = {
+  'app-sign': 'App signing (POST /v1/wallets/{wallet_id}/rpc, signTransaction)',
+  'wallet-lookup': 'Wallet lookup (GET /v1/wallets/{wallet_id})',
+  'session-exchange': 'Owner session key exchange (POST /v1/wallets/authenticate, HPKE)',
+  'owner-sign': 'Owner-session signing (POST /v1/wallets/{wallet_id}/rpc, signTransaction)',
+};
+const PRIVY_REQUEST_DETAILS = {
+  'wallet-matched': 'Wallet ID, Solana chain, and sending address matched.',
+  'wallet-mismatch': 'The response did not match the expected wallet ID, Solana chain, or sending address.',
+  'missing-signed-transaction': 'Privy returned no serialized signed transaction.',
+  'mfa-required': 'Privy indicated that it requires multi-factor verification.',
+  'mfa-enrollment-required': 'Privy indicated that the owner must enroll in multi-factor verification.',
+  'token-expired': 'Privy indicated that the session token expired.',
+  'token-invalid': 'Privy indicated that the session token was invalid.',
+  'jwt-configuration': 'Privy indicated a JWT authentication or verification-key configuration problem.',
+  'no-wallets': 'Privy indicated that it could not find wallets for this session.',
+  'invalid-encryption': 'Privy indicated an encryption or recipient public key problem.',
+  'invalid-data': 'Privy indicated that request data was invalid.',
+  'provider-detail': 'Privy returned a detail outside the supported error codes.',
+  'local-failure': 'The Worker could not prepare this request or process the result.',
+};
+const PRIVY_SESSION_LABELS = {
+  missing: 'No bearer token reached the signing Worker.',
+  unreadable: 'The bearer token had no readable owner claim.',
+  'owner-mismatch': 'The token owner claim differed from the sending wallet owner.',
+  'owner-matched': 'The token owner claim matched the sending wallet owner.',
+};
+const PRIVY_ERROR_LENGTH = 3200;
 const SECRET_KEY = /key|token|secret|password|authorization|cookie|seed|phrase/i;
 const SECRET_VALUE = /eyJ[A-Za-z0-9_-]{8,}|live\.browser\.run/i;
 
@@ -141,6 +170,41 @@ function commandLine(name, args) {
   return parts.join(' ').slice(0, 240);
 }
 
+function privyDiagnosticMessage(privy, reason) {
+  const lines = [
+    'Signing stopped before broadcast on Solana devnet.',
+    SPEND_SIGN_MESSAGES.has(reason) && `Maelstrom reason ${reason}.`,
+    privy.at && `Worker time ${new Date(privy.at).toISOString()}.`,
+    typeof privy.appSignature === 'boolean'
+      && `App authorization signature header ${privy.appSignature ? 'present' : 'absent'}.`,
+  ];
+  for (const request of privy.requests) {
+    const result = request.status ? `HTTP ${request.status}` : 'no HTTP response';
+    lines.push([
+      `${PRIVY_REQUEST_LABELS[request.stage]} returned ${result}.`,
+      request.code && `Privy code ${request.code}.`,
+      request.transport && `Transport result ${request.transport}.`,
+      request.detail && (request.detail !== 'provider-detail' || !request.code) && PRIVY_REQUEST_DETAILS[request.detail],
+      typeof request.mfaProof === 'boolean' && `MFA proof header ${request.mfaProof ? 'present' : 'absent'}.`,
+      request.requestId && `Privy request ID ${request.requestId}.`,
+      request.edgeId && `Cloudflare Ray ID ${request.edgeId}.`,
+    ].filter(Boolean).join(' '));
+  }
+  if (privy.session) {
+    const { check, audience, issuer, expiry } = privy.session;
+    lines.push([
+      PRIVY_SESSION_LABELS[check],
+      audience && `Token audience ${audience}.`,
+      issuer && `Token issuer ${issuer}.`,
+      expiry && `Token expiry ${expiry}.`,
+      audience && 'The Worker read these claims locally. Privy verifies the token.',
+    ].filter(Boolean).join(' '));
+    const stages = new Set(privy.requests.map(request => request.stage));
+    if (!stages.has('owner-sign')) lines.push('The Worker did not send an owner-session signing request.');
+  }
+  return lines.filter(Boolean).join('\n');
+}
+
 export function spendFailureMessage(result) {
   const parsed = parseResult(result);
   switch (parsed?.error || parsed?.state) {
@@ -151,10 +215,11 @@ export function spendFailureMessage(result) {
       return SPEND_BLOCK_MESSAGES.get(parsed.reason) || 'The spend service blocked this payment without a recognized reason.';
     case 'sign-rejected': {
       const privy = parsePrivySigningFailure(parsed.privyFailure);
-      const transport = PRIVY_TRANSPORT_MESSAGES.get(privy?.transport);
-      if (transport) return transport;
       const message = SPEND_SIGN_MESSAGES.get(parsed.reason)
         || 'The signing step returned no receipt. Check the wallet before trying again.';
+      if (privy?.requests?.length) return `${message}\n${privyDiagnosticMessage(privy, parsed.reason)}`;
+      const transport = PRIVY_TRANSPORT_MESSAGES.get(privy?.transport);
+      if (transport) return transport;
       const details = [privy?.status && `HTTP ${privy.status}`, privy?.code].filter(Boolean).join(', ');
       const lookupStatus = privy?.walletLookupStatus;
       const lookup = lookupStatus && [
@@ -176,7 +241,7 @@ function failureText(name, parsed) {
   const spendReason = spend ? spendFailureMessage(parsed) : '';
   return [...new Set([error, hint, extra, spendReason].filter(Boolean))]
     .join('\n')
-    .slice(0, 400);
+    .slice(0, spend ? PRIVY_ERROR_LENGTH : 400);
 }
 
 function withFailure(step, name, args, parsed, failed) {
@@ -235,7 +300,8 @@ export function toolStep(name, args, result) {
 
 function failureFields(step) {
   const command = clip(step.command, 240).replace(SECRET_VALUE, '[hidden]');
-  const error = clip(step.error, 400).replace(SECRET_VALUE, '[hidden]');
+  const error = clip(step.error, step.name === 'request_spend' ? PRIVY_ERROR_LENGTH : 400)
+    .replace(SECRET_VALUE, '[hidden]');
   return {
     ...(command ? { command } : {}),
     ...(error ? { error } : {}),

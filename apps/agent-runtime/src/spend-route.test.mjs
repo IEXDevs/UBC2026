@@ -158,7 +158,14 @@ test('a confirmed send returns only public facts about a Privy signing failure',
       prepareDevnetTransfer: async ({ transaction }) => ({ transaction, feeLamports: '5000' }),
       signPreparedDevnetTransfer: async () => {
         throw Object.assign(new Error('private provider diagnostics'), {
-          code: 'privy_failed', privyFailure: { status: 404, code: 'private-code', token: 'private token' },
+          code: 'wallet_authorization_failed',
+          privyFailure: {
+            status: 400, code: 'private-code', token: 'private token',
+            requests: [
+              { stage: 'app-sign', status: 401 },
+              { stage: 'session-exchange', status: 400, requestId: 'req_test123456', body: 'private body' },
+            ],
+          },
         });
       },
     },
@@ -170,8 +177,14 @@ test('a confirmed send returns only public facts about a Privy signing failure',
   }), env);
   const body = await response.json();
   assert.equal(body.state, 'sign-rejected');
-  assert.equal(body.reason, 'privy_failed');
-  assert.deepEqual(body.privyFailure, { status: 404 });
+  assert.equal(body.reason, 'wallet_authorization_failed');
+  assert.deepEqual(body.privyFailure, {
+    status: 400,
+    requests: [
+      { stage: 'app-sign', status: 401 },
+      { stage: 'session-exchange', status: 400, requestId: 'req_test123456' },
+    ],
+  });
   assert.doesNotMatch(JSON.stringify(body), /private/i);
 });
 
