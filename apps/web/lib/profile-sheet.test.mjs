@@ -40,7 +40,7 @@ test('profile shows the wallet name and address once', () => {
     assert.match(sheet, new RegExp(`id: '${section}'`));
   }
   assert.doesNotMatch(sheet, /const PANES|wallet-nav|pane ===|role="tablist"/);
-  for (const component of ['TokenScreen', 'ConnectedPortfolio', 'SendPane', 'ReceivePane', 'SwapPane', 'TxnLog', 'TokenPane', 'LinkedLogins', 'PrivyKeyButton']) {
+  for (const component of ['TokenScreen', 'ConnectedPortfolio', 'SendPane', 'ReceivePane', 'JupiterSwap', 'TxnLog', 'TokenPane', 'LinkedLogins', 'PrivyKeyButton']) {
     assert.match(sheet, new RegExp(`<${component}[\\s>]`));
   }
   assert.match(sheet, /className="wallet-overview"/);
