@@ -22,7 +22,7 @@ import {
   spokenAwayBriefing,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
-import { parsePrivySigningFailure } from '@ubc2026/contracts';
+import { parsePrivySigningFailure, parseSpendApprovalTerms } from '@ubc2026/contracts';
 import { ownerAskedToBreakLoop } from '@ubc2026/contracts/card-loop';
 import { normalizePriceMint, readAgentPriceQuote } from '@ubc2026/prices';
 import { ownerAsksForOneTrade } from './owner-trade.mjs';
@@ -60,12 +60,14 @@ function gateFields(detail) {
     ? detail.steps.filter(step => typeof step === 'string').slice(0, 8)
     : [];
   const privyFailure = parsePrivySigningFailure(detail.privyFailure);
+  const approvalTerms = parseSpendApprovalTerms(detail.approvalTerms);
   return {
     ...(typeof detail.state === 'string' ? { state: detail.state } : {}),
     ...(steps.length > 0 ? { steps } : {}),
     ...(typeof detail.signed === 'boolean' ? { signed: detail.signed } : {}),
     ...(typeof detail.reason === 'string' ? { reason: detail.reason } : {}),
     ...(privyFailure ? { privyFailure } : {}),
+    ...(approvalTerms ? { approvalTerms } : {}),
     ...(typeof detail.prompt === 'string' ? { prompt: detail.prompt } : {}),
     ...(typeof detail.cluster === 'string' ? { cluster: detail.cluster } : {}),
   };
@@ -102,6 +104,10 @@ async function workerJson(fetcher, url, ownerId, method, body, accessToken = '',
   }
   if (typeof accessToken === 'string' && accessToken.trim() && accessToken.length < 8000) {
     headers.authorization = `Bearer ${accessToken.trim()}`;
+  }
+  const approval = extraHeaders?.['x-spend-approve-once'];
+  if (typeof approval === 'string' && /^v1\.[0-9]{13}\.[a-f0-9]{64}$/.test(approval)) {
+    headers['x-spend-approve-once'] = approval;
   }
   const response = await fetcher(url, {
     method,
@@ -575,7 +581,7 @@ export function createChatToolInvoker({
 
   const apiBase = root || 'shell';
 
-  async function invokeDashboard(name, args = {}, { sessionBot = true } = {}) {
+  async function invokeDashboard(name, args = {}, { sessionBot = true, approveOnce } = {}) {
     if (name === 'break_loop' && !ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
     const def = DASHBOARD_TOOLS.find((tool) => tool.name === name);
     if (!def?.voiceCalls?.length) return { error: 'unknown_tool' };
@@ -636,10 +642,11 @@ export function createChatToolInvoker({
       if (!ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
       return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body, { 'x-loop-break': 'owner-asked' });
     }
-    return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body);
+    return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body,
+      name === 'request_spend' && approveOnce ? { 'x-spend-approve-once': approveOnce } : undefined);
   }
 
-  return async function invokeTool(name, args = {}) {
+  return async function invokeTool(name, args = {}, { approveOnce } = {}) {
     args = applySituation(name, args, situation);
     if (name === 'create_loop' || name === 'set_loop_cooldown' || name === 'break_loop') {
       args = { ...args, botId };
@@ -765,7 +772,7 @@ export function createChatToolInvoker({
         });
       }
       if (DASHBOARD_NAMES.has(name)) {
-        return await invokeDashboard(name, args);
+        return await invokeDashboard(name, args, { approveOnce });
       }
       return await local.invokeTool(name, args, identity);
     } catch (error) {

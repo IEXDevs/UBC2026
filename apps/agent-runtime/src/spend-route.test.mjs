@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
+import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
 import { DEVNET_USDC_MINT } from '@ubc2026/wallets/privy';
 import { SystemInstruction, Transaction } from '@solana/web3.js';
 import { decodeTransferCheckedInstruction } from '@solana/spl-token';
@@ -147,6 +149,101 @@ test('a non-USDC transfer cannot spend a USDC budget', async () => {
   const body = await response.json();
   assert.equal(body.signed, false);
   assert.equal(body.reason, 'accounting-asset-mismatch');
+});
+
+test('over-limit SOL waits for a bound one-time approval, then reserves before signing once', async () => {
+  const grant = 'ab'.repeat(32);
+  const grantHash = await sha256Hex(grant);
+  const key = 'test-role';
+  const destination = 'So11111111111111111111111111111111111111112';
+  let nativeBot = {
+    ...bot, approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'SOL', maxOutflow: '3000000000', maxPerTransaction: '999999999' },
+  };
+  let currentWallet = wallet;
+  let feeLamports = '5000';
+  let signs = 0;
+  let reserves = 0;
+  let approval;
+  const env = spendEnv({
+    SUPABASE_URL: 'https://test.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: key,
+    loadSpendContext: async () => ({ bot: nativeBot, wallet: currentWallet, ledger: { ...ledger, asset: 'SOL' } }),
+    fetch: async (url, init) => {
+      const { pathname } = new URL(url);
+      if (pathname.endsWith('/desk_locks')) return Response.json([{ grant_hash: grantHash, grant_until: new Date(NOW + 60_000).toISOString() }]);
+      if (pathname.endsWith('/profiles')) return Response.json([{ owner_id: 'user_2' }]);
+      if (pathname.endsWith('/wallets')) return Response.json([{ address: destination }]);
+      assert.equal(pathname, '/rest/v1/approvals');
+      approval = JSON.parse(init.body);
+      assert.equal(approval.action, 'approve-once');
+      return new Response(null, { status: 201 });
+    },
+    ledgerApi: {
+      async reserveBudget({ proposal, approvalId, idempotencyKey }) {
+        assert.equal(approval.id, approvalId);
+        assert.equal(approval.policy_version, nativeBot.policyVersion);
+        assert.equal(approval.owner_id, nativeBot.ownerId);
+        assert.equal(approval.bot_id, nativeBot.id);
+        assert.equal(idempotencyKey, 'test_approve_once');
+        assert.equal(proposal.maxFee, '5000');
+        return { state: 'reserved', replay: reserves++ > 0 };
+      },
+    },
+    transferClient: {
+      getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: DESTINATION }),
+      prepareDevnetTransfer: async ({ transaction }) => ({ transaction, feeLamports }),
+      signPreparedDevnetTransfer: async () => {
+        assert.equal(reserves, 1);
+        signs++;
+        return { cluster: 'devnet', signature: 'test_signature' };
+      },
+    },
+  });
+  const spend = {
+    action: 'spend', permission: 'review', confirmed: true, reviewCap: '3000000000',
+    botId: nativeBot.id, destination, handle: '@hi', asset: 'SOL', amount: '1000000000',
+    idempotencyKey: 'test_approve_once',
+  };
+  const call = async (overrides = {}, headers = {}) => (await worker.fetch(spendRequest(
+    { ...spend, ...overrides }, { 'x-desk-grant': grant, ...headers },
+  ), env)).json();
+  const waiting = await call();
+  assert.equal(waiting.state, 'approval-needed');
+  assert.equal(waiting.reason, 'per-transaction');
+  assert.deepEqual(waiting.approvalTerms, {
+    walletId: wallet.id, walletAddress: wallet.address, policyVersion: nativeBot.policyVersion, feeLamports,
+  });
+  assert.equal(reserves, 0);
+  assert.equal(approval, undefined);
+  assert.equal((await call({}, { 'x-desk-grant': '' })).error, 'desk_locked');
+  const token = expiresAt => {
+    const binding = spendApprovalMessage({
+      ownerId: nativeBot.ownerId, spend: parsePermissionedSpendBody(spend), terms: waiting.approvalTerms, expiresAt,
+    });
+    return `v1.${expiresAt}.${createHmac('sha256', key).update(binding).digest('hex')}`;
+  };
+  const header = { 'x-spend-approve-once': token(NOW + 60_000) };
+  assert.equal((await call({}, { ...header, 'x-desk-grant': '' })).error, 'desk_locked');
+  assert.equal((await call({ amount: '1000000001' }, header)).error, 'invalid_spend_approval');
+  assert.equal((await call({ idempotencyKey: 'different_spend' }, header)).error, 'invalid_spend_approval');
+  assert.equal((await call({}, { 'x-spend-approve-once': token(NOW) })).error, 'invalid_spend_approval');
+  feeLamports = '10000';
+  assert.equal((await call({}, header)).error, 'invalid_spend_approval');
+  feeLamports = '5000';
+  nativeBot.policyVersion++;
+  assert.equal((await call({}, header)).error, 'invalid_spend_approval');
+  nativeBot.policyVersion--;
+  currentWallet = { ...wallet, frozen: true };
+  assert.equal((await call({}, header)).reason, 'spend-frozen');
+  currentWallet = wallet;
+  assert.equal(reserves, 0);
+  assert.equal(approval, undefined);
+  assert.equal(signs, 0);
+  assert.equal((await call({}, header)).state, 'signed');
+  assert.equal((await call({}, header)).reason, 'duplicate-spend');
+  assert.equal(signs, 1);
+  assert.equal(nativeBot.cap.maxPerTransaction, '999999999');
 });
 
 test('a confirmed send returns only public facts about a Privy signing failure', async () => {
