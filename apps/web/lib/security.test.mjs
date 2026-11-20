@@ -15,6 +15,14 @@ test('the scrollable agent statuses remain reachable with a keyboard', () => {
   assert.match(source, /<ul className="security-agent-list" tabIndex=\{0\} aria-label="Agent statuses">/);
 });
 
+test('security action accessible names use the visible button text', () => {
+  const source = readFileSync(new URL('../components/SecurityPanel.js', import.meta.url), 'utf8');
+  const button = source.match(/<button[\s\S]*?className="security-action-button"[\s\S]*?<\/button>/)?.[0];
+  assert.ok(button);
+  assert.match(button, /look\.button/);
+  assert.doesNotMatch(button, /aria-label=/);
+});
+
 /**
  * Achieves: verifies security page lists kill-switch actions and never echoes secrets in notes.
  * Fails when: action count drifts, labels wrong, notes contain sk-/JWT/secret, or javascript: pause URL accepted.

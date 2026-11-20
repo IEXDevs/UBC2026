@@ -50,7 +50,6 @@ export default function SecurityPanel({
             type="button"
             className="security-action-button"
             disabled={pending != null || !page.signedIn}
-            aria-label={action.label}
             aria-expanded={selected}
             aria-controls={selected ? `security-confirm-${action.id}` : undefined}
             onClick={() => { setArmed(selected ? null : action); setMessage(null); }}
