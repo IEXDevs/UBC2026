@@ -97,7 +97,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   const finishTimer = useRef(0);
   const passwordRules = 'Use 8 to 64 characters, with no line breaks.';
   const normalizedPassword = normalizePassphrase(password);
-  const feedback = passwordFeedback(password, repeat, normalizedPassword ? '' : 'Password must contain 8 to 64 characters and no line breaks.', normalizedPassword);
+  const feedback = passwordFeedback(password, repeat, normalizedPassword ? '' : 'Password must contain 8 to 64 characters and no line breaks.', normalizedPassword ?? password);
 
   async function authToken() {
     try { return (await getAccessToken?.()) || ''; } catch { return ''; }
