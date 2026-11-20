@@ -1,7 +1,7 @@
 /**
  * Exhaustive live-route smoke suite.
  *
- * Rigor: every API_ROUTES entry with status=live is exercised through worker.fetch
+ * Rigor: every runtime API_ROUTES entry with status=live is exercised through worker.fetch
  * (HTTP) or worker.scheduled (CRON). Auth expectations are checked without headers
  * so missing auth cannot silently succeed. A live path must be dispatched — never
  * the generic worker `{ error: 'not_found' }` 404. Handlers may return business
@@ -12,6 +12,9 @@ import assert from 'node:assert/strict';
 import { API_ROUTES } from '@ubc2026/contracts';
 import worker from './index.mjs';
 import { BotStateMachine } from './bot-do.mjs';
+
+// The Next.js route has its own smoke test in next-api-routes.test.mjs.
+const NEXT_ONLY_HTTP = new Set(['wallets.additional']);
 
 const SAMPLES = Object.freeze({
   walletId: 'fmfdj6yqly31huorjqzq38zc',
@@ -99,9 +102,9 @@ function buildRequest(route) {
  *   those live in api-data / spend / commerce suites. HMAC-valid webhook bodies
  *   are covered in quicknode-webhook.test.mjs / voice.test.mjs.
  */
-test('every live HTTP API route is dispatched with auth-appropriate status', async () => {
+test('every live runtime HTTP API route is dispatched with auth-appropriate status', async () => {
   const env = fakeEnv();
-  const httpLive = API_ROUTES.filter(route => route.status === 'live' && route.method !== 'CRON');
+  const httpLive = API_ROUTES.filter(route => route.status === 'live' && route.method !== 'CRON' && !NEXT_ONLY_HTTP.has(route.id));
   assert.ok(httpLive.length >= 40, `expected a full live catalog, got ${httpLive.length}`);
 
   const matrix = [];
