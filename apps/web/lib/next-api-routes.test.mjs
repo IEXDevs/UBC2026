@@ -470,7 +470,8 @@ test('POST /api/wallets with bearer but missing Privy secrets returns missing_co
  * Side effects: may set META_MODEL_API_KEY temporarily; restored after.
  * Gaps: does not assert live Meta Model catalog shape when key works.
  */
-test('GET /api/models returns fallback catalog without leaking API keys', async () => {
+test('GET /api/models returns fallback catalog without leaking API keys', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
   const prev = process.env.META_MODEL_API_KEY;
   process.env.META_MODEL_API_KEY = 'sk_should_never_appear_in_body';
   try {
@@ -490,6 +491,28 @@ test('GET /api/models returns fallback catalog without leaking API keys', async 
     if (prev === undefined) delete process.env.META_MODEL_API_KEY;
     else process.env.META_MODEL_API_KEY = prev;
   }
+});
+
+test('POST /api/models validates the endpoint and checks models without returning credentials', async (t) => {
+  const token = 'synthetic-provider-check-token';
+  const calls = t.mock.method(globalThis, 'fetch', async (url, init) => {
+    assert.equal(url, 'https://api.openai.com/v1/models');
+    assert.equal(init.headers.Authorization, `Bearer ${token}`);
+    return Response.json({ data: [{ id: 'gpt-test' }] });
+  });
+  const { POST } = await import('../app/api/models/route.js');
+  const request = baseUrl => new Request('https://desk.example/api/models', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseUrl, token }),
+  });
+  const rejected = await POST(request('https://127.0.0.1/v1'));
+  assert.equal(rejected.status, 400);
+  assert.equal(calls.mock.callCount(), 0);
+  const result = await POST(request('https://api.openai.com/v1'));
+  assert.equal(result.status, 200);
+  assert.match(result.headers.get('cache-control'), /no-store/);
+  const body = await result.json();
+  assert.equal(body.models[0].id, 'gpt-test');
+  assert.equal(JSON.stringify(body).includes(token), false);
 });
 
 /**

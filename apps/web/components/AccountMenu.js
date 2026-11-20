@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChartColumn, Lock, LogOut, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
+import { BrainCircuit, ChartColumn, Lock, LogOut, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
 import { markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
 import SpecularButton from './SpecularButton';
@@ -12,6 +12,7 @@ const ITEMS = [
   { id: 'statistics', label: 'Statistics', icon: ChartColumn },
   { id: 'wallet', label: 'Wallet', icon: Wallet },
   { id: 'plugins', label: 'Plugins', icon: Plug },
+  { id: 'ai-providers', label: 'AI Providers', icon: BrainCircuit },
   { id: 'security', label: 'Security', icon: Shield },
   { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'computer', label: 'Computer', icon: Monitor },

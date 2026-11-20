@@ -10,6 +10,7 @@ import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
 import { grantCovers, isFundTool, toolAccessRequest } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
 import { reasoningEffortFor } from './thinking-levels.mjs';
+import { parseModelProvider } from './ai-provider.mjs';
 import {
   clipOwnerMessage,
   contextWindowFor,
@@ -270,7 +271,7 @@ async function postCompletion({
   }
   if (reasoningEffort) {
     payload.reasoning_effort = reasoningEffort;
-  } else if (resolved.provider !== 'meta') {
+  } else if (resolved.provider === 'openrouter') {
     payload.temperature = 0.5;
   }
   let response;
@@ -284,6 +285,7 @@ async function postCompletion({
         'X-Title': 'Maelstrom',
       },
       body: JSON.stringify(payload),
+      redirect: 'error',
       signal: AbortSignal.timeout(60000),
     });
   } catch {
@@ -311,7 +313,7 @@ async function postCompletion({
       : status === 400
         ? 'openrouter_bad_request'
         : 'openrouter_failed';
-    throw new TextChatError(code, status, detail.slice(0, 240));
+    throw new TextChatError(code, status, redact(detail, secrets).slice(0, 240));
   }
   let data;
   try {
@@ -360,6 +362,7 @@ export async function completeTextChat({
   metaModelApiKey = '',
   modelApiKey = '',
   openrouterApiKey = '',
+  modelProvider = null,
   botName,
   botGoal,
   botType,
@@ -379,7 +382,9 @@ export async function completeTextChat({
   maxToolRounds = 4,
   onMessage = null,
 } = {}) {
-  const resolved = resolveTextChatProvider({
+  const custom = modelProvider == null ? null : parseModelProvider(modelProvider);
+  if (modelProvider != null && !custom) throw new TextChatError('provider_not_supported', 400);
+  const resolved = custom || resolveTextChatProvider({
     metaModelApiKey: metaModelApiKey || modelApiKey || (String(apiKey).startsWith('LLM_') ? apiKey : ''),
     openrouterApiKey: openrouterApiKey || (!String(apiKey).startsWith('LLM_') ? apiKey : ''),
   });
@@ -403,7 +408,7 @@ export async function completeTextChat({
   if (!latest) throw new TextChatError('message_required', 400);
   const secrets = [resolved.apiKey];
   let modelId = typeof model === 'string' && model.trim() ? model.trim() : resolved.model;
-  if (resolved.provider === 'openrouter') {
+  if (resolved.provider === 'openrouter' && !custom) {
     const selected = selectFreeOpenRouterModel(modelId);
     if (!selected) throw new TextChatError('openrouter_paid_model', 400);
     modelId = selected;

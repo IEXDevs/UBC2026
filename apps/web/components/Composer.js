@@ -14,7 +14,11 @@ import { orbSpeed, voiceOrbLook } from '../lib/voice-orb.mjs';
 import WakeSlider from './WakeSlider';
 import GlideSelect from './GlideSelect';
 import PromptBar from './PromptBar';
-import ProviderAdd from './ProviderAdd';
+import AIProvidersSheet from './AIProvidersSheet';
+import {
+  ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
+  selectedModelRequest, visibleModelOptions,
+} from '../lib/provider-models.mjs';
 import { clampFloat, FLOAT_SIZE, FLOAT_STORAGE_KEY } from '../lib/voice-float.mjs';
 import { createMicGate } from '../lib/mic-gate.mjs';
 import {
@@ -65,7 +69,7 @@ const PROMPT_SOURCES = [
 function promptModels(rows) {
   const source = Array.isArray(rows) && rows.length > 0 ? rows : fallbackThinkingCatalog();
   return source.map(model => ({
-    key: model.id,
+    key: model.key || model.id,
     name: model.name,
     tag: 'Chat',
     levels: Array.isArray(model.levels) ? model.levels : [],
@@ -151,7 +155,7 @@ export default function Composer({
   const [reviewCap, setReviewCap] = useState('');
   const [models, setModels] = useState(() => promptModels());
   const [chatModel, setChatModel] = useState(() => promptModels()[0]?.key || '');
-  const [providerOpen, setProviderOpen] = useState(false);
+  const [aiProvidersOpen, setAIProvidersOpen] = useState(false);
   const [callName, setCallName] = useState('');
   const [callBotId, setCallBotId] = useState(null);
   const [speaker, setSpeaker] = useState('idle');
@@ -278,17 +282,31 @@ export default function Composer({
 
   useEffect(() => {
     let stop = false;
+    function refresh() {
+      const next = visibleModelOptions(localStorage);
+      setModels(next);
+      setChatModel(current => (next.some(item => item.key === current) ? current : next[0]?.key || ''));
+      if (!next.some(item => item.key === modelRef.current)) {
+        modelRef.current = next[0]?.key || '';
+        effortRef.current = next[0]?.levels?.find(level => level.default)?.label || '';
+      }
+    }
+    refresh();
+    window.addEventListener(MODEL_SETTINGS_EVENT, refresh);
+    window.addEventListener('storage', refresh);
     fetch('/api/models', { cache: 'no-store' })
       .then(response => (response.ok ? response.json() : null))
       .then(data => {
-        if (stop || !Array.isArray(data?.models) || data.models.length === 0) return;
-        const next = promptModels(data.models);
-        setModels(next);
-        setChatModel(current => (next.some(item => item.key === current) ? current : next[0].key));
-        if (!next.some(item => item.key === modelRef.current)) modelRef.current = next[0].key;
+        if (stop || !data?.checked || !Array.isArray(data.models)) return;
+        saveModelCatalog(localStorage, ACCOUNT_PROVIDER, data.models);
+        announceModelSettings();
       })
       .catch(() => {});
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+      window.removeEventListener(MODEL_SETTINGS_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
   }, []);
 
   useEffect(() => {
@@ -534,6 +552,11 @@ export default function Composer({
   async function sendMessage(text) {
     const spoken = spokenFrom(text);
     if (!spoken) return;
+    if (!selectedModelRequest(localStorage, modelRef.current)) {
+      pushLine('note', 'Show a model in AI Providers before sending a message.');
+      setAIProvidersOpen(true);
+      return;
+    }
     if (sendingRef.current) {
       rememberQueue(appendQueued(queueRef.current, {
         id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -639,6 +662,13 @@ export default function Composer({
   }
 
   async function runChat(spoken, prior, grants) {
+    const selection = selectedModelRequest(localStorage, modelRef.current);
+    if (!selection) {
+      sendingRef.current = false;
+      pushLine('note', 'Show a model in AI Providers before sending a message.');
+      setAIProvidersOpen(true);
+      return;
+    }
     const run = ++runRef.current;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -671,7 +701,7 @@ export default function Composer({
         type: botType,
         permission: permissionRef.current,
         grants,
-        model: modelRef.current,
+        ...selection,
         effort: currentEffortId(),
         shellBots,
         shellWallets,
@@ -1032,7 +1062,7 @@ export default function Composer({
       {stageNode}
       {floatNode}
       {settingsNode}
-      <ProviderAdd open={providerOpen} onClose={() => setProviderOpen(false)} />
+      <AIProvidersSheet open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}
       {mentionCopy ? (
         <p className="mention-hint" role="status"><AddressCopy address={mentionCopy.address} prefix={mentionCopy.prefix} /></p>
@@ -1074,7 +1104,7 @@ export default function Composer({
           permission={permission}
           reviewCapDollars={reviewCapToDollars(reviewCap)}
           onEffortChange={(label) => { effortRef.current = label; }}
-          onAddProvider={() => setProviderOpen(true)}
+          onAddProvider={() => setAIProvidersOpen(true)}
           onModelChange={(key) => {
             const item = models.find(model => model.key === key);
             if (!item || item.key === modelRef.current) return;

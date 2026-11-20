@@ -1,0 +1,96 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { saveProvider } from './provider-tokens.mjs';
+import { aiProvider, checkProviderModels, parseModelProvider, parseProviderModels } from './ai-provider.mjs';
+import {
+  ACCOUNT_PROVIDER, forgetProviderModels, modelOptionKey, readModelCatalogs,
+  saveModelCatalog, selectedModelRequest, setModelVisible, visibleModelOptions,
+} from './provider-models.mjs';
+import { completeTextChat } from './text-chat.mjs';
+
+const token = 'synthetic-test-key-not-a-credential';
+const baseUrl = 'https://api.openai.com/v1';
+const models = [{ id: 'gpt-test-a', name: 'Model A' }, { id: 'gpt-test-b', name: 'Model B' }];
+function memory() {
+  const rows = new Map();
+  return { getItem: key => rows.get(key) ?? null, setItem: (key, value) => rows.set(key, value) };
+}
+
+test('model choices default on, hidden choices persist across discovery, and provider IDs stay separate', () => {
+  const storage = memory();
+  const provider = saveProvider(storage, { name: 'Work', token, baseUrl }).provider;
+  saveModelCatalog(storage, ACCOUNT_PROVIDER, models);
+  saveModelCatalog(storage, provider.id, models);
+  assert.equal(visibleModelOptions(storage).length, 4);
+  const key = modelOptionKey(provider.id, models[0].id);
+  setModelVisible(storage, key, false);
+  assert.equal(visibleModelOptions(storage).length, 3);
+  assert.ok(visibleModelOptions(storage).some(row => row.key === models[0].id));
+  saveModelCatalog(storage, provider.id, [...models, { id: 'gpt-test-c', name: 'Model C' }]);
+  assert.equal(visibleModelOptions(storage).some(row => row.key === key), false);
+  assert.ok(visibleModelOptions(storage).some(row => row.id === 'gpt-test-c'));
+  setModelVisible(storage, key, true);
+  assert.deepEqual(selectedModelRequest(storage, key), { model: models[0].id, modelProvider: { baseUrl, token } });
+  assert.equal(JSON.stringify(readModelCatalogs(storage)).includes(token), false);
+  forgetProviderModels(storage, provider.id);
+  assert.equal(selectedModelRequest(storage, key), null);
+});
+
+test('all models can be hidden without silently reintroducing a fallback', () => {
+  const storage = memory();
+  saveModelCatalog(storage, ACCOUNT_PROVIDER, models);
+  for (const model of models) setModelVisible(storage, model.id, false);
+  assert.deepEqual(visibleModelOptions(storage), []);
+  assert.equal(selectedModelRequest(storage, models[0].id), null);
+  saveModelCatalog(storage, ACCOUNT_PROVIDER, []);
+  assert.deepEqual(visibleModelOptions(storage), []);
+});
+
+test('catalog normalization includes non-reasoning chat models but excludes duplicates and incompatible models', () => {
+  const data = [...models, models[0], { id: 'not a model' }, { id: 'text-embedding-3-small' }, { id: 'gpt-4o-audio-preview' }];
+  assert.deepEqual(parseProviderModels({ data }, 'openai').map(row => row.id), models.map(row => row.id));
+  assert.equal(parseProviderModels({ data: [{ id: 'vendor/chat', supported_parameters: ['tools'] }, { id: 'vendor/image', architecture: { output_modalities: ['image'] } }] }, 'openrouter').length, 1);
+});
+
+test('model checks only contact supported exact HTTPS roots and never echo raw errors or credentials', async () => {
+  for (const url of ['http://api.openai.com/v1', 'https://api.openai.com.evil/v1', 'https://localhost/v1', 'https://api.openai.com/v1?key=bad', 'https://user:pass@api.openai.com/v1']) {
+    assert.equal(aiProvider(url), null);
+    assert.equal(parseModelProvider({ baseUrl: url, token }), null);
+  }
+  let called = false;
+  const rejected = await checkProviderModels({ baseUrl: 'https://localhost/v1', apiKey: token, fetcher: () => { called = true; } });
+  assert.equal(called, false);
+  assert.equal(rejected.ok, false);
+  const success = await checkProviderModels({ baseUrl, apiKey: token, fetcher: async (url, init) => {
+    assert.equal(url, `${baseUrl}/models`);
+    assert.equal(init.headers.Authorization, `Bearer ${token}`);
+    assert.equal(init.redirect, 'error');
+    return Response.json({ data: models });
+  } });
+  assert.equal(success.models.length, 2);
+  const failure = await checkProviderModels({ baseUrl, apiKey: token, fetcher: async () => { throw new Error(token); } });
+  assert.equal(JSON.stringify(failure).includes(token), false);
+  const denied = await checkProviderModels({ baseUrl, apiKey: token, fetcher: async () => Response.json({ error: token }, { status: 401 }) });
+  assert.equal(denied.error, 'provider_unauthorized');
+});
+
+test('a selected custom model uses its key and endpoint with the existing turn verifier and redaction', async () => {
+  let calls = 0;
+  const reply = await completeTextChat({
+    metaModelApiKey: 'unused-account-key', model: 'gpt-test-a', modelProvider: { token, baseUrl }, message: `Hello ${token}`,
+    fetcher: async (url, init) => {
+      calls++;
+      assert.equal(url, `${baseUrl}/chat/completions`);
+      assert.equal(init.redirect, 'error');
+      assert.equal(init.headers.Authorization, `Bearer ${token}`);
+      assert.equal(init.body.includes(token), false);
+      const body = JSON.parse(init.body);
+      assert.equal(body.model, 'gpt-test-a');
+      return Response.json({ choices: [{ message: { content: init.body.includes('Role: turn-verify') ? '{"allow":true}' : 'Hello' } }] });
+    },
+  });
+  assert.equal(reply.provider, 'openai');
+  assert.equal(reply.text, 'Hello');
+  assert.ok(calls > 1, 'the existing verifier still runs');
+  await assert.rejects(completeTextChat({ modelProvider: { token, baseUrl: 'https://localhost/v1' }, message: 'Hello' }), error => error.code === 'provider_not_supported');
+});

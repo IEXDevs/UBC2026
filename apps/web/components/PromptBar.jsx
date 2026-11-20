@@ -779,7 +779,7 @@ export default function PromptBar({
                 menuAction={onAddProvider ? { label: 'Add Provider', onSelect: onAddProvider } : null}
               />
             </span>
-          ) : null}
+          ) : onAddProvider ? <button type="button" className="prompt-bar__pick" onClick={onAddProvider}>No models shown</button> : null}
           {efforts.length > 0 ? (
             <button
               ref={effortAnchor}
