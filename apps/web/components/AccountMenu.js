@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChartColumn, Lock, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
+import { ChartColumn, Lock, LogOut, Monitor, Plug, ScrollText, Shield, UserRound, Wallet } from 'lucide-react';
 import { markSeenLogin } from '../lib/seen-login.mjs';
 import ProfileMark from './ProfileMark';
 import SpecularButton from './SpecularButton';
@@ -61,7 +61,7 @@ export default function AccountMenu({ accountLabel, avatarUrl = null, collapsed 
   return (
     <div className={`account-menu${open ? ' is-open' : ''}`} ref={rootRef}>
       <div className="account-pop" role="menu" aria-label="Account" inert={open ? undefined : true}>
-        {[...ITEMS, ...(walletUnlocked ? [{ id: 'lock-wallet', label: 'Lock wallet', icon: Lock }] : [])].map((item) => {
+        {[...ITEMS, ...(walletUnlocked ? [{ id: 'lock-wallet', label: 'Lock wallet', icon: Lock }] : []), { id: 'logout', label: 'Log out', icon: LogOut }].map((item) => {
           const Icon = item.icon;
           return (
             <button
