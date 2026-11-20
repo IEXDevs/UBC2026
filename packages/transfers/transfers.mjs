@@ -10,6 +10,7 @@ import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
   getAssociatedTokenAddressSync,
@@ -216,6 +217,38 @@ export function buildSolanaAssetTransaction({ asset, decimals, sourceOwner, dest
     keys: [{ pubkey: source, isSigner: true, isWritable: false }],
     data: memoBytes(memo),
   }));
+  return transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
+}
+
+/** Owner-confirmed send; token accounts and mint details come from chain reads. */
+export function buildWalletAssetTransaction({ asset, decimals, tokenProgramId, accounts = [], sourceOwner, destinationOwner, amount: rawAmount, memo = 'wallet.send', recentBlockhash } = {}) {
+  if (asset === 'SOL') return buildSolanaAssetTransaction({ asset, sourceOwner, destinationOwner, amount: rawAmount, memo, recentBlockhash });
+  const amount = positiveAmount(rawAmount);
+  const source = pubkey(sourceOwner, 'source wallet');
+  const destination = pubkey(destinationOwner, 'destination wallet');
+  const mint = pubkey(asset, 'mint');
+  const program = pubkey(tokenProgramId, 'token program');
+  if (!program.equals(TOKEN_PROGRAM_ID) && !program.equals(TOKEN_2022_PROGRAM_ID)) fail('Unsupported token program', 'unsupported_mint');
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) fail('Invalid mint decimals', 'invalid_mint');
+  if (source.equals(destination)) fail('Source and destination must differ', 'invalid_destination');
+  pubkey(recentBlockhash, 'blockhash');
+  const target = getAssociatedTokenAddressSync(mint, destination, false, program);
+  const transaction = new Transaction({ feePayer: source, recentBlockhash }).add(
+    createAssociatedTokenAccountIdempotentInstruction(source, target, destination, mint, program),
+  );
+  let remaining = amount;
+  const seen = new Set();
+  for (const account of accounts) {
+    if (remaining === 0n) break;
+    if (seen.has(account.address)) continue;
+    seen.add(account.address);
+    const available = positiveAmount(account.amount);
+    const moved = available < remaining ? available : remaining;
+    transaction.add(createTransferCheckedInstruction(pubkey(account.address, 'token account'), mint, target, source, moved, decimals, [], program));
+    remaining -= moved;
+  }
+  if (remaining !== 0n) fail('Insufficient token balance', 'insufficient_balance');
+  transaction.add(new TransactionInstruction({ programId: MEMO_PROGRAM, keys: [{ pubkey: source, isSigner: true, isWritable: false }], data: memoBytes(memo) }));
   return transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
 }
 

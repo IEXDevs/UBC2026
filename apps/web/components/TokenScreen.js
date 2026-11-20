@@ -6,6 +6,8 @@ import { ArrowLeft } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
+import AddressCopy from './AddressCopy';
+import { walletAssetName, walletAssetValue } from '../lib/wallet-send-assets.mjs';
 import { dexTokenView, enrichPortfolio, readDexCandles, readDexTokens } from '../lib/dex-token.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import { formatUsdMicro, portfolioErrorNote } from '../lib/portfolio.mjs';
@@ -24,7 +26,7 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-export default function TokenScreen({ open, address = '', onSend, onReceive, onSwap, previewPortfolio = null, refreshKey = 0 }) {
+export default function TokenScreen({ open, address = '', onSend, onReceive, onSwap, onPortfolio, previewPortfolio = null, refreshKey = 0 }) {
   const { user, getAccessToken } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
@@ -97,9 +99,13 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
   const scoped = address && Array.isArray(portfolio?.wallets)
     ? { ...portfolio, wallets: portfolio.wallets.filter(row => row?.address === address) }
     : portfolio;
+  useEffect(() => {
+    onPortfolio?.(portfolio);
+  }, [portfolio, onPortfolio]);
   const holdings = combineHoldings(scoped);
   const total = holdings.reduce((sum, row) => sum + BigInt(row.usdMicro || '0'), 0n).toString();
-  const holding = selected ? holdings.find(row => row.mint === selected) || null : null;
+  const holdingKey = row => row.native === false ? `${row.mint}:wrapped` : row.mint;
+  const holding = selected ? holdings.find(row => holdingKey(row) === selected) || null : null;
   const ease = [0.22, 1, 0.36, 1];
 
   return (
@@ -113,12 +119,12 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
         transition={{ duration: 0.45, ease }}
       >
       <TokenDetail
-        mint={selected}
+        mint={holding?.mint || selected}
         holding={holding}
         cluster={portfolio?.cluster || SOLANA_CLUSTER}
         userId={user?.id}
         onBack={() => setSelected(null)}
-        onSend={() => onSend?.(holding?.symbol)}
+        onSend={() => onSend?.(holding)}
         onReceive={onReceive}
         onSwap={() => onSwap?.(holding?.symbol, selected)}
       />
@@ -137,14 +143,17 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
       {error ? <p className="quiet" role="status">{error}</p> : null}
       <ul className="token-rows">
         {holdings.map(row => (
-          <li key={row.mint}>
-            <button type="button" className="token-row" onClick={() => setSelected(row.mint)}>
+          <li key={holdingKey(row)}>
+            <button type="button" className="token-row" onClick={() => setSelected(holdingKey(row))}>
               <span>
-                <strong>{row.symbol}</strong>
-                <small>{formatBaseUnits(row.amount, row.decimals)} {row.symbol}</small>
+                <strong>{walletAssetName(row)}</strong>
+                <small>{formatBaseUnits(row.amount, row.decimals)} {walletAssetName(row)}</small>
               </span>
-              <b>{row.usdMicro && row.usdMicro !== '0' ? formatUsdMicro(row.usdMicro) : ''}</b>
+              <b>{walletAssetValue(row)}</b>
             </button>
+            {walletAssetName(row) === 'Unknown token' || holdings.filter(item => walletAssetName(item) === walletAssetName(row)).length > 1 ? (
+              <div className="token-mint"><AddressCopy address={row.mint} compact inline /></div>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -210,7 +219,7 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
       ? 'pending'
       : (Array.isArray(candles) && candles.length >= 2 ? candles : null),
   }) : null;
-  const symbol = view?.symbol || holding?.symbol || 'Token';
+  const symbol = walletAssetName({ ...holding, mint, symbol: view?.symbol || holding?.symbol });
   const price = typeof view?.price === 'number' ? formatTokenPrice(view.price) : '';
   const change = typeof view?.changePct === 'number' ? view.changePct : null;
   const down = change != null && change < 0;
@@ -264,7 +273,7 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
         ))}
       </div>
       <div className="token-position">
-        <p><span>Value</span><strong>{holding ? formatUsdMicro(holding.usdMicro) : '—'}</strong></p>
+        <p><span>Value</span><strong>{holding ? walletAssetValue(holding) : '—'}</strong></p>
         <p><span>Amount</span><strong>{holding ? `${formatBaseUnits(holding.amount, holding.decimals)} ${symbol}` : '—'}</strong></p>
       </div>
       <dl className="token-info">

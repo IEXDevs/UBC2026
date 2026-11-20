@@ -8,7 +8,7 @@ test('Send recipients do not require signing access and sender copy ends with a 
   assert.doesNotMatch(picker, /spendable|Read only/);
   assert.match(picker, /if \(!row \|\| row\.disabled \|\| row\.frozen\) return/);
   assert.match(picker, /const locked = row\.disabled \|\| row\.frozen/);
-  assert.match(sheet, /const walletReady = target\?\.kind === 'wallet' && !target\.frozen && asset\?\.symbol === 'USDC'/);
+  assert.match(sheet, /const walletReady = target\?\.kind === 'wallet' && !target\.frozen/);
   assert.doesNotMatch(sheet, /target\.spendable/);
   assert.match(sheet, /`From \$\{active\.label\}\.`/);
 });

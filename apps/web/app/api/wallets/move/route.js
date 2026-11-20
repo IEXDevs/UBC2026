@@ -9,6 +9,7 @@ import { verifyPrivyAccessToken } from '../../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../../lib/root-env.mjs';
 import { planWalletMove, selectOwnedMoveRecipient, selectOwnedMoveWallet } from '../../../../lib/wallet-move.mjs';
 import { resolvePrivyAppId } from '../../../../lib/wallet-provision.mjs';
+import { sendWalletAsset } from '../../../../lib/wallet-asset-send.mjs';
 
 function env() {
   return {
@@ -54,6 +55,15 @@ export async function POST(request) {
     });
     const rows = await readStoredWallets(ownerId, secrets, fetch);
     const wallets = rows.map(row => storedWalletRow(row, ownerId)).filter(Boolean);
+    if (body.asset !== undefined) {
+      const user = await client.readLoginUser({ accessToken, ownerId });
+      if (user?.id !== ownerId) return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+      const verified = walletsForDeposit(rows, user, ownerId);
+      const observed = selectOwnedMoveRecipient(verified.filter(wallet => wallet.spendable === false), body?.from);
+      const from = selectOwnedMoveWallet(wallets, body?.from) || observed;
+      const sent = await sendWalletAsset({ client, ownerId, from, wallets: verified, destination: body.destination, asset: body.asset, amount: body.amount, decimals: body.decimals, phase: body.phase, signedTransaction: body.signedTransaction });
+      return Response.json(sent, { headers: { 'Cache-Control': 'no-store' } });
+    }
     let recipient = selectOwnedMoveRecipient(wallets, body?.to);
     if (!recipient) {
       const user = await client.readLoginUser({ accessToken, ownerId });

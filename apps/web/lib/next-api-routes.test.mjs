@@ -18,7 +18,7 @@ import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contr
 import { privySessionFixture } from '../../agent-runtime/src/owner-auth.fixture.mjs';
 import { Keypair, Transaction } from '@solana/web3.js';
 import { SOLANA_GENESIS_HASH } from '@ubc2026/contracts/solana';
-import { buildSolanaUsdcTransaction } from '@ubc2026/transfers';
+import { buildSolanaUsdcTransaction, buildWalletAssetTransaction } from '@ubc2026/transfers';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -48,6 +48,11 @@ test('wallet move accepts a verified connected recipient and signs only with the
   });
   let frozen = false;
   let loginOwner = ownerId;
+  let expectedAsset = null;
+  let tokenProgramId = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  let simulationError = null;
+  const tokenAccount = Keypair.generate().publicKey.toBase58();
+  const tokenMint = Keypair.generate().publicKey.toBase58();
   const signing = [];
   const broadcasts = [];
   t.mock.method(globalThis, 'fetch', async (url, init) => {
@@ -67,7 +72,11 @@ test('wallet move accepts a verified connected recipient and signs only with the
     if (target === `https://api.privy.io/v1/wallets/${from.id}/rpc`) {
       assert.equal(body.method, 'signTransaction');
       const transaction = Transaction.from(Buffer.from(body.params.transaction, 'base64'));
-      const expected = buildSolanaUsdcTransaction({
+      const expected = expectedAsset ? { transaction: Transaction.from(Buffer.from(buildWalletAssetTransaction({
+        asset: expectedAsset, decimals: expectedAsset === 'SOL' ? 9 : 8, tokenProgramId,
+        accounts: [{ address: tokenAccount, amount: '9000000000' }],
+        sourceOwner: from.address, destinationOwner: phantom, amount: '1000000', recentBlockhash: blockhash,
+      }), 'base64')) } : buildSolanaUsdcTransaction({
         feePayer: from.address, sourceOwner: from.address, destinationOwner: phantom,
         amount: '1000000', memo: 'wallet.move', recentBlockhash: blockhash,
       });
@@ -80,6 +89,11 @@ test('wallet move accepts a verified connected recipient and signs only with the
     assert.equal(target, settings.SOLANA_RPC_URL, 'all network calls must remain mocked');
     if (body.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
     if (body.method === 'getLatestBlockhash') return Response.json({ result: { value: { blockhash, lastValidBlockHeight: 100 } } });
+    if (body.method === 'getBalance') return Response.json({ result: { value: 9000000000 } });
+    if (body.method === 'getAccountInfo') return Response.json({ result: { value: { owner: tokenProgramId, data: { parsed: { type: 'mint', info: { decimals: 8, isInitialized: true } } } } } });
+    if (body.method === 'getTokenAccountsByOwner') return Response.json({ result: { value: [{ pubkey: tokenAccount, account: { owner: tokenProgramId, data: { parsed: { info: { owner: from.address, mint: tokenMint, state: 'initialized', tokenAmount: { amount: '9000000000', decimals: 8 } } } } } }] } });
+    if (body.method === 'getFeeForMessage') return Response.json({ result: { value: 5000 } });
+    if (body.method === 'simulateTransaction') return Response.json({ result: { value: { err: simulationError } } });
     assert.equal(body.method, 'sendTransaction');
     broadcasts.push(body);
     return Response.json({ result: '5'.repeat(88) });
@@ -120,6 +134,22 @@ test('wallet move accepts a verified connected recipient and signs only with the
     assert.deepEqual(await unconfigured.json(), { error: 'missing_config', missing: [name] });
     process.env[name] = settings[name];
   }
+  loginOwner = ownerId;
+  for (const asset of ['SOL', tokenMint, tokenMint]) {
+    expectedAsset = asset;
+    const response = await move({ asset, destination: phantom, decimals: asset === 'SOL' ? 9 : 8, phase: 'send' });
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+    assert.equal((await response.json()).asset, asset);
+    if (asset !== 'SOL') tokenProgramId = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+  }
+  assert.equal(signing.length, 4);
+  const wrongDecimals = await move({ asset: tokenMint, destination: phantom, decimals: 9, phase: 'send' });
+  assert.equal((await wrongDecimals.json()).error, 'asset_changed');
+  simulationError = { InstructionError: [0, 'InsufficientFunds'] };
+  const simulated = await move({ asset: tokenMint, destination: phantom, decimals: 8, phase: 'send' });
+  assert.equal((await simulated.json()).error, 'simulation_failed');
+  assert.equal(signing.length, 4, 'asset validation and simulation failures never sign');
+  assert.equal(broadcasts.length, 4);
 });
 
 test('profile claims and handle lookup share the configured runtime directory', async (t) => {

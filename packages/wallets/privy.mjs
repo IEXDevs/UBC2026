@@ -1182,7 +1182,34 @@ export function createPrivyWalletClient({
         || account.data.parsed.info?.isInitialized !== true || !Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
         fail('Unsupported or missing mainnet-beta mint', 'unsupported_mint');
       }
-      return { cluster: SOLANA_CLUSTER, mint, decimals };
+      return { cluster: SOLANA_CLUSTER, mint, decimals, ...(allowToken2022 ? { tokenProgramId: account.owner } : {}) };
+    },
+
+    async readSolanaAsset({ address, asset } = {}) {
+      if (!base58.test(address || '')) fail('Wallet address is required', 'invalid_wallet');
+      await assertSolana();
+      if (asset === 'SOL') {
+        const read = await rpc('getBalance', [address, { commitment: 'confirmed' }]);
+        const amount = read.result?.value;
+        if (!Number.isSafeInteger(amount) || amount < 0) fail('SOL balance unavailable', 'rpc_rejected');
+        return { asset, decimals: 9, amount: String(amount) };
+      }
+      const mint = await this.readSolanaMint({ mint: asset, allowToken2022: true });
+      const listed = await rpc('getTokenAccountsByOwner', [address, { mint: asset }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+      if (!Array.isArray(listed.result?.value)) fail('Token balance unavailable', 'rpc_rejected');
+      const accounts = [];
+      const seen = new Set();
+      for (const row of listed.result.value) {
+        const info = row?.account?.data?.parsed?.info;
+        const amount = info?.tokenAmount?.amount;
+        if (row?.account?.owner !== mint.tokenProgramId || info?.owner !== address || info?.mint !== asset
+          || info?.tokenAmount?.decimals !== mint.decimals || !base58.test(row?.pubkey || '')
+          || typeof amount !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(amount)) fail('Invalid token balance', 'rpc_rejected');
+        if (info.state === 'frozen' || amount === '0' || seen.has(row.pubkey)) continue;
+        seen.add(row.pubkey);
+        accounts.push({ address: row.pubkey, amount });
+      }
+      return { asset, decimals: mint.decimals, tokenProgramId: mint.tokenProgramId, accounts, amount: accounts.reduce((sum, row) => sum + BigInt(row.amount), 0n).toString() };
     },
 
     async prepareSolanaTransfer({ transaction, accountCreationPayer } = {}) {
@@ -1276,6 +1303,17 @@ export function createPrivyWalletClient({
       const signedTransaction = await signWithPrivy(walletId, transaction);
       const signature = await sendSigned(signedTransaction, { privy: true });
       return { cluster: SOLANA_CLUSTER, signature, privyWalletId: walletId };
+    },
+
+    async signPreparedOwnerSolana({ ownerId, wallet, prepared } = {}) {
+      validateWallet(wallet);
+      if (wallet.ownerId !== assertOwnerId(ownerId)) fail('Wallet owner must match', 'owner_mismatch');
+      if (wallet.frozen || wallet.spendable === false || String(wallet.id).startsWith('linked_')) fail('Wallet cannot sign', 'wallet_frozen');
+      if (!simulatedTransfers.delete(prepared)) fail('Transfer simulation is required', 'simulation_required');
+      const walletId = assertPrivyWalletId(wallet.privyWalletId);
+      const signed = await signWithPrivy(walletId, prepared.transaction);
+      if (!singleSignerMessage(signed).equals(singleSignerMessage(prepared.transaction))) fail('Signed transfer differs from the simulation', 'transaction_mismatch');
+      return { cluster: SOLANA_CLUSTER, signature: await sendSigned(signed, { privy: true }) };
     },
 
     /**
