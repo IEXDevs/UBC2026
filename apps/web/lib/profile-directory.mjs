@@ -10,6 +10,7 @@ import {
   normalizeHandle,
   parseLookupQuery,
   postgrestEq,
+  publicDisplayName,
 } from '@ubc2026/contracts';
 
 const OWNER = /^[a-zA-Z0-9:_-]{1,128}$/;
@@ -97,7 +98,7 @@ export async function localHandleLookup(request, { env = {}, fetcher = fetch } =
     recipient: {
       kind: 'handle',
       handle: row.handle,
-      displayName: row.display_name || '',
+      displayName: publicDisplayName(row.display_name) || `@${row.handle}`,
       avatarUrl: row.avatar_url || null,
       self: row.owner_id === ownerId,
       missing: false,

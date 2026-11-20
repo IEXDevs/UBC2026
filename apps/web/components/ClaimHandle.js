@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Check, X } from 'lucide-react';
-import { normalizeDisplayName, normalizeHandle } from '@ubc2026/contracts';
+import { normalizeDisplayName, normalizeHandle, publicDisplayName } from '@ubc2026/contracts';
 import { claimLookupVerdict, claimSaveNote, handleAlreadyClaimed } from '../lib/profile.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { blockCopy } from '../lib/block-copy.mjs';
@@ -24,7 +24,7 @@ const BURST = [
 ];
 
 export default function ClaimHandle({ accountLabel = '', ownerId = '', getAccessToken = null, onSave, onContinue }) {
-  const [displayName, setDisplayName] = useState(accountLabel || '');
+  const [displayName, setDisplayName] = useState(() => publicDisplayName(accountLabel) || '');
   const [handle, setHandle] = useState('');
   const [note, setNote] = useState('');
   const [pending, setPending] = useState(false);

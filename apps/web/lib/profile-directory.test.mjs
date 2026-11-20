@@ -65,10 +65,13 @@ test('a handle lookup refuses a name another owner already stored', async () => 
     headers: { 'x-owner-id': 'did:privy:user_2' },
   }), {
     env: ENV,
-    fetcher: async () => Response.json([{ owner_id: 'did:privy:user_1', handle: 'alex' }]),
+    fetcher: async () => Response.json([{ owner_id: 'did:privy:user_1', handle: 'alex', display_name: 'alex@example.test' }]),
   });
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).recipient.missing, false);
+  const body = await response.json();
+  assert.equal(body.recipient.missing, false);
+  assert.equal(body.recipient.displayName, '@alex');
+  assert.equal(JSON.stringify(body).includes('alex@example.test'), false);
   const open = await localHandleLookup(new Request('https://app.local/api/profiles/lookup?q=%40sid', {
     headers: { 'x-owner-id': 'did:privy:user_2' },
   }), {

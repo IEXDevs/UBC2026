@@ -303,6 +303,12 @@ export function normalizeDisplayName(value) {
   return name;
 }
 
+/** Public recipient names can come from older profiles that used an email as the label. */
+export function publicDisplayName(value) {
+  const name = normalizeDisplayName(value);
+  return name && !/[^\s@]+@[^\s@]+/.test(name) ? name : null;
+}
+
 export function normalizeHandle(value) {
   if (typeof value !== 'string') return null;
   const handle = value.trim().replace(/^@/, '').toLowerCase();

@@ -10,6 +10,7 @@ import worker from '../../agent-runtime/src/index.mjs';
 
 test('the agent tool resolves another signed-in user’s handle to their main wallet', async () => {
   const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  let displayName = 'Bob';
   const env = {
     PRIVY_APP_ID: 'test-app',
     PRIVY_APP_SECRET: 'test-secret',
@@ -24,7 +25,7 @@ test('the agent tool resolves another signed-in user’s handle to their main wa
       const target = new URL(url);
       if (target.pathname === '/rest/v1/profiles') {
         assert.equal(target.searchParams.get('handle'), 'eq.wallet');
-        return Response.json([{ owner_id: 'did:privy:bob', handle: 'wallet', display_name: 'Bob' }]);
+        return Response.json([{ owner_id: 'did:privy:bob', handle: 'wallet', display_name: displayName }]);
       }
       assert.equal(target.pathname, '/rest/v1/wallets');
       assert.equal(target.searchParams.get('owner_id'), 'eq.did:privy:bob');
@@ -41,6 +42,11 @@ test('the agent tool resolves another signed-in user’s handle to their main wa
   const result = await invoke('lookup_recipient', { q: '@Wallet' });
   assert.equal(result.ok, true);
   assert.deepEqual(result.recipient, { kind: 'handle', handle: 'wallet', displayName: 'Bob', avatarUrl: null, self: false, missing: false, address });
+  displayName = 'Bob (bob@example.test)';
+  const privateRecipient = await invoke('lookup_recipient', { q: '@Wallet' });
+  assert.equal(privateRecipient.recipient.displayName, '@wallet');
+  assert.equal(privateRecipient.recipient.address, address);
+  assert.equal(JSON.stringify(privateRecipient).includes('bob@example.test'), false);
 });
 
 /**
