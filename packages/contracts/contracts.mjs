@@ -528,7 +528,7 @@ export function buildPermissionedSpendRequest(input) {
 }
 
 export const API_ROUTES = Object.freeze([
-  { id: 'models.list', method: 'GET', path: '/api/models', phase: 1, auth: 'none', status: 'live' },
+  { id: 'models.list', method: 'GET', path: '/api/models', phase: 1, auth: 'none', status: 'guarded' },
   { id: 'models.check', method: 'POST', path: '/api/models', phase: 1, auth: 'none', status: 'guarded' },
   { id: 'health', method: 'GET', path: '/health', phase: 1, auth: 'none', status: 'live' },
   { id: 'routes.list', method: 'GET', path: '/api/routes', phase: 0, auth: 'none', status: 'live' },

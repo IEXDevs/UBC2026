@@ -1087,6 +1087,7 @@ export default function Composer({
           efforts={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.map(level => level.label) ?? []}
           defaultEffort={(models.find(item => item.key === chatModel) ?? models[0])?.levels?.find(level => level.default)?.label ?? ''}
           busy={thinking}
+          sendDisabled={models.length === 0}
           background="transparent"
           color="#f5f5f5"
           menuBackground="#27272a"

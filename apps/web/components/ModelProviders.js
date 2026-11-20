@@ -53,7 +53,7 @@ export default function ModelProviders() {
       });
       const data = await response.json();
       if (!response.ok || data.checked === false || data.ok === false || !Array.isArray(data.models)) throw new Error(data.error || 'provider_unavailable');
-      if (provider.id !== ACCOUNT_PROVIDER && !readProviderCredentials(localStorage, provider.id)) return;
+      if (provider.id !== ACCOUNT_PROVIDER && JSON.stringify(readProviderCredentials(localStorage, provider.id)) !== JSON.stringify(credentials)) return;
       saveModelCatalog(localStorage, provider.id, data.models);
       announceModelSettings();
       setChecks(current => ({ ...current, [provider.id]: { message: `${data.models.length} chat models available. New models are shown automatically.` } }));

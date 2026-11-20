@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { saveProvider } from '../lib/provider-tokens.mjs';
 import { AI_PROVIDERS } from '../lib/ai-provider.mjs';
-import { announceModelSettings } from '../lib/provider-models.mjs';
+import { announceModelSettings, forgetProviderModels } from '../lib/provider-models.mjs';
 
 const EMPTY = { name: 'Meta', token: '', baseUrl: AI_PROVIDERS[0].baseUrl };
 
@@ -47,6 +47,7 @@ export default function ProviderAdd({ open, onClose, onSaved }) {
       setNote(noteFor(result.reason));
       return;
     }
+    try { forgetProviderModels(localStorage, result.provider.id); } catch { /* credentials were saved; a check can refresh models */ }
     announceModelSettings();
     onSaved?.(result.provider);
     onClose?.();
