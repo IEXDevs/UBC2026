@@ -8,7 +8,7 @@ const web = new URL('../', import.meta.url);
 /**
  * Achieves: verifies login and onboarding refuse selection copy, while copy buttons still call the clipboard.
  * Fails when: a gate drops no-copy, the wordmark effect returns, or SecretDraft/AddressCopy stop writing the clipboard.
- * Oracle: blockCopy prevents the event; each gate wires onCopy; CSS sets user-select none; copy buttons keep clipboard.writeText.
+ * Oracle: blockCopy prevents the event, each gate wires onCopy, CSS sets user-select none, and copy buttons call copyText.
  * Side effects / state checked: one prevented event.
  * Gaps: browser selection is not driven here.
  */
@@ -41,7 +41,7 @@ test('login and onboarding block selection copy and keep explicit copy buttons',
 
   const draft = readFileSync(new URL('components/SecretDraft.js', web), 'utf8');
   const address = readFileSync(new URL('components/AddressCopy.js', web), 'utf8');
-  assert.match(draft, /navigator\.clipboard\.writeText\(value\)/);
+  assert.match(draft, /copyText\(value\)/);
   assert.match(draft, /aria-label="Copy"/);
-  assert.match(address, /navigator\.clipboard\.writeText\(address\)/);
+  assert.match(address, /copyText\(address\)/);
 });
