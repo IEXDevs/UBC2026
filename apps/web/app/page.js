@@ -101,7 +101,7 @@ import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-previe
 import { clearDeskGrant, clearDeskSession, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { restoreDeskEntry } from '../lib/desk-grant-client.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
-import { walletsNeedingSigner } from '../lib/privy-signers.mjs';
+import { serverSignerFailure, walletsNeedingSigner } from '../lib/privy-signers.mjs';
 import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
 import { logoutAfterFlush } from '../lib/profile-logout.mjs';
 
@@ -195,7 +195,7 @@ function AuthedShell() {
         try {
           await addSigners({ address, signers: [{ signerId, policyIds: [] }] });
         } catch (error) {
-          console.warn('[wallets] server signer not added', error?.code || error?.name || 'error');
+          console.warn('[wallets] server signer not added', serverSignerFailure(error));
         }
       }
     })();

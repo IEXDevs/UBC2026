@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { privySignerId, walletsNeedingSigner } from './privy-signers.mjs';
+import { serverSignerFailure, privySignerId, walletsNeedingSigner } from './privy-signers.mjs';
 
 const A = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';
 const B = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 const C = 'HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH';
+
+test('server signer diagnostics retain safe status and code without raw provider text', () => {
+  assert.deepEqual(serverSignerFailure({ status: 403, code: 'forbidden', error: 'Permission denied https://private.example/token' }), {
+    status: 403, code: 'forbidden', message: 'Privy denied permission to add this signer.',
+  });
+  assert.deepEqual(serverSignerFailure(null), { code: 'unknown', message: 'Privy rejected adding the server signer.' });
+  assert.deepEqual(serverSignerFailure({ status: 999, code: 'Bearer secret', message: 'secret' }), {
+    code: 'unknown', message: 'Privy rejected adding the server signer.',
+  });
+});
 
 test('privySignerId accepts key quorum ids only', () => {
   assert.equal(privySignerId(' cm1abcdefghijklmnopqrstu '), 'cm1abcdefghijklmnopqrstu');

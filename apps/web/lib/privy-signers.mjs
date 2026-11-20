@@ -6,6 +6,24 @@
 const SIGNER_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
+export function serverSignerFailure(error) {
+  const status = Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? error.status : undefined;
+  const code = typeof error?.code === 'string' && /^[a-zA-Z0-9_.-]{1,64}$/.test(error.code) ? error.code : 'unknown';
+  const detail = [error?.error, error?.message].filter(value => typeof value === 'string').join(' ').slice(0, 2048);
+  const reasons = [
+    [/mfa|multi.factor/i, 'Privy requires multi-factor authentication.'],
+    [/expired|session|login|log.in/i, 'Privy requires a fresh authenticated session.'],
+    [/not.found|does.not.exist|unknown.signer|invalid.{0,20}(signer|quorum)/i, 'Privy could not find the signer or key quorum for this app.'],
+    [/unauthori[sz]ed|forbidden|permission|not.allowed|not.owner/i, 'Privy denied permission to add this signer.'],
+    [/not.supported|unsupported|not.enabled/i, 'Privy does not support or enable this signer operation for this wallet.'],
+    [/already/i, 'Privy reports the signer is already configured.'],
+    [/invalid|malformed/i, 'Privy rejected the signer configuration.'],
+    [/network|fetch|timeout/i, 'The Privy signer request could not complete.'],
+  ];
+  const message = reasons.find(([pattern]) => pattern.test(detail))?.[1] || 'Privy rejected adding the server signer.';
+  return { ...(status ? { status } : {}), code, message };
+}
+
 export function privySignerId(value) {
   const id = typeof value === 'string' ? value.trim() : '';
   return SIGNER_ID.test(id) ? id : '';
