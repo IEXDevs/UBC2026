@@ -26,7 +26,8 @@ test('wallet move accepts a verified connected recipient and signs only with the
   const ownerId = 'did:privy:move-recipient';
   const session = privySessionFixture(ownerId, 'recipienttestapp');
   const sender = Keypair.generate();
-  const phantom = Keypair.generate().publicKey.toBase58();
+  const phantomSigner = Keypair.generate();
+  const phantom = phantomSigner.publicKey.toBase58();
   const blockhash = Keypair.generate().publicKey.toBase58();
   const from = { id: 'cm5sender1234567890abcd', address: sender.publicKey.toBase58() };
   const to = { id: `linked_${phantom}`, address: phantom };
@@ -91,7 +92,7 @@ test('wallet move accepts a verified connected recipient and signs only with the
     if (body.method === 'getLatestBlockhash') return Response.json({ result: { value: { blockhash, lastValidBlockHeight: 100 } } });
     if (body.method === 'getBalance') return Response.json({ result: { value: 9000000000 } });
     if (body.method === 'getAccountInfo') return Response.json({ result: { value: { owner: tokenProgramId, data: { parsed: { type: 'mint', info: { decimals: 8, isInitialized: true } } } } } });
-    if (body.method === 'getTokenAccountsByOwner') return Response.json({ result: { value: [{ pubkey: tokenAccount, account: { owner: tokenProgramId, data: { parsed: { info: { owner: from.address, mint: tokenMint, state: 'initialized', tokenAmount: { amount: '9000000000', decimals: 8 } } } } } }] } });
+    if (body.method === 'getTokenAccountsByOwner') return Response.json({ result: { value: [{ pubkey: tokenAccount, account: { owner: tokenProgramId, data: { parsed: { info: { owner: body.params[0], mint: tokenMint, state: 'initialized', tokenAmount: { amount: '9000000000', decimals: 8 } } } } } }] } });
     if (body.method === 'getFeeForMessage') return Response.json({ result: { value: 5000 } });
     if (body.method === 'simulateTransaction') return Response.json({ result: { value: { err: simulationError } } });
     assert.equal(body.method, 'sendTransaction');
@@ -150,6 +151,30 @@ test('wallet move accepts a verified connected recipient and signs only with the
   assert.equal((await simulated.json()).error, 'simulation_failed');
   assert.equal(signing.length, 4, 'asset validation and simulation failures never sign');
   assert.equal(broadcasts.length, 4);
+  simulationError = null;
+  for (const asset of ['SOL', tokenMint]) {
+    const destination = Keypair.generate().publicKey.toBase58();
+    const payload = { from: { ...to, spendable: true }, asset, destination, decimals: asset === 'SOL' ? 9 : 8 };
+    const prepared = await move({ ...payload, phase: 'prepare' });
+    assert.equal(prepared.status, 200, JSON.stringify(await prepared.clone().json()));
+    const { transaction: unsigned } = await prepared.json();
+    assert.equal(signing.length, 4, 'prepare never signs for an external wallet');
+    const unsignedBroadcast = await move({ ...payload, phase: 'broadcast', signedTransaction: unsigned });
+    assert.equal((await unsignedBroadcast.json()).error, 'invalid_signature');
+    const transaction = Transaction.from(Buffer.from(unsigned, 'base64'));
+    transaction.sign(phantomSigner);
+    const signedTransaction = transaction.serialize().toString('base64');
+    const sent = await move({ ...payload, phase: 'broadcast', signedTransaction });
+    assert.equal(sent.status, 200, JSON.stringify(await sent.clone().json()));
+    const changed = await move({ ...payload, destination: from.address, phase: 'broadcast', signedTransaction });
+    assert.equal((await changed.json()).error, 'transaction_mismatch');
+    const forged = await move({ ...payload, phase: 'send' });
+    assert.equal((await forged.json()).error, 'invalid_phase', 'request spendable flag cannot choose the Privy signer');
+  }
+  assert.equal(signing.length, 4);
+  assert.equal(broadcasts.length, 6);
+  const unlinked = await move({ from: { id: 'unverified', address: Keypair.generate().publicKey.toBase58() }, asset: 'SOL', destination: from.address, decimals: 9, phase: 'prepare' });
+  assert.equal((await unlinked.json()).error, 'wallet_not_owned');
 });
 
 test('profile claims and handle lookup share the configured runtime directory', async (t) => {

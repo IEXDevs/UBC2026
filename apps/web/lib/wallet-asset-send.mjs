@@ -17,7 +17,6 @@ export async function sendWalletAsset({ client, ownerId, from, wallets, destinat
   const ownDestination = wallets.find(wallet => wallet?.address === destination);
   if (ownDestination?.frozen) fail('wallet_frozen');
   const connected = from.spendable === false;
-  if (connected && ownDestination?.kind !== 'main') fail('invalid_destination');
   if ((connected && !['prepare', 'broadcast'].includes(phase)) || (!connected && phase !== 'send')) fail('invalid_phase');
   let signed;
   if (phase === 'broadcast') {

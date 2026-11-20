@@ -3,7 +3,7 @@ import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
-import { useAuthorizationSignature, usePrivy } from '@privy-io/react-auth';
+import { useAuthorizationSignature, useConnectWallet, usePrivy } from '@privy-io/react-auth';
 import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
@@ -55,6 +55,7 @@ import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
+import { signSelectedWalletTransaction } from '../lib/wallet-signing.mjs';
 import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
   deleteOwnerBot,
@@ -454,9 +455,10 @@ function base64ToBytes(value) {
 function DepositSigner({ signerRef }) {
   const { signTransaction } = useSignTransaction();
   const { wallets } = useWallets();
+  const { connectWallet } = useConnectWallet();
   useEffect(() => {
-    signerRef.current = { signTransaction, wallets };
-  }, [signTransaction, wallets, signerRef]);
+    signerRef.current = { signTransaction, wallets, connectWallet };
+  }, [signTransaction, wallets, connectWallet, signerRef]);
   return null;
 }
 
@@ -1217,13 +1219,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         if (from.spendable === false) {
           const prepared = await post({ phase: 'prepare' });
           if (!prepared.response.ok || !prepared.body.transaction) return { ok: false, message: 'The transfer was not prepared. Check the balance and SOL network fees.' };
-          const signer = depositSignerRef.current;
-          const wallet = signer?.wallets?.find(item => item?.address === from.address);
           const transaction = base64ToBytes(prepared.body.transaction);
-          if (!wallet || !transaction || typeof signer?.signTransaction !== 'function') return { ok: false, message: 'Connect that wallet again to approve the send.' };
-          const signed = await signer.signTransaction({ transaction, wallet, chain: SOLANA_PRIVY_CHAIN });
-          if (!(signed?.signedTransaction instanceof Uint8Array)) return { ok: false, message: 'The wallet did not approve the send.' };
-          result = await post({ phase: 'broadcast', signedTransaction: bytesToBase64(signed.signedTransaction) });
+          const signed = await signSelectedWalletTransaction({ from, transaction, signer: depositSignerRef.current });
+          result = await post({ phase: 'broadcast', signedTransaction: bytesToBase64(signed) });
         } else result = await post({ phase: 'send' });
         const { response, body } = result;
         if (!response.ok || !body.signature) {
@@ -1246,7 +1244,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             { label: 'Asset', value: pending.walletAsset }, { label: 'Signature', value: body.signature },
           ], signature: body.signature, cluster: SOLANA_CLUSTER },
         };
-      } catch { return { ok: false, message: 'The wallet send did not complete.' }; }
+      } catch (error) {
+        const messages = {
+          wallet_connection_required: 'Connect the selected wallet, then slide again to approve the send.',
+          wallet_approval_cancelled: 'The wallet did not approve the send. Nothing was sent.',
+          invalid_signature: 'The wallet did not return a signed transfer. Nothing was sent.',
+        };
+        return { ok: false, message: messages[error?.code] || 'The wallet send did not complete.' };
+      }
     }
     if (target?.kind === 'sns') {
       const main = (Array.isArray(liveWallets) ? liveWallets : wallets).find(item => item?.kind === 'main') || null;

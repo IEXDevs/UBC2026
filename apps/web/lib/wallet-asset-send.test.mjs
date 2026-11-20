@@ -18,12 +18,13 @@ const base = { ownerId: from.ownerId, from, wallets: [from], destination, asset:
 
 function harness({ program = TOKEN_PROGRAM_ID, failSimulation = false } = {}) {
   const calls = [];
+  const accounts = [{ address: Keypair.generate().publicKey.toBase58(), amount: '100000000' }, { address: Keypair.generate().publicKey.toBase58(), amount: '1134567890' }];
   return { calls, client: {
     async readSolanaAsset({ asset }) {
       calls.push('balance');
       return asset === 'SOL' ? { asset, decimals: 9, amount: '9000000000' } : {
         asset, decimals: 8, tokenProgramId: program.toBase58(), amount: '1234567890',
-        accounts: [{ address: Keypair.generate().publicKey.toBase58(), amount: '100000000' }, { address: Keypair.generate().publicKey.toBase58(), amount: '1134567890' }],
+        accounts,
       };
     },
     async getSolanaBlockhash() { return { cluster: SOLANA_CLUSTER, blockhash }; },
@@ -79,7 +80,7 @@ test('invalid amounts, insufficient balances, changed decimals and frozen source
   assert.equal(calls.some(row => row.signer), false);
 });
 
-test('connected source requires a signature for the exact reconstructed asset transfer into Main', async () => {
+test('connected source requires a signature for the exact reconstructed asset transfer', async () => {
   const connected = { ...from, id: 'linked_phantom', kind: 'additional', spendable: false };
   const main = { ...from, address: destination };
   const { client, calls } = harness();
@@ -93,10 +94,31 @@ test('connected source requires a signature for the exact reconstructed asset tr
   assert.equal(sent.signature, 'offline-signature');
   assert.equal(calls.filter(row => row === 'broadcast').length, 1);
   await assert.rejects(sendWalletAsset({ ...args, phase: 'broadcast', signedTransaction, amount: '1' }), { code: 'transaction_mismatch' });
-  await assert.rejects(sendWalletAsset({ ...args, destination: Keypair.generate().publicKey.toBase58() }), { code: 'invalid_destination' });
+  await assert.rejects(sendWalletAsset({ ...args, destination: from.address }), { code: 'invalid_destination' });
   await assert.rejects(sendWalletAsset({ ...args, phase: 'send' }), { code: 'invalid_phase' });
   assert.equal(calls.filter(row => row === 'broadcast').length, 1);
 });
+
+for (const program of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+  test(`external wallet sends held assets to other addresses only after its approval (${program})`, async () => {
+    const connected = { ...from, id: 'linked_phantom', kind: 'additional', spendable: false };
+    const { client, calls } = harness({ program });
+    const args = { ...base, client, from: connected, wallets: [connected], phase: 'prepare' };
+    const prepared = await sendWalletAsset(args);
+    const transaction = Transaction.from(Buffer.from(prepared.transaction, 'base64'));
+    assert.equal(transaction.feePayer.toBase58(), connected.address);
+    assert.equal(calls.some(row => row.signer || row === 'broadcast'), false);
+    await assert.rejects(sendWalletAsset({ ...args, phase: 'broadcast', signedTransaction: prepared.transaction }), { code: 'invalid_signature' });
+    transaction.sign(source);
+    const signedTransaction = transaction.serialize().toString('base64');
+    await sendWalletAsset({ ...args, phase: 'broadcast', signedTransaction });
+    assert.equal(calls.filter(row => row === 'broadcast').length, 1);
+    assert.equal(calls.some(row => row.signer), false, 'external keys never use the stored Privy signer');
+    await assert.rejects(sendWalletAsset({ ...args, phase: 'broadcast', signedTransaction, destination: Keypair.generate().publicKey.toBase58() }), { code: 'transaction_mismatch' });
+    await assert.rejects(sendWalletAsset({ ...args, wallets: [...args.wallets, { address: destination, frozen: true }] }), { code: 'wallet_frozen' });
+    assert.equal(calls.filter(row => row === 'broadcast').length, 1);
+  });
+}
 
 test('Send assets come only from the selected wallet, including unpriced tokens, with native SOL separate from wSOL', () => {
   const portfolio = buildPortfolio({ cluster: SOLANA_CLUSTER === 'mainnet-beta' ? 'mainnet' : SOLANA_CLUSTER, wallets: [{ address: from.address, tokens: [
