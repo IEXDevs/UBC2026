@@ -70,6 +70,8 @@ test('both setup forms wire accessible feedback without gating seed verification
   assert.match(desk, /secretAcceptAllowed\(\{ generated, copied \}\)/);
   assert.match(recovery, /aria-describedby="recovery-password-match"/);
   assert.match(recovery, /disabled=\{!feedback.ready\}/);
+  assert.match(recovery, /Password must contain 8 to 64 characters and no line breaks\./);
+  assert.match(recovery, /Password meets the requirements\./);
   assert.match(draft, /aria-describedby=\{describedBy\}/);
   assert.match(draft, /Copied\. Keep it somewhere safe/);
   assert.match(draft, /onCopy=\{\(event\) => \{\s*event.preventDefault\(\);\s*event.stopPropagation\(\);\s*void copy\(\);/);

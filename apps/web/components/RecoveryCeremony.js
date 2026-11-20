@@ -97,7 +97,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
   const finishTimer = useRef(0);
   const passwordRules = 'Use 8 to 64 characters, with no line breaks.';
   const normalizedPassword = normalizePassphrase(password);
-  const feedback = passwordFeedback(password, repeat, normalizedPassword ? '' : passwordRules, normalizedPassword);
+  const feedback = passwordFeedback(password, repeat, normalizedPassword ? '' : 'Password must contain 8 to 64 characters and no line breaks.', normalizedPassword);
 
   async function authToken() {
     try { return (await getAccessToken?.()) || ''; } catch { return ''; }
@@ -377,7 +377,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
               <input type="password" name="wallet-password" autoComplete="new-password" value={password} aria-describedby="recovery-password-rules" aria-invalid={Boolean(feedback.problem) || undefined} onChange={(event) => { setPassword(event.target.value); setNote(''); }} />
             </label>
             <PasswordFeedback id="recovery-password-rules" state={feedback.problem ? 'error' : (password ? 'ok' : '')}>
-              {feedback.problem || passwordRules}
+              {feedback.problem || (password ? 'Password meets the requirements.' : passwordRules)}
             </PasswordFeedback>
             <label>
               Repeat password
