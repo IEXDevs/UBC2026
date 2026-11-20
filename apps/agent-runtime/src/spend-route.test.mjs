@@ -66,6 +66,8 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
   let approvals = 0;
   let reserves = 0;
   let signs = 0;
+  let blockhashReads = 0;
+  let originalTransaction;
   const env = spendEnv({
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test-role',
@@ -102,18 +104,26 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
       return new Response(null, { status: 201 });
     },
     transferClient: {
-      getDevnetBlockhash: async () => ({ cluster: 'devnet', blockhash: DESTINATION }),
+      getDevnetBlockhash: async () => {
+        blockhashReads++;
+        return { cluster: 'devnet', blockhash: DESTINATION };
+      },
       prepareDevnetTransfer: async ({ transaction }) => {
         const ix = Transaction.from(Buffer.from(transaction, 'base64')).instructions[0];
         const transfer = SystemInstruction.decodeTransfer(ix);
-        assert.equal(transfer.lamports, 1000000000n);
         assert.equal(transfer.toPubkey.toBase58(), destination);
         prepared = { transaction, feeLamports: '5000' };
         return prepared;
       },
+      formatPreparedSpendAuthorization: ({ prepared, expiresAt }) => {
+        assert.equal(expiresAt, NOW + 60_000);
+        return prepared.transaction;
+      },
       signPreparedDevnetTransfer: async input => {
         assert.equal(input.prepared, prepared);
-        assert.equal(input.accessToken, 'test-owner-session');
+        assert.equal(input.prepared.transaction, originalTransaction);
+        assert.equal(input.ownerAuthorization.signature, Buffer.alloc(64, 3).toString('base64'));
+        assert.equal(input.accessToken, undefined);
         assert.equal(reserves, 1);
         signs++;
         return { cluster: 'devnet', signature: 'mock_signature' };
@@ -129,14 +139,33 @@ test('SOL to a handle reserves lamports plus the fee and signs the simulated tra
   const held = await (await call(spend)).json();
   assert.equal(held.state, 'approval-needed');
   assert.equal(prepared, undefined);
-  const sent = await (await call({ ...spend, confirmed: true })).json();
+  const confirmed = { ...spend, confirmed: true };
+  const challenge = await (await call({ ...confirmed, spendAuthorization: 'prepare' })).json();
+  assert.equal(challenge.signed, false);
+  assert.match(challenge.spendAuthorization.proof, /^[a-f0-9]{64}$/);
+  assert.equal(challenge.spendAuthorization.payload, prepared.transaction);
+  originalTransaction = prepared.transaction;
+  assert.equal(SystemInstruction.decodeTransfer(Transaction.from(Buffer.from(originalTransaction, 'base64')).instructions[0]).lamports, 1000000000n);
+  assert.equal(reserves, 0);
+  assert.equal(approvals, 0);
+  assert.equal(signs, 0);
+
+  const { payload: _payload, ...binding } = challenge.spendAuthorization;
+  const spendAuthorization = { ...binding, signature: Buffer.alloc(64, 3).toString('base64') };
+  const expired = await (await call({ ...confirmed, spendAuthorization: { ...spendAuthorization, expiresAt: NOW } })).json();
+  assert.equal(expired.error, 'spend_authorization_expired');
+  const changed = await (await call({ ...confirmed, amount: '999999999', spendAuthorization })).json();
+  assert.equal(changed.reason, 'spend_authorization_changed');
+  assert.equal(reserves, 0);
+  const sent = await (await call({ ...confirmed, spendAuthorization })).json();
   assert.equal(sent.state, 'signed', sent.reason);
   assert.equal(sent.signed, true);
   assert.equal(sent.feeLamports, '5000');
   assert.deepEqual(sent.steps, ['trust-gate', 'verify-consensus', 'wallet-freeze', 'bot-policy', 'approval-mode', 'reserve', 'sign']);
-  const replay = await (await call({ ...spend, confirmed: true })).json();
+  const replay = await (await call({ ...confirmed, spendAuthorization })).json();
   assert.equal(replay.reason, 'duplicate-spend');
   assert.equal(signs, 1);
+  assert.equal(blockhashReads, 1);
   assert.equal(approvals, 2);
   const wrongRecipient = await (await call({ ...spend, confirmed: true, destination: DESTINATION })).json();
   assert.equal(wrongRecipient.error, 'recipient_address_missing');

@@ -581,7 +581,7 @@ export function createChatToolInvoker({
 
   const apiBase = root || 'shell';
 
-  async function invokeDashboard(name, args = {}, { sessionBot = true, approveOnce } = {}) {
+  async function invokeDashboard(name, args = {}, { sessionBot = true, approveOnce, spendAuthorization } = {}) {
     if (name === 'break_loop' && !ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
     const def = DASHBOARD_TOOLS.find((tool) => tool.name === name);
     if (!def?.voiceCalls?.length) return { error: 'unknown_tool' };
@@ -642,11 +642,12 @@ export function createChatToolInvoker({
       if (!ownerAskedToBreakLoop(ownerMessage)) return { error: 'owner_must_ask' };
       return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body, { 'x-loop-break': 'owner-asked' });
     }
+    if (name === 'request_spend' && spendAuthorization) body.spendAuthorization = spendAuthorization;
     return callWorker(url, entry.method, entry.method === 'GET' ? undefined : body,
       name === 'request_spend' && approveOnce ? { 'x-spend-approve-once': approveOnce } : undefined);
   }
 
-  return async function invokeTool(name, args = {}, { approveOnce } = {}) {
+  return async function invokeTool(name, args = {}, { approveOnce, spendAuthorization } = {}) {
     args = applySituation(name, args, situation);
     if (name === 'create_loop' || name === 'set_loop_cooldown' || name === 'break_loop') {
       args = { ...args, botId };
@@ -772,7 +773,7 @@ export function createChatToolInvoker({
         });
       }
       if (DASHBOARD_NAMES.has(name)) {
-        return await invokeDashboard(name, args, { approveOnce });
+        return await invokeDashboard(name, args, { approveOnce, spendAuthorization });
       }
       return await local.invokeTool(name, args, identity);
     } catch (error) {

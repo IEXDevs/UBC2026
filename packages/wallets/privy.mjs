@@ -950,6 +950,55 @@ export function createPrivyWalletClient({
     }
   }
 
+  function browserAuthorizedRequest(wallet, prepared, expiresAt) {
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= now() || expiresAt > now() + REQUEST_TTL_MS) {
+      fail('The payment authorization expired', 'wallet_authorization_failed');
+    }
+    const walletId = assertPrivyWalletId(wallet.privyWalletId);
+    return {
+      version: 1,
+      url: `${privyApi}/v1/wallets/${encodeURIComponent(walletId)}/rpc`,
+      method: 'POST',
+      headers: { 'privy-app-id': id, 'privy-request-expiry': String(expiresAt) },
+      body: {
+        chain_type: 'solana', method: 'signTransaction',
+        params: { transaction: prepared.transaction, encoding: 'base64' },
+      },
+    };
+  }
+
+  async function signWithBrowserAuthorization(wallet, prepared, { expiresAt, signature }) {
+    if (typeof signature !== 'string' || !/^[A-Za-z0-9+/]{80,128}={0,2}$/.test(signature)
+      || signature.length % 4 !== 0) fail('Invalid Privy authorization signature', 'wallet_authorization_failed');
+    const request = browserAuthorizedRequest(wallet, prepared, expiresAt);
+    const attempt = { stage: 'browser-owner-sign' };
+    const at = now();
+    try {
+      const result = await fetchJson(request.url, {
+        method: request.method,
+        headers: {
+          ...request.headers,
+          Authorization: basicAuth(id, secret),
+          'Content-Type': 'application/json',
+          'privy-authorization-signature': signature,
+        },
+        body: request.body,
+        signingAttempt: attempt,
+      }, 'wallet_authorization_failed');
+      if (typeof result?.data?.signed_transaction !== 'string') {
+        attempt.detail = 'missing-signed-transaction';
+        failSigning('Privy returned no signed transaction', 'wallet_authorization_failed', { transport: 'invalid-response' });
+      }
+      return result.data.signed_transaction;
+    } catch (error) {
+      const diagnostic = error?.privyFailure;
+      if (diagnostic?.transport) attempt.transport = diagnostic.transport;
+      const code = diagnostic?.code === 'policy_violation' ? 'wallet_policy_rejected' : 'wallet_authorization_failed';
+      failSigning('Privy rejected the browser-authorized signing request', code,
+        parsePrivySigningFailure({ ...diagnostic, at, requests: [attempt] }));
+    }
+  }
+
   async function sendSigned(signedTransaction, { privy = false } = {}) {
     const signed = decodeBase64(signedTransaction, 'Signed transaction');
     if (signed.length <= 64) {
@@ -1150,16 +1199,24 @@ export function createPrivyWalletClient({
       return prepared;
     },
 
-    async signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken } = {}) {
+    formatPreparedSpendAuthorization({ bot, wallet, prepared, expiresAt } = {}) {
+      assertSpendAllowed({ bot, wallet });
+      if (!simulatedTransfers.has(prepared)) fail('Transfer simulation is required', 'simulation_required');
+      const request = browserAuthorizedRequest(wallet, prepared, expiresAt);
+      return Buffer.from(canonicalizeJson(request)).toString('base64');
+    },
+
+    async signPreparedDevnetTransfer({ bot, wallet, prepared, accessToken, ownerAuthorization } = {}) {
       assertSpendAllowed({ bot, wallet });
       if (!simulatedTransfers.delete(prepared)) fail('Transfer simulation is required', 'simulation_required');
       await assertDevnet();
-      const walletId = assertPrivyWalletId(wallet.privyWalletId);
-      const signed = await signWithPrivy(walletId, prepared.transaction, {
-        ownerId: wallet.ownerId,
-        walletAddress: wallet.address,
-        accessToken,
-      });
+      const signed = ownerAuthorization
+        ? await signWithBrowserAuthorization(wallet, prepared, ownerAuthorization)
+        : await signWithPrivy(assertPrivyWalletId(wallet.privyWalletId), prepared.transaction, {
+            ownerId: wallet.ownerId,
+            walletAddress: wallet.address,
+            accessToken,
+          });
       if (!singleSignerMessage(signed).equals(singleSignerMessage(prepared.transaction))) {
         fail('Signed transfer differs from the simulation', 'transaction_mismatch');
       }

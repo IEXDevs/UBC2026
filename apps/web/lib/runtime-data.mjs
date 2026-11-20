@@ -5,6 +5,7 @@
  * Never invent PreviewMain / demo bots.
  */
 import { publicCardLoop } from '@ubc2026/contracts/card-loop';
+import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { sanitizeActivity } from './chat-activity.mjs';
 import { catalogPayload } from './file-catalog.mjs';
 import { clipOwnerMessage, MESSAGE_CHAR_CAP } from './context-usage.mjs';
@@ -369,6 +370,8 @@ export function botChatUrl(_runtimeBase, botId) {
 }
 
 function chatResult(body) {
+  const spendAuthorization = parseSpendAuthorizationChallenge(body.spendAuthorization);
+  if (spendAuthorization) return { ok: true, spendAuthorization };
   const hold = body.hold && (body.hold.kind === 'inline' || body.hold.kind === 'modal')
     && typeof body.hold.name === 'string'
     ? body.hold
@@ -446,6 +449,7 @@ export async function sendBotChat({
   type,
   permission,
   grants = null,
+  spendAuthorization,
   model,
   effort,
   shellBots = null,
@@ -502,6 +506,7 @@ export async function sendBotChat({
         ...(typeof type === 'string' && type.trim() ? { type: type.trim().slice(0, 40) } : {}),
         ...(typeof permission === 'string' && permission.trim() ? { permission: permission.trim().slice(0, 16) } : {}),
         ...(Array.isArray(grants) ? { grants: grants.slice(0, 4) } : {}),
+        ...(spendAuthorization ? { spendAuthorization } : {}),
         ...(typeof model === 'string' && model.trim() ? { model: model.trim().slice(0, 80) } : {}),
         ...(typeof effort === 'string' && effort.trim() ? { effort: effort.trim().slice(0, 16) } : {}),
         ...(Array.isArray(shellBots) ? { shellBots: shellBots.slice(0, 40) } : {}),

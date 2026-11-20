@@ -191,6 +191,10 @@ test('chat requires a second sealed slide and a verified owner to approve an ove
     return `${input}.${sign('sha256', Buffer.from(input), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
   };
   const calls = [];
+  const challenge = {
+    blockhash: '11111111111111111111111111111111',
+    expiresAt: Date.now() + 60_000, proof: 'b'.repeat(64), payload: Buffer.alloc(100, 4).toString('base64'),
+  };
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const target = new URL(url);
     if (target.origin === 'https://auth.privy.io') {
@@ -199,27 +203,31 @@ test('chat requires a second sealed slide and a verified owner to approve an ove
     }
     assert.equal(target.origin, config.NEXT_PUBLIC_AGENT_RUNTIME_URL);
     assert.equal(target.pathname, '/api/spend');
-    const spend = parsePermissionedSpendBody(JSON.parse(init.body));
+    const raw = JSON.parse(init.body);
+    const spend = parsePermissionedSpendBody(raw);
     const approval = init.headers['x-spend-approve-once'];
-    calls.push({ spend, approval });
+    calls.push({ spend, approval, spendAuthorization: raw.spendAuthorization });
     if (!approval) {
       return Response.json({ state: 'approval-needed', reason: 'per-transaction', signed: false, approvalTerms: terms }, { status: 409 });
     }
     const binding = spendApprovalMessage({ ownerId, spend, terms, expiresAt: initial.expiresAt });
     assert.equal(approval, `v1.${initial.expiresAt}.${createHmac('sha256', config.SUPABASE_SERVICE_ROLE_KEY).update(binding).digest('hex')}`);
+    if (raw.spendAuthorization === 'prepare') {
+      return Response.json({ signed: false, spendAuthorization: challenge });
+    }
     return Response.json({ signed: true, cluster: 'devnet', signature: 'a'.repeat(88) });
   });
 
   const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
-  const chat = async (hold, token = tokenFor(ownerId)) => {
+  const chat = async (hold, token = tokenFor(ownerId), spendAuthorization) => {
     const res = await POST(new Request('https://desk.example/api/bots/bot_1/chat', {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'x-owner-id': ownerId, 'x-spend-approve-once': 'client-supplied' },
-      body: JSON.stringify({ message: 'Send 1 SOL to @hi', grants: [hold], permission: 'review' }),
+      body: JSON.stringify({ message: 'Send 1 SOL to @hi', grants: [hold], permission: 'review', spendAuthorization }),
     }), { params: { botId } });
     return res.json();
   };
-  const waiting = await chat(initial);
+  const waiting = await chat(initial, undefined, 'prepare');
   assert.match(waiting.reply, /Approve once: send 1 SOL to @hi.*0.000005 SOL fee/);
   assert.equal(waiting.hold.idempotencyKey, initial.idempotencyKey);
   assert.equal(waiting.hold.expiresAt, initial.expiresAt);
@@ -230,8 +238,18 @@ test('chat requires a second sealed slide and a verified owner to approve an ove
   assert.equal((await chat(waiting.hold, tokenFor('did:privy:someone-else'))).error, 'login_required');
   assert.equal((await chat(waiting.hold, 'invalid-token')).error, 'login_required');
   assert.equal(calls.length, 1);
-  assert.match((await chat(waiting.hold)).reply, /Sent\./);
-  assert.equal(calls.length, 2);
+  const prepared = await chat(waiting.hold, undefined, 'prepare');
+  assert.deepEqual(prepared.spendAuthorization, challenge);
+  assert.equal(prepared.hold, undefined);
+  assert.equal(prepared.reply, undefined);
+  const { payload, ...proof } = challenge;
+  const authorization = { ...proof, signature: Buffer.alloc(64, 3).toString('base64') };
+  const sent = await chat(waiting.hold, undefined, authorization);
+  assert.match(sent.reply, /Sent\./);
+  assert.equal(sent.spendAuthorization, undefined);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[2].spendAuthorization, authorization);
+  assert.equal(JSON.stringify(sent).includes(authorization.signature), false);
   assert.deepEqual(calls[0].spend, calls[1].spend);
 });
 
