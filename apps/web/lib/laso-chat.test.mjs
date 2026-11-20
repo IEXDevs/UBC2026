@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lasoPreparationArgs, lasoPurchaseHold, pendingLasoConfirmation } from './laso-chat.mjs';
 import { sealAssetSpendHold, resumeAssetSpend } from './chat-spend-confirmation.mjs';
-import { createChatToolInvoker } from './chat-tools.mjs';
+import { createChatToolInvoker, serializeToolResult } from './chat-tools.mjs';
 import { completeTextChat } from './text-chat.mjs';
 
 const context = { ownerId: 'owner_1', botId: 'bot_1', secret: 'offline-test-key' };
@@ -77,4 +77,53 @@ test('the model preparation path returns its hold without another model reply or
   assert.equal(reply.hold.args.action, 'x402');
   assert.equal(reply.hold.args.lasoTicket, prepared.lasoTicket);
   assert.equal(calls, 1);
+});
+
+test('a named Laso reloadable request prepares the default card even if the model omits or misnames the provider', async () => {
+  for (const provider of [undefined, 'reloadable']) {
+    let modelCalls = 0;
+    let runtimeCalls = 0;
+    const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get me a laso finance reloadable card', runtimeBase: 'https://runtime.invalid', fetcher: async (_url, init) => {
+      runtimeCalls++;
+      assert.deepEqual(JSON.parse(init.body), { provider: 'laso' });
+      return Response.json({ ...prepared, botId: context.botId, proposal: { outflow: '5000000' } });
+    } });
+    const reply = await completeTextChat({
+      modelApiKey: 'LLM_1607358788850350_testsecretvalue', message: 'get me a laso finance reloadable card',
+      tools: [{ type: 'function', function: { name: 'prepare_shopping', parameters: { type: 'object' } } }],
+      fetcher: async () => {
+        assert.equal(++modelCalls, 1);
+        return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [
+          { id: 'prepare', type: 'function', function: { name: 'prepare_shopping', arguments: JSON.stringify({ provider, type: 'reloadable' }) } },
+        ] } }] });
+      },
+      invokeTool: async (name, inputs) => serializeToolResult(await invoke(name, inputs)),
+    });
+    assert.equal(reply.hold.args.action, 'x402');
+    assert.equal(reply.hold.args.amount, '5000000');
+    assert.equal(reply.hold.args.botId, context.botId);
+    assert.equal(modelCalls, 1);
+    assert.equal(runtimeCalls, 1);
+  }
+});
+
+test('Laso tool failures and empty results return a preparation error without a follow-up model call', async () => {
+  for (const failure of [null, '{}', { error: 'invalid_amount' }, { ok: false }, new Error('offline')]) {
+    let calls = 0;
+    const reply = await completeTextChat({
+      modelApiKey: 'LLM_1607358788850350_testsecretvalue', message: 'get me a laso finance reloadable card',
+      tools: [{ type: 'function', function: { name: 'prepare_shopping', parameters: { type: 'object' } } }],
+      fetcher: async () => {
+        assert.equal(++calls, 1);
+        return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [
+          { id: 'prepare', type: 'function', function: { name: 'prepare_shopping', arguments: JSON.stringify(args) } },
+        ] } }] });
+      },
+      invokeTool: async () => { if (failure instanceof Error) throw failure; return failure; },
+    });
+    assert.equal(reply.hold, undefined);
+    assert.match(reply.text, /could not prepare the Laso card/);
+    assert.doesNotMatch(reply.text, /model call failed/);
+    assert.equal(calls, 1);
+  }
 });
