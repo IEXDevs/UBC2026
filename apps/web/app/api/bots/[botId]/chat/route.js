@@ -22,6 +22,7 @@ import { readSubagentResults } from '../../../../../lib/subagent-board.mjs';
 import { MESSAGE_CHAR_CAP } from '../../../../../lib/context-usage.mjs';
 import { ensureOwnerTradeLoop } from '../../../../../lib/owner-trade.mjs';
 import { cloudflareWorkerEnv } from '../../../../../lib/wallets-cloudflare.mjs';
+import { parseSolHandleSend, runSolHandleSend } from '../../../../../lib/sol-handle-send.mjs';
 
 const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const OWNER = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -79,10 +80,11 @@ export async function POST(request, context) {
 
   const permissionMode = parsePermission(body.permission);
   const reviewCap = ownerReviewCap(body.reviewCap);
-  const connectors = linkedConnectorIds(body.connectors);
-  const situation = situationFromEdge(body.situation, await visitorGeo(request));
-  const prepared = prepareOwnerTurn(message, connectors, situation, new Date(situation.at));
-  if (prepared.reply) {
+  const solSend = parseSolHandleSend(message);
+  const connectors = solSend ? [] : linkedConnectorIds(body.connectors);
+  const situation = solSend ? null : situationFromEdge(body.situation, await visitorGeo(request));
+  const prepared = situation ? prepareOwnerTurn(message, connectors, situation, new Date(situation.at)) : null;
+  if (prepared?.reply) {
     return Response.json(
       { ok: true, botId, reply: prepared.reply, provider: 'desk', toolRounds: 0 },
       { headers: { 'Cache-Control': 'no-store' } },
@@ -108,6 +110,10 @@ export async function POST(request, context) {
       ? request.headers.get('x-desk-grant')
       : '',
     fetcher: async (url, init) => {
+      if (solSend) {
+        const options = init?.method === 'GET' ? { ...init, signal: AbortSignal.timeout(8000) } : init;
+        return fetchAgentRuntime(url, options);
+      }
       try {
         return await fetchAgentRuntime(url, init);
       } catch {
@@ -126,6 +132,13 @@ export async function POST(request, context) {
     situation,
   });
   const spend = { permissionMode, reviewCap, confirmSpend: true, grants };
+  if (solSend) {
+    const reply = await runSolHandleSend(solSend, { botId, invoke: invokeRaw, spend });
+    return Response.json(
+      { ok: true, botId, provider: 'desk', toolRounds: 0, ...reply },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
   const chatModel = (typeof body.model === 'string' && /^[A-Za-z0-9_.:/-]{1,80}$/.test(body.model.trim()))
     ? body.model.trim()
     : (readRootEnv('OPENROUTER_MODEL_RESEARCH') || undefined);

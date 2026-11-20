@@ -46,6 +46,89 @@ test('profile claims and handle lookup share the configured runtime directory', 
   ]);
 });
 
+test('chat sends SOL to a handle without a model call and binds approval to the resolved wallet', async (t) => {
+  const runtime = 'https://runtime.test.example';
+  const previous = process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
+  process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = runtime;
+  t.after(() => {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL;
+    else process.env.NEXT_PUBLIC_AGENT_RUNTIME_URL = previous;
+  });
+
+  const address = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+  const signature = 'a'.repeat(88);
+  const deskGrant = 'ab'.repeat(32);
+  let recipient = { kind: 'handle', handle: 'hi', missing: false, address };
+  const sends = [];
+  const checks = t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const target = new URL(url);
+    assert.equal(target.origin, runtime, 'must not call the model or a search provider');
+    assert.equal(init.headers.authorization, 'Bearer test-owner-token');
+    if (target.pathname === '/api/profiles/lookup') {
+      assert.equal(target.searchParams.get('q'), '@hi');
+      assert.equal(init.method, 'GET');
+      assert.ok(init.signal);
+      return Response.json({ ok: true, recipient });
+    }
+    assert.equal(target.pathname, '/api/spend');
+    assert.equal(init.method, 'POST');
+    assert.equal(init.headers['x-desk-grant'], deskGrant);
+    sends.push(JSON.parse(init.body));
+    return Response.json({ signed: true, cluster: 'devnet', signature });
+  });
+
+  const { POST } = await import('../app/api/bots/[botId]/chat/route.js');
+  const chat = async (grants = [], message = 'Could you send 1 SOL to @Hi?') => {
+    const res = await POST(new Request('https://desk.example/api/bots/bot_1/chat', {
+      method: 'POST',
+      headers: {
+        accept: 'text/event-stream, application/json',
+        authorization: 'Bearer test-owner-token',
+        'x-owner-id': 'did:privy:alice',
+        'x-desk-grant': deskGrant,
+      },
+      body: JSON.stringify({ message, permission: 'full', grants }),
+    }), { params: { botId: 'bot_1' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    const body = await res.json();
+    assert.equal(body.provider, 'desk');
+    assert.equal(body.toolRounds, 0);
+    return body;
+  };
+  const { hold } = await chat();
+  assert.equal(hold.kind, 'modal');
+  assert.match(hold.prompt, /1 SOL to @hi \(4zMMC\.\.\.DncDU\) on Solana devnet/);
+  assert.deepEqual(sends, []);
+
+  recipient = { ...recipient, address: 'So11111111111111111111111111111111111111112' };
+  const changed = await chat([hold]);
+  assert.equal(changed.hold.args.destination, recipient.address);
+  assert.deepEqual(sends, []);
+
+  recipient = { ...recipient, address };
+  const sent = await chat([hold]);
+  assert.match(sent.reply, /Sent 1 SOL to @hi on Solana devnet\./);
+  assert.ok(sent.reply.includes(`https://solscan.io/tx/${signature}?cluster=devnet`));
+  assert.deepEqual(sends, [{
+    botId: 'bot_1',
+    action: 'spend',
+    amount: '1000000000',
+    destination: address,
+    handle: 'hi',
+    asset: 'SOL',
+    idempotencyKey: hold.idempotencyKey,
+    confirmed: true,
+    permission: 'full',
+    reviewCap: '30000000',
+  }]);
+
+  recipient = { kind: 'handle', handle: 'hi', missing: true };
+  assert.match((await chat()).reply, /couldn’t find @hi/);
+  assert.equal(checks.mock.callCount(), 5);
+  assert.equal(sends.length, 1);
+});
+
 /**
  * Rigor audit — GET /api/build happy path
  * Achieves: returns JSON { id } with no-store when NEXT_PUBLIC_BUILD_ID is set.
