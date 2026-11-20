@@ -1199,10 +1199,7 @@ export function createPrivyWalletClient({
     async signAndBroadcastSolana({ bot, wallet, transaction } = {}) {
       assertSpendAllowed({ bot, wallet });
       const walletId = assertPrivyWalletId(wallet.privyWalletId);
-      const ownerSession = typeof accessToken === 'string' && accessToken
-        ? { ownerId: owner, accessToken, walletAddress: wallet.address }
-        : undefined;
-      const signedTransaction = await signWithPrivy(walletId, transaction, ownerSession);
+      const signedTransaction = await signWithPrivy(walletId, transaction);
       const signature = await sendSigned(signedTransaction, { privy: true });
       return {
         cluster: SOLANA_CLUSTER,
