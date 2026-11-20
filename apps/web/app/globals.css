@@ -4936,33 +4936,85 @@ body:has(.backdrop.is-cover) {
 }
 
 .profile-modal {
+  position: relative;
   width: min(1120px, calc(100vw - 40px));
   max-height: calc(100vh - 40px);
   display: grid;
   grid-template-columns: 1.15fr 0.85fr;
-  gap: 48px;
+  gap: 40px;
   overflow: auto;
   background: #111;
   border: 1px solid #2e2e2e;
   border-radius: 28px;
-  padding: 40px 44px;
+  padding: 36px;
 }
 
 .profile-identity h2 {
-  margin: 18px 0 0;
-  font-size: clamp(40px, 5vw, 68px);
-  line-height: 0.95;
-  letter-spacing: -0.04em;
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
   font-weight: 560;
+  overflow-wrap: anywhere;
 }
 
 .profile-handle {
-  margin: 8px 0 22px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 22px;
   color: var(--muted);
-  font-size: 20px;
+  font-size: 15px;
 }
 
-.profile-form { max-width: 420px; }
+.profile-form { min-width: 0; max-width: 420px; }
+.profile-photo { width: 112px; height: 112px; margin: 22px 0 20px; }
+.profile-photo .you-mark { width: 112px; height: 112px; border-radius: 26px; object-fit: cover; font-size: 38px; }
+.profile-photo .agent-pencil { opacity: 1; pointer-events: auto; width: 30px; height: 30px; border-radius: 10px; }
+.profile-name-row { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.profile-name-row > .icon-btn { flex: none; }
+.profile-name-input { width: 100%; min-width: 0; max-width: 300px; padding: 6px 0; border: 0; border-bottom: 1px solid #666; border-radius: 0; background: transparent; font: inherit; font-size: 24px; }
+.profile-handle .handle-copy { width: 30px; height: 30px; margin-left: 2px; }
+.handle-copy.is-copied { color: #70d5a0; animation: copy-pop 180ms ease-out; }
+.profile-handle small { min-width: 40px; font-size: 12px; }
+.profile-save { margin-top: 2px; }
+.profile-note { max-width: 360px; line-height: 1.5; }
+.profile-context { font-size: 11px; margin: 12px 0 20px; }
+.profile-claim { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 12px; }
+.profile-claim-input { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.profile-claim-input input { width: 160px; min-width: 0; border: 0; border-bottom: 1px solid #666; border-radius: 0; padding: 5px 0; background: transparent; font: inherit; }
+.profile-connections { margin-top: 22px; }
+.profile-connection { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; }
+.profile-connection > div { display: grid; gap: 4px; min-width: 0; }
+.profile-connection strong { font-size: 13px; font-weight: 500; }
+.profile-connection div > span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.profile-connection .ghost, .profile-linked { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; }
+.profile-linked { color: var(--muted); }
+@keyframes copy-pop { from { transform: scale(0.85); } to { transform: scale(1); } }
+
+/* Opt-in only: the wallet modal keeps its existing layout and controls. */
+.stats-modal, .party-sheet, .sheet.create-agent, .sheet.provider-modal, .desk-lock > .wallet-gate { position: relative; }
+.stats-head, .party-sheet .sheet-head, .create-agent .sheet-head, .desk-lock .sheet-head { padding-right: 36px; }
+.profile-settings > .plugin-kicker { padding-right: 32px; }
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #d4d4d4;
+}
+.modal-close:hover { background: #2a2a2a; }
+.modal-close:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.sheet.create-agent.is-create > button.modal-close { position: absolute; z-index: 5; }
 
 .profile-stats {
   list-style: none;

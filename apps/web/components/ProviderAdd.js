@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import ModalClose from './ModalClose';
 import { saveProvider } from '../lib/provider-tokens.mjs';
 import { AI_PROVIDERS } from '../lib/ai-provider.mjs';
 import { announceModelSettings, forgetProviderModels } from '../lib/provider-models.mjs';
@@ -63,6 +64,7 @@ export default function ProviderAdd({ open, onClose, onSaved, storage }) {
         onMouseDown={event => event.stopPropagation()}
         onSubmit={submit}
       >
+        <ModalClose label="Close add AI provider" onClick={onClose} />
         <p className="plugin-kicker">AI Providers</p>
         <h2 id="provider-add-title">Add AI provider</h2>
         <p className="quiet">Save a key, then check which chat models it offers. Your key is stored only in this browser and sent securely when checking models or chatting. Usage is billed by your provider.</p>

@@ -8,6 +8,8 @@
  * remains. A second seed is never issued for an account.
  */
 import { supabaseConfig, supabaseGet, supabaseWrite } from './supabase-rest.mjs';
+import { PROFILE_LOOK_KEY, profilePhoto } from '@ubc2026/contracts';
+import { saveAppearance } from './profile-appearance.mjs';
 
 export const STATE_NAMES = Object.freeze([
   'roster',
@@ -50,6 +52,13 @@ function hasSecretKey(value, depth = 0) {
 export function parseStateItem(item) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
   if (typeof item.name !== 'string' || !STATE_NAMES.includes(item.name)) return null;
+  if (item.profilePhoto !== undefined) {
+    if (item.name !== 'looks' || item.profilePhoto !== true || typeof item.value !== 'string' || item.value.length > 32768 + 100) return null;
+    let looks;
+    try { looks = JSON.parse(item.value); } catch { return null; }
+    if (!profilePhoto(looks) || Object.keys(looks).join(',') !== PROFILE_LOOK_KEY || Object.keys(looks[PROFILE_LOOK_KEY]).join(',') !== 'image') return null;
+    return { name: item.name, value: item.value, profilePhoto: true };
+  }
   if (item.value === null) return { name: item.name, value: null };
   if (typeof item.value !== 'string' || item.value.length > STATE_VALUE_MAX) return null;
   if (item.name === 'accountCode' && !ACCOUNT_CODE.test(item.value)) return null;
@@ -198,6 +207,11 @@ export async function handleAccountRoute(routeId, request, env, ownerId, fetcher
     const saved = [];
     const rows = [];
     for (const item of items) {
+      if (item.name === 'looks' && item.value !== null) {
+        if (!(await saveAppearance(env, ownerId, item, fetcher))) return json({ error: 'state_failed' }, 502);
+        saved.push(item.name);
+        continue;
+      }
       if (item.value === null) {
         const removed = await supabaseWrite(env, {
           path: `owner_state?owner_id=eq.${encodeURIComponent(ownerId)}&name=eq.${encodeURIComponent(item.name)}`,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import ModalClose from './ModalClose';
 import { partyBook, signedUsdc } from '../lib/party-book.mjs';
 import AddressCopy from './AddressCopy';
 import TxnLog from './TxnLog';
@@ -59,9 +59,7 @@ export default function PartySheet({ open, party, transfers = [], payments = [],
             <h2 id="party-title">{party.label}</h2>
             {address ? <AddressCopy address={address} /> : <p className="quiet">Platform handle</p>}
           </div>
-          <button type="button" className="icon-btn" aria-label="Close counterparty" onClick={onClose}>
-            <X size={18} strokeWidth={1.75} />
-          </button>
+          <ModalClose label="Close counterparty" onClick={onClose} />
         </div>
         <dl className="party-totals">
           <div>

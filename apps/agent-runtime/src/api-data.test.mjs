@@ -31,6 +31,36 @@ function fakeEnv(extra = {}) {
   };
 }
 
+test('profile edits keep the canonical handle and never claim one for an unregistered owner', async () => {
+  for (const registered of [true, false]) {
+    let row = registered ? { handle: 'canonical', display_name: 'Old' } : null;
+    const writes = [];
+    const env = fakeEnv({
+      SUPABASE_URL: 'https://directory.example', SUPABASE_SERVICE_ROLE_KEY: 'service-role-test-value',
+      fetch: async (url, init = {}) => {
+        assert.equal(new URL(url).pathname, '/rest/v1/profiles');
+        assert.equal(new URL(url).searchParams.get('owner_id'), 'eq.owner_1');
+        if (init.method === 'PATCH') {
+          const patch = JSON.parse(init.body);
+          writes.push(patch);
+          assert.equal('handle' in patch, false);
+          assert.equal('owner_id' in patch, false);
+          row = { ...row, ...patch };
+        } else assert.equal(init.method || 'GET', 'GET');
+        return Response.json(row ? [row] : []);
+      },
+    });
+    const response = await worker.fetch(new Request('https://runtime/api/profiles/me', {
+      method: 'PUT', headers: { 'x-owner-id': 'owner_1', 'content-type': 'application/json' },
+      body: JSON.stringify({ editOnly: true, handle: 'stale', displayName: 'Updated' }),
+    }), env);
+    const body = await response.json();
+    assert.equal(response.status, registered ? 200 : 409);
+    if (registered) { assert.equal(body.profile.handle, 'canonical'); assert.equal(writes[0].display_name, 'Updated'); }
+    else { assert.equal(body.error, 'profile_not_registered'); assert.equal(writes.length, 0); }
+  }
+});
+
 /**
  * Achieves: enrichEnv returns the same object on re-entry and preserves injected transferClient/loadLoopContext.
  * Fails when: second enrichEnv allocates a new env, or injectables are overwritten/dropped.
