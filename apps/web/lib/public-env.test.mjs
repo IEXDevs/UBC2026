@@ -21,7 +21,7 @@ test('public Privy ids are trimmed and stay empty when unset', () => {
   assert.deepEqual(publicPrivyIds({
     NEXT_PUBLIC_PRIVY_APP_ID: ' app_1 ',
     NEXT_PUBLIC_PRIVY_CLIENT_ID: '',
-  }), { appId: 'app_1', clientId: '' });
+  }), { appId: 'app_1', clientId: '', signerId: '' });
 });
 
 /**

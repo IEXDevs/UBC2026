@@ -3,7 +3,7 @@ import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
-import { useAuthorizationSignature, useConnectWallet, usePrivy } from '@privy-io/react-auth';
+import { useAuthorizationSignature, useConnectWallet, usePrivy, useSigners } from '@privy-io/react-auth';
 import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
@@ -100,6 +100,7 @@ import { DEV_PREVIEW_OWNER, previewBot, previewWallets } from '../lib/dev-previe
 import { clearDeskGrant, clearDeskSession, hotkeyTypingTarget, readDeskGrant, readDeskSession, walletHotkey, writeDeskSession } from '../lib/desk-lock.mjs';
 import { restoreDeskEntry } from '../lib/desk-grant-client.mjs';
 import { getPrivyAccessToken } from '../lib/privy-session.mjs';
+import { walletsNeedingSigner } from '../lib/privy-signers.mjs';
 import { withPrivyLogout } from '../lib/accept-terms-auth.mjs';
 import { logoutAfterFlush } from '../lib/profile-logout.mjs';
 
@@ -179,6 +180,26 @@ function AuthedShell() {
   const getAccessToken = useCallback(() => readAccessToken(privyGetAccessToken), [privyGetAccessToken]);
   const deskToken = useRef(getAccessToken);
   deskToken.current = getAccessToken;
+  const { signerId } = usePrivyPublic();
+  const { addSigners } = useSigners();
+  const signerTried = useRef(new Set());
+
+  useEffect(() => {
+    if (!signedIn || !deskEntered) return undefined;
+    const pending = walletsNeedingSigner(user, signerId).filter((address) => !signerTried.current.has(address));
+    if (!pending.length) return undefined;
+    (async () => {
+      for (const address of pending) {
+        signerTried.current.add(address);
+        try {
+          await addSigners({ address, signers: [{ signerId, policyIds: [] }] });
+        } catch (error) {
+          console.warn('[wallets] server signer not added', error?.code || error?.name || 'error');
+        }
+      }
+    })();
+    return undefined;
+  }, [signedIn, deskEntered, accountsKey, signerId, addSigners]);
 
   useEffect(() => {
     if (!deskOwner) {

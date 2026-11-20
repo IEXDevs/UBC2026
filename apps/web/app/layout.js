@@ -31,7 +31,7 @@ export default async function RootLayout({ children }) {
         <SoftTouch />
         <HostedPreview enabled={hostedPreview}>
           <CrashGuard>
-            <PrivyRoot appId={privy.appId} clientId={privy.clientId}>{children}</PrivyRoot>
+            <PrivyRoot appId={privy.appId} clientId={privy.clientId} signerId={privy.signerId}>{children}</PrivyRoot>
           </CrashGuard>
         </HostedPreview>
       </body>
