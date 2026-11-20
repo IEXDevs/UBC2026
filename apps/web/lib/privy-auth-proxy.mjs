@@ -124,7 +124,10 @@ export async function proxyPrivyAuth(request, path, fetchImpl = globalThis.fetch
     }
   }
   if (!headers.has('origin')) headers.set('origin', new URL(request.url).origin);
-  if (method === 'POST' && (SESSION_WRITE.has(path) || OAUTH_CALLBACK.has(path)) && !headers.has('authorization')) {
+  for (const [name, value] of request.headers) {
+    if (/^privy-[a-z0-9-]{1,40}$/.test(name) && !headers.has(name) && value.length < 12000 && !/[\r\n]/.test(value)) headers.set(name, value);
+  }
+  if (!headers.has('authorization')) {
     const access = readSessionCookie(request.headers.get('cookie'), PRIVY_ACCESS_COOKIE);
     if (access) headers.set('authorization', `Bearer ${access}`);
   }

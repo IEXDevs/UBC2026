@@ -689,7 +689,11 @@ export function installAcceptTermsAuth(target = globalThis) {
       let nextInput = input;
       let nextInit = init;
 
-      if (isAcceptTermsRequest(url, method)) {
+      const privyApi = isPrivyAuthOrigin(url) || /\/api\/privy-auth\/api\/v1\//.test(String(url))
+        || /^https:\/\/[a-z0-9.-]*privy\.io\/api\/v1\/(wallets|embedded_wallets)/.test(String(url));
+      const unauthenticated = privyApi && !bearerFromHeaders(new Headers(init?.headers || input?.headers || undefined))
+        && !/\/api\/v1\/(sessions|oauth|passwordless|siws|siwe)/.test(String(url));
+      if (isAcceptTermsRequest(url, method) || unauthenticated) {
         const headers = new Headers(init?.headers || input?.headers || undefined);
         let token = auth.current(localStorage, sessionStorage);
         if (!isUnexpiredPrivyAccessToken(token)) {
