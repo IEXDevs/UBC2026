@@ -72,6 +72,7 @@ export default function WalletsSheet({
   const { mounted, leaving } = usePresence(open);
   const [root, setRoot] = useState(null);
   const [portfolioOpen, setPortfolioOpen] = useState(false);
+  const [balanceRevision, setBalanceRevision] = useState(0);
   const settingsRef = useRef(null);
   const transferRef = useRef(null);
   const [transfer, setTransfer] = useState('send');
@@ -136,6 +137,12 @@ export default function WalletsSheet({
     if (!onParty) return;
     onClose();
     onParty(party);
+  }
+
+  async function send(pending) {
+    const result = await onSend?.(pending);
+    if (result?.ok) setBalanceRevision(value => value + 1);
+    return result;
   }
 
   const wallets = (state?.wallets || []).filter(wallet => wallet && !wallet.deletedAt && !wallet.deleted_at);
@@ -208,7 +215,7 @@ export default function WalletsSheet({
               ) : null}
               {signedIn && active?.address ? (
                 <TokenScreen
-                  key={active.id}
+                  key={`${active.id}:${balanceRevision}`}
                   open={open}
                   address={active.address}
                   previewPortfolio={previewBook}
@@ -220,7 +227,7 @@ export default function WalletsSheet({
               <details className="wallet-fold wallet-allocation" onToggle={event => setPortfolioOpen(event.currentTarget.open)}>
                 <summary>Portfolio breakdown<ChevronDown size={16} aria-hidden="true" /></summary>
                 <div className="wallet-fold-body">
-                  {signedIn ? <ConnectedPortfolio open={open && portfolioOpen} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>}
+                  {signedIn ? <ConnectedPortfolio key={balanceRevision} open={open && portfolioOpen} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>}
                 </div>
               </details>
             </section>
@@ -266,7 +273,7 @@ export default function WalletsSheet({
                       tokens={tradeableTokens(tokens)}
                       frozen={Boolean(active?.frozen)}
                       observing={observing}
-                      onSend={onSend}
+                      onSend={send}
                       onReceipt={onReceipt}
                       resolveRecipient={resolveRecipient}
                     />

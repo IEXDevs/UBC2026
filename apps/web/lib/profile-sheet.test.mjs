@@ -54,7 +54,10 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   assert.match(sheet, /if \(!mounted \|\| !root\) return null/);
   assert.match(sheet, /return createPortal\(/);
   assert.match(sheet, /key=\{`\$\{active\?\.id \|\| 'empty'\}:\$\{transfer\}`\}/);
-  assert.match(sheet, /key=\{active\.id\}/);
+  assert.match(sheet, /key=\{`\$\{active\.id\}:\$\{balanceRevision\}`\}/);
+  assert.match(sheet, /key=\{balanceRevision\} open=\{open && portfolioOpen\}/);
+  assert.match(sheet, /const result = await onSend\?\.\(pending\);\s+if \(result\?\.ok\) setBalanceRevision\(value => value \+ 1\);\s+return result/);
+  assert.match(sheet, /onSend=\{send\}/);
   assert.match(sheet, /reduceMotion \? 0 : transferDir/);
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.wallet-overview, \.wallet-settings-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
