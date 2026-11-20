@@ -16,7 +16,7 @@ import {
 import { devnetSpendAsset } from '@ubc2026/contracts';
 import { chatToolsInstruction, createChatToolInvoker } from './chat-tools.mjs';
 import { connectorInstruction, planConnectorUse, resolveDeskConnectors } from './connector-access.mjs';
-import { effectiveReviewCap, grantCovers, isFundTool, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
+import { effectiveReviewCap, isFundTool, matchingToolGrant, permissionInstruction, toolAccessKind } from './spend-permission.mjs';
 import { readSubagentResults, recordSubagentResult } from './subagent-board.mjs';
 import { completeTextChat } from './text-chat.mjs';
 
@@ -62,8 +62,8 @@ export function stampSpendPermission(name, args, { permissionMode = 'ask', revie
     delete next.confirmed;
     if (confirmSpend && toolAccessKind(next.permission, name, next, next.reviewCap)) {
       if (name === 'request_spend' && devnetSpendAsset(next.asset ?? 'USDC') !== 'USDC') {
-        const grant = Array.isArray(grants) ? grants.find(item => grantCovers([item], name, next)) : null;
-        if (/^spend_[0-9a-f-]{36}$/.test(grant?.idempotencyKey || '')) {
+        const grant = matchingToolGrant(grants, name, next);
+        if (grant) {
           next.idempotencyKey = grant.idempotencyKey;
           next.confirmed = true;
         }
