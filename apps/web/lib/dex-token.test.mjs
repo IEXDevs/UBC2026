@@ -6,10 +6,13 @@ import {
   dexTokenUrl,
   dexTokenView,
   enrichPortfolio,
+  geckoCandleUrl,
   indexDexPairs,
   memoryDexStorage,
+  pointsFromOhlcv,
   portfolioWithDex,
   rateLimitCopy,
+  readDexCandles,
   readDexTokens,
   requestUrl,
   toProfile,
@@ -230,4 +233,82 @@ test('portfolio dollars use the live dex price, then a peg, and the saved symbol
   assert.equal(rateLimitCopy('https://api.dexscreener.com/tokens/v1/solana/x').title, 'DexScreener rate limit');
   assert.equal(rateLimitCopy('/api/portfolio').title, 'Rate limit');
   assert.equal(requestUrl(new URL('https://api.dexscreener.com/tokens/v1/solana')), DEX_TOKEN_ORIGIN);
+});
+
+/**
+ * Achieves: verifies ranges past 1D are not a copy of the 24h line.
+ * Fails when: 1W still draws the h24 window or candle closes stay newest-first.
+ * Oracle: assert.equal(week.points.length, 0); assert.deepEqual(drawn.points.map(point => point.price), [4, 8, 3]);
+ * Side effects / state checked: injected candle fetcher, no network.
+ * Gaps: none.
+ */
+test('ranges past one day draw that window, not the 24h move', async () => {
+  const token = { symbol: 'BONK', priceUsd: '2', priceChange: { h1: 100, h24: -50 } };
+  const day = dexTokenView({ mint: BONK, range: '1D', token, now: 1_700_000_000_000 });
+  const week = dexTokenView({ mint: BONK, range: '1W', token, now: 1_700_000_000_000 });
+  assert.equal(day.points.length, 2);
+  assert.equal(day.changeLabel, '24H');
+  assert.equal(dexTokenView({ mint: BONK, range: '1D', token, candles: 'pending' }).points.length, 0);
+  assert.equal(week.points.length, 0);
+  assert.equal(week.changeLabel, '1W');
+  assert.equal(dexTokenView({ mint: BONK, range: 'All', token }).points.length, 0);
+
+  const candles = [
+    { t: 10, price: 4 },
+    { t: 20, price: 8 },
+    { t: 30, price: 3 },
+  ];
+  const drawn = dexTokenView({ mint: BONK, range: '1W', token, candles });
+  assert.deepEqual(drawn.points, candles);
+  assert.equal(drawn.changeLabel, '1W');
+  assert.equal(drawn.points.length, 3);
+  assert.notEqual(drawn.points[1].price, day.points[1].price);
+  assert.match(drawn.note, /GeckoTerminal history/);
+  assert.match(drawn.note, /devnet execution, mainnet pricing/);
+
+  const now = Date.UTC(2026, 10, 19);
+  assert.match(geckoCandleUrl(POOL, '1H', now), /\/ohlcv\/minute\?aggregate=5&limit=12&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, '1D', now), /\/ohlcv\/hour\?aggregate=1&limit=24&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, '1W', now), /\/ohlcv\/hour\?aggregate=4&limit=42&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, '1M', now), /\/ohlcv\/day\?aggregate=1&limit=30&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, '1Y', now), /\/ohlcv\/day\?aggregate=1&limit=365&currency=usd$/);
+  assert.match(geckoCandleUrl(POOL, 'All', now), /\/ohlcv\/day\?aggregate=1&limit=1000&currency=usd$/);
+  const ytd = geckoCandleUrl(POOL, 'YTD', now);
+  const ytdLimit = Number(new URL(ytd).searchParams.get('limit'));
+  assert.ok(ytdLimit > 30 && ytdLimit < 365);
+  assert.equal(geckoCandleUrl('not-a-pool', '1W', now), null);
+
+  const calls = [];
+  const book = await readDexCandles({
+    pairAddress: POOL,
+    range: '1M',
+    now,
+    fetcher: async (url) => {
+      calls.push(url);
+      return Response.json({
+        data: {
+          attributes: {
+            ohlcv_list: [
+              [1_700_000_300, 1, 9, 1, 3, 0],
+              [1_700_000_100, 1, 9, 1, 4, 0],
+              [1_700_000_200_000, 1, 9, 1, 8, 0],
+            ],
+          },
+        },
+      });
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/ohlcv\/day\?/);
+  assert.deepEqual(book.points.map(point => point.price), [4, 8, 3]);
+  assert.equal(book.points[1].t, 1_700_000_200);
+  assert.deepEqual(pointsFromOhlcv({}), []);
+
+  const limited = await readDexCandles({
+    pairAddress: POOL,
+    range: '1Y',
+    fetcher: async () => new Response('limited', { status: 429 }),
+  });
+  assert.equal(limited.rateLimited, true);
+  assert.deepEqual(limited.points, []);
 });

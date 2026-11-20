@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
-import { dexTokenView, enrichPortfolio, readDexTokens } from '../lib/dex-token.mjs';
+import { dexTokenView, enrichPortfolio, readDexCandles, readDexTokens } from '../lib/dex-token.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import { formatUsdMicro, portfolioErrorNote } from '../lib/portfolio.mjs';
 import {
@@ -96,9 +98,19 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
     : portfolio;
   const holdings = combineHoldings(scoped);
   const total = holdings.reduce((sum, row) => sum + BigInt(row.usdMicro || '0'), 0n).toString();
-  if (selected) {
-    const holding = holdings.find(row => row.mint === selected) || null;
-    return (
+  const holding = selected ? holdings.find(row => row.mint === selected) || null : null;
+  const ease = [0.22, 1, 0.36, 1];
+
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+    {selected ? (
+      <motion.div
+        key={selected}
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 10 }}
+        transition={{ duration: 0.45, ease }}
+      >
       <TokenDetail
         mint={selected}
         holding={holding}
@@ -109,11 +121,16 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
         onReceive={onReceive}
         onSwap={() => onSwap?.(holding?.symbol)}
       />
-    );
-  }
-
-  return (
-    <div className="token-screen">
+      </motion.div>
+    ) : (
+    <motion.div
+      key="token-list"
+      className="token-screen"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={{ duration: 0.4, ease }}
+    >
       {holdings.length ? <p className="wallet-figure">{formatUsdMicro(total)}</p> : null}
       {loading ? <p className="quiet">Reading devnet balances.</p> : null}
       {error ? <p className="quiet" role="status">{error}</p> : null}
@@ -131,14 +148,18 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
         ))}
       </ul>
       {holdings.length === 0 && !loading && !error ? <p className="quiet">No assets in this wallet yet.</p> : null}
-    </div>
+    </motion.div>
+    )}
+    </AnimatePresence>
   );
 }
 
 function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive, onSwap }) {
   const [range, setRange] = useState('1D');
   const [token, setToken] = useState(null);
+  const [series, setSeries] = useState({ range: '1D', points: null });
   const [error, setError] = useState('');
+  const candles = series.range === range ? series.points : null;
 
   useEffect(() => {
     let stopped = false;
@@ -162,31 +183,73 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
     return () => { stopped = true; };
   }, [mint, userId]);
 
-  const view = token ? dexTokenView({ mint, range, cluster, token }) : null;
+  useEffect(() => {
+    const pair = token?.pairAddress;
+    if (!pair) {
+      setSeries({ range, points: null });
+      return undefined;
+    }
+    let stopped = false;
+    readDexCandles({ pairAddress: pair, range })
+      .then(book => {
+        if (!stopped) setSeries({ range, points: book.points });
+      })
+      .catch(() => {
+        if (!stopped) setSeries({ range, points: [] });
+      });
+    return () => { stopped = true; };
+  }, [token?.pairAddress, range]);
+
+  const view = token ? dexTokenView({
+    mint,
+    range,
+    cluster,
+    token,
+    candles: token.pairAddress && candles == null
+      ? 'pending'
+      : (Array.isArray(candles) && candles.length >= 2 ? candles : null),
+  }) : null;
   const symbol = view?.symbol || holding?.symbol || 'Token';
   const price = typeof view?.price === 'number' ? formatTokenPrice(view.price) : '';
   const change = typeof view?.changePct === 'number' ? view.changePct : null;
   const down = change != null && change < 0;
   const liquidity = formatCompactUsd(view?.liquidityUsd);
   const marketCap = formatCompactUsd(view?.marketCap);
-
   return (
     <div className="token-detail">
-      <button type="button" className="token-back" onClick={onBack}>Back</button>
+      <button type="button" className="token-back" onClick={onBack}>
+        <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+        Back
+      </button>
       <div className="token-title">
         {view?.imageUrl ? <img className="token-mark" src={view.imageUrl} alt="" /> : null}
         <h3>{symbol}</h3>
         <span className="token-score">{view?.dexId || 'DEX'}</span>
       </div>
       {price ? <p className="wallet-figure wallet-figure-sm">{price}</p> : null}
-      {change != null ? (
-        <p className={down ? 'token-down' : 'token-up'}>
-          {down ? '' : '+'}{change.toFixed(2)}%
-          <span> {view?.changeLabel || range}</span>
-        </p>
-      ) : null}
+      <p className={down ? 'token-down' : 'token-up'} aria-live="polite">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={change == null ? `${range}:wait` : `${view?.changeLabel}:${change.toFixed(2)}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: change == null ? 0 : 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {change == null ? '\u00a0' : `${down ? '' : '+'}${change.toFixed(2)}%`}
+            {change == null ? null : <span> {view?.changeLabel || range}</span>}
+          </motion.span>
+        </AnimatePresence>
+      </p>
       <TokenChart points={view?.points || []} range={range} />
-      <div className="wallet-switch" role="group" aria-label="Chart range">
+      <p className="quiet token-range-note" role="status">
+        {token?.pairAddress && range !== '1H' && range !== '1D'
+          ? (candles == null
+            ? `Reading ${range} prices.`
+            : (candles.length < 2 ? `No ${range} prices for this token yet.` : ''))
+          : ''}
+      </p>
+      <div className="wallet-switch token-ranges" role="group" aria-label="Chart range">
         {CHART_RANGES.map(item => (
           <button
             key={item}

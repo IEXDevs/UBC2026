@@ -16,6 +16,7 @@ import SlideCommit from './bits/SlideCommit';
 import TxnLog from './TxnLog';
 import SendToField from './SendToField';
 import TxnPreview from './TxnPreview';
+import LinkedLogins from './LinkedLogins';
 import { usePresence } from './usePresence';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { partyFromToken } from '../lib/party-book.mjs';
@@ -185,6 +186,7 @@ export default function WalletsSheet({
           {pane === 'assets' ? (
             <>
               {signedIn ? <WalletAdd /> : <p className="quiet">Sign in to add a wallet.</p>}
+              {signedIn ? <LinkedLogins showWallets={false} /> : null}
               <WalletRoster
                 rows={rows}
                 activeId={active?.id || ''}
@@ -521,8 +523,7 @@ export function WalletAdd() {
           Import key
         </button>
       </div>
-      {hint ? <p className="quiet wallet-add-hint">{hint}</p> : null}
-      <p className="quiet">The phrase and the private key are not stored here.</p>
+      <p className="quiet wallet-add-hint" aria-live="polite">{hint || 'The phrase and the private key are not stored here.'}</p>
       {mode === 'seed' ? (
         <form className="field" onSubmit={(event) => {
           event.preventDefault();

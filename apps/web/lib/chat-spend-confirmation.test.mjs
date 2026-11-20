@@ -64,5 +64,20 @@ test('a runtime rejection ends the confirmed turn and shows the reason', async (
     error: 'approval-needed', reason: 'per-transaction', signed: false,
   }), 2000);
   assert.equal(reply.hold, undefined);
+  assert.match(reply.text, /per-transfer limit/);
   assert.match(reply.activity[0].error, /per-transfer limit/);
+});
+
+test('a blocked SOL send shows the runtime reason in the reply and the trace', async () => {
+  const hold = sealAssetSpendHold(toolAccessRequest('ask', 'request_spend', args), context, 1000);
+  const invoke = createChatToolInvoker({
+    ownerId, botId, runtimeBase: 'https://runtime.example',
+    fetcher: async () => Response.json({
+      state: 'blocked', reason: 'accounting-asset-mismatch', signed: false,
+    }, { status: 409 }),
+  });
+  const reply = await resumeAssetSpend(hold, context, invoke, 2000);
+  assert.equal(reply.hold, undefined);
+  assert.match(reply.text, /does not match the agent's spending asset/);
+  assert.match(reply.activity[0].error, /^blocked\nThe payment asset/);
 });

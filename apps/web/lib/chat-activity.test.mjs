@@ -65,6 +65,20 @@ test('spend approval activity shows the reason for the hold', () => {
   }
 });
 
+test('spend blocks use known explanations without displaying raw error details', () => {
+  const known = toolStep('request_spend', { asset: 'SOL' }, {
+    ok: false, state: 'blocked', reason: 'approval-save-failed',
+  });
+  assert.equal(known.status, 'error');
+  assert.match(known.error, /^blocked\nThe spend service could not save the approval\./);
+
+  const unknown = toolStep('request_spend', { asset: 'SOL' }, {
+    error: 'blocked', reason: 'raw provider diagnostics',
+  });
+  assert.match(unknown.error, /without a recognized reason/);
+  assert.doesNotMatch(unknown.error, /raw provider diagnostics/);
+});
+
 /**
  * Achieves: verifies sanitizeActivity drops private URLs and blank thoughts.
  * Fails when: blank think kept, live.browser.run site survives, or tool label lost.

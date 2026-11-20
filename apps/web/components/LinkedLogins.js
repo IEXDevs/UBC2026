@@ -59,7 +59,7 @@ export default function LinkedLogins({ showWallets = true }) {
 
   return (
     <div className="linked-logins">
-      <p className="plugin-kicker">Sign-in methods</p>
+      <h2 className="linked-logins-title">Sign-in methods</h2>
       <p className="quiet">
         Manage the ways you sign in to your account.
       </p>

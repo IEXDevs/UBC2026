@@ -73,11 +73,13 @@ export function enrichEnv(env) {
   if (env.__maelstromEnriched) return env;
 
   const transferClient = env.transferClient ?? tryPrivyClient(env);
-  const rpc = typeof env.supabaseRpc === 'function'
-    ? env.supabaseRpc
-    : createSupabaseRpc(env, env.fetch ?? fetch);
+  const injectedRpc = typeof env.supabaseRpc === 'function' ? env.supabaseRpc : null;
+  const rpc = injectedRpc ?? createSupabaseRpc(env, env.fetch ?? fetch);
+  // The SQL policy functions take one named jsonb argument. PostgREST
+  // requires the argument name in the HTTP body.
+  const policyRpc = injectedRpc ?? (rpc && ((fn, payload) => rpc(fn, { payload })));
   const ledgerApi = env.ledgerApi
-    || (typeof rpc === 'function' ? createSupabaseLedger(rpc) : null);
+    || (policyRpc ? createSupabaseLedger(policyRpc) : null);
 
   const next = {
     ...env,
