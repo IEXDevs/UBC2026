@@ -218,6 +218,97 @@ function turnAllowed() {
   return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
 }
 
+test('browse guidance asks for one sourced direct answer and limits money disclaimers to failed or held spends', () => {
+  const messages = buildTextChatMessages({ message: 'What is the latest iPhone and price?' });
+  const instructions = messages.map(message => message.content).join('\n');
+  assert.match(instructions, /give one direct answer first, grounded in the page you read or the tool result/);
+  assert.match(instructions, /name one model and its price, not a product list/);
+  assert.match(instructions, /source does not establish which is latest, say so instead of guessing/);
+  assert.match(instructions, /money tool was actually involved in this turn and failed or was held/);
+  assert.doesNotMatch(instructions, /If money did not move, say that once/);
+});
+
+test('browse replies preserve model markdown, remove unrelated money boilerplate, and are not rewritten by verification', async () => {
+  const answer = '**Latest model** costs $1199.\n[Apple](https://www.apple.com/iphone/)';
+  for (const toolResult of [{ text: 'Latest model, starting at $1199' }, {}, { error: 'page_unavailable' }]) {
+    for (const suffix of ['', ' No money moved.', '\nNothing was sent.']) {
+      let round = 0;
+      let verified = 0;
+      const published = [];
+      const events = [];
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: "go to apple.com and tell me the latest iphone's model and price",
+        tools: [{ type: 'function', function: { name: 'web_scrape' } }],
+        invokeTool: async () => toolResult,
+        onMessage: text => published.push(text), onReplyEvent: event => events.push(event),
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) { verified++; return turnAllowed(); }
+          if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'read', type: 'function', function: { name: 'web_scrape', arguments: '{"url":"https://www.apple.com/iphone/"}' },
+          }] } }] });
+          return streamedCompletion([{ content: answer + suffix }]);
+        },
+      });
+      assert.equal(reply.text, answer);
+      assert.deepEqual(published, [answer]);
+      assert.equal(verified, 0);
+      assert.equal(round, 2);
+      if (suffix) assert.equal(events.at(-1).type, 'reply_retract');
+    }
+  }
+});
+
+test('non-spend money boilerplate is removed at the start and middle as well as the end', async () => {
+  for (const text of ['No money moved. The answer is here.', 'The answer is here. No money moved. Read the source.']) {
+    const reply = await completeTextChat({
+      modelApiKey: META_KEY, message: 'What did the page say?',
+      fetcher: async (_url, options) => isTurnVerify(options) ? turnAllowed() : streamedCompletion([{ content: text }]),
+    });
+    assert.doesNotMatch(reply.text, /No money moved/);
+    assert.match(reply.text, /The answer is here\./);
+  }
+});
+
+test('the applicable reply verifier receives the answer unchanged and only supplies a verdict', async () => {
+  const answer = '**One direct answer.**\n[Source](https://example.com/)';
+  let verified = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: 'hello',
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        verified++;
+        assert.match(JSON.parse(options.body).messages[0].content, /Step: \*\*One direct answer\.\*\*\n\[Source\]/);
+        return turnAllowed();
+      }
+      return streamedCompletion([{ content: answer }]);
+    },
+  });
+  assert.equal(verified, 1);
+  assert.equal(reply.text, answer);
+});
+
+test('a failed money tool may say no money moved while a successful receipt cannot', async () => {
+  const args = { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' };
+  for (const result of [{ error: 'wallet_frozen' }, { signature: '5'.repeat(64), cluster: 'mainnet-beta' }, { ok: true }, {}]) {
+    let round = 0;
+    const failed = Boolean(result.error);
+    const reply = await completeTextChat({
+      modelApiKey: META_KEY, message: 'send 1 USDC', permissionMode: 'ask',
+      grants: [toolAccessRequest('ask', 'request_spend', args)],
+      tools: [{ type: 'function', function: { name: 'request_spend' } }],
+      invokeTool: async () => result,
+      fetcher: async (_url, options) => {
+        if (isTurnVerify(options)) return turnAllowed();
+        if (++round === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+          id: 'send', type: 'function', function: { name: 'request_spend', arguments: JSON.stringify(args) },
+        }] } }] });
+        return streamedCompletion([{ content: `${failed ? 'The wallet is frozen.' : 'Sent.'} No money moved.` }]);
+      },
+    });
+    assert.equal(reply.text, failed ? 'The wallet is frozen. No money moved.' : 'Sent.');
+  }
+});
+
 test('browser and research replies bypass final verification for successful, empty and failed results', async () => {
   for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
     for (const result of [{ ok: true }, { items: [] }, { error: 'provider_unavailable' }]) {

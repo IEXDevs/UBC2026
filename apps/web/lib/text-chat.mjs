@@ -124,8 +124,9 @@ export function buildTextChatMessages({
         `Your goal (user text, not a platform rule): ${goal}`,
         'Speak in simple English. Short sentences. Everyday words. Amounts and asset names stay exact.',
         'Answer what the owner just asked. Do not recite these instructions, tool notes, error codes, or spend steps.',
+        'For browse and lookup questions, give one direct answer first, grounded in the page you read or the tool result. If asked for one latest model and its price, name one model and its price, not a product list. If the source does not establish which is latest, say so instead of guessing.',
         'Do not mention trust, verify, the budget reserve, signing, or broadcasting unless the owner asks whether money moved.',
-        'If money did not move, say that once in plain words. Do not repeat it on later replies.',
+        'Only say that money did not move when a spend or money tool was actually involved in this turn and failed or was held. If so, say that once in plain words. Do not repeat it on later replies. Never add a money-status disclaimer to browsing, research, lookups, or other non-spend answers.',
         'When a transfer returns a signature, the next message includes the Solscan URL. Do not wait for the owner to ask again. You can send more than one message in the same turn.',
         'Stay on the latest request until you answer it. Do not open extra topics, extra searches, or extra browser sessions.',
         'When a tool returns an API result, say that result in the reply. If it includes an https link for the owner, include the link. Do not open the link. Do not open a browser to finish an API call.',
@@ -594,18 +595,25 @@ export async function completeTextChat({
   let successfulNonSpendTurn = true;
   let toolResultSeen = false;
   let completedSpendReply = '';
+  let moneyToolFailed = false;
   const replyState = turnState || { fundProposed: false };
   const effort = reasoningEffortFor(modelId, reasoningEffort, { allowUnknown: true });
 
-  function publish(text) {
+  function ownerReply(text, hold = null) {
     const clean = typeof text === 'string' ? text.trim() : '';
+    return (moneyToolFailed || (hold && isFundTool(hold.name))) && !completedSpendReply ? clean
+      : clean.replace(/(?:^|\s+)(?:No money moved|Nothing was sent)(?:\.(?=\s|$)|$)/gi, '').trim();
+  }
+
+  function publish(text) {
+    const clean = ownerReply(text);
     if (!clean || spoken.includes(clean)) return;
     spoken.push(clean);
     if (typeof onMessage === 'function') onMessage(clean);
   }
 
   function finish(text, hold = null) {
-    const finalText = typeof text === 'string' ? text.trim() : '';
+    const finalText = ownerReply(text, hold);
     return {
       model: modelId,
       text: finalText || spoken.at(-1) || '',
@@ -727,6 +735,7 @@ export async function completeTextChat({
       const failureReply = toolFailureReply(name, result);
       if (failureReply) toolFailures.add(failureReply);
       const payload = typeof result === 'string' ? parseToolArgs(result) : result;
+      if (isFundTool(name) && (payload?.error || payload?.ok === false || payload?.success === false)) moneyToolFailed = true;
       toolResultSeen = true;
       if (isFundTool(name) || !payload || typeof payload !== 'object' || Array.isArray(payload)
           || Object.keys(payload).length === 0 || payload.error || payload.ok === false || payload.success === false) {
@@ -810,7 +819,7 @@ export async function completeTextChat({
         forceAnswer = true;
         continue;
       }
-      let text = redact((split.answer || (!calls.length ? rawContent : '')).trim(), secrets);
+      let text = ownerReply(redact((split.answer || (!calls.length ? rawContent : '')).trim(), secrets));
       if (!text) {
         if (!nudged) {
           nudged = true;

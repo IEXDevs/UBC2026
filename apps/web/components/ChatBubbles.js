@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
-import { formatAgentOutput, linkParts } from '../lib/agent-output.mjs';
+import { formatAgentOutput } from '../lib/agent-output.mjs';
+import { replyLinks } from '../lib/reply-markdown.mjs';
+import ChatMarkdown from './ChatMarkdown.mjs';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
 import { withHeads } from '../lib/voice-float.mjs';
@@ -14,7 +16,7 @@ import { Bubble, BubbleContent } from './ui/bubble';
 import { Message, MessageContent, MessageGroup } from './ui/message';
 
 function urlsIn(text) {
-  return [...String(text || '').matchAll(/https?:\/\/[^\s)]+/g)].map((match) => match[0]);
+  return replyLinks(text);
 }
 
 export default function ChatBubbles({
@@ -151,11 +153,7 @@ export default function ChatBubbles({
               <AgentTrace steps={steps} />
               <Bubble align="start" variant="secondary">
                 <BubbleContent className={line.mentionAddress || line.access?.args?.destination ? 'overflow-visible' : undefined}>
-                  {linkParts(text).map((part, index) => (
-                    part.type === 'link'
-                      ? <a key={`${line.id}-link-${index}`} className="chat-link" href={part.value} target="_blank" rel="noreferrer">{part.value}</a>
-                      : <AddressText key={`${line.id}-text-${index}`} text={part.value} addresses={[line.mentionAddress, line.access?.args?.destination]} renderText={value => <MentionText text={value} onParty={onParty} />} />
-                  ))}
+                  <ChatMarkdown text={text} renderText={value => <AddressText text={value} addresses={[line.mentionAddress, line.access?.args?.destination]} renderText={part => <MentionText text={part} onParty={onParty} />} />} />
                 </BubbleContent>
               </Bubble>
               <Sources urls={urls} />

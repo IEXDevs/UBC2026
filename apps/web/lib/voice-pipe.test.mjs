@@ -22,6 +22,25 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+test('speech queue removes reply markdown for speech without changing the chat text', async () => {
+  const finished = deferred();
+  const text = '**Latest model** from $1199.\n[Apple](https://apple.com/)';
+  const queue = createSpeechQueue({
+    fetcher: async (_url, init) => {
+      assert.equal(JSON.parse(init.body).text, 'Latest model from $1199. Apple');
+      return {};
+    },
+    play: async ({ text: spoken, response }) => {
+      await response;
+      finished.resolve(spoken);
+    },
+  });
+  queue.enqueue(text);
+  assert.equal(await finished.promise, 'Latest model from $1199. Apple');
+  assert.match(text, /\*\*Latest model\*\*/);
+  queue.stop();
+});
+
 test('sentence splitting holds fragments, combines tiny sentences and flushes the last tail', () => {
   assert.deepEqual(splitSpeechSentences(''), { sentences: [], rest: '' });
   assert.deepEqual(splitSpeechSentences('Hi. Still thinking'), { sentences: [], rest: 'Hi. Still thinking' });
