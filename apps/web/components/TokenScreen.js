@@ -6,6 +6,8 @@ import { ArrowLeft } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { usePrivy } from '@privy-io/react-auth';
 import TokenChart from './TokenChart';
+import AddressCopy from './AddressCopy';
+import { walletAssetName, walletAssetValue } from '../lib/wallet-send-assets.mjs';
 import { dexTokenView, enrichPortfolio, readDexCandles, readDexTokens } from '../lib/dex-token.mjs';
 import { formatBaseUnits } from '../lib/money-views.mjs';
 import { formatUsdMicro, portfolioErrorNote } from '../lib/portfolio.mjs';
@@ -144,11 +146,14 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
           <li key={holdingKey(row)}>
             <button type="button" className="token-row" onClick={() => setSelected(holdingKey(row))}>
               <span>
-                <strong>{row.symbol}</strong>
-                <small>{formatBaseUnits(row.amount, row.decimals)} {row.symbol}</small>
+                <strong>{walletAssetName(row)}</strong>
+                <small>{formatBaseUnits(row.amount, row.decimals)} {walletAssetName(row)}</small>
               </span>
-              <b>{row.usdMicro && row.usdMicro !== '0' ? formatUsdMicro(row.usdMicro) : ''}</b>
+              <b>{walletAssetValue(row)}</b>
             </button>
+            {walletAssetName(row) === 'Unknown token' || holdings.filter(item => walletAssetName(item) === walletAssetName(row)).length > 1 ? (
+              <div className="token-mint"><AddressCopy address={row.mint} compact inline /></div>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -214,7 +219,7 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
       ? 'pending'
       : (Array.isArray(candles) && candles.length >= 2 ? candles : null),
   }) : null;
-  const symbol = view?.symbol || holding?.symbol || 'Token';
+  const symbol = walletAssetName({ ...holding, mint, symbol: view?.symbol || holding?.symbol });
   const price = typeof view?.price === 'number' ? formatTokenPrice(view.price) : '';
   const change = typeof view?.changePct === 'number' ? view.changePct : null;
   const down = change != null && change < 0;
@@ -268,7 +273,7 @@ function TokenDetail({ mint, holding, cluster, userId, onBack, onSend, onReceive
         ))}
       </div>
       <div className="token-position">
-        <p><span>Value</span><strong>{holding ? formatUsdMicro(holding.usdMicro) : '—'}</strong></p>
+        <p><span>Value</span><strong>{holding ? walletAssetValue(holding) : '—'}</strong></p>
         <p><span>Amount</span><strong>{holding ? `${formatBaseUnits(holding.amount, holding.decimals)} ${symbol}` : '—'}</strong></p>
       </div>
       <dl className="token-info">

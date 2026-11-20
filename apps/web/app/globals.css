@@ -1648,6 +1648,7 @@ button.add-agent:not(:disabled):hover {
   padding: 0;
 }
 .token-rows li { border-top: 1px solid #2a2a2a; }
+.token-mint { padding-bottom: 10px; }
 .token-row {
   width: 100%;
   display: flex;

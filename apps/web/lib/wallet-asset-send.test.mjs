@@ -4,7 +4,7 @@ import { Keypair, PublicKey, SystemInstruction, Transaction } from '@solana/web3
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { sendWalletAsset } from './wallet-asset-send.mjs';
-import { walletSendAssets, NATIVE_SOL_MINT } from './wallet-send-assets.mjs';
+import { walletSendAssets, walletAssetName, walletAssetValue, NATIVE_SOL_MINT } from './wallet-send-assets.mjs';
 import { buildPortfolio } from './portfolio.mjs';
 import { displayToUnits } from './wallet-desk.mjs';
 import { portfolioWithDex } from './dex-token.mjs';
@@ -114,4 +114,15 @@ test('Send assets come only from the selected wallet, including unpriced tokens,
   assert.deepEqual(walletSendAssets(portfolio, 'not-this-wallet'), []);
   assert.equal(displayToUnits('0.000000000001', 12), '1');
   assert.equal(displayToUnits('0.000000001', 8), null);
+});
+
+test('unknown assets retain mint identity and tiny values do not appear to be zero', () => {
+  const unknown = { mint, amount: '1234', decimals: 3, symbol: `${mint.slice(0, 5)}...${mint.slice(-5)}` };
+  assert.equal(walletAssetName(unknown), 'Unknown token');
+  assert.equal(walletAssetName({ ...unknown, symbol: 'BONK' }), 'BONK');
+  assert.equal(walletAssetName({ mint: NATIVE_SOL_MINT, native: false, symbol: 'SOL' }), 'wSOL');
+  assert.equal(walletAssetValue({ usdMicro: '63' }), '<$0.01');
+  assert.equal(walletAssetValue({ usdMicro: '0' }), 'Not priced');
+  assert.equal(walletAssetValue({ usdMicro: '10000' }), '$0.01');
+  assert.equal(walletAssetValue({ usdMicro: '9000000' }), '$9.00');
 });
