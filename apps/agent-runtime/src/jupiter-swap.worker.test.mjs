@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
@@ -10,8 +9,6 @@ const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL = 'So11111111111111111111111111111111111111112';
 const BLOCKHASH = '11111111111111111111111111111111';
 const KEY = 'synthetic-jupiter-test-key';
-const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')
-  .replace(/^\s*\/\/.*$/gm, ''));
 
 function buildResponse() {
   const data = Buffer.alloc(34);
@@ -48,7 +45,7 @@ test('the hosted swap builder reaches Jupiter and refuses redirects in workerd',
   let upstream = buildResponse;
   const worker = new Miniflare(convertV4MiniflareOptions({
     modules: true, script: result.outputFiles[0].text,
-    compatibilityDate: wrangler.compatibility_date, compatibilityFlags: wrangler.compatibility_flags,
+    compatibilityDate: '2026-11-13', compatibilityFlags: ['nodejs_compat'],
     outboundService: async request => {
       const url = new URL(request.url);
       hosts.push(url.host);
