@@ -37,6 +37,21 @@ test('sentence splitting holds fragments, combines tiny sentences and flushes th
   assert.equal(splitSpeechSentences('Not a boundary.yet!still incomplete').sentences.length, 0);
 });
 
+test('reply speech keeps a decimal split across deltas together until whitespace or final flush', () => {
+  const spoken = [];
+  const reply = createReplySpeech({ enqueue: text => spoken.push(text) });
+  reply.event({ type: 'reply_delta', text: 'The current price is $123.' });
+  assert.deepEqual(spoken, []);
+  reply.event({ type: 'reply_delta', text: '45 per token.' });
+  assert.deepEqual(spoken, []);
+  reply.event({ type: 'reply_delta', text: ' The remaining balance is $456.' });
+  assert.deepEqual(spoken, ['The current price is $123.45 per token.']);
+  reply.event({ type: 'reply_delta', text: '78 in total.' });
+  assert.deepEqual(spoken, ['The current price is $123.45 per token.']);
+  assert.equal(reply.complete(), true);
+  assert.deepEqual(spoken, ['The current price is $123.45 per token.', 'The remaining balance is $456.78 in total.']);
+});
+
 test('reply speech buffers the first sentence and does not repeat the final full reply', () => {
   const spoken = [];
   let cleared = 0;
