@@ -14,6 +14,7 @@ import EarningsChart from './EarningsChart';
 const PLACE_KEY = 'maelstrom.cardPlaces';
 const DRAG_PX = 7;
 const HOME_Z = 2300;
+const SAFE_GAP = 12;
 
 function readPlaces() {
   try {
@@ -719,24 +720,58 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         };
       }
 
-      function framedDistance() {
+      // Phones stack the chart, zoom tools and caption over the book, so frame it in the gap they leave.
+      function safeArea() {
         const width = mount.clientWidth || 1;
+        const height = mount.clientHeight || 1;
+        const full = { left: 0, top: 0, right: width, bottom: height };
+        if (!window.matchMedia('(max-width: 800px)').matches) return full;
+        const box = mount.getBoundingClientRect();
+        const edge = selector => {
+          const rect = mount.querySelector(selector)?.getBoundingClientRect();
+          return rect && rect.width && rect.height ? rect : null;
+        };
+        const earnings = edge('.book-earnings');
+        const caption = edge('.book-caption');
+        const tools = edge('.book-tools');
+        const area = { ...full };
+        if (earnings) area.top = earnings.bottom - box.top + SAFE_GAP;
+        if (caption) area.bottom = caption.top - box.top - SAFE_GAP;
+        if (tools) {
+          area.left = SAFE_GAP;
+          area.right = tools.left - box.left - SAFE_GAP;
+        }
+        if (area.right - area.left < width / 2) {
+          area.left = full.left;
+          area.right = full.right;
+        }
+        if (area.bottom - area.top < height / 3) {
+          area.top = full.top;
+          area.bottom = full.bottom;
+        }
+        return area;
+      }
+
+      function framedDistance(area) {
         const height = mount.clientHeight || 1;
         const frame = bookFrame(book);
         const worldW = Math.max(frame.maxX - frame.minX, 1);
         const worldH = Math.max(frame.maxY - frame.minY, 1);
-        const vHalf = (camera.fov * Math.PI) / 360;
-        const distH = (worldH / 2) / Math.tan(vHalf);
-        const hHalf = Math.atan((width / height) * Math.tan(vHalf));
-        const distW = (worldW / 2) / Math.tan(hHalf);
+        const tan = Math.tan((camera.fov * Math.PI) / 360);
+        const distH = (worldH * height) / (2 * tan * Math.max(area.bottom - area.top, 1));
+        const distW = (worldW * height) / (2 * tan * Math.max(area.right - area.left, 1));
         return THREE.MathUtils.clamp(Math.max(distH, distW) * 1.18, 700, 12000);
       }
 
       function applyHome(snap = true) {
+        const width = mount.clientWidth || 1;
+        const height = mount.clientHeight || 1;
         const frame = bookFrame(book);
-        home.x = frame.x;
-        home.y = frame.y;
-        home.z = framedDistance();
+        const area = safeArea();
+        home.z = framedDistance(area);
+        const perPixel = (2 * Math.tan((camera.fov * Math.PI) / 360) * home.z) / height;
+        home.x = frame.x - ((area.left + area.right) / 2 - width / 2) * perPixel;
+        home.y = frame.y + ((area.top + area.bottom) / 2 - height / 2) * perPixel;
         focus.x = home.x;
         focus.y = home.y;
         focus.z = home.z;
