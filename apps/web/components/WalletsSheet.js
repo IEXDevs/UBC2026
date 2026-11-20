@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
-import { useCreateWallet, useImportWallet } from '@privy-io/react-auth/solana';
+import { useConnectWallet, useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
+import { useCreateWallet, useImportWallet, useWallets } from '@privy-io/react-auth/solana';
 import { ChevronDown, Plus, Settings2, X } from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
@@ -24,7 +24,7 @@ import { partyFromToken } from '../lib/party-book.mjs';
 import { embeddedCreateOptions, embeddedSolanaCount } from '../lib/wallet-provision.mjs';
 import { portfolioErrorNote } from '../lib/portfolio.mjs';
 import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
-import { describeWallets, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
+import { describeWallets, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
   displayToUnits,
@@ -43,6 +43,7 @@ import { sendPreview } from '../lib/txn-preview.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
 import { walletSendAssets, NATIVE_SOL_MINT } from '../lib/wallet-send-assets.mjs';
 import { swapReceipt } from '../lib/jupiter-plugin.mjs';
+import { walletConnectionOptions } from '../lib/wallet-signing.mjs';
 
 const TRANSFER = [
   { id: 'send', label: 'Send' },
@@ -231,9 +232,10 @@ export default function WalletsSheet({
               {active?.address ? (
                 <div className="wallet-identity">
                   <AddressCopy address={active.address} compact />
-                  <span className="wallet-status">{active.frozen ? 'Frozen' : observing ? 'Connected' : 'Ready'}</span>
+                  <span className="wallet-status">{active.frozen ? 'Frozen' : observing ? 'Linked' : 'Ready'}</span>
                 </div>
               ) : null}
+              {signedIn && observing ? <WalletConnection key={`connection:${active.id}`} wallet={activeRaw} /> : null}
               {signedIn && active?.address ? (
                 <TokenScreen
                   key={active.id}
@@ -750,6 +752,22 @@ function WalletPick({ rows, handle = '', activeId, onSelect }) {
   );
 }
 
+function WalletConnection({ wallet }) {
+  const { wallets } = useWallets();
+  const { connectWallet } = useConnectWallet();
+  const connected = wallets.some(item => item.address === wallet.address);
+  return (
+    <div className="wallet-form">
+      <p className="quiet">{wallet.label} approves sends and swaps in its own wallet prompt.</p>
+      {!connected ? (
+        <button type="button" className="ghost" disabled={wallet.frozen} onClick={() => connectWallet(walletConnectionOptions(wallet))}>
+          Connect {wallet.label}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function SendPane({
   active,
   destinations = [],
@@ -835,9 +853,6 @@ function SendPane({
       });
     return () => { stop = true; };
   }, [target?.kind, target?.handle, resolveRecipient]);
-  const fundingMain = observing
-    && target?.kind === 'wallet'
-    && target.walletKind === 'main';
   const walletReady = target?.kind === 'wallet' && !target.frozen;
   const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
   const destinationAddress = target?.kind === 'wallet' || target?.kind === 'address'
@@ -846,13 +861,10 @@ function SendPane({
   const ready = Boolean(
     active && !frozen && target && enough && destinationAddress && destinationAddress !== active.address
     && (
-      fundingMain
-      || (!observing && (
-        walletReady
-        || handleReady
-        || (target.kind === 'sns' && snsAddress)
-        || target.kind === 'address'
-      ))
+      walletReady
+      || handleReady
+      || (target.kind === 'sns' && snsAddress)
+      || target.kind === 'address'
     )
   );
   const destination = target?.kind === 'wallet'
@@ -870,7 +882,7 @@ function SendPane({
 
   return (
     <form className="wallet-form field" onSubmit={event => event.preventDefault()}>
-      <p className="quiet">{active ? `From ${active.label}.` : 'No wallet yet.'} A slide confirms the send. Nothing is signed before that.</p>
+      <p className="quiet">{active ? `From ${active.label}.` : 'No wallet yet.'} {observing ? 'A slide opens this wallet’s approval prompt. Nothing sends without its approval.' : 'A slide confirms the send. Nothing is signed before that.'}</p>
       {frozen ? <p className="quiet" role="status">This wallet is frozen.</p> : null}
       <label>
         To
@@ -896,9 +908,9 @@ function SendPane({
           {sendHandleHint(handleRecipient, { looking: handleLooking, handle: target.handle })}
         </p>
       ) : target?.kind === 'invalid-address' || target?.kind === 'address' ? (
-        <p className="quiet" role="status">{targetHint(target, observing)}</p>
+        <p className="quiet" role="status">{targetHint(target)}</p>
       ) : (
-        <p className="quiet">{targetHint(target, observing)}</p>
+        <p className="quiet">{targetHint(target)}</p>
       )}
       <label>
         Amount
@@ -957,13 +969,7 @@ function SendPane({
   );
 }
 
-function targetHint(target, observing = false) {
-  if (observing) {
-    if (target?.kind === 'wallet' && target.walletKind === 'main') {
-      return 'This sends the selected asset to the main wallet. The connected wallet approves it.';
-    }
-    return 'A connected wallet sends the selected asset to the main wallet.';
-  }
+function targetHint(target) {
   if (!target) return 'Type a @handle, .sol name, or Solana address, or pick a wallet.';
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
   if (target.kind === 'wallet') return `Sends the selected asset to ${target.caption}.`;
