@@ -92,6 +92,7 @@ export async function POST(request) {
     const sent = await moveBetweenWallets({
       client,
       ownerId,
+      accessToken,
       fromWallet: plan.from,
       toWallet: plan.to,
       amount: plan.amount,
@@ -107,6 +108,7 @@ export async function POST(request) {
     const code = typeof error?.code === 'string' && /^[a-z0-9_]{1,64}$/.test(error.code)
       ? error.code
       : 'wallet_move_failed';
+    console.error('wallet_move_failed', { code });
     return Response.json({ error: code }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
   }
 }

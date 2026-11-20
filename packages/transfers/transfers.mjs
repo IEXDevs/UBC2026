@@ -330,6 +330,7 @@ async function ownerMove({
   memo,
   recentBlockhash,
   kind,
+  accessToken,
 }) {
   requireMethod(client, 'signAndBroadcastOwnerSolana');
   const source = ownedWallet(fromWallet, ownerId);
@@ -347,6 +348,7 @@ async function ownerMove({
     ownerId,
     wallet: source,
     transaction: built.transactionBase64,
+    accessToken,
   });
   if (!sent || sent.cluster !== SOLANA_CLUSTER) fail('Refusing to broadcast outside Solana mainnet-beta', 'wrong_cluster');
   return movementResult(kind, built, sent.signature);
@@ -360,6 +362,7 @@ export async function moveBetweenWallets({
   amount: rawAmount,
   memo = 'wallet.move',
   recentBlockhash,
+  accessToken,
 } = {}) {
   const destination = ownedWallet(toWallet, ownerId);
   if (fromWallet?.id === destination.id) fail('Source and destination must differ', 'invalid_destination');
@@ -372,6 +375,7 @@ export async function moveBetweenWallets({
     memo,
     recentBlockhash,
     kind: 'move',
+    accessToken,
   });
 }
 
