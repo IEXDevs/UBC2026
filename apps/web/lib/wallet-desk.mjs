@@ -245,7 +245,7 @@ export function parseSendTarget(value) {
 }
 
 export function displayToUnits(text, decimals = 6) {
-  if (typeof text !== 'string' || !Number.isInteger(decimals) || decimals < 0 || decimals > 9) return null;
+  if (typeof text !== 'string' || !Number.isInteger(decimals) || decimals < 0 || decimals > 18) return null;
   const value = text.trim();
   if (!/^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(value)) return null;
   const [whole, fraction = ''] = value.split('.');

@@ -127,9 +127,10 @@ export function withKnownPegs(cluster, prices = {}) {
 }
 
 function addToken(bucket, token) {
-  const existing = bucket.get(token.mint);
+  const key = token.native === false ? `${token.mint}:wrapped` : token.mint;
+  const existing = bucket.get(key);
   if (!existing) {
-    bucket.set(token.mint, { ...token });
+    bucket.set(key, { ...token });
     return;
   }
   existing.amount = (BigInt(existing.amount) + BigInt(token.amount)).toString();
@@ -192,7 +193,7 @@ export function buildPortfolio({ cluster, wallets, prices = {} }) {
       if (!token || !BASE58.test(token.mint) || !AMOUNT.test(token.amount) || token.amount === '0') continue;
       if (!Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 18) continue;
       if (token.decimals === 0 && token.amount === '1') continue;
-      addToken(local, { mint: token.mint, amount: token.amount, decimals: token.decimals });
+      addToken(local, { mint: token.mint, amount: token.amount, decimals: token.decimals, ...(token.native === undefined ? {} : { native: token.native }) });
     }
     let walletUsd = 0n;
     for (const token of local.values()) {
@@ -202,10 +203,11 @@ export function buildPortfolio({ cluster, wallets, prices = {} }) {
       if (!priced) unpriced += 1;
       const row = {
         mint: token.mint,
-        symbol: symbolFor(token.mint),
+        symbol: token.native === false && token.mint === SOL_MINT ? 'wSOL' : symbolFor(token.mint),
         amount: token.amount,
         decimals: token.decimals,
         usdMicro: priced ? micro : '0',
+        ...(token.native === undefined ? {} : { native: token.native }),
       };
       holdings.push(row);
       if (priced) {
@@ -316,7 +318,7 @@ function parseTokenAccounts(result) {
     if (!BASE58.test(mint) || typeof amount !== 'string' || !AMOUNT.test(amount)) continue;
     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) continue;
     if (amount === '0' || (decimals === 0 && amount === '1')) continue;
-    out.push({ mint, amount, decimals });
+    out.push({ mint, amount, decimals, ...(mint === SOL_MINT ? { native: false } : {}) });
     if (out.length >= MAX_TOKENS) break;
   }
   return out;
@@ -364,7 +366,7 @@ export async function readChainBalances({ rpcUrl, wallets, fetcher = fetch }) {
       ...parseTokenAccounts(rpcResult(rows[base + 2])),
     ];
     if (lamports && lamports !== '0') {
-      tokens.unshift({ mint: SOL_MINT, amount: lamports, decimals: 9 });
+      tokens.unshift({ mint: SOL_MINT, amount: lamports, decimals: 9, native: true });
     }
     return {
       address: wallet.address,

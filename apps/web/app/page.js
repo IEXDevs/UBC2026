@@ -1186,6 +1186,54 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       return { ok: false, message: 'Enter your password to use the wallet.' };
     }
     const target = pending?.target;
+    if (pending?.walletAsset) {
+      const list = Array.isArray(liveWallets) ? liveWallets : wallets;
+      const from = list.find(item => item?.id === pending.fromWalletId);
+      if (!from || from.frozen) return { ok: false, message: 'That wallet cannot send.' };
+      try {
+        if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
+        const token = await getAccessToken?.();
+        const headers = moneyHeaders(token);
+        const payload = { from, asset: pending.walletAsset, destination: pending.destination, amount: pending.amount, decimals: pending.decimals };
+        const post = async (extra) => {
+          const response = await fetch('/api/wallets/move', { method: 'POST', headers, body: JSON.stringify({ ...payload, ...extra }) });
+          return { response, body: await response.json().catch(() => ({})) };
+        };
+        let result;
+        if (from.spendable === false) {
+          const prepared = await post({ phase: 'prepare' });
+          if (!prepared.response.ok || !prepared.body.transaction) return { ok: false, message: 'The transfer was not prepared. Check the balance and SOL network fees.' };
+          const signer = depositSignerRef.current;
+          const wallet = signer?.wallets?.find(item => item?.address === from.address);
+          const transaction = base64ToBytes(prepared.body.transaction);
+          if (!wallet || !transaction || typeof signer?.signTransaction !== 'function') return { ok: false, message: 'Connect that wallet again to approve the send.' };
+          const signed = await signer.signTransaction({ transaction, wallet, chain: SOLANA_PRIVY_CHAIN });
+          if (!(signed?.signedTransaction instanceof Uint8Array)) return { ok: false, message: 'The wallet did not approve the send.' };
+          result = await post({ phase: 'broadcast', signedTransaction: bytesToBase64(signed.signedTransaction) });
+        } else result = await post({ phase: 'send' });
+        const { response, body } = result;
+        if (!response.ok || !body.signature) {
+          const messages = {
+            insufficient_balance: 'Amount exceeds this wallet’s balance.',
+            wallet_frozen: 'That wallet is frozen.',
+            unsupported_mint: 'This token’s transfer rules are not supported.',
+            simulation_failed: 'The send could not be simulated. Check the token balance and SOL for fees or token-account rent.',
+            asset_changed: 'Token details changed. Reload your wallet balances before sending.',
+          };
+          return { ok: false, message: messages[body.error] || 'The asset send did not post. Nothing was marked sent.' };
+        }
+        const amountLabel = `${pending.amountText} ${pending.asset}`;
+        return {
+          ok: true,
+          message: `Sent ${amountLabel}.`,
+          signature: body.signature,
+          receipt: { id: `asset_${body.signature}`, at: new Date().toISOString(), title: `Send ${amountLabel}`, lines: [
+            { label: 'To', value: pending.destination }, { label: 'Amount', value: amountLabel },
+            { label: 'Asset', value: pending.walletAsset }, { label: 'Network', value: EXECUTION_LABEL }, { label: 'Signature', value: body.signature },
+          ], signature: body.signature, cluster: SOLANA_CLUSTER },
+        };
+      } catch { return { ok: false, message: 'The wallet send did not complete.' }; }
+    }
     if (target?.kind === 'sns') {
       const main = (Array.isArray(liveWallets) ? liveWallets : wallets).find(item => item?.kind === 'main') || null;
       if (!main) return { ok: false, message: 'The main wallet is not ready.' };

@@ -41,6 +41,8 @@ import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
 import { accountStorage } from '../lib/account-state.mjs';
 import { sendPreview } from '../lib/txn-preview.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
+import { walletSendAssets, NATIVE_SOL_MINT } from '../lib/wallet-send-assets.mjs';
+import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 
 const TRANSFER = [
   { id: 'send', label: 'Send' },
@@ -73,6 +75,8 @@ export default function WalletsSheet({
   const [root, setRoot] = useState(null);
   const [portfolioOpen, setPortfolioOpen] = useState(false);
   const [balanceRevision, setBalanceRevision] = useState(0);
+  const [sendPortfolio, setSendPortfolio] = useState(null);
+  const [preferredAsset, setPreferredAsset] = useState(null);
   const settingsRef = useRef(null);
   const transferRef = useRef(null);
   const bodyRef = useRef(null);
@@ -230,7 +234,11 @@ export default function WalletsSheet({
                   open={open}
                   address={active.address}
                   previewPortfolio={previewBook}
-                  onSend={() => openTransfer('send')}
+                  onPortfolio={setSendPortfolio}
+                  onSend={holding => {
+                    setPreferredAsset({ walletId: active.id, id: holding?.mint === NATIVE_SOL_MINT && holding.native !== false ? 'SOL' : holding?.mint });
+                    openTransfer('send');
+                  }}
                   onReceive={() => openTransfer('receive')}
                   onSwap={() => openTransfer('swap')}
                 />
@@ -281,7 +289,8 @@ export default function WalletsSheet({
                     <SendPane
                       active={active}
                       destinations={destinations}
-                      tokens={tradeableTokens(tokens)}
+                      tokens={walletSendAssets(sendPortfolio, active?.address)}
+                      preferredAsset={preferredAsset?.walletId === active?.id ? preferredAsset?.id : ''}
                       frozen={Boolean(active?.frozen)}
                       observing={observing}
                       onSend={send}
@@ -727,6 +736,7 @@ function SendPane({
   active,
   destinations = [],
   tokens,
+  preferredAsset = '',
   frozen,
   observing = false,
   onSend,
@@ -736,12 +746,19 @@ function SendPane({
   const [to, setTo] = useState('');
   const [pickedId, setPickedId] = useState('');
   const [amount, setAmount] = useState('');
-  const [symbol, setSymbol] = useState('USDC');
+  const [assetId, setAssetId] = useState(preferredAsset);
   const [status, setStatus] = useState('');
   const [sendComplete, setSendComplete] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [folded, setFolded] = useState(false);
-  const asset = tokens.find(token => token.symbol === symbol) || tokens[0] || null;
+  useEffect(() => {
+    if (!tokens.some(token => token.id === assetId)) {
+      setAssetId(tokens[0]?.id || '');
+      setAmount('');
+    }
+  }, [tokens, assetId]);
+  useEffect(() => { if (preferredAsset) { setAssetId(preferredAsset); setAmount(''); } }, [preferredAsset]);
+  const asset = tokens.find(token => token.id === assetId) || tokens[0] || null;
   const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
   const target = picked?.kind === 'recent'
     ? parseSendTarget(picked.caption)
@@ -800,26 +817,23 @@ function SendPane({
       });
     return () => { stop = true; };
   }, [target?.kind, target?.handle, resolveRecipient]);
-  const pricedSwap = asset && asset.symbol !== 'USDC'
-    ? swapDraft(tokens, { from: asset.symbol, to: 'USDC', amountText: amount })
-    : null;
   const fundingMain = observing
     && target?.kind === 'wallet'
-    && target.walletKind === 'main'
-    && asset?.symbol === 'USDC';
-  const walletReady = target?.kind === 'wallet' && !target.frozen && asset?.symbol === 'USDC';
+    && target.walletKind === 'main';
+  const walletReady = target?.kind === 'wallet' && !target.frozen;
   const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
+  const destinationAddress = target?.kind === 'wallet' || target?.kind === 'address'
+    ? target.address : target?.kind === 'sns' ? snsAddress : handleReady ? handleRecipient.address : '';
+  const enough = asset && units && BigInt(units) <= BigInt(asset.amount);
   const ready = Boolean(
-    active && !frozen && target && units && asset
+    active && !frozen && target && enough && destinationAddress && destinationAddress !== active.address
     && (
       fundingMain
       || (!observing && (
         walletReady
-        || (target.kind === 'handle' && (
-          (asset.symbol === 'USDC' && handleReady)
-          || (asset.symbol !== 'USDC' && handleReady && pricedSwap?.broadcast === false && pricedSwap.url)
-        ))
-        || (target.kind === 'sns' && asset.symbol === 'USDC' && snsAddress)
+        || handleReady
+        || (target.kind === 'sns' && snsAddress)
+        || target.kind === 'address'
       ))
     )
   );
@@ -829,7 +843,7 @@ function SendPane({
       ? `@${target.handle}`
       : target?.kind === 'sns'
         ? (snsAddress || target.domain)
-        : '';
+        : target?.kind === 'address' ? target.address : '';
   const preview = ready ? sendPreview({
     from: active?.label || 'Agent wallet',
     to: destination,
@@ -877,37 +891,34 @@ function SendPane({
           onChange={event => { setAmount(event.target.value); setStatus(''); setFolded(false); }}
         />
       </label>
-      <div className="wallet-switch" role="group" aria-label="Asset">
-        {tokens.map(token => (
-          <button
-            key={token.symbol}
-            type="button"
-            className={asset?.symbol === token.symbol ? 'is-on' : ''}
-            aria-pressed={asset?.symbol === token.symbol}
-            onClick={() => { setSymbol(token.symbol); setStatus(''); setFolded(false); }}
-          >
-            {token.symbol}
-          </button>
-        ))}
-      </div>
-      {asset && asset.symbol !== 'USDC' ? (
-        <p className="quiet">This prices {asset.symbol} in USDC. The quote is mainnet pricing and is not broadcast. The slide sends that USDC on the platform ledger.</p>
-      ) : null}
+      <label>
+        Asset
+        <GlideSelect
+          ariaLabel="Asset"
+          value={asset?.id || ''}
+          options={tokens.map(token => ({ value: token.id, label: `${token.symbol} · ${formatBaseUnits(token.amount, token.decimals)}`, tag: token.id === 'SOL' ? 'Native' : shortAddress(token.mint) }))}
+          onChange={id => { setAssetId(id); setAmount(''); setStatus(''); setFolded(false); }}
+        />
+      </label>
+      {!asset ? <p className="quiet" role="status">No sendable balance loaded for this wallet.</p> : <p className="quiet">Available: {formatBaseUnits(asset.amount, asset.decimals)} {asset.symbol}. Sends this asset directly, plus SOL network fees.</p>}
+      {asset && units && !enough ? <p className="quiet" role="status">Amount exceeds this wallet’s balance.</p> : null}
       <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
       <SlideCommit
         label="Slide to send"
         doneLabel={sendComplete ? 'Sent' : 'Sending'}
         disabled={!ready}
-        resetKey={`${resetKey}:${to}:${amount}:${asset?.symbol || ''}`}
+        resetKey={`${resetKey}:${to}:${amount}:${asset?.id || ''}`}
         onCommit={() => {
           setSendComplete(false);
           const pending = {
             target,
+            walletAsset: asset.id,
+            destination: destinationAddress,
+            decimals: asset.decimals,
             fromWalletId: active.id,
             amount: units,
             asset: asset.symbol,
             amountText: amount.trim(),
-            quote: pricedSwap && pricedSwap.url ? pricedSwap : null,
           };
           Promise.resolve(onSend?.(pending)).then(result => {
             setStatus(result?.message || result?.error || 'The send did not post.');
@@ -931,15 +942,15 @@ function SendPane({
 function targetHint(target, observing = false) {
   if (observing) {
     if (target?.kind === 'wallet' && target.walletKind === 'main') {
-      return 'This sends mainnet-beta USDC to the main wallet. The connected wallet approves it.';
+      return `This sends the selected asset on ${SOLANA_CLUSTER} to the main wallet. The connected wallet approves it.`;
     }
-    return 'A connected wallet sends mainnet-beta USDC to the main wallet.';
+    return `A connected wallet sends the selected asset on ${SOLANA_CLUSTER} to the main wallet.`;
   }
-  if (!target) return 'Type a @handle or a .sol name, or pick a wallet.';
+  if (!target) return 'Type a @handle, .sol name, or Solana address, or pick a wallet.';
   if (target.kind === 'sns') return `Looking up ${target.domain}.`;
-  if (target.kind === 'wallet') return `Sends USDC on Solana mainnet-beta to ${target.caption}.`;
+  if (target.kind === 'wallet') return `Sends the selected asset on Solana ${SOLANA_CLUSTER} to ${target.caption}.`;
   if (target.kind === 'invalid-address') return 'That address is not a valid Solana pubkey.';
-  return 'Raw addresses are not on the platform ledger yet.';
+  return target.kind === 'address' ? `Sends directly on Solana ${SOLANA_CLUSTER}. Check the recipient address.` : '';
 }
 
 function ReceivePane({ active, handle }) {

@@ -24,7 +24,7 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-export default function TokenScreen({ open, address = '', onSend, onReceive, onSwap, previewPortfolio = null, refreshKey = 0 }) {
+export default function TokenScreen({ open, address = '', onSend, onReceive, onSwap, onPortfolio, previewPortfolio = null, refreshKey = 0 }) {
   const { user, getAccessToken } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
@@ -97,9 +97,13 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
   const scoped = address && Array.isArray(portfolio?.wallets)
     ? { ...portfolio, wallets: portfolio.wallets.filter(row => row?.address === address) }
     : portfolio;
+  useEffect(() => {
+    onPortfolio?.(portfolio);
+  }, [portfolio, onPortfolio]);
   const holdings = combineHoldings(scoped);
   const total = holdings.reduce((sum, row) => sum + BigInt(row.usdMicro || '0'), 0n).toString();
-  const holding = selected ? holdings.find(row => row.mint === selected) || null : null;
+  const holdingKey = row => row.native === false ? `${row.mint}:wrapped` : row.mint;
+  const holding = selected ? holdings.find(row => holdingKey(row) === selected) || null : null;
   const ease = [0.22, 1, 0.36, 1];
 
   return (
@@ -113,12 +117,12 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
         transition={{ duration: 0.45, ease }}
       >
       <TokenDetail
-        mint={selected}
+        mint={holding?.mint || selected}
         holding={holding}
         cluster={portfolio?.cluster || SOLANA_CLUSTER}
         userId={user?.id}
         onBack={() => setSelected(null)}
-        onSend={() => onSend?.(holding?.symbol)}
+        onSend={() => onSend?.(holding)}
         onReceive={onReceive}
         onSwap={() => onSwap?.(holding?.symbol)}
       />
@@ -137,8 +141,8 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
       {error ? <p className="quiet" role="status">{error}</p> : null}
       <ul className="token-rows">
         {holdings.map(row => (
-          <li key={row.mint}>
-            <button type="button" className="token-row" onClick={() => setSelected(row.mint)}>
+          <li key={holdingKey(row)}>
+            <button type="button" className="token-row" onClick={() => setSelected(holdingKey(row))}>
               <span>
                 <strong>{row.symbol}</strong>
                 <small>{formatBaseUnits(row.amount, row.decimals)} {row.symbol}</small>

@@ -105,14 +105,16 @@ export function combineHoldings(portfolio) {
       const amount = typeof row.amount === 'string' ? row.amount : '0';
       const usd = typeof row.usdMicro === 'string' ? row.usdMicro : '0';
       if (!/^(0|[1-9][0-9]*)$/.test(amount) || !/^(0|[1-9][0-9]*)$/.test(usd)) continue;
-      const current = map.get(row.mint);
+      const key = row.native === false ? `${row.mint}:wrapped` : row.mint;
+      const current = map.get(key);
       if (!current) {
-        map.set(row.mint, {
+        map.set(key, {
           mint: row.mint,
           symbol: row.symbol || 'Token',
           decimals: Number.isInteger(row.decimals) ? row.decimals : 0,
           amount,
           usdMicro: usd,
+          ...(row.native === undefined ? {} : { native: row.native }),
         });
         continue;
       }
