@@ -29,6 +29,11 @@ test('privacy and terms name the product rules and the liability limit', () => {
   assert.match(terms, /best effort to reduce risk/);
   assert.match(terms, /can never be truly mitigated/);
   assert.match(terms, /no liability for losses, harm, injury, or other forms of damage/);
+  assert.match(privacy, /maximum is 30 USD/);
+  assert.match(privacy, /Laso reloadable card/);
+  assert.match(privacy, /separate payment, not a desk transfer/);
+  assert.match(terms, /maximum is 30 USD/);
+  assert.match(terms, /when the mode is Full/);
   assert.equal(/google|drive/i.test(`${privacy}\n${terms}`), false);
   assert.equal(/\bbot\b/i.test(`${privacy}\n${terms}`), false);
 });

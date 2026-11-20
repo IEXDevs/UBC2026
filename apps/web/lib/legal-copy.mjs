@@ -1,9 +1,10 @@
 /**
  * Privacy and terms shown at /privacy and /tos.
  * Amounts and product rules match the desk. The store vendor is unnamed.
+ * Network names stay off these pages.
  */
 
-export const LEGAL_UPDATED = 'November 17, 2026';
+export const LEGAL_UPDATED = 'November 20, 2026';
 
 export const PRIVACY = Object.freeze({
   kind: 'privacy',
@@ -15,7 +16,7 @@ export const PRIVACY = Object.freeze({
       heading: 'The account',
       paragraphs: Object.freeze([
         'Sign-in creates a session for you. Maelstrom keeps the handle you choose, a .sol name when you claim one, and the wallet address tied to that account. The address is shown as the first 5 and last 5 characters in the desk and copies when you click it.',
-        'Spend settings stay with the account: Ask every time, Review by AI, or Full permissions, and the Review by AI maximum in USD when you set one.',
+        'Spend settings stay with the account: Ask every time, Review by AI, or Full permissions, and the Review by AI maximum in USD. If you have not set one, the maximum is 30 USD. A spend above that maximum still asks you to confirm, including when the mode is Full.',
       ]),
     }),
     Object.freeze({
@@ -47,7 +48,7 @@ export const PRIVACY = Object.freeze({
       paragraphs: Object.freeze([
         'When you use voice, the audio of that session is processed so the agent can answer. Voice uses the same spend permissions as the desk.',
         'When an agent opens a page, the session record belongs to that agent and its owner. A live view is returned on the owner route.',
-        'A reloadable card belongs to you. You complete signup, identity checks, the issuer code, and the issuer terms. An agent may hand you the claim link and check status. It does not open that link or submit identity for you.',
+        'A Laso reloadable card belongs to you. You complete signup, identity checks, the issuer code, and the issuer terms. Funding that card is a separate payment, not a desk transfer. An agent may hand you the claim link and check status. It does not open that link or submit identity for you.',
       ]),
     }),
     Object.freeze({
@@ -81,7 +82,7 @@ export const TERMS = Object.freeze({
       heading: 'What you are using',
       paragraphs: Object.freeze([
         'Agents can be wrong. Research, prices, trust scores, and suggested spends are information for you to judge. Transactions can move real funds. A price quote never authorizes a transaction.',
-        'You choose Ask every time, Review by AI, or Full permissions. Ask and Full still use the confirm slide. Review by AI stores a USDC maximum you set. At or under that cap a spend can continue after the server check. Above that cap, you confirm.',
+        'You choose Ask every time, Review by AI, or Full permissions. Ask and Full still use the confirm slide. The Review by AI maximum is a USD amount you set. If you have not set one, the maximum is 30 USD. At or under that cap a spend can continue after the server checks the amount, the asset, the network, and the recipient. Above that cap, you confirm. That confirm still applies when the mode is Full.',
       ]),
     }),
     Object.freeze({
@@ -106,7 +107,7 @@ export const TERMS = Object.freeze({
     Object.freeze({
       heading: 'Your wallet',
       paragraphs: Object.freeze([
-        'You keep the seed phrase and any private key. Maelstrom does not keep them after you confirm them. A lost phrase cannot be recovered. You are responsible for the amount, the asset, and the destination you confirm, and for the permission mode you leave on.',
+        'You keep the seed phrase and any private key. Maelstrom does not keep them after you confirm them. A lost phrase cannot be recovered. You can add an external wallet to fund this one. You are responsible for the amount, the asset, and the destination you confirm, and for the permission mode you leave on.',
       ]),
     }),
     Object.freeze({
@@ -119,7 +120,7 @@ export const TERMS = Object.freeze({
       heading: 'Use of the desk',
       paragraphs: Object.freeze([
         'Use Maelstrom for your own account and your own funds. Do not use it to take funds, credentials, or data that are not yours, or to interfere with the service. You need to be at least 18.',
-        'A reloadable card is yours. You complete the issuer’s signup, identity checks, code, and terms. Maelstrom can pass you the claim link and read status. It does not submit identity for you.',
+        'A Laso reloadable card is yours. You complete the issuer’s signup, identity checks, code, and terms. Funding that card is a separate payment, not a desk transfer. Maelstrom can pass you the claim link and read status. It does not open that link or submit identity for you.',
       ]),
     }),
     Object.freeze({
