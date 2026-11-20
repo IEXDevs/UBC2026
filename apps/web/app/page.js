@@ -34,6 +34,7 @@ import { formatBaseUnits, moneyPane, walletGlance } from '../lib/money-views.mjs
 import { mentionSuggestions } from '../lib/mention-handles.mjs';
 import { assignedWalletAddress, solanaSpendableLabel } from '../lib/solana-balance.mjs';
 import { parsePlatformSend } from '../lib/platform-send.mjs';
+import { walletSendFailure } from '../lib/wallet-send-failure.mjs';
 import { clearAcceptanceDraft, netChangeSummary, readAcceptanceAck, readReviewThreshold, readStoredPermission, writeAcceptance } from '../lib/spend-permission.mjs';
 import { CONFIRM_HOLD_MS } from '../lib/confirm-hold.mjs';
 import { compactLines, contextUsage, contextWindowFor } from '../lib/context-usage.mjs';
@@ -1202,18 +1203,20 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     };
   }
   const onWalletSend = useCallback(async (pending) => {
+    let failure = {};
+    const failed = (message, detail = failure) => walletSendFailure(message, detail);
     if (deskLockOnRef.current && !unlockedRef.current) {
       lockIntentRef.current ??= { type: 'wallet' };
       setLockOpen(true);
-      return { ok: false, message: 'Enter your password to use the wallet.' };
+      return failed('Enter your password to use the wallet.');
     }
     const target = pending?.target;
     if (pending?.walletAsset) {
       const list = Array.isArray(liveWallets) ? liveWallets : wallets;
       const from = list.find(item => item?.id === pending.fromWalletId);
-      if (!from || from.frozen) return { ok: false, message: 'That wallet cannot send.' };
+      if (!from || from.frozen) return failed('That wallet cannot send.');
       try {
-        if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
+        if (!sessionReadyForWallets(signedIn, user)) return failed('Sign in again, then send.');
         const token = await getAccessToken?.();
         const headers = moneyHeaders(token);
         const payload = { from, asset: pending.walletAsset, destination: pending.destination, amount: pending.amount, decimals: pending.decimals };
@@ -1224,12 +1227,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         let result;
         if (!serverSignsWallet(from)) {
           const prepared = await post({ phase: 'prepare' });
-          if (!prepared.response.ok || !prepared.body.transaction) return { ok: false, message: 'The transfer was not prepared. Check the balance and SOL network fees.' };
+          failure = prepared.body;
+          if (!prepared.response.ok || !prepared.body.transaction) return failed('The transfer was not prepared. Check the balance and SOL network fees.');
           const transaction = base64ToBytes(prepared.body.transaction);
           const signed = await signSelectedWalletTransaction({ from, transaction, signer: depositSignerRef.current });
           result = await post({ phase: 'broadcast', signedTransaction: bytesToBase64(signed) });
         } else result = await post({ phase: 'send' });
         const { response, body } = result;
+        failure = body;
         if (!response.ok || !body.signature) {
           const messages = {
             insufficient_balance: 'Amount exceeds this wallet’s balance.',
@@ -1241,7 +1246,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             wallet_authorization_failed: 'Privy did not sign the send. Sign in again, then slide once more.',
             privy_failed: 'Privy did not sign the send. Sign in again, then slide once more.',
           };
-          return { ok: false, message: messages[body.error] || 'The asset send did not post. Nothing was marked sent.' };
+          return failed(messages[body.error] || 'The asset send did not post. Nothing was marked sent.');
         }
         const amountLabel = `${pending.amountText} ${pending.asset}`;
         return {
@@ -1254,19 +1259,20 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           ], signature: body.signature, cluster: SOLANA_CLUSTER },
         };
       } catch (error) {
+        failure = { error: error?.code, privy: error?.privyFailure };
         const messages = {
           wallet_connection_required: 'Connect the selected wallet, then slide again to approve the send.',
           wallet_approval_cancelled: 'The wallet did not approve the send. Nothing was sent.',
           invalid_signature: 'The wallet did not return a signed transfer. Nothing was sent.',
         };
-        return { ok: false, message: messages[error?.code] || 'The wallet send did not complete.' };
+        return failed(messages[error?.code] || 'The wallet send did not complete.');
       }
     }
     if (target?.kind === 'sns') {
       const main = (Array.isArray(liveWallets) ? liveWallets : wallets).find(item => item?.kind === 'main') || null;
-      if (!main) return { ok: false, message: 'The main wallet is not ready.' };
+      if (!main) return failed('The main wallet is not ready.');
       try {
-        if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
+        if (!sessionReadyForWallets(signedIn, user)) return failed('Sign in again, then send.');
         const token = await getAccessToken?.();
         const response = await fetch('/api/sns/send', {
           method: 'POST',
@@ -1278,16 +1284,17 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           body: JSON.stringify({ domain: target.domain, amount: pending.amount, wallet: main }),
         });
         const body = await response.json().catch(() => ({}));
+        failure = body;
         const where = body.address ? clipAddress(body.address) : target.domain;
         if (body.error === 'missing_config') {
           const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'SOLANA_RPC_URL';
-          return { ok: false, message: `${target.domain} is ${where}. This send needs ${names}.` };
+          return failed(`${target.domain} is ${where}. This send needs ${names}.`);
         }
         if (body.error === 'sns_not_found' || body.error === 'sns_failed') {
-          return { ok: false, message: 'Failed.' };
+          return failed('Failed.');
         }
         if (!response.ok || !body.signature) {
-          return { ok: false, message: `The send to ${where} did not post.` };
+          return failed(`The send to ${where} did not post.`);
         }
         const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
         return {
@@ -1307,22 +1314,23 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             cluster: SOLANA_CLUSTER,
           },
         };
-      } catch {
-        return { ok: false, message: 'The send did not post.' };
+      } catch (error) {
+        failure = { error: error?.code, privy: error?.privyFailure };
+        return failed('The send did not post.');
       }
     }
     if (target?.kind === 'wallet') {
       const list = Array.isArray(liveWallets) ? liveWallets : wallets;
       const from = list.find(item => item?.id === pending.fromWalletId) || null;
       const dest = list.find(item => item?.id === target.id && item?.address === target.address) || null;
-      if (!from || !dest) return { ok: false, message: 'That wallet is not on this desk.' };
-      if (pending.asset !== 'USDC') return { ok: false, message: 'Wallet sends are USDC.' };
+      if (!from || !dest) return failed('That wallet is not on this desk.');
+      if (pending.asset !== 'USDC') return failed('Wallet sends are USDC.');
       try {
-        if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
+        if (!sessionReadyForWallets(signedIn, user)) return failed('Sign in again, then send.');
         const token = await getAccessToken?.();
         if (from.spendable === false) {
           if (dest.kind !== 'main') {
-            return { ok: false, message: 'A connected wallet sends USDC to the main wallet.' };
+            return failed('A connected wallet sends USDC to the main wallet.');
           }
           const headers = {
             'content-type': 'application/json',
@@ -1342,14 +1350,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             body: JSON.stringify({ phase: 'prepare', ...depositBody }),
           });
           const prepared = await preparedResponse.json().catch(() => ({}));
+          failure = prepared;
           if (!preparedResponse.ok || typeof prepared.transaction !== 'string') {
-            return { ok: false, message: 'The transfer to the main wallet was not prepared.' };
+            return failed('The transfer to the main wallet was not prepared.');
           }
           const signer = depositSignerRef.current;
           const wallet = (Array.isArray(signer?.wallets) ? signer.wallets : []).find(item => item?.address === from.address);
           const unsigned = base64ToBytes(prepared.transaction);
           if (!wallet || !unsigned || typeof signer?.signTransaction !== 'function') {
-            return { ok: false, message: 'Connect that wallet again, then send to the main wallet.' };
+            return failed('Connect that wallet again, then send to the main wallet.');
           }
           let signedBytes;
           try {
@@ -1359,11 +1368,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
               chain: SOLANA_PRIVY_CHAIN,
             });
             signedBytes = signed?.signedTransaction;
-          } catch {
-            return { ok: false, message: 'The connected wallet did not approve the transfer.' };
+          } catch (error) {
+            failure = { error: error?.code, privy: error?.privyFailure };
+            return failed('The connected wallet did not approve the transfer.');
           }
           if (!(signedBytes instanceof Uint8Array) || signedBytes.length <= 64) {
-            return { ok: false, message: 'The connected wallet did not return a signed transfer.' };
+            return failed('The connected wallet did not return a signed transfer.');
           }
           const response = await fetch('/api/wallets/deposit', {
             method: 'POST',
@@ -1371,10 +1381,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             body: JSON.stringify({ phase: 'broadcast', ...depositBody, signedTransaction: bytesToBase64(signedBytes) }),
           });
           const body = await response.json().catch(() => ({}));
+          failure = body;
           const where = dest.label || clipAddress(dest.address);
-          if (body.error === 'wallet_frozen') return { ok: false, message: 'That wallet is frozen.' };
-          if (body.error === 'transaction_mismatch') return { ok: false, message: 'The signed transfer did not match the deposit.' };
-          if (!response.ok || !body.signature) return { ok: false, message: `The send to ${where} did not post.` };
+          if (body.error === 'wallet_frozen') return failed('That wallet is frozen.');
+          if (body.error === 'transaction_mismatch') return failed('The signed transfer did not match the deposit.');
+          if (!response.ok || !body.signature) return failed(`The send to ${where} did not post.`);
           const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
           return {
             ok: true,
@@ -1404,14 +1415,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           body: JSON.stringify({ from, to: dest, amount: pending.amount }),
         });
         const body = await response.json().catch(() => ({}));
+        failure = body;
         const where = target.caption || clipAddress(target.address);
         if (body.error === 'missing_config') {
           const names = Array.isArray(body.missing) ? body.missing.join(', ') : 'SOLANA_RPC_URL';
-          return { ok: false, message: `This send needs ${names}.` };
+          return failed(`This send needs ${names}.`);
         }
-        if (body.error === 'wallet_frozen') return { ok: false, message: 'That wallet is frozen.' };
-        if (body.error === 'invalid_destination') return { ok: false, message: 'Pick a different wallet.' };
-        if (!response.ok || !body.signature) return { ok: false, message: `The send to ${where} did not post.` };
+        if (body.error === 'wallet_frozen') return failed('That wallet is frozen.');
+        if (body.error === 'invalid_destination') return failed('Pick a different wallet.');
+        if (!response.ok || !body.signature) return failed(`The send to ${where} did not post.`);
         const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
         return {
           ok: true,
@@ -1430,27 +1442,30 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             cluster: SOLANA_CLUSTER,
           },
         };
-      } catch {
-        return { ok: false, message: 'The send did not post.' };
+      } catch (error) {
+        failure = { error: error?.code, privy: error?.privyFailure };
+        return failed('The send did not post.');
       }
     }
     if (target?.kind !== 'handle') {
-      return { ok: false, message: 'Platform sends go to a @handle.' };
+      return failed('Platform sends go to a @handle.');
     }
     let settleAmount = pending.asset === 'USDC' ? pending.amount : null;
     let pricedFrom = null;
     if (pending.asset !== 'USDC') {
       const quote = pending.quote;
       if (!quote?.url || quote.broadcast !== false) {
-        return { ok: false, message: 'That quote cannot authorize a send.' };
+        return failed('That quote cannot authorize a send.');
       }
       let quoted = null;
       try {
         const response = await fetch(quote.url);
         const payload = await response.json().catch(() => ({}));
+        failure = payload;
         if (response.ok) quoted = readQuoteOut(payload);
-      } catch {
-        return { ok: false, message: 'The quote did not load. Nothing was sent.' };
+      } catch (error) {
+        failure = { error: error?.code, privy: error?.privyFailure };
+        return failed('The quote did not load. Nothing was sent.');
       }
       const settlement = swapSendSettlement({
         inputSymbol: pending.asset,
@@ -1458,16 +1473,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         quote,
       });
       if (settlement.error || settlement.authorizesTransaction !== false || settlement.broadcast !== false) {
-        return { ok: false, message: 'That quote cannot authorize a send.' };
+        return failed('That quote cannot authorize a send.', { error: settlement.error });
       }
       settleAmount = settlement.amount;
       pricedFrom = settlement.inputSymbol;
     }
-    if (!settleAmount) return { ok: false, message: 'Platform sends are USDC to a @handle.' };
+    if (!settleAmount) return failed('Platform sends are USDC to a @handle.');
     const transfersUrl = shellRuntimeUrl('/api/transfers');
-    if (!transfersUrl) return { ok: false, message: 'Platform sends need the agent runtime.' };
+    if (!transfersUrl) return failed('Platform sends need the agent runtime.');
     try {
-      if (!sessionReadyForWallets(signedIn, user)) return { ok: false, message: 'Sign in again, then send.' };
+      if (!sessionReadyForWallets(signedIn, user)) return failed('Sign in again, then send.');
       const token = await getAccessToken?.();
       const idempotencyKey = `wallet_${target.handle}_${settleAmount}_${Date.now()}`.replace(/[^a-zA-Z0-9:_-]/g, '_').slice(0, 128);
       const response = await fetch(transfersUrl, {
@@ -1480,6 +1495,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         }),
       });
       const body = await response.json().catch(() => ({}));
+      failure = body;
       if (!response.ok || !body.transfer) {
         const message = body.error === 'handle_missing'
           ? `@${target.handle} is not on Maelstrom.`
@@ -1488,7 +1504,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             : body.error === 'wallet_frozen'
               ? 'That wallet is frozen.'
               : 'The send did not post.';
-        return { ok: false, message };
+        return failed(message);
       }
       setTransfers(current => [body.transfer, ...current.filter(item => item.id !== body.transfer.id)]);
       const amountLabel = `${formatBaseUnits(body.transfer.amount)} USDC`;
@@ -1510,8 +1526,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           cluster: SOLANA_CLUSTER,
         },
       };
-    } catch {
-      return { ok: false, message: 'The send did not post.' };
+    } catch (error) {
+      failure = { error: error?.code, privy: error?.privyFailure };
+      return failed('The send did not post.');
     }
   }, [liveWallets, wallets, signedIn, user, getAccessToken, ownerId]);
   const confirmResolve = useRef(null);

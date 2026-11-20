@@ -17,6 +17,195 @@ import {
 const META_KEY = 'LLM_1607358788850350_testsecretvalue';
 const OR_KEY = 'sk-or-v1-test-openrouter-key-value';
 
+function streamedCompletion(deltas, finish = 'stop') {
+  const frames = deltas.map(delta => ({ choices: [{ index: 0, delta }] }));
+  frames.push({ choices: [{ index: 0, delta: {}, finish_reason: finish }] });
+  const text = frames.map(frame => `data: ${JSON.stringify(frame)}\r\n\r\n`).join('') + 'data: [DONE]\r\n\r\n';
+  const bytes = new TextEncoder().encode(text);
+  return new Response(new ReadableStream({ start(controller) {
+    for (let offset = 0; offset < bytes.length; offset += 7) controller.enqueue(bytes.slice(offset, offset + 7));
+    controller.close();
+  } }), { headers: { 'content-type': 'text/event-stream' } });
+}
+
+test('reply deltas arrive before completion and full reply verification', async () => {
+  let input;
+  let firstDelta;
+  const received = new Promise(resolve => { firstDelta = resolve; });
+  const events = [];
+  let verified = false;
+  const job = completeTextChat({
+    modelApiKey: META_KEY, message: 'hello',
+    onReplyEvent: event => { events.push(event); firstDelta(); },
+    onMessage: text => { assert.equal(verified, true); events.push({ message: text }); },
+    fetcher: async (_url, options) => {
+      assert.equal(JSON.parse(options.body).stream, true);
+      if (isTurnVerify(options)) { verified = true; return turnAllowed(); }
+      return new Response(new ReadableStream({ start(controller) { input = controller; } }), { headers: { 'content-type': 'text/event-stream' } });
+    },
+  });
+  const send = payload => input.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`));
+  send({ choices: [{ delta: { content: 'Hello from the agent. ' } }] });
+  await received;
+  assert.equal(verified, false);
+  assert.deepEqual(events, [{ type: 'reply_delta', text: 'Hello from the agent. ' }]);
+  send({ choices: [{ delta: { content: 'Welcome!' }, finish_reason: 'stop' }] });
+  input.close();
+  assert.equal((await job).text, 'Hello from the agent. Welcome!');
+  assert.equal(events.at(-1).message, 'Hello from the agent. Welcome!');
+});
+
+test('a tool delta retracts its preamble and a fund proposal disables all later deltas', async () => {
+  const order = [];
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'send it', permissionMode: 'full',
+    tools: [{ type: 'function', function: { name: 'request_spend' } }],
+    onReplyEvent: event => order.push(event.type),
+    onMessage: text => order.push(`publish:${text}`),
+    invokeTool: async name => { order.push(`invoke:${name}`); return { ok: false }; },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        order.push(JSON.parse(options.body).messages[0].content.includes('Kind: tool') ? 'verify:tool' : 'verify:reply');
+        return turnAllowed();
+      }
+      if (++round === 1) return streamedCompletion([
+        { content: 'I will check the requested transfer. ' },
+        { tool_calls: [{ index: 0, id: 'c1', function: { name: 'request_', arguments: '' } }], content: 'Not for speech.' },
+        { tool_calls: [{ index: 0, function: { name: 'spend', arguments: '{"amount":"1","handle":"bob"}' } }] },
+      ], 'tool_calls');
+      return streamedCompletion([{ content: 'The transfer was not executed.' }]);
+    },
+  });
+  assert.deepEqual(order, ['reply_delta', 'reply_retract', 'verify:tool', 'invoke:request_spend', 'verify:reply', 'publish:The transfer was not executed.']);
+  assert.equal(result.text, 'The transfer was not executed.');
+});
+
+test('non-fund tools retract the preamble but the next round can stream', async () => {
+  const events = [];
+  let round = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'look up the rate',
+    tools: [{ type: 'function', function: { name: 'web_search' } }],
+    invokeTool: async () => ({ items: [] }), onReplyEvent: event => events.push(event),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      if (++round === 1) return streamedCompletion([
+        { content: 'Looking up the current rate. ' },
+        { tool_calls: [{ index: 0, id: 'c1', function: { name: 'web_search', arguments: '{"query":"rate"}' } }] },
+      ], 'tool_calls');
+      return streamedCompletion([{ content: 'No rate was found.' }]);
+    },
+  });
+  assert.equal(result.text, 'No rate was found.');
+  assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract', 'reply_delta']);
+  assert.equal(events.at(-1).text, result.text);
+});
+
+test('a streamed fund proposal cannot execute before approval from the existing tool verifier', async () => {
+  const events = [];
+  let checked = false;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'send', permissionMode: 'full',
+    tools: [{ type: 'function', function: { name: 'request_spend' } }],
+    onReplyEvent: event => events.push(event),
+    invokeTool: async () => assert.fail('rejected spend must not execute'),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) {
+        checked = true;
+        assert.match(JSON.parse(options.body).messages[0].content, /Kind: tool/);
+        return Response.json({ choices: [{ message: { content: '{"allow":false}' } }] });
+      }
+      return streamedCompletion([
+        { tool_calls: [{ index: 0, id: 'c1', function: { name: 'request_spend', arguments: '{"amount":"1","handle":"bob"}' } }] },
+        { content: 'Do not speak this tool preamble.' },
+      ], 'tool_calls');
+    },
+  });
+  assert.equal(checked, true);
+  assert.equal(result.hold.name, 'request_spend');
+  assert.deepEqual(events, [{ type: 'reply_retract' }]);
+});
+
+test('reply rejection retracts streamed speech before publishing the existing failure', async () => {
+  const order = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'hello',
+    onReplyEvent: event => order.push(event.type), onMessage: text => order.push(text),
+    fetcher: async (_url, options) => isTurnVerify(options)
+      ? Response.json({ choices: [{ message: { content: '{"allow":false}' } }] })
+      : streamedCompletion([{ content: 'An answer that is not allowed.' }]),
+  });
+  assert.deepEqual(order, ['reply_delta', 'reply_retract', 'That step did not pass the check.']);
+  assert.equal(result.text, 'That step did not pass the check.');
+});
+
+test('JSON-only providers and explicitly unsupported streaming retain the non-stream path', async () => {
+  const requested = [];
+  const events = [];
+  const result = await completeTextChat({
+    modelApiKey: META_KEY, message: 'hello', onReplyEvent: event => events.push(event),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      const body = JSON.parse(options.body);
+      requested.push(body.stream);
+      return body.stream
+        ? Response.json({ error: { message: 'Streaming is not supported' } }, { status: 400 })
+        : Response.json({ choices: [{ message: { content: 'Hello.' } }] });
+    },
+  });
+  assert.equal(result.text, 'Hello.');
+  assert.deepEqual(requested, [true, false]);
+  assert.deepEqual(events, []);
+});
+
+test('streaming strips thinking and redacts a key split across provider chunks', async () => {
+  const events = [];
+  await completeTextChat({
+    modelApiKey: META_KEY, message: 'hello', onReplyEvent: event => events.push(event),
+    fetcher: async (_url, options) => isTurnVerify(options) ? turnAllowed() : streamedCompletion([
+      { content: '<thi' }, { content: 'nk>private thought' }, { content: '</think>Hello. ' },
+      { content: META_KEY.slice(0, 12) }, { content: `${META_KEY.slice(12)} End.` },
+    ]),
+  });
+  const speech = events.filter(event => event.type === 'reply_delta').map(event => event.text).join('');
+  assert.equal(speech.includes('private thought'), false);
+  assert.equal(speech.includes(META_KEY), false);
+  assert.match(speech, /Hello/);
+});
+
+test('broken and empty provider streams fail closed and retract provisional speech', async () => {
+  for (const content of ['', 'data: {"choices":[{"delta":{"content":"Partial reply."}}]}\n\n']) {
+    const events = [];
+    await assert.rejects(completeTextChat({
+      modelApiKey: META_KEY, message: 'hello', onReplyEvent: event => events.push(event),
+      fetcher: async () => new Response(content, { headers: { 'content-type': 'text/event-stream' } }),
+    }), error => error.code === 'openrouter_invalid_response');
+    if (content) assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract']);
+  }
+});
+
+test('fund proposals from a delegated turn disable outer reply deltas too', async () => {
+  const turnState = { fundProposed: false };
+  const events = [];
+  await completeTextChat({
+    modelApiKey: META_KEY, message: 'send', turnState,
+    tools: [{ type: 'function', function: { name: 'request_spend' } }], invokeTool: async () => { assert.fail('approval required'); },
+    fetcher: async () => streamedCompletion([{ tool_calls: [{ index: 0, id: 'c1', function: { name: 'request_spend', arguments: '{"amount":"1"}' } }] }], 'tool_calls'),
+  });
+  assert.equal(turnState.fundProposed, true);
+  let verified = false;
+  await completeTextChat({
+    modelApiKey: META_KEY, message: 'report', turnState, onReplyEvent: event => events.push(event),
+    onMessage: () => assert.equal(verified, true),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) { verified = true; return turnAllowed(); }
+      return streamedCompletion([{ content: 'Approval is still required.' }]);
+    },
+  });
+  assert.deepEqual(events, []);
+});
+
 function isTurnVerify(options) {
   try {
     return JSON.stringify(JSON.parse(options.body).messages || []).includes('Role: turn-verify');
@@ -28,6 +217,97 @@ function isTurnVerify(options) {
 function turnAllowed() {
   return Response.json({ choices: [{ message: { content: '{"allow":true}' } }] });
 }
+
+test('Laso browser and research restrictions follow the current request or an unexpired pending hold, not past chat', async () => {
+  const pending = {
+    name: 'request_spend', kind: 'modal', args: { action: 'x402', lasoTicket: 'offline-ticket' },
+    proof: 'a'.repeat(64), expiresAt: Date.now() + 60_000,
+  };
+  const cases = [
+    { message: 'Open example.com', blocked: false },
+    { message: 'Search the web for weather', blocked: false },
+    { message: 'Get me a Laso card for 10 USDC', blocked: true },
+    { message: 'Complete this x402 purchase', blocked: true },
+    { message: 'yes', grants: [pending], blocked: true },
+    { message: 'yes', grants: [{ ...pending, expiresAt: 1 }], blocked: false },
+    { message: 'yes', grants: [{ ...pending, proof: '' }], blocked: false },
+    { message: 'yes', grants: [{ ...pending, args: { action: 'swap' } }], blocked: false },
+    { message: 'yes', blocked: false },
+  ];
+  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+    for (const scenario of cases) {
+      let modelCalls = 0;
+      const invoked = [];
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: scenario.message, grants: scenario.grants ?? [],
+        history: [{ role: 'assistant', text: 'Your Laso x402 purchase was cancelled.' }],
+        tools: [{ type: 'function', function: { name, parameters: { type: 'object' } } }],
+        invokeTool: async tool => { invoked.push(tool); return { ok: true }; },
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) return turnAllowed();
+          const body = JSON.parse(options.body);
+          if (++modelCalls === 1) return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{
+            id: 'browse', type: 'function', function: { name, arguments: JSON.stringify({ url: 'https://example.com', query: 'weather', sessionRecordId: 'session_1' }) },
+          }] } }] });
+          const result = JSON.parse(body.messages.findLast(item => item.role === 'tool').content);
+          assert.equal(result.error, scenario.blocked ? 'use_api' : undefined, `${name}: ${scenario.message}`);
+          return Response.json({ choices: [{ message: { content: scenario.blocked ? 'The purchase stays on the API.' : 'The requested tool completed.' } }] });
+        },
+      });
+      assert.deepEqual(invoked, scenario.blocked ? [] : [name], `${name}: ${scenario.message}`);
+      assert.equal(reply.hold, undefined);
+      assert.equal(modelCalls, 2);
+    }
+  }
+});
+
+test('every assistant tool call gets a result, including calls beyond the execution limit and tool failures', async () => {
+  for (const count of [0, 1, 4, 6]) {
+    for (const failTool of [false, true]) {
+      const calls = Array.from({ length: count }, (_, index) => ({
+        id: `call_${index}`, type: 'function',
+        function: { name: index === 4 ? 'request_spend' : 'get_price', arguments: JSON.stringify(index === 4
+          ? { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' }
+          : { mint: String(index + 1).repeat(32) }) },
+      }));
+      const invoked = [];
+      let modelCalls = 0;
+      const reply = await completeTextChat({
+        modelApiKey: META_KEY, message: 'Check these token prices', permissionMode: 'ask',
+        tools: ['get_price', 'request_spend'].map(name => ({ type: 'function', function: { name, parameters: { type: 'object' } } })),
+        invokeTool: async name => {
+          invoked.push(name);
+          if (failTool) throw new Error('offline tool failure');
+          return { ok: true };
+        },
+        fetcher: async (_url, options) => {
+          if (isTurnVerify(options)) return turnAllowed();
+          const body = JSON.parse(options.body);
+          if (++modelCalls === 1 && count) {
+            return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: calls } }] });
+          }
+          if (count) {
+            const assistant = body.messages.findLast(item => item.role === 'assistant' && item.tool_calls);
+            const results = body.messages.filter(item => item.role === 'tool');
+            assert.deepEqual(results.map(item => item.tool_call_id), assistant.tool_calls.map(item => item.id));
+            assert.equal(results.length, count);
+            for (const [index, result] of results.entries()) {
+              const payload = JSON.parse(result.content);
+              if (index >= 4) assert.equal(payload.error, 'tool_call_limit');
+              else assert.equal(payload.error, failTool ? 'tool_failed' : undefined);
+            }
+            if (count > 4) assert.equal(body.tools, undefined);
+          }
+          return Response.json({ choices: [{ message: { content: 'The requested batch has finished; skipped steps did not run.' } }] });
+        },
+      });
+      assert.equal(reply.hold, undefined);
+      assert.equal(invoked.length, Math.min(count, 4));
+      assert.equal(invoked.includes('request_spend'), false);
+      assert.equal(modelCalls, count ? 2 : 1);
+    }
+  }
+});
 
 /**
  * Achieves: verifies text chat messages keep platform rules and map agent history.

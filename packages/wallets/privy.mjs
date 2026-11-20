@@ -1,6 +1,6 @@
 import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
-import { Transaction, VersionedTransaction } from '@solana/web3.js';
-import { verifySwapSimulation } from './swap-simulation.mjs';
+import { AddressLookupTableAccount, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { swapAccountSnapshot, verifySwapSimulation } from './swap-simulation.mjs';
 /**
  * Privy Solana wallet path for Maelstrom.
  * Login provisioning (main wallet at sign-up, additional wallets) and
@@ -1343,11 +1343,32 @@ export function createPrivyWalletClient({
           || parsed.message.staticAccountKeys[0]?.toBase58() !== walletAddress
           || parsed.signatures[0].some(byte => byte !== 0)) fail('Unexpected swap signer', 'invalid_transaction');
       await assertSolana();
+      const tables = await Promise.all(parsed.message.addressTableLookups.map(async ({ accountKey }) => {
+        const read = await rpc('getAccountInfo', [accountKey.toBase58(), { encoding: 'base64', commitment: 'confirmed' }]);
+        const data = read.result?.value?.data;
+        if (data?.[1] !== 'base64') fail('Swap lookup table is unavailable', 'simulation_failed');
+        return new AddressLookupTableAccount({ key: accountKey, state: AddressLookupTableAccount.deserialize(Buffer.from(data[0], 'base64')) });
+      }));
+      const addresses = parsed.message.getAccountKeys({ addressLookupTableAccounts: tables }).keySegments().flat().map(key => key.toBase58());
+      if (addresses.length > 100) fail('Swap has too many accounts to verify', 'swap_simulation_unavailable');
+      const prior = await rpc('getMultipleAccounts', [addresses, { encoding: 'base64', commitment: 'confirmed' }]);
+      const before = swapAccountSnapshot(prior.result?.value, walletAddress);
+      if (!before || !Number.isSafeInteger(prior.result?.context?.slot)) fail('Swap account snapshot is unavailable', 'swap_simulation_unavailable');
       const [fee, simulation] = await Promise.all([
         rpc('getFeeForMessage', [message.toString('base64'), { commitment: 'confirmed' }]),
-        rpc('simulateTransaction', [transaction, { encoding: 'base64', commitment: 'confirmed', sigVerify: false, replaceRecentBlockhash: false }]),
+        rpc('simulateTransaction', [transaction, {
+          encoding: 'base64', commitment: 'confirmed', sigVerify: false, replaceRecentBlockhash: false,
+          minContextSlot: prior.result.context.slot, accounts: { encoding: 'base64', addresses },
+        }]),
       ]);
-      const effects = verifySwapSimulation(simulation.result?.value, { wallet: walletAddress, inputMint, outputMint, amount, minOutput });
+      const value = simulation.result?.value;
+      if (value?.err !== null) failSimulation(value);
+      const after = swapAccountSnapshot(value.accounts, walletAddress);
+      if (!after) fail('Swap simulated accounts are unavailable', 'swap_simulation_unavailable');
+      const effects = verifySwapSimulation({
+        err: value.err, fee: fee.result?.value, preBalances: [before.lamports], postBalances: [after.lamports],
+        preTokenBalances: before.tokens, postTokenBalances: after.tokens,
+      }, { wallet: walletAddress, inputMint, outputMint, amount, minOutput });
       if (!effects || String(fee.result?.value) !== effects.feeLamports) fail('Swap simulation did not match the quote', 'simulation_failed');
       const prepared = Object.freeze({ transaction, ...effects });
       simulatedTransfers.add(prepared);

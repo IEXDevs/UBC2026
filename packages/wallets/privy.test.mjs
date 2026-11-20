@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, verify } from 'node:crypto';
-import { Keypair, VersionedTransaction } from '@solana/web3.js';
+import { Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { buildSolanaX402Transaction } from '../transfers/transfers.mjs';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
 import { CipherSuite, DhkemP256HkdfSha256, HkdfSha256 } from '@hpke/core';
@@ -13,7 +13,7 @@ import { ConfigError } from '@ubc2026/contracts';
 import { formatRequestForAuthorizationSignature } from '@privy-io/node';
 import { assignBotWallet, createMainWallet } from './wallets.mjs';
 import { accountWriteBodies } from './wallets.mjs';
-import { verifySwapSimulation } from './swap-simulation.mjs';
+import { swapAccountSnapshot, verifySwapSimulation } from './swap-simulation.mjs';
 import {
   SOLANA_GENESIS_HASH,
   WalletError,
@@ -110,6 +110,50 @@ function client(extra = {}) {
     ...extra,
   });
 }
+
+test('swap preparation derives balances from requested RPC account snapshots, not transaction metadata', async () => {
+  const signer = Keypair.generate().publicKey;
+  const tokenAccount = Keypair.generate().publicKey;
+  const mint = new PublicKey(address);
+  const transaction = Buffer.from(new VersionedTransaction(new TransactionMessage({
+    payerKey: signer, recentBlockhash: SystemProgram.programId.toBase58(),
+    instructions: [new TransactionInstruction({ programId: SystemProgram.programId,
+      keys: [{ pubkey: signer, isSigner: true, isWritable: true }, { pubkey: tokenAccount, isSigner: false, isWritable: true }], data: Buffer.alloc(0) })],
+  }).compileToV0Message()).serialize()).toString('base64');
+  const account = amount => {
+    const data = Buffer.alloc(165);
+    data.set(mint.toBytes(), 0);
+    data.set(signer.toBytes(), 32);
+    data.writeBigUInt64LE(BigInt(amount), 64);
+    return { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280, data: [data.toString('base64'), 'base64'] };
+  };
+  let missing = false;
+  const calls = [];
+  const fetcher = async (_url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    calls.push(method);
+    let result;
+    if (method === 'getGenesisHash') result = SOLANA_GENESIS_HASH;
+    else if (method === 'getMultipleAccounts') result = { context: { slot: 42 }, value: [{ lamports: 1000000000 }, account('0'), null] };
+    else if (method === 'getFeeForMessage') result = { value: 5000 };
+    else if (method === 'simulateTransaction') {
+      assert.equal(params[1].minContextSlot, 42);
+      assert.equal(params[1].accounts.addresses[0], signer.toBase58());
+      result = { value: { err: null, accounts: missing ? null : [{ lamports: 989995000 }, account('1000000'), null] } };
+    } else assert.fail(`unexpected RPC ${method}`);
+    return Response.json({ jsonrpc: '2.0', id: 1, result });
+  };
+  const privy = client({ fetcher });
+  const intent = { transaction, walletAddress: signer.toBase58(), inputMint: 'So11111111111111111111111111111111111111112', outputMint: address, amount: '10000000', minOutput: '950000' };
+  const prepared = await privy.prepareSolanaSwap(intent);
+  assert.equal(prepared.maxSolCost, '5000');
+  assert.equal(calls.includes('sendTransaction'), false);
+  missing = true;
+  await assert.rejects(privy.prepareSolanaSwap(intent), { code: 'swap_simulation_unavailable' });
+  assert.equal(swapAccountSnapshot(null, signer.toBase58()), null);
+  assert.deepEqual(swapAccountSnapshot([{ lamports: 1 }, null], signer.toBase58()), { lamports: 1, tokens: [] });
+  assert.equal(swapAccountSnapshot([{ lamports: 1 }, { ...account('1'), data: ['bad', 'base64'] }], signer.toBase58()), null);
+});
 
 test('x402 partial signing binds the simulated message and leaves the facilitator signature empty without broadcasting', async () => {
   const signer = Keypair.generate();

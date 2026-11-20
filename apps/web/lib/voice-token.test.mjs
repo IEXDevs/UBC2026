@@ -146,6 +146,8 @@ test('requestSpeech streams a desk reply and keeps the API key on the request', 
   assert.equal(seen.method, 'POST');
   assert.equal(seen.key, 'server-key');
   assert.match(seen.href, /\/text-to-speech\/21m00Tcm4TlvDq8ikWAM\/stream/);
+  assert.equal(new URL(seen.href).searchParams.get('output_format'), 'mp3_22050_32');
+  assert.equal(new URL(seen.href).searchParams.get('optimize_streaming_latency'), '3');
   assert.equal(seen.body.text, 'hello there');
   assert.equal(seen.body.model_id, 'eleven_flash_v2_5');
   assert.equal(seen.body.voice_settings.speed, 0.9);
