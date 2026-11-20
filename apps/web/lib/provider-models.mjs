@@ -1,5 +1,5 @@
-import { fallbackThinkingCatalog } from './thinking-levels.mjs';
-import { MODEL_ID } from './ai-provider.mjs';
+import { fallbackThinkingCatalog, META_SPARK_NAME } from './thinking-levels.mjs';
+import { accountProviderModels, aiProvider, MODEL_ID } from './ai-provider.mjs';
 import { readProviderViews, readProviderCredentials } from './provider-tokens.mjs';
 
 export const MODEL_SETTINGS_EVENT = 'maelstrom:models-changed';
@@ -61,12 +61,17 @@ export function forgetProviderModels(storage, providerId) {
 
 export function providerModelGroups(storage) {
   const catalogs = readModelCatalogs(storage);
-  return [{ id: ACCOUNT_PROVIDER, name: 'Account provider' }, ...readProviderViews(storage)].map(provider => ({
-    ...provider,
-    checked: catalogs.some(row => row.providerId === provider.id),
-    models: catalogs.find(row => row.providerId === provider.id)?.models
-      ?? (provider.id === ACCOUNT_PROVIDER ? fallbackThinkingCatalog() : []),
-  }));
+  return [{ id: ACCOUNT_PROVIDER, name: 'Account provider' }, ...readProviderViews(storage)].map(provider => {
+    const cached = catalogs.find(row => row.providerId === provider.id);
+    const account = provider.id === ACCOUNT_PROVIDER;
+    let models = cached?.models ?? (account ? fallbackThinkingCatalog() : []);
+    // Older account catalogs have no provider field. Meta's account IDs used the bare Muse prefix.
+    if (aiProvider(provider.baseUrl)?.provider === 'meta' || (account && models.some(model => /^muse-/i.test(model.id)))) {
+      models = accountProviderModels(models, 'meta').map(model => ({ ...model, name: META_SPARK_NAME }));
+      if (account && models.length === 0) models = fallbackThinkingCatalog();
+    }
+    return { ...provider, checked: Boolean(cached), models };
+  });
 }
 
 export function visibleModelOptions(storage) {

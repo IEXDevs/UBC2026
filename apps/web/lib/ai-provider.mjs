@@ -1,4 +1,4 @@
-import { thinkingLevelsForModel } from './thinking-levels.mjs';
+import { META_SPARK_MODEL, META_SPARK_NAME, thinkingLevelsForModel } from './thinking-levels.mjs';
 import { reportedContextWindow } from './context-usage.mjs';
 import { OPENROUTER_FREE_MODEL, selectFreeOpenRouterModel } from '@ubc2026/contracts';
 
@@ -13,6 +13,7 @@ export const MODEL_ID = /^[A-Za-z0-9_.:/-]{1,80}$/;
 
 export function accountProviderModels(models, provider) {
   // Only advertise choices that account inference will actually run unchanged.
+  if (provider === 'meta') return models.filter(model => model.id === META_SPARK_MODEL);
   return models.filter(model => provider !== 'openrouter' || selectFreeOpenRouterModel(model.id) === model.id);
 }
 
@@ -40,6 +41,7 @@ export function parseProviderModels(payload, provider = 'meta') {
   return rows.flatMap(row => {
     const id = typeof row?.id === 'string' ? row.id.trim() : '';
     if (!MODEL_ID.test(id) || seen.has(id)) return [];
+    if (provider === 'meta' && id !== META_SPARK_MODEL) return [];
     // These APIs also advertise image/audio/embedding models, which cannot chat.
     if (provider === 'openai' && (!/^(gpt-|chatgpt-|o[1-9](?:-|$))/.test(id)
       || /audio|realtime|transcrib|tts|image|search/.test(id))) return [];
@@ -48,14 +50,15 @@ export function parseProviderModels(payload, provider = 'meta') {
     seen.add(id);
     return [{
       id,
-      name: typeof row.name === 'string' && row.name.trim() ? row.name.trim().slice(0, 80) : id,
+      name: provider === 'meta' ? META_SPARK_NAME
+        : typeof row.name === 'string' && row.name.trim() ? row.name.trim().slice(0, 80) : id,
       levels: thinkingLevelsForModel(row),
       contextWindow: reportedContextWindow(row) || 0,
     }];
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function checkProviderModels({ baseUrl, apiKey, provider, fetcher = fetch }) {
+export async function checkProviderModels({ baseUrl, apiKey, fetcher = fetch }) {
   const endpoint = aiProvider(baseUrl);
   if (!endpoint || !apiKey) return { ok: false, error: 'provider_not_supported' };
   try {
@@ -69,7 +72,7 @@ export async function checkProviderModels({ baseUrl, apiKey, provider, fetcher =
     if (!response.ok) return { ok: false, error: [401, 403].includes(response.status) ? 'provider_unauthorized' : 'provider_unavailable' };
     const payload = await response.json();
     if (!Array.isArray(payload?.data) && !Array.isArray(payload)) return { ok: false, error: 'provider_invalid_catalog' };
-    return { ok: true, models: parseProviderModels(payload, provider || endpoint.provider) };
+    return { ok: true, models: parseProviderModels(payload, endpoint.provider) };
   } catch {
     // Raw provider/network errors can contain keys. Only return our own codes.
     return { ok: false, error: 'provider_unavailable' };

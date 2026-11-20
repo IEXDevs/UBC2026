@@ -4,6 +4,8 @@
  */
 import { contextWindowFor, rememberContextWindow, reportedContextWindow } from './context-usage.mjs';
 
+export const META_SPARK_MODEL = 'muse-spark-1.3-contributor';
+export const META_SPARK_NAME = 'Muse Spark 1.3 Contributor';
 const ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 const LABELS = {
@@ -95,10 +97,10 @@ function displayName(id, model) {
 }
 
 export function fallbackThinkingCatalog() {
-  const id = 'muse-spark-1.3-contributor';
+  const id = META_SPARK_MODEL;
   const contextWindow = contextWindowFor(id);
   rememberContextWindow(id, contextWindow);
-  return [{ id, name: 'Muse Spark', levels: thinkingLevelsForModel(id), contextWindow }];
+  return [{ id, name: META_SPARK_NAME, levels: thinkingLevelsForModel(id), contextWindow }];
 }
 
 export async function loadThinkingCatalog({ apiKey = '', baseUrl = '', fetcher = fetch } = {}) {
