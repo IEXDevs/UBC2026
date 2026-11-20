@@ -38,7 +38,7 @@ export async function POST(request) {
   if (!url) return json({ error: 'missing_config' }, 503);
   try {
     const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(15000) });
+      body: JSON.stringify(body), redirect: 'manual', signal: AbortSignal.timeout(15000) });
     if (!response.ok) return json({ error: 'rpc_unavailable' }, 502);
     return json(await response.json(), 200);
   } catch { return json({ error: 'rpc_unavailable' }, 502); }
