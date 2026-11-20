@@ -23,6 +23,52 @@ function requestFor(url, { method = 'POST', cookie = '', body = '', headers = {}
   });
 }
 
+test('same-origin Privy SOL price GETs forward the page origin, app id and query', async () => {
+  const response = await proxyPrivyAuth(requestFor(
+    'https://maelstrom.iexdevs.com/api/privy-auth/api/v1/token_price?chainId=0&tokenSymbol=SOL',
+    { method: 'GET', headers: { 'privy-app-id': 'test-app' } },
+  ), '/api/v1/token_price', async (url, init) => {
+    assert.equal(url, 'https://auth.privy.io/api/v1/token_price?chainId=0&tokenSymbol=SOL');
+    assert.equal(init.method, 'GET');
+    assert.equal(init.body, undefined);
+    assert.equal(init.headers.get('origin'), 'https://maelstrom.iexdevs.com');
+    assert.equal(init.headers.get('privy-app-id'), 'test-app');
+    return Response.json({ usd: 68.88 });
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { usd: 68.88 });
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.getSetCookie().length, 0);
+});
+
+test('Privy price GETs preserve an explicit origin and upstream missing-price errors', async () => {
+  for (const [body, status] of [[{}, 200], [{ error: 'token price cannot be found' }, 404], [{ code: 'invalid_origin' }, 403]]) {
+    const response = await proxyPrivyAuth(requestFor(
+      'https://maelstrom.iexdevs.com/api/privy-auth/api/v1/token_price?chainId=0&tokenSymbol=SOL',
+      { method: 'GET', headers: { origin: 'https://other.example' } },
+    ), '/api/v1/token_price', async (_url, init) => {
+      assert.equal(init.headers.get('origin'), 'https://other.example');
+      return Response.json(body, { status });
+    });
+    assert.equal(response.status, status);
+    assert.deepEqual(await response.json(), body);
+  }
+});
+
+test('Privy POSTs supply a missing page origin without replacing an explicit origin', async () => {
+  for (const origin of ['', 'https://other.example']) {
+    const response = await proxyPrivyAuth(requestFor(
+      'https://maelstrom.iexdevs.com/api/privy-auth/api/v1/sessions',
+      { body: '{}', headers: origin ? { origin } : {} },
+    ), '/api/v1/sessions', async (_url, init) => {
+      assert.equal(init.method, 'POST');
+      assert.equal(init.headers.get('origin'), origin || 'https://maelstrom.iexdevs.com');
+      return Response.json({});
+    });
+    assert.equal(response.status, 200);
+  }
+});
+
 /**
  * Achieves: verifies the refresh token is removed from the body the page receives.
  * Fails when: refresh_token stays in the JSON or the access token is dropped.

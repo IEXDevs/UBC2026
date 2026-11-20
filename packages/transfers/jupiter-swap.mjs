@@ -86,7 +86,7 @@ export async function buildJupiterSwap({
   });
   const response = await fetcher(`https://api.jup.ag/swap/v2/build?${query}`, {
     headers: { accept: 'application/json', 'x-api-key': apiKey },
-    redirect: 'error',
+    redirect: 'manual',
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) {

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { Keypair, Transaction, TransactionMessage, VersionedTransaction, ComputeBudgetInstruction } from '@solana/web3.js';
 import { decodeTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
@@ -19,12 +20,51 @@ import {
   TransferError,
   buildSolanaUsdcTransaction,
   buildSolanaX402Transaction,
+  buildJupiterSwap,
   depositFromWalletAdapter,
   grabBackToMain,
   moveBetweenWallets,
   transferSolanaUsdc,
   withdrawToWalletAdapter,
 } from './transfers.mjs';
+
+test('Jupiter swap quote builds use Workers-supported manual redirects and reject redirect responses', async () => {
+  const walletAddress = Keypair.generate().publicKey.toBase58();
+  const inputMint = MAINNET_USDC_MINT;
+  const outputMint = 'So11111111111111111111111111111111111111112';
+  const args = { walletAddress, inputMint, outputMint, amount: '1000000',
+    blockhash: Keypair.generate().publicKey.toBase58(), apiKey: 'mock-key' };
+  const data = Buffer.alloc(34);
+  createHash('sha256').update('global:route_v2').digest().copy(data, 0, 0, 8);
+  data.writeBigUInt64LE(1_000_000n, 8);
+  data.writeBigUInt64LE(10_000_000n, 16);
+  data.writeUInt16LE(50, 24);
+  let calls = 0;
+  const result = await buildJupiterSwap({ ...args, fetcher: async (url, init) => {
+    calls += 1;
+    assert.equal(new URL(url).origin, 'https://api.jup.ag');
+    assert.equal(new URL(url).pathname, '/swap/v2/build');
+    assert.equal(init.redirect, 'manual');
+    assert.equal(init.headers['x-api-key'], 'mock-key');
+    return Response.json({ inputMint, outputMint, inAmount: args.amount, outAmount: '10000000',
+      otherAmountThreshold: '9950000', swapMode: 'ExactIn', slippageBps: 50,
+      swapInstruction: { programId: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', data: data.toString('base64'),
+        accounts: [walletAddress, walletAddress, walletAddress, inputMint, outputMint]
+          .map((pubkey, index) => ({ pubkey, isSigner: index === 0 })),
+      },
+    });
+  } });
+  assert.equal(result.minOutput, '9950000');
+  assert.equal(VersionedTransaction.deserialize(Buffer.from(result.transaction, 'base64')).signatures[0].every(byte => byte === 0), true);
+  assert.equal(calls, 1);
+  for (const status of [302, 401, 429, 503]) {
+    await assert.rejects(buildJupiterSwap({ ...args, fetcher: async (_url, init) => {
+      assert.equal(init.redirect, 'manual');
+      return new Response(null, { status, headers: { location: 'https://untrusted.example' } });
+    } }), { code: `jupiter_http_${status}` });
+  }
+  await assert.rejects(buildJupiterSwap({ ...args, fetcher: async () => Response.json({}) }), /swap_route_refused/);
+});
 
 test('x402 builds only bounded compute budget and exact USDC transfer with the sponsor fee payer', () => {
   const owner = Keypair.generate().publicKey;

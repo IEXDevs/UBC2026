@@ -123,6 +123,7 @@ export async function proxyPrivyAuth(request, path, fetchImpl = globalThis.fetch
       headers.set(name, value);
     }
   }
+  if (!headers.has('origin')) headers.set('origin', new URL(request.url).origin);
   if (method === 'POST' && (SESSION_WRITE.has(path) || OAUTH_CALLBACK.has(path)) && !headers.has('authorization')) {
     const access = readSessionCookie(request.headers.get('cookie'), PRIVY_ACCESS_COOKIE);
     if (access) headers.set('authorization', `Bearer ${access}`);
