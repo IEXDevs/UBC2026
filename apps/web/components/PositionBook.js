@@ -736,7 +736,6 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         const caption = edge('.book-caption');
         const tools = edge('.book-tools');
         const area = { ...full };
-        if (earnings) area.top = earnings.bottom - box.top + SAFE_GAP;
         if (caption) area.bottom = caption.top - box.top - SAFE_GAP;
         if (tools) {
           area.left = SAFE_GAP;
@@ -745,6 +744,15 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         if (area.right - area.left < MIN_SAFE) {
           area.left = full.left;
           area.right = full.right;
+        }
+        if (earnings) {
+          // Below the chart on portrait phones, beside it on short landscape ones: whichever shows the book larger.
+          const below = { ...area, top: earnings.bottom - box.top + SAFE_GAP };
+          const beside = { ...area, top: earnings.top - box.top, left: earnings.right - box.left + SAFE_GAP };
+          const frame = bookFrame(book);
+          const scale = r => Math.min((r.right - r.left) / Math.max(frame.maxX - frame.minX, 1), (r.bottom - r.top) / Math.max(frame.maxY - frame.minY, 1));
+          const fits = [below, beside].filter(r => r.right - r.left >= MIN_SAFE && r.bottom - r.top >= MIN_SAFE);
+          if (fits.length) return fits.reduce((a, b) => (scale(b) > scale(a) ? b : a));
         }
         if (area.bottom - area.top < MIN_SAFE) {
           area.top = full.top;
