@@ -10,5 +10,6 @@ export function walletSendFailure(message, failure = {}) {
       request.transport, request.detail, request.requestId].filter(Boolean).join(' ')),
     privy.session?.check ? `session: ${privy.session.check}` : '',
   ].filter(Boolean).join(' · ') : '';
-  return { ok: false, message: `${message} Code: ${code}${details ? ` · Privy: ${details}` : ''}` };
+  const build = process.env.NEXT_PUBLIC_BUILD_ID || '';
+  return { ok: false, message: `${message} Code: ${code}${details ? ` · Privy: ${details}` : ''}${build ? ` · build ${build}` : ''}` };
 }

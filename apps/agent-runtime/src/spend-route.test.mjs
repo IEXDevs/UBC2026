@@ -41,6 +41,71 @@ const bot = {
 };
 const ledger = { botId: 'bot_1', asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' };
 
+for (const [asset, action] of [['USDC', 'spend'], ['SOL', 'spend'], ['USDC', 'pay'], ['USDC', undefined]]) test(`browser ${asset} ${action ?? 'default'} sends run runtime gates twice and reserve only before verified broadcast`, async () => {
+  const keypair = Keypair.generate();
+  const now = Date.now();
+  const grant = 'ef'.repeat(32);
+  const hash = await sha256Hex(grant);
+  const currentBot = { ...bot, cap: { ...bot.cap, asset, maxOutflow: '100000', maxPerTransaction: '50000' } };
+  const currentWallet = { ...wallet, address: keypair.publicKey.toBase58() };
+  let trust = '800';
+  let reserved = 0;
+  let broadcasts = 0;
+  const env = spendEnv({
+    spendNow: now, SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-role',
+    loadSpendContext: async () => ({ bot: currentBot, wallet: currentWallet, ledger: { ...ledger, asset } }),
+    trustLookup: async () => trust,
+    fetch: async url => new URL(url).pathname.endsWith('/desk_locks')
+      ? Response.json([{ grant_hash: hash, grant_until: new Date(now + 120000).toISOString() }])
+      : new Response('', { status: 201 }),
+    transferClient: {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      prepareSolanaTransfer: async ({ transaction }) => ({ transaction, feeLamports: '5000', maxSolCost: '5000' }),
+      signPreparedSolanaTransfer: () => assert.fail('must not server-sign'),
+      broadcastSignedSolana: async ({ signedTransaction }) => {
+        assert.equal(reserved, 1);
+        assert.equal(Transaction.from(Buffer.from(signedTransaction, 'base64')).verifySignatures(), true);
+        broadcasts++;
+        return { signature: '5'.repeat(64), cluster: 'mainnet-beta' };
+      },
+    },
+    ledgerApi: { reserveBudget: async () => ({ state: 'reserved', replay: reserved++ > 0 }) },
+  });
+  const spend = { botId: bot.id, action, asset, amount: '1000', permission: 'ask', confirmed: true,
+    idempotencyKey: 'browser_send', destination: DESTINATION };
+  const request = async (extra = {}, headers = { 'x-desk-grant': grant }) => (await worker.fetch(spendRequest({ ...spend, ...extra }, headers), env)).json();
+  const prepared = await request({ moveAuthorization: 'prepare' });
+  assert.ok(prepared.moveAuthorization, JSON.stringify(prepared));
+  assert.equal(reserved, 0);
+  assert.equal(broadcasts, 0);
+  const transaction = Transaction.from(Buffer.from(prepared.moveAuthorization.transaction, 'base64'));
+  transaction.sign(keypair);
+  const authorization = { ...prepared.moveAuthorization, signedTransaction: transaction.serialize().toString('base64') };
+  const submit = extra => request({ moveAuthorization: authorization, ...extra });
+  for (const extra of [{ amount: '1001' }, { destination: Keypair.generate().publicKey.toBase58() },
+    { moveAuthorization: { ...authorization, proof: '0'.repeat(64) } },
+    { moveAuthorization: { ...authorization, signedTransaction: prepared.moveAuthorization.transaction } },
+    { moveAuthorization: { ...authorization, expiresAt: now - 1 } }]) {
+    assert.notEqual((await submit(extra)).signed, true);
+  }
+  currentWallet.frozen = true;
+  assert.notEqual((await submit()).signed, true);
+  currentWallet.frozen = false;
+  trust = '0';
+  assert.notEqual((await submit()).signed, true);
+  trust = '800';
+  currentBot.policyVersion++;
+  assert.notEqual((await submit()).signed, true);
+  currentBot.policyVersion--;
+  assert.notEqual((await request({ moveAuthorization: authorization }, {})).signed, true);
+  assert.equal(reserved, 0);
+  assert.equal(broadcasts, 0);
+  assert.equal((await submit()).signed, true);
+  assert.equal(broadcasts, 1);
+  assert.notEqual((await submit()).signed, true);
+  assert.equal(broadcasts, 1);
+});
+
 function spendEnv(extra = {}) {
   return {
     PRODUCT: 'Maelstrom',

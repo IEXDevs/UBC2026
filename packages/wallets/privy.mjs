@@ -1399,6 +1399,30 @@ export function createPrivyWalletClient({
       return prepared;
     },
 
+    ownerAuthorizationPayload({ ownerId, wallet, transaction, expiresAt } = {}) {
+      if (!wallet || wallet.ownerId !== assertOwnerId(ownerId)) fail('Wallet owner must match', 'owner_mismatch');
+      if (wallet.frozen) fail('Wallet is frozen', 'wallet_frozen');
+      if (!wallet.id || /^(linked_|client_)/.test(wallet.id)) fail('Wallet is not owned', 'wallet_not_owned');
+      const bytes = decodeBase64(transaction, 'Transaction');
+      if (bytes.length <= 64 || bytes.length > MAX_TX_BYTES) fail('Invalid transaction', 'invalid_transaction');
+      try { VersionedTransaction.deserialize(bytes); } catch { fail('Invalid transaction', 'invalid_transaction'); }
+      return Buffer.from(canonicalizeJson(browserAuthorizedRequest(wallet, { transaction }, expiresAt))).toString('base64');
+    },
+
+    async signWithOwnerAuthorization({ ownerId, wallet, transaction, expiresAt, signature } = {}) {
+      this.ownerAuthorizationPayload({ ownerId, wallet, transaction, expiresAt });
+      const signed = await signWithBrowserAuthorization(wallet, { transaction }, { expiresAt, signature });
+      const bytes = decodeBase64(signed, 'Signed transaction');
+      if (bytes.length > MAX_TX_BYTES) fail('Invalid transaction', 'invalid_transaction');
+      let message;
+      try { message = VersionedTransaction.deserialize(bytes).message.serialize(); }
+      catch { fail('Invalid signed transaction', 'transaction_mismatch'); }
+      if (!Buffer.from(message).equals(Buffer.from(VersionedTransaction.deserialize(decodeBase64(transaction, 'Transaction')).message.serialize()))) {
+        fail('Signed transaction differs from request', 'transaction_mismatch');
+      }
+      return signed;
+    },
+
     formatPreparedSpendAuthorization({ bot, wallet, prepared, expiresAt } = {}) {
       assertSpendAllowed({ bot, wallet });
       if (!simulatedTransfers.has(prepared)) fail('Transfer simulation is required', 'simulation_required');

@@ -11,6 +11,7 @@ import { readRootEnv } from '../../../../lib/root-env.mjs';
 import { planWalletMove, selectOwnedMoveRecipient, selectOwnedMoveWallet } from '../../../../lib/wallet-move.mjs';
 import { resolvePrivyAppId } from '../../../../lib/wallet-provision.mjs';
 import { sendWalletAsset } from '../../../../lib/wallet-asset-send.mjs';
+import { POST as postChat } from '../../bots/[botId]/chat/route.js';
 
 function env() {
   return {
@@ -48,6 +49,23 @@ export async function POST(request) {
     return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
   }
   const body = await request.json().catch(() => ({}));
+  if (body.chatSpend !== undefined) {
+    const hold = body.chatSpend?.grants?.[0];
+    if (hold?.name !== 'request_spend' || !['spend', 'pay'].includes(hold.args?.action ?? 'spend')
+        || !['prepare', 'broadcast'].includes(body.phase)
+        || (body.phase === 'broadcast' && typeof body.signedTransaction !== 'string')) {
+      return Response.json({ error: 'invalid_spend' }, { status: 400 });
+    }
+    const headers = new Headers(request.headers);
+    headers.set('x-owner-id', ownerId);
+    headers.set('content-type', 'application/json');
+    headers.delete('accept');
+    return postChat(new Request(request.url, {
+      method: 'POST', headers,
+      body: JSON.stringify({ ...body.chatSpend, moveAuthorization: body.phase === 'prepare' ? 'prepare'
+        : { ...body.moveAuthorization, signedTransaction: body.signedTransaction } }),
+    }), { params: { botId: hold.args.botId } });
+  }
   try {
     const client = createPrivyWalletClient({
       appId,

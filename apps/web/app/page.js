@@ -4,7 +4,7 @@ import { SOLANA_CLUSTER, SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useAuthorizationSignature, useConnectWallet, usePrivy, useSigners } from '@privy-io/react-auth';
-import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
+import { useSignTransaction, useWallets, useStandardWallets } from '@privy-io/react-auth/solana';
 import MoneyPane from '../components/MoneyPane';
 import BotRail from '../components/BotRail';
 import AgentThread from '../components/AgentThread';
@@ -55,7 +55,8 @@ import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
-import { signSelectedWalletTransaction, signWalletMoveTransaction } from '../lib/wallet-signing.mjs';
+import { browserCanSign, createOwnerAuthorizationSigner, waitForBrowserSigner, withLinkedSolanaWallets, signSelectedWalletTransaction, signWalletMoveTransaction } from '../lib/wallet-signing.mjs';
+import { executeClientSignedSwap } from '../lib/swap-client-sign.mjs';
 import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
   deleteOwnerBot,
@@ -483,22 +484,28 @@ function base64ToBytes(value) {
   return bytes;
 }
 
-function DepositSigner({ signerRef }) {
+function DepositSigner({ signerRef, signWithOwnerAuthorization }) {
   const { signTransaction } = useSignTransaction();
-  const { wallets } = useWallets();
+  const { wallets, ready } = useWallets();
+  const { wallets: standardWallets, ready: standardReady } = useStandardWallets();
+  const { user } = usePrivy();
   const { connectWallet } = useConnectWallet();
   useEffect(() => {
-    signerRef.current = { signTransaction, wallets, connectWallet };
-  }, [signTransaction, wallets, connectWallet, signerRef]);
+    signerRef.current = { signTransaction, wallets: withLinkedSolanaWallets(wallets, standardWallets, user),
+      ready: ready || standardReady, connectWallet, signWithOwnerAuthorization };
+  }, [signTransaction, wallets, ready, standardWallets, standardReady, user, connectWallet, signerRef, signWithOwnerAuthorization]);
   return null;
 }
 
 function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, onWalletCreated = null, privyLive = false }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
-  const signChatTransaction = useCallback(({ walletAddress, transaction }) => signSelectedWalletTransaction({
-    from: { address: walletAddress }, transaction, signer: depositSignerRef.current,
+  const signChatTransaction = useCallback(async ({ walletAddress, transaction }) => signSelectedWalletTransaction({
+    from: { address: walletAddress }, transaction,
+    signer: await waitForBrowserSigner(() => depositSignerRef.current, [{ address: walletAddress }]),
   }), []);
+  const executeChatSwap = useCallback(input => executeClientSignedSwap({ ...input, signer: depositSignerRef.current,
+    readSigner: () => depositSignerRef.current }), []);
   const [looks, setLooks] = useState({});
   const [savedPhoto, setSavedPhoto] = useState(null);
   const [roster, setRoster] = useState({ order: [], extra: [] });
@@ -1226,9 +1233,18 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       ...(grant ? { 'x-desk-grant': grant.grant } : {}),
     };
   }
+  const signWithOwnerAuthorization = createOwnerAuthorizationSigner({
+    headers: async () => moneyHeaders(await getAccessToken?.()), authorize: authorizeSpend,
+  });
   const onWalletSend = useCallback(async (pending) => {
     let failure = {};
     const failed = (message, detail = failure) => walletSendFailure(message, detail);
+    const missingBrowserWallet = () => {
+      const seen = depositSignerRef.current?.wallets || [];
+      const addresses = seen.map(wallet => String(wallet?.address || '').slice(0, 5)).join(', ') || 'none';
+      return failed(`Main isn't available to sign in this browser. Reload and sign in again. Browser sees ${seen.length} wallets: ${addresses}.`,
+        { error: 'browser_wallet_missing' });
+    };
     if (!pending?.walletAsset && pending?.target?.kind !== 'wallet' && deskLockOnRef.current && !unlockedRef.current) {
       lockIntentRef.current ??= { type: 'wallet' };
       setLockOpen(true);
@@ -1249,10 +1265,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           return { response, body: await response.json().catch(() => ({})) };
         };
         let result;
-        const signer = depositSignerRef.current;
-        const browserEmbedded = from.spendable !== false
-          && typeof signer?.signTransaction === 'function'
-          && (Array.isArray(signer.wallets) ? signer.wallets : []).some(wallet => wallet?.address === from.address);
+        const signer = await waitForBrowserSigner(() => depositSignerRef.current, [from]);
+        const requireBrowser = from.kind === 'main' || (from.spendable !== false && from.provider === 'privy');
+        const browserEmbedded = from.spendable !== false && browserCanSign(signer, from);
+        if (requireBrowser && !browserCanSign(signer, from)) return failed(from.kind === 'main'
+          ? "Main isn't available to sign in this browser. Reload and sign in again."
+          : 'Privy did not approve signing for this agent wallet in your browser. Sign in again, then slide once more.');
         if (browserEmbedded || from.spendable === false) {
           const prepared = await post({ phase: 'prepare' });
           failure = prepared.body;
@@ -1289,6 +1307,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       } catch (error) {
         failure = { error: error?.code, privy: error?.privyFailure };
         const messages = {
+          wallet_owner_authorization_failed: 'Privy did not approve signing for this agent wallet in your browser. Sign in again, then slide once more.',
           wallet_connection_required: 'Connect the selected wallet, then slide again to approve the send.',
           wallet_approval_cancelled: 'The wallet did not approve the send. Nothing was sent.',
           invalid_signature: 'The wallet did not return a signed transfer. Nothing was sent.',
@@ -1440,20 +1459,24 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           });
           return { response, body: await response.json().catch(() => ({})) };
         };
-        const signer = depositSignerRef.current;
-        const available = wallet => typeof signer?.signTransaction === 'function'
-          && (Array.isArray(signer.wallets) ? signer.wallets : []).some(item => item?.address === wallet.address);
+        let signer = await waitForBrowserSigner(() => depositSignerRef.current, [from]);
+        const requireBrowser = from.kind === 'main' || (from.spendable !== false && from.provider === 'privy');
+        const available = wallet => browserCanSign(signer, wallet);
+        if (requireBrowser && !available(from)) return from.kind === 'main' ? missingBrowserWallet()
+          : failed('Privy did not approve signing for this agent wallet in your browser. Sign in again, then slide once more.');
         let result;
         if (available(from)) {
           const prepared = await postMove({ phase: 'prepare' });
           failure = prepared.body;
           if (!prepared.response.ok || !prepared.body.transaction || !Array.isArray(prepared.body.signerWallets)
               || !prepared.body.signerWallets.length) return failed('The transfer was not prepared. Check the balance and SOL network fees.');
+          signer = await waitForBrowserSigner(() => depositSignerRef.current, prepared.body.signerWallets);
           if (prepared.body.signerWallets.every(available)) {
             const signed = await signWalletMoveTransaction({ wallets: prepared.body.signerWallets,
               transaction: base64ToBytes(prepared.body.transaction), signer });
             result = await postMove({ phase: 'broadcast', signedTransaction: bytesToBase64(signed) });
-          } else result = await postMove();
+          } else if (requireBrowser) return missingBrowserWallet();
+          else result = await postMove();
         } else result = await postMove();
         const { response, body } = result;
         failure = body;
@@ -1485,6 +1508,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         };
       } catch (error) {
         failure = { error: error?.code, privy: error?.privyFailure };
+        if (error?.code === 'wallet_owner_authorization_failed') return failed('Privy did not approve signing for this agent wallet in your browser. Sign in again, then slide once more.');
         return failed('The send did not post.');
       }
     }
@@ -2016,7 +2040,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const noAgents = bots.length === 0;
   return (
     <>
-    {privyLive ? <DepositSigner signerRef={depositSignerRef} /> : null}
+    {privyLive ? <DepositSigner signerRef={depositSignerRef} signWithOwnerAuthorization={signWithOwnerAuthorization} /> : null}
     <div
       className={`shell${noAgents ? ' is-empty' : ''}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' && bot ? ' has-detail' : ''}${paneDrag ? ' is-dragging-pane' : ''}${setupStep === 'handle' || claimWelcome ? ' is-claim' : ''}`}
       style={{ '--side-w': `${sideWidth}px`, '--detail-w': `${detailWidth}px`, '--pill-detail': bot ? `${detailWidth}px` : '0px' }}
@@ -2166,6 +2190,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             getAccessToken={getAccessToken}
             authorizeSpend={authorizeSpend}
             signChatTransaction={signChatTransaction}
+            executeChatSwap={executeChatSwap}
             lines={talks[bot.id] ?? []}
             onLine={(line, forBot) => {
               const id = forBot || bot.id;

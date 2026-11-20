@@ -2,10 +2,70 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SOLANA_PRIVY_CHAIN } from '@ubc2026/contracts/solana';
 import { Keypair, Transaction, SystemProgram } from '@solana/web3.js';
-import { serverSignsWallet, signSelectedWalletTransaction, signWalletMoveTransaction } from './wallet-signing.mjs';
+import { browserCanSign, createOwnerAuthorizationSigner, browserSignerHasWallet, waitForBrowserSigner, withLinkedSolanaWallets, serverSignsWallet, signSelectedWalletTransaction, signWalletMoveTransaction } from './wallet-signing.mjs';
+
+test('owner authorization signs absent agent wallets, preserves failures, and does not replace Main', async () => {
+  const agent = { id: 'agent-wallet-id', address: 'agent', kind: 'additional', provider: 'privy' };
+  const signed = new Uint8Array(100);
+  const signer = { signWithOwnerAuthorization: async () => signed };
+  assert.equal(browserCanSign(signer, agent), true);
+  assert.equal(browserCanSign(signer, { ...agent, kind: 'main' }), false);
+  assert.equal(browserCanSign(signer, { ...agent, id: 'linked_agent' }), false);
+  assert.equal(await signSelectedWalletTransaction({ from: agent, transaction, signer }), signed);
+  await assert.rejects(signSelectedWalletTransaction({ from: { ...agent, kind: 'main' }, transaction, signer }), { code: 'wallet_connection_required' });
+  await assert.rejects(signSelectedWalletTransaction({ from: agent, transaction, signer: {
+    signWithOwnerAuthorization: async () => { throw { privyFailure: { status: 401 } }; },
+  } }), error => error.code === 'wallet_owner_authorization_failed' && error.privyFailure.status === 401);
+});
+
+test('owner authorization helper sends exact bytes through request, approval, and sign', async () => {
+  const calls = [];
+  const sign = createOwnerAuthorizationSigner({ headers: async () => ({ authorization: 'Bearer mock' }),
+    authorize: async bytes => { assert.deepEqual([...bytes], [1, 2, 3]); return { signature: 'approval' }; },
+    fetchImpl: async (url, init) => {
+      assert.equal(url, '/api/wallets/authorize-sign');
+      calls.push(JSON.parse(init.body));
+      return Response.json(calls.length === 1 ? { payload: 'AQID', expiresAt: 123 } : { signedTransaction: Buffer.from(transaction).toString('base64') });
+    } });
+  assert.deepEqual(await sign({ address: 'agent', transaction }), transaction);
+  assert.deepEqual(calls.map(call => call.phase), ['request', 'sign']);
+  assert.equal(calls[1].signature, 'approval');
+  assert.equal(calls[1].expiresAt, 123);
+  const rejected = createOwnerAuthorizationSigner({ fetchImpl: async () => Response.json({ error: 'wallet_frozen', privy: { status: 401 } }, { status: 400 }) });
+  await assert.rejects(rejected({ address: 'agent', transaction }), error => error.code === 'wallet_frozen' && error.privyFailure.status === 401);
+  const empty = createOwnerAuthorizationSigner({ authorize: async () => ({ signature: 'ok' }), fetchImpl: async () => Response.json({ payload: '', signedTransaction: '' }) });
+  await assert.rejects(empty({ address: 'agent', transaction }), { code: 'invalid_signature' });
+});
 
 const transaction = new Uint8Array(100);
 const from = { address: 'selected-external-account', label: 'Phantom', spendable: false };
+
+test('browser signer polling re-reads readiness and supports a final case-insensitive lookup', async () => {
+  const ready = { ready: true, wallets: [{ address: from.address }], signTransaction() {} };
+  let reads = 0;
+  assert.equal(await waitForBrowserSigner(() => ++reads === 1 ? { ready: false, wallets: [] } : ready, [from], 0), ready);
+  assert.equal(browserSignerHasWallet(ready, from), true);
+  assert.equal(browserSignerHasWallet({ ...ready, ready: false }, from), false);
+  const differentCase = { ...ready, wallets: [{ address: from.address.toUpperCase() }] };
+  assert.equal(browserSignerHasWallet(await waitForBrowserSigner(() => differentCase, [from], 0), from), true);
+  assert.equal(browserSignerHasWallet({ ...ready, wallets: [] }, from), false);
+});
+
+test('linked Solana accounts use the Privy standard-wallet signing feature when absent from useWallets', async () => {
+  const signedTransaction = new Uint8Array(120);
+  let input;
+  const standard = { features: { 'privy:': { privy: { async signTransaction(args) {
+    input = args;
+    return { signedTransaction };
+  } } } } };
+  const account = { type: 'wallet', chainType: 'solana', walletClientType: 'privy', address: from.address };
+  const wallets = withLinkedSolanaWallets([], [standard], { linkedAccounts: [account] });
+  assert.equal(await signSelectedWalletTransaction({ from, transaction, signer: { wallets,
+    signTransaction: args => args.wallet.signTransaction(args) } }), signedTransaction);
+  assert.deepEqual(input, { transaction, address: from.address, chain: SOLANA_PRIVY_CHAIN, options: undefined });
+  assert.deepEqual(withLinkedSolanaWallets([], [], { linkedAccounts: [account] }), []);
+  assert.deepEqual(withLinkedSolanaWallets([], [standard], { linkedAccounts: [{ ...account, userCanSign: false }] }), []);
+});
 
 test('browser move retains both signatures even when the second signer clears the first', async () => {
   const source = Keypair.generate();
@@ -25,6 +85,27 @@ test('browser move retains both signatures even when the second signer clears th
   await assert.rejects(signWalletMoveTransaction({ wallets: [], transaction, signer }), { code: 'invalid_signature' });
   signer.signTransaction = async ({ transaction }) => ({ signedTransaction: transaction });
   await assert.rejects(signWalletMoveTransaction({ wallets, transaction, signer }), { code: 'invalid_signature' });
+});
+
+test('browser move merges an owner-authorized agent signature with Main useWallets signature', async () => {
+  const agent = Keypair.generate();
+  const main = Keypair.generate();
+  const wallets = [{ id: 'agent-wallet-id', kind: 'additional', provider: 'privy', address: agent.publicKey.toBase58() },
+    { kind: 'main', address: main.publicKey.toBase58() }];
+  const tx = new Transaction({ feePayer: main.publicKey, recentBlockhash: SystemProgram.programId.toBase58() })
+    .add(SystemProgram.transfer({ fromPubkey: agent.publicKey, toPubkey: main.publicKey, lamports: 1 }));
+  const sign = (transaction, key) => {
+    const next = Transaction.from(transaction);
+    next.signatures.forEach(entry => { entry.signature = null; });
+    next.partialSign(key);
+    return new Uint8Array(next.serialize({ requireAllSignatures: false }));
+  };
+  const signer = { ready: true, wallets: [wallets[1]],
+    signWithOwnerAuthorization: async ({ transaction }) => sign(transaction, agent),
+    signTransaction: async ({ transaction }) => ({ signedTransaction: sign(transaction, main) }) };
+  assert.equal(await waitForBrowserSigner(() => signer, wallets, 0), signer);
+  const signed = await signWalletMoveTransaction({ wallets, transaction: new Uint8Array(tx.serialize({ requireAllSignatures: false })), signer });
+  assert.equal(Transaction.from(signed).verifySignatures(), true);
 });
 
 test('Privy wallets sign on the server and linked wallets stay in the browser', () => {
