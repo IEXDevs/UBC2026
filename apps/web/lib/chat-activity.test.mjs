@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { sanitizeActivity, thinkStep, toolStep } from './chat-activity.mjs';
+import { publicApiSummary, sanitizeActivity, thinkStep, toolStep } from './chat-activity.mjs';
 
 /**
  * Achieves: verifies web search keeps public sites and drops javascript / live.browser.run secrets.
@@ -105,6 +105,28 @@ test('stored activity drops private urls and blank thoughts', () => {
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
+test('a Laso API result stays visible and drops payment secrets', () => {
+  const quote = toolStep('prepare_shopping', { provider: 'laso' }, {
+    provider: 'laso',
+    amountUsd: 5,
+    next: 'await-owner-mainnet-approval',
+    proposal: { outflow: '5000000', recipient: '3MZVk97x9SeRxbYpc3jhzRfU2fyA3emYutnqfn9kNfYX' },
+    challenge: { accepted: { payTo: '3MZVk97x9SeRxbYpc3jhzRfU2fyA3emYutnqfn9kNfYX' } },
+    claimUrl: 'https://laso.finance/claim/card-1',
+    paymentRequired: 'eyJhbGciOiJub25lIn0.secret.secret',
+  });
+  assert.equal(quote.label, 'Laso API');
+  assert.match(quote.output, /https:\/\/laso\.finance\/claim\/card-1/);
+  assert.equal(quote.output.includes('eyJ'), false);
+  const [kept] = sanitizeActivity([quote]);
+  assert.match(kept.output, /claim\/card-1/);
+  assert.equal(publicApiSummary('request_spend', {
+    error: 'simulation_failed',
+    signed: false,
+  }).includes('did not simulate'), true);
+  assert.equal(publicApiSummary('request_spend', { signature: 'sig', signed: true }), '');
+});
+
 test('repeated searches and a bare search query stay out of the log', () => {
   const noisy = toolStep('web_search', { query: 'search' }, { results: [] });
   assert.equal(noisy.query, '');

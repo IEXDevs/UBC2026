@@ -27,9 +27,9 @@ test('a live trace groups tools and drops empty input', () => {
 });
 
 /**
- * Achieves: verifies open browser sessions collapse to one running chip without leaking purposes/URLs.
+ * Achieves: verifies open browser sessions collapse to one idle chip without leaking purposes/URLs.
  * Fails when: closed sessions produce chips, multiple opens produce multiple chips, or purpose/http leaks.
- * Oracle: closed→empty; 2 open→one Browser chip argument '2 open'; named purpose kept; no http in JSON.
+ * Oracle: closed→empty; 2 open→one Browser chip argument '2 open' and status done; named purpose kept; no http in JSON.
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
@@ -42,7 +42,7 @@ test('an open browser session is one chip and drops a generic purpose', () => {
   ]);
   assert.equal(live.chips.length, 1);
   assert.equal(live.chips[0].name, 'Browser');
-  assert.equal(live.chips[0].status, 'running');
+  assert.equal(live.chips[0].status, 'done');
   assert.equal(live.chips[0].argument, '2 open');
   assert.equal(live.section, null);
   assert.equal(live.chips[0].argument.includes('browse'), false);

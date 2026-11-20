@@ -5,7 +5,7 @@
  */
 import { OPENROUTER_FREE_MODEL, parseLookupQuery, selectFreeOpenRouterModel } from '@ubc2026/contracts';
 import { BLOCKED_TURN, parseTurnVerdict, turnVerifyTask } from '@ubc2026/verify-consensus/turn';
-import { thinkStep, toolStep } from './chat-activity.mjs';
+import { publicApiSummary, thinkStep, toolStep } from './chat-activity.mjs';
 import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
 import { grantCovers, isFundTool, toolAccessRequest } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
@@ -127,6 +127,7 @@ export function buildTextChatMessages({
         'If money did not move, say that once in plain words. Do not repeat it on later replies.',
         'When a transfer returns a signature, the next message includes the Solscan URL. Do not wait for the owner to ask again. You can send more than one message in the same turn.',
         'Stay on the latest request until you answer it. Do not open extra topics, extra searches, or extra browser sessions.',
+        'When a tool returns an API result, say that result in the reply. If it includes an https link for the owner, include the link. Do not open the link. Do not open a browser to finish an API call.',
         'Call each tool once. When the result is enough to answer, stop calling tools and reply.',
         'When the owner asks for one trade, a price lookup is only a step. Continue the trade after the price. Say the price in plain words.',
         'In replies, leave out execution and pricing network labels unless the owner asks about the network. Do not repeat internal quote disclaimers unless asked.',
@@ -233,6 +234,25 @@ function blockedBrowser(name, args) {
   if (name !== 'browser_open' && name !== 'browser_navigate') return '';
   const host = hostOf(args);
   return BLOCKED_HOST.test(host) ? host : '';
+}
+
+const BROWSER_TOOLS = new Set([
+  'browser_open',
+  'browser_navigate',
+  'browser_live_view',
+  'browser_release',
+  'web_search',
+  'web_scrape',
+]);
+
+function cardCheckout(message, history) {
+  const bits = [typeof message === 'string' ? message : ''];
+  const prior = Array.isArray(history) ? history.slice(-8) : [];
+  for (const item of prior) {
+    const text = typeof item?.content === 'string' ? item.content : (typeof item?.text === 'string' ? item.text : '');
+    if (text) bits.push(text);
+  }
+  return /\blaso\b|reloadable card|\bx402\b/i.test(bits.join('\n'));
 }
 
 function assistantToolMessage(message) {
@@ -506,6 +526,7 @@ export async function completeTextChat({
       const args = parseToolArgs(call?.function?.arguments);
       const signature = toolSignature(name, args);
       const blocked = blockedBrowser(name, args);
+      const stayOnApi = cardCheckout(latest, history) && BROWSER_TOOLS.has(name);
       const access = toolAccessRequest(permissionMode, name, args, reviewCap);
       let result;
       if (!name || seenTools.has(signature)) {
@@ -517,6 +538,12 @@ export async function completeTextChat({
           error: 'site_blocked',
           host: blocked,
           hint: 'This site blocks datacenter browsers. Do not retry. Answer from search.',
+        };
+      } else if (stayOnApi) {
+        repeated = true;
+        result = {
+          error: 'use_api',
+          hint: 'This purchase stays on the API. Tell the owner what the API returned. Do not open a browser.',
         };
       } else if (access && !grantCovers(grants, name, args)) {
         return access;
@@ -541,6 +568,8 @@ export async function completeTextChat({
           seenSigs.add(receipt.signature);
           publish(receipt.text);
         }
+        const apiLine = publicApiSummary(name, result);
+        if (apiLine) publish(apiLine);
       }
       const content = typeof result === 'string'
         ? clip(redact(result, secrets), 6000)

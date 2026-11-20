@@ -686,6 +686,8 @@ export default function Composer({
       const label = result.reply || result.hold.prompt || result.hold.label;
       if (label && !shown.includes(label)) pushLine('agent', label, botIdRef.current, 0, [], null, { mentionAddress: result.hold.args?.destination });
       sayConfirm(label);
+      setThinking(false);
+      onThinking?.(false);
       const accepted = typeof onConfirm === 'function' ? await onConfirm(result.hold.prompt || result.hold.label, result.hold.args?.destination) : false;
       if (run !== runRef.current) return;
       if (!accepted) {

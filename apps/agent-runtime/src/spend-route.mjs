@@ -273,7 +273,10 @@ export async function handleSpend(request, env = {}) {
     } catch (error) {
       const known = ['unsupported_mint', 'simulation_failed', 'invalid_destination', 'usd_price_unavailable'];
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
-      return json({ error: code, signed: false }, 409);
+      const hint = code === 'simulation_failed'
+        ? 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.'
+        : '';
+      return json({ error: code, ...(hint ? { hint } : {}), signed: false }, 409);
     }
   }
   const facts = {

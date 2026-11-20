@@ -266,7 +266,7 @@ export function AgentTrace({ steps = [] }) {
           <ToolCall
             key={key}
             name={step.label}
-            input={step.detail}
+            input={step.output || step.detail}
             status={step.status === 'error' ? 'error' : undefined}
           />
         );

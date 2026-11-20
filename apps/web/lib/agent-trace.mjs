@@ -80,7 +80,7 @@ export function browserTrace(sessions) {
       id: 'browser-open',
       name: 'Browser',
       argument: purpose || (open.length === 1 ? 'Open' : `${open.length} open`),
-      status: 'running',
+      status: 'done',
       icon: 'terminal',
     }],
     section: null,
