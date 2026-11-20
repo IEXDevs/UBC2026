@@ -343,7 +343,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         {step === 'tell' ? (
           <>
             <p className="quiet">
-              Your account gets one 12-word seed, shown once. Download it and keep the file. It is never shown again, on this browser or any other.
+              Your account gets one 12-word seed, shown once. It resets your desk password; it is not a wallet key and will not import your wallets into another app. Download it and keep the file. It is never shown again, on this browser or any other.
               {handle ? ` @${handle} is the name people pay.` : ''}
             </p>
             <ul className="recovery-wallets">
