@@ -37,6 +37,8 @@
     "dev": {
       "name": "maelstrom-web-dev",
       "workers_dev": false,
+      // PR previews (.github/workflows/pr-preview.yml) use version preview URLs.
+      "preview_urls": true,
       "cache": {
         "enabled": true
       },

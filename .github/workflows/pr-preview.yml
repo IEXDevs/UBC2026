@@ -1,0 +1,94 @@
+# Gives every pull request into dev its own preview link:
+# https://pr-<number>-maelstrom-web-dev.<account>.workers.dev
+# It uploads a version of the maelstrom-web-dev Worker with a preview alias,
+# so it uses that Worker's secrets and bindings and never changes what
+# dev.maelstrom.iexdevs.com serves. Runs on each push to a pull request from
+# this repository, or when the `preview` label is added.
+# GitHub secrets: the same names as dev-page.yml. Values never appear here.
+
+name: PR preview
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    # Forked pull requests never get the Cloudflare secrets.
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'labeled' || github.event.label.name == 'preview')
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NEXT_PUBLIC_PRIVY_APP_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_APP_ID }}
+      NEXT_PUBLIC_PRIVY_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_CLIENT_ID }}
+      NEXT_PUBLIC_AGENT_RUNTIME_URL: ${{ secrets.NEXT_PUBLIC_AGENT_RUNTIME_URL }}
+      NEXT_PUBLIC_ELEVENLABS_AGENT_ID: ${{ secrets.NEXT_PUBLIC_ELEVENLABS_AGENT_ID }}
+      PR: ${{ github.event.pull_request.number }}
+      WORKER: maelstrom-web-dev
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Turn on preview URLs for the dev Worker
+        run: |
+          curl --fail-with-body -sS -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "Cloudflare-Workers-Script-Api-Date: 2025-08-01" \
+            --data '{"enabled":false,"previews_enabled":true}' > /dev/null
+
+      - name: Build and upload the preview version
+        id: upload
+        working-directory: apps/web
+        run: |
+          set -o pipefail
+          npx opennextjs-cloudflare build
+          npx opennextjs-cloudflare upload --env dev --preview-alias "pr-$PR" --tag "pr-$PR" 2>&1 | tee upload.log
+          url="$(grep -oE 'Version Preview Alias URL: https://[^[:space:]]+' upload.log | tail -1 | sed 's/^Version Preview Alias URL: //')"
+          if [ -z "$url" ]; then
+            echo "::error::No preview URL. The Cloudflare account needs a workers.dev subdomain (Workers & Pages > Overview)."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Post the link on the pull request
+        uses: actions/github-script@v7
+        env:
+          URL: ${{ steps.upload.outputs.url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const marker = '<!-- pr-preview -->';
+            const body = `${marker}\nPreview for this PR: ${process.env.URL}\nBuilt from \`${process.env.SHA.slice(0, 7)}\`. It updates on every push.`;
+            const issue_number = Number(process.env.PR);
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const mine = comments.find((c) => c.user?.type === 'Bot' && c.body?.startsWith(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
