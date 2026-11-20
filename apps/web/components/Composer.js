@@ -667,17 +667,6 @@ export default function Composer({
 
   async function runChat(spoken, prior, grants) {
     const selection = selectedModelRequest(modelStorage, modelRef.current);
-    if (!selection && modelFreeCommand(spoken) === 'platform-send') {
-      // onLine already opened the existing USDC approval flow in the shell.
-      sendingRef.current = false;
-      return;
-    }
-    if (!selection && needsChatModel(spoken, grants)) {
-      sendingRef.current = false;
-      pushLine('note', 'Show a model in AI Providers before sending a message.');
-      setAIProvidersOpen(true);
-      return;
-    }
     const run = ++runRef.current;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -686,6 +675,14 @@ export default function Composer({
     onThinking?.(true);
     window.clearTimeout(thinkTimer.current);
     try {
+      // Every turn, including non-model commands and rejected queued messages,
+      // must reach the same finally block to release the queue and busy state.
+      if (!selection && modelFreeCommand(spoken) === 'platform-send') return;
+      if (!selection && needsChatModel(spoken, grants)) {
+        pushLine('note', 'Show a model in AI Providers before sending a message.');
+        setAIProvidersOpen(true);
+        return;
+      }
       if (!ownerId || !botIdRef.current) {
         if (run === runRef.current) {
           const note = ownerId
