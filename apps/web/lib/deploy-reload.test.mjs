@@ -10,6 +10,7 @@ import {
   checkDeploy,
   cleanBuildQuery,
   clearBrowserCaches,
+  installAuthFetchTracker,
   isPrivyAuthRequest,
   reloadUrl,
   waitForStablePrivySession,
@@ -188,7 +189,7 @@ test('a deploy reload waits for the Privy write, locks wallet unlocks, and keeps
     href: 'https://maelstrom.example/',
     session: memorySession(),
     persistent,
-    settle: async () => { order.push('settle'); },
+    settle: async () => { order.push('settle'); return true; },
     fetcher: async () => ({ ok: true, json: async () => ({ id: 'bbbbbbb' }) }),
     replace: () => { order.push('replace'); },
   });
@@ -208,8 +209,8 @@ test('a deploy reload waits for the Privy write, locks wallet unlocks, and keeps
     fetcher: async () => ({ ok: true, json: async () => ({ id: 'ccccccc' }) }),
     replace: (url) => { replaced = url; },
   });
-  assert.equal(thrown.reload, true);
-  assert.equal(replaced, `https://maelstrom.example/desk?${BUILD_QUERY}=ccccccc`);
+  assert.deepEqual(thrown, { reload: false });
+  assert.equal(replaced, '');
 });
 
 /**
@@ -231,7 +232,7 @@ test('the reload keeps waiting while Privy is writing or refreshing', async () =
   const storage = keyedStorage({ 'privy:refresh_token': 'old' });
   const ready = await waitForStablePrivySession({
     storage,
-    idle: () => idle,
+    authSnapshot: () => idle ? 1 : null,
     quietMs: 100,
     timeoutMs: 1000,
     now: () => time,
@@ -243,7 +244,83 @@ test('the reload keeps waiting while Privy is writing or refreshing', async () =
   });
   assert.equal(ready, true);
   assert.equal(storage.getItem('privy:refresh_token'), 'new');
-  assert.ok(time >= 200);
+  assert.ok(time >= 300);
+});
+
+test('a deploy can retry after a slow Privy refresh without locking the desk early', async () => {
+  let finishRefresh;
+  const view = { fetch: () => new Promise((resolve) => { finishRefresh = resolve; }) };
+  const tracker = installAuthFetchTracker(view);
+  const refresh = view.fetch('/api/privy-auth/api/v1/sessions');
+  let time = 0;
+  const persistent = keyedStorage({ 'maelstrom.desk-open.did:privy:abc': '{"v":1}' });
+  const navigations = [];
+  const options = {
+    localId: 'aaaaaaa',
+    href: 'https://maelstrom.example/',
+    session: memorySession(),
+    persistent,
+    authSnapshot: tracker.snapshot,
+    settle: () => waitForStablePrivySession({
+      storage: persistent,
+      authSnapshot: tracker.snapshot,
+      now: () => time,
+      sleep: async (ms) => { time += ms; },
+    }),
+    fetcher: async () => Response.json({ id: 'bbbbbbb' }),
+    replace: (url) => { navigations.push(url); },
+  };
+
+  assert.deepEqual(await checkDeploy(options), { reload: false });
+  assert.equal(persistent.getItem('maelstrom.desk-open.did:privy:abc'), '{"v":1}');
+  assert.deepEqual(navigations, []);
+
+  finishRefresh(Response.json({}));
+  await refresh;
+  assert.deepEqual(await checkDeploy(options), { reload: true, id: 'bbbbbbb' });
+  assert.equal(persistent.getItem('maelstrom.desk-open.did:privy:abc'), null);
+  assert.deepEqual(await checkDeploy(options), { reload: false });
+  assert.deepEqual(navigations, [`https://maelstrom.example/?${BUILD_QUERY}=bbbbbbb`]);
+});
+
+test('a refresh that starts and finishes between samples resets the quiet window', async () => {
+  const view = { fetch: async () => Response.json({}) };
+  const tracker = installAuthFetchTracker(view);
+  let time = 0;
+  const settled = await waitForStablePrivySession({
+    authSnapshot: tracker.snapshot,
+    quietMs: 100,
+    timeoutMs: 180,
+    now: () => time,
+    sleep: async (ms) => {
+      time += ms;
+      if (time === 80) await view.fetch('/api/privy-auth/api/v1/sessions');
+    },
+  });
+  assert.equal(settled, false);
+});
+
+test('auth activity during cache cleanup defers the deploy without consuming its reload', async () => {
+  const view = { fetch: async () => Response.json({}) };
+  const tracker = installAuthFetchTracker(view);
+  let refreshDuringCleanup = true;
+  const options = {
+    localId: 'aaaaaaa',
+    href: 'https://maelstrom.example/',
+    session: memorySession(),
+    authSnapshot: tracker.snapshot,
+    settle: async () => true,
+    fetcher: async () => Response.json({ id: 'bbbbbbb' }),
+    caches: {
+      keys: async () => ['pages'],
+      delete: async () => {
+        if (refreshDuringCleanup) await view.fetch('/api/privy-auth/api/v1/sessions');
+      },
+    },
+  };
+  assert.deepEqual(await checkDeploy(options), { reload: false });
+  refreshDuringCleanup = false;
+  assert.deepEqual(await checkDeploy(options), { reload: true, id: 'bbbbbbb' });
 });
 
 /**
