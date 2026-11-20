@@ -477,16 +477,14 @@ function ConnectedPortfolio({ open, previewPortfolio = null }) {
           setError(portfolioErrorNote(body));
           return;
         }
-        rememberPortfolio(cacheKey, body);
-        setPortfolio(body);
-        setLoading(false);
         const enriched = await enrichPortfolio(body, {
           userId: user?.id,
           storage: window.localStorage,
-        });
+        }).catch(() => ({ portfolio: body }));
         if (!stopped) {
           rememberPortfolio(cacheKey, enriched.portfolio);
           setPortfolio(enriched.portfolio);
+          setLoading(false);
         }
       } catch {
         if (!stopped) {

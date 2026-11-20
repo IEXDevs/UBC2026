@@ -37,10 +37,18 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
   useEffect(() => {
     if (!open) return undefined;
     if (previewPortfolio) {
-      setPortfolio(previewPortfolio);
+      let stopped = false;
+      setPortfolio(null);
       setError('');
-      setLoading(false);
-      return undefined;
+      setLoading(true);
+      enrichPortfolio(previewPortfolio, { storage: window.localStorage })
+        .catch(() => ({ portfolio: previewPortfolio }))
+        .then((enriched) => {
+          if (stopped) return;
+          setPortfolio(enriched.portfolio);
+          setLoading(false);
+        });
+      return () => { stopped = true; };
     }
     const cacheKey = user?.id || 'portfolio';
     const cached = cachedPortfolio(cacheKey);
@@ -75,17 +83,15 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
           setError(portfolioErrorNote(body));
           return;
         }
-        rememberPortfolio(cacheKey, body);
-        setPortfolio(body);
-        setError('');
-        setLoading(false);
         const enriched = await enrichPortfolio(body, {
           userId: user?.id,
           storage: window.localStorage,
-        });
+        }).catch(() => ({ portfolio: body }));
         if (!stopped) {
           rememberPortfolio(cacheKey, enriched.portfolio);
           setPortfolio(enriched.portfolio);
+          setError('');
+          setLoading(false);
         }
       } catch {
         if (!stopped) setError(portfolioErrorNote({ error: 'rpc_failed' }));
