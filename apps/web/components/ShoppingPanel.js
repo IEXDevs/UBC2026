@@ -5,11 +5,10 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { sandboxSettleBody, shoppingComparisonView } from '../lib/shopping-comparison.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
-import { rememberLasoCard } from '../lib/laso-card-book.mjs';
 import SlideCommit from './bits/SlideCommit';
 
 /**
- * Shopping bot controls (Isaac / 6B): prepare sandbox or Laso challenge via the Worker.
+ * Shopping bot controls (Isaac / 6B): prepare a sandbox catalog comparison via the Worker.
  * Settlement still requires owner approval + signer on the runtime.
  */
 export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = null, onEvent = null }) {
@@ -21,7 +20,7 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
 
   if (bot?.type !== 'shopping') return null;
 
-  async function prepare(provider) {
+  async function prepare() {
     setBusy(true);
     setError(null);
       setResult(null);
@@ -38,42 +37,23 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
         setError('Assign a provisioned wallet to this agent before shopping.');
         return;
       }
-      const body = provider === 'laso'
-        ? {
-          provider: 'laso',
-          amountUsd: 5,
-          bot: {
-            id: bot.id,
-            ownerId,
-            name: bot.name,
-            goal: bot.goal,
-            type: 'shopping',
-            enabled: true,
-            frozen: false,
-            policyVersion: 1,
-            approvalMode: 'ask',
-            walletId,
-            cap: bot.record?.cap || { mode: 'limited', asset: 'USDC', maxOutflow: '20000000', maxPerTransaction: '10000000' },
-          },
-          ledger: { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },
-        }
-        : {
-          bot: {
-            id: bot.id,
-            ownerId,
-            name: bot.name,
-            goal: bot.goal,
-            type: 'shopping',
-            enabled: true,
-            frozen: false,
-            policyVersion: 1,
-            approvalMode: 'ask',
-            walletId,
-            cap: bot.record?.cap || { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
-          },
-          ledger: { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },
-          recipient: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-        };
+      const body = {
+        bot: {
+          id: bot.id,
+          ownerId,
+          name: bot.name,
+          goal: bot.goal,
+          type: 'shopping',
+          enabled: true,
+          frozen: false,
+          policyVersion: 1,
+          approvalMode: 'ask',
+          walletId,
+          cap: bot.record?.cap || { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
+        },
+        ledger: { asset: 'USDC', spent: '0', reserved: '0', realizedLoss: '0' },
+        recipient: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      };
       const response = await fetch(url, {
         method: 'POST',
         headers: await ownerAuthHeaders(ownerId, getAccessToken, {
@@ -87,12 +67,9 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
         return;
       }
       setResult(data);
-      if (data.provider === 'laso' && data.card && ownerId) rememberLasoCard(window.sessionStorage, ownerId, data.card);
       onEvent?.({
         kind: 'tool.call',
-        summary: provider === 'laso'
-          ? `Laso tiny-card challenge ready (${data.next})`
-          : `Sandbox pick ${data.pick?.item?.name || data.pick?.item?.id} (${data.next})`,
+        summary: `Sandbox pick ${data.pick?.item?.name || data.pick?.item?.id} (${data.next})`,
       });
     } catch (err) {
       setError(err?.message || 'prepare_failed');
@@ -145,17 +122,14 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
     <section className="panel" aria-label="Shopping">
       <h2>Shopping</h2>
       <p className="hint">
-        Compare the x402 sandbox catalog on price and quality, or open a Laso card challenge.
-        The card itself opens from Cards in the account menu.
+        Compare the x402 sandbox catalog on price and quality.
+        Agents set up Laso cards. The card opens from Cards in the account menu.
         The result is a proposal. Nothing is bought until you approve.
         {SOLANA_CLUSTER === 'mainnet-beta' ? ' Sandbox purchases are unavailable.' : null}
       </p>
       <div className="live-actions">
-        <button className="cta" type="button" disabled={busy || SOLANA_CLUSTER === 'mainnet-beta'} onClick={() => prepare('sandbox')}>
+        <button className="cta" type="button" disabled={busy || SOLANA_CLUSTER === 'mainnet-beta'} onClick={() => prepare()}>
           {busy ? 'Working…' : 'Compare catalog'}
-        </button>
-        <button className="ghost" type="button" disabled={busy} onClick={() => prepare('laso')}>
-          Laso $5 card challenge
         </button>
       </div>
       {error ? <p className="hint" role="alert">{error}</p> : null}

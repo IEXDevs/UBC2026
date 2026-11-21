@@ -2357,9 +2357,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         open={cardsOpen}
         onClose={closeCards}
         ownerId={ownerId || ''}
-        getAccessToken={getAccessToken}
-        bot={bot}
-        bots={bots}
       />
       <WalletsSheet
         open={walletsOpen}
