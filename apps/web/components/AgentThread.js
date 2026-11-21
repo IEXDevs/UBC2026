@@ -129,9 +129,9 @@ export default function AgentThread({
         <div className="agent-chips">
           {chips.map(chip => (
             chip.name === 'Transaction' ? (
-              <TerminalBlock key={chip.id} command={chip.argument} status={chip.status} />
+              <TerminalBlock key={chip.id} command={[chip.argument, chip.detail].filter(Boolean).join('\n')} status={chip.status} />
             ) : (
-              <ToolCall key={chip.id} name={chip.name} input={chip.argument} status={chip.status} />
+              <ToolCall key={chip.id} name={chip.name} input={chip.argument} command={chip.argument} output={chip.detail} status={chip.status} />
             )
           ))}
         </div>

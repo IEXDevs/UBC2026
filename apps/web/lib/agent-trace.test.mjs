@@ -5,7 +5,7 @@ import { browserTrace, callStatus, clipTrace, traceModel } from './agent-trace.m
 /**
  * Achieves: verifies live traces group tool calls, mark mismatches as errors, and clip long text.
  * Fails when: null input is non-empty, tool chips miscount, verify.mismatch is not error, or clip exceeds max.
- * Oracle: two tool.call → Tool section children=2; chips length 2; clipTrace(80 chars, 42) ≤ 42.
+ * Oracle: two tool.call → Tool section children=2; chips length 3 (tool + mismatch + tool, all API activity is a chip); clipTrace(80 chars, 42) ≤ 42.
  * Side effects / state checked: N/A.
  * Gaps: none for traceModel helpers.
  */
@@ -16,9 +16,12 @@ test('a live trace groups tools and drops empty input', () => {
     { id: 'b', kind: 'verify.mismatch', summary: 'Price still differs' },
     { id: 'c', kind: 'tool.call', summary: 'x'.repeat(80) },
   ]);
-  assert.equal(trace.chips.length, 2);
+  assert.equal(trace.chips.length, 3);
   assert.equal(trace.chips[0].icon, 'terminal');
   assert.equal(trace.chips[0].status, 'done');
+  assert.equal(trace.chips[1].name, 'Mismatch');
+  assert.equal(trace.chips[1].status, 'error');
+  assert.equal(trace.chips[1].detail, 'Price still differs');
   assert.equal(callStatus('verify.mismatch'), 'error');
   assert.equal(trace.sections[0].label, 'Tool');
   assert.equal(trace.sections[0].children.length, 2);

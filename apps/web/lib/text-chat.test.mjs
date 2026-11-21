@@ -56,7 +56,7 @@ test('reply deltas arrive before completion and full reply verification', async 
   assert.equal(events.at(-1).message, 'Hello from the agent. Welcome!');
 });
 
-test('a tool delta retracts its preamble and a fund proposal disables all later deltas', async () => {
+test('a tool round streams thinking, calls, results, and the follow-up reply', async () => {
   const order = [];
   let round = 0;
   const result = await completeTextChat({
@@ -78,7 +78,7 @@ test('a tool delta retracts its preamble and a fund proposal disables all later 
       return streamedCompletion([{ content: 'The transfer was not executed.' }]);
     },
   });
-  assert.deepEqual(order, ['reply_delta', 'reply_retract', 'verify:tool', 'invoke:request_spend', 'verify:reply', 'publish:The transfer was not executed.']);
+  assert.deepEqual(order, ['reply_delta', 'reply_retract', 'reply_delta', 'reply_retract', 'think_delta', 'verify:tool', 'tool_call', 'invoke:request_spend', 'tool_result', 'reply_delta', 'verify:reply', 'publish:The transfer was not executed.']);
   assert.equal(result.text, 'The transfer was not executed.');
 });
 
@@ -99,7 +99,7 @@ test('non-fund tools retract the preamble but the next round can stream', async 
     },
   });
   assert.equal(result.text, 'No rate was found.');
-  assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract', 'reply_delta']);
+  assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract', 'think_delta', 'tool_call', 'tool_result', 'reply_delta']);
   assert.equal(events.at(-1).text, result.text);
 });
 
@@ -125,7 +125,12 @@ test('a streamed fund proposal cannot execute before approval from the existing 
   });
   assert.equal(checked, true);
   assert.equal(result.hold.name, 'request_spend');
-  assert.deepEqual(events, [{ type: 'reply_retract' }]);
+  assert.deepEqual(events, [
+    { type: 'reply_retract' },
+    { type: 'reply_delta', text: 'Do not speak this tool preamble.' },
+    { type: 'reply_retract' },
+    { type: 'think_delta', text: 'Do not speak this tool preamble.' },
+  ]);
 });
 
 test('reply rejection retracts streamed speech before publishing the existing failure', async () => {
@@ -186,7 +191,7 @@ test('broken and empty provider streams fail closed and retract provisional spee
   }
 });
 
-test('fund proposals from a delegated turn disable outer reply deltas too', async () => {
+test('a fund proposal marks the turn and the next reply streams live', async () => {
   const turnState = { fundProposed: false };
   const events = [];
   await completeTextChat({
@@ -204,7 +209,7 @@ test('fund proposals from a delegated turn disable outer reply deltas too', asyn
       return streamedCompletion([{ content: 'Approval is still required.' }]);
     },
   });
-  assert.deepEqual(events, []);
+  assert.deepEqual(events, [{ type: 'reply_delta', text: 'Approval is still required.' }]);
 });
 
 function isTurnVerify(options) {
@@ -311,7 +316,7 @@ test('a failed money tool may say no money moved while a successful receipt cann
   }
 });
 
-test('a latest-model question searches once and does not open a browser', async () => {
+test('a latest-model question can call every research tool and shows each result', async () => {
   const seen = [];
   let round = 0;
   const reply = await completeTextChat({
@@ -336,14 +341,15 @@ test('a latest-model question searches once and does not open a browser', async 
           { id: 'find', type: 'function', function: { name: 'web_search', arguments: '{"query":"latest iPhone model price"}' } },
         ] } }] });
       }
-      assert.equal(body.tools, undefined);
+      assert.ok(Array.isArray(body.tools));
       return streamedCompletion([{ content: '**iPhone 17 Pro** starts at $1199.' }]);
     },
   });
-  assert.deepEqual(seen, ['web_search']);
+  assert.deepEqual(seen, ['browser_open', 'delegate_task', 'web_search']);
   assert.equal(round, 2);
   assert.equal(reply.text, '**iPhone 17 Pro** starts at $1199.');
   assert.equal(reply.toolRounds, 1);
+  assert.equal(reply.activity.filter(step => step.kind === 'tool' || step.kind === 'search').length >= 2, true);
   assert.equal(isFactLookup('Check example.com'), false);
   assert.equal(isFactLookup('Check the page and my prices'), false);
   assert.equal(isFactLookup('buy the latest iPhone'), false);
@@ -624,21 +630,21 @@ test('model failures without a tool error still propagate and successful follow-
   }
 });
 
-test('Laso browser and research restrictions follow the current request or an unexpired pending hold, not past chat', async () => {
+test('browser and research tools stay callable on Laso turns and show their results', async () => {
   const pending = {
     name: 'request_spend', kind: 'modal', args: { action: 'x402', lasoTicket: 'offline-ticket' },
     proof: 'a'.repeat(64), expiresAt: Date.now() + 60_000,
   };
   const cases = [
-    { message: 'Open example.com', blocked: false },
-    { message: 'Search the web for weather', blocked: false },
-    { message: 'Get me a Laso card for 10 USDC', blocked: true },
-    { message: 'Complete this x402 purchase', blocked: true },
-    { message: 'yes', grants: [pending], blocked: true },
-    { message: 'yes', grants: [{ ...pending, expiresAt: 1 }], blocked: false },
-    { message: 'yes', grants: [{ ...pending, proof: '' }], blocked: false },
-    { message: 'yes', grants: [{ ...pending, args: { action: 'swap' } }], blocked: false },
-    { message: 'yes', blocked: false },
+    { message: 'Open example.com' },
+    { message: 'Search the web for weather' },
+    { message: 'Get me a Laso card for 10 USDC' },
+    { message: 'Complete this x402 purchase' },
+    { message: 'yes', grants: [pending] },
+    { message: 'yes', grants: [{ ...pending, expiresAt: 1 }] },
+    { message: 'yes', grants: [{ ...pending, proof: '' }] },
+    { message: 'yes', grants: [{ ...pending, args: { action: 'swap' } }] },
+    { message: 'yes' },
   ];
   for (const name of ['browser_open', 'browser_navigate', 'browser_click', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
     for (const scenario of cases) {
@@ -656,11 +662,11 @@ test('Laso browser and research restrictions follow the current request or an un
             id: 'browse', type: 'function', function: { name, arguments: JSON.stringify({ url: 'https://example.com', query: 'weather', sessionRecordId: 'session_1' }) },
           }] } }] });
           const result = JSON.parse(body.messages.findLast(item => item.role === 'tool').content);
-          assert.equal(result.error, scenario.blocked ? 'use_api' : undefined, `${name}: ${scenario.message}`);
-          return Response.json({ choices: [{ message: { content: scenario.blocked ? 'The purchase stays on the API.' : 'The requested tool completed.' } }] });
+          assert.equal(result.error, undefined, `${name}: ${scenario.message}`);
+          return Response.json({ choices: [{ message: { content: 'The requested tool completed.' } }] });
         },
       });
-      assert.deepEqual(invoked, scenario.blocked ? [] : [name], `${name}: ${scenario.message}`);
+      assert.deepEqual(invoked, [name], `${name}: ${scenario.message}`);
       assert.equal(reply.hold, undefined);
       assert.equal(modelCalls, 2);
     }
@@ -668,13 +674,13 @@ test('Laso browser and research restrictions follow the current request or an un
 });
 
 test('every assistant tool call gets a result, including calls beyond the execution limit and tool failures', async () => {
-  for (const count of [0, 1, 4, 6]) {
+  for (const count of [0, 1, 8, 10]) {
     for (const failTool of [false, true]) {
       const calls = Array.from({ length: count }, (_, index) => ({
         id: `call_${index}`, type: 'function',
-        function: { name: index === 4 ? 'request_spend' : 'get_price', arguments: JSON.stringify(index === 4
+        function: { name: index === 8 ? 'request_spend' : 'get_price', arguments: JSON.stringify(index === 8
           ? { action: 'spend', amount: '1000000', asset: 'USDC', destination: '11111111111111111111111111111111' }
-          : { mint: String(index + 1).repeat(32) }) },
+          : { mint: String((index % 9) + 1).repeat(32) }) },
       }));
       const invoked = [];
       let modelCalls = 0;
@@ -699,16 +705,16 @@ test('every assistant tool call gets a result, including calls beyond the execut
             assert.equal(results.length, count);
             for (const [index, result] of results.entries()) {
               const payload = JSON.parse(result.content);
-              if (index >= 4) assert.equal(payload.error, 'tool_call_limit');
+              if (index >= 8) assert.equal(payload.error, 'tool_call_limit');
               else assert.equal(payload.error, failTool ? 'tool_failed' : undefined);
             }
-            if (count > 4) assert.equal(body.tools, undefined);
+            if (count > 8) assert.equal(body.tools, undefined);
           }
           return Response.json({ choices: [{ message: { content: 'The requested batch has finished; skipped steps did not run.' } }] });
         },
       });
       assert.equal(reply.hold, undefined);
-      assert.equal(invoked.length, Math.min(count, 4));
+      assert.equal(invoked.length, Math.min(count, 8));
       assert.equal(invoked.includes('request_spend'), false);
       assert.equal(modelCalls, count ? 2 : 1);
     }
@@ -1002,7 +1008,7 @@ test('completeTextChat runs a tool round then answers', async () => {
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
-test('a Laso card turn shows the API result and does not open a browser', async () => {
+test('a Laso card turn shows the API result alongside the browser result', async () => {
   const seen = [];
   const heard = [];
   let round = 0;
@@ -1052,13 +1058,14 @@ test('a Laso card turn shows the API result and does not open a browser', async 
       });
     },
   });
-  assert.deepEqual(seen, ['prepare_shopping']);
+  assert.deepEqual(seen, ['prepare_shopping', 'browser_open']);
   assert.match(heard.join('\n'), /https:\/\/laso\.finance\/claim\/card-1/);
   assert.match(result.messages.join('\n'), /claim\/card-1/);
   assert.equal(result.activity.some(step => step.label === 'Laso API' && step.output.includes('claim/card-1')), true);
+  assert.equal(result.activity.some(step => step.command && step.command.includes('browser_open')), true);
 });
 
-test('a repeated tool and a blocked browser stop the spin and still answer', async () => {
+test('a repeated tool stays visible and every browser call runs before answering', async () => {
   const seen = [];
   let round = 0;
   const result = await completeTextChat({
@@ -1096,13 +1103,15 @@ test('a repeated tool and a blocked browser stop the spin and still answer', asy
       }
       assert.equal(body.tools, undefined);
       return Response.json({
-        choices: [{ finish_reason: 'stop', message: { content: 'Rates are on example.com. X blocks this browser.' } }],
+        choices: [{ finish_reason: 'stop', message: { content: 'Rates are on example.com, and the browser opened x.com.' } }],
       });
     },
   });
-  assert.deepEqual(seen, ['web_search']);
-  assert.equal(result.text, 'Rates are on example.com. X blocks this browser.');
-  assert.equal(result.activity.some(step => step.label === 'Skipped a blocked site'), true);
+  assert.deepEqual(seen, ['web_search', 'browser_open']);
+  assert.equal(result.text, 'Rates are on example.com, and the browser opened x.com.');
+  assert.equal(result.activity.some(step => step.kind === 'search' || step.name === 'web_search'), true);
+  assert.equal(result.activity.some(step => step.command && step.command.includes('browser_open')), true);
+  assert.equal(result.activity.some(step => (step.error && step.error.includes('repeated_tool')) || (step.output && step.output.includes('repeated_tool'))), true);
 });
 
 /**

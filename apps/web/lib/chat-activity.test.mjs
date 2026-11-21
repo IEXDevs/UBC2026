@@ -99,9 +99,9 @@ test('stored activity drops private urls and blank thoughts', () => {
 });
 
 /**
- * Achieves: verifies noisy/repeated searches and blocked browser tools stay out of the useful log.
- * Fails when: bare query 'search' kept, repeated_tool returns a step, or duplicate searches not collapsed.
- * Oracle: query 'search'→''; repeated_tool→null; site_blocked labeled; duplicate USDC searches → length 1.
+ * Achieves: verifies every API/MCP call stays in the useful log with its command and return.
+ * Fails when: bare query 'search' kept, repeated_tool dropped, or duplicate searches not collapsed.
+ * Oracle: query 'search'→''; repeated_tool visible with command+output; every browser call kept; duplicate USDC searches → length 1.
  * Side effects / state checked: N/A.
  * Gaps: none.
  */
@@ -134,10 +134,16 @@ test('a Laso API result stays visible and drops payment secrets', () => {
 test('repeated searches and a bare search query stay out of the log', () => {
   const noisy = toolStep('web_search', { query: 'search' }, { results: [] });
   assert.equal(noisy.query, '');
-  assert.equal(toolStep('browser_open', { url: 'https://x.com' }, { error: 'repeated_tool' }), null);
-  assert.equal(toolStep('browser_open', { url: 'https://www.apple.com/iphone/' }, { error: 'search_first' }), null);
-  const blocked = toolStep('browser_navigate', { url: 'https://x.com' }, { error: 'site_blocked', host: 'x.com' });
-  assert.equal(blocked.label, 'Skipped a blocked site');
+  const repeated = toolStep('browser_open', { url: 'https://x.com' }, { error: 'repeated_tool' });
+  assert.equal(repeated.status, 'error');
+  assert.match(repeated.command, /browser_open/);
+  assert.match(repeated.output, /repeated_tool/);
+  const retried = toolStep('browser_open', { url: 'https://www.apple.com/iphone/' }, { ok: true });
+  assert.equal(retried.status, 'done');
+  assert.match(retried.command, /apple\.com/);
+  const navigated = toolStep('browser_navigate', { url: 'https://x.com' }, { ok: true, url: 'https://x.com' });
+  assert.equal(navigated.status, 'done');
+  assert.match(navigated.command, /x\.com/);
   const steps = sanitizeActivity([
     { kind: 'search', query: 'USDC', sites: [], status: 'done' },
     { kind: 'search', query: 'USDC', sites: [], status: 'done' },

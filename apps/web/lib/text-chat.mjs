@@ -222,42 +222,12 @@ function splitThink(content) {
   };
 }
 
-const BLOCKED_HOST = /(^|\.)((x|twitter)\.com|reddit\.com)$/i;
-
 function toolSignature(name, args) {
   try {
     return `${name}:${JSON.stringify(args ?? {})}`;
   } catch {
     return name;
   }
-}
-
-function hostOf(args) {
-  const raw = typeof args?.url === 'string' ? args.url : '';
-  try {
-    return new URL(raw).hostname.replace(/^www\./, '');
-  } catch {
-    return '';
-  }
-}
-
-function blockedBrowser(name, args) {
-  if (name !== 'browser_open' && name !== 'browser_navigate' && name !== 'browser_click') return '';
-  const host = hostOf(args);
-  return BLOCKED_HOST.test(host) ? host : '';
-}
-
-const FACT_BROWSER = new Set(['browser_open', 'browser_navigate', 'browser_click', 'browser_live_view', 'delegate_task']);
-
-/**
- * A product fact such as the latest model and its price.
- * Spends, swaps, wallets, and "open this site" checks stay off this path.
- */
-export function isFactLookup(message) {
-  const text = typeof message === 'string' ? message : '';
-  if (!/\b(?:latest|newest)\b/i.test(text)) return false;
-  if (/\b(?:buy|order|purchase|checkout|send|swap|transfer|laso|wallet)\b/i.test(text)) return false;
-  return /\b(?:model|iphone|ipad|macbook|pixel|galaxy|phone|version|price|cost)\b/i.test(text);
 }
 
 const BROWSER_TOOLS = new Set([
@@ -269,6 +239,17 @@ const BROWSER_TOOLS = new Set([
   'web_search',
   'web_scrape',
 ]);
+
+/**
+ * Kept for compatibility: fact lookups no longer gate tool calls.
+ * Every API/MCP tool is callable; results are shown in the chat trace.
+ */
+export function isFactLookup(message) {
+  const text = typeof message === 'string' ? message : '';
+  if (!/\b(?:latest|newest)\b/i.test(text)) return false;
+  if (/\b(?:buy|order|purchase|checkout|send|swap|transfer|laso|wallet)\b/i.test(text)) return false;
+  return /\b(?:model|iphone|ipad|macbook|pixel|galaxy|phone|version|price|cost)\b/i.test(text);
+}
 
 const READ_ONLY_TOOLS = new Set([
   'list_bots', 'get_bot_status', 'get_wallets', 'get_overview', 'get_activity',
@@ -290,7 +271,6 @@ function cardCheckout(message, history) {
 function toolFailureReply(name, result) {
   const payload = typeof result === 'string' ? parseToolArgs(result) : result;
   if (!payload || (!payload.error && payload.ok !== false)) return '';
-  if (payload.error === 'search_first') return '';
   const label = {
     __proto__: null,
     lookup_recipient: 'recipient lookup', get_price: 'price lookup', get_wallets: 'wallet lookup',
@@ -317,6 +297,15 @@ function activeCardCheckout(message, grants) {
     && typeof hold.args.lasoTicket === 'string' && hold.args.lasoTicket.length > 0
     && /^[0-9a-f]{64}$/.test(hold.proof ?? '')
     && Number.isSafeInteger(hold.expiresAt) && hold.expiresAt > Date.now()));
+}
+
+function redactToolResult(result, max = 2000) {
+  try {
+    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    return clip(redact(text, []), max);
+  } catch {
+    return '';
+  }
 }
 
 function assistantToolMessage(message) {
@@ -624,10 +613,8 @@ export async function completeTextChat({
   let toolResultSeen = false;
   let completedSpendReply = '';
   let moneyToolFailed = false;
-  let factAnswerNext = false;
   let agentTask = '';
   let proposedGoal = '';
-  const factLookup = isFactLookup(latest);
   const replyState = turnState || { fundProposed: false };
   const effort = reasoningEffortFor(modelId, reasoningEffort, { allowUnknown: true });
 
@@ -694,7 +681,7 @@ export async function completeTextChat({
     let repeated = false;
     for (const [index, call] of calls.entries()) {
       const name = typeof call?.function?.name === 'string' ? call.function.name : '';
-      if (trackAgentTask && name === AGENT_TASK_TOOL && index < 4) {
+      if (trackAgentTask && name === AGENT_TASK_TOOL && index < 8) {
         const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
         const args = parseToolArgs(call.function.arguments);
         if (!agentTask) {
@@ -710,34 +697,14 @@ export async function completeTextChat({
       const rawArgs = withDefaultBotId(name, parseToolArgs(call?.function?.arguments), botId);
       const args = name === 'prepare_shopping' && cardCheckout(latest, history) ? lasoPreparationArgs(rawArgs, latest) : rawArgs;
       const signature = toolSignature(name, args);
-      const blocked = blockedBrowser(name, args);
-      const stayOnApi = activeCardCheckout(latest, grants) && BROWSER_TOOLS.has(name);
       const access = toolAccessRequest(permissionMode, name, args, reviewCap);
       let result;
-      if (index >= 4) {
+      if (index >= 8) {
         repeated = true;
-        result = { error: 'tool_call_limit', hint: 'Only four tool calls can run in one batch. This call did not run. Tell the owner which steps remain incomplete.' };
+        result = { error: 'tool_call_limit', hint: 'Only eight tool calls can run in one batch. This call did not run. Tell the owner which steps remain incomplete.' };
       } else if (!name || seenTools.has(signature)) {
         repeated = true;
         result = { error: 'repeated_tool', hint: 'Already called. Answer the owner now.' };
-      } else if (blocked) {
-        repeated = true;
-        result = {
-          error: 'site_blocked',
-          host: blocked,
-          hint: 'This site blocks datacenter browsers. Do not retry. Answer from search.',
-        };
-      } else if (factLookup && FACT_BROWSER.has(name)) {
-        result = {
-          error: 'search_first',
-          hint: 'This is a fact lookup. Call web_search once and answer from it. Do not open a browser or delegate.',
-        };
-      } else if (stayOnApi) {
-        repeated = true;
-        result = {
-          error: 'use_api',
-          hint: 'This purchase stays on the API. Tell the owner what the API returned. Do not open a browser.',
-        };
       } else if ((isLasoCardRequest(latest) || (cardCheckout(latest, history) && /^\s*(?:yes|ok(?:ay)?|approved?|go ahead)\b/i.test(latest)))
           && name === 'request_spend' && args.action !== 'x402') {
         result = { error: 'laso_requires_x402', hint: 'Never transfer to Laso payTo. Use the prepared Laso ticket with action x402.' };
@@ -755,12 +722,13 @@ export async function completeTextChat({
       } else {
         seenTools.add(signature);
         if (READ_ONLY_TOOLS.has(name)) readOnlyToolRan = true;
+        onReplyEvent?.({ type: 'tool_call', name, args });
         try {
           result = await invokeTool(name, args);
         } catch (error) {
           result = { error: typeof error?.code === 'string' ? error.code : 'tool_failed' };
         }
-        if (factLookup && (name === 'web_search' || name === 'web_scrape')) factAnswerNext = true;
+        onReplyEvent?.({ type: 'tool_result', name, result: redactToolResult(result) });
         result = withSolscanUrl(result);
         const purchase = name === 'prepare_shopping' && lasoPurchaseHold(args, result);
         if (purchase) {
@@ -804,18 +772,16 @@ export async function completeTextChat({
       if (failureReply) toolFailures.add(failureReply);
       const payload = typeof result === 'string' ? parseToolArgs(result) : result;
       if (isFundTool(name) && (payload?.error || payload?.ok === false || payload?.success === false)) moneyToolFailed = true;
-      if (payload?.error !== 'search_first') {
-        toolResultSeen = true;
-        if (isFundTool(name) || !payload || typeof payload !== 'object' || Array.isArray(payload)
-            || Object.keys(payload).length === 0 || payload.error || payload.ok === false || payload.success === false) {
-          successfulNonSpendTurn = false;
-        }
+      toolResultSeen = true;
+      if (isFundTool(name) || !payload || typeof payload !== 'object' || Array.isArray(payload)
+        || Object.keys(payload).length === 0 || payload.error || payload.ok === false || payload.success === false) {
+        successfulNonSpendTurn = false;
       }
       const content = typeof result === 'string'
         ? clip(redact(result, secrets), 6000)
         : clip(redact(JSON.stringify(result), secrets), 6000);
       const step = toolStep(name, args, result);
-      if (step && activity.length < 12) activity.push(step);
+      if (step && activity.length < 24) activity.push(step);
       messages.push({
         role: 'tool',
         tool_call_id: id,
@@ -823,7 +789,7 @@ export async function completeTextChat({
       });
     }
     toolRounds += 1;
-    if (repeated || factAnswerNext) forceAnswer = true;
+    if (repeated) forceAnswer = true;
     return null;
   }
 
@@ -851,11 +817,12 @@ export async function completeTextChat({
           retract(firstTool);
         },
         onDelta: content => {
-          if (toolSeen || replyState.fundProposed) return;
           const safe = replyPreview(content, secrets);
           if (safe.startsWith(preview) && safe.length > preview.length) {
             onReplyEvent?.({ type: 'reply_delta', text: safe.slice(preview.length) });
             preview = safe;
+          } else if (!toolSeen && !replyState.fundProposed && safe && !preview) {
+            onReplyEvent?.({ type: 'think_delta', text: safe.slice(0, 2000) });
           }
         },
       });
@@ -879,7 +846,10 @@ export async function completeTextChat({
     const split = splitThink(rawContent);
     const thoughtSource = reasoningText(completion.message) || split.thought || (calls.length ? split.answer : '');
     const thought = thinkStep(redact(thoughtSource, secrets));
-    if (thought && activity.length < 12) activity.push(thought);
+    if (thought) {
+      if (activity.length < 24) activity.push(thought);
+      onReplyEvent?.({ type: 'think_delta', text: thought.text.slice(0, 2000) });
+    }
     const wantsTools = Boolean(toolList) && !forceAnswer && (completion.finishReason === 'tool_calls' || calls.length > 0);
     if (!wantsTools || toolRounds >= rounds) {
       if (wantsTools && calls.length > 0 && toolRounds < rounds) {

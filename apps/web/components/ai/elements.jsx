@@ -61,9 +61,10 @@ function Output({ text, failed = false }) {
   );
 }
 
-export function ToolCall({ name, input, status }) {
+export function ToolCall({ name, input, command, output, status }) {
   const failed = status === 'error';
   const running = status === 'running';
+  const body = [command || input, output].filter(Boolean).join('\n\n');
   const line = (
     <TraceLine status={traceStatus(status)}>
       <TraceIcon>
@@ -72,12 +73,12 @@ export function ToolCall({ name, input, status }) {
       <TraceTitle>{running ? `Running ${name}` : failed ? `Failed ${name}` : name}</TraceTitle>
     </TraceLine>
   );
-  if (!input) return line;
+  if (!body) return line;
   return (
     <TraceCollapsible>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
-        <Output text={input} failed={failed} />
+        <Output text={body} failed={failed} />
       </TraceCollapsibleContent>
     </TraceCollapsible>
   );
@@ -199,9 +200,10 @@ function SearchRow({ label, sites = [], icon = null }) {
   );
 }
 
-function FailedCommand({ title, command, error }) {
+function FailedCommand({ title, command, error, output }) {
   const lines = [];
   if (command) lines.push(`$ ${command}`);
+  if (output) lines.push(output);
   if (error) lines.push(error);
   const body = lines.join('\n');
   const line = (
@@ -238,6 +240,7 @@ export function AgentTrace({ steps = [] }) {
               key={key}
               title={title}
               command={step.command}
+              output={step.output}
               error={step.error || step.detail}
             />
           );
@@ -266,7 +269,9 @@ export function AgentTrace({ steps = [] }) {
           <ToolCall
             key={key}
             name={step.label}
-            input={step.output || step.detail}
+            input={step.command}
+            command={step.command}
+            output={step.output || step.detail}
             status={step.status === 'error' ? 'error' : undefined}
           />
         );

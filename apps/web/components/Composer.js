@@ -222,6 +222,9 @@ export default function Composer({
   const [mention, setMention] = useState('');
   const [mentionCopy, setMentionCopy] = useState(null);
   const [thinking, setThinking] = useState(false);
+  const [liveThink, setLiveThink] = useState('');
+  const [liveText, setLiveText] = useState('');
+  const [liveTools, setLiveTools] = useState([]);
   const [subagents, setSubagents] = useState([]);
   const [subDetail, setSubDetail] = useState(null);
   const [suggesting, setSuggesting] = useState(false);
@@ -692,6 +695,9 @@ export default function Composer({
 
   async function settleChat(result, spoken, prior, grants, run, shown = [], firstLineId = null) {
     if (run !== runRef.current) return;
+    setLiveText('');
+    setLiveThink('');
+    setLiveTools([]);
     if (Array.isArray(result?.subagents)) setSubagents(result.subagents.slice(-8));
     if (result?.claimUrl) {
       setLasoClaim({ botId: botIdRef.current, url: result.claimUrl });
@@ -777,6 +783,9 @@ export default function Composer({
     abortRef.current = controller;
     sendingRef.current = true;
     setThinking(true);
+    setLiveThink('');
+    setLiveText('');
+    setLiveTools([]);
     onThinking?.(true);
     window.clearTimeout(thinkTimer.current);
     try {
@@ -841,6 +850,41 @@ export default function Composer({
           signal: controller.signal,
           onReplyEvent: event => {
             if (run === runRef.current && !controller.signal.aborted) voiceReply.event(event);
+            if (run !== runRef.current || controller.signal.aborted) return;
+            if (event?.type === 'reply_delta' && typeof event.text === 'string') {
+              setLiveText(previous => (previous + event.text).slice(0, 4000));
+            } else if (event?.type === 'think_delta' && typeof event.text === 'string') {
+              setLiveThink(previous => (previous + (previous ? ' ' : '') + event.text).slice(0, 2000));
+            } else if (event?.type === 'tool_call' && typeof event.name === 'string') {
+              const label = String(event.name).replaceAll('_', ' ');
+              const detail = event.args && typeof event.args === 'object'
+                ? (() => { try { return JSON.stringify(event.args).slice(0, 1000); } catch { return ''; } })()
+                : '';
+              setLiveTools(previous => [...previous.slice(-11), {
+                kind: 'tool', name: event.name, label, detail,
+                command: detail ? `${event.name} ${detail}` : event.name,
+                status: 'running',
+              }]);
+            } else if (event?.type === 'tool_result' && typeof event.name === 'string') {
+              const output = typeof event.result === 'string' ? event.result.slice(0, 2000) : (() => { try { return JSON.stringify(event.result).slice(0, 2000); } catch { return ''; } })();
+              setLiveTools(previous => {
+                const next = previous.slice();
+                for (let index = next.length - 1; index >= 0; index -= 1) {
+                  if (next[index]?.name === event.name && next[index]?.status === 'running') {
+                    next[index] = { ...next[index], status: 'done', ...(output ? { output } : {}) };
+                    return next.slice(-12);
+                  }
+                }
+                return [...next.slice(-11), {
+                  kind: 'tool', name: event.name, label: String(event.name).replaceAll('_', ' '),
+                  command: event.name, status: 'done', ...(output ? { output } : {}),
+                }];
+              });
+            } else if (event?.type === 'reply_retract') {
+              setLiveText('');
+              setLiveThink('');
+              setLiveTools([]);
+            }
           },
           onReply: (text) => {
             if (run !== runRef.current) return;
@@ -1284,6 +1328,15 @@ export default function Composer({
         ) : null}
         <input ref={fileRef} className="sr-only" type="file" multiple aria-label="Attach files" />
         <MessageQueue items={queue} onEdit={editQueued} onSendNow={sendQueuedNow} />
+        {thinking && (liveThink || liveText || liveTools.length > 0) ? (
+          <div className="live-trace" aria-live="polite">
+            <AgentTrace steps={[
+              ...(liveThink ? [{ kind: 'think', text: liveThink.slice(0, 2000) }] : []),
+              ...liveTools.slice(-12),
+              ...(liveText ? [{ kind: 'tool', name: 'reply', label: 'Streaming reply', output: liveText.slice(0, 2000), status: 'running' }] : []),
+            ]} />
+          </div>
+        ) : null}
         <PromptBar
           placeholder={`Message ${botName}`}
           label={`Message ${botName}`}

@@ -313,8 +313,7 @@ export async function POST(request, context) {
       const hold = await loadPendingSwapHold();
       return { provider: 'desk', text: hold ? '' : 'This agent has no swap waiting for review.', hold };
     }
-    const trading = ownerAsksForOneTrade(message);
-    return completeTextChat({ ...turnArgs, onMessage: trading ? null : onMessage, onReplyEvent: trading ? null : onReplyEvent });
+    return completeTextChat({ ...turnArgs, onMessage, onReplyEvent });
   }
 
   async function tryAutoSwap(hold, swapHold, swapPreview) {

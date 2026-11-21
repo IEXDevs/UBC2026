@@ -359,6 +359,9 @@ async function readChatStream(response, onReply, onReplyEvent) {
       if (!payload || typeof payload !== 'object') continue;
       if (payload.type === 'reply_delta' && typeof payload.text === 'string') onReplyEvent?.(payload);
       if (payload.type === 'reply_retract') onReplyEvent?.(payload);
+      if (payload.type === 'think_delta' && typeof payload.text === 'string') onReplyEvent?.(payload);
+      if (payload.type === 'tool_call' && typeof payload.name === 'string') onReplyEvent?.(payload);
+      if (payload.type === 'tool_result' && typeof payload.name === 'string') onReplyEvent?.(payload);
       if (typeof payload.error === 'string' && payload.error) {
         onReplyEvent?.({ type: 'reply_retract' });
         if (replies.length > 0) return chatResult({ ...(meta || {}), reply: replies.at(-1), replies });

@@ -12,12 +12,26 @@ const KIND = Object.freeze({
   'approval.requested': 'Approval',
   'approval.granted': 'Approval',
   'approval.consumed': 'Approval',
+  'budget.reserved': 'Budget',
   'payment.x402': 'x402',
   'tx.submitted': 'Transaction',
   'tx.confirmed': 'Transaction',
 });
 
-const CHIP_KINDS = new Set(['tool.call', 'payment.x402', 'tx.submitted', 'tx.confirmed']);
+const CHIP_KINDS = new Set([
+  'tool.call',
+  'trust.gate',
+  'verify.attempt',
+  'verify.settled',
+  'verify.mismatch',
+  'approval.requested',
+  'approval.granted',
+  'approval.consumed',
+  'budget.reserved',
+  'payment.x402',
+  'tx.submitted',
+  'tx.confirmed',
+]);
 
 export function clipTrace(text, max = 72) {
   const clean = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -44,6 +58,7 @@ export function traceModel(entries) {
         id: entry.id,
         name: label,
         argument: clipTrace(entry.summary, 42),
+        detail: clipTrace(entry.summary, 240),
         status: callStatus(entry.kind),
         icon: 'terminal',
       });
