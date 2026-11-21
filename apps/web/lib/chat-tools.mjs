@@ -695,7 +695,10 @@ export function createChatToolInvoker({
 
   return async function invokeTool(name, args = {}, { approveOnce, spendAuthorization, swapTicket, lasoPayment, moveAuthorization } = {}) {
     args = applySituation(name, args, situation);
-    if (isLasoCardRequest(ownerMessage)) {
+    const ownerSaysLaso = isLasoCardRequest(ownerMessage);
+    const modelSaysLaso = args?.provider === 'laso' && String(ownerMessage ?? '').trim() !== ''
+      && lasoCardKind(ownerMessage) !== 'undecided';
+    if (ownerSaysLaso || modelSaysLaso) {
       if (name === 'prepare_shopping') {
         const kind = lasoCardKind(ownerMessage);
         if (kind === 'undecided') {
@@ -710,6 +713,9 @@ export function createChatToolInvoker({
           };
         }
         args = lasoPreparationArgs(args, ownerMessage);
+        if (args?.provider === 'laso' && args.amountUsd == null && ['setup', 'modify', 'intl', 'gift'].includes(args.lasoAction)) {
+          return { ok: false, error: 'laso_amount_required', hint: 'Ask the owner for the amount in one short line, naming what is already known, then prepare again. Never quote or spend without it.' };
+        }
       }
       if (name === 'request_spend' && args.action !== 'x402') {
         return { error: 'laso_requires_x402', hint: 'Use action x402 with the prepared lasoTicket, never a plain transfer to Laso payTo.' };

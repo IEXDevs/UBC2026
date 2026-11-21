@@ -111,9 +111,14 @@ export default function PortfolioGraph({
                 <div className="portfolio-bar" aria-hidden="true">
                   {wallet.holdings?.filter(row => row.usdMicro !== '0').map(row => {
                     const sliceIndex = slices.findIndex(slice => slice.mint === row.mint);
-                    const width = wallet.totalUsdMicro && wallet.totalUsdMicro !== '0'
-                      ? Number((BigInt(row.usdMicro) * 10000n) / BigInt(wallet.totalUsdMicro)) / 100
-                      : 0;
+                    let width = 0;
+                    try {
+                      const part = typeof row.usdMicro === 'string' && /^[0-9]+$/.test(row.usdMicro) ? BigInt(row.usdMicro) : 0n;
+                      const whole = wallet.totalUsdMicro && /^[0-9]+$/.test(wallet.totalUsdMicro) ? BigInt(wallet.totalUsdMicro) : 0n;
+                      width = whole > 0n ? Number((part * 10000n) / whole) / 100 : 0;
+                    } catch {
+                      width = 0;
+                    }
                     return (
                       <i
                         key={row.mint}

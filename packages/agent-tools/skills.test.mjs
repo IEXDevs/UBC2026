@@ -5,6 +5,7 @@ import {
   AVAILABLE_SKILLS,
   parseSkillCommand,
   skillById,
+  skillForMessage,
   skillInstruction,
   skillsCatalogInstruction,
 } from './skills.mjs';
@@ -71,4 +72,23 @@ test('slash skills parse to the harness and ignore normal chat', () => {
   assert.equal(HARNESS_TOOL_NAMES.includes('use_connector'), false);
   assert.equal(HARNESS_TOOL_NAMES.includes('list_connectors'), false);
   assert.ok(HARNESS_TOOL_NAMES.includes('read_subagent_results'));
+});
+
+test(`plain-word Laso asks auto-attach the laso-cards playbook`, () => {
+  assert.equal(skillForMessage(`make me a laso card for $10`).id, `laso-cards`);
+  assert.equal(skillForMessage(`get me a reloadable card`).id, `laso-cards`);
+  assert.equal(skillForMessage(`top up my card`).id, `laso-cards`);
+  assert.equal(skillForMessage(`buy me a prepaid card`).id, `laso-cards`);
+  assert.equal(skillForMessage(`hello there`), null);
+  assert.equal(skillForMessage(`check the price of SOL`), null);
+  assert.equal(skillForMessage(``), null);
+  assert.equal(skillForMessage(null), null);
+});
+
+test(`typo tolerance and top-up phrasing attach, real words do not`, () => {
+  assert.equal(skillForMessage(`actually relodbale please`).id, `laso-cards`);
+  assert.equal(skillForMessage(`reload my card balance`).id, `laso-cards`);
+  assert.equal(skillForMessage(`top up $50 please`).id, `laso-cards`);
+  assert.equal(skillForMessage(`is this reliable?`), null);
+  assert.equal(skillForMessage(`check my card balance`), null);
 });

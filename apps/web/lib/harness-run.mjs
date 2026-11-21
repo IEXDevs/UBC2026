@@ -10,6 +10,7 @@ import {
   parseSkillCommand,
   situationInstruction,
   skillById,
+  skillForMessage,
   skillsCatalogInstruction,
   toOpenAiTools,
 } from '@ubc2026/agent-tools';
@@ -93,9 +94,15 @@ export function prepareOwnerTurn(message, connectors, situation = null, now = ne
   const parsed = parseSkillCommand(message);
   if (!parsed) {
     const task = typeof message === 'string' ? message.trim() : '';
-    return task
-      ? { message: task, skillId: '', instruction: harnessPrompt(connectors, '', clock) }
-      : { error: 'message_required' };
+    if (!task) return { error: 'message_required' };
+    const auto = skillForMessage(task);
+    if (!auto) return { message: task, skillId: '', instruction: harnessPrompt(connectors, '', clock) };
+    return {
+      message: task,
+      skillId: auto.id,
+      autoSkill: true,
+      instruction: `${harnessPrompt(connectors, auto.id, clock)}\nYou were attached automatically from plain words: open with one short line naming the skill (for example "Using ${auto.command} for this."), then work it.`,
+    };
   }
   if (!parsed.task) {
     return { error: 'task_required', reply: `Add what ${parsed.command} should do.` };

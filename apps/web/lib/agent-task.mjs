@@ -39,6 +39,30 @@ export function taskFromRequest(message) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+import { lasoCardKind } from './laso-chat.mjs';
+
+/**
+ * Goal-free first turn: the owner gives a direction, the desk proposes the
+ * goal for one-tap accept instead of interrogating. Any recognizable Laso
+ * card ask maps to card handling; anything else stays empty so the model
+ * proposes (or not). Never overrides an existing goal.
+ */
+export function goalFromFirstMessage(message, currentGoal) {
+  if (hasGeneralGoal(currentGoal)) return '';
+  const text = typeof message === 'string' ? message.trim() : '';
+  if (!text) return '';
+  let kind = 'undecided';
+  try {
+    kind = lasoCardKind(text);
+  } catch { /* plain chat stays goal-free */ }
+  if (kind !== 'undecided') return 'Handle Laso card purchases';
+  if (/\blaso\b|\blasso\b/i.test(text)
+    && /\bcard\b|\bkyc\b|\bclaim\b|\btop[\s-]?up\b|\bwallet\b|\bquote\b|\bamount\b/i.test(text)) {
+    return 'Handle Laso card purchases';
+  }
+  return '';
+}
+
 export function proposedGeneralGoal(candidate, current, pending) {
   const goal = taskLabel(candidate);
   if (!hasGeneralGoal(goal)) return '';

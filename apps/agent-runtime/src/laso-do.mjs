@@ -222,6 +222,26 @@ export async function handleLasoStatus(machine, request, env, now) {
       note: typeof data.note === 'string' ? data.note.slice(0, 300) : undefined,
     });
   }
+  if (view === 'merchants') {
+    const q = url.searchParams.get('q');
+    const path = q && q.length <= 80 ? `/search-merchants?q=${encodeURIComponent(q)}` : '/search-merchants';
+    const result = await lasoGet(fetcher, path, session.idToken);
+    if (result.error) return done(result);
+    const data = result.data;
+    const rows = Array.isArray(data) ? data : (Array.isArray(data?.merchants) ? data.merchants : []);
+    return done({
+      merchants: rows.slice(0, 25).map(row => (
+        row && typeof row === 'object'
+          ? {
+            ...(typeof row.name === 'string' ? { name: row.name.slice(0, 120) } : {}),
+            ...(typeof row.merchant === 'string' ? { merchant: row.merchant.slice(0, 120) } : {}),
+            ...(row.accepted !== undefined ? { accepted: Boolean(row.accepted) } : {}),
+            ...(typeof row.status === 'string' ? { status: row.status.slice(0, 32) } : {}),
+          }
+          : row
+      )),
+    });
+  }
   const cardId = url.searchParams.get('card_id');
   if (cardId) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(cardId)) return noStore({ error: 'invalid_card' }, 400);

@@ -61,3 +61,17 @@ export function withoutRetiredWallets(wallets, ids) {
     && !wallet.deleted_at
   ));
 }
+
+/**
+ * Portfolio views use synthetic `wallet_<address>` ids for linked wallets
+ * that never had a server row. Resolve those to the real directory id by
+ * address so the retire call matches the stored row.
+ */
+export function resolveRetireId(wallets, wallet) {
+  const id = typeof wallet?.id === 'string' ? wallet.id : '';
+  if (!id.startsWith('wallet_') || !wallet?.address) return id;
+  const match = (Array.isArray(wallets) ? wallets : []).find(row => (
+    row && row.address === wallet.address && typeof row.id === 'string' && !row.id.startsWith('wallet_')
+  ));
+  return match ? match.id : id;
+}

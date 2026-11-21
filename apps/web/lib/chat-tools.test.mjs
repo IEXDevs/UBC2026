@@ -64,6 +64,16 @@ test('Laso checkpoint and status reach the bot routes with only facts', async ()
   assert.ok(calls[1][0].includes('view=card') && calls[1][0].includes('card_id=card_1'));
 });
 
+test('Laso merchant lookup reaches the status route with view and query', async () => {
+  const calls = [];
+  const invoke = createChatToolInvoker({ ownerId: 'user_1', botId: 'bot_1', ownerMessage: 'dominos pizza', runtimeBase: 'https://runtime.invalid', fetcher: async (url, init) => {
+    calls.push([String(url), init.method]);
+    return Response.json({ ok: true });
+  } });
+  await invoke('laso_status', { botId: 'bot_1', view: 'merchants', q: 'dominos' });
+  assert.ok(calls[0][0].includes('view=merchants') && calls[0][0].includes('q=dominos'));
+});
+
 test('Laso forwards numeric and string dollar amounts and keeps login links and tokens out of model results', async () => {
   const invoke = createChatToolInvoker({ ownerId: 'user_1', botId: 'bot_1', runtimeBase: 'https://runtime.invalid', fetcher: async (url, init) => {
     assert.equal(String(url), 'https://runtime.invalid/bots/bot_1/shopping/prepare');
@@ -1048,4 +1058,16 @@ test('request_spend posts a 1 USDC buy without a destination', async () => {
   assert.equal(spent.steps.includes('trust-gate'), true);
   assert.equal(spent.steps.includes('reserve'), true);
   assert.equal(spent.steps.includes('approval-mode'), true);
+});
+
+test(`a known card kind without an amount asks instead of quoting`, async () => {
+  let quoted = false;
+  const invoke = createChatToolInvoker({ ownerId: `user_1`, botId: `bot_1`, ownerMessage: `get me a prepaid card for dominos`, runtimeBase: `https://runtime.invalid`, fetcher: async () => {
+    quoted = true;
+    return Response.json({ ok: true });
+  } });
+  const result = await invoke(`prepare_shopping`, { botId: `bot_1`, provider: `laso`, type: `prepaid` });
+  assert.equal(result.error, `laso_amount_required`);
+  assert.equal(quoted, false);
+  assert.match(result.hint, /amount/);
 });

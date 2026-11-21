@@ -9,10 +9,10 @@ import { publicApiSummary, thinkStep, toolStep } from './chat-activity.mjs';
 import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
 import { grantCovers, isFundTool, toolAccessRequest, withDefaultBotId } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
-import { isLasoCardRequest, LASO_CARD_CHOICE_PROMPT, lasoCardKind, lasoPreparationArgs, lasoPurchaseHold, lasoReloadableReply } from './laso-chat.mjs';
+import { isLasoCardRequest, LASO_CARD_CHOICE_PROMPT, lasoCardKind, lasoMerchantFrom, lasoPreparationArgs, lasoPrepareLine, lasoPurchaseHold, lasoReloadableReply, lasoStatusLine, requestedLasoAmount } from './laso-chat.mjs';
 import { META_SPARK_MODEL, reasoningEffortFor } from './thinking-levels.mjs';
 import { MODEL_ID, parseModelProvider } from './ai-provider.mjs';
-import { AGENT_TASK_TOOL, GOAL_QUESTION, agentTaskTool, hasGeneralGoal, taskLabel } from './agent-task.mjs';
+import { AGENT_TASK_TOOL, GOAL_QUESTION, agentTaskTool, goalFromFirstMessage, hasGeneralGoal, taskLabel } from './agent-task.mjs';
 import {
   clipOwnerMessage,
   contextWindowFor,
@@ -271,6 +271,11 @@ function cardCheckout(message, history) {
 function toolFailureReply(name, result) {
   const payload = typeof result === 'string' ? parseToolArgs(result) : result;
   if (!payload || (!payload.error && payload.ok !== false)) return '';
+  if ((name === 'laso_status' || name === 'prepare_shopping') && typeof payload.error === 'string') {
+    const line = lasoStatusLine(payload);
+    if (line) return line;
+    if (payload.error === 'laso_card_choice_required' || payload.error === 'laso_reloadable_human_steps') return '';
+  }
   const label = {
     __proto__: null,
     lookup_recipient: 'recipient lookup', get_price: 'price lookup', get_wallets: 'wallet lookup',
@@ -633,6 +638,7 @@ export async function completeTextChat({
 
   function finish(text, hold = null) {
     const finalText = ownerReply(text, hold);
+    const goal = proposedGoal || goalFromFirstMessage(latest, botGoal);
     return {
       model: modelId,
       text: finalText || spoken.at(-1) || '',
@@ -643,7 +649,7 @@ export async function completeTextChat({
       ...(activity.length > 0 ? { activity } : {}),
       ...(usage.total > 0 ? { usage } : {}),
       ...(agentTask ? { agentTask } : {}),
-      ...(proposedGoal ? { proposedGoal } : {}),
+      ...(goal ? { proposedGoal: goal } : {}),
     };
   }
 
@@ -723,12 +729,14 @@ export async function completeTextChat({
         seenTools.add(signature);
         if (READ_ONLY_TOOLS.has(name)) readOnlyToolRan = true;
         onReplyEvent?.({ type: 'tool_call', name, args });
+        onReplyEvent?.({ type: 'tool_progress', name, index: toolRounds + 1, total: rounds, status: 'running' });
         try {
           result = await invokeTool(name, args);
         } catch (error) {
           result = { error: typeof error?.code === 'string' ? error.code : 'tool_failed' };
         }
         onReplyEvent?.({ type: 'tool_result', name, result: redactToolResult(result) });
+        onReplyEvent?.({ type: 'tool_progress', name, index: toolRounds + 1, total: rounds, status: 'done' });
         result = withSolscanUrl(result);
         const purchase = name === 'prepare_shopping' && lasoPurchaseHold(args, result);
         if (purchase) {
@@ -740,23 +748,39 @@ export async function completeTextChat({
           const prepared = typeof result === 'string' ? parseToolArgs(result) : result;
           const checkpointBotId = (typeof botId === 'string' && botId) || args?.botId || rawArgs?.botId;
           if (prepared?.error === 'laso_card_choice_required' && args.provider === 'laso') {
-            try {
-              if (typeof invokeTool === 'function' && typeof checkpointBotId === 'string' && checkpointBotId) {
-                await invokeTool('laso_checkpoint', { botId: checkpointBotId, kind: 'undecided', stage: 'waiting-owner' });
-              }
-            } catch { /* checkpoint is best-effort; the choice prompt is the contract */ }
-            return { kind: 'reply', label: LASO_CARD_CHOICE_PROMPT };
+            if (typeof invokeTool === 'function' && typeof checkpointBotId === 'string' && checkpointBotId) {
+              void invokeTool('laso_checkpoint', { botId: checkpointBotId, kind: 'undecided', stage: 'waiting-owner' }).catch(() => {});
+            }
+            const choiceAmount = requestedLasoAmount(latest);
+            const choiceMerchant = lasoMerchantFrom(latest);
+            const choiceLead = choiceAmount || choiceMerchant
+              ? `Got it —${choiceAmount ? ` $${choiceAmount}` : ''}${choiceMerchant ? ` for ${choiceMerchant}` : ''}. `
+              : '';
+            return { kind: 'reply', label: `${choiceLead}${LASO_CARD_CHOICE_PROMPT}` };
+          }
+          if (prepared?.error === 'laso_amount_required') {
+            const needKind = lasoCardKind(latest);
+            const needNoun = needKind === 'gift' ? 'gift card'
+              : needKind === 'top-up' ? 'top-up'
+              : needKind === 'intl' ? 'international card' : 'prepaid card';
+            const needMerchant = lasoMerchantFrom(latest);
+            const needCurrency = needKind === 'gift' ? ' in the product currency' : '';
+            publish(`Got it — ${needNoun}${needMerchant ? ` for ${needMerchant}` : ''}. One quick question before I quote it.`);
+            return { kind: 'reply', label: `How much should I put on it${needMerchant ? ` for ${needMerchant}` : ''}${needCurrency}? Give me the exact total and I will quote it — nothing moves until you confirm.` };
           }
           if (prepared?.error === 'laso_reloadable_human_steps') {
-            try {
-              if (typeof invokeTool === 'function' && typeof checkpointBotId === 'string' && checkpointBotId) {
-                await invokeTool('laso_checkpoint', { botId: checkpointBotId, kind: 'reloadable', stage: 'waiting-owner', note: 'reloadable human steps handed over' });
-              }
-            } catch { /* checkpoint is best-effort; the handover reply is the contract */ }
+            const handoverMerchant = lasoMerchantFrom(latest);
+            publish(handoverMerchant
+              ? `On it — checking ${handoverMerchant} first, then your KYC and issuer-code steps, then I fund and create.`
+              : 'On it — reloadable means your KYC and issuer-code steps first, then I fund and create. Checking where you are now.');
+            if (typeof invokeTool === 'function' && typeof checkpointBotId === 'string' && checkpointBotId) {
+              void invokeTool('laso_checkpoint', { botId: checkpointBotId, kind: 'reloadable', stage: 'waiting-owner', note: 'reloadable human steps handed over' }).catch(() => {});
+            }
             return { kind: 'reply', label: `${lasoReloadableReply()}\nReply done when you finish the owner steps and I will continue from the checkpoint.` };
           }
           if (!prepared || Object.keys(prepared).length === 0 || prepared.error || prepared.ok === false) {
-            return { kind: 'reply', label: 'I could not prepare the Laso card. The card service or request validation failed. No purchase was submitted. Please try again with an amount from $5 to $1000.' };
+            const prepLine = lasoPrepareLine(prepared?.error, args?.lasoAction);
+            return { kind: 'reply', label: prepLine || 'I could not prepare the Laso card. The card service or request validation failed. No purchase was submitted. Please try again with an amount from $5 to $1000.' };
           }
         }
         const receipt = txReceiptFromResult(result);

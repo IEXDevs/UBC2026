@@ -183,3 +183,18 @@ test('skills and subagents use the connected apps and stop at one handoff', asyn
   assert.equal(fullUnder.confirmed, undefined);
   assert.equal(fullUnder.reviewCap, '25000000');
 });
+
+test(`plain-word card asks auto-attach the laso playbook without a slash command`, () => {
+  const attached = prepareOwnerTurn(`make me a laso card for $10 dominos`, []);
+  assert.equal(attached.skillId, `laso-cards`);
+  assert.equal(attached.autoSkill, true);
+  assert.equal(attached.message, `make me a laso card for $10 dominos`);
+  assert.match(attached.instruction, /Skill \/laso-cards/);
+  assert.match(attached.instruction, /attached automatically/);
+  const plain = prepareOwnerTurn(`just chat`, []);
+  assert.equal(plain.skillId, ``);
+  assert.equal(plain.autoSkill, undefined);
+  const slashed = prepareOwnerTurn(`/laso-cards make me a card`, []);
+  assert.equal(slashed.skillId, `laso-cards`);
+  assert.equal(slashed.autoSkill, undefined);
+});

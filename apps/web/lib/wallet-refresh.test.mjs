@@ -39,3 +39,20 @@ test('the account total stays visible until an available replacement arrives', (
   assert.match(accountValue, /if \(pending\) return/);
   assert.match(accountValue, /if \(hasAccountValue\(enriched\.portfolio\)\) setPortfolio\(enriched\.portfolio\)/);
 });
+
+test('the send pane defines its recipient before deriving the effective asset', () => {
+  const sheet = source('components/WalletsSheet.js');
+  const sendPane = sheet.slice(sheet.indexOf('function SendPane('));
+  const pickedAt = sendPane.indexOf('const picked = destinations.find');
+  const targetAt = sendPane.indexOf('const target = picked');
+  const effectiveAt = sendPane.indexOf('const effectiveAsset = target');
+  assert.ok(pickedAt >= 0 && targetAt > pickedAt && effectiveAt > targetAt);
+  assert.match(sendPane, /\/\^\[0-9\]\+\$\/\.test\(units\)/);
+  assert.match(sendPane, /\/\^\[0-9\]\+\$\/\.test\(effectiveAsset\.amount\)/);
+});
+
+test('the portfolio graph tolerates missing usdMicro values', () => {
+  const graph = source('components/PortfolioGraph.js');
+  assert.doesNotMatch(graph, /BigInt\(row\.usdMicro\) \* 10000n\) \/ BigInt\(wallet\.totalUsdMicro\)/);
+  assert.match(graph, /\/\^\[0-9\]\+\$\/\.test\(row\.usdMicro\)/);
+});

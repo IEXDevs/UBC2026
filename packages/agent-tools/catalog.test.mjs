@@ -196,7 +196,7 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.deepEqual(checkpoint.voiceCalls[1], { method: 'GET', path: '/bots/:botId/laso/checkpoint', query: [], body: [] });
   const status = DASHBOARD_TOOLS.find((tool) => tool.name === 'laso_status');
   assert.equal(status.voiceCalls[0].method, 'GET');
-  assert.deepEqual(status.voiceCalls[0].query, ['view', 'card_id', 'card_type']);
+  assert.deepEqual(status.voiceCalls[0].query, ['view', 'card_id', 'card_type', 'q']);
   const away = DASHBOARD_TOOLS.find((tool) => tool.name === 'what_happened_while_away');
   assert.deepEqual(away.voiceCalls.map((entry) => ({ method: entry.method, path: entry.path })), [
     { method: 'GET', path: '/api/events' },

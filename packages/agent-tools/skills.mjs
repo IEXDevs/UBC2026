@@ -109,7 +109,41 @@ export function skillInstruction(id) {
   return skill ? skill.instruction : '';
 }
 
+/**
+ * Plain-word intent match so the owner never has to type a /command.
+ * A Laso card ask in any words attaches the /laso-cards playbook.
+ * Explicit /commands still win: this only runs when there is none.
+ * Mirror of shopping/laso-card.mjs mentionsReloadable — keep in sync.
+ */
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+function mentionsReloadable(message) {
+  const words = String(message ?? '').toLowerCase().match(/[a-z]+/g) || [];
+  return words.some(word =>
+    word.length >= 7 && word.length <= 11 && /^(relo|rela|rea)/.test(word) && editDistance(word, 'reloadable') <= 3
+  );
+}
+
+const LASO_INTENT = /\blaso\b|\blasso\b|\bnon[\s-]?reloadable\b|\bprepaid cards?\b|\btop[\s-]?up\b|\badd\s*funds\b|\bfund\s+(?:the\s|my\s)?card\b|\breload\s+(?:the\s|my\s)?card\b|\bgift\s*cards?\b/i;
+
+export function skillForMessage(message) {
+  const text = typeof message === 'string' ? message : '';
+  if (!text.trim()) return null;
+  if (LASO_INTENT.test(text) || mentionsReloadable(text)) return SKILL_BY_ID.get('laso-cards') || null;
+  return null;
+}
+
 export function skillsCatalogInstruction() {
   const names = AGENT_SKILLS.map(skill => `${skill.command} (${skill.description})`).join('; ');
-  return `The owner can start a skill with ${names}. Follow that skill when the message uses its command. Other skills stay out of this prompt until the owner calls one.`;
+  return `The owner can start a skill with ${names}. Follow that skill when the message uses its command. A skill whose request is obvious from plain words arrives attached automatically with skillId set — say so in one short line, then work it. Other skills stay out of this prompt.`;
 }

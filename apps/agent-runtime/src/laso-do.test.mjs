@@ -96,6 +96,28 @@ test('Laso status reads strip card numbers and honor expiry', async () => {
   assert.ok(calls.length >= 2);
 });
 
+test('Laso merchants view trims rows and passes the merchant query', async () => {
+  const machine = new BotStateMachine();
+  const missing = await machine.handle(get('/laso/status?view=merchants&q=dominos'));
+  assert.equal((await missing.json()).error, 'laso_session_expired');
+  await machine.put('lasoSession', { idToken: 'tok_123', expiresAt: Date.now() + 3600_000 });
+  const calls = [];
+  const env = { fetch: async (url, init) => {
+    calls.push(String(url));
+    assert.match(init.headers.Authorization, /^Bearer tok_123$/);
+    return Response.json({ merchants: [
+      { name: 'Dominos', accepted: true, status: 'active', claimUrl: 'https://owner-only.example/claim', junk: 'x'.repeat(500) },
+    ] });
+  } };
+  const res = await machine.handle(get('/laso/status?view=merchants&q=dominos'), env);
+  const payload = await res.json();
+  assert.equal(payload.merchants.length, 1);
+  assert.equal(payload.merchants[0].name, 'Dominos');
+  assert.equal(payload.merchants[0].accepted, true);
+  assert.equal(JSON.stringify(payload).includes('owner-only'), false);
+  assert.ok(calls[0].includes('/search-merchants?q=dominos'));
+});
+
 test('public laso routes require the owner', async () => {
   const env = { PRODUCT: 'Maelstrom', SOLANA_CLUSTER: 'mainnet-beta' };
   for (const [method, path] of [

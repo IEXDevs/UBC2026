@@ -4419,6 +4419,13 @@ button.wallet-export:not(:disabled):hover {
 
 .talk-dock { margin: 8px 16px 18px; }
 
+.live-trace.is-top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 0 8px;
+}
+
 .entry-suggestions {
   display: flex;
   flex-direction: column;

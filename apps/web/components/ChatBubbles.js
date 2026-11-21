@@ -194,6 +194,7 @@ export default function ChatBubbles({
                 </BubbleContent>
               </Bubble>
               <Sources urls={urls} />
+              {line.skill ? <span className="sub-line-skill" title="Attached skill">/{line.skill}</span> : null}
               {onGoalDecision && line.id === goalProposalId ? (
                 <div className="access-request" role="group" aria-label="General goal proposal">
                   <button type="button" onClick={() => onGoalDecision(line, true)}>Update goal</button>

@@ -37,7 +37,7 @@ import { portfolioErrorNote } from '../lib/portfolio.mjs';
 import { cachedPortfolio, rememberPortfolio } from '../lib/portfolio-cache.mjs';
 import { exportWalletIdForSheet } from '../lib/privy-export.mjs';
 import { walletPickLabel, walletPickTag } from '../lib/wallet-pick.mjs';
-import { describeWallets, formatAmount, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
+import { describeWallets, formatAmountSafe, formatBaseUnits, recentCounterparties, sendDestinations, shortAddress, walletGlance } from '../lib/money-views.mjs';
 import {
   deskTokens,
   displayToUnits,
@@ -958,7 +958,7 @@ function WalletConnection({ wallet }) {
 function SendPane({
   active,
   destinations = [],
-  tokens,
+  tokens = [],
   preferredAsset = '',
   frozen,
   observing = false,
@@ -976,23 +976,25 @@ function SendPane({
   const [folded, setFolded] = useState(false);
 
   useEffect(() => {
-    if (!tokens.some(token => token.id === assetId)) {
-      setAssetId(tokens[0]?.id || '');
+    const list = Array.isArray(tokens) ? tokens : [];
+    if (!list.some(token => token.id === assetId)) {
+      setAssetId(list[0]?.id || '');
       setAmount('');
     }
   }, [tokens, assetId]);
   useEffect(() => { if (preferredAsset) { setAssetId(preferredAsset); setAmount(''); } }, [preferredAsset]);
 
-  const asset = tokens.find(token => token.id === assetId) || tokens[0] || null;
-  const effectiveAsset = target?.kind === 'sns'
-    ? (tokens.find(token => token.symbol === 'USDC') || asset)
-    : asset;
+  const list = Array.isArray(tokens) ? tokens : [];
+  const asset = list.find(token => token.id === assetId) || list[0] || null;
   const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
   const target = picked?.kind === 'recent'
     ? parseSendTarget(picked.caption)
     : picked
       ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, frozen: picked.frozen, walletKind: picked.walletKind }
       : parseSendTarget(to);
+  const effectiveAsset = target?.kind === 'sns'
+    ? (list.find(token => token.symbol === 'USDC') || asset)
+    : asset;
   const units = effectiveAsset ? displayToUnits(amount, effectiveAsset.decimals) : null;
   const [snsAddress, setSnsAddress] = useState('');
   const [snsFailed, setSnsFailed] = useState(false);
@@ -1052,7 +1054,15 @@ function SendPane({
   const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
   const destinationAddress = target?.kind === 'wallet' || target?.kind === 'address'
     ? target.address : target?.kind === 'sns' ? snsAddress : handleReady ? handleRecipient.address : '';
-  const enough = effectiveAsset && units && BigInt(units) <= BigInt(effectiveAsset.amount);
+  const enough = (() => {
+    try {
+      if (!effectiveAsset || !units || !/^[0-9]+$/.test(units)) return false;
+      if (!effectiveAsset.amount || !/^[0-9]+$/.test(effectiveAsset.amount)) return false;
+      return BigInt(units) <= BigInt(effectiveAsset.amount);
+    } catch {
+      return false;
+    }
+  })();
   const ready = Boolean(
     active && !frozen && target && enough && destinationAddress && destinationAddress !== active.address
     && (
@@ -1119,7 +1129,13 @@ function SendPane({
               type="button"
               className="phantom-max-btn"
               onClick={() => {
-                setAmount(formatAmount(asset.amount, asset.decimals));
+                try {
+                  if (typeof asset.amount === 'string' && /^[0-9]+$/.test(asset.amount)) {
+                    setAmount(formatBaseUnits(asset.amount, asset.decimals));
+                  }
+                } catch {
+                  /* keep the typed amount when the balance is unavailable */
+                }
                 setStatus('');
                 setFolded(false);
               }}
@@ -1140,10 +1156,10 @@ function SendPane({
             <GlideSelect
               ariaLabel="Asset"
               value={asset?.id || ''}
-              options={tokens.map(token => ({
+              options={list.map(token => ({
                 value: token.id,
                 label: `${token.symbol}`,
-                tag: `${formatAmount(token.amount, token.decimals)}`,
+                tag: formatAmountSafe(token.amount, token.decimals) ?? '—',
               }))}
               onChange={id => { setAssetId(id); setAmount(''); setStatus(''); setFolded(false); }}
             />
@@ -1153,10 +1169,14 @@ function SendPane({
           <p className="quiet" role="status">No sendable balance loaded for this wallet.</p>
         ) : (
           <p className="quiet phantom-avail">
-            Balance: {formatAmount(asset.amount, asset.decimals)} {asset.symbol}
+            Balance: {formatAmountSafe(asset.amount, asset.decimals) ?? 'unavailable'} {asset.symbol}
           </p>
         )}
         {asset && units && !enough ? <p className="quiet phantom-error-text" role="status">Amount exceeds this wallet’s balance.</p> : null}
+        {asset && units && !enough && active?.address ? (
+          <p className="quiet" role="status">Insufficient funds — send {effectiveAsset?.symbol || asset.symbol} to this wallet to top it up.</p>
+        ) : null}
+        {asset && units && !enough && active?.address ? <AddressCopy address={active.address} compact /> : null}
       </div>
 
       <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
@@ -1167,6 +1187,7 @@ function SendPane({
         disabled={!ready}
         resetKey={`${resetKey}:${to}:${amount}:${effectiveAsset?.id || ''}`}
         onCommit={() => {
+          if (!active || !effectiveAsset || !units || !destinationAddress) return;
           setSendComplete(false);
           const pending = {
             target,

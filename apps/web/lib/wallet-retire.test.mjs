@@ -4,6 +4,7 @@ import {
   forgetRetiredWallet,
   readRetiredWalletIds,
   rememberRetiredWallet,
+  resolveRetireId,
   retireTarget,
   withoutRetiredWallets,
 } from './wallet-retire.mjs';
@@ -45,4 +46,18 @@ test('forgetting a retired wallet restores it to readRetiredWalletIds', () => {
   const empty = forgetRetiredWallet(storage, 'user_1', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
   assert.deepEqual(empty, []);
   assert.deepEqual(readRetiredWalletIds(storage, 'user_1'), []);
+});
+
+test('synthetic portfolio ids resolve to the stored row by address', () => {
+  const wallets = [
+    { id: 'w_real', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
+    { id: 'w_main', address: '11111111111111111111111111111111' },
+  ];
+  assert.equal(
+    resolveRetireId(wallets, { id: 'wallet_EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' }),
+    'w_real',
+  );
+  assert.equal(resolveRetireId(wallets, { id: 'w_real', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' }), 'w_real');
+  assert.equal(resolveRetireId([], { id: 'wallet_abc', address: 'abc' }), 'wallet_abc');
+  assert.equal(resolveRetireId(wallets, null), '');
 });

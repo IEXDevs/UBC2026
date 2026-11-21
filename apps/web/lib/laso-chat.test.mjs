@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cacheSpendConfirmation, LASO_CARD_CHOICE_PROMPT, lasoCardKind, lasoPreparationArgs, lasoPurchaseHold, lasoReloadableChecklist, lasoReloadableReply, lasoResumeDecision, pendingSpendConfirmation } from './laso-chat.mjs';
+import { cacheSpendConfirmation, LASO_CARD_CHOICE_PROMPT, lasoCardKind, lasoPreparationArgs, lasoPurchaseHold, lasoReloadableChecklist, lasoReloadableReply, lasoResumeDecision, lasoStatusLine, pendingSpendConfirmation } from './laso-chat.mjs';
 import { sealAssetSpendHold, resumeAssetSpend } from './chat-spend-confirmation.mjs';
 import { createChatToolInvoker, serializeToolResult } from './chat-tools.mjs';
 import { completeTextChat } from './text-chat.mjs';
@@ -214,6 +214,7 @@ test('a named Laso reloadable request hands over the human steps even if the mod
     assert.match(reply.text, /verify-card-issuer-link/);
     assert.match(reply.text, /Reply done/);
     assert.equal(modelCalls, 1);
+    await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(checkpointCalls.length, 1);
     assert.match(checkpointCalls[0], /\/laso\/checkpoint$/);
   }
@@ -245,11 +246,12 @@ test('an undecided Laso card request asks the choice without a follow-up model c
   assert.equal(reply.hold, undefined);
   assert.match(reply.text, /Reloadable or non-reloadable USA/);
   assert.equal(calls, 1);
+  await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(checkpointCalls.length, 1);
 });
 
 test('Laso tool failures and empty results return a preparation error without a follow-up model call', async () => {
-  for (const failure of [null, '{}', { error: 'invalid_amount' }, { ok: false }, new Error('offline')]) {
+  for (const failure of [null, '{}', { ok: false }, new Error('offline')]) {
     let calls = 0;
     const reply = await completeTextChat({
       modelApiKey: 'LLM_1607358788850350_testsecretvalue', message: 'get me a laso finance reloadable card',
@@ -266,6 +268,26 @@ test('Laso tool failures and empty results return a preparation error without a 
     assert.match(reply.text, /could not prepare the Laso card/);
     assert.doesNotMatch(reply.text, /model call failed/);
     assert.equal(calls, 1);
+  }
+});
+
+test('an out-of-range Laso amount names the right window instead of the generic error', async () => {
+  for (const [message, action, range] of [
+    ['get a $3 laso card', 'setup', '$5 to $1000'],
+    ['top up $20000', 'modify', '$5 to $10,000'],
+  ]) {
+    const reply = await completeTextChat({
+      modelApiKey: 'LLM_1607358788850350_testsecretvalue', message,
+      tools: [{ type: 'function', function: { name: 'prepare_shopping', parameters: { type: 'object' } } }],
+      fetcher: async () => Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [
+        { id: 'prepare', type: 'function', function: { name: 'prepare_shopping', arguments: JSON.stringify({ ...args, lasoAction: action }) } },
+      ] } }] }),
+      invokeTool: async () => ({ ok: false, error: 'invalid_amount' }),
+    });
+    assert.equal(reply.hold, undefined);
+    assert.match(reply.text, /outside the range/);
+    assert.match(reply.text, new RegExp(range.replace(/[$]/g, '\\$')));
+    assert.match(reply.text, /No purchase was submitted/);
   }
 });
 
@@ -308,5 +330,82 @@ test('a reloadable request that only scrapes docs is nudged to prepare instead o
   assert.match(reply.text, /three steps first/);
   assert.match(reply.text, /Reply done/);
   assert.equal(modelCalls, 2);
+  await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(checkpointCalls.length, 1);
+});
+
+test(`a reloadable handover speaks progress first instead of one silent reply`, async () => {
+  const spoken = [];
+  const reply = await completeTextChat({
+    modelApiKey: `LLM_1607358788850350_testsecretvalue`, message: `get me a laso finance reloadable card`, botId: context.botId,
+    tools: [{ type: `function`, function: { name: `prepare_shopping`, parameters: { type: `object` } } }],
+    onMessage: text => spoken.push(text),
+    fetcher: async () => Response.json({ choices: [{ finish_reason: `tool_calls`, message: { content: null, tool_calls: [
+      { id: `prepare`, type: `function`, function: { name: `prepare_shopping`, arguments: JSON.stringify(args) } },
+    ] } }] }),
+    invokeTool: async () => ({ ok: false, error: `laso_reloadable_human_steps`, steps: [], hint: `human` }),
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(spoken.length >= 1);
+  assert.match(spoken[0], /On it/);
+  assert.match(reply.text, /Reply done/);
+  assert.notEqual(spoken[0], reply.text);
+});
+
+test(`merchant extraction powers the natural first line`, async () => {
+  const { lasoMerchantFrom, requestedLasoAmount } = await import(`./laso-chat.mjs`);
+  assert.equal(lasoMerchantFrom(`make me a laso card for $10 dominos pizza`), `Dominos`);
+  assert.equal(lasoMerchantFrom(`order from Domino\u2019s please`), `Dominos`);
+  assert.equal(lasoMerchantFrom(`card for amazon order $25`), `Amazon`);
+  assert.equal(lasoMerchantFrom(`pizza at joes diner for $15`), `Joes diner`);
+  assert.equal(lasoMerchantFrom(`make me a card`), null);
+  assert.equal(lasoMerchantFrom(`what about dominos`), `Dominos`);
+  assert.equal(lasoMerchantFrom(``), null);
+  assert.equal(lasoMerchantFrom(null), null);
+  assert.equal(requestedLasoAmount(`load 10 bucks`), `10`);
+  assert.equal(requestedLasoAmount(`$1,000 please`), `1000`);
+  assert.equal(requestedLasoAmount(`for $10.50 worth`), `10.50`);
+  assert.equal(requestedLasoAmount(`$10 and $20`), null);
+});
+
+test(`Laso status errors map to natural owner-safe lines`, () => {
+  assert.match(lasoStatusLine({ error: `laso_session_expired` }), /session lapsed/);
+  assert.match(lasoStatusLine({ error: `laso_session_expired` }), /dashboard link/);
+  assert.doesNotMatch(lasoStatusLine({ error: `laso_session_expired` }), /https?:\/\//);
+  assert.match(lasoStatusLine({ error: `kyc_required` }), /KYC first/);
+  assert.match(lasoStatusLine({ error: `kyc_required` }), /Nothing was charged/);
+  assert.match(lasoStatusLine({ error: `card_unavailable` }), /international card instead/);
+  assert.match(lasoStatusLine({ error: `unknown_laso_server_id` }), /catalog id/);
+  assert.match(lasoStatusLine({ error: `payment_not_found` }), /no record/);
+  assert.match(lasoStatusLine({ error: `account_balance_not_found` }), /no record/);
+  assert.match(lasoStatusLine({ error: `rate_limited`, retry_after_seconds: 30 }), /30 seconds/);
+  assert.match(lasoStatusLine({ error: `too_many_requests` }), /slow down/);
+  assert.match(lasoStatusLine({ error: `laso_status_unavailable` }), /could not reach Laso/);
+  assert.match(lasoStatusLine({ error: `laso_requires_x402` }), /prepared ticket/);
+  assert.equal(lasoStatusLine({ error: `laso_card_choice_required` }), ``);
+  assert.equal(lasoStatusLine({ error: `laso_reloadable_human_steps` }), ``);
+  assert.equal(lasoStatusLine({ error: `something_else` }), ``);
+  assert.equal(lasoStatusLine({ ok: true }), ``);
+  assert.equal(lasoStatusLine(null), ``);
+});
+
+test(`settlement and prepare failures map to natural owner-safe lines`, async () => {
+  const { lasoPrepareLine, lasoStatusLine } = await import(`./laso-chat.mjs`);
+  assert.match(lasoStatusLine({ error: `laso_payment_rejected` }), /nothing was charged/);
+  assert.match(lasoStatusLine({ error: `payment_already_used` }), /did not charge again/);
+  assert.match(lasoStatusLine({ error: `laso_settlement_unknown` }), /checking status/);
+  assert.match(lasoStatusLine({ error: `gift_country` }), /two-letter code/);
+  assert.match(lasoPrepareLine(`invalid_amount`, `setup`), /\$5 to \$1000/);
+  assert.match(lasoPrepareLine(`invalid_amount`, `modify`), /\$5 to \$10,000/);
+  assert.match(lasoPrepareLine(`invalid_amount`, `intl`), /whole dollars \$100 to \$1000/);
+  assert.match(lasoPrepareLine(`invalid_amount`, `gift`), /product currency/);
+  assert.match(lasoPrepareLine(`invalid_amount`, ``), /No purchase was submitted/);
+  assert.match(lasoPrepareLine(`unknown_laso_server_id`), /catalog/);
+  assert.match(lasoPrepareLine(`gift_product_required`), /catalog/);
+  assert.match(lasoPrepareLine(`laso_payment_rejected`), /nothing was charged/);
+  assert.match(lasoPrepareLine(`payment_already_used`), /did not charge again/);
+  assert.match(lasoPrepareLine(`laso_settlement_unknown`), /checking status/);
+  assert.equal(lasoPrepareLine(`laso_card_choice_required`), ``);
+  assert.equal(lasoPrepareLine(`nope`), ``);
+  assert.equal(lasoPrepareLine(null), ``);
 });

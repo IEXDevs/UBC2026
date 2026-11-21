@@ -58,6 +58,7 @@ import {
   forgetRetiredWallet,
   readRetiredWalletIds,
   rememberRetiredWallet,
+  resolveRetireId,
   withoutRetiredWallets,
 } from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
@@ -179,7 +180,6 @@ function AuthedShell() {
   const [walletNote, setWalletNote] = useState('');
   const [walletError, setWalletError] = useState('');
   const [deskEntry, setDeskEntry] = useState(null);
-  const [deskLogout, setDeskLogout] = useState(null);
   const ownerId = ownerIdFromPrivyUser(user, signedIn);
   const deskOwner = devPreview && devAllowed ? null : ownerId;
   const deskChecked = Boolean(deskOwner && deskEntry?.ownerId === deskOwner);
@@ -251,19 +251,6 @@ function AuthedShell() {
     }
     await withPrivyLogout(window, () => logout());
   }, [logout, ownerId]);
-
-  const onDeskStatusUnavailable = useCallback(async () => {
-    setDeskLogout('signing-out');
-    try {
-      await onLogout();
-    } catch {
-      setDeskLogout('retry');
-    }
-  }, [onLogout]);
-
-  useEffect(() => {
-    if (ready && !authenticated) setDeskLogout(null);
-  }, [ready, authenticated]);
 
   useEffect(() => {
     if (!devAllowed) return undefined;
@@ -408,16 +395,15 @@ function AuthedShell() {
     );
   }
 
-  if (!deskLogout && showSessionHold({ privyConfigured: true, ready })) {
+  if (showSessionHold({ privyConfigured: true, ready })) {
     return <SessionHold />;
   }
 
-  if (deskLogout || signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
+  if (signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
     return (
       <SignInPage
         disabled={!ready || signInHold || authenticated}
         onLogin={login}
-        onRetrySignOut={deskLogout === 'retry' && authenticated ? onDeskStatusUnavailable : null}
         onDeveloperPreview={devAllowed ? enterDevPreview : null}
         onHoldChange={setSignInHold}
       />
@@ -434,7 +420,6 @@ function AuthedShell() {
         accountLabel={privyAccountLabel(user)}
         getAccessToken={getAccessToken}
         onSignOut={onLogout}
-        onStatusUnavailable={onDeskStatusUnavailable}
         onUnlock={until => {
           try { writeDeskSession(window.localStorage, deskOwner, until); } catch { /* this tab can still enter */ }
           setDeskEntry({ ownerId: deskOwner, until });
@@ -1282,9 +1267,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       }));
       return { ok: true };
     }
+    let unlinked = false;
     if (wallet.address) {
       try {
         await unlinkWallet?.(wallet.address);
+        unlinked = true;
       } catch {
         // Embedded wallets cannot be unlinked from Privy; ignore
       }
@@ -1292,6 +1279,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     let token = '';
     try { token = (await getAccessToken?.()) || ''; } catch { token = ''; }
     if (!token) return { ok: false, message: 'Sign in again, then unlink the wallet.' };
+    const retireId = resolveRetireId(wallets, wallet);
     try {
       const response = await fetch('/api/wallets/retire', {
         method: 'POST',
@@ -1300,11 +1288,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           authorization: `Bearer ${token}`,
           ...(ownerId ? { 'x-owner-id': ownerId } : {}),
         },
-        body: JSON.stringify({ id: wallet.id, address: wallet.address }),
+        body: JSON.stringify({ id: retireId, address: wallet.address }),
         cache: 'no-store',
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || body.ok !== true) {
+      if ((!response.ok || body.ok !== true) && !(response.status === 404 && unlinked)) {
         return { ok: false, message: 'That wallet is still on the account.' };
       }
       const next = rememberRetiredWallet(window.localStorage, ownerId, wallet.id, wallet.address);
@@ -1318,7 +1306,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     } catch {
       return { ok: false, message: 'That wallet is still on the account.' };
     }
-  }, [devPreview, getAccessToken, onRetireWallet, ownerId, unlinkWallet]);
+  }, [devPreview, getAccessToken, onRetireWallet, ownerId, unlinkWallet, wallets]);
   const openWallet = useCallback((walletId) => {
     setAIProvidersOpen(false);
     setCreateOpen(false);
