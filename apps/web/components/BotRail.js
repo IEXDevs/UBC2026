@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { PencilEdit01Icon } from '@hugeicons/core-free-icons';
 import Dock from './Dock';
@@ -20,10 +20,44 @@ function statusMark(status) {
   );
 }
 
+function LoopPicture({ loop, paused, children }) {
+  const [now, setNow] = useState(() => Date.now());
+  const nextWakeAt = loop.nextWakeAt;
+  useEffect(() => {
+    if (paused || !Number.isSafeInteger(nextWakeAt)) return undefined;
+    const update = () => setNow(Date.now());
+    update();
+    const timer = setInterval(update, 1000);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, [paused, nextWakeAt]);
+
+  const seconds = Math.max(0, Math.ceil((nextWakeAt - now) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  let label = minutes + ':' + String(seconds % 60).padStart(2, '0');
+  if (minutes >= 60) label = Math.floor(minutes / 60) + 'h ' + (minutes % 60) + 'm';
+  if (!Number.isSafeInteger(nextWakeAt)) label = loop.cooldownLabel;
+  if (paused) label = 'Paused';
+  return (
+    <span className={'agent-loop-picture' + (paused ? '' : ' is-running')}>
+      {children}
+      <span className="agent-loop-countdown" title={paused ? 'Loop paused' : 'Next run in ' + label}>{label}</span>
+    </span>
+  );
+}
+
 function agentIcon(bot, size, onPhoto) {
+  const picture = <BotMark shape={bot.shape} color={bot.color} image={bot.image} name={bot.name} size={size} />;
   return (
     <span className="agent-mark" style={{ width: size, height: size }}>
-      <BotMark shape={bot.shape} color={bot.color} image={bot.image} name={bot.name} size={size} />
+      {bot.loop?.active ? (
+        <LoopPicture loop={bot.loop} paused={bot.loopPaused || bot.frozen || bot.enabled === false || bot.status === 'paused'}>
+          {picture}
+        </LoopPicture>
+      ) : picture}
       {statusMark(bot.status)}
       <button
         type="button"

@@ -719,6 +719,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'bots.decide', method: 'POST', path: '/bots/:botId/decide', phase: 1, auth: 'owner', status: 'live', action: 'decide' },
   { id: 'bots.loop', method: 'POST', path: '/bots/:botId/loop', phase: 4, auth: 'owner', status: 'live', action: 'loop' },
   { id: 'bots.cardLoop.create', method: 'POST', path: '/bots/:botId/card-loop', phase: 4, auth: 'owner', status: 'live', action: 'card-loop' },
+  { id: 'bots.cardLoop.check', method: 'POST', path: '/bots/:botId/card-loop/check', phase: 4, auth: 'owner', status: 'live', action: 'card-loop/check' },
   { id: 'bots.cardLoop.cooldown', method: 'POST', path: '/bots/:botId/card-loop/cooldown', phase: 4, auth: 'owner', status: 'live', action: 'card-loop/cooldown' },
   { id: 'bots.cardLoop.break', method: 'POST', path: '/bots/:botId/card-loop/break', phase: 4, auth: 'owner', status: 'live', action: 'card-loop/break' },
   { id: 'bots.browser.list', method: 'GET', path: '/bots/:botId/browser/sessions', phase: 3, auth: 'owner', status: 'live', action: 'browser/sessions' },

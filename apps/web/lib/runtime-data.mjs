@@ -4,7 +4,7 @@
  * Worker URL is configured on the server. Empty arrays when unsigned or unconfigured.
  * Never invent PreviewMain / demo bots.
  */
-import { publicCardLoop } from '@ubc2026/contracts/card-loop';
+import { cardLoopDue, publicCardLoop } from '@ubc2026/contracts/card-loop';
 import { parseLasoBrowserPayment } from '../../agent-runtime/src/laso-browser-payment.mjs';
 import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { sanitizeActivity } from './chat-activity.mjs';
@@ -52,6 +52,7 @@ export function shellBotFromRemote(row, looks = {}) {
     frozen,
     record: row,
     loop: publicCardLoop(row.loop),
+    loopPaused: row.loopPaused === true,
   };
 }
 
@@ -147,6 +148,7 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
     if (!status.ok) return;
     const loop = publicCardLoop(status.body?.cardLoop);
     if (loop) bot.loop = loop;
+    if (status.body?.ownerPaused === true) bot.loopPaused = true;
   }));
   const source = botsRes.body?.source || walletsRes.body?.source || paymentsRes.body?.source || 'unknown';
   return {
@@ -163,6 +165,27 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
       : [],
     positions: [],
   };
+}
+
+/** The open desk helps recover a due alarm after a browser or runtime interruption. */
+export async function checkDueCardLoops(ownerId, bots, accessToken, pending, fetcher = fetch, now = Date.now()) {
+  if (!accessToken || !OWNER.test(ownerId ?? '')) return;
+  const headers = ownerHeaders(ownerId, accessToken);
+  await Promise.all(bots.map(async bot => {
+    if (!BOT_ID.test(bot?.id ?? '') || bot.enabled === false || bot.frozen || bot.loopPaused || !cardLoopDue(bot.loop, now)) return;
+    const key = ownerId + '/' + bot.id;
+    if (pending.has(key)) return;
+    const url = shellRuntimeUrl('/bots/' + encodeURIComponent(bot.id) + '/card-loop/check');
+    if (!url) return;
+    pending.add(key);
+    try {
+      await fetcher(url, { method: 'POST', headers, cache: 'no-store' });
+    } catch {
+      // The next desk poll or the alarm can retry.
+    } finally {
+      pending.delete(key);
+    }
+  }));
 }
 
 export function emptyMoneyState() {

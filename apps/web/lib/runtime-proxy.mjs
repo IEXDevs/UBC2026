@@ -37,6 +37,7 @@ const ALLOWED = Object.freeze([
   new RegExp(`^/bots/${BOT}/wake$`),
   new RegExp(`^/bots/${BOT}/loop$`),
   new RegExp(`^/bots/${BOT}/card-loop$`),
+  new RegExp(`^/bots/${BOT}/card-loop/check$`),
   new RegExp(`^/bots/${BOT}/card-loop/cooldown$`),
   new RegExp(`^/bots/${BOT}/card-loop/break$`),
   new RegExp(`^/bots/${BOT}/sns/send$`),
