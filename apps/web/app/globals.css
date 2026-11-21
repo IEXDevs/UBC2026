@@ -120,7 +120,6 @@ button:focus-visible, input:focus-visible {
   .side.is-collapsed .search { display: none; }
   .side.is-collapsed .recall-search { display: none; }
 
-  .side.is-collapsed .add-agent,
   .side.is-collapsed .rail-toggle {
     width: 36px;
   }
@@ -232,6 +231,7 @@ button:focus-visible, input:focus-visible {
 }
 
 .side-tools {
+  --side-control-size: 36px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -241,8 +241,8 @@ button:focus-visible, input:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: var(--side-control-size);
+  height: var(--side-control-size);
   padding: 0;
   border-radius: 999px;
   border: 0;
@@ -289,6 +289,7 @@ button.add-agent:not(:disabled):hover {
 }
 
 .recall-search.glide-select {
+  --gs-chip: var(--side-control-size, 36px);
   display: block;
   width: 100%;
   z-index: 8;
@@ -1562,18 +1563,21 @@ button.add-agent:not(:disabled):hover {
   background: #000000;
 }
 
-.wallet-overview { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.wallet-overview { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 18px; align-items: stretch; }
 .wallet-card { min-width: 0; padding: 20px; border: 1px solid #1c1c1c; border-radius: 22px; background: #0d0d0d; }
 .phantom-assets-card {
   background: #0d0d0d;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 .phantom-transfers-card {
+  display: grid;
+  align-content: start;
+  gap: 16px;
   background: #0d0d0d;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
-.wallet-assets { display: grid; gap: 16px; }
+.wallet-assets { display: flex; flex-direction: column; gap: 16px; }
 .wallet-identity { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .phantom-wallet-status-strip {
   padding: 8px 12px;
@@ -1593,20 +1597,20 @@ button.add-agent:not(:disabled):hover {
 }
 .wallet-status { color: #aaa; font-size: 12px; }
 
-/* Phantom Action Tiles (Send, Swap, Receive, Buy - Screenshot 1) */
-.wallet-action-switch { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .phantom-action-tiles {
-  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
 }
 .phantom-action-tile {
   min-width: 0;
-  min-height: 76px;
+  min-height: 84px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 10px 6px;
+  gap: 8px;
+  padding: 10px 2px;
   background: #121212;
   border: 1px solid #1e1e1e;
   border-radius: 18px;
@@ -1631,8 +1635,8 @@ button.add-agent:not(:disabled):hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: #1a1a1a;
   transition: all 180ms ease;
@@ -1655,12 +1659,6 @@ button.add-agent:not(:disabled):hover {
   color: #ffffff;
 }
 
-.wallet-action-title { margin: 16px 0 12px; font-size: 18px; font-weight: 650; letter-spacing: -0.03em; color: #ffffff; }
-.phantom-stage-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 .wallets-sheet .field { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .wallets-sheet .field > * { min-width: 0; }
 
@@ -1682,12 +1680,24 @@ button.add-agent:not(:disabled):hover {
 .wallet-fold[open] > summary svg { transform: rotate(180deg); }
 .wallet-fold > summary:focus-visible { outline: 2px solid #ffffff; outline-offset: -4px; border-radius: inherit; }
 .wallet-fold-body { padding: 0 20px 20px; min-width: 0; }
-.wallet-allocation { margin: 0; border: 0; border-top: 1px solid #1c1c1c; border-radius: 0; }
+.wallet-allocation { margin: auto 0 0; border: 0; border-top: 1px solid #1c1c1c; border-radius: 0; }
 .wallet-allocation > summary { padding: 16px 0 0; }
 .wallet-allocation > .wallet-fold-body { padding: 18px 0 0; }
-.wallet-allocation .portfolio-layout { grid-template-columns: 1fr; justify-items: center; }
-.wallet-allocation .portfolio-layout > div { width: 100%; }
+.wallet-allocation .portfolio { container-type: inline-size; }
+.wallet-allocation .portfolio-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.wallet-allocation .portfolio-actions p { flex: 1 1 160px; }
+.wallet-allocation .portfolio-layout {
+  grid-template-columns: clamp(88px, 30%, 148px) minmax(0, 1fr);
+  gap: 12px;
+}
+.wallet-allocation .portfolio-ring { width: 100%; height: auto; }
 .wallet-allocation .wallet-figure { font-size: 30px; }
+.wallet-allocation .wallet-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 176px), 1fr)); margin: 0; }
+.wallet-allocation .wallet-list li { min-width: 0; overflow-wrap: anywhere; }
+@container (max-width: 269px) {
+  .wallet-allocation .portfolio-layout { grid-template-columns: minmax(0, 1fr); }
+  .wallet-allocation .portfolio-ring { width: 110px; justify-self: center; }
+}
 .wallet-settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
 .wallet-settings-grid > section { min-width: 0; }
 .wallet-settings h3 { margin: 0 0 14px; font-size: 14px; color: #ffffff; font-weight: 650; }
@@ -1723,6 +1733,7 @@ button.add-agent:not(:disabled):hover {
 }
 @media (prefers-reduced-motion: reduce) {
   .wallet-fold > summary svg { transition: none; }
+  .phantom-action-tile, .phantom-action-tile-icon { transition: none; }
 }
 
 .wallet-figure {
@@ -1971,7 +1982,6 @@ button.add-agent:not(:disabled):hover {
     color 280ms cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.transfer-title { display: inline-block; }
 .transfer-stage { min-width: 0; }
 @media (hover: hover) and (pointer: fine) {
   .wallet-switch button:hover { background: #2a2a2a; }

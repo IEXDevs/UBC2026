@@ -60,10 +60,25 @@ test('profile shows the wallet name and address once', () => {
   assert.match(sheet, /aria-label="Transfer"/);
   assert.match(sheet, /chooseTransfer\(item\.id\)/);
   assert.match(sheet, /<AnimatePresence mode="wait" initial=\{false\}>/);
-  assert.match(sheet, /key=\{transfer\}/);
+  assert.doesNotMatch(sheet, /wallet-action-title|transfer-title/);
   assert.match(sheet, /ease: TRANSFER_EASE/);
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.wallet-switch button \{[^}]*transition:/);
+});
+
+test('wallet panels match heights and spread the breakdown and transfer controls across their cards', () => {
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.wallet-overview \{[^}]*align-items: stretch/);
+  assert.match(css, /\.phantom-action-tiles \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.wallet-allocation \.portfolio-layout \{[^}]*grid-template-columns: clamp\([^)]*\) minmax\(0, 1fr\)/);
+  assert.match(css, /\.wallet-allocation \.wallet-list \{[^}]*repeat\(auto-fit/);
+});
+
+test('the add agent button diameter matches the sidebar search height', () => {
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.side-tools \{[^}]*--side-control-size: 36px/);
+  assert.match(css, /\.add-agent \{[^}]*width: var\(--side-control-size\);[^}]*height: var\(--side-control-size\)/);
+  assert.match(css, /\.recall-search\.glide-select \{[^}]*--gs-chip: var\(--side-control-size, 36px\)/);
 });
 
 test('unified wallet stays viewport-mounted and resets transfer drafts when the wallet changes', () => {
