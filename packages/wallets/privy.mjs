@@ -1314,6 +1314,10 @@ export function createPrivyWalletClient({
       return session.user;
     },
 
+    listOwnedSolanaWallets(privyUserId) {
+      return listSolanaWallets(assertOwnerId(privyUserId));
+    },
+
     /**
      * Provision / sync Solana wallets after Privy login.
      * Prefer the app-secret `/v1/users/:id` path when the access token JWT has a

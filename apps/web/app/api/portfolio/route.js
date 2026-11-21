@@ -4,6 +4,7 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { choosePortfolioRpc, loadPortfolio, PortfolioError } from '../../../lib/portfolio.mjs';
 import { loadProviderPositions } from '../../../lib/provider-positions.mjs';
+import { loadWalletActivity } from '../../../lib/wallet-activity.mjs';
 import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
 import { verifyPrivyAccessToken } from '../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
@@ -76,7 +77,8 @@ export async function GET(request) {
     );
   }
   const params = new URL(request.url).searchParams;
-  const requestedCluster = params.get('cluster') || '';
+  const activity = params.get('activity') === '1';
+  const requestedCluster = activity ? SOLANA_CLUSTER : params.get('cluster') || '';
   const rpc = choosePortfolioRpc(env, requestedCluster);
   if (!rpc.rpcUrl) {
     return Response.json(
@@ -111,6 +113,17 @@ export async function GET(request) {
       ownerId,
     });
     const wallets = walletsFromPrivyUser(user, ownerId);
+    if (activity) {
+      const ownedWallets = await client.listOwnedSolanaWallets(ownerId).catch(() => null);
+      if (!ownedWallets && !wallets.length) throw new PortfolioError('wallets_unavailable');
+      const data = await loadWalletActivity({
+        wallets: [...(ownedWallets || []), ...wallets],
+        rpcUrl: rpc.rpcUrl,
+      });
+      return Response.json({ ...data, incomplete: data.incomplete || ownedWallets === null }, {
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
     // DexScreener prices are read in the browser so the limit applies to the visitor IP.
     const portfolio = await loadPortfolio({
       wallets,

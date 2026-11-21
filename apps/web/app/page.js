@@ -539,6 +539,8 @@ function DepositSigner({ signerRef, signWithOwnerAuthorization }) {
   return null;
 }
 
+const EMPTY_DESK_LOG_PANES = Object.freeze(['Main', 'Logs']);
+
 function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, attachSwapSigner = null, onRetireWallet = null, onWalletCreated = null, privyLive = false, unlinkWallet = null }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
@@ -2238,15 +2240,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       </aside>
 
       <section className={`stage${pane === 'Positions' ? ' is-book' : ''}`}>
-        {noAgents ? null : (
+        {noAgents && pane !== 'Logs' ? null : (
         <header className="topbar">
           <span className="topbar-side" />
-          <PaneDock panes={SHELL_PANES} pane={pane} onChange={choosePane} />
+          <PaneDock panes={noAgents ? EMPTY_DESK_LOG_PANES : SHELL_PANES} pane={pane} onChange={choosePane} />
         </header>
         )}
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' ? ' is-chat' : ''}`}>
           <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}`} aria-label={pane}>
-            {noAgents ? (
+            {noAgents && pane !== 'Logs' ? (
                 <div className={`empty-hold${createOpen ? ' is-away' : ''}`}>
                   <p className="empty-hold__title">Create your first agent</p>
                   <div className="empty-hold__control">
@@ -2293,7 +2295,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
                 onWallet={openWallet}
               />
             ) : null}
-            {!noAgents && pane === 'Logs' ? (
+            {pane === 'Logs' ? (
               <LogsPanel
                 key={ownerId}
                 ownerId={ownerId}
