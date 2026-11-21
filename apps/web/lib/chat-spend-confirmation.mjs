@@ -7,6 +7,7 @@ import { TextChatError } from './text-chat.mjs';
 import { txReceiptFromResult } from './tx-receipt.mjs';
 import { swapFailure } from './swap-failure.mjs';
 import { parseLasoBrowserPayment } from '../../agent-runtime/src/laso-browser-payment.mjs';
+import { publicLasoCard } from '@ubc2026/shopping/laso-card.mjs';
 
 const HOLD_LIFETIME_MS = 5 * 60 * 1000;
 
@@ -94,6 +95,7 @@ export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now
     toolRounds: 1,
     text,
     ...(receipt && typeof result?.claimUrl === 'string' ? { claimUrl: result.claimUrl } : {}),
+    ...(receipt && publicLasoCard(result?.card) ? { lasoCard: publicLasoCard(result.card) } : {}),
     ...(step ? { activity: [step] } : {}),
   };
 }

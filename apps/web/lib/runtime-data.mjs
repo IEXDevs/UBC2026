@@ -309,6 +309,11 @@ function chatResult(body) {
     hold,
     ...(typeof body.claimUrl === 'string' && /^https:\/\/laso\.finance\/agent\/dashboard\/auth\?/.test(body.claimUrl)
       ? { claimUrl: body.claimUrl } : {}),
+    ...(body.lasoCard && typeof body.lasoCard.id === 'string'
+      && typeof body.lasoCard.number === 'string'
+      && /^•••• •••• •••• (?:••••|\d{4})$/.test(body.lasoCard.number)
+      && body.lasoCard.cvv === '•••' && body.lasoCard.revealed !== true
+      ? { lasoCard: body.lasoCard } : {}),
   };
 }
 

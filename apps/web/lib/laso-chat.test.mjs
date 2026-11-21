@@ -79,6 +79,8 @@ test('Composer uses the shared local recovery before any model request and still
 test('Laso preparation preserves the requested amount and directly produces an x402 confirmation', () => {
   assert.equal(lasoPreparationArgs({ ...args, amountUsd: 5 }, 'get a Laso card for 10 USDC').amountUsd, '10');
   assert.equal(lasoPreparationArgs(args, 'get a Laso card').amountUsd, '10');
+  assert.equal(lasoPreparationArgs(args, 'get a Laso card').lasoAction, undefined);
+  assert.equal(lasoPreparationArgs(args, 'add funds to the Laso card').lasoAction, 'modify');
   const hold = lasoPurchaseHold(args, JSON.stringify(prepared));
   assert.equal(hold.args.action, 'x402');
   assert.equal(hold.args.amount, '10000000');
