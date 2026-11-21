@@ -1,20 +1,9 @@
-import { useId } from 'react';
 import { Wallet } from 'lucide-react';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
 import BotMark from './BotMark';
+import PositionWalletBubbles from './PositionWalletBubbles';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-
-const BUBBLE_PALETTE = [
-  ['#62d9ff', '#1775e6', '#16317a'],
-  ['#d497ff', '#9246e8', '#442182'],
-  ['#64efd0', '#17a782', '#09534e'],
-  ['#ffca69', '#ed7a25', '#8a3715'],
-  ['#ff98c1', '#dc427f', '#801c4a'],
-  ['#bdeb6a', '#66ab2e', '#34591b'],
-  ['#80baff', '#4b58e4', '#252779'],
-  ['#ff9d94', '#e74f51', '#812a2f'],
-];
 
 export function usdLabel(notionalLabel) {
   if (!notionalLabel) return '';
@@ -26,8 +15,7 @@ function VenueLogo({ src }) {
   return src ? <img className="book-logo" alt="" draggable={false} src={src} /> : null;
 }
 
-export function WalletCard({ wallet }) {
-  const gradientId = useId();
+export function WalletCard({ wallet, sprites }) {
   return (
     <Card className="book-wallet-surface size-full gap-0 p-0">
       <CardHeader className="book-wallet-head p-0">
@@ -43,52 +31,7 @@ export function WalletCard({ wallet }) {
       </CardDescription>
       {wallet.bubbles.length > 0 && (
         <CardContent className="p-0">
-          <svg
-            className="book-wallet-bubbles"
-            viewBox={`0 0 ${wallet.bubbleWidth} ${wallet.bubbleHeight}`}
-            role="group"
-            aria-label={wallet.bubbles.map(bubble => `${bubble.asset} ${bubble.valueLabel}`).join(', ')}
-          >
-            <defs>
-              <radialGradient id={`${gradientId}-reflection`}>
-                <stop stopColor="#f0f8ff" stopOpacity="0.62" />
-                <stop offset="100%" stopColor="#f0f8ff" stopOpacity="0" />
-              </radialGradient>
-              {BUBBLE_PALETTE.map(([highlight, mid, shadow], index) => (
-                <radialGradient key={highlight} id={`${gradientId}-${index}`} cx="32%" cy="22%" r="78%">
-                  <stop stopColor={highlight} />
-                  <stop offset="62%" stopColor={mid} />
-                  <stop offset="100%" stopColor={shadow} />
-                </radialGradient>
-              ))}
-            </defs>
-            {wallet.bubbles.map((bubble, index) => {
-              const label = [bubble.asset, bubble.valueLabel, bubble.amountLabel].filter(Boolean).join(' · ');
-              return (
-                <g key={bubble.id}>
-                  <circle
-                    className="book-wallet-bubble"
-                    tabIndex={0}
-                    role="img"
-                    aria-label={label}
-                    cx={bubble.x} cy={bubble.y} r={bubble.r}
-                    fill={`url(#${gradientId}-${index % BUBBLE_PALETTE.length})`}
-                    strokeWidth={Math.min(0.9, bubble.r / 5)}
-                  >
-                    <title>{label}</title>
-                  </circle>
-                  <ellipse
-                    className="book-wallet-reflection"
-                    cx={bubble.x - bubble.r * 0.28} cy={bubble.y - bubble.r * 0.56}
-                    rx={bubble.r * 0.56} ry={bubble.r * 0.19}
-                    transform={`rotate(-27 ${bubble.x - bubble.r * 0.28} ${bubble.y - bubble.r * 0.56})`}
-                    fill={`url(#${gradientId}-reflection)`}
-                  />
-                  {bubble.r * 2 >= bubble.asset.length * 5 + 7 && <text x={bubble.x} y={bubble.y}>{bubble.asset}</text>}
-                </g>
-              );
-            })}
-          </svg>
+          <PositionWalletBubbles wallet={wallet} sprites={sprites} />
         </CardContent>
       )}
       {wallet.unpriced > 0 && <CardDescription>{wallet.unpriced} unpriced</CardDescription>}

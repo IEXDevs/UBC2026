@@ -1,6 +1,7 @@
 /** Places live positions on an open plane, one cluster per venue. */
 
-import { describePositions, formatAmount, formatBaseUnits, shortAddress } from './money-views.mjs';
+import { describePositions, formatBaseUnits, shortAddress } from './money-views.mjs';
+import { holdingUsd, packHoldingBubbles } from './position-bubbles.mjs';
 import { withAssignedWallet } from './wallet-assign.mjs';
 
 export const VENUE_LOGOS = Object.freeze({
@@ -23,61 +24,6 @@ function addMicro(rows, key) {
 function walletFor(position, bots) {
   if (typeof position.walletId === 'string' && position.walletId) return position.walletId;
   return bots.find(bot => bot.id === position.botId)?.walletId ?? null;
-}
-
-function holdingUsd(value) {
-  if (value > 0n && value < 10000n) return '<$0.01';
-  return `$${formatAmount((value / 10000n).toString(), 2)}`;
-}
-
-function walletBubbles(rows, width, height) {
-  const circles = rows.filter(row => row.notionalMicroUsdc != null && BigInt(row.notionalMicroUsdc) > 0n)
-    .map(row => ({
-      id: row.id ?? row.asset,
-      asset: row.asset,
-      value: BigInt(row.notionalMicroUsdc),
-      amountLabel: typeof row.amount === 'string' && Number.isInteger(row.decimals)
-        ? `${formatAmount(row.amount, row.decimals)} ${row.asset}`
-        : '',
-    }))
-    .sort((left, right) => left.value === right.value ? 0 : left.value > right.value ? -1 : 1);
-  if (!circles.length) return [];
-  const maximum = Number(circles[0].value);
-  const largest = circles.slice(0, 11);
-  if (circles.length > largest.length) {
-    const rest = circles.slice(largest.length);
-    const value = rest.reduce((sum, circle) => sum + circle.value, 0n);
-    largest.push({ id: 'other', asset: 'Other', value, amountLabel: `${rest.length} ${rest.length === 1 ? 'asset' : 'assets'}` });
-  }
-  const gap = 3;
-  const inset = 2;
-  const lines = Array.from({ length: largest.length > 2 ? 2 : 1 }, () => ({ sum: 0, tallest: 0, circles: [] }));
-  for (const circle of largest) {
-    const radius = Math.sqrt(Number(circle.value) / maximum);
-    const line = lines.length === 2 && lines[1].sum < lines[0].sum ? lines[1] : lines[0];
-    line.sum += radius * 2;
-    line.tallest = Math.max(line.tallest, radius * 2);
-    line.circles.push({ ...circle, radius });
-  }
-  const bubbleHeight = lines.reduce((sum, line) => sum + line.tallest, 0);
-  const scale = Math.min((height - inset * 2 - gap * (lines.length - 1)) / bubbleHeight,
-    ...lines.map(line => (width - inset * 2 - gap * Math.max(0, line.circles.length - 1)) / line.sum));
-  if (scale <= 0) return [];
-  let y = (height - bubbleHeight * scale - gap * (lines.length - 1)) / 2;
-  return lines.flatMap(line => {
-    let x = (width - line.sum * scale - gap * (line.circles.length - 1)) / 2;
-    const centerY = y + line.tallest * scale / 2;
-    y += line.tallest * scale + gap;
-    return line.circles.map(circle => {
-      const r = circle.radius * scale;
-      const bubble = {
-        id: circle.id, asset: circle.asset, valueLabel: holdingUsd(circle.value), amountLabel: circle.amountLabel,
-        x: x + r, y: centerY, r,
-      };
-      x += 2 * r + gap;
-      return bubble;
-    });
-  });
 }
 
 export function positionSceneKey(book) {
@@ -185,7 +131,7 @@ export function placeWalletGroup(bounds, requested, occupied) {
   return nearest;
 }
 
-export function layoutPositionBook(positions, bots, wallets = [], holdings = [], measureName) {
+export function layoutPositionBook(positions, bots, wallets = [], holdings = [], measureName, previousBook) {
   const source = Array.isArray(positions) ? positions : [];
   const assignedBots = withAssignedWallet(bots, wallets).bots;
   const rows = describePositions(source, assignedBots).map((row, index) => ({
@@ -208,6 +154,7 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [],
   for (const row of holdings) holdingsByWallet.get(row.walletId)?.push(row);
   const totals = new Map([...holdingsByWallet].map(([id, rows]) => [id, addMicro(rows, 'notionalMicroUsdc')]));
   const maximum = Math.max(1, ...[...totals.values()].map(Number));
+  const previousWallets = new Map(previousBook?.wallets.map(wallet => [wallet.id, wallet]));
   let cursor = 0;
   wallets.forEach(wallet => {
     const owned = rows.filter(row => row.walletId === wallet.id);
@@ -225,8 +172,11 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [],
     const walletHoldings = holdingsByWallet.get(wallet.id);
     const holdingTotal = totals.get(wallet.id);
     const scale = Math.sqrt(Number(holdingTotal) / maximum);
-    const width = Math.round(146 + 86 * scale);
-    const height = Math.round(90 + 54 * scale);
+    const previousWallet = previousWallets.get(wallet.id);
+    const proposedWidth = Math.round(146 + 86 * scale);
+    const proposedHeight = Math.round(90 + 54 * scale);
+    const width = Math.abs(proposedWidth - previousWallet?.width) < 4 ? previousWallet.width : proposedWidth;
+    const height = Math.abs(proposedHeight - previousWallet?.height) < 4 ? previousWallet.height : proposedHeight;
     const unpriced = walletHoldings.filter(row => row.notionalMicroUsdc == null).length;
     const bubbleWidth = width - 20;
     const bubbleHeight = height - 62;
@@ -245,7 +195,7 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [],
       height,
       bubbleWidth,
       bubbleHeight,
-      bubbles: walletBubbles(walletHoldings, bubbleWidth, bubbleHeight),
+      bubbles: packHoldingBubbles(walletHoldings, bubbleWidth, bubbleHeight, previousWallet),
       unpriced,
       holdingsLabel: unpriced > 0 && unpriced === walletHoldings.length ? 'Unpriced' : holdingUsd(holdingTotal),
       venues: venueNames,

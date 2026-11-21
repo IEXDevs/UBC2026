@@ -3986,10 +3986,15 @@ button.wallet-export:not(:disabled):hover {
 .book-wallet-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .book-wallet-head b { flex: none; }
 .book-wallet-surface [data-slot="card-description"] { color: #a3a3a3; font-size: 10px; line-height: 1.2; }
-.book-wallet-bubbles { display: block; width: 100%; }
-.book-wallet-bubble { stroke: rgba(234, 241, 250, 0.32); }
-.book-wallet-bubble:is(:hover, :focus-visible) { stroke: rgba(234, 241, 250, 0.9); }
-.book-wallet-reflection { pointer-events: none; }
+.book-wallet-bubbles { display: block; width: 100%; overflow: hidden; }
+.book-wallet-bubble { cursor: help; stroke: transparent; stroke-width: 0.8px; }
+.book-wallet-bubble:is([data-active], :focus-visible) { stroke: rgba(234, 241, 250, 0.9); outline: none; }
+.book-wallet-sprite, .book-wallet-sheen { pointer-events: none; }
+.book-wallet-sheen {
+  translate: var(--book-pointer-x, 0px) var(--book-pointer-y, 0px);
+  transform: translate(var(--book-view-x, 0px), var(--book-view-y, 0px));
+  opacity: 0.72;
+}
 .book-wallet-bubbles text {
   fill: #f7f9fc;
   font-size: 9px;
@@ -3999,6 +4004,29 @@ button.wallet-export:not(:disabled):hover {
   text-anchor: middle;
   pointer-events: none;
 }
+
+.book-holding-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  min-width: 168px;
+  max-width: calc(100vw - 16px);
+  padding: 8px 10px;
+  border: 1px solid #3f3f46;
+  border-radius: 9px;
+  background: #202024;
+  color: #f5f5f5;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 6px 20px #0008;
+  pointer-events: none;
+}
+.book-holding-tooltip div { display: flex; justify-content: space-between; gap: 12px; }
+.book-holding-tooltip span { overflow-wrap: anywhere; }
+.book-holding-tooltip small { flex: none; color: #b5b5bd; font-size: 11px; }
 
 .book-account-surface {
   width: 148px;
