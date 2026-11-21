@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getDemoShellState } from './demo-state.mjs';
 import { walletGlance } from './money-views.mjs';
-import { bookFrame, layoutPositionBook, positionSceneKey, stepBubbleFollow } from './position-book.mjs';
+import {
+  agentWireSegments, bookFrame, layoutPositionBook, placeWalletGroup, positionSceneKey,
+  stepBubbleFollow, translatedBounds, walletGroupBounds,
+} from './position-book.mjs';
 
 /**
  * Achieves: verifies position book layout clusters venues, wires account/spoke links, and cash glance excludes borrow.
@@ -109,6 +112,59 @@ test('the graph links each agent to its wallet and puts unassigned agents on Mai
   }
   const reassigned = layoutPositionBook([], [{ ...bots[0], walletId: 'main' }, ...bots.slice(1)], wallets);
   assert.notEqual(positionSceneKey(book), positionSceneKey(reassigned));
+});
+
+test('short names get narrow cards while long names keep their full measured width', () => {
+  const names = ['a', 'trada', 'A much longer agent name that needs the whole label'];
+  const bots = names.map((name, index) => ({ id: `bot_${index}`, name, walletId: 'main' }));
+  const wallets = [{ id: 'main', kind: 'main' }];
+  const book = layoutPositionBook([], bots, wallets, [], name => 7 * name.length);
+  assert.deepEqual(book.agents.map(agent => agent.name), names);
+  assert.ok(book.agents[0].width < 70);
+  assert.ok(book.agents[2].width >= 7 * names[2].length + 46);
+  for (let index = 1; index < book.agents.length; index += 1) {
+    const previous = book.agents[index - 1];
+    const agent = book.agents[index];
+    assert.ok(agent.x - agent.width / 2 - previous.x - previous.width / 2 >= 14);
+  }
+  const [stem, rail, ...branches] = agentWireSegments(book.links);
+  assert.equal(stem[0].x, stem[1].x);
+  assert.equal(rail[0].y, rail[1].y);
+  assert.deepEqual(branches.map(branch => branch[1]), book.links.map(link => link.to));
+});
+
+test('a larger agent group uses a shared center line and enters cards at their inner edge', () => {
+  const bots = Array.from({ length: 7 }, (_, index) => ({ id: `bot_${index}`, name: `Agent ${index}`, walletId: 'main' }));
+  const book = layoutPositionBook([], bots, [{ id: 'main', kind: 'main' }]);
+  const [wallet] = book.wallets;
+  const [trunk, ...branches] = agentWireSegments(book.links);
+  assert.equal(trunk[0].x, wallet.x);
+  assert.equal(trunk[1].x, wallet.x);
+  for (const [index, agent] of book.agents.entries()) {
+    const [center, edge] = branches[index];
+    assert.deepEqual(center, { x: wallet.x, y: agent.y });
+    assert.ok(Math.abs(edge.x - wallet.x) >= 16);
+    assert.equal(Math.abs(agent.x - edge.x), agent.width / 2);
+    if (index >= 2) assert.ok(agent.y - book.agents[index - 2].y >= agent.height + 14);
+  }
+});
+
+test('overlapping wallet placements clear the neighboring wallet and its agent cards', () => {
+  const wallets = [{ id: 'main', kind: 'main' }, { id: 'other', kind: 'additional' }];
+  const bots = [{ id: 'bot_1', name: 'A long enough name to extend beyond Main', walletId: 'main' }];
+  const book = layoutPositionBook([], bots, wallets);
+  const [main, other] = book.wallets;
+  const mainBounds = walletGroupBounds(main, book.agents);
+  const otherBounds = walletGroupBounds(other, []);
+  const occupied = translatedBounds(mainBounds, main);
+  assert.ok(occupied.maxX > main.x + main.width / 2);
+  const overlapping = { x: main.x, y: main.y + 4 };
+  const moved = placeWalletGroup(otherBounds, overlapping, [occupied]);
+  const area = translatedBounds(otherBounds, moved);
+  const gap = Math.max(area.minX - occupied.maxX, occupied.minX - area.maxX, area.minY - occupied.maxY, occupied.minY - area.maxY);
+  assert.ok(gap >= 28);
+  const valid = { x: other.x, y: other.y };
+  assert.deepEqual(placeWalletGroup(otherBounds, valid, [occupied]), valid);
 });
 
 test('a single large holding leaves room for its outline at every edge', () => {
