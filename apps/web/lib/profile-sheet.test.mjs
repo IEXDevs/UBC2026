@@ -74,6 +74,12 @@ test('wallet panels match heights and spread the breakdown and transfer controls
   assert.match(css, /\.wallet-allocation \.wallet-list \{[^}]*repeat\(auto-fit/);
 });
 
+test('Recent activity starts collapsed and resets when Wallets reopens', () => {
+  const sheet = readFileSync(new URL('../components/WalletsSheet.js', import.meta.url), 'utf8');
+  assert.match(sheet, /<details className="wallet-fold phantom-fold" ref=\{activityRef\}>\s*<summary>Recent activity/);
+  assert.match(sheet, /if \(open && activityRef\.current\) activityRef\.current\.open = false;\s*\}, \[open\]\)/);
+});
+
 test('the add agent button diameter matches the sidebar search height', () => {
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.side-tools \{[^}]*--side-control-size: 36px/);

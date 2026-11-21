@@ -94,6 +94,7 @@ export default function WalletsSheet({
   const [preferredAsset, setPreferredAsset] = useState(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const settingsRef = useRef(null);
+  const activityRef = useRef(null);
   const transferRef = useRef(null);
   const bodyRef = useRef(null);
   const [transfer, setTransfer] = useState('send');
@@ -124,6 +125,10 @@ export default function WalletsSheet({
   useEffect(() => {
     if (open && focusId) setWalletId(focusId);
   }, [open, focusId]);
+
+  useEffect(() => {
+    if (open && activityRef.current) activityRef.current.open = false;
+  }, [open]);
 
   useEffect(() => {
     const key = tokenStorageKey(ownerId);
@@ -454,7 +459,7 @@ export default function WalletsSheet({
             </section>
           </div>
 
-          <details className="wallet-fold phantom-fold" open>
+          <details className="wallet-fold phantom-fold" ref={activityRef}>
             <summary>Recent activity<ChevronDown size={16} aria-hidden="true" /></summary>
             <div className="wallet-fold-body">
               {bot ? (
