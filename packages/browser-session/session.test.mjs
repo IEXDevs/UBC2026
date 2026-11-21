@@ -113,7 +113,7 @@ test('expired views persist closed records while unrelated failures keep session
 test('agent tools cover search, scrape, and owned browser lifecycle', () => {
   assert.deepEqual(
     agentTools.map(tool => tool.name),
-    ['web_search', 'web_scrape', 'browser_open', 'browser_navigate', 'browser_live_view', 'browser_release'],
+    ['web_search', 'web_scrape', 'browser_open', 'browser_navigate', 'browser_live_view', 'browser_click', 'browser_release'],
   );
 });
 
@@ -270,6 +270,29 @@ test('live view is owner-only, no-store, and embeds the verified Live View host'
   const redacted = await svc.invokeTool('browser_live_view', { sessionRecordId: 'rec-1' }, { ownerId: 'u1', botId: 'b1' });
   assert.equal(redacted.viewerUrl, undefined);
   assert.equal(JSON.stringify(redacted).includes('jwt'), false);
+});
+
+test('browser_click presses via visible cursor overlay and rejects other owners', async () => {
+  const clicks = [];
+  const svc = service({
+    browsers: {
+      createSession: async () => ({ sessionId: 'prov-1' }),
+      openTab: async () => ({ targetId: 'T1', url: 'https://example.com/', title: 'Page' }),
+      click: async (sessionId, targetId, selector) => {
+        clicks.push([sessionId, targetId, selector]);
+        return { x: 10, y: 20, tag: 'button', text: 'Go' };
+      },
+      readonlyView: async () => ({ viewerUrl: 'https://live.browser.run/ui/view?jwt=test' }),
+    },
+  });
+  await svc.openSession({ ownerId: 'u1', botId: 'b1', url: 'https://example.com/' });
+  const clicked = await svc.invokeTool('browser_click', { sessionRecordId: 'rec-1', selector: 'button[type=submit]' }, { ownerId: 'u1', botId: 'b1' });
+  assert.equal(clicked.x, 10);
+  assert.equal(clicked.tag, 'button');
+  assert.equal(clicked.event.name, 'browser_click');
+  assert.deepEqual(clicks, [['prov-1', 'T1', 'button[type=submit]']]);
+  await assert.rejects(svc.click({ ownerId: 'other', botId: 'b1', sessionRecordId: 'rec-1', selector: 'button' }), SessionError);
+  await assert.rejects(svc.click({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1', selector: '' }), { code: 'invalid_selector' });
 });
 
 /**
