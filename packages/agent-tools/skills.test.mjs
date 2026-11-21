@@ -60,6 +60,7 @@ test('slash skills parse to the harness and ignore normal chat', () => {
     'crypto-market-rank',
     'trading-strategist',
     'market-sentiment',
+    'laso-cards',
   ]);
   const called = parseSkillCommand('/domain-modeling name the wallet');
   assert.equal(called.id, 'domain-modeling');

@@ -13,7 +13,7 @@ import {
   paymentFeedEntry,
 } from '@ubc2026/x402';
 import { evaluateProposal, proposalDigest } from '@ubc2026/bot-policy';
-import { LasoCardError, billingAddress, lasoCardAction, presentLasoCard } from './laso-card.mjs';
+import { LasoCardError, billingAddress, lasoCardAction, lasoIntlMaxUnits, presentLasoCard } from './laso-card.mjs';
 
 export class ShoppingError extends Error {}
 const fail = message => { throw new ShoppingError(message); };
@@ -209,8 +209,12 @@ function decodePaymentRequiredHeader(header) {
 }
 
 /**
- * Laso card setup or balance change on Solana mainnet USDC.
- * setup follows GET /get-card. modify follows GET /fund-card-balance.
+ * Laso x402 quote on Solana mainnet USDC.
+ * setup follows GET /get-card (exact amount, no fee).
+ * modify follows GET /fund-card-balance (exact amount, no fee).
+ * intl follows GET /order-intl-card (whole dollars, at most 3.8% over).
+ * gift follows GET /order-gift-card (amount in the product currency, product
+ * fee varies, so the quote may exceed the amount; the owner confirms the total).
  * Returns the x402 challenge for the owner. Does not sign or broadcast.
  */
 export async function prepareLasoCardAction({
@@ -219,6 +223,7 @@ export async function prepareLasoCardAction({
   action = 'setup',
   amountUsd = LASO_TINY_CARD_USD,
   billing = null,
+  extra = {},
   fetcher = fetch,
   baseUrl = LASO_BASE_URL,
   now = Date.now(),
@@ -226,23 +231,26 @@ export async function prepareLasoCardAction({
   if (!bot?.id) fail('Bot is required');
   const usd = Number(amountUsd);
   const units = Math.round(usd * 1_000_000);
-  const ceiling = action === 'modify' ? 10000 : action === 'setup' ? 1000 : 0;
-  if (!['number', 'string'].includes(typeof amountUsd) || !Number.isFinite(usd) || usd < 5 || usd > ceiling
+  const range = action === 'modify'
+    ? { min: 5, max: 10000, message: 'Laso card amount must be $5–$10000 with at most 6 decimals' }
+    : action === 'intl'
+      ? { min: 100, max: 1000, whole: true, message: 'Laso international card amount must be whole dollars from $100–$1000' }
+      : action === 'gift'
+        ? { min: 0, max: Infinity, message: 'Laso gift card amount must be a positive number in the product currency' }
+        : { min: 5, max: 1000, message: 'Laso card amount must be $5–$1000 with at most 6 decimals' };
+  if (!['number', 'string'].includes(typeof amountUsd) || !Number.isFinite(usd)
+      || (action === 'gift' ? !(usd > 0) : usd < range.min || usd > range.max)
       || Math.abs(units / 1_000_000 - usd) > Number.EPSILON * usd) {
-    fail(action === 'modify'
-      ? 'Laso card amount must be $5–$10000 with at most 6 decimals'
-      : 'Laso card amount must be $5–$1000 with at most 6 decimals');
+    fail(range.message);
   }
   let spec;
   try {
-    spec = lasoCardAction(action, usd);
+    spec = lasoCardAction(action, usd, extra);
   } catch (error) {
     if (error instanceof LasoCardError && error.code === 'invalid_amount') {
-      fail(action === 'modify'
-        ? 'Laso card amount must be $5–$10000 with at most 6 decimals'
-        : 'Laso card amount must be $5–$1000 with at most 6 decimals');
+      fail(range.message);
     }
-    if (error instanceof LasoCardError) fail('Laso card action must be setup or modify');
+    if (error instanceof LasoCardError) fail(`Laso card action failed: ${error.code}`);
     throw error;
   }
   let shared = null;
@@ -257,6 +265,10 @@ export async function prepareLasoCardAction({
 
   const url = new URL(spec.path, baseUrl);
   url.searchParams.set('amount', String(usd));
+  if (spec.action === 'gift') {
+    url.searchParams.set('laso_server_id', spec.laso_server_id);
+    url.searchParams.set('country', spec.country);
+  }
 
   let response;
   try {
@@ -286,11 +298,23 @@ export async function prepareLasoCardAction({
     const bytes = n === 0n ? 0 : Math.ceil(n.toString(16).length / 2);
     return bytes + (value.match(/^1*/)?.[0].length ?? 0) === 32;
   };
-  const solana = Array.isArray(accepts) && accepts.find(a => a?.scheme === 'exact'
-    && a.network === NETWORKS.mainnet && a.asset === MAINNET_USDC_MINT && a.amount === String(units)
-    && validPubkey(a.payTo) && validPubkey(a.extra?.feePayer)
-    && Number.isSafeInteger(a.maxTimeoutSeconds) && a.maxTimeoutSeconds > 0
-    && a.extra?.memo == null);
+  const solana = Array.isArray(accepts) && accepts.find(a => {
+    if (a?.scheme !== 'exact' || a.network !== NETWORKS.mainnet || a.asset !== MAINNET_USDC_MINT
+        || !validPubkey(a.payTo) || !validPubkey(a.extra?.feePayer)
+        || !Number.isSafeInteger(a.maxTimeoutSeconds) || a.maxTimeoutSeconds <= 0
+        || a.extra?.memo != null) return false;
+    if (spec.action === 'intl') {
+      try {
+        return BigInt(a.amount) >= BigInt(units) && BigInt(a.amount) <= BigInt(lasoIntlMaxUnits(String(units)));
+      } catch { return false; }
+    }
+    // Gift fees vary by product, so the quote may exceed the face value.
+    // The owner confirms the exact total before anything is signed.
+    if (spec.action === 'gift') {
+      try { return BigInt(a.amount) >= BigInt(units); } catch { return false; }
+    }
+    return a.amount === String(units);
+  });
   if (decoded?.x402Version !== 2 || !solana) fail('Laso 402 has no supported exact mainnet USDC payment terms');
 
   const outflow = solana.amount;
@@ -309,7 +333,9 @@ export async function prepareLasoCardAction({
     cluster: 'mainnet-read',
     asset: 'USDC',
     recipient,
-    quoteId: `laso:${spec.path.slice(1)}:${usd}`,
+    quoteId: spec.action === 'gift'
+      ? `laso:${spec.path.slice(1)}:${spec.laso_server_id}:${spec.country}:${usd}`
+      : `laso:${spec.path.slice(1)}:${usd}`,
     outflow,
     expectedReceive: '1',
     expectedReceiveAsset: `laso:${spec.kind}:${usd}`,
@@ -349,11 +375,18 @@ export async function prepareLasoCardAction({
     provider: 'laso',
     lasoAction: spec.action,
     amountUsd: usd,
+    ...(spec.action === 'gift' ? { laso_server_id: spec.laso_server_id, country: spec.country } : {}),
     card,
     billing: shared,
     resource: {
       url: url.href,
-      description: spec.action === 'modify' ? 'Laso card balance' : 'Laso USA prepaid card',
+      description: spec.action === 'modify'
+        ? 'Laso card balance'
+        : spec.action === 'intl'
+          ? 'Laso international prepaid card'
+          : spec.action === 'gift'
+            ? `Laso gift card (${spec.laso_server_id}, ${spec.country})`
+            : 'Laso USA prepaid card',
       mimeType: 'application/json',
     },
     proposal,

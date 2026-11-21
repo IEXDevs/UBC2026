@@ -33,3 +33,12 @@ test('withSolscanUrl adds the link onto the tool result', () => {
   assert.match(text, /solscanUrl/);
   assert.equal(withSolscanUrl({ error: 'nope' }).error, 'nope');
 });
+
+test('Laso outcomes name the product that settled', () => {
+  const base = { signed: true, signature, cluster: 'mainnet-beta' };
+  assert.match(txReceiptFromResult({ ...base, card: { card_id: 'card_1', usd_amount: 10, status: 'ready' } }).text, /Laso card card_1: \$10, ready/);
+  assert.match(txReceiptFromResult({ ...base, giftCard: { card_id: 'gc_1', laso_server_id: 'amazon', amount: 50, currency: 'USD', status: 'completed' } }).text, /Laso gift card gc_1 \(amazon\): 50 USD, completed/);
+  assert.match(txReceiptFromResult({ ...base, intlCardOrder: { card_id: '1706', on_card_usd_amount: 250 } }).text, /Laso international card 1706: \$250 queued/);
+  assert.match(txReceiptFromResult({ ...base, topUp: { top_up_id: 't1', funded_usd: 50, status: 'paid' } }).text, /top-up \$50: paid/);
+  assert.match(txReceiptFromResult({ ...base, kycRequired: true }).text, /needs KYC/);
+});

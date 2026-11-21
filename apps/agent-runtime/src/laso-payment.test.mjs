@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { issueLasoTicket, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
+import { Keypair } from '@solana/web3.js';
+import { issueLasoTicket, prepareLasoPayment, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
 import worker from './owner-auth.fixture.mjs';
 import { sha256Hex } from './desk-grant.mjs';
 
@@ -11,6 +12,36 @@ const accepted = { scheme: 'exact', network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKq
   extra: { feePayer: 'BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP' } };
 const resource = { url: 'https://laso.finance/get-card?amount=10' };
 const result = { challenge: { accepted }, resource };
+
+test('Laso payment spends the USDC token account that holds the balance', async () => {
+  const walletAddress = Keypair.generate().publicKey.toBase58();
+  const funded = Keypair.generate().publicKey.toBase58();
+  let seen;
+  const env = { transferClient: {
+    getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: Keypair.generate().publicKey.toBase58() }),
+    listSolanaUsdcAccounts: async ({ address }) => {
+      assert.equal(address, walletAddress);
+      return [{ address: funded, amount: '5000000' }];
+    },
+    prepareSolanaX402Payment: async input => {
+      seen = input.sourceTokenAccount;
+      return { transaction: input.transaction };
+    },
+  } };
+  const ticket = { accepted: { ...accepted, amount: '5000000' } };
+  await prepareLasoPayment(env, { wallet: { address: walletAddress } }, ticket);
+  assert.equal(seen, funded);
+  env.transferClient.listSolanaUsdcAccounts = async () => [{ address: funded, amount: '4999999' }];
+  await assert.rejects(
+    prepareLasoPayment(env, { wallet: { address: walletAddress } }, ticket),
+    error => error.code === 'simulation_failed' && error.simulationReason === 'insufficient_funds' && error.usdcBalance === '4999999',
+  );
+  env.transferClient.listSolanaUsdcAccounts = async () => [];
+  await assert.rejects(
+    prepareLasoPayment(env, { wallet: { address: walletAddress } }, ticket),
+    error => error.simulationReason === 'source_account_not_found' && error.usdcBalance === undefined,
+  );
+});
 
 test('Laso HMAC tickets bind every payment term, identity, URL and timeout', () => {
   for (const timeout of [30, 300, 600]) {
@@ -44,6 +75,10 @@ test('Laso settles only via PAYMENT-SIGNATURE and exchanges then discards auth t
       assert.equal(init.headers.Authorization, 'Bearer private-id-token');
       return Response.json({ auth_url: mode === 'unsafe-link' ? 'https://attacker.invalid' : 'https://laso.finance/agent/dashboard/auth?token=owner-only' });
     }
+    if (String(url).startsWith('https://laso.finance/get-card-data?card_id=card_123')) {
+      assert.equal(init.headers.Authorization, 'Bearer private-id-token');
+      return Response.json({ card_id: 'card_123', status: mode === 'still-pending' ? 'pending' : 'ready', last4: '4242' });
+    }
     assert.equal(url, resource.url);
     assert.equal(init.redirect, 'manual');
     assert.deepEqual(JSON.parse(Buffer.from(init.headers['PAYMENT-SIGNATURE'], 'base64')), {
@@ -57,8 +92,8 @@ test('Laso settles only via PAYMENT-SIGNATURE and exchanges then discards auth t
       headers: mode === 'missing-receipt' ? {} : { 'PAYMENT-RESPONSE': Buffer.from(JSON.stringify({ success: true, network: accepted.network, transaction: signature })).toString('base64') },
     });
   } };
-  const settled = await settleLasoPayment(env, ticket, transaction);
-  assert.deepEqual(settled, { cluster: 'mainnet-beta', signature, card: { card_id: 'card_123', usd_amount: 10, status: 'pending' }, claimUrl: 'https://laso.finance/agent/dashboard/auth?token=owner-only' });
+  const settled = await settleLasoPayment(env, ticket, transaction, { tries: 2, delayMs: 0 });
+  assert.deepEqual(settled, { cluster: 'mainnet-beta', signature, card: { card_id: 'card_123', usd_amount: 10, status: 'ready', last4: '4242' }, claimUrl: 'https://laso.finance/agent/dashboard/auth?token=owner-only' });
   assert.equal(JSON.stringify(settled).includes('private-'), false);
   mode = 'unsafe-link';
   assert.equal((await settleLasoPayment(env, ticket, transaction)).claimUrl, undefined);
@@ -68,6 +103,30 @@ test('Laso settles only via PAYMENT-SIGNATURE and exchanges then discards auth t
     await assert.rejects(settleLasoPayment(env, ticket, transaction), { message: failure === 'rejected' ? 'laso_payment_rejected' : 'laso_settlement_unknown' });
     assert.equal(calls, before + 1, 'never automatically retry an uncertain payment');
   }
+  mode = 'still-pending';
+  const pending = await settleLasoPayment(env, ticket, transaction, { tries: 2, delayMs: 0 });
+  assert.equal(pending.card.status, 'pending');
+  assert.match(pending.note, /still pending/);
+});
+
+test('Laso settle surfaces gift, international, top-up, and KYC outcomes without secrets', async () => {
+  const signature = '6'.repeat(88);
+  const receipt = { success: true, network: accepted.network, transaction: signature };
+  const settle = (body) => settleLasoPayment({ fetch: async () => Response.json(body, {
+    headers: { 'PAYMENT-RESPONSE': Buffer.from(JSON.stringify(receipt)).toString('base64') },
+  }) }, { ...result, accepted, amount: accepted.amount }, 'txn', { tries: 1, delayMs: 0 });
+  const gift = await settle({ gift_card: { card_id: 'gc_1', laso_server_id: 'amazon', amount: 50, currency: 'USD', country: 'US', status: 'completed', redemption_code: 'XXXX-1111', pin_code: '1234' } });
+  assert.equal(gift.giftCard.redemption_code, 'XXXX-1111');
+  assert.equal(gift.giftCard.pin_code, '1234');
+  assert.equal(gift.card, undefined);
+  const intl = await settle({ intl_card_order: { card_id: '1706', on_card_usd_amount: 250, charged_usd_amount: 259.5, status: 'queued' } });
+  assert.deepEqual(intl.intlCardOrder, { card_id: '1706', on_card_usd_amount: 250, charged_usd_amount: 259.5, status: 'queued' });
+  const topUp = await settle({ top_up_id: 'abc123', status: 'paid', funded_usd: 50 });
+  assert.equal(topUp.topUp.top_up_id, 'abc123');
+  assert.match(topUp.note, /within a minute/);
+  const kyc = await settle({ kyc_required: true, kyc_url: 'https://laso.example/kyc/start' });
+  assert.equal(kyc.kycRequired, true);
+  assert.equal(kyc.signature, signature);
 });
 
 for (const asset of ['USDC', 'USD']) for (const browser of [false, true]) test(`Laso ${browser ? 'browser' : 'server'} purchase uses the shared ${asset} gates and a single reservation`, async () => {
@@ -94,7 +153,7 @@ for (const asset of ['USDC', 'USD']) for (const browser of [false, true]) test(`
         assert.equal(input.accepted.extra.feePayer, accepted.extra.feePayer);
         assert.ok(input.sourceTokenAccount);
         assert.ok(input.destinationTokenAccount);
-        if (simulationError) throw Object.assign(new Error('private RPC details'), { code: 'simulation_failed', simulationReason: 'insufficient_funds' });
+        if (simulationError) throw Object.assign(new Error('private RPC details'), { code: 'simulation_failed', simulationReason: simulationError === true ? 'insufficient_funds' : simulationError });
         return { transaction: input.transaction, feeLamports: '0', maxSolCost: '0' };
       },
       signPreparedSolanaX402Payment: async ({ prepared }) => { signs++; return { transaction: prepared.transaction }; },
@@ -164,7 +223,15 @@ for (const asset of ['USDC', 'USD']) for (const browser of [false, true]) test(`
   assert.equal((await request({ confirmed: true })).signed, false);
   bot.cap.maxPerTransaction = '20000000';
   simulationError = true;
-  assert.deepEqual(await request({ confirmed: true }), { error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' });
+  assert.deepEqual(await request({ confirmed: true }), {
+    error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds',
+    hint: `The USDC account for agent wallet ${wallet.address} cannot cover this card. Nothing was submitted.`,
+  });
+  simulationError = 'source_account_not_found';
+  const missingSource = await request({ confirmed: true });
+  assert.equal(missingSource.signed, false);
+  assert.equal(missingSource.simulationReason, 'source_account_not_found');
+  assert.match(missingSource.hint, new RegExp(wallet.address));
   simulationError = false;
   assert.equal(signs, 0);
   assert.equal(reservations.size, 0);

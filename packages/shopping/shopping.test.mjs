@@ -6,6 +6,7 @@ import {
   buildShoppingProposal,
   prepareSandboxPurchase,
   settleSandboxPurchase,
+  prepareLasoCardAction,
   prepareLasoTinyCardPurchase,
 } from './shopping.mjs';
 import { NETWORKS, buildPaymentRequired, SOLANA_USDC_MINT } from '@ubc2026/x402';
@@ -275,4 +276,39 @@ test('prepareLasoTinyCardPurchase surfaces a mainnet owner gate', async () => {
   assert.equal(result.proposal.outflow, '5000000');
   assert.equal(result.challenge.accepted.payTo, recipient);
   assert.ok(SOLANA_USDC_MINT);
+});
+
+test('prepareLasoCardAction quotes the international card within its fee cap and gift above face value', async () => {
+  const quote = (amount) => ({
+    scheme: 'exact',
+    network: NETWORKS.mainnet,
+    amount,
+    asset: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    payTo: recipient,
+    maxTimeoutSeconds: 60,
+    extra: { feePayer: recipient },
+  });
+  const bigBot = { ...bot, cap: { mode: 'limited', asset: 'USDC', maxOutflow: '1000000000', maxPerTransaction: '1000000000' } };
+  const prepare = (action, amountUsd, extra, amount) => prepareLasoCardAction({
+    bot: bigBot, ledger, action, amountUsd, extra,
+    fetcher: async (url) => {
+      if (action === 'intl') assert.ok(String(url).startsWith('https://laso.finance/order-intl-card?amount=250'));
+      if (action === 'gift') {
+        assert.ok(String(url).includes('/order-gift-card?'));
+        assert.ok(String(url).includes('laso_server_id=amazon'));
+      }
+      return Response.json({ x402Version: 2, accepts: [quote(amount)] }, { status: 402 });
+    },
+  });
+  const intl = await prepare('intl', 250, undefined, '259500000');
+  assert.equal(intl.lasoAction, 'intl');
+  assert.equal(intl.proposal.outflow, '259500000');
+  assert.equal(intl.next, 'await-owner-mainnet-approval');
+  await assert.rejects(prepare('intl', 250, undefined, '259500001'), /no supported/);
+  await assert.rejects(prepare('intl', 250.5, undefined, '260000000'), /whole dollars/);
+  const gift = await prepare('gift', 50, { laso_server_id: 'amazon', country: 'US' }, '52400000');
+  assert.equal(gift.lasoAction, 'gift');
+  assert.equal(gift.proposal.outflow, '52400000');
+  await assert.rejects(prepare('gift', 50, undefined, '52400000'), /gift_product_required/);
+  await assert.rejects(prepare('gift', 50, { laso_server_id: 'amazon', country: 'US' }, '40000000'), /no supported/);
 });

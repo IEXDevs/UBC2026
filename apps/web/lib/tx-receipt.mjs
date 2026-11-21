@@ -35,9 +35,17 @@ export function txReceiptFromResult(result) {
     url,
     text: parsed.card && typeof parsed.card.card_id === 'string'
       ? `Laso card ${parsed.card.card_id}: $${parsed.card.usd_amount}, ${parsed.card.status}. ${url}`
-      : parsed.provider === 'laso'
-        ? `Laso payment settled, but card details are unavailable. Check Laso before buying again. ${url}`
-        : `Sent. ${url}`,
+      : parsed.giftCard && typeof parsed.giftCard.card_id === 'string'
+        ? `Laso gift card ${parsed.giftCard.card_id} (${parsed.giftCard.laso_server_id}): ${parsed.giftCard.amount} ${parsed.giftCard.currency}, ${parsed.giftCard.status}. ${url}`
+        : parsed.intlCardOrder && typeof parsed.intlCardOrder.card_id === 'string'
+          ? `Laso international card ${parsed.intlCardOrder.card_id}: $${parsed.intlCardOrder.on_card_usd_amount} queued. ${url}`
+          : parsed.topUp && typeof parsed.topUp.top_up_id === 'string'
+            ? `Laso card balance top-up $${parsed.topUp.funded_usd}: ${parsed.topUp.status}. ${url}`
+            : parsed.kycRequired === true
+              ? `Laso needs KYC before this payout dispatches. The funds are credited and recoverable. ${url}`
+              : parsed.provider === 'laso'
+                ? `Laso payment settled, but card details are unavailable. Check Laso before buying again. ${url}`
+                : `Sent. ${url}`,
   };
 }
 

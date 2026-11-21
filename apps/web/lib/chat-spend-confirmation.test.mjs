@@ -71,7 +71,7 @@ test('Laso preparation needs no slide; its ticket-bound purchase does, and retur
   const ticket = `payload.${'a'.repeat(64)}`;
   const args = { botId, action: 'x402', amount: '10000000', asset: 'USDC', lasoTicket: ticket };
   const hold = sealAssetSpendHold(toolAccessRequest('full', 'request_spend', args), context, 1000);
-  assert.match(hold.label, /Buy a Laso.*\$10/);
+  assert.match(hold.label, /Buy with Laso.*\$10/);
   assert.equal(hold.args.lasoTicket, ticket);
   const changed = await resumeAssetSpend({ ...hold, args: { ...args, lasoTicket: 'changed' } }, context, () => assert.fail('changed ticket invoked'), 2000);
   assert.match(changed.text, /invalid or expired/);
@@ -90,7 +90,7 @@ test('Laso preparation needs no slide; its ticket-bound purchase does, and retur
   assert.equal(JSON.stringify(reply.activity).includes('owner-only'), false);
   assert.equal(reply.text.includes('owner-only'), false);
   const failed = await resumeAssetSpend(hold, context, async () => ({ error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' }), 2000);
-  assert.match(failed.text, /insufficient_funds/);
+  assert.match(failed.text, /does not have enough USDC/);
 });
 
 test('USDC swaps display confirmed minimum output and bind the quote ticket to the slide', async () => {

@@ -20,6 +20,7 @@ import {
   TransferError,
   buildSolanaUsdcTransaction,
   buildSolanaX402Transaction,
+  selectX402SourceAccount,
   buildJupiterSwap,
   depositFromWalletAdapter,
   grabBackToMain,
@@ -122,8 +123,23 @@ test('x402 builds only bounded compute budget and exact USDC transfer with the s
   assert.equal(transfer.data.amount, 10000000n);
   assert.equal(transfer.data.decimals, 6);
   assert.equal(transfer.keys.owner.pubkey.toBase58(), owner.toBase58());
-  assert.equal(transfer.keys.source.pubkey.toBase58(), getAssociatedTokenAddressSync(transfer.keys.mint.pubkey, owner).toBase58());
+  const ata = getAssociatedTokenAddressSync(transfer.keys.mint.pubkey, owner).toBase58();
+  assert.equal(transfer.keys.source.pubkey.toBase58(), ata);
   assert.equal(transfer.keys.destination.pubkey.toBase58(), built.destinationTokenAccount);
+  const funded = Keypair.generate().publicKey.toBase58();
+  const direct = buildSolanaX402Transaction({ ...args, sourceTokenAccount: funded });
+  const directTransfer = decodeTransferCheckedInstruction(TransactionMessage.decompile(VersionedTransaction.deserialize(Buffer.from(direct.transaction, 'base64')).message).instructions[2]);
+  assert.equal(directTransfer.keys.source.pubkey.toBase58(), funded);
+  assert.equal(selectX402SourceAccount(owner.toBase58(), [
+    { address: funded, amount: '5000000' },
+    { address: ata, amount: '1000000' },
+    { address: 'not-an-account', amount: '9000000' },
+  ], '5000000'), funded);
+  assert.equal(selectX402SourceAccount(owner.toBase58(), [
+    { address: funded, amount: '9000000' },
+    { address: ata, amount: '5000000' },
+  ], '5000000'), ata);
+  assert.equal(selectX402SourceAccount(owner.toBase58(), [{ address: funded, amount: '4999999' }], '5000000'), null);
   assert.equal(built.destinationTokenAccount, getAssociatedTokenAddressSync(transfer.keys.mint.pubkey, payTo).toBase58());
   for (const change of [{ asset: owner.toBase58() }, { network: 'solana:devnet' }, { scheme: 'other' }, { extra: { feePayer: owner.toBase58() } }]) {
     assert.throws(() => buildSolanaX402Transaction({ ...args, accepted: { ...accepted, ...change } }));

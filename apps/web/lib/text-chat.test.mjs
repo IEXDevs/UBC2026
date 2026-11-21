@@ -351,7 +351,7 @@ test('a latest-model question searches once and does not open a browser', async 
 });
 
 test('browser and research replies bypass final verification for successful, empty and failed results', async () => {
-  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+  for (const name of ['browser_open', 'browser_navigate', 'browser_click', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
     for (const result of [{ ok: true }, { items: [] }, { error: 'provider_unavailable' }]) {
       let round = 0;
       let verified = 0;
@@ -640,7 +640,7 @@ test('Laso browser and research restrictions follow the current request or an un
     { message: 'yes', grants: [{ ...pending, args: { action: 'swap' } }], blocked: false },
     { message: 'yes', blocked: false },
   ];
-  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+  for (const name of ['browser_open', 'browser_navigate', 'browser_click', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
     for (const scenario of cases) {
       let modelCalls = 0;
       const invoked = [];

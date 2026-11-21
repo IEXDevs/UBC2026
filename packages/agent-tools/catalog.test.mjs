@@ -28,6 +28,7 @@ test('shared catalog covers research and dashboard tools', () => {
     'get_price',
     'browser_open',
     'browser_navigate',
+    'browser_click',
     'browser_live_view',
     'browser_release',
     'list_bots',
@@ -37,11 +38,14 @@ test('shared catalog covers research and dashboard tools', () => {
     'create_loop',
     'set_loop_cooldown',
     'break_loop',
+    'prepare_shopping',
+    'laso_checkpoint',
+    'laso_status',
     'request_spend',
   ]) {
     assert.ok(SHARED_TOOL_NAMES.includes(name), name);
   }
-  assert.equal(RESEARCH_TOOLS.length, 6);
+  assert.equal(RESEARCH_TOOLS.length, 7);
   assert.ok(DASHBOARD_TOOLS.length >= 10);
   assert.equal(SHARED_AGENT_TOOLS.length, RESEARCH_TOOLS.length + PRICE_TOOLS.length + DASHBOARD_TOOLS.length);
   assert.equal(new Set(SHARED_TOOL_NAMES).size, SHARED_TOOL_NAMES.length);
@@ -140,11 +144,14 @@ test('OpenAI tool mapping preserves names', () => {
  */
 test('voice research webhooks include live_view and navigate', () => {
   const names = VOICE_RESEARCH_WEBHOOKS.map((item) => item.name);
+  assert.ok(names.includes('browser_click'));
   assert.ok(names.includes('browser_live_view'));
   assert.ok(names.includes('browser_navigate'));
   assert.ok(names.includes('web_search'));
   assert.ok(VOICE_BROWSER_ALIASES.some((item) => item.name === 'open_browser_session'));
   assert.match(sharedToolsInstruction(), /simple English/);
+  assert.match(sharedToolsInstruction(), /browser_click/);
+  assert.match(sharedToolsInstruction(), /cursor move/);
   assert.match(sharedToolsInstruction(), /Do not read them back/);
   assert.match(sharedToolsInstruction(), /You have the following tools/);
   assert.match(sharedToolsInstruction(), /get_price/);
@@ -158,11 +165,14 @@ test('voice research webhooks include live_view and navigate', () => {
   assert.match(sharedToolsInstruction(), /Do not break a loop on your own/);
   assert.match(sharedToolsInstruction(), /lookup_recipient/);
   assert.match(sharedToolsInstruction(), /solscanUrl/);
+  assert.match(sharedToolsInstruction(), /laso_checkpoint/);
+  assert.match(sharedToolsInstruction(), /SKILL\.md/);
+  assert.match(sharedToolsInstruction(), /continue from that stage/);
   assert.match(sharedToolsInstruction(), /Do not wait for the owner to ask again/);
   assert.match(sharedToolsInstruction(), /Never web_search for \.sol/);
   assert.match(sharedToolsInstruction(), /Prefer a direct URL over searching/);
   assert.match(sharedToolsInstruction(), /call web_search once and answer from that result/);
-  assert.match(sharedToolsInstruction(), /Do not call browser_open, browser_navigate, browser_live_view, or delegate_task for that fact/);
+  assert.match(sharedToolsInstruction(), /Do not call browser_open, browser_navigate, browser_click, browser_live_view, or delegate_task for that fact/);
   assert.match(sharedToolsInstruction(), /owner situation/);
   assert.match(sharedToolsInstruction(), /Do not invent a city/);
   const lookup = DASHBOARD_TOOLS.find((tool) => tool.name === 'lookup_recipient');
@@ -179,6 +189,14 @@ test('voice research webhooks include live_view and navigate', () => {
   const broken = DASHBOARD_TOOLS.find((tool) => tool.name === 'break_loop');
   assert.match(broken.description, /only when the owner explicitly asks/);
   assert.equal(broken.parameters.properties.ownerAsked, undefined);
+  const checkpoint = DASHBOARD_TOOLS.find((tool) => tool.name === 'laso_checkpoint');
+  assert.deepEqual(checkpoint.parameters.required, ['botId']);
+  assert.equal(checkpoint.voiceCalls[0].method, 'POST');
+  assert.equal(checkpoint.voiceCalls[0].path, '/bots/:botId/laso/checkpoint');
+  assert.deepEqual(checkpoint.voiceCalls[1], { method: 'GET', path: '/bots/:botId/laso/checkpoint', query: [], body: [] });
+  const status = DASHBOARD_TOOLS.find((tool) => tool.name === 'laso_status');
+  assert.equal(status.voiceCalls[0].method, 'GET');
+  assert.deepEqual(status.voiceCalls[0].query, ['view', 'card_id', 'card_type']);
   const away = DASHBOARD_TOOLS.find((tool) => tool.name === 'what_happened_while_away');
   assert.deepEqual(away.voiceCalls.map((entry) => ({ method: entry.method, path: entry.path })), [
     { method: 'GET', path: '/api/events' },

@@ -4,8 +4,8 @@ import { createHash, createHmac } from 'node:crypto';
 import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
 import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
 import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
-import { Keypair, SystemInstruction, Transaction, VersionedTransaction } from '@solana/web3.js';
-import { decodeTransferCheckedInstruction } from '@solana/spl-token';
+import { Keypair, PublicKey, SystemInstruction, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { decodeTransferCheckedInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { sha256Hex } from './desk-grant.mjs';
 import worker from './owner-auth.fixture.mjs';
 import { handleVoiceRequest } from './voice.mjs';
@@ -729,6 +729,49 @@ test('a classic SPL send uses the exact mint and mainnet-beta decimals', async (
   const invalid = await (await worker.fetch(spendRequest(request), env)).json();
   assert.equal(invalid.signed, false);
   assert.equal(invalid.error, 'transfer_preparation_failed');
+});
+
+/**
+ * Achieves: a pay to a plain external address (no handle, no .sol) embeds that
+ *   address in the built USDC transfer and broadcasts it once.
+ * Fails when: the destination is swapped, dropped, or the spend never signs.
+ * Oracle: ATA derivation + transfer-checked decode of the prepared transaction.
+ * Side effects: mocked signer and ledger only.
+ * Gaps: on-chain confirmation is the signature itself.
+ */
+test('a USDC pay to an external address embeds that address and broadcasts once', async () => {
+  const external = Keypair.fromSeed(new Uint8Array(32).fill(7)).publicKey.toBase58();
+  assert.notEqual(external, wallet.address);
+  const autoBot = {
+    ...bot,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
+  };
+  let broadcasts = 0;
+  const env = spendEnv({
+    loadSpendContext: async () => ({ bot: autoBot, wallet, ledger }),
+    transferClient: {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      signAndBroadcastSolana: async ({ transaction }) => {
+        broadcasts += 1;
+        const tx = Transaction.from(Buffer.from(transaction, 'base64'));
+        assert.equal(tx.instructions.length, 3);
+        const { keys, data } = decodeTransferCheckedInstruction(tx.instructions[1]);
+        const expectedAta = getAssociatedTokenAddressSync(new PublicKey(SOLANA_USDC_MINT), new PublicKey(external), false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+        assert.equal(keys.destination.pubkey.toBase58(), expectedAta.toBase58());
+        assert.equal(data.amount, 2500000n);
+        return { cluster: 'mainnet-beta', signature: 'external_pay_signature' };
+      },
+    },
+    ledgerApi: { reserveBudget: async () => ({ state: 'reserved' }) },
+  });
+  const body = await (await worker.fetch(spendRequest({
+    permission: 'full', botId: 'bot_1', action: 'pay',
+    asset: 'USDC', amount: '2500000', destination: external,
+  }), env)).json();
+  assert.equal(body.signed, true);
+  assert.equal(body.signature, 'external_pay_signature');
+  assert.equal(broadcasts, 1);
 });
 
 /**

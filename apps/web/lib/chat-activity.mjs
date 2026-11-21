@@ -12,6 +12,7 @@ const LABELS = Object.freeze({
   web_scrape: 'Read a page',
   browser_open: 'Opened a browser',
   browser_navigate: 'Opened a page',
+  browser_click: 'Clicked in the browser',
   browser_live_view: 'Checked the live view',
   browser_release: 'Released the browser',
   get_price: 'Checked a price',
@@ -277,6 +278,13 @@ export function spendFailureMessage(result) {
   }
   switch (parsed?.error || parsed?.state) {
     case 'simulation_failed':
+      if (parsed.simulationReason === 'source_account_not_found' || parsed.simulationReason === 'insufficient_funds' || parsed.simulationReason === 'instruction_2_custom_1') {
+        const hint = typeof parsed.hint === 'string' && parsed.hint.length > 0 && parsed.hint.length <= 240 ? parsed.hint : '';
+        if (hint) return hint;
+        return parsed.simulationReason === 'source_account_not_found'
+          ? 'The agent wallet has no USDC account that covers this payment. Nothing was submitted.'
+          : 'The agent wallet does not have enough USDC for this card. Nothing was submitted.';
+      }
       return `Payment simulation failed${/^[a-zA-Z0-9_]{1,100}$/.test(parsed.simulationReason ?? '') ? `: ${parsed.simulationReason}` : ''}. No payment was submitted.`;
     case 'laso_ticket_invalid':
       return 'The Laso purchase expired or its details changed. Prepare a fresh card purchase.';
