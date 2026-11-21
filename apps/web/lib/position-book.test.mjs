@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getDemoShellState } from './demo-state.mjs';
 import { walletGlance } from './money-views.mjs';
-import { bookFrame, layoutPositionBook, stepBubbleFollow } from './position-book.mjs';
+import { bookFrame, layoutPositionBook, positionSceneKey, stepBubbleFollow } from './position-book.mjs';
 
 /**
  * Achieves: verifies position book layout clusters venues, wires account/spoke links, and cash glance excludes borrow.
@@ -95,4 +95,16 @@ test('a single large holding leaves room for its outline at every edge', () => {
   const [{ x, y, r }] = wallet.bubbles;
   assert.ok(x - r >= 2 && x + r <= wallet.bubbleWidth - 2);
   assert.ok(y - r >= 2 && y + r <= wallet.bubbleHeight - 2);
+});
+
+test('a price refresh updates holdings without changing the scene when geometry matches', () => {
+  const wallets = [{ id: 'main', label: 'Main' }];
+  const sol = { id: 'sol', walletId: 'main', asset: 'SOL', amount: '1000000000', decimals: 9 };
+  const initial = layoutPositionBook([], [], wallets, [{ ...sol, notionalMicroUsdc: '100000000' }]);
+  const refreshed = layoutPositionBook([], [], wallets, [{ ...sol, notionalMicroUsdc: '110000000' }]);
+  const added = layoutPositionBook([], [], [...wallets, { id: 'extra', label: 'Extra' }]);
+  assert.equal(positionSceneKey(initial), positionSceneKey(refreshed));
+  assert.notEqual(positionSceneKey(initial), positionSceneKey(added));
+  assert.equal(initial.wallets[0].bubbles[0].valueLabel, '$100');
+  assert.equal(refreshed.wallets[0].bubbles[0].valueLabel, '$110');
 });

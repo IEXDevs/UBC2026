@@ -5,10 +5,14 @@ import AddressText from './AddressText';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 
 const BUBBLE_PALETTE = [
-  ['#5b84ab', '#355b80', '#20384f'],
-  ['#807cad', '#575583', '#363553'],
-  ['#53948a', '#326b64', '#204840'],
-  ['#a2875e', '#755b37', '#4b3822'],
+  ['#62d9ff', '#1775e6', '#16317a'],
+  ['#d497ff', '#9246e8', '#442182'],
+  ['#64efd0', '#17a782', '#09534e'],
+  ['#ffca69', '#ed7a25', '#8a3715'],
+  ['#ff98c1', '#dc427f', '#801c4a'],
+  ['#bdeb6a', '#66ab2e', '#34591b'],
+  ['#80baff', '#4b58e4', '#252779'],
+  ['#ff9d94', '#e74f51', '#812a2f'],
 ];
 
 export function usdLabel(notionalLabel) {
@@ -41,7 +45,7 @@ export function WalletCard({ wallet }) {
           <svg
             className="book-wallet-bubbles"
             viewBox={`0 0 ${wallet.bubbleWidth} ${wallet.bubbleHeight}`}
-            role="img"
+            role="group"
             aria-label={wallet.bubbles.map(bubble => `${bubble.asset} ${bubble.valueLabel}`).join(', ')}
           >
             <defs>
@@ -57,26 +61,32 @@ export function WalletCard({ wallet }) {
                 </radialGradient>
               ))}
             </defs>
-            {wallet.bubbles.map((bubble, index) => (
-              <g key={`${bubble.asset}-${index}`}>
-                <circle
-                  className="book-wallet-bubble"
-                  cx={bubble.x} cy={bubble.y} r={bubble.r}
-                  fill={`url(#${gradientId}-${index % BUBBLE_PALETTE.length})`}
-                  strokeWidth={Math.min(0.9, bubble.r / 5)}
-                >
-                  <title>{`${bubble.asset} · ${bubble.valueLabel}`}</title>
-                </circle>
-                <ellipse
-                  className="book-wallet-reflection"
-                  cx={bubble.x - bubble.r * 0.28} cy={bubble.y - bubble.r * 0.56}
-                  rx={bubble.r * 0.56} ry={bubble.r * 0.19}
-                  transform={`rotate(-27 ${bubble.x - bubble.r * 0.28} ${bubble.y - bubble.r * 0.56})`}
-                  fill={`url(#${gradientId}-reflection)`}
-                />
-                {bubble.r * 2 >= bubble.asset.length * 5 + 7 && <text x={bubble.x} y={bubble.y}>{bubble.asset}</text>}
-              </g>
-            ))}
+            {wallet.bubbles.map((bubble, index) => {
+              const label = [bubble.asset, bubble.valueLabel, bubble.amountLabel].filter(Boolean).join(' · ');
+              return (
+                <g key={bubble.id}>
+                  <circle
+                    className="book-wallet-bubble"
+                    tabIndex={0}
+                    role="img"
+                    aria-label={label}
+                    cx={bubble.x} cy={bubble.y} r={bubble.r}
+                    fill={`url(#${gradientId}-${index % BUBBLE_PALETTE.length})`}
+                    strokeWidth={Math.min(0.9, bubble.r / 5)}
+                  >
+                    <title>{label}</title>
+                  </circle>
+                  <ellipse
+                    className="book-wallet-reflection"
+                    cx={bubble.x - bubble.r * 0.28} cy={bubble.y - bubble.r * 0.56}
+                    rx={bubble.r * 0.56} ry={bubble.r * 0.19}
+                    transform={`rotate(-27 ${bubble.x - bubble.r * 0.28} ${bubble.y - bubble.r * 0.56})`}
+                    fill={`url(#${gradientId}-reflection)`}
+                  />
+                  {bubble.r * 2 >= bubble.asset.length * 5 + 7 && <text x={bubble.x} y={bubble.y}>{bubble.asset}</text>}
+                </g>
+              );
+            })}
           </svg>
         </CardContent>
       )}
