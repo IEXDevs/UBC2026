@@ -262,7 +262,9 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
   const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey };
   const request = body => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
   routeSlippage = 100;
-  assert.equal((await (await request()).json()).error, 'swap_route_refused');
+  const rejectedTerms = await (await request()).json();
+  assert.equal(rejectedTerms.error, 'swap_route_instruction_mismatch');
+  assert.match(rejectedTerms.failure.message, /quoted terms and wallet/);
   routeSlippage = 50;
   const instructionProgram = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
   const log = `Program ${instructionProgram} failed: custom program error: 0x1`;

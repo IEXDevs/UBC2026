@@ -41,6 +41,7 @@ function walletBubbles(rows, width, height) {
     largest.push({ asset: 'Other', value });
   }
   const gap = 3;
+  const inset = 2;
   const lines = Array.from({ length: largest.length > 2 ? 2 : 1 }, () => ({ sum: 0, tallest: 0, circles: [] }));
   for (const circle of largest) {
     const radius = Math.sqrt(Number(circle.value) / maximum);
@@ -50,8 +51,8 @@ function walletBubbles(rows, width, height) {
     line.circles.push({ ...circle, radius });
   }
   const bubbleHeight = lines.reduce((sum, line) => sum + line.tallest, 0);
-  const scale = Math.min((height - gap * (lines.length - 1)) / bubbleHeight,
-    ...lines.map(line => (width - gap * Math.max(0, line.circles.length - 1)) / line.sum));
+  const scale = Math.min((height - inset * 2 - gap * (lines.length - 1)) / bubbleHeight,
+    ...lines.map(line => (width - inset * 2 - gap * Math.max(0, line.circles.length - 1)) / line.sum));
   if (scale <= 0) return [];
   let y = (height - bubbleHeight * scale - gap * (lines.length - 1)) / 2;
   return lines.flatMap(line => {
