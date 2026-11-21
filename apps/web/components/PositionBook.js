@@ -2,13 +2,15 @@
 
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
 import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
-import { addressTextParts } from '../lib/address-labels.mjs';
-import { copyText } from '../lib/copy-text.mjs';
 import EarningsChart from './EarningsChart';
+import { ProviderGroupCard, ProviderPositionCard, WalletCard, usdLabel } from './PositionBookCards';
+import { Button } from './ui/button';
+import { Card } from './ui/card';
 
 const PLACE_KEY = 'maelstrom.cardPlaces';
 const DRAG_PX = 7;
@@ -37,172 +39,6 @@ function placedSpot(places, card) {
   return { x: card.x, y: card.y };
 }
 
-function usdLabel(notionalLabel) {
-  if (!notionalLabel) return '';
-  const amount = notionalLabel.replace(/ USDC$/, '');
-  return amount.startsWith('-') ? `-$${amount.slice(1)}` : `$${amount}`;
-}
-
-function metric(parent, label, value, extra) {
-  if (!value) return;
-  const row = document.createElement('div');
-  row.className = `book-metric${extra ? ` ${extra}` : ''}`;
-  const name = document.createElement('span');
-  name.textContent = label;
-  const amount = document.createElement('b');
-  amount.textContent = value;
-  row.append(name, amount);
-  parent.append(row);
-}
-
-// The 3D cards are DOM nodes, so keep the same address controls as the React details.
-function addressText(node, text, address) {
-  for (const part of addressTextParts(text, [address])) {
-    if (!part.address) {
-      if (part.punctuation) {
-        const token = document.createElement('span');
-        token.className = 'address-copy-token';
-        token.textContent = part.text + part.punctuation;
-        node.append(token);
-      } else {
-        node.append(document.createTextNode(part.text));
-      }
-      continue;
-    }
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'address-copy is-inline is-dotted';
-    button.setAttribute('aria-label', `Copy ${part.address}`);
-    button.title = 'Copy address';
-    const label = document.createElement('span');
-    label.className = 'address-copy-label';
-    label.textContent = part.text;
-    const status = document.createElement('span');
-    status.className = 'address-copy-status';
-    status.setAttribute('role', 'status');
-    let timer;
-    button.onpointerdown = event => event.stopPropagation();
-    button.onclick = async event => {
-      event.stopPropagation();
-      window.clearTimeout(timer);
-      const ok = await copyText(part.address);
-      const note = document.createElement('small');
-      note.className = 'address-copy-feedback';
-      note.textContent = ok ? 'Copied' : 'Copy failed';
-      status.replaceChildren(note);
-      timer = window.setTimeout(() => status.replaceChildren(), 1200);
-    };
-    button.append(label, status);
-    if (part.punctuation) {
-      const token = document.createElement('span');
-      token.className = 'address-copy-token';
-      token.append(button, document.createTextNode(part.punctuation));
-      node.append(token);
-    } else {
-      node.append(button);
-    }
-  }
-}
-
-function face(className) {
-  const side = document.createElement('div');
-  side.className = `book-face ${className}`;
-  const spot = document.createElement('span');
-  spot.className = 'book-spot';
-  const glare = document.createElement('span');
-  glare.className = 'book-glare';
-  side.append(spot, glare);
-  return side;
-}
-
-function sparks(parent) {
-  for (let i = 0; i < 6; i += 1) {
-    const spark = document.createElement('span');
-    spark.className = 'book-spark';
-    spark.style.setProperty('--sx', `${18 + ((i * 37) % 70)}%`);
-    spark.style.setProperty('--sy', `${16 + ((i * 23) % 68)}%`);
-    parent.append(spark);
-  }
-}
-
-function cardElement(card) {
-  const article = document.createElement('article');
-  article.className = 'book-card';
-  article.dataset.positionId = card.id;
-  article.dataset.kind = 'position';
-  article.dataset.walletId = card.walletId ?? '';
-
-  const tilt = document.createElement('div');
-  tilt.className = 'book-tilt';
-  const flip = document.createElement('div');
-  flip.className = 'book-flip';
-  const glow = document.createElement('span');
-  glow.className = 'book-glow';
-
-  const front = face('book-front');
-  const heading = document.createElement('div');
-  heading.className = 'book-glance';
-  const mark = logoImage(card.logo);
-  if (mark) heading.append(mark);
-  const names = document.createElement('div');
-  const asset = document.createElement('strong');
-  addressText(asset, card.asset, card.mint);
-  names.append(asset);
-  const source = document.createElement('span');
-  source.textContent = [card.venue, card.side].filter(Boolean).join(' · ');
-  names.append(source);
-  heading.append(names);
-
-  const size = document.createElement('p');
-  size.className = 'book-size';
-  addressText(size, card.amountLabel, card.mint);
-  const usd = document.createElement('p');
-  usd.className = 'book-usd';
-  usd.textContent = usdLabel(card.notionalLabel);
-  front.append(heading, size, usd);
-  sparks(front);
-
-  const back = face('book-back');
-  const top = document.createElement('div');
-  top.className = 'book-card-top';
-  const market = document.createElement('strong');
-  addressText(market, card.market, card.mint);
-  top.append(market);
-  if (card.venue) {
-    const venue = document.createElement('span');
-    venue.className = 'book-side';
-    venue.textContent = card.venue;
-    top.append(venue);
-  }
-  const body = document.createElement('div');
-  metric(body, 'Entry', card.entry);
-  metric(body, 'Mark', card.mark);
-  metric(body, 'Leverage', card.leverage);
-  metric(body, 'Health', card.healthLabel);
-  metric(body, 'APY', card.apyLabel);
-  metric(body, 'PnL', usdLabel(card.pnlLabel), card.pnlDown ? 'book-pnl is-down' : 'book-pnl is-up');
-  const agent = document.createElement('small');
-  agent.textContent = card.botName;
-  back.append(top, body, agent);
-
-  flip.append(front, back);
-  tilt.append(flip, glow);
-  article.append(tilt);
-  return article;
-}
-
-function clusterHome(book) {
-  const venue = book.venues[0]?.venue;
-  const cards = book.cards.filter(card => card.venue === venue);
-  if (!cards.length) return { x: 0, y: 0 };
-  const xs = cards.map(card => card.x);
-  const ys = cards.map(card => card.y);
-  return {
-    x: (Math.min(...xs) + Math.max(...xs)) / 2,
-    y: (Math.min(...ys) + Math.max(...ys)) / 2,
-  };
-}
-
 function logoImage(src) {
   if (!src) return null;
   const mark = document.createElement('img');
@@ -211,100 +47,6 @@ function logoImage(src) {
   mark.draggable = false;
   mark.src = src;
   return mark;
-}
-
-function walletIcon() {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', '15');
-  svg.setAttribute('height', '15');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.75');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('stroke-linejoin', 'round');
-  svg.setAttribute('aria-hidden', 'true');
-  const body = document.createElementNS(svg.namespaceURI, 'path');
-  body.setAttribute('d', 'M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1');
-  const fold = document.createElementNS(svg.namespaceURI, 'path');
-  fold.setAttribute('d', 'M3 5v14a2 2 0 0 0 2 2h15v-2');
-  svg.append(body, fold);
-  return svg;
-}
-
-function walletElement(wallet) {
-  const article = document.createElement('article');
-  article.className = 'book-card book-wallet';
-  article.style.setProperty('--wallet-width', `${wallet.width}px`);
-  article.style.setProperty('--wallet-height', `${wallet.height}px`);
-  article.dataset.positionId = wallet.id;
-  article.dataset.kind = 'wallet';
-  const head = document.createElement('div');
-  head.className = 'book-wallet-head';
-  const title = document.createElement('strong');
-  title.append(walletIcon());
-  const name = document.createElement('span');
-  name.textContent = wallet.label;
-  name.title = wallet.label;
-  title.append(name);
-  const size = document.createElement('b');
-  size.textContent = wallet.holdingsLabel;
-  head.append(title, size);
-  const sub = document.createElement('p');
-  addressText(sub, wallet.address, wallet.fullAddress);
-  if (wallet.frozen || wallet.readOnly) sub.append(wallet.frozen ? ' · Frozen' : ' · Read-only');
-  article.append(head, sub);
-  if (wallet.bubbles.length) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'book-wallet-bubbles');
-    svg.setAttribute('viewBox', `0 0 ${wallet.bubbleWidth} ${wallet.bubbleHeight}`);
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', wallet.bubbles.map(bubble => `${bubble.asset} ${bubble.valueLabel}`).join(', '));
-    wallet.bubbles.forEach((bubble, index) => {
-      const circle = document.createElementNS(svg.namespaceURI, 'circle');
-      circle.setAttribute('cx', bubble.x);
-      circle.setAttribute('cy', bubble.y);
-      circle.setAttribute('r', bubble.r);
-      circle.setAttribute('class', `book-wallet-tone-${index % 4}`);
-      const value = document.createElementNS(svg.namespaceURI, 'title');
-      value.textContent = `${bubble.asset} · ${bubble.valueLabel}`;
-      circle.append(value);
-      svg.append(circle);
-      if (bubble.r * 2 >= bubble.asset.length * 5 + 7) {
-        const label = document.createElementNS(svg.namespaceURI, 'text');
-        label.setAttribute('x', bubble.x);
-        label.setAttribute('y', bubble.y);
-        label.textContent = bubble.asset;
-        svg.append(label);
-      }
-    });
-    article.append(svg);
-  }
-  if (wallet.unpriced) {
-    const note = document.createElement('p');
-    note.textContent = `${wallet.unpriced} unpriced`;
-    article.append(note);
-  }
-  return article;
-}
-
-function accountElement(account) {
-  const article = document.createElement('article');
-  article.className = 'book-card book-account';
-  article.dataset.positionId = account.id;
-  article.dataset.kind = 'account';
-  article.dataset.walletId = account.walletId;
-  const mark = logoImage(account.logo);
-  const names = document.createElement('div');
-  names.className = 'book-glance-copy';
-  const title = document.createElement('strong');
-  title.textContent = account.venue;
-  const meta = document.createElement('span');
-  meta.textContent = account.count === 1 ? '1 position' : `${account.count} positions`;
-  names.append(title, meta);
-  if (mark) article.append(mark);
-  article.append(names);
-  return article;
 }
 
 function venueElement(venue) {
@@ -343,6 +85,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
   const cameraRef = useRef(null);
   const openRef = useRef(null);
   const walletRef = useRef(onWallet);
+  const [sceneCards, setSceneCards] = useState(null);
   const [detail, setDetail] = useState(null);
   const [drifted, setDrifted] = useState(false);
   const driftedRef = useRef(false);
@@ -477,7 +220,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       const anchors = new Map();
       const bindings = [];
       const cardObjects = new Map();
-      const nodeObjects = new Map();
+      const hosts = [];
       const linkMeshes = [];
       const tiltState = new Map();
       const places = readPlaces();
@@ -516,38 +259,33 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         object.element.dataset.positionId = venue.id;
         object.position.set(venue.x, venue.y, 0);
         scene.add(object);
-        nodeObjects.set(venue.id, object.element);
         anchors.set(venue.id, object.position);
       }
-      for (const wallet of book.wallets) {
-        const spot = placedSpot(places, wallet);
-        const object = new CSS3DObject(walletElement(wallet));
+
+      function addCard(item, kind, content) {
+        const host = document.createElement('article');
+        host.className = kind === 'position' ? 'book-card' : `book-card book-${kind}`;
+        host.dataset.positionId = item.id;
+        host.dataset.kind = kind;
+        host.dataset.walletId = item.walletId ?? '';
+        if (kind === 'wallet') {
+          host.style.setProperty('--wallet-width', `${item.width}px`);
+          host.style.setProperty('--wallet-height', `${item.height}px`);
+        }
+        const spot = placedSpot(places, item);
+        const object = new CSS3DObject(host);
         object.position.set(spot.x, spot.y, 0);
         scene.add(object);
-        cardObjects.set(wallet.id, object);
-        nodeObjects.set(wallet.id, object.element);
-        anchors.set(wallet.id, object.position);
-        tiltState.set(wallet.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
+        cardObjects.set(item.id, object);
+        anchors.set(item.id, object.position);
+        if (kind === 'position') tiltState.set(item.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
+        hosts.push({ host, content, id: item.id });
       }
-      for (const account of book.accounts) {
-        const spot = placedSpot(places, account);
-        const object = new CSS3DObject(accountElement(account));
-        object.position.set(spot.x, spot.y, 0);
-        scene.add(object);
-        cardObjects.set(account.id, object);
-        nodeObjects.set(account.id, object.element);
-        anchors.set(account.id, object.position);
-      }
-      for (const card of book.cards) {
-        const spot = placedSpot(places, card);
-        const object = new CSS3DObject(cardElement(card));
-        object.position.set(spot.x, spot.y, 0);
-        scene.add(object);
-        cardObjects.set(card.id, object);
-        nodeObjects.set(card.id, object.element);
-        anchors.set(card.id, object.position);
-        tiltState.set(card.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
-      }
+
+      for (const wallet of book.wallets) addCard(wallet, 'wallet', <WalletCard wallet={wallet} />);
+      for (const account of book.accounts) addCard(account, 'account', <ProviderGroupCard account={account} />);
+      for (const card of book.cards) addCard(card, 'position', <ProviderPositionCard card={card} />);
+      setSceneCards({ book, hosts });
 
       const walletHeights = new Map(book.wallets.map(wallet => [wallet.id, wallet.height]));
       function anchorPoint(id, role, kind) {
@@ -883,7 +621,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
 
       function down(event) {
         if (event.button !== 0) return;
-        if (event.target.closest('.book-tools, .book-caption, .book-modal')) return;
+        if (event.target.closest('.book-tools, .book-caption, .book-modal, .address-copy')) return;
         const card = event.target.closest('.book-card');
         if (card) {
           gesture = {
@@ -1050,6 +788,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
 
   return (
     <section className="position-book" aria-label="Positions" ref={mountRef}>
+      {sceneCards?.book === book && sceneCards.hosts.map(({ host, content, id }) => createPortal(content, host, id))}
       <EarningsChart series={earnings} />
       <div className="book-caption">
         {book.summary.count > 0 && (
@@ -1061,22 +800,22 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         {(status || book.summary.count === 0) && <span role="status">{status || 'No open Jupiter Perps or Meteora DLMM positions.'}</span>}
       </div>
       <div className="book-tools">
-        <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.86)}>
+        <Button variant="outline" size="icon" aria-label="Zoom in" onClick={() => zoomBy(0.86)}>
           <Plus size={16} strokeWidth={1.75} />
-        </button>
-        <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1.16)}>
+        </Button>
+        <Button variant="outline" size="icon" aria-label="Zoom out" onClick={() => zoomBy(1.16)}>
           <Minus size={16} strokeWidth={1.75} />
-        </button>
+        </Button>
         {drifted ? (
-          <button type="button" aria-label="Reset view" onClick={reset}>
+          <Button variant="outline" size="icon" aria-label="Reset view" onClick={reset}>
             <LocateFixed size={16} strokeWidth={1.75} />
-          </button>
+          </Button>
         ) : null}
       </div>
       {detail ? (
         <div className="book-modal" onMouseDown={() => setDetail(null)}>
-          <article
-            className="book-modal-card"
+          <Card
+            className="book-modal-card block"
             role="dialog"
             aria-modal="true"
             aria-label={detail.title}
@@ -1107,8 +846,8 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
               </section>
             ))}
             {detail.note ? <p className="book-modal-note">{detail.note}</p> : null}
-            <button type="button" onClick={() => setDetail(null)}>Close</button>
-          </article>
+            <Button className="book-modal-close" onClick={() => setDetail(null)}>Close</Button>
+          </Card>
         </div>
       ) : null}
     </section>
