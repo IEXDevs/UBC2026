@@ -977,6 +977,9 @@ function SendPane({
 
   useEffect(() => {
     const list = Array.isArray(tokens) ? tokens : [];
+    // A balance poll briefly empties the list while reloading; keep the
+    // typed amount and asset instead of wiping the draft mid-typing.
+    if (!list.length) return;
     if (!list.some(token => token.id === assetId)) {
       setAssetId(list[0]?.id || '');
       setAmount('');

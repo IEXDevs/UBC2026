@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { normalizeLiveEvent, timelineEntries, whyFromListedDecision } from '../lib/bot-experience.mjs';
+import { isPreviewOwnerId } from '../lib/dev-preview.mjs';
 import { browserTrace, traceModel } from '../lib/agent-trace.mjs';
 import { browserSessionUrl } from '../lib/live-view.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
@@ -43,7 +44,7 @@ export default function AgentThread({
     setFocus(null);
     setRemoteEvents(null);
     const url = liveEventsUrl(bot.id);
-    if (!url || !ownerId) return undefined;
+    if (!url || !ownerId || isPreviewOwnerId(ownerId)) return undefined;
     let stop = false;
     async function load() {
       try {
@@ -69,7 +70,7 @@ export default function AgentThread({
   useEffect(() => {
     setWhy(null);
     const url = liveDecisionsUrl(bot.id);
-    if (!url || !ownerId) return undefined;
+    if (!url || !ownerId || isPreviewOwnerId(ownerId)) return undefined;
     let stop = false;
     async function load() {
       try {
@@ -91,7 +92,7 @@ export default function AgentThread({
   useEffect(() => {
     setSessions([]);
     const url = browserSessionUrl('shell', bot.id);
-    if (!url || !ownerId) return undefined;
+    if (!url || !ownerId || isPreviewOwnerId(ownerId)) return undefined;
     let stop = false;
     async function load() {
       try {
