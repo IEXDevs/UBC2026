@@ -193,9 +193,14 @@ function AuthedShell() {
       for (const address of pending) {
         signerTried.current.add(address);
         try {
-          await addSigners({ address, signers: [{ signerId, policyIds: [] }] });
+          await addSigners({ address, signers: [{ signerId }] });
         } catch (error) {
-          console.warn('[wallets] server signer not added', serverSignerFailure(error));
+          const failure = serverSignerFailure(error);
+          if (failure.status === 401) {
+            console.debug(`[wallets] server signer not added for ${address} (legacy quorum-owned):`, failure.message);
+          } else {
+            console.warn(`[wallets] server signer not added for ${address}:`, failure.message, failure);
+          }
         }
       }
     })();

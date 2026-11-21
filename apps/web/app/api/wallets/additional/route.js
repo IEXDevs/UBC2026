@@ -102,7 +102,7 @@ export async function POST(request) {
       appSecret: secrets.PRIVY_APP_SECRET,
       rpcUrl: secrets.SOLANA_RPC_URL || null,
       authorizationKey: secrets.PRIVY_AUTHORIZATION_KEY || null,
-      signerId: readRootEnv('NEXT_PUBLIC_PRIVY_SIGNER_ID') || null,
+      signerId: readRootEnv('NEXT_PUBLIC_PRIVY_SIGNER_ID') || readRootEnv('PRIVY_SIGNER_ID') || null,
     });
     const created = await client.createAdditional({
       privyUserId: ownerId,
