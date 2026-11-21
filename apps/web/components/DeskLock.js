@@ -89,11 +89,11 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
   const setting = replacing || status === 'missing';
   const passwordForm = status === 'configured' || status === 'missing';
   const feedback = passwordFeedback(password, confirm, passwordProblem(password));
-  const title = !passwordForm ? 'Unlock your desk'
-    : replacing ? 'Set a new desk password'
+  const title = !passwordForm ? 'Unlock your wallet'
+    : replacing ? 'Set a new wallet password'
     : phraseGate ? 'Reset with your seed'
-    : setting ? 'Set a desk password'
-    : 'Unlock your desk';
+    : setting ? 'Set a wallet password'
+    : 'Unlock your wallet';
 
   function clearUnlockPassword() {
     const input = unlockInput.current;
@@ -201,12 +201,12 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
           setPhraseGate(false);
           setPassword('');
           setConfirm('');
-          setNote('This account already has a desk password. Enter that password.');
+          setNote('This account already has a wallet password. Enter that password.');
           setPending(false);
           return;
         }
         if (!registered.ok) {
-          setNote('Could not save your desk password. Try again.');
+          setNote('Could not save your wallet password. Try again.');
           setPending(false);
           return;
         }
@@ -224,9 +224,9 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
       }).catch(() => ({ ok: false }));
       if (!active.current) return;
       if (!accepted.ok) {
-        const message = setting ? 'Password saved. Enter it to unlock your desk.'
+        const message = setting ? 'Password saved. Enter it to unlock your wallet.'
           : accepted.error === 'desk_locked' ? 'Wrong password.'
-          : 'Could not unlock your desk. Try again.';
+          : 'Could not unlock your wallet. Try again.';
         setNote(message);
         if (setting) {
           setPassword('');
@@ -241,7 +241,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
       onUnlock?.(accepted.until);
     } catch {
       if (!active.current) return;
-      setNote('Could not unlock your desk. Try again.');
+      setNote('Could not unlock your wallet. Try again.');
       setPending(false);
     }
   }
@@ -276,7 +276,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
         {!passwordForm ? (
           <>
             <p className="quiet" role="status">
-              {status === 'checking' ? 'Checking your desk…' : 'Could not load your desk password status.'}
+              {status === 'checking' ? 'Checking your wallet…' : 'Could not load your wallet password status.'}
             </p>
             {status === 'unavailable' ? (
               <button type="button" className="solid" disabled={pending} onClick={() => setAttempt(value => value + 1)}>Try again</button>
@@ -289,7 +289,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
             ) : null}
             {phraseGate && !replacing ? (
               <>
-                <p className="quiet">Enter the 12-word seed for this account to reset your desk password.</p>
+                <p className="quiet">Enter the 12-word recovery phrase for this account to recover your password. This phrase is only to recover your password, not for your wallet.</p>
                 <PhraseEntry slots={slots} onChange={setSlots} disabled={pending} />
               </>
             ) : null}
@@ -372,7 +372,7 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
             ) : null}
             {note ? <p className="quiet" role="status">{note}</p> : null}
             <button type="submit" className="solid" disabled={pending || (setting && !(phraseGate && !replacing) && (!feedback.ready || !secretAcceptAllowed({ generated, copied })))}>
-              {pending ? 'Checking…' : setting ? 'Set password and unlock' : phraseGate ? 'Check seed' : 'Unlock desk'}
+              {pending ? 'Checking…' : setting ? 'Set password and unlock' : phraseGate ? 'Check seed' : 'Unlock wallet'}
             </button>
             {!setting && !phraseGate ? (
               <button

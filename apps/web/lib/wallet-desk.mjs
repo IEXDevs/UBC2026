@@ -646,8 +646,8 @@ export function recoveryCard({ words, wallets = [], handle = '', passphrase = ''
   const lines = ['Maelstrom recovery', ''];
   if (typeof handle === 'string' && handle.trim()) lines.push(`Handle: @${handle.trim().replace(/^@/, '')}`, '');
   if (phrase) {
-    lines.push('Desk recovery words:', phrase.join(' '), '');
-    lines.push('These words reset your Maelstrom desk password. They are not a wallet seed or private key: importing them into a wallet app opens an unrelated empty wallet. Your wallets are Privy wallets and their keys never leave Privy.', '');
+    lines.push('Password recovery words:', phrase.join(' '), '');
+    lines.push('These words are only to recover your password, not for your wallet. They are not a wallet seed or private key: importing them into a wallet app opens an unrelated empty wallet. Your wallets are Privy wallets and their keys never leave Privy.', '');
     const pass = normalizePassphrase(passphrase);
     if (pass) lines.push('Password:', pass, '');
     lines.push('This file is the only copy. Maelstrom does not keep these words or the password.', '');

@@ -343,7 +343,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         {step === 'tell' ? (
           <>
             <p className="quiet">
-              Your account gets one 12-word seed, shown once. It resets your desk password; it is not a wallet key and will not import your wallets into another app. Download it and keep the file. It is never shown again, on this browser or any other.
+              Your account gets one 12-word recovery phrase, shown once. This phrase is strictly to recover your password — it is not for your wallet and will not import your wallets into another app (your wallet keys are secured separately by Privy). Download it and keep the file. It is never shown again, on this browser or any other.
               {handle ? ` @${handle} is the name people pay.` : ''}
             </p>
             <ul className="recovery-wallets">
@@ -395,7 +395,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         ) : null}
         {step === 'save' ? (
           <>
-            <p className="quiet">Download the seed to continue. This is the only time it is shown.</p>
+            <p className="quiet">Download the recovery phrase to continue. This phrase is only to recover your password, not for your wallet. This is the only time it is shown.</p>
             <ol className="phrase-grid">
               {(words || []).map((word, index) => (
                 <li key={`${word}-${index}`}>
@@ -427,7 +427,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         ) : null}
         {step === 'restore' || step === 'finish' ? (
           <form className="field" onSubmit={restoreSeed}>
-            {step === 'restore' ? <p className="quiet">This account already saved its seed. Enter the 12 words from your file to open the desk on this browser.</p> : null}
+            {step === 'restore' ? <p className="quiet">This account already saved its recovery phrase. Enter the 12 words from your file to recover your password. This phrase is only to recover your password, not for your wallet.</p> : null}
             <PhraseEntry slots={slots} onChange={(next) => { setSlots(next); }} disabled={leaving || busy} />
             <button type="submit" className="solid" disabled={leaving || busy}>{step === 'finish' ? 'Confirm seed' : 'Restore seed'}</button>
           </form>
@@ -440,7 +440,7 @@ export default function RecoveryCeremony({ wallets = [], handle = '', ownerId = 
         {step === 'success' ? (
           <div className="recovery-success" role="status">
             <p className="acceptance-ok">Seed confirmed. You are set.</p>
-            <p className="quiet">Opening your desk…</p>
+            <p className="quiet">Opening your wallet…</p>
           </div>
         ) : null}
         {note && step !== 'success' ? (

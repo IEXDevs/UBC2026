@@ -59,7 +59,7 @@ export default function PrivyKeyButton({
   }
 
   function lockNote(error) {
-    if (error === 'desk_lock_required') return 'Unlock the desk, then copy the key.';
+    if (error === 'desk_lock_required') return 'Unlock the wallet, then copy the key.';
     if (error === 'not_exportable' || error === 'observing_wallet') return 'This wallet cannot be exported.';
     if (error === 'wallet_not_found') return 'This wallet is not on the account.';
     if (error === 'signer_not_configured') return 'The signing service is not configured.';
@@ -92,7 +92,7 @@ export default function PrivyKeyButton({
       const loaded = await loadServerKey();
       if (!loaded.ok) {
         setNote(loaded.error === 'desk_lock_required'
-          ? 'Unlock the desk, then download the key.'
+          ? 'Unlock the wallet, then download the key.'
           : lockNote(loaded.error));
         return;
       }
@@ -152,7 +152,7 @@ export default function PrivyKeyButton({
       ) : null}
       {note ? <p className="quiet" role="status">{note}</p> : null}
       {!note && action.mode === 'server' ? (
-        <p className="quiet">Copies this wallet’s private key. Unlock the desk first. The key is not stored here.</p>
+        <p className="quiet">Copies this wallet’s private key. Unlock the wallet first. The key is not stored here.</p>
       ) : null}
       {!note && action.mode === 'client' && exportAddress ? (
         <p className="quiet">Opens Privy’s secure key screen for <AddressCopy address={exportAddress} />.</p>
