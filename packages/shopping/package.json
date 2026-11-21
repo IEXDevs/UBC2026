@@ -5,9 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./shopping.mjs",
-    "./laso-card.mjs": "./laso-card.mjs"
+    "./laso-card.mjs": "./laso-card.mjs",
+    "./laso-docs.mjs": "./laso-docs.mjs",
+    "./laso-flow.mjs": "./laso-flow.mjs"
   },
-  "scripts": { "test": "node --test shopping.test.mjs laso-card.test.mjs" },
+  "scripts": { "test": "node --test shopping.test.mjs laso-card.test.mjs laso-helpers.test.mjs" },
   "dependencies": {
     "@ubc2026/bot-policy": "0.1.0",
     "@ubc2026/x402": "0.1.0"

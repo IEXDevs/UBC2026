@@ -192,7 +192,7 @@ function stable(value) {
 function accessDetail(name, args) {
   if (name === 'prepare_shopping') return 'Prepare a purchase';
   if (name === 'request_spend' && args?.action === 'x402' && AMOUNT.test(args?.amount ?? '')) {
-    return `Buy a Laso USA prepaid card for $${formatBaseUnits(args.amount)} USDC`;
+    return `Buy with Laso for $${formatBaseUnits(args.amount)} USDC (x402)`;
   }
   const amount = typeof args?.amount === 'string' ? args.amount.trim() : '';
   const handle = typeof args?.handle === 'string' ? args.handle.replace(/^@/, '').trim() : '';

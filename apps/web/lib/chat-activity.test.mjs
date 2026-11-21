@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { publicApiSummary, sanitizeActivity, thinkStep, toolStep } from './chat-activity.mjs';
+import { publicApiSummary, sanitizeActivity, spendFailureMessage, thinkStep, toolStep } from './chat-activity.mjs';
 
 /**
  * Achieves: verifies web search keeps public sites and drops javascript / live.browser.run secrets.
@@ -124,6 +124,10 @@ test('a Laso API result stays visible and drops payment secrets', () => {
     error: 'simulation_failed',
     signed: false,
   }).includes('did not simulate'), true);
+  const wallet = 'So11111111111111111111111111111111111111112';
+  const hint = `Payment checked agent wallet ${wallet} for a USDC account that covers this amount. Nothing was submitted.`;
+  assert.equal(spendFailureMessage({ error: 'simulation_failed', simulationReason: 'source_account_not_found', hint }), hint);
+  assert.equal(spendFailureMessage({ error: 'simulation_failed', simulationReason: 'instruction_2_custom_1' }), 'The agent wallet does not have enough USDC for this card. Nothing was submitted.');
   assert.equal(publicApiSummary('request_spend', { signature: 'sig', signed: true }), '');
 });
 

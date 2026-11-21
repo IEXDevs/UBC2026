@@ -23,6 +23,7 @@ import { resolvePriceLookup } from './price-lookup.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
 import { assessPositions } from './schedules.mjs';
 import { alertFromGate, alertFromPauseReason, rememberBotAlert, rememberDecisionMemo } from './bot-alerts.mjs';
+import { handleLasoRequest } from './laso-do.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
@@ -626,7 +627,11 @@ export class BotStateMachine {
       return this.handleCardLoop(request, env, url.pathname, now);
     }
 
-    const browserPath = url.pathname.match(/^\/id\/([^/]+)\/browser\/sessions(?:\/([^/]+)\/(live-view|release|navigate))?$/);
+    if (url.pathname === '/laso/session' || url.pathname === '/laso/checkpoint' || url.pathname === '/laso/status') {
+      return handleLasoRequest(this, request, env, now, url.pathname);
+    }
+
+    const browserPath = url.pathname.match(/^\/id\/([^/]+)\/browser\/sessions(?:\/([^/]+)\/(live-view|release|navigate|click))?$/);
     if (browserPath) {
       return this.handleBrowser(request, env, {
         botId: decodeURIComponent(browserPath[1]),
@@ -799,6 +804,26 @@ export class BotStateMachine {
           embedVerified: view.embedVerified,
           fallback: view.fallback,
           event: view.event,
+        });
+      }
+      if (leaf === 'click' && request.method === 'POST') {
+        const body = await readBrowserBody(request);
+        if (typeof body.selector !== 'string' || !body.selector.trim() || body.selector.length > 256) {
+          return noStore({ error: 'invalid_selector' }, 400);
+        }
+        const clicked = await service.click({
+          ownerId,
+          botId,
+          sessionRecordId,
+          selector: body.selector.trim(),
+        });
+        return noStore({
+          sessionRecordId: clicked.sessionRecordId,
+          x: clicked.x,
+          y: clicked.y,
+          tag: clicked.tag,
+          text: clicked.text,
+          event: clicked.event,
         });
       }
       if (leaf === 'release' && request.method === 'POST') {

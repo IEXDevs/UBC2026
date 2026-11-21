@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import {
   billingAddress,
   cardCanPay,
+  chooseLasoCardKind,
+  LASO_CARD_CHOICE_PROMPT,
   lasoCardAction,
+  lasoCardChecklist,
+  lasoIntlMaxUnits,
   payWithVirtualCard,
   presentLasoCard,
   publicLasoCard,
@@ -80,4 +84,39 @@ test('modify quotes the card balance route and returns a masked card', async () 
   assert.equal(result.card.number, '•••• •••• •••• ••••');
   assert.equal(result.card.billing.line1, '1 Main St');
   assert.equal(result.next, 'await-owner-mainnet-approval');
+});
+
+test('card choice never guesses: reloadable, prepaid, top-up, or ask', () => {
+  assert.equal(chooseLasoCardKind('get me a laso finance reloadable card'), 'reloadable');
+  assert.equal(chooseLasoCardKind('order a non-reloadable USA card for $20'), 'non-reloadable-usa');
+  assert.equal(chooseLasoCardKind('get me a lasso prepaid card'), 'non-reloadable-usa');
+  assert.equal(chooseLasoCardKind('add funds to the Laso card'), 'top-up');
+  assert.equal(chooseLasoCardKind('get me a laso card'), 'undecided');
+  assert.equal(chooseLasoCardKind('get me a lasso card'), 'undecided');
+  assert.equal(chooseLasoCardKind('buy a $50 amazon gift card'), 'gift');
+  assert.match(LASO_CARD_CHOICE_PROMPT, /Reloadable or non-reloadable USA/);
+  const reloadable = lasoCardChecklist('reloadable');
+  assert.ok(reloadable.some((step) => /kyc/i.test(step)));
+  assert.ok(reloadable.some((step) => /verify-card-issuer-link/i.test(step)));
+  assert.ok(reloadable.some((step) => /create-reloadable-card/i.test(step)));
+  const prepaid = lasoCardChecklist('non-reloadable-usa');
+  assert.ok(prepaid.some((step) => /get-card\?amount/i.test(step)));
+  assert.ok(prepaid.some((step) => /get-card-data/i.test(step)));
+  assert.ok(lasoCardChecklist('top-up').some((step) => /fund-card-balance/i.test(step)));
+});
+
+test('intl and gift specs carry their routes, limits, and fee bounds', () => {
+  const intl = lasoCardAction('intl', 250);
+  assert.equal(intl.path, '/order-intl-card');
+  assert.equal(intl.kind, 'prepaid-intl');
+  assert.equal(lasoIntlMaxUnits('250000000'), '259500000');
+  assert.throws(() => lasoCardAction('intl', 250.5), /invalid_amount/);
+  assert.throws(() => lasoCardAction('intl', 50), /invalid_amount/);
+  const gift = lasoCardAction('gift', 50, { laso_server_id: 'amazon', country: 'us' });
+  assert.equal(gift.path, '/order-gift-card');
+  assert.equal(gift.laso_server_id, 'amazon');
+  assert.equal(gift.country, 'US');
+  assert.throws(() => lasoCardAction('gift', 50, {}), /gift_product_required/);
+  assert.throws(() => lasoCardAction('gift', 50, { laso_server_id: 'amazon', country: 'USA' }), /gift_country/);
+  assert.throws(() => lasoCardAction('bogus', 5), /invalid_action/);
 });

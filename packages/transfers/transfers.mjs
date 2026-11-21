@@ -27,7 +27,27 @@ if (SOLANA_USDC_MINT !== X402_SOLANA_USDC_MINT) {
 export { SOLANA_USDC_MINT };
 export { buildJupiterSwap } from './jupiter-swap.mjs';
 
-export function buildSolanaX402Transaction({ sourceOwner, accepted, recentBlockhash } = {}) {
+export function selectX402SourceAccount(sourceOwner, accounts, rawAmount) {
+  const needed = positiveAmount(rawAmount);
+  const ata = tokenAccount(pubkey(sourceOwner, 'source wallet')).toBase58();
+  let best = null;
+  let bestAmount = 0n;
+  for (const row of Array.isArray(accounts) ? accounts : []) {
+    if (typeof row?.address !== 'string' || typeof row.amount !== 'string') continue;
+    try { pubkey(row.address, 'source token account'); } catch { continue; }
+    let balance;
+    try { balance = amount(row.amount); } catch { continue; }
+    if (balance < needed) continue;
+    if (row.address === ata) return row.address;
+    if (!best || balance > bestAmount) {
+      best = row.address;
+      bestAmount = balance;
+    }
+  }
+  return best;
+}
+
+export function buildSolanaX402Transaction({ sourceOwner, sourceTokenAccount, accepted, recentBlockhash } = {}) {
   if (SOLANA_CLUSTER !== 'mainnet-beta' || accepted?.scheme !== 'exact'
       || accepted.network !== 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'
       || accepted.asset !== SOLANA_USDC_MINT || accepted.extra?.memo != null) fail('Unsupported x402 terms', 'invalid_payment');
@@ -36,7 +56,10 @@ export function buildSolanaX402Transaction({ sourceOwner, accepted, recentBlockh
   const destination = pubkey(accepted.payTo, 'recipient');
   if (source.equals(payer) || source.equals(destination)) fail('Invalid x402 payer', 'invalid_payment');
   pubkey(recentBlockhash, 'blockhash');
-  const sourceAccount = tokenAccount(source);
+  const sourceAccount = sourceTokenAccount ? pubkey(sourceTokenAccount, 'source token account') : tokenAccount(source);
+  if (sourceAccount.equals(source) || sourceAccount.equals(payer) || sourceAccount.equals(destination)) {
+    fail('Invalid x402 source', 'invalid_payment');
+  }
   const destinationAccount = tokenAccount(destination);
   const message = new TransactionMessage({ payerKey: payer, recentBlockhash, instructions: [
     ComputeBudgetProgram.setComputeUnitLimit({ units: 40_000 }),

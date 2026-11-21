@@ -93,12 +93,16 @@ async function handleShoppingPrepare(request, env, botId, owner) {
     if (body.provider === 'laso') {
       const approvalKey = supabaseConfig(env)?.key;
       if (!approvalKey) return json({ error: 'laso_unavailable' }, 503);
+      const lasoAction = ['setup', 'modify', 'intl', 'gift'].includes(body.lasoAction) ? body.lasoAction : 'setup';
       const result = await prepareLasoCardAction({
         bot,
         ledger,
-        action: body.lasoAction === 'modify' ? 'modify' : 'setup',
+        action: lasoAction,
         amountUsd: body.amountUsd,
         billing: body.billing,
+        extra: body.extra && typeof body.extra === 'object'
+          ? { laso_server_id: body.extra.laso_server_id, country: body.extra.country }
+          : { laso_server_id: body.laso_server_id, country: body.country },
         fetcher: env.fetch || fetch,
         baseUrl: env.LASO_BASE_URL,
       });

@@ -9,7 +9,7 @@ import { publicApiSummary, thinkStep, toolStep } from './chat-activity.mjs';
 import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
 import { grantCovers, isFundTool, toolAccessRequest, withDefaultBotId } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
-import { isLasoCardRequest, lasoPreparationArgs, lasoPurchaseHold } from './laso-chat.mjs';
+import { isLasoCardRequest, LASO_CARD_CHOICE_PROMPT, lasoPreparationArgs, lasoPurchaseHold, lasoReloadableReply } from './laso-chat.mjs';
 import { META_SPARK_MODEL, reasoningEffortFor } from './thinking-levels.mjs';
 import { MODEL_ID, parseModelProvider } from './ai-provider.mjs';
 import { AGENT_TASK_TOOL, GOAL_QUESTION, agentTaskTool, hasGeneralGoal, taskLabel } from './agent-task.mjs';
@@ -242,12 +242,12 @@ function hostOf(args) {
 }
 
 function blockedBrowser(name, args) {
-  if (name !== 'browser_open' && name !== 'browser_navigate') return '';
+  if (name !== 'browser_open' && name !== 'browser_navigate' && name !== 'browser_click') return '';
   const host = hostOf(args);
   return BLOCKED_HOST.test(host) ? host : '';
 }
 
-const FACT_BROWSER = new Set(['browser_open', 'browser_navigate', 'browser_live_view', 'delegate_task']);
+const FACT_BROWSER = new Set(['browser_open', 'browser_navigate', 'browser_click', 'browser_live_view', 'delegate_task']);
 
 /**
  * A product fact such as the latest model and its price.
@@ -263,6 +263,7 @@ export function isFactLookup(message) {
 const BROWSER_TOOLS = new Set([
   'browser_open',
   'browser_navigate',
+  'browser_click',
   'browser_live_view',
   'browser_release',
   'web_search',
@@ -283,7 +284,7 @@ function cardCheckout(message, history) {
     const text = typeof item?.content === 'string' ? item.content : (typeof item?.text === 'string' ? item.text : '');
     if (text) bits.push(text);
   }
-  return /\blaso\b|reloadable card|\bx402\b/i.test(bits.join('\n'));
+  return /\blaso\b|\blasso\b|reloadable cards?|non[\s-]?reloadable cards?|prepaid cards?|\bx402\b/i.test(bits.join('\n'));
 }
 
 function toolFailureReply(name, result) {
@@ -295,6 +296,7 @@ function toolFailureReply(name, result) {
     lookup_recipient: 'recipient lookup', get_price: 'price lookup', get_wallets: 'wallet lookup',
     list_bots: 'agent lookup', web_search: 'web search', web_scrape: 'page lookup',
     browser_open: 'browser session request', browser_navigate: 'browser navigation',
+    browser_click: 'browser click',
     browser_live_view: 'browser view request', browser_release: 'browser session release',
     request_spend: 'spend request',
   }[name] || 'requested step';
@@ -765,6 +767,12 @@ export async function completeTextChat({
         }
         if (name === 'prepare_shopping' && args.provider === 'laso') {
           const prepared = typeof result === 'string' ? parseToolArgs(result) : result;
+          if (prepared?.error === 'laso_card_choice_required') {
+            return { kind: 'reply', label: LASO_CARD_CHOICE_PROMPT };
+          }
+          if (prepared?.error === 'laso_reloadable_human_steps') {
+            return { kind: 'reply', label: lasoReloadableReply() };
+          }
           if (!prepared || Object.keys(prepared).length === 0 || prepared.error || prepared.ok === false) {
             return { kind: 'reply', label: 'I could not prepare the Laso card. The card service or request validation failed. No purchase was submitted. Please try again with an amount from $5 to $1000.' };
           }

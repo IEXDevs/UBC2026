@@ -44,6 +44,8 @@ const OWNER_BOT_ACTIONS = new Set([
   'card-loop',
   'card-loop/cooldown',
   'card-loop/break',
+  'laso/checkpoint',
+  'laso/status',
 ]);
 
 function isOwnerBotAction(action) {
@@ -192,6 +194,12 @@ async function forwardBotAction(stub, target, request, ownerId, env, botId, acti
     const read = await readLoopPayload(request);
     const value = read.kind === 'json' ? { ...read.value } : {};
     value.botId = botId;
+    return forwardPrepared(stub, target, request, ownerId, value, false);
+  }
+  if (typeof action === 'string' && action.startsWith('laso/') && request.method === 'POST') {
+    const read = await readLoopPayload(request);
+    const value = read.kind === 'json' ? { ...read.value } : {};
+    if (typeof value.botId !== 'string' || !value.botId) value.botId = botId;
     return forwardPrepared(stub, target, request, ownerId, value, false);
   }
   return forwardToBot(stub, target, request, ownerId);
