@@ -24,10 +24,17 @@ test('wallet balances refresh every 5 seconds', () => {
   assert.match(page, /walletsOpen, listsTick\]\)/);
 
   const accountValue = source('components/AccountValue.js');
-  assert.match(accountValue, /setInterval\(\(\) => setPollTick\(\(tick\) => tick \+ 1\), 5000\)/);
-  assert.match(accountValue, /refreshKey, pollTick\]/);
+  assert.match(page, /<AccountValue[^\n]+refreshKey=\{\`\$\{listsTick\}/);
+  assert.match(accountValue, /refreshPortfolio\.current\?\.\(\);\s*\}, \[refreshKey\]\)/);
 
   const tokenScreen = source('components/TokenScreen.js');
   assert.match(tokenScreen, /setInterval\(\(\) => setPollTick\(\(tick\) => tick \+ 1\), 5000\)/);
   assert.match(tokenScreen, /refreshKey, pollTick\]/);
+});
+
+test('the account total stays visible until an available replacement arrives', () => {
+  const accountValue = source('components/AccountValue.js');
+  assert.doesNotMatch(accountValue, /setPortfolio\(null\)/);
+  assert.match(accountValue, /if \(pending\) return/);
+  assert.match(accountValue, /if \(hasAccountValue\(enriched\.portfolio\)\) setPortfolio\(enriched\.portfolio\)/);
 });

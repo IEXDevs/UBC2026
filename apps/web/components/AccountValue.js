@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
-import { accountValueLabel } from '../lib/account-value.mjs';
+import { accountValueLabel, hasAccountValue } from '../lib/account-value.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
@@ -10,21 +10,16 @@ import { rememberPortfolio } from '../lib/portfolio-cache.mjs';
 
 export default function AccountValue({ ownerId, getAccessToken, wallets = [], devPreview = false, refreshKey = '' }) {
   const [portfolio, setPortfolio] = useState(null);
-  const [pollTick, setPollTick] = useState(0);
+  const refreshPortfolio = useRef(null);
   const walletKey = wallets.map(wallet => wallet?.address || '').filter(Boolean).sort().join(',');
 
   useEffect(() => {
     if (!ownerId) return undefined;
-    const id = window.setInterval(() => setPollTick((tick) => tick + 1), 5000);
-    return () => window.clearInterval(id);
-  }, [ownerId]);
-
-  useEffect(() => {
-    setPortfolio(null);
-    if (!ownerId) return undefined;
     const controller = new AbortController();
-    let stopped = false;
-    (async () => {
+    let pending = false;
+    const load = async () => {
+      if (pending) return;
+      pending = true;
       try {
         let body;
         if (devPreview) {
@@ -40,13 +35,23 @@ export default function AccountValue({ ownerId, getAccessToken, wallets = [], de
         }
         const enriched = await enrichPortfolio(body, { userId: ownerId, storage: window.localStorage })
           .catch(() => ({ portfolio: body }));
-        if (stopped) return;
+        if (controller.signal.aborted) return;
         rememberPortfolio(ownerId, enriched.portfolio);
-        setPortfolio(enriched.portfolio);
+        if (hasAccountValue(enriched.portfolio)) setPortfolio(enriched.portfolio);
       } catch { /* An unavailable quote is not a zero-dollar balance. */ }
-    })();
-    return () => { stopped = true; controller.abort(); };
-  }, [ownerId, getAccessToken, walletKey, devPreview, refreshKey, pollTick]);
+      finally { pending = false; }
+    };
+    refreshPortfolio.current = load;
+    void load();
+    return () => {
+      refreshPortfolio.current = null;
+      controller.abort();
+    };
+  }, [ownerId, getAccessToken, walletKey, devPreview]);
+
+  useEffect(() => {
+    void refreshPortfolio.current?.();
+  }, [refreshKey]);
 
   const partial = Number(portfolio?.unpriced) > 0;
   const title = !portfolio
