@@ -12,6 +12,8 @@ test('owner authorization signs absent agent wallets, preserves failures, and do
   assert.equal(browserCanSign(signer, { ...agent, kind: 'main' }), false);
   assert.equal(browserCanSign(signer, { ...agent, id: 'linked_agent' }), false);
   assert.equal(await signSelectedWalletTransaction({ from: agent, transaction, signer }), signed);
+  await assert.rejects(signSelectedWalletTransaction({ from: agent, transaction, signer, requireWalletApproval: true }),
+    { code: 'wallet_connection_required' });
   await assert.rejects(signSelectedWalletTransaction({ from: { ...agent, kind: 'main' }, transaction, signer }), { code: 'wallet_connection_required' });
   await assert.rejects(signSelectedWalletTransaction({ from: agent, transaction, signer: {
     signWithOwnerAuthorization: async () => { throw { privyFailure: { status: 401 } }; },

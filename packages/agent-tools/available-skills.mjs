@@ -16,6 +16,7 @@ import diagnosingBugs from './available/diagnosing-bugs.mjs';
 import domainModeling from './available/domain-modeling.mjs';
 import implement from './available/implement.mjs';
 import iterativeRetrieval from './available/iterative-retrieval.mjs';
+import lasoCards from './available/laso-cards.mjs';
 import llmTradingAgentSecurity from './available/llm-trading-agent-security.mjs';
 import marketResearch from './available/market-research.mjs';
 import marketSentiment from './available/market-sentiment.mjs';
@@ -43,6 +44,7 @@ const skills = [
   domainModeling,
   implement,
   iterativeRetrieval,
+  lasoCards,
   llmTradingAgentSecurity,
   marketResearch,
   marketSentiment,

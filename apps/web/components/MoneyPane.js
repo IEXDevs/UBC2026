@@ -14,6 +14,7 @@ import {
 } from '../lib/money-views.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { buildEarningsSeries, mergeWalletPositions } from '../lib/earnings-chart.mjs';
+import { readRetiredWalletIds } from '../lib/wallet-retire.mjs';
 import { linkedWalletKey } from '../lib/wallet-provision.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
 import AddressCopy from './AddressCopy';
@@ -199,11 +200,15 @@ function Positions({ state, ownerId, getAccessToken, onWallet }) {
   useEffect(() => {
     if (typeof getAccessToken !== 'function') return undefined;
     let stopped = false;
+    const fail = () => {
+      if (!stopped) setPortfolio(previous => ({ ownerId, data: previous?.ownerId === ownerId ? previous.data : null, failed: true }));
+    };
     (async () => {
       try {
         const token = await getAccessToken();
-        if (stopped || !token) return;
-        const response = await fetch(`/api/portfolio?cluster=${SOLANA_CLUSTER}`, {
+        if (stopped) return;
+        if (!token) return fail();
+        const response = await fetch(`/api/portfolio?cluster=${SOLANA_CLUSTER}&positions=1`, {
           headers: {
             Authorization: `Bearer ${token}`,
             ...(ownerId ? { 'x-owner-id': ownerId } : {}),
@@ -211,15 +216,16 @@ function Positions({ state, ownerId, getAccessToken, onWallet }) {
           cache: 'no-store',
         });
         const body = await response.json().catch(() => null);
-        if (stopped || !response.ok || !body || typeof body !== 'object') return;
+        if (stopped) return;
+        if (!response.ok || !body || typeof body !== 'object') return fail();
         setPortfolio({ ownerId, data: body });
         const enriched = await enrichPortfolio(body, {
           userId: user?.id || ownerId,
           storage: window.localStorage,
         });
-        if (!stopped) setPortfolio({ ownerId, data: enriched.portfolio });
+        if (!stopped) setPortfolio({ ownerId, data: { ...enriched.portfolio, providers: body.providers } });
       } catch {
-        // Owner-scoped wallet results are also available through the runtime.
+        fail();
       }
     })();
     return () => { stopped = true; };
@@ -228,14 +234,24 @@ function Positions({ state, ownerId, getAccessToken, onWallet }) {
   const merged = useMemo(() => mergeWalletPositions({
     wallets: state.wallets,
     portfolio: portfolio?.ownerId === ownerId ? portfolio.data : null,
-  }), [ownerId, state.wallets, portfolio]);
+    retiredIds: state.retiredIds || readRetiredWalletIds(typeof window !== 'undefined' ? window.localStorage : null, ownerId),
+  }), [ownerId, state.wallets, state.retiredIds, portfolio]);
   const earnings = useMemo(() => buildEarningsSeries({
     payments: state.payments,
   }), [state.payments]);
+  const providerStatus = portfolio?.ownerId === ownerId ? portfolio : null;
+  const incomplete = providerStatus?.data?.providers?.incomplete ?? [];
+  const status = SOLANA_CLUSTER !== 'mainnet-beta' ? 'Provider positions are available on mainnet.'
+    : providerStatus?.failed ? 'Could not refresh provider positions.'
+    : !providerStatus ? 'Loading provider positions…'
+    : incomplete.length ? `Could not load all positions from ${incomplete.join(' and ')}.`
+    : null;
 
   return (
     <PositionBook
       positions={merged.positions}
+      holdings={merged.holdings}
+      status={status}
       bots={state.bots}
       wallets={merged.wallets}
       earnings={earnings}

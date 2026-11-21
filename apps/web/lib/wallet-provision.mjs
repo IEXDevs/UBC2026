@@ -154,9 +154,9 @@ export function walletsFromPrivyUser(user, ownerId) {
     out.push({
       id,
       ownerId: owner,
-      kind: out.length === 0 ? 'main' : 'additional',
+      kind: 'additional',
       label: spendable
-        ? (out.length === 0 ? 'Main' : `Additional ${out.length}`)
+        ? 'Main'
         : clientLabel(client),
       address: addressText,
       frozen: false,
@@ -189,7 +189,22 @@ export function walletsFromPrivyUser(user, ownerId) {
     }
   }
 
-  return out;
+  // Ensure at least one spendable Maelstrom assigned wallet is prioritized as 'main'.
+  // External/linked wallets are never 'main'.
+  const spendableRows = out.filter(w => w.spendable);
+  const externalRows = out.filter(w => !w.spendable);
+  let spendableIndex = 0;
+  const normalizedSpendable = spendableRows.map((wallet, idx) => ({
+    ...wallet,
+    kind: idx === 0 ? 'main' : 'additional',
+    label: idx === 0 ? 'Main' : `Additional ${idx}`,
+  }));
+  const normalizedExternal = externalRows.map(wallet => ({
+    ...wallet,
+    kind: 'additional',
+  }));
+
+  return [...normalizedSpendable, ...normalizedExternal];
 }
 
 /**
@@ -230,7 +245,23 @@ export function mergeObservedWallets(serverWallets, user, ownerId) {
     if (!chosen || out.some(row => row.address === chosen.address)) continue;
     out.push(chosen);
   }
-  return out;
+
+  // A user must always have ONE Maelstrom assigned wallet at minimum which becomes the main.
+  // Prioritize the spendable Maelstrom wallet as kind: 'main' at index 0.
+  const spendableIdx = out.findIndex(w => w.spendable === true && !String(w.id).startsWith('linked_'));
+  if (spendableIdx > 0) {
+    const [mainWallet] = out.splice(spendableIdx, 1);
+    out.unshift(mainWallet);
+  }
+  let hasMain = false;
+  return out.map(wallet => {
+    const isMaelstromSpendable = wallet.spendable === true && !String(wallet.id).startsWith('linked_');
+    if (isMaelstromSpendable && !hasMain) {
+      hasMain = true;
+      return { ...wallet, kind: 'main', label: wallet.label || 'Main' };
+    }
+    return { ...wallet, kind: 'additional' };
+  });
 }
 
 export function resolvePrivyAppId(env = {}) {

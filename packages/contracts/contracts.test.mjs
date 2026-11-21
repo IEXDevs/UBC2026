@@ -284,6 +284,9 @@ test('API route contracts match concrete paths and keep cron off the HTTP matche
   assert.equal(matchApiRoute('POST', '/bots/bot_1/card-loop').route.id, 'bots.cardLoop.create');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/card-loop/cooldown').route.action, 'card-loop/cooldown');
   assert.equal(matchApiRoute('POST', '/bots/bot_1/card-loop/break').route.id, 'bots.cardLoop.break');
+  assert.equal(matchApiRoute('POST', '/bots/bot_1/laso/checkpoint').route.id, 'bots.laso.checkpoint.save');
+  assert.equal(matchApiRoute('GET', '/bots/bot_1/laso/checkpoint').route.action, 'laso/checkpoint');
+  assert.equal(matchApiRoute('GET', '/bots/bot_1/laso/status').route.id, 'bots.laso.status');
   const liveView = matchApiRoute('POST', '/bots/bot_1/browser/sessions/rec_1/live-view');
   assert.equal(liveView.route.id, 'bots.browser.liveView');
   assert.equal(liveView.params.sessionRecordId, 'rec_1');
@@ -367,6 +370,7 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.equal(directoryFailureCode(0, null), '');
   assert.deepEqual(parseRecipient('@Alex'), { kind: 'handle', handle: 'alex' });
   assert.deepEqual(parseRecipient('@richclub.sol'), { kind: 'sns', domain: 'richclub.sol' });
+  assert.deepEqual(parseRecipient('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'), { kind: 'address', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' });
   assert.equal(parseRecipient('not a handle'), null);
   assert.deepEqual(parseLookupQuery('can you look up @Alex_Smith please'), { kind: 'handle', handle: 'alexsmith' });
   assert.deepEqual(parseLookupQuery("what's @BOB's wallet"), { kind: 'handle', handle: 'bob' });
@@ -377,6 +381,8 @@ test('profile pictures, handles, and SNS recipients stay separate', () => {
   assert.deepEqual(parseLookupQuery('@the rock'), { kind: 'handle', handle: 'therock' });
   assert.deepEqual(parseLookupQuery('@Wallet'), { kind: 'handle', handle: 'wallet' });
   assert.deepEqual(parseLookupQuery('find richclub.sol for me'), { kind: 'sns', domain: 'richclub.sol' });
+  assert.deepEqual(parseLookupQuery('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'), { kind: 'address', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' });
+  assert.deepEqual(parseLookupQuery('send to EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v please'), { kind: 'address', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' });
   assert.equal(parseLookupQuery('look up the wallet'), null);
   assert.equal(lookupHandleKey('Alex_Smith'), 'alexsmith');
   assert.match(lookupHandleFilter('alexsmith'), /handle\.eq\.alexsmith/);
@@ -453,6 +459,15 @@ test('parsePermissionedSpendBody accepts valid spends and rejects unsafe shapes'
   });
   assert.equal(viaHandle.handle, 'alex');
   assert.equal(viaHandle.destination, null);
+
+  const viaSns = parsePermissionedSpendBody({
+    permission: 'ask',
+    botId: 'bot_1',
+    amount: '5',
+    destination: 'richclub.sol',
+  });
+  assert.equal(viaSns.domain, 'richclub.sol');
+  assert.equal(viaSns.destination, null);
 
   assert.equal(parsePermissionedSpendBody(null), null);
   assert.equal(parsePermissionedSpendBody({ permission: 'sudo', botId: 'bot_1', amount: '1', destination: dest }), null);

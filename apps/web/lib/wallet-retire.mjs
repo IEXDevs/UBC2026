@@ -31,10 +31,21 @@ export function readRetiredWalletIds(storage, ownerId) {
   }
 }
 
-export function rememberRetiredWallet(storage, ownerId, id) {
+export function rememberRetiredWallet(storage, ownerId, ...ids) {
   const key = retiredWalletKey(ownerId);
-  if (!key || !storage || typeof storage.setItem !== 'function' || !ID.test(id)) return readRetiredWalletIds(storage, ownerId);
-  const next = [...new Set([...readRetiredWalletIds(storage, ownerId), id])];
+  const valid = ids.filter(id => typeof id === 'string' && ID.test(id.trim())).map(id => id.trim());
+  if (!key || !storage || typeof storage.setItem !== 'function' || valid.length === 0) return readRetiredWalletIds(storage, ownerId);
+  const next = [...new Set([...readRetiredWalletIds(storage, ownerId), ...valid])];
+  storage.setItem(key, JSON.stringify(next));
+  return next;
+}
+
+export function forgetRetiredWallet(storage, ownerId, ...ids) {
+  const key = retiredWalletKey(ownerId);
+  const toRemove = new Set(ids.filter(id => typeof id === 'string' && ID.test(id.trim())).map(id => id.trim()));
+  if (!key || !storage || typeof storage.setItem !== 'function' || toRemove.size === 0) return readRetiredWalletIds(storage, ownerId);
+  const current = readRetiredWalletIds(storage, ownerId);
+  const next = current.filter(id => !toRemove.has(id));
   storage.setItem(key, JSON.stringify(next));
   return next;
 }
@@ -45,6 +56,7 @@ export function withoutRetiredWallets(wallets, ids) {
     wallet
     && typeof wallet.id === 'string'
     && !gone.has(wallet.id)
+    && (!wallet.address || !gone.has(wallet.address))
     && !wallet.deletedAt
     && !wallet.deleted_at
   ));

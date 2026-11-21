@@ -1,14 +1,20 @@
 'use client';
 
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
-import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
+import {
+  agentWirePaths, bookFrame, layoutPositionBook, placeWalletGroup, positionSceneKey,
+  stepBubbleFollow, translatedBounds, walletGroupBounds,
+} from '../lib/position-book.mjs';
+import { renderHoldingSprites } from '../lib/position-bubble-sprites.mjs';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
-import { addressTextParts } from '../lib/address-labels.mjs';
-import { copyText } from '../lib/copy-text.mjs';
 import EarningsChart from './EarningsChart';
+import { AgentCard, ProviderGroupCard, ProviderPositionCard, WalletCard, usdLabel } from './PositionBookCards';
+import { Button } from './ui/button';
+import { Card } from './ui/card';
 
 const PLACE_KEY = 'maelstrom.cardPlaces';
 const DRAG_PX = 7;
@@ -37,174 +43,6 @@ function placedSpot(places, card) {
   return { x: card.x, y: card.y };
 }
 
-function usdLabel(notionalLabel) {
-  if (!notionalLabel) return '';
-  const amount = notionalLabel.replace(/ USDC$/, '');
-  return amount.startsWith('-') ? `-$${amount.slice(1)}` : `$${amount}`;
-}
-
-function metric(parent, label, value, extra) {
-  if (!value) return;
-  const row = document.createElement('div');
-  row.className = `book-metric${extra ? ` ${extra}` : ''}`;
-  const name = document.createElement('span');
-  name.textContent = label;
-  const amount = document.createElement('b');
-  amount.textContent = value;
-  row.append(name, amount);
-  parent.append(row);
-}
-
-// The 3D cards are DOM nodes, so keep the same address controls as the React details.
-function addressText(node, text, address) {
-  for (const part of addressTextParts(text, [address])) {
-    if (!part.address) {
-      if (part.punctuation) {
-        const token = document.createElement('span');
-        token.className = 'address-copy-token';
-        token.textContent = part.text + part.punctuation;
-        node.append(token);
-      } else {
-        node.append(document.createTextNode(part.text));
-      }
-      continue;
-    }
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'address-copy is-inline is-dotted';
-    button.setAttribute('aria-label', `Copy ${part.address}`);
-    button.title = 'Copy address';
-    const label = document.createElement('span');
-    label.className = 'address-copy-label';
-    label.textContent = part.text;
-    const status = document.createElement('span');
-    status.className = 'address-copy-status';
-    status.setAttribute('role', 'status');
-    let timer;
-    button.onpointerdown = event => event.stopPropagation();
-    button.onclick = async event => {
-      event.stopPropagation();
-      window.clearTimeout(timer);
-      const ok = await copyText(part.address);
-      const note = document.createElement('small');
-      note.className = 'address-copy-feedback';
-      note.textContent = ok ? 'Copied' : 'Copy failed';
-      status.replaceChildren(note);
-      timer = window.setTimeout(() => status.replaceChildren(), 1200);
-    };
-    button.append(label, status);
-    if (part.punctuation) {
-      const token = document.createElement('span');
-      token.className = 'address-copy-token';
-      token.append(button, document.createTextNode(part.punctuation));
-      node.append(token);
-    } else {
-      node.append(button);
-    }
-  }
-}
-
-function face(className) {
-  const side = document.createElement('div');
-  side.className = `book-face ${className}`;
-  const spot = document.createElement('span');
-  spot.className = 'book-spot';
-  const glare = document.createElement('span');
-  glare.className = 'book-glare';
-  side.append(spot, glare);
-  return side;
-}
-
-function sparks(parent) {
-  for (let i = 0; i < 6; i += 1) {
-    const spark = document.createElement('span');
-    spark.className = 'book-spark';
-    spark.style.setProperty('--sx', `${18 + ((i * 37) % 70)}%`);
-    spark.style.setProperty('--sy', `${16 + ((i * 23) % 68)}%`);
-    parent.append(spark);
-  }
-}
-
-function cardElement(card) {
-  const article = document.createElement('article');
-  article.className = 'book-card';
-  article.dataset.positionId = card.id;
-  article.dataset.kind = 'position';
-  article.dataset.walletId = card.walletId ?? '';
-
-  const tilt = document.createElement('div');
-  tilt.className = 'book-tilt';
-  const flip = document.createElement('div');
-  flip.className = 'book-flip';
-  const glow = document.createElement('span');
-  glow.className = 'book-glow';
-
-  const front = face('book-front');
-  const heading = document.createElement('div');
-  heading.className = 'book-glance';
-  const mark = logoImage(card.logo);
-  if (mark) heading.append(mark);
-  const names = document.createElement('div');
-  const asset = document.createElement('strong');
-  addressText(asset, card.asset, card.mint);
-  names.append(asset);
-  if (card.side) {
-    const side = document.createElement('span');
-    side.textContent = card.side;
-    names.append(side);
-  }
-  heading.append(names);
-
-  const size = document.createElement('p');
-  size.className = 'book-size';
-  addressText(size, card.amountLabel, card.mint);
-  const usd = document.createElement('p');
-  usd.className = 'book-usd';
-  usd.textContent = usdLabel(card.notionalLabel);
-  front.append(heading, size, usd);
-  sparks(front);
-
-  const back = face('book-back');
-  const top = document.createElement('div');
-  top.className = 'book-card-top';
-  const market = document.createElement('strong');
-  addressText(market, card.market, card.mint);
-  top.append(market);
-  if (card.venue) {
-    const venue = document.createElement('span');
-    venue.className = 'book-side';
-    venue.textContent = card.venue;
-    top.append(venue);
-  }
-  const body = document.createElement('div');
-  metric(body, 'Entry', card.entry);
-  metric(body, 'Mark', card.mark);
-  metric(body, 'Leverage', card.leverage);
-  metric(body, 'Health', card.healthLabel);
-  metric(body, 'APY', card.apyLabel);
-  metric(body, 'PnL', card.pnlLabel, card.pnlDown ? 'book-pnl is-down' : 'book-pnl is-up');
-  const agent = document.createElement('small');
-  agent.textContent = card.botName;
-  back.append(top, body, agent);
-
-  flip.append(front, back);
-  tilt.append(flip, glow);
-  article.append(tilt);
-  return article;
-}
-
-function clusterHome(book) {
-  const venue = book.venues[0]?.venue;
-  const cards = book.cards.filter(card => card.venue === venue);
-  if (!cards.length) return { x: 0, y: 0 };
-  const xs = cards.map(card => card.x);
-  const ys = cards.map(card => card.y);
-  return {
-    x: (Math.min(...xs) + Math.max(...xs)) / 2,
-    y: (Math.min(...ys) + Math.max(...ys)) / 2,
-  };
-}
-
 function logoImage(src) {
   if (!src) return null;
   const mark = document.createElement('img');
@@ -213,67 +51,6 @@ function logoImage(src) {
   mark.draggable = false;
   mark.src = src;
   return mark;
-}
-
-function walletIcon() {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', '15');
-  svg.setAttribute('height', '15');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.75');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('stroke-linejoin', 'round');
-  svg.setAttribute('aria-hidden', 'true');
-  const body = document.createElementNS(svg.namespaceURI, 'path');
-  body.setAttribute('d', 'M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1');
-  const fold = document.createElementNS(svg.namespaceURI, 'path');
-  fold.setAttribute('d', 'M3 5v14a2 2 0 0 0 2 2h15v-2');
-  svg.append(body, fold);
-  return svg;
-}
-
-function walletElement(wallet) {
-  const article = document.createElement('article');
-  article.className = 'book-card book-wallet';
-  article.dataset.positionId = wallet.id;
-  article.dataset.kind = 'wallet';
-  const head = document.createElement('div');
-  head.className = 'book-wallet-head';
-  const title = document.createElement('strong');
-  title.append(walletIcon());
-  title.append(document.createTextNode(wallet.label));
-  const size = document.createElement('b');
-  size.textContent = wallet.notionalLabel.replace(' USDC', '');
-  head.append(title, size);
-  const sub = document.createElement('p');
-  sub.textContent = wallet.frozen
-    ? 'Frozen'
-    : wallet.readOnly
-      ? `Read-only · ${wallet.count} positions`
-      : `${wallet.venues.length} providers · ${wallet.count} positions`;
-  article.append(head, sub);
-  return article;
-}
-
-function accountElement(account) {
-  const article = document.createElement('article');
-  article.className = 'book-card book-account';
-  article.dataset.positionId = account.id;
-  article.dataset.kind = 'account';
-  article.dataset.walletId = account.walletId;
-  const mark = logoImage(account.logo);
-  const names = document.createElement('div');
-  names.className = 'book-glance-copy';
-  const title = document.createElement('strong');
-  title.textContent = account.venue;
-  const meta = document.createElement('span');
-  meta.textContent = account.count === 1 ? '1 position' : `${account.count} positions`;
-  names.append(title, meta);
-  if (mark) article.append(mark);
-  article.append(names);
-  return article;
 }
 
 function venueElement(venue) {
@@ -306,12 +83,47 @@ function starTexture() {
   return canvas;
 }
 
-export default function PositionBook({ positions, bots, wallets = [], earnings = null, onWallet }) {
-  const book = useMemo(() => layoutPositionBook(positions, bots, wallets), [positions, bots, wallets]);
+export default function PositionBook({ positions, holdings = [], status, bots, wallets = [], earnings = null, onWallet }) {
   const mountRef = useRef(null);
+  const bookRef = useRef(null);
+  const [measureName, setMeasureName] = useState(null);
+  const [sphereSprites, setSphereSprites] = useState(null);
+  useLayoutEffect(() => {
+    const mount = mountRef.current;
+    const canvas = document.createElement('canvas').getContext('2d');
+    if (!mount || !canvas) return;
+    canvas.font = `600 12px ${window.getComputedStyle(mount).fontFamily}`;
+    setMeasureName(() => name => canvas.measureText(name).width);
+  }, []);
+  const book = useMemo(() => layoutPositionBook(positions, bots, wallets, holdings, measureName, bookRef.current),
+    [positions, bots, wallets, holdings, measureName]);
+  useLayoutEffect(() => { bookRef.current = book; }, [book]);
+  const showHoldings = book.wallets.some(wallet => wallet.bubbles.length > 0);
+  useEffect(() => {
+    if (!showHoldings || sphereSprites) return undefined;
+    let stopped = false;
+    (async () => {
+      try {
+        const THREE = await import('three');
+        if (!stopped) setSphereSprites(renderHoldingSprites(THREE));
+      } catch {
+        if (!stopped) setSphereSprites([]);
+      }
+    })();
+    return () => { stopped = true; };
+  }, [showHoldings, sphereSprites]);
+  const sceneKey = useMemo(() => positionSceneKey(book), [book]);
+  const content = useMemo(() => new Map([
+    ...book.wallets.map(wallet => [wallet.id, <WalletCard wallet={wallet} sprites={sphereSprites} />]),
+    ...book.agents.map(agent => [agent.id, <AgentCard agent={agent} />]),
+    ...book.accounts.map(account => [account.id, <ProviderGroupCard account={account} />]),
+    ...book.cards.map(card => [card.id, <ProviderPositionCard card={card} />]),
+  ]), [book, sphereSprites]);
   const cameraRef = useRef(null);
+  const savedView = useRef(null);
   const openRef = useRef(null);
   const walletRef = useRef(onWallet);
+  const [sceneCards, setSceneCards] = useState(null);
   const [detail, setDetail] = useState(null);
   const [drifted, setDrifted] = useState(false);
   const driftedRef = useRef(false);
@@ -322,6 +134,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return undefined;
+    const book = bookRef.current;
     let alive = true;
     let cleanup = () => {};
 
@@ -331,10 +144,12 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       if (!alive) return;
 
       const home = { x: 0, y: 0, z: HOME_Z };
-      const focus = { x: home.x, y: home.y, z: home.z };
+      const view = driftedRef.current ? savedView.current : null;
+      const focus = { ...(view?.focus ?? home) };
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(40, 1, 1, 20000);
-      camera.position.set(home.x, home.y, home.z);
+      const initial = view?.position ?? home;
+      camera.position.set(initial.x, initial.y, initial.z);
 
       function aim() {
         camera.lookAt(camera.position.x, camera.position.y, 0);
@@ -405,6 +220,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       });
       const joint = new THREE.CircleGeometry(5, 20);
       const jointMaterial = new THREE.MeshBasicMaterial({ color: 0xf5f5f5 });
+      const agentWireMaterial = new THREE.MeshBasicMaterial({ color: 0x868694, transparent: true, opacity: 0.88, depthWrite: false, side: THREE.DoubleSide });
 
       function ribbonPositions(link) {
         const start = new THREE.Vector3(link.from.x, link.from.y, 0.2);
@@ -419,8 +235,10 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         );
         const curve = new THREE.QuadraticBezierCurve3(start, control, end);
         const wide = link.kind === 'provider' || link.kind === 'shared';
-        const points = curve.getPoints(wide ? 64 : 18);
-        const width = wide ? 3.2 : 1.5;
+        return ribbonFromPoints(curve.getPoints(wide ? 64 : 18), wide ? 3.2 : 1.5);
+      }
+
+      function ribbonFromPoints(points, width) {
         const positions = [];
         const progress = [];
         for (let i = 0; i < points.length; i += 1) {
@@ -446,14 +264,26 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       const anchors = new Map();
       const bindings = [];
       const cardObjects = new Map();
-      const nodeObjects = new Map();
+      const hosts = [];
       const linkMeshes = [];
       const tiltState = new Map();
       const places = readPlaces();
       const linkMaterials = [];
+      const walletGroups = new Map(book.wallets.map(wallet => [wallet.id, {
+        wallet,
+        bounds: walletGroupBounds(wallet, book.agents.filter(agent => agent.walletId === wallet.id)),
+      }]));
+      const occupied = new Map();
 
-      function addLink(link) {
-        const { positions, progress } = ribbonPositions(link);
+      function walletSpot(id, requested) {
+        const bounds = walletGroups.get(id).bounds;
+        const neighbors = [...occupied].filter(([other]) => other !== id).map(([, area]) => area);
+        const spot = placeWalletGroup(bounds, requested, neighbors);
+        occupied.set(id, translatedBounds(bounds, spot));
+        return spot;
+      }
+
+      function ribbonGeometry({ positions, progress }) {
         const ribbon = new THREE.BufferGeometry();
         ribbon.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
         ribbon.setAttribute('aT', new THREE.Float32BufferAttribute(progress, 1));
@@ -464,18 +294,25 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
         }
         ribbon.setIndex(indices);
+        linkGeometries.push(ribbon);
+        return ribbon;
+      }
+
+      function addLink(link) {
+        const ribbon = ribbonGeometry(ribbonPositions(link));
         const material = linkMaterial.clone();
         material.uniforms.uTime = linkMaterial.uniforms.uTime;
         material.uniforms.uOpacity = { value: 1 };
         linkMaterials.push(material);
         const mesh = new THREE.Mesh(ribbon, material);
         scene.add(mesh);
-        linkGeometries.push(ribbon);
         linkMeshes.push({ id: link.id, material });
-        bindings.push({ geometry: ribbon, link });
+        bindings.push({ geometry: ribbon, link: { ...link } });
       }
 
-      for (const link of book.links) addLink(link);
+      for (const link of book.links) {
+        if (link.kind !== 'agent') addLink(link);
+      }
       for (const venue of book.venues) {
         const dot = new THREE.Mesh(joint, jointMaterial);
         dot.position.set(venue.x, venue.y, 0.3);
@@ -485,44 +322,61 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         object.element.dataset.positionId = venue.id;
         object.position.set(venue.x, venue.y, 0);
         scene.add(object);
-        nodeObjects.set(venue.id, object.element);
         anchors.set(venue.id, object.position);
       }
-      for (const wallet of book.wallets) {
-        const spot = placedSpot(places, wallet);
-        const object = new CSS3DObject(walletElement(wallet));
-        object.position.set(spot.x, spot.y, 0);
-        scene.add(object);
-        cardObjects.set(wallet.id, object);
-        nodeObjects.set(wallet.id, object.element);
-        anchors.set(wallet.id, object.position);
-        tiltState.set(wallet.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
-      }
-      for (const account of book.accounts) {
-        const spot = placedSpot(places, account);
-        const object = new CSS3DObject(accountElement(account));
-        object.position.set(spot.x, spot.y, 0);
-        scene.add(object);
-        cardObjects.set(account.id, object);
-        nodeObjects.set(account.id, object.element);
-        anchors.set(account.id, object.position);
-      }
-      for (const card of book.cards) {
-        const spot = placedSpot(places, card);
-        const object = new CSS3DObject(cardElement(card));
-        object.position.set(spot.x, spot.y, 0);
-        scene.add(object);
-        cardObjects.set(card.id, object);
-        nodeObjects.set(card.id, object.element);
-        anchors.set(card.id, object.position);
-        tiltState.set(card.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
+
+      function addCard(item, kind) {
+        const host = document.createElement('article');
+        host.className = kind === 'position' ? 'book-card' : `book-card book-${kind}`;
+        host.dataset.positionId = item.id;
+        host.dataset.kind = kind;
+        host.dataset.walletId = item.walletId ?? '';
+        if (kind === 'wallet') {
+          host.style.setProperty('--wallet-width', `${item.width}px`);
+          host.style.setProperty('--wallet-height', `${item.height}px`);
+        }
+        if (kind === 'agent') {
+          host.style.width = `${item.width}px`;
+          host.style.height = `${item.height}px`;
+        }
+        const object = new CSS3DObject(host);
+        if (kind === 'agent') {
+          const { wallet } = walletGroups.get(item.walletId);
+          object.position.set(item.x - wallet.x, item.y - wallet.y, 0);
+          cardObjects.get(wallet.id).add(object);
+        } else {
+          const requested = placedSpot(places, item);
+          const spot = kind === 'wallet' ? walletSpot(item.id, requested) : requested;
+          object.position.set(spot.x, spot.y, 0);
+          scene.add(object);
+        }
+        cardObjects.set(item.id, object);
+        anchors.set(item.id, object.position);
+        if (kind === 'position') tiltState.set(item.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
+        hosts.push({ host, id: item.id });
       }
 
+      for (const wallet of book.wallets) addCard(wallet, 'wallet');
+      for (const agent of book.agents) addCard(agent, 'agent');
+      for (const wallet of book.wallets) {
+        const links = book.links.filter(link => link.kind === 'agent' && link.walletId === wallet.id);
+        for (const path of agentWirePaths(links)) {
+          const points = path.map(point => new THREE.Vector3(point.x - wallet.x, point.y - wallet.y, 0.2));
+          const curve = new THREE.CubicBezierCurve3(...points);
+          const ribbon = ribbonGeometry(ribbonFromPoints(curve.getPoints(24), 1.8));
+          cardObjects.get(wallet.id).add(new THREE.Mesh(ribbon, agentWireMaterial));
+        }
+      }
+      for (const account of book.accounts) addCard(account, 'account');
+      for (const card of book.cards) addCard(card, 'position');
+      setSceneCards({ sceneKey, hosts });
+
+      const walletHeights = new Map(book.wallets.map(wallet => [wallet.id, wallet.height]));
       function anchorPoint(id, role, kind) {
         const pos = anchors.get(id);
         if (!pos) return { x: 0, y: 0 };
         if (kind === 'spoke' && role === 'to') return { x: pos.x, y: pos.y + 88 };
-        if (kind === 'account' && role === 'from') return { x: pos.x, y: pos.y + 36 };
+        if (kind === 'account' && role === 'from') return { x: pos.x, y: pos.y - (walletHeights.get(id) ?? 0) / 2 };
         if (kind === 'provider' && role === 'from') return { x: pos.x, y: pos.y + 28 };
         return { x: pos.x, y: pos.y };
       }
@@ -555,12 +409,14 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       const bodies = [];
       const bodyById = new Map();
       for (const [id, object] of cardObjects) {
+        if (object.element.dataset.kind === 'agent') continue;
         const body = { id, x: object.position.x, y: object.position.y, pin: false, lag: null, ox: 0, oy: 0, dirty: false };
         bodies.push(body);
         bodyById.set(id, body);
       }
       const neighbors = new Map();
       for (const link of book.links) {
+        if (link.kind === 'shared') continue;
         if (!bodyById.has(link.fromId) || !bodyById.has(link.toId)) continue;
         if (!neighbors.has(link.fromId)) neighbors.set(link.fromId, []);
         if (!neighbors.has(link.toId)) neighbors.set(link.toId, []);
@@ -569,14 +425,19 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       }
       let trailing = false;
 
-      function applyBodies() {
-        for (const body of bodies) {
-          const object = cardObjects.get(body.id);
-          if (!object) continue;
-          object.position.x = body.x;
-          object.position.y = body.y;
+      function moveBody(body) {
+        const object = cardObjects.get(body.id);
+        if (object.position.x === body.x && object.position.y === body.y) return false;
+        if (walletGroups.has(body.id)) {
+          const spot = walletSpot(body.id, body);
+          body.x = spot.x;
+          body.y = spot.y;
         }
-        refreshLinks();
+        if (object.position.x === body.x && object.position.y === body.y) return false;
+        object.position.x = body.x;
+        object.position.y = body.y;
+        body.dirty = true;
+        return true;
       }
 
       function flushPlaces() {
@@ -614,14 +475,9 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         const stretch = stepBubbleFollow(bodies, dt);
         let moved = false;
         for (const body of bodies) {
-          const object = cardObjects.get(body.id);
-          if (!object) continue;
-          if (Math.hypot(object.position.x - body.x, object.position.y - body.y) > 0.05) {
-            body.dirty = true;
-            moved = true;
-          }
+          if (moveBody(body)) moved = true;
         }
-        if (moved) applyBodies();
+        if (moved) refreshLinks();
         if (!(gesture && gesture.moved) && (stretch < 0.75 || !moved)) {
           for (const body of bodies) body.pin = false;
           flushPlaces();
@@ -630,6 +486,17 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       }
 
       function detailPayload(id, point) {
+        const book = bookRef.current;
+        const agent = book.agents.find(item => item.id === id);
+        if (agent) {
+          const owner = book.wallets.find(item => item.id === agent.walletId);
+          return {
+            title: agent.name,
+            kicker: 'Agent',
+            rows: [['Wallet', owner?.label], ['Status', agent.status], ['Current task', agent.currentTask]].filter(([, value]) => value),
+            point,
+          };
+        }
         const wallet = book.wallets.find(item => item.id === id);
         if (wallet) {
           return {
@@ -703,17 +570,18 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           rows: [
             ['Asset', card.asset],
             ['Side', card.side],
-            ['USD', card.notionalLabel],
+            ['Value', usdLabel(card.notionalLabel)],
             ['Market', card.market],
             ['Entry', card.entry],
             ['Mark', card.mark],
             ['Leverage', card.leverage],
             ['Health', card.healthLabel],
             ['APY', card.apyLabel],
-            ['PnL', card.pnlLabel],
+            ['PnL', usdLabel(card.pnlLabel)],
             ['Agent', card.botName],
             ['Wallet', owner?.label],
             ['Mint', card.mint],
+            ['Account', card.positionAddress],
           ].filter(([, value]) => value),
           note: card.note,
           point,
@@ -721,7 +589,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       }
 
       // Phones stack the chart, zoom tools and caption over the book, so frame it in the gap they leave.
-      function safeArea() {
+      function safeArea(frame) {
         const width = mount.clientWidth || 1;
         const height = mount.clientHeight || 1;
         const full = { left: 0, top: 0, right: width, bottom: height };
@@ -748,7 +616,6 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           // Below the chart on portrait phones, beside it on short landscape ones: whichever shows the book larger.
           const below = { ...area, top: earnings.bottom - box.top + SAFE_GAP };
           const beside = { ...area, top: earnings.top - box.top, left: earnings.right - box.left + SAFE_GAP };
-          const frame = bookFrame(book);
           const scale = r => Math.min((r.right - r.left) / Math.max(frame.maxX - frame.minX, 1), (r.bottom - r.top) / Math.max(frame.maxY - frame.minY, 1));
           const fits = [below, beside].filter(r => r.right - r.left >= MIN_SAFE && r.bottom - r.top >= MIN_SAFE);
           if (fits.length) return fits.reduce((a, b) => (scale(b) > scale(a) ? b : a));
@@ -760,9 +627,8 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         return area;
       }
 
-      function framedDistance(area) {
+      function framedDistance(area, frame) {
         const height = mount.clientHeight || 1;
-        const frame = bookFrame(book);
         const worldW = Math.max(frame.maxX - frame.minX, 1);
         const worldH = Math.max(frame.maxY - frame.minY, 1);
         const tan = Math.tan((camera.fov * Math.PI) / 360);
@@ -774,9 +640,10 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       function applyHome(snap = true) {
         const width = mount.clientWidth || 1;
         const height = mount.clientHeight || 1;
-        const frame = bookFrame(book);
-        const area = safeArea();
-        home.z = framedDistance(area);
+        const spot = new THREE.Vector3();
+        const frame = bookFrame(book, item => cardObjects.get(item.id)?.getWorldPosition(spot) ?? item);
+        const area = safeArea(frame);
+        home.z = framedDistance(area, frame);
         const perPixel = (2 * Math.tan((camera.fov * Math.PI) / 360) * home.z) / height;
         home.x = frame.x - ((area.left + area.right) / 2 - width / 2) * perPixel;
         home.y = frame.y + ((area.top + area.bottom) / 2 - height / 2) * perPixel;
@@ -806,6 +673,8 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       }
 
       let lastFrame = performance.now();
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      let sheenOffset = '';
 
       function render(now) {
         const dt = Math.min(48, Math.max(0, now - lastFrame));
@@ -822,6 +691,21 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
             camera.position.z += dz * k;
             aim();
           }
+        }
+        if (!reducedMotion.matches) {
+          const depth = THREE.MathUtils.clamp(1 - camera.position.z / home.z, 0, 0.65);
+          const x = THREE.MathUtils.clamp((camera.position.x - home.x) / camera.position.z * 6, -3, 3);
+          const y = THREE.MathUtils.clamp((camera.position.y - home.y) / camera.position.z * 6, -3, 3) - depth * 2;
+          const offset = `${x.toFixed(1)}px ${y.toFixed(1)}px`;
+          if (offset !== sheenOffset) {
+            mount.style.setProperty('--book-view-x', `${x.toFixed(1)}px`);
+            mount.style.setProperty('--book-view-y', `${y.toFixed(1)}px`);
+            sheenOffset = offset;
+          }
+        } else if (sheenOffset) {
+          mount.style.removeProperty('--book-view-x');
+          mount.style.removeProperty('--book-view-y');
+          sheenOffset = '';
         }
         linkMaterial.uniforms.uTime.value = now * 0.001;
         for (const [id, state] of tiltState) {
@@ -850,11 +734,12 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
 
       function down(event) {
         if (event.button !== 0) return;
-        if (event.target.closest('.book-tools, .book-caption, .book-modal')) return;
+        if (event.target.closest('.book-tools, .book-caption, .book-modal, .address-copy, .book-wallet-bubble')) return;
         const card = event.target.closest('.book-card');
         if (card) {
           gesture = {
             id: card.dataset.positionId,
+            dragId: card.dataset.kind === 'agent' ? card.dataset.walletId : card.dataset.positionId,
             x: event.clientX,
             y: event.clientY,
             moved: false,
@@ -875,20 +760,17 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
             cardObjects.get(gesture.id)?.element.classList.add('is-dragging');
           }
           if (gesture.moved) {
-            const object = cardObjects.get(gesture.id);
-            const body = bodyById.get(gesture.id);
-            if (!object || !body) return;
+            const body = bodyById.get(gesture.dragId);
+            if (!body) return;
             const scale = worldPerPixel();
-            if (!body.pin) pinOnly(gesture.id);
+            if (!body.pin) pinOnly(gesture.dragId);
             body.x += (event.clientX - gesture.x) * scale;
             body.y -= (event.clientY - gesture.y) * scale;
-            body.dirty = true;
-            object.position.x = body.x;
-            object.position.y = body.y;
+            moveBody(body);
             gesture.x = event.clientX;
             gesture.y = event.clientY;
             trailing = true;
-            refreshLinks(gesture.id);
+            refreshLinks(gesture.dragId);
           }
           return;
         }
@@ -972,6 +854,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       loop(performance.now());
 
       cleanup = () => {
+        savedView.current = { position: camera.position.clone(), focus: { ...focus } };
         flushPlaces();
         cancelAnimationFrame(frame);
         observer.disconnect();
@@ -986,9 +869,13 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         for (const material of linkMaterials) material.dispose();
         joint.dispose();
         jointMaterial.dispose();
+        agentWireMaterial.dispose();
         renderer.dispose();
         renderer.domElement.remove();
         labels.domElement.remove();
+        mount.classList.remove('is-panning');
+        mount.style.removeProperty('--book-view-x');
+        mount.style.removeProperty('--book-view-y');
         cameraRef.current = null;
       };
     })();
@@ -997,7 +884,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
       alive = false;
       cleanup();
     };
-  }, [book]);
+  }, [sceneKey]);
 
   function reset() {
     const view = cameraRef.current;
@@ -1017,34 +904,34 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
 
   return (
     <section className="position-book" aria-label="Positions" ref={mountRef}>
+      {sceneCards?.sceneKey === sceneKey && sceneCards.hosts.map(({ host, id }) => createPortal(content.get(id), host, id))}
       <EarningsChart series={earnings} />
-      <p className="book-caption">
-        {book.summary.count === 0 ? (
-          <span>No Positions Yet.</span>
-        ) : (
-          <>
-            <strong>{book.summary.notionalLabel}</strong>
-            <span>{book.summary.count} positions · {book.summary.venues} venues{book.summary.pnlLabel ? ` · PnL ${book.summary.pnlLabel}` : ''}</span>
-          </>
+      <div className="book-caption">
+        {book.summary.count > 0 && (
+          <div className="book-summary">
+            <strong>{usdLabel(book.summary.notionalLabel)}</strong>
+            <span>{book.summary.count} {book.summary.count === 1 ? 'position card' : 'position cards'} · {book.summary.venues} {book.summary.venues === 1 ? 'provider' : 'providers'}</span>
+          </div>
         )}
-      </p>
+        {(status || book.summary.count === 0) && <span role="status">{status || 'No open Jupiter Perps or Meteora DLMM positions.'}</span>}
+      </div>
       <div className="book-tools">
-        <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.86)}>
+        <Button variant="outline" size="icon" aria-label="Zoom in" onClick={() => zoomBy(0.86)}>
           <Plus size={16} strokeWidth={1.75} />
-        </button>
-        <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1.16)}>
+        </Button>
+        <Button variant="outline" size="icon" aria-label="Zoom out" onClick={() => zoomBy(1.16)}>
           <Minus size={16} strokeWidth={1.75} />
-        </button>
+        </Button>
         {drifted ? (
-          <button type="button" aria-label="Reset view" onClick={reset}>
+          <Button variant="outline" size="icon" aria-label="Reset view" onClick={reset}>
             <LocateFixed size={16} strokeWidth={1.75} />
-          </button>
+          </Button>
         ) : null}
       </div>
       {detail ? (
         <div className="book-modal" onMouseDown={() => setDetail(null)}>
-          <article
-            className="book-modal-card"
+          <Card
+            className="book-modal-card block"
             role="dialog"
             aria-modal="true"
             aria-label={detail.title}
@@ -1057,7 +944,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
               {detail.rows.map(([label, value]) => (
                 <div key={label}>
                   <dt>{label}</dt>
-                  <dd>{label === 'Address' || label === 'Mint' ? <AddressCopy address={value} /> : <AddressText text={value} addresses={detail.copyAddresses} />}</dd>
+                  <dd>{['Address', 'Mint', 'Account'].includes(label) ? <AddressCopy address={value} /> : <AddressText text={value} addresses={detail.copyAddresses} />}</dd>
                 </div>
               ))}
             </dl>
@@ -1075,8 +962,8 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
               </section>
             ))}
             {detail.note ? <p className="book-modal-note">{detail.note}</p> : null}
-            <button type="button" onClick={() => setDetail(null)}>Close</button>
-          </article>
+            <Button className="book-modal-close" onClick={() => setDetail(null)}>Close</Button>
+          </Card>
         </div>
       ) : null}
     </section>

@@ -56,7 +56,7 @@ export function formatLogTime(at) {
   return `${months[date.getUTCMonth()]} ${day}, ${date.getUTCFullYear()} ${hour}:${minute} UTC`;
 }
 
-export function logRows({ receipts = [], payments = [], transfers = [], events = [] } = {}) {
+export function logRows({ receipts = [], payments = [], transfers = [], history = [], events = [] } = {}) {
   const rows = [];
   for (const receipt of receipts) {
     if (!receipt?.id) continue;
@@ -104,6 +104,18 @@ export function logRows({ receipts = [], payments = [], transfers = [], events =
     });
   }
   const linkedTransactions = new Set(rows.map(row => row.solscanUrl).filter(Boolean));
+  for (const transaction of history) {
+    const solscanUrl = solscanTxUrl(transaction?.signature, clusterOf(transaction?.cluster));
+    if (!transaction?.id || !solscanUrl || linkedTransactions.has(solscanUrl)) continue;
+    linkedTransactions.add(solscanUrl);
+    rows.push({
+      id: transaction.id,
+      at: transaction.at,
+      title: transaction.title,
+      lines: transaction.lines,
+      solscanUrl,
+    });
+  }
   for (const event of events) {
     const title = MONEY_EVENTS.get(event?.kind);
     if (typeof event?.id !== 'string' || !event.id || !title) continue;

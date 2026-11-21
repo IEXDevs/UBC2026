@@ -42,6 +42,14 @@ test('the roster keeps the full token mint and its base-unit caps after a reload
   assert.equal(draftTransferCap('SOL', '500', '1000'), null);
 });
 
+test('the selected wallet survives writing and merging the local agent roster', () => {
+  const store = memoryStorage();
+  const bot = draftBot({ id: 'bot_ada', name: 'Ada', shape: 'circle', color: '#7c5cff', walletId: 'wallet_shop' });
+  writeRoster(store, 'alice', { order: [bot.id], extra: [bot] });
+  const merged = mergeRoster([], readRoster(store, 'alice'));
+  assert.equal(merged.bots[0].walletId, 'wallet_shop');
+});
+
 function memoryStorage(initial = {}) {
   const data = { ...initial };
   return {

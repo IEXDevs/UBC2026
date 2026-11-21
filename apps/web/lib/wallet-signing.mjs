@@ -81,13 +81,13 @@ export async function waitForBrowserSigner(readSigner, wallets, timeoutMs = 5000
   }
 }
 
-export async function signSelectedWalletTransaction({ from, transaction, signer } = {}) {
+export async function signSelectedWalletTransaction({ from, transaction, signer, forSwap = false, requireWalletApproval = forSwap } = {}) {
   if (!from?.address || from.frozen) fail('wallet_frozen');
   if (!(transaction instanceof Uint8Array) || transaction.length <= 64) fail('invalid_transaction');
   const wallets = Array.isArray(signer?.wallets) ? signer.wallets : [];
   const wallet = wallets.find(item => item?.address === from.address)
-    || wallets.find(item => typeof item?.address === 'string' && item.address.toLowerCase() === from.address.toLowerCase());
-  if (from.kind !== 'main' && typeof signer?.signWithOwnerAuthorization === 'function'
+    || (!forSwap && wallets.find(item => typeof item?.address === 'string' && item.address.toLowerCase() === from.address.toLowerCase()));
+  if (!requireWalletApproval && from.kind !== 'main' && typeof signer?.signWithOwnerAuthorization === 'function'
       && (!wallet || signer.preferOwnerAuthorization)) {
     try {
       const signed = await signer.signWithOwnerAuthorization({ address: from.address, transaction });
@@ -105,10 +105,24 @@ export async function signSelectedWalletTransaction({ from, transaction, signer 
   }
   let signed;
   try {
+    const input = { transaction, chain: SOLANA_PRIVY_CHAIN,
+      ...(requireWalletApproval ? { options: { uiOptions: { showWalletUIs: true } } } : {}) };
     signed = wallet.standardWallet && typeof wallet.signTransaction === 'function'
-      ? await wallet.signTransaction({ transaction, chain: SOLANA_PRIVY_CHAIN })
-      : await signer.signTransaction({ transaction, wallet, chain: SOLANA_PRIVY_CHAIN });
-  } catch { fail('wallet_approval_cancelled'); }
+      ? await wallet.signTransaction(input)
+      : await signer.signTransaction({ ...input, wallet });
+  } catch (error) {
+    if (!forSwap) fail('wallet_approval_cancelled');
+    const causes = [error, error?.cause, error?.data, error?.cause?.data];
+    const status = causes.map(item => item?.status ?? item?.response?.status)
+      .find(value => Number.isInteger(value) && value >= 400 && value <= 599);
+    let code = 'client_sign_failed';
+    if (causes.some(item => item?.code === 4001 || ['user_rejected', 'user_cancelled'].includes(item?.code)
+        || /^(user (rejected|cancelled)|request rejected by user)/i.test(item?.message ?? ''))) code = 'client_sign_rejected';
+    else if (status === 401 || causes.some(item => ['invalid_jwt', 'missing_auth_token', 'wallet_signing_session_missing'].includes(item?.code)
+        || /invalid jwt token provided|privy wallet session expired/i.test(item?.message ?? item?.error ?? ''))) code = 'client_sign_session_required';
+    else if (causes.some(item => item?.code === 'policy_violation')) code = 'wallet_policy_rejected';
+    throw Object.assign(new Error(code), { code, ...(status ? { signingHttpStatus: status } : {}) });
+  }
   if (!(signed?.signedTransaction instanceof Uint8Array) || signed.signedTransaction.length <= 64) fail('invalid_signature');
   return signed.signedTransaction;
 }

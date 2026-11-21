@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { browserSessionUrl, liveViewFrame, pickOpenSession, reconcileLiveSession, liveSessionKey } from './live-view.mjs';
+import {
+  browserSessionUrl,
+  liveViewFrame,
+  pickOpenSession,
+  reconcileLiveSession,
+  liveSessionKey,
+  nextViewerRefreshAt,
+} from './live-view.mjs';
 
 test('navigation revisions invalidate the viewer, unchanged polling retains it and empty lists clear it', () => {
   const current = { id: 'rec_1', revision: 0, frame: { src: 'private' }, control: 'agent' };
@@ -41,6 +48,14 @@ test('browser session URLs stay on the runtime origin', () => {
     browserSessionUrl('shell', 'bot_1', { sessionRecordId: 'rec_1', action: 'live-view' }),
     '/api/runtime/bots/bot_1/browser/sessions/rec_1/live-view',
   );
+  assert.equal(
+    browserSessionUrl('shell', 'bot_1', { sessionRecordId: 'rec_1', action: 'click' }),
+    '/api/runtime/bots/bot_1/browser/sessions/rec_1/click',
+  );
+  assert.equal(
+    browserSessionUrl('https://runtime.example', 'bot_1', { sessionRecordId: 'rec_1', action: 'click' }),
+    'https://runtime.example/bots/bot_1/browser/sessions/rec_1/click',
+  );
 });
 
 /**
@@ -79,6 +94,28 @@ test('only a verified live.browser.run URL is framed', () => {
  * Side effects / state checked: N/A.
  * Gaps: ties on updatedAt not asserted.
  */
+/**
+ * Achieves: Viewer remints honor the Worker's connectBefore deadline (ISO string, or ms
+ * number) with a 15s margin, clamped into [at+5s, at+60s]; missing or past deadlines keep
+ * the flat 60s poll.
+ * Fails when: an invalid/past deadline tightens the poll, the margin or clamps drift, or a
+ * numeric connectBefore is ignored.
+ * Oracle: Explicit at/deadline pairs — far deadline caps at +60s, +40s gives +25s, +10s
+ * floors at +5s.
+ * Side effects / state checked: N/A.
+ * Gaps: clock skew between Worker and browser beyond the 5s floor is not modeled.
+ */
+test('viewer remints honor connectBefore with a clamped margin', () => {
+  const at = 1_000_000;
+  assert.equal(nextViewerRefreshAt({}, at), at + 60_000);
+  assert.equal(nextViewerRefreshAt({ connectBefore: 'nope' }, at), at + 60_000);
+  assert.equal(nextViewerRefreshAt({ connectBefore: new Date(at - 5_000).toISOString() }, at), at + 60_000);
+  assert.equal(nextViewerRefreshAt({ connectBefore: new Date(at + 120_000).toISOString() }, at), at + 60_000);
+  assert.equal(nextViewerRefreshAt({ connectBefore: new Date(at + 40_000).toISOString() }, at), at + 25_000);
+  assert.equal(nextViewerRefreshAt({ connectBefore: new Date(at + 10_000).toISOString() }, at), at + 5_000);
+  assert.equal(nextViewerRefreshAt({ connectBefore: at + 40_000 }, at), at + 25_000);
+});
+
 test('pickOpenSession prefers the newest open record', () => {
   assert.equal(pickOpenSession({ sessions: [] }), null);
   const picked = pickOpenSession({

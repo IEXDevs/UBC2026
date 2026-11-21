@@ -23,6 +23,7 @@ import { resolvePriceLookup } from './price-lookup.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
 import { assessPositions } from './schedules.mjs';
 import { alertFromGate, alertFromPauseReason, rememberBotAlert, rememberDecisionMemo } from './bot-alerts.mjs';
+import { handleLasoRequest } from './laso-do.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 
 const OWNER_HEADER = 'x-owner-id';
@@ -297,6 +298,7 @@ export class BotStateMachine {
         meta,
         run,
         paused: ownerPaused || run?.paused === true,
+        ownerPaused,
         positionCheck,
         cardLoop,
         ...(!ownerPaused && pendingSwap?.expiresAt > now ? { pendingSwap } : {}),
@@ -616,17 +618,30 @@ export class BotStateMachine {
 
     if (url.pathname === '/card-loop/tick' && request.method === 'POST') {
       if (!isInternalCardLoop(request)) return Response.json({ error: 'not_found' }, { status: 404 });
+      const ownerGate = await this.requireBoundOwner(request);
+      if (ownerGate) return ownerGate;
       const body = await request.json().catch(() => ({}));
       const tickNow = Number.isSafeInteger(body?.now) ? body.now : now;
       const woke = await this.wakeCardLoop(env, tickNow);
       return Response.json({ ok: true, ...woke }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
+    if (url.pathname === '/card-loop/check' && request.method === 'POST') {
+      if (!ownerFrom(request)) return noStore({ error: 'owner_required' }, 401);
+      const ownerGate = await this.requireBoundOwner(request);
+      if (ownerGate) return ownerGate;
+      return noStore({ ok: true, ...await this.wakeCardLoop(env, now) });
+    }
+
     if (url.pathname === '/card-loop' || url.pathname === '/card-loop/cooldown' || url.pathname === '/card-loop/break') {
       return this.handleCardLoop(request, env, url.pathname, now);
     }
 
-    const browserPath = url.pathname.match(/^\/id\/([^/]+)\/browser\/sessions(?:\/([^/]+)\/(live-view|release|navigate))?$/);
+    if (url.pathname === '/laso/session' || url.pathname === '/laso/checkpoint' || url.pathname === '/laso/status') {
+      return handleLasoRequest(this, request, env, now, url.pathname);
+    }
+
+    const browserPath = url.pathname.match(/^\/id\/([^/]+)\/browser\/sessions(?:\/([^/]+)\/(live-view|release|navigate|click))?$/);
     if (browserPath) {
       return this.handleBrowser(request, env, {
         botId: decodeURIComponent(browserPath[1]),
@@ -695,6 +710,16 @@ export class BotStateMachine {
    * decision gate before any spend. This method does not sign on its own.
    */
   async wakeCardLoop(env, now) {
+    if (this.cardLoopWake) return { woke: false, reason: 'running', spent: false };
+    this.cardLoopWake = this.runDueCardLoop(env, now);
+    try {
+      return await this.cardLoopWake;
+    } finally {
+      this.cardLoopWake = null;
+    }
+  }
+
+  async runDueCardLoop(env, now) {
     const loop = await this.get('cardLoop');
     if (!loop?.active) return { woke: false, reason: 'no_loop', spent: false };
     if (await this.get('ownerPaused') === true) return { woke: false, reason: 'run_paused', spent: false };
@@ -702,12 +727,18 @@ export class BotStateMachine {
     const meta = await this.get('meta');
     const ownerId = typeof meta?.ownerId === 'string' ? meta.ownerId : null;
     const botId = loop.botId;
+    const context = await loopContext(env, { botId, goal: loop.purpose }, ownerId);
+    const stillScheduled = current => current?.active && current.createdAt === loop.createdAt
+      && current.nextWakeAt === loop.nextWakeAt;
+    if (!stillScheduled(await this.get('cardLoop')) || await this.get('ownerPaused') === true) {
+      return { woke: false, reason: 'schedule_changed', spent: false };
+    }
     let run = await this.get('run');
-    if ((!run || replaceableSwapRun(run, now) || run.checkpoints?.monitor?.status === 'done') && botId) {
+    const retry = ['research-failed', 'verifier-blocked', 'spend-frozen'].includes(run?.pauseReason);
+    if (!run || retry || replaceableSwapRun(run, now) || run.checkpoints?.monitor?.status === 'done') {
       run = createEmptyRun({ runId: `run_${now}`, botId, goal: loop.purpose, now });
       await this.put('run', run);
     }
-    const context = await loopContext(env, { botId, goal: loop.purpose }, ownerId);
     let gate = 'not-run';
     let spent = false;
     try {
@@ -721,13 +752,22 @@ export class BotStateMachine {
         models: loopModels(env),
         deps: loopDeps(env),
         now,
-        persist: async (next) => { await this.put('run', next); },
+        persist: async (next) => {
+          if (!stillScheduled(await this.get('cardLoop')) || await this.get('ownerPaused') === true) {
+            throw new LoopEngineError('schedule_changed', 409);
+          }
+          await this.put('run', next);
+        },
       });
       gate = result.run?.pauseReason || (result.waiting ? 'waiting' : 'ran');
       const execution = result.run?.checkpoints?.execute;
       spent = execution?.at === now && typeof execution.signature === 'string';
     } catch (error) {
       gate = typeof error?.code === 'string' ? error.code : 'loop_failed';
+    }
+    const current = await this.get('cardLoop');
+    if (!stillScheduled(current)) {
+      return { woke: true, gate, throughGate: true, spent, loop: publicCardLoop(current) };
     }
     const minutes = loop.cooldownMinutes;
     const next = {
@@ -737,7 +777,7 @@ export class BotStateMachine {
       nextWakeAt: now + minutes * 60_000,
     };
     await this.put('cardLoop', next);
-    await this.armAlarm(next.nextWakeAt);
+    if (await this.get('ownerPaused') !== true) await this.armAlarm(next.nextWakeAt);
     return { woke: true, gate, throughGate: true, spent, loop: publicCardLoop(next) };
   }
 
@@ -799,6 +839,26 @@ export class BotStateMachine {
           embedVerified: view.embedVerified,
           fallback: view.fallback,
           event: view.event,
+        });
+      }
+      if (leaf === 'click' && request.method === 'POST') {
+        const body = await readBrowserBody(request);
+        if (typeof body.selector !== 'string' || !body.selector.trim() || body.selector.length > 256) {
+          return noStore({ error: 'invalid_selector' }, 400);
+        }
+        const clicked = await service.click({
+          ownerId,
+          botId,
+          sessionRecordId,
+          selector: body.selector.trim(),
+        });
+        return noStore({
+          sessionRecordId: clicked.sessionRecordId,
+          x: clicked.x,
+          y: clicked.y,
+          tag: clicked.tag,
+          text: clicked.text,
+          event: clicked.event,
         });
       }
       if (leaf === 'release' && request.method === 'POST') {
@@ -871,11 +931,7 @@ export class BotDurableObject {
 
   async alarm() {
     const machine = await this.#machine();
-    const request = new Request('https://bot/card-loop/tick', {
-      method: 'POST',
-      headers: { [INTERNAL_POSITION_HEADER]: INTERNAL_CARD_LOOP_VALUE },
-    });
-    await machine.handle(request, this.env);
+    await machine.wakeCardLoop(enrichEnv(this.env), Date.now());
   }
 
   async fetch(request) {

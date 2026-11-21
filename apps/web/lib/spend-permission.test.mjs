@@ -164,3 +164,29 @@ test('swap legs keep each asset and net the USDC side', () => {
   assert.equal(summary.lines[1].label, 'SOL');
   assert.equal(summary.net, '−5 USDC');
 });
+
+test('spend permission accessDetail formats raw address and domain recipients', () => {
+  const toAddress = toolAccessRequest('ask', 'request_spend', {
+    amount: '1000000',
+    asset: 'USDC',
+    destination: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+  });
+  assert.equal(toAddress.label, 'Move 1 USDC to 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM');
+  assert.equal(toAddress.kind, 'modal');
+
+  const toDomain = toolAccessRequest('ask', 'request_spend', {
+    amount: '2000000',
+    asset: 'USDC',
+    domain: 'alex.sol',
+  });
+  assert.equal(toDomain.label, 'Move 2 USDC to alex.sol');
+  assert.equal(toDomain.kind, 'modal');
+
+  const toHandleAndAddress = toolAccessRequest('ask', 'request_spend', {
+    amount: '1000000',
+    asset: 'USDC',
+    handle: 'alex',
+    destination: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+  });
+  assert.equal(toHandleAndAddress.label, 'Move 1 USDC to @alex (9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM)');
+});

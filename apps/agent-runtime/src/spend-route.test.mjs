@@ -4,8 +4,8 @@ import { createHash, createHmac } from 'node:crypto';
 import { createMemoryLedger } from '@ubc2026/bot-policy/ledger';
 import { parsePermissionedSpendBody, spendApprovalMessage } from '@ubc2026/contracts';
 import { SOLANA_USDC_MINT } from '@ubc2026/wallets/privy';
-import { Keypair, SystemInstruction, Transaction, VersionedTransaction } from '@solana/web3.js';
-import { decodeTransferCheckedInstruction } from '@solana/spl-token';
+import { Keypair, PublicKey, SystemInstruction, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { decodeTransferCheckedInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { sha256Hex } from './desk-grant.mjs';
 import worker from './owner-auth.fixture.mjs';
 import { handleVoiceRequest } from './voice.mjs';
@@ -160,6 +160,97 @@ test('USD valuation keeps precision and rounds the debit up', () => {
   assert.equal(usdMicros('1', 6, '0'), null);
 });
 
+test('a manual SOL swap offers a fresh smaller quote for wrapping and later setup rent', async () => {
+  const sol = 'So11111111111111111111111111111111111111112';
+  const setup = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+  const amounts = ['100000000', '97950000', '95970720'];
+  const simulated = [];
+  const quotes = [];
+  const grant = '12'.repeat(32);
+  const grantHash = await sha256Hex(grant);
+  const currentBot = { ...bot, cap: { mode: 'limited', asset: 'USD', maxOutflow: '20000000', maxPerTransaction: '15000000' } };
+  const machine = new BotStateMachine();
+  const scheduled = createLoopSwapIntent({ bot: currentBot, wallet, now: NOW,
+    swap: { inputMint: sol, outputMint: SOLANA_USDC_MINT, inAmount: amounts[0] } });
+  await machine.put('meta', { botId: bot.id, ownerId: bot.ownerId, cluster: 'mainnet-beta' });
+  await machine.put('run', { botId: bot.id, step: 'decide', paused: true, pauseReason: LOOP_SWAP_PENDING, events: [],
+    checkpoints: { decide: { status: 'waiting', reason: LOOP_SWAP_PENDING, swapIntent: scheduled } } });
+  const errors = [
+    { program: DESTINATION, available: amounts[1], needed: amounts[0] },
+    { program: setup, available: '60000', needed: '2039280' },
+  ];
+  const env = spendEnv({
+    SUPABASE_URL: 'https://test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-role', JUPITER_API_KEY: 'test',
+    spendTrustScore: '800',
+    BOT: { idFromName: name => name, get: () => ({ fetch: request => machine.handle(request) }) },
+    loadSpendContext: async () => ({ bot: currentBot, wallet, ledger: { ...ledger, asset: 'USD' } }),
+    lookupSpendPrice: async mint => ({
+      mint, pricingCluster: 'mainnet', executionCluster: 'mainnet-beta', priceUsd: '100', fetchedAt: new Date(NOW).toISOString(),
+    }),
+    transferClient: {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      readSolanaMint: async ({ mint }) => ({ cluster: 'mainnet-beta', mint, decimals: 6 }),
+      prepareSolanaSwap: async ({ amount, transaction }) => {
+        simulated.push(amount);
+        const shortfall = errors[amounts.indexOf(amount)];
+        if (shortfall) throw Object.assign(new Error('simulation_failed'), {
+          code: 'simulation_failed', simulationReason: 'instruction_3_custom_1', solWrapReached: true,
+          simulationDetails: { instructionProgram: shortfall.program, logs: [
+            `Program log: Transfer: insufficient lamports ${shortfall.available}, need ${shortfall.needed}`,
+            `Program ${DESTINATION} failed: custom program error: 0x1`,
+          ] },
+        });
+        return { transaction, feeLamports: '5000', maxSolCost: '2044280' };
+      },
+      signPreparedSolanaTransfer: () => assert.fail('swap preview must never sign'),
+      broadcastSignedSolana: () => assert.fail('quote must never broadcast'),
+    },
+    ledgerApi: { reserveBudget: () => assert.fail('quote must never reserve') },
+    fetch: async url => {
+      const target = new URL(url);
+      if (target.pathname.endsWith('/desk_locks')) {
+        return Response.json([{ grant_hash: grantHash, grant_until: new Date(NOW + 120_000).toISOString() }]);
+      }
+      assert.equal(target.pathname, '/swap/v2/build');
+      const amount = target.searchParams.get('amount');
+      quotes.push(amount);
+      const data = Buffer.alloc(34);
+      createHash('sha256').update('global:route_v2').digest().copy(data, 0, 0, 8);
+      data.writeBigUInt64LE(BigInt(amount), 8);
+      data.writeBigUInt64LE(9_000_000n, 16);
+      data.writeUInt16LE(50, 24);
+      return Response.json({ inputMint: sol, outputMint: SOLANA_USDC_MINT, inAmount: amount,
+        outAmount: '9000000', otherAmountThreshold: '8955000', swapMode: 'ExactIn', slippageBps: 50,
+        swapInstruction: { programId: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+          accounts: [wallet.address, DESTINATION, DESTINATION, sol, SOLANA_USDC_MINT].map((pubkey, index) => ({ pubkey, isSigner: index === 0 })),
+          data: data.toString('base64') },
+      });
+    },
+  });
+  const request = body => worker.fetch(spendRequest({ botId: bot.id, action: 'swap', asset: 'SOL', outputAsset: 'USDC',
+    amount: amounts[0], permission: 'full', idempotencyKey: 'manual_swap', ...body }, { 'x-desk-grant': grant }), env);
+  const preview = await (await request()).json();
+  assert.equal(preview.state, 'approval-needed');
+  assert.equal(preview.signed, false);
+  assert.equal(preview.swapPreview?.inputAmount, amounts[2]);
+  assert.equal(preview.swapPreview?.usdMicros, '9801500');
+  assert.deepEqual(quotes, amounts);
+  assert.deepEqual(simulated, amounts);
+  const originalAmount = await (await request({ confirmed: true, swapTicket: preview.swapPreview.ticket, swapAuthorization: 'prepare' })).json();
+  assert.equal(originalAmount.error, 'swap_quote_expired');
+  const automatic = await (await request({ amount: amounts[2], autoSwap: true, swapTicket: preview.swapPreview.ticket })).json();
+  assert.equal(automatic.reason, 'swap_quote_requires_confirmation');
+  assert.deepEqual(simulated, amounts);
+  const approved = await (await request({ amount: amounts[2], confirmed: true,
+    swapTicket: preview.swapPreview.ticket, swapAuthorization: 'prepare' })).json();
+  assert.ok(approved.swapAuthorization?.transaction, JSON.stringify(approved));
+  assert.equal(approved.signed, false);
+  const scheduledPreview = await (await request({ idempotencyKey: scheduled.idempotencyKey })).json();
+  assert.equal(scheduledPreview.error, 'instruction_3_custom_1');
+  assert.equal(scheduledPreview.swapPreview, undefined);
+  assert.deepEqual(quotes, [...amounts, amounts[0]]);
+});
+
 for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits only the approved quote and reserves USD once`, async () => {
   const keypair = Keypair.generate();
   const wallet = { id: 'w_main', ownerId: 'user_1', kind: 'main', label: 'Main', address: keypair.publicKey.toBase58(), frozen: false, provider: 'privy' };
@@ -262,7 +353,9 @@ for (const path of ['chat', 'scheduled']) test(`a ${path} mainnet swap submits o
   const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey };
   const request = body => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
   routeSlippage = 100;
-  assert.equal((await (await request()).json()).error, 'swap_route_refused');
+  const rejectedTerms = await (await request()).json();
+  assert.equal(rejectedTerms.error, 'swap_route_instruction_mismatch');
+  assert.match(rejectedTerms.failure.message, /quoted terms and wallet/);
   routeSlippage = 50;
   const instructionProgram = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
   const log = `Program ${instructionProgram} failed: custom program error: 0x1`;
@@ -636,6 +729,49 @@ test('a classic SPL send uses the exact mint and mainnet-beta decimals', async (
   const invalid = await (await worker.fetch(spendRequest(request), env)).json();
   assert.equal(invalid.signed, false);
   assert.equal(invalid.error, 'transfer_preparation_failed');
+});
+
+/**
+ * Achieves: a pay to a plain external address (no handle, no .sol) embeds that
+ *   address in the built USDC transfer and broadcasts it once.
+ * Fails when: the destination is swapped, dropped, or the spend never signs.
+ * Oracle: ATA derivation + transfer-checked decode of the prepared transaction.
+ * Side effects: mocked signer and ledger only.
+ * Gaps: on-chain confirmation is the signature itself.
+ */
+test('a USDC pay to an external address embeds that address and broadcasts once', async () => {
+  const external = Keypair.fromSeed(new Uint8Array(32).fill(7)).publicKey.toBase58();
+  assert.notEqual(external, wallet.address);
+  const autoBot = {
+    ...bot,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
+  };
+  let broadcasts = 0;
+  const env = spendEnv({
+    loadSpendContext: async () => ({ bot: autoBot, wallet, ledger }),
+    transferClient: {
+      getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: DESTINATION }),
+      signAndBroadcastSolana: async ({ transaction }) => {
+        broadcasts += 1;
+        const tx = Transaction.from(Buffer.from(transaction, 'base64'));
+        assert.equal(tx.instructions.length, 3);
+        const { keys, data } = decodeTransferCheckedInstruction(tx.instructions[1]);
+        const expectedAta = getAssociatedTokenAddressSync(new PublicKey(SOLANA_USDC_MINT), new PublicKey(external), false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+        assert.equal(keys.destination.pubkey.toBase58(), expectedAta.toBase58());
+        assert.equal(data.amount, 2500000n);
+        return { cluster: 'mainnet-beta', signature: 'external_pay_signature' };
+      },
+    },
+    ledgerApi: { reserveBudget: async () => ({ state: 'reserved' }) },
+  });
+  const body = await (await worker.fetch(spendRequest({
+    permission: 'full', botId: 'bot_1', action: 'pay',
+    asset: 'USDC', amount: '2500000', destination: external,
+  }), env)).json();
+  assert.equal(body.signed, true);
+  assert.equal(body.signature, 'external_pay_signature');
+  assert.equal(broadcasts, 1);
 });
 
 /**
@@ -1338,20 +1474,21 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
   assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
 });
 
-async function autoSwapSetup({ trust = '800' } = {}) {
+async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2000000',
+  delegated = false, queued = true, freezeWhileSigning = false, maxPerTransaction = '1200000' } = {}) {
   const keypair = Keypair.generate();
   const wallet = { id: 'w_main', ownerId: 'user_1', kind: 'main', label: 'Main', address: keypair.publicKey.toBase58(), frozen: false, provider: 'privy' };
   const sol = 'So11111111111111111111111111111111111111112';
   const grant = '34'.repeat(32);
   const grantHash = await sha256Hex(grant);
-  const usdBot = { ...bot, cap: { mode: 'limited', asset: 'USD', maxOutflow: '5000000', maxPerTransaction: '1200000' } };
+  const usdBot = { ...bot, cap: { mode: 'limited', asset: 'USD', maxOutflow: '5000000', maxPerTransaction } };
   const now = Date.now();
   const machine = new BotStateMachine();
   const intent = createLoopSwapIntent({ bot: usdBot, wallet, now, swap: { inputMint: SOLANA_USDC_MINT, outputMint: sol, inAmount: '1000000' } });
   await machine.put('meta', { botId: bot.id, ownerId: bot.ownerId, cluster: 'mainnet-beta' });
   await machine.put('run', { botId: bot.id, step: 'decide', paused: true, pauseReason: LOOP_SWAP_PENDING, events: [],
     checkpoints: { decide: { status: 'waiting', reason: LOOP_SWAP_PENDING, swapIntent: intent } } });
-  const calls = { signed: [], reserved: 0 };
+  const calls = { signed: [], reserved: 0, broadcasts: 0 };
   const env = spendEnv({
     spendNow: now,
     BOT: { idFromName: name => name, get: () => ({ fetch: request => machine.handle(request) }) },
@@ -1359,7 +1496,9 @@ async function autoSwapSetup({ trust = '800' } = {}) {
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test-role',
     spendTrustScore: trust,
-    loadSpendContext: async () => ({ bot: usdBot, wallet, ledger: { ...ledger, asset: 'USD' } }),
+    loadSpendContext: async () => ({ bot: usdBot,
+      wallet: freezeWhileSigning && calls.signed.length ? { ...wallet, frozen: true } : wallet,
+      ledger: { ...ledger, asset: 'USD' } }),
     lookupSpendPrice: async mint => ({
       mint, pricingCluster: 'mainnet', executionCluster: 'mainnet-beta',
       priceUsd: mint === sol ? '100' : '1', fetchedAt: new Date(now).toISOString(),
@@ -1370,7 +1509,18 @@ async function autoSwapSetup({ trust = '800' } = {}) {
       prepareSolanaSwap: async input => ({ transaction: input.transaction, feeLamports: '5000', maxSolCost: '5000' }),
       formatPreparedSpendAuthorization: () => Buffer.from('swap-owner-authorization-payload'.repeat(2)).toString('base64'),
       signPreparedSolanaTransfer: async (request) => {
+        assert.fail('swaps must not use transfer signing');
+      },
+      inspectSwapDelegation: async () => (typeof delegated === 'function' ? delegated() : delegated) ? { ready: true } : {
+        reason: 'swap_signer_missing', delegation: { walletAddress: wallet.address, signerId: 'test-signer-id' },
+      },
+      signPreparedSolanaSwap: async (request) => {
+        assert.equal(calls.reserved, 1);
+        assert.equal(request.wallet, wallet);
+        assert.equal(request.accessToken, undefined);
         calls.signed.push(request);
+        await request.checkPermission();
+        calls.broadcasts += 1;
         return { cluster: 'mainnet-beta', signature: '6'.repeat(64) };
       },
       broadcastSignedSolana: () => assert.fail('no browser signature provided'),
@@ -1397,11 +1547,17 @@ async function autoSwapSetup({ trust = '800' } = {}) {
       if (target.pathname.endsWith('/desk_locks')) {
         return Response.json([{ grant_hash: grantHash, grant_until: new Date(now + 120_000).toISOString() }]);
       }
+      if (target.pathname.endsWith('/owner_state')) {
+        assert.equal(target.searchParams.get('owner_id'), 'eq.user_1');
+        const value = typeof permission === 'function' ? permission(calls) : permission;
+        return Response.json([{ name: 'permission', value }, { name: 'reviewCap', value: savedCap }]);
+      }
       if (target.pathname.endsWith('/approvals')) return new Response('', { status: 201 });
       return new Response('[]');
     },
   });
-  const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey: intent.idempotencyKey };
+  const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000',
+    idempotencyKey: queued ? intent.idempotencyKey : `spend_${crypto.randomUUID()}` };
   const request = (body, headers = { 'x-desk-grant': grant }) => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
   const ticket = (await (await request()).json()).swapPreview.ticket;
   return { calls, request, ticket, machine, env, keypair };
@@ -1409,17 +1565,13 @@ async function autoSwapSetup({ trust = '800' } = {}) {
 
 /**
  * Achieves: a queued agent swap runs without the slide only on an agent send's terms.
- * Fails when: an auto swap skips review, desk or browser-signing requirements.
- * Oracle: unsigned results, no reservation, and a specific client-signing requirement under the cap.
+ * Fails when: an auto swap skips review, desk or signer requirements.
+ * Oracle: unsigned results and no reservation when delegation is unavailable.
  * Side effects: in-memory bot DO; Jupiter, prices, Privy and the ledger are doubles.
  * Gaps: live Jupiter and Privy are not called.
  */
-test('an auto agent swap retains review and desk gates and requires browser signing', async () => {
-  const { calls, request, ticket } = await autoSwapSetup();
-  const over = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '1000000' })).json();
-  assert.equal(over.signed, false);
-  assert.equal(over.state, 'approval-needed');
-  assert.equal(over.failure.step, 'approval');
+test('automatic swaps retain the desk gate and require delegation', async () => {
+  const { calls, request, ticket, keypair } = await autoSwapSetup();
   const locked = await (await request({ autoSwap: true, swapTicket: ticket }, {})).json();
   assert.equal(locked.signed, false);
   assert.equal(locked.failure.code, 'desk_locked');
@@ -1428,9 +1580,96 @@ test('an auto agent swap retains review and desk gates and requires browser sign
   assert.equal(calls.signed.length, 0);
   const auto = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
   assert.equal(auto.signed, false);
-  assert.equal(auto.reason, 'client_sign_required');
+  assert.equal(auto.reason, 'swap_signer_missing');
+  assert.deepEqual(auto.swapDelegation, { walletAddress: keypair.publicKey.toBase58(), signerId: 'test-signer-id' });
   assert.equal(calls.signed.length, 0);
   assert.equal(calls.reserved, 0);
+});
+
+for (const queued of [true, false]) test(`delegated Full ${queued ? 'queued' : 'chat'} swap reserves and signs once`, async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, queued });
+  assert.equal(calls.reserved, 0);
+  const body = { autoSwap: true, swapTicket: ticket, reviewCap: '2000000' };
+  const sent = await (await request(body)).json();
+  assert.equal(sent.signed, true, JSON.stringify(sent));
+  assert.equal(sent.signature, '6'.repeat(64));
+  assert.equal(sent.swapAuthorization, undefined);
+  const again = await (await request(body)).json();
+  assert.equal(again.signed, false);
+  assert.equal(again.reason ?? again.error, queued ? 'swap_intent_unavailable' : 'duplicate-spend');
+  assert.equal(calls.signed.length, 1);
+  assert.equal(calls.broadcasts, 1);
+});
+
+test('delegated signing uses the saved permission and clamps a raised Review limit', async () => {
+  const denied = await autoSwapSetup({ delegated: true, queued: false, permission: 'review' });
+  const forged = await (await denied.request({ autoSwap: true, swapTicket: denied.ticket })).json();
+  assert.equal(forged.reason, 'swap_saved_permission_required');
+  assert.equal(denied.calls.reserved, 0);
+  const limited = await autoSwapSetup({ delegated: true, queued: false, permission: 'review', savedCap: '1000000' });
+  const raised = await (await limited.request({ autoSwap: true, permission: 'review', swapTicket: limited.ticket, reviewCap: '900000000' })).json();
+  assert.equal(raised.state, 'approval-needed');
+  assert.equal(limited.calls.reserved, 0);
+  assert.equal(limited.calls.signed.length, 0);
+});
+
+test('Full ignores the Review cap and still enforces the agent budget', async () => {
+  const full = await autoSwapSetup({ delegated: true, queued: false, savedCap: '1' });
+  assert.equal((await (await full.request({ autoSwap: true, swapTicket: full.ticket, reviewCap: '1' })).json()).signed, true);
+  const limited = await autoSwapSetup({ delegated: true, queued: false, maxPerTransaction: '1000000' });
+  const result = await (await limited.request({ autoSwap: true, swapTicket: limited.ticket })).json();
+  assert.equal(result.reason, 'per-transaction');
+  assert.equal(limited.calls.reserved, 0);
+});
+
+test('Review signs eligible chat swaps with the saved USD threshold', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, queued: false, permission: 'review' });
+  const result = await (await request({ autoSwap: true, permission: 'review', swapTicket: ticket })).json();
+  assert.equal(result.signed, true, JSON.stringify(result));
+  assert.equal(calls.broadcasts, 1);
+});
+
+test('changing permission while Privy signs stops broadcast', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true,
+    permission: calls => calls.signed.length === 0 ? 'full' : 'ask' });
+  const result = await (await request({ autoSwap: true, swapTicket: ticket })).json();
+  assert.equal(result.reason, 'spend_authorization_changed');
+  assert.equal(result.signed, false);
+  assert.equal(calls.signed.length, 1);
+  assert.equal(calls.broadcasts, 0);
+});
+
+test('a wallet frozen while Privy signs never broadcasts', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, freezeWhileSigning: true });
+  const result = await (await request({ autoSwap: true, swapTicket: ticket })).json();
+  assert.equal(result.reason, 'spend-frozen');
+  assert.equal(result.signed, false);
+  assert.equal(calls.signed.length, 1);
+  assert.equal(calls.broadcasts, 0);
+});
+
+test('browser enrollment resumes the original Full swap through the Worker exactly once', async () => {
+  const { executeClientSignedSwap } = await import('../../web/lib/swap-client-sign.mjs');
+  let attached = false;
+  const { calls, request, ticket, keypair, env } = await autoSwapSetup({ delegated: () => attached, queued: false });
+  const pending = await (await request({ autoSwap: true, swapTicket: ticket })).json();
+  assert.equal(pending.state, 'blocked');
+  assert.equal(pending.reason, 'swap_signer_missing');
+  assert.equal(calls.reserved, 0);
+  const result = await executeClientSignedSwap({
+    spend: { action: 'swap', permission: 'full' }, swapTicket: ticket, accessToken: 'mock-owner-token', deskGrant: 'mock-grant',
+    delegation: { ...pending.swapDelegation, expiresAt: env.spendNow + 55_000 },
+    attachSwapSigner: async ({ address, signerId }) => {
+      assert.equal(address, keypair.publicKey.toBase58());
+      assert.equal(signerId, 'test-signer-id');
+      assert.equal(calls.reserved, 0);
+      attached = true;
+    },
+    fetchImpl: async (_url, init) => request(JSON.parse(init.body)),
+  });
+  assert.equal(result.signed, true, JSON.stringify(result));
+  assert.equal(calls.reserved, 1);
+  assert.equal(calls.broadcasts, 1);
 });
 
 /**
@@ -1489,4 +1728,82 @@ test('client-signed swaps reject unsigned or expired messages before reserving a
   assert.equal(JSON.stringify(failed).includes('secret provider'), false);
   assert.equal(calls.signed.length, 0);
   assert.equal(calls.reserved, 1);
+});
+
+test('USDC spend directly to an SNS domain resolves destination and signs and broadcasts', async () => {
+  const targetAddress = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const autoBot = {
+    ...bot,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
+  };
+  let signed = false;
+  const client = {
+    async getSolanaBlockhash() {
+      return { cluster: 'mainnet-beta', blockhash: DESTINATION };
+    },
+    async signAndBroadcastSolana() {
+      signed = true;
+      return { cluster: 'mainnet-beta', signature: 'sig_sns_spend' };
+    },
+  };
+  const env = spendEnv({
+    transferClient: client,
+    loadSpendContext: async () => ({ bot: autoBot, wallet, ledger }),
+    resolveSns: async (domain) => {
+      if (domain === 'alex.sol') return targetAddress;
+      throw new Error('not found');
+    },
+  });
+  const res = await worker.fetch(spendRequest({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'spend',
+    amount: '1000000',
+    asset: 'USDC',
+    destination: 'alex.sol',
+  }), env);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.signed, true);
+  assert.equal(signed, true);
+  assert.equal(body.signature, 'sig_sns_spend');
+  assert.equal(body.state, 'signed');
+});
+
+test('USDC spend directly to a raw base58 address signs and broadcasts', async () => {
+  const targetAddress = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const autoBot = {
+    ...bot,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
+  };
+  let signed = false;
+  const client = {
+    async getSolanaBlockhash() {
+      return { cluster: 'mainnet-beta', blockhash: DESTINATION };
+    },
+    async signAndBroadcastSolana() {
+      signed = true;
+      return { cluster: 'mainnet-beta', signature: 'sig_raw_addr_spend' };
+    },
+  };
+  const env = spendEnv({
+    transferClient: client,
+    loadSpendContext: async () => ({ bot: autoBot, wallet, ledger }),
+  });
+  const res = await worker.fetch(spendRequest({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'spend',
+    amount: '1000000',
+    asset: 'USDC',
+    destination: targetAddress,
+  }), env);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.signed, true);
+  assert.equal(signed, true);
+  assert.equal(body.signature, 'sig_raw_addr_spend');
+  assert.equal(body.state, 'signed');
 });

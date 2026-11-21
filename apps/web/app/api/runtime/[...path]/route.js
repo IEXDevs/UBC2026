@@ -50,9 +50,13 @@ async function proxy(request, context) {
     return localHandleLookup(request, { env: directoryEnv });
   }
   if (target.error === 'runtime_unconfigured') {
+    console.error('[api/runtime] runtime unconfigured for request:', pathname);
     return noStore({ ok: false, error: 'runtime_unconfigured', source: 'unconfigured' }, 503);
   }
-  if (target.error) return noStore({ error: 'not_found' }, 404);
+  if (target.error) {
+    console.error('[api/runtime] path rejected by proxy allowlist:', pathname, target.error);
+    return noStore({ error: 'not_found' }, 404);
+  }
 
   const headers = new Headers();
   const cookieToken = readPrivyTokenCookie(request.headers.get('cookie'));
@@ -88,14 +92,19 @@ async function proxy(request, context) {
   try {
     const upstream = await fetchAgentRuntime(target.url, init);
     if (upstream.status >= 300 && upstream.status < 400) {
+      console.error('[api/runtime] upstream redirect received from target:', target.url, upstream.status);
       return noStore({ error: 'runtime_unreachable' }, 502);
+    }
+    if (!upstream.ok) {
+      console.error('[api/runtime] upstream non-OK response:', upstream.status, target.url);
     }
     const body = await upstream.arrayBuffer();
     const out = new Headers({ 'Cache-Control': 'no-store' });
     const type = upstream.headers.get('content-type');
     if (type && type.length < 200) out.set('content-type', type);
     return new Response(body, { status: upstream.status, headers: out });
-  } catch {
+  } catch (err) {
+    console.error('[api/runtime] fetchAgentRuntime failed for target:', target.url, err);
     return noStore({ error: 'runtime_unreachable' }, 502);
   }
 }

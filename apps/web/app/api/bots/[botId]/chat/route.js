@@ -53,9 +53,10 @@ function budgetApprovalReply(hold, gate) {
   const terms = parseSpendApprovalTerms(gate?.approvalTerms);
   const { action, asset, handle, destination, amount } = hold.args;
   if (hold.budgetOverride || action !== 'spend' || asset !== 'SOL'
-    || !handle || !destination || !terms || gate.signed !== false
+    || (!handle && !destination) || !destination || !terms || gate.signed !== false
     || (gate.error || gate.state) !== 'approval-needed' || gate.reason !== 'per-transaction') return null;
-  const label = `Approve once: send ${formatBaseUnits(amount, 9)} SOL to @${handle} (${shortAddress(destination)}) plus a ${formatBaseUnits(terms.feeLamports, 9)} SOL fee.`;
+  const who = handle ? `@${handle} (${shortAddress(destination)})` : shortAddress(destination);
+  const label = `Approve once: send ${formatBaseUnits(amount, 9)} SOL to ${who} plus a ${formatBaseUnits(terms.feeLamports, 9)} SOL fee.`;
   const prompt = `${label} This overrides the agent’s per-transfer limit and, if needed, its remaining budget for this payment only. The limits won’t change. Slide to approve once.`;
   return { provider: 'desk', toolRounds: 1, text: prompt, hold: { ...hold, budgetOverride: terms, label, prompt } };
 }
@@ -277,6 +278,7 @@ export async function POST(request, context) {
     permissionMode,
     reviewCap,
     grants,
+    trackAgentTask: true,
     invokeTool: async (name, args) => {
       const hit = await dispatchHarness(name, args, harnessCtx);
       if (hit) return serializeToolResult(hit);
@@ -314,27 +316,29 @@ export async function POST(request, context) {
     return completeTextChat({ ...turnArgs, onMessage: trading ? null : onMessage, onReplyEvent: trading ? null : onReplyEvent });
   }
 
-  /** A queued agent swap runs on the terms an agent send would: Full or Review, within the review cap. The runtime re-checks trust, policy and the desk. */
-  async function autoLoopSwap(hold, swapHold, swapPreview) {
-    const approvalReason = (permissionMode !== 'full' && permissionMode !== 'review') ? 'owner_approval_required'
-      : amountOverReviewCap(swapPreview.usdMicros, reviewCap) ? 'approval-needed' : null;
+  async function tryAutoSwap(hold, swapHold, swapPreview) {
+    if (swapHold.args.amount !== hold.args.amount) return null;
+    if (permissionMode === 'ask') return null;
+    const approvalReason = permissionMode === 'review' && amountOverReviewCap(swapPreview.usdMicros, reviewCap)
+      ? 'approval-needed' : null;
     if (approvalReason) {
       const message = swapFailure({ error: approvalReason }).message;
       swapHold.prompt = `${message} ${swapHold.prompt}`;
       swapHold.label = `${message} ${swapHold.label}`;
       return null;
     }
-    if (!hold.idempotencyKey?.startsWith('loop_swap_')) return null;
     const sent = await invokeRaw('request_spend', {
       ...hold.args, botId, permission: permissionMode, reviewCap: effectiveReviewCap(reviewCap),
-      idempotencyKey: hold.idempotencyKey, autoSwap: true,
+      idempotencyKey: hold.idempotencyKey, autoSwap: true, confirmed: false,
     }, { swapTicket: swapHold.swapTicket });
     if (sent?.signed === true && typeof sent.signature === 'string') {
-      return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted within your review limit: https://solscan.io/tx/${sent.signature}`;
+      return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted automatically: https://solscan.io/tx/${sent.signature}`;
     }
-    if (sent?.reason === 'client_sign_required' || sent?.error === 'client_sign_required') {
+    if (sent?.signed === false && sent.reason === 'swap_signer_missing'
+        && sent.swapDelegation) {
       return { clientSwap: { spend: { ...hold.args, botId, permission: permissionMode,
-        reviewCap: effectiveReviewCap(reviewCap), idempotencyKey: hold.idempotencyKey }, swapTicket: swapHold.swapTicket } };
+        reviewCap: effectiveReviewCap(reviewCap), idempotencyKey: hold.idempotencyKey }, swapTicket: swapHold.swapTicket,
+        delegation: { ...sent.swapDelegation, expiresAt: swapHold.expiresAt } } };
     }
     // Only a swap stopped before its reservation can still go to the slide under the same key.
     const beforeReserve = sent?.state === 'approval-needed' || sent?.state === 'trust-confirmation-required'
@@ -376,13 +380,14 @@ export async function POST(request, context) {
         ...reply.hold.args, botId, permission: 'ask', idempotencyKey: reply.hold.idempotencyKey,
       });
       const swapHold = swapHoldFromPreview(reply.hold, preview?.swapPreview);
-      const auto = swapHold && await autoLoopSwap(reply.hold, swapHold, preview.swapPreview);
+      const auto = swapHold && await tryAutoSwap(reply.hold, swapHold, preview.swapPreview);
       reply = auto?.clientSwap
         ? { ...reply, text: '', hold: null, clientSwap: auto.clientSwap }
         : auto
         ? { ...reply, text: auto, hold: null }
         : swapHold
-        ? { ...reply, text: swapHold.label, hold: swapHold }
+        ? { ...reply, text: swapHold.label, hold: swapHold,
+          ...(swapHold.args.amount !== reply.hold.args.amount ? { messages: [] } : {}) }
         : { ...reply, text: preview?.error === 'swap_requires_usd_budget'
           ? swapFailure({ error: 'swap_requires_usd_budget' }).message
           : swapFailure(preview).message, hold: null };
@@ -398,9 +403,12 @@ export async function POST(request, context) {
       ok: true,
       botId,
       reply: reply.text,
+      ...(reply.agentTask ? { agentTask: reply.agentTask } : {}),
+      ...(reply.proposedGoal ? { proposedGoal: reply.proposedGoal } : {}),
       ...(reply.clientSwap ? { clientSwap: reply.clientSwap } : {}),
       ...(moveAuthorization === 'prepare' && reply.moveAuthorization ? { moveAuthorization: reply.moveAuthorization } : {}),
       ...(assetConfirmation?.args?.action === 'x402' && reply.claimUrl ? { claimUrl: reply.claimUrl } : {}),
+      ...(assetConfirmation?.args?.action === 'x402' && reply.lasoCard ? { lasoCard: reply.lasoCard } : {}),
       ...(lasoPayment?.phase === 'prepare' && reply.lasoPayment ? { lasoPayment: reply.lasoPayment } : {}),
       ...(assetConfirmation && spendAuthorization === 'prepare' && reply.spendAuthorization
         ? { spendAuthorization: reply.spendAuthorization } : {}),

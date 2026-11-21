@@ -9,7 +9,7 @@ import { issueLasoTicket } from './laso-payment.mjs';
 import {
   prepareSandboxPurchase,
   settleSandboxPurchase,
-  prepareLasoTinyCardPurchase,
+  prepareLasoCardAction,
   ShoppingError,
 } from '@ubc2026/shopping';
 import { buildSignalOffer, settleSignalSale, CommerceError } from '@ubc2026/agent-commerce';
@@ -93,10 +93,16 @@ async function handleShoppingPrepare(request, env, botId, owner) {
     if (body.provider === 'laso') {
       const approvalKey = supabaseConfig(env)?.key;
       if (!approvalKey) return json({ error: 'laso_unavailable' }, 503);
-      const result = await prepareLasoTinyCardPurchase({
+      const lasoAction = ['setup', 'modify', 'intl', 'gift'].includes(body.lasoAction) ? body.lasoAction : 'setup';
+      const result = await prepareLasoCardAction({
         bot,
         ledger,
+        action: lasoAction,
         amountUsd: body.amountUsd,
+        billing: body.billing,
+        extra: body.extra && typeof body.extra === 'object'
+          ? { laso_server_id: body.extra.laso_server_id, country: body.extra.country }
+          : { laso_server_id: body.laso_server_id, country: body.country },
         fetcher: env.fetch || fetch,
         baseUrl: env.LASO_BASE_URL,
       });

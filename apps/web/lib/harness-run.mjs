@@ -134,7 +134,7 @@ export async function runDelegatedAgent(ctx, args = {}) {
         harnessPrompt(ctx.connectors, skill?.id || '', ctx.situation),
         'You are a subagent. Use the tools. Do not delegate. Reply with what you found.',
       ].join('\n'),
-      maxToolRounds: 3,
+      maxToolRounds: 6,
       invokeTool: async (name, toolArgs) => {
         const hit = await dispatchHarness(name, toolArgs, { ...ctx, depth: (ctx.depth || 0) + 1 });
         if (hit) return hit;
@@ -142,16 +142,37 @@ export async function runDelegatedAgent(ctx, args = {}) {
       },
     });
   } catch (error) {
-    return { error: typeof error?.code === 'string' ? error.code : 'handoff_failed' };
+    const code = typeof error?.code === 'string' ? error.code : 'handoff_failed';
+    recordSubagentResult({
+      ownerId: ctx.ownerId,
+      botId: ctx.botId,
+      task,
+      skill: skill?.id || '',
+      reply: 'The subagent could not finish that step.',
+      status: 'error',
+    });
+    return { error: code };
   }
   const reply = typeof result?.text === 'string' ? result.text.trim() : '';
-  if (!reply) return { error: 'empty_reply' };
+  if (!reply) {
+    recordSubagentResult({
+      ownerId: ctx.ownerId,
+      botId: ctx.botId,
+      task,
+      skill: skill?.id || '',
+      reply: 'The subagent came back with nothing to report.',
+      status: 'error',
+    });
+    return { error: 'empty_reply' };
+  }
   const row = recordSubagentResult({
     ownerId: ctx.ownerId,
     botId: ctx.botId,
     task,
     skill: skill?.id || '',
     reply,
+    activity: result?.activity,
+    model: result?.model,
   });
   return { ok: true, reply, skill: skill?.id || null, subagents: row ? [row] : [] };
 }
@@ -226,7 +247,7 @@ export async function runVoiceAgentTurn({
       reviewCap: cap,
       model,
       fetcher,
-      maxToolRounds: 3,
+      maxToolRounds: 6,
       ...opts,
     }),
   };

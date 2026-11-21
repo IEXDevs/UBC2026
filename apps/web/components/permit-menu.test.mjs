@@ -10,10 +10,11 @@ function menuContaining(...nodes) {
 const css = readFileSync(new URL('./PromptBar.css', import.meta.url), 'utf8');
 const bar = readFileSync(new URL('./PromptBar.jsx', import.meta.url), 'utf8');
 const shellCss = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+const glideCss = readFileSync(new URL('./GlideSelect.css', import.meta.url), 'utf8');
 
 test('composer setting buttons share the model selector height and keep the permission trigger neutral', () => {
   assert.match(css, /\.prompt-bar__glide \.glide-select__trigger,\s*\.prompt-bar__pick\s*\{\s*height: var\(--pb-control-height\)/);
-  assert.match(shellCss, /\.composer \.prompt-bar\s*\{[^}]*--pb-control-height: 36px;/);
+  assert.match(shellCss, /\.composer \.prompt-bar\s*\{[^}]*--pb-control-height: 34px;/);
   assert.doesNotMatch(shellCss, /\.composer \.prompt-bar__pick\b[^{]*\{[^}]*\bheight\s*:/);
   assert.match(bar, /surfaceColor="var\(--pb-control-bg\)"/);
   assert.match(bar, /className="prompt-bar__pick"\s+aria-label=\{`Permissions,/);
@@ -28,10 +29,21 @@ test('the three permission modes change text color rather than the row backgroun
   }
 });
 
-test('the permissions menu fits within the composer rather than hanging off the trigger', () => {
-  assert.match(css, /\.prompt-bar__field\s*\{[^}]*position: relative;/);
-  assert.match(css, /\.permit-menu\s*\{[^}]*right: 12px;[^}]*width: min\(280px, calc\(100% - 24px\)\);/);
-  assert.doesNotMatch(css, /\.permit\s*\{[^}]*position: relative;/);
+test('composer menus center above their own triggers', () => {
+  assert.match(css, /\.prompt-bar__effort,\s*\.permit\s*\{\s*position: relative;/);
+  assert.match(css, /\.prompt-bar__menu\[data-kind='effort'\],\s*\.permit-menu\s*\{[^}]*bottom: calc\(100% \+ 8px \+ var\(--pb-menu-rise, 0px\)\);[^}]*left: calc\(50%[^;]*;[^}]*translate: -50% 0;/);
+  assert.match(css, /\.permit-menu\s*\{[^}]*width: min\(280px, calc\(100vw - 16px\)\);/);
+  assert.match(glideCss, /\.glide-select__menu\[data-align='center'\]\s*\{[^}]*left: calc\(50%[^;]*;[^}]*translate: -50% 0;/);
+  assert.match(bar, /placement="top"\s+align="center"/);
+  assert.match(shellCss, /\.context-card\s*\{[^}]*left: calc\(50%[^;]*;[^}]*bottom: calc\(100% \+ 8px \+ var\(--pb-menu-rise, 0px\)\);[^}]*translate: -50% 0;/);
+});
+
+test('composer popups share a single active menu', () => {
+  assert.match(bar, /menuActive=\{bar === 'model'\}/);
+  assert.match(bar, /const effortOpen = bar === 'effort'/);
+  assert.match(bar, /const permitOpen = bar === 'permit'/);
+  assert.match(bar, /open: bar === 'context'/);
+  assert.match(bar, /if \(shouldClosePermitMenu[^\n]*\) closeMenu\('permit'\)/);
 });
 
 test('the threshold input replaces the cap within the review row, not the active permission', () => {

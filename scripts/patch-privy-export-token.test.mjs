@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { patchPrivyExportAccessToken } from './patch-privy-export-token.mjs';
+import { patchPrivyExportAccessToken, patchPrivyWalletSignerToken } from './patch-privy-export-token.mjs';
 
 const ESM = 'node_modules/@privy-io/react-auth/dist/esm/EmbeddedWalletKeyExportScreen-CNWacpBt.mjs';
 const CJS = 'node_modules/@privy-io/react-auth/dist/cjs/EmbeddedWalletKeyExportScreen-DVgT7zi4.js';
 const SESSION_ESM = 'node_modules/@privy-io/react-auth/dist/esm/use-sign-transaction-internal-Cx-lKGKG.mjs';
 const SESSION_CJS = 'node_modules/@privy-io/react-auth/dist/cjs/use-sign-transaction-internal-DbS_YZ_u.js';
+const SIGNER_ESM = 'node_modules/@privy-io/react-auth/dist/esm/use-sign-with-user-signer-Nr1Myml4.mjs';
+const SIGNER_CJS = 'node_modules/@privy-io/react-auth/dist/cjs/use-sign-with-user-signer-Dec-9fsx.js';
 
 const IDENTITY = 'updateUserAndIdToken().then(()=>';
 
@@ -49,5 +51,41 @@ test('identity token patch replaces the published call and the session-token cal
     assert.equal(patched.includes(IDENTITY), true);
     assert.equal(patched.includes('getAccessTokenInternal'), false);
     assert.equal(patched.includes('y.getAccessToken().then(r)'), false);
+  }
+});
+
+test('browser signing and enrollment use the wallet token and preserve Privy MFA errors', async () => {
+  for (const file of [SIGNER_ESM, SIGNER_CJS]) {
+    const patched = patchPrivyWalletSignerToken(readFileSync(file, 'utf8'));
+    assert.equal(patched, patchPrivyWalletSignerToken(patched));
+    assert.match(patched, /return await maelstromSignWithUserSigner\(\w+,\w+,\{message:\w+,targetAppId:\w+\}\)/);
+    const start = patched.indexOf('\nasync function maelstromSignWithUserSigner(');
+    assert.ok(start > 0);
+    const sign = new Function(`${patched.slice(start)}; return maelstromSignWithUserSigner;`)();
+    const request = { message: new Uint8Array([1, 2, 3]), targetAppId: 'app' };
+    let walletToken = null;
+    const client = {
+      apiUrl: 'https://desk.example/api/privy-auth',
+      getAccessToken: async () => 'login-jwt',
+      getPrivyAccessToken: async options => {
+        assert.equal(options.disableAutoRefresh, true);
+        return walletToken;
+      },
+    };
+    const calls = [];
+    const proxy = { signWithUserSigner: async input => {
+      calls.push(input);
+      return { signature: 'signature' };
+    } };
+    await assert.rejects(sign(client, proxy, request), { code: 'wallet_signing_session_missing' });
+    assert.deepEqual(calls, []);
+    walletToken = 'wallet-jwt';
+    assert.deepEqual(await sign(client, proxy, request), { signature: 'signature' });
+    assert.deepEqual(calls, [{ accessToken: 'wallet-jwt', ...request }]);
+    assert.deepEqual(await sign({ apiUrl: 'https://auth.privy.io', getAccessToken: client.getAccessToken }, proxy, request),
+      { signature: 'signature' });
+    assert.deepEqual(calls[1], { accessToken: 'login-jwt', ...request });
+    const mfa = Object.assign(new Error('MFA required'), { code: 'mfa_required' });
+    await assert.rejects(sign(client, { signWithUserSigner: async () => { throw mfa; } }, request), error => error === mfa);
   }
 });

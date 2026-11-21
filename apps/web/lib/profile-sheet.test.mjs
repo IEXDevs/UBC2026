@@ -45,7 +45,7 @@ test('profile shows the wallet name and address once', () => {
     assert.match(sheet, new RegExp(`id: '${section}'`));
   }
   assert.doesNotMatch(sheet, /const PANES|wallet-nav|pane ===|role="tablist"/);
-  for (const component of ['TokenScreen', 'ConnectedPortfolio', 'SendPane', 'ReceivePane', 'JupiterSwap', 'TxnLog', 'TokenPane', 'LinkedLogins', 'PrivyKeyButton']) {
+  for (const component of ['TokenScreen', 'ConnectedPortfolio', 'SendPane', 'ReceivePane', 'JupiterSwap', 'TxnLog', 'LinkedLogins', 'PrivyKeyButton']) {
     assert.match(sheet, new RegExp(`<${component}[\\s>]`));
   }
   assert.match(sheet, /onSwap=\{\(symbol, mint\) => \{\s*setSwapMint\(mint \|\|/);
@@ -60,10 +60,31 @@ test('profile shows the wallet name and address once', () => {
   assert.match(sheet, /aria-label="Transfer"/);
   assert.match(sheet, /chooseTransfer\(item\.id\)/);
   assert.match(sheet, /<AnimatePresence mode="wait" initial=\{false\}>/);
-  assert.match(sheet, /key=\{transfer\}/);
+  assert.doesNotMatch(sheet, /wallet-action-title|transfer-title/);
   assert.match(sheet, /ease: TRANSFER_EASE/);
   const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
   assert.match(css, /\.wallet-switch button \{[^}]*transition:/);
+});
+
+test('wallet panels match heights and spread the breakdown and transfer controls across their cards', () => {
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.wallet-overview \{[^}]*align-items: stretch/);
+  assert.match(css, /\.phantom-action-tiles \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.wallet-allocation \.portfolio-layout \{[^}]*grid-template-columns: clamp\([^)]*\) minmax\(0, 1fr\)/);
+  assert.match(css, /\.wallet-allocation \.wallet-list \{[^}]*repeat\(auto-fit/);
+});
+
+test('Recent activity starts collapsed and resets when Wallets reopens', () => {
+  const sheet = readFileSync(new URL('../components/WalletsSheet.js', import.meta.url), 'utf8');
+  assert.match(sheet, /<details className="wallet-fold phantom-fold" ref=\{activityRef\}>\s*<summary>Recent activity/);
+  assert.match(sheet, /if \(open && activityRef\.current\) activityRef\.current\.open = false;\s*\}, \[open\]\)/);
+});
+
+test('the add agent button diameter matches the sidebar search height', () => {
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.side-tools \{[^}]*--side-control-size: 36px/);
+  assert.match(css, /\.add-agent \{[^}]*width: var\(--side-control-size\);[^}]*height: var\(--side-control-size\)/);
+  assert.match(css, /\.recall-search\.glide-select \{[^}]*--gs-chip: var\(--side-control-size, 36px\)/);
 });
 
 test('unified wallet stays viewport-mounted and resets transfer drafts when the wallet changes', () => {
@@ -93,7 +114,7 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   assert.equal((sheet.match(/onParty=\{openParty\}/g) || []).length, 2);
   const tokenScreen = readFileSync(new URL('../components/TokenScreen.js', import.meta.url), 'utf8');
   assert.match(tokenScreen, /previewPortfolio = null, refreshKey = 0/);
-  assert.match(tokenScreen, /\[open, accounts, getAccessToken, user\?\.id, previewPortfolio, refreshKey\]/);
+  assert.match(tokenScreen, /\[open, accounts, getAccessToken, user\?\.id, previewPortfolio, refreshKey, pollTick\]/);
   assert.match(tokenScreen, /enrichPortfolio\(previewPortfolio, \{ storage: window\.localStorage \}\)/);
   for (const source of [tokenScreen, sheet]) {
     assert.doesNotMatch(source, /rememberPortfolio\(cacheKey, body\)/);
@@ -101,12 +122,14 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   }
 });
 
-test('agent creation goes from color straight to USD spending limits', () => {
+test('agent creation selects its wallet after color and before USD spending limits', () => {
   const dialog = readFileSync(new URL('../components/CreateBotDialog.js', import.meta.url), 'utf8');
   assert.match(dialog, /className=\{`sheet create-agent/);
   assert.match(dialog, /colorsForPicker\(color, true\)/);
   assert.equal(dialog.includes('More colors'), false);
-  assert.match(dialog, /const STEPS = \['name', 'look', 'limits'\]/);
+  assert.match(dialog, /const STEPS = \['name', 'look', 'wallet', 'limits'\]/);
+  assert.match(dialog, /role="radiogroup" aria-label="Agent wallet"/);
+  assert.match(dialog, /draftBot\(\{[^}]*walletId: wallet\.id/);
   assert.match(dialog, /step === 'limits' && \(\s+<div className="create-limits"/);
   assert.match(dialog, /draftTransferCap\('USD', total, perTransfer\)/);
   assert.match(dialog, /dollarsToBaseUnits\(maxOutflow\)/);

@@ -20,7 +20,7 @@ test('an owner trade ask wakes the loop unless a spend tool already ran', async 
   });
   assert.deepEqual(calls.map(call => call.name), ['wake_bot', 'start_task']);
   assert.equal(calls[1].args.ownerPermission, 'full');
-  assert.equal(calls[1].args.goal, 'try finding and doing one trade right now\nAgent goal: beat inflation');
+  assert.equal(calls[1].args.goal, 'try finding and doing one trade right now\nGeneral goal for background context only: beat inflation');
   assert.equal(started.loop.done, true);
 
   const skipped = await ensureOwnerTradeLoop({

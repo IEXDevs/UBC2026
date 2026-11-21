@@ -50,14 +50,31 @@ function headers(ownerId, token) {
 
 export async function readDeskLockState(fetchImpl, { ownerId, token, signal } = {}) {
   const url = shellRuntimeUrl('/api/desk');
-  if (!url || !ownerId) return { ok: false, locked: false };
-  const response = await fetchImpl(url, { headers: headers(ownerId, token), cache: 'no-store', signal });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) return { ok: false, locked: false, error: body?.error || 'desk_lock_failed' };
-  if (body?.source === 'unconfigured' || typeof body?.locked !== 'boolean') {
-    return { ok: false, locked: false, error: 'desk_lock_unavailable' };
+  if (!url || !ownerId) {
+    console.error('[desk-grant-client] readDeskLockState missing url or ownerId:', { url, ownerId });
+    return { ok: false, locked: false };
   }
-  return { ok: true, locked: body.locked };
+  try {
+    const response = await fetchImpl(url, { headers: headers(ownerId, token), cache: 'no-store', signal });
+    const body = await response.json().catch((err) => {
+      console.error('[desk-grant-client] readDeskLockState json parse error:', err);
+      return {};
+    });
+    if (!response.ok) {
+      console.error('[desk-grant-client] readDeskLockState non-OK HTTP response:', response.status, body);
+      return { ok: false, locked: false, error: body?.error || 'desk_lock_failed' };
+    }
+    if (body?.source === 'unconfigured' || typeof body?.locked !== 'boolean') {
+      console.error('[desk-grant-client] readDeskLockState unconfigured or invalid payload:', body);
+      return { ok: false, locked: false, error: 'desk_lock_unavailable' };
+    }
+    return { ok: true, locked: body.locked };
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      console.error('[desk-grant-client] readDeskLockState fetch error:', err);
+    }
+    return { ok: false, locked: false, error: err?.message || 'desk_lock_failed' };
+  }
 }
 
 function privySessionId(token, ownerId) {
@@ -85,21 +102,35 @@ export async function restoreDeskEntry({ localStorage, sessionStorage, ownerId, 
 
 export async function registerDeskVerifier(fetchImpl, { ownerId, token, verifier, replace = false, proof = '' } = {}) {
   const url = shellRuntimeUrl('/api/desk/lock');
-  if (!url || !ownerId || !verifier) return { ok: false, error: 'runtime' };
-  if (replace === true && !/^[0-9a-f]{64}$/i.test(proof)) return { ok: false, error: 'recovery_required' };
-  const response = await fetchImpl(url, {
-    method: 'POST',
-    headers: headers(ownerId, token),
-    body: JSON.stringify({
-      salt: verifier.salt,
-      hash: verifier.hash,
-      iterations: verifier.iterations,
-      ...(replace === true ? { replace: true, proof: proof.toLowerCase() } : {}),
-    }),
-  });
-  if (response.status === 409) return { ok: true, exists: true };
-  if (!response.ok) return { ok: false, error: 'desk_lock_failed' };
-  return { ok: true };
+  if (!url || !ownerId || !verifier) {
+    console.error('[desk-grant-client] registerDeskVerifier missing required fields:', { url, ownerId, hasVerifier: Boolean(verifier) });
+    return { ok: false, error: 'runtime' };
+  }
+  if (replace === true && !/^[0-9a-f]{64}$/i.test(proof)) {
+    console.error('[desk-grant-client] registerDeskVerifier invalid recovery proof');
+    return { ok: false, error: 'recovery_required' };
+  }
+  try {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers: headers(ownerId, token),
+      body: JSON.stringify({
+        salt: verifier.salt,
+        hash: verifier.hash,
+        iterations: verifier.iterations,
+        ...(replace === true ? { replace: true, proof: proof.toLowerCase() } : {}),
+      }),
+    });
+    if (response.status === 409) return { ok: true, exists: true };
+    if (!response.ok) {
+      console.error('[desk-grant-client] registerDeskVerifier non-OK status:', response.status);
+      return { ok: false, error: 'desk_lock_failed' };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('[desk-grant-client] registerDeskVerifier network error:', err);
+    return { ok: false, error: 'desk_lock_failed' };
+  }
 }
 
 export async function saveDeskVerifier(fetchImpl, { localStorage, ...input }) {
@@ -111,17 +142,29 @@ export async function saveDeskVerifier(fetchImpl, { localStorage, ...input }) {
 
 export async function openDeskGrant(fetchImpl, { ownerId, token, password } = {}) {
   const url = shellRuntimeUrl('/api/desk/unlock');
-  if (!url || !ownerId || typeof password !== 'string') return { ok: false, error: 'runtime' };
-  const response = await fetchImpl(url, {
-    method: 'POST',
-    headers: headers(ownerId, token),
-    body: JSON.stringify({ password }),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || typeof body.grant !== 'string') {
-    return { ok: false, error: body.error || 'desk_locked' };
+  if (!url || !ownerId || typeof password !== 'string') {
+    console.error('[desk-grant-client] openDeskGrant missing required fields:', { url, ownerId, hasPassword: Boolean(password) });
+    return { ok: false, error: 'runtime' };
   }
-  return { ok: true, grant: body.grant, until: body.until };
+  try {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers: headers(ownerId, token),
+      body: JSON.stringify({ password }),
+    });
+    const body = await response.json().catch((err) => {
+      console.error('[desk-grant-client] openDeskGrant json parse error:', err);
+      return {};
+    });
+    if (!response.ok || typeof body.grant !== 'string') {
+      console.error('[desk-grant-client] openDeskGrant failed:', response.status, body);
+      return { ok: false, error: body.error || 'desk_locked' };
+    }
+    return { ok: true, grant: body.grant, until: body.until };
+  } catch (err) {
+    console.error('[desk-grant-client] openDeskGrant fetch error:', err);
+    return { ok: false, error: 'network_error' };
+  }
 }
 
 /** Check the current account verifier. A password reset on another device takes effect here. */

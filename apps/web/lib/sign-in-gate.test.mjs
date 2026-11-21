@@ -137,3 +137,17 @@ test('signed-in users mount the desk entry dialog before workspace or wallet pro
   assert.match(desk, /const setting = replacing \|\| status === 'missing';/);
   assert.match(desk, /await saveDeskVerifier[\s\S]*?await acceptEnteredPassword[\s\S]*?onUnlock\?\.\(accepted.until\)/);
 });
+
+test('an unavailable desk status returns to sign-in and clears the session', () => {
+  const page = readFileSync(new URL('../app/page.js', import.meta.url), 'utf8');
+  const desk = readFileSync(new URL('../components/DeskLock.js', import.meta.url), 'utf8');
+  const gate = page.slice(page.indexOf('function AuthedShell()'), page.indexOf('function profileKey'));
+  assert.match(desk, /status === 'unavailable' && !pending\) onStatusUnavailable\?\.\(\)/);
+  assert.match(desk, /status === 'unavailable' && onStatusUnavailable\) return null/);
+  assert.match(gate, /setDeskLogout\('signing-out'\);\s*try \{\s*await onLogout\(\)/);
+  assert.match(gate, /if \(deskLogout \|\| signInHold[^\n]*\) \{\s*return \(\s*<SignInPage/);
+  assert.match(gate, /onRetrySignOut=\{deskLogout === 'retry' && authenticated \? onDeskStatusUnavailable : null\}/);
+  assert.match(gate, /if \(!deskEntered\)[\s\S]*?<DeskLock[^>]*onStatusUnavailable=\{onDeskStatusUnavailable\}/);
+  const walletLock = page.slice(page.lastIndexOf('<DeskLock'));
+  assert.doesNotMatch(walletLock, /onStatusUnavailable/);
+});

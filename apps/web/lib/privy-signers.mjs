@@ -11,6 +11,7 @@ export function serverSignerFailure(error) {
   const code = typeof error?.code === 'string' && /^[a-zA-Z0-9_.-]{1,64}$/.test(error.code) ? error.code : 'unknown';
   const detail = [error?.error, error?.message].filter(value => typeof value === 'string').join(' ').slice(0, 2048);
   const reasons = [
+    [/on.device execution|TEE execution/i, 'This Privy wallet uses on-device execution and cannot add this server signer.'],
     [/mfa|multi.factor/i, 'Privy requires multi-factor authentication.'],
     [/expired|session|login|log.in/i, 'Privy requires a fresh authenticated session.'],
     [/not.found|does.not.exist|unknown.signer|invalid.{0,20}(signer|quorum)/i, 'Privy could not find the signer or key quorum for this app.'],

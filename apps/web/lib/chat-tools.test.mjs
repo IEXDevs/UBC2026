@@ -10,7 +10,7 @@ import worker from '../../agent-runtime/src/index.mjs';
 import { privySessionFixture } from '../../agent-runtime/src/owner-auth.fixture.mjs';
 
 test('session-dependent browser tools resolve exactly one open session and never POST without an ID', async () => {
-  for (const name of ['browser_navigate', 'browser_live_view', 'browser_release']) {
+  for (const name of ['browser_navigate', 'browser_click', 'browser_live_view', 'browser_release']) {
     for (const count of [0, 1, 2]) {
       const calls = [];
       const sessions = Array.from({ length: count }, (_, index) => ({ sessionRecordId: `bs_${index}`, status: 'open' }));
@@ -21,11 +21,15 @@ test('session-dependent browser tools resolve exactly one open session and never
           calls.push([String(url), options.method]);
           if (options.method === 'GET') return Response.json({ sessions });
           assert.equal(count, 1);
-          assert.equal(String(url), `https://runtime.invalid/bots/bot_1/browser/sessions/bs_0/${name.slice(8).replace('_', '-')}`);
+          const expectedPath = name === 'browser_click' ? 'click' : name.slice(8).replace('_', '-');
+          assert.equal(String(url), `https://runtime.invalid/bots/bot_1/browser/sessions/bs_0/${expectedPath}`);
           return Response.json({ sessionRecordId: 'bs_0', url: 'https://example.com/' });
         },
       });
-      const result = await invoke(name, { url: 'https://example.com/' });
+      const args = name === 'browser_click'
+        ? { selector: 'button[type=submit]' }
+        : { url: 'https://example.com/' };
+      const result = await invoke(name, args);
       assert.equal(result.error, count === 1 ? undefined : count ? 'browser_session_ambiguous' : 'browser_session_missing');
       assert.equal(calls.length, count === 1 ? 2 : 1);
       if (count === 1) assert.equal(result.sessionRecordId, 'bs_0');
@@ -40,8 +44,24 @@ test('session-dependent browser tools resolve exactly one open session and never
         return Response.json({ sessionRecordId: 'bs_explicit' });
       },
     });
-    assert.equal((await explicitInvoke(name, { sessionRecordId: 'bs_explicit', url: 'https://example.com/' })).sessionRecordId, 'bs_explicit');
+    assert.equal((await explicitInvoke(name, name === 'browser_click'
+      ? { sessionRecordId: 'bs_explicit', selector: 'button' }
+      : { sessionRecordId: 'bs_explicit', url: 'https://example.com/' })).sessionRecordId, 'bs_explicit');
   }
+});
+
+test('Laso checkpoint and status reach the bot routes with only facts', async () => {
+  const calls = [];
+  const invoke = createChatToolInvoker({ ownerId: 'user_1', botId: 'bot_1', ownerMessage: 'my reloadable card', runtimeBase: 'https://runtime.invalid', fetcher: async (url, init) => {
+    calls.push([String(url), init.method, init.body ? JSON.parse(init.body) : null]);
+    return Response.json({ ok: true });
+  } });
+  await invoke('laso_checkpoint', { botId: 'bot_1', kind: 'reloadable', stage: 'waiting-owner' });
+  await invoke('laso_status', { botId: 'bot_1', view: 'card', card_id: 'card_1' });
+  assert.equal(calls[0][0], 'https://runtime.invalid/bots/bot_1/laso/checkpoint');
+  assert.deepEqual(calls[0][2], { stage: 'waiting-owner', kind: 'reloadable' });
+  assert.ok(calls[1][0].startsWith('https://runtime.invalid/bots/bot_1/laso/status?'));
+  assert.ok(calls[1][0].includes('view=card') && calls[1][0].includes('card_id=card_1'));
 });
 
 test('Laso forwards numeric and string dollar amounts and keeps login links and tokens out of model results', async () => {

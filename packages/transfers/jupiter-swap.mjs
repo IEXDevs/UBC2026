@@ -3,7 +3,7 @@ import {
   AddressLookupTableAccount, ComputeBudgetProgram, PublicKey, SystemInstruction,
   SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction,
 } from '@solana/web3.js';
-import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
 const JUPITER = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
 const WRAPPED_SOL = new PublicKey('So11111111111111111111111111111111111111112');
@@ -40,12 +40,19 @@ function jupiterInstruction(raw) {
   });
 }
 
-function allowedSetup(ix, taker, nativeAccount, inputMint, outputMint, amount) {
+function allowedSetup(ix, taker, nativeAccount, inputMint, outputMint, amount, intermediateMints, swap) {
   const key = index => ix.keys[index]?.pubkey;
   if (ix.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)) {
-    return ix.data.length <= 1 && (ix.data.length === 0 || ix.data[0] <= 1)
-      && key(0)?.equals(taker) && key(2)?.equals(taker)
-      && [inputMint, outputMint].includes(key(3)?.toBase58());
+    const mint = key(3);
+    const tokenProgram = key(5);
+    if (ix.data.length > 1 || (ix.data.length === 1 && ix.data[0] > 1)
+        || !key(0)?.equals(taker) || !key(2)?.equals(taker) || !key(4)?.equals(SystemProgram.programId)
+        || !mint || !(tokenProgram?.equals(TOKEN_PROGRAM_ID) || tokenProgram?.equals(TOKEN_2022_PROGRAM_ID))) return false;
+    const associated = getAssociatedTokenAddressSync(mint, taker, false, tokenProgram);
+    if (!key(1)?.equals(associated)) return false;
+    const address = mint.toBase58();
+    return address === inputMint || address === outputMint || (intermediateMints.has(address)
+      && swap.keys.some(account => account.isWritable && account.pubkey.equals(associated)));
   }
   if (ix.programId.equals(SystemProgram.programId) && inputMint === WRAPPED_SOL.toBase58()) {
     const transfer = SystemInstruction.decodeTransfer(ix);
@@ -54,6 +61,12 @@ function allowedSetup(ix, taker, nativeAccount, inputMint, outputMint, amount) {
   }
   return ix.programId.equals(TOKEN_PROGRAM_ID) && ix.data.length === 1 && ix.data[0] === 17
     && key(0)?.equals(nativeAccount);
+}
+
+function intermediateRouteMints(routePlan) {
+  const legs = Array.isArray(routePlan) ? routePlan.map(leg => leg?.swapInfo) : [];
+  const inputs = new Set(legs.map(leg => leg?.inputMint));
+  return new Set(legs.map(leg => leg?.outputMint).filter(mint => typeof mint === 'string' && inputs.has(mint)));
 }
 
 function matchesSwapQuote(ix, taker, quote) {
@@ -107,19 +120,20 @@ export async function buildJupiterSwap({
   if (result.inputMint !== inputMint || result.outputMint !== outputMint || result.inAmount !== amount
       || result.swapMode !== 'ExactIn' || result.slippageBps !== SLIPPAGE_BPS || !positiveU64(result.outAmount)
       || !positiveU64(result.otherAmountThreshold) || BigInt(result.otherAmountThreshold) > BigInt(result.outAmount)
-      || BigInt(result.otherAmountThreshold) < BigInt(result.outAmount) * 9950n / 10000n
-      || result.tipInstruction || result.otherInstructions?.length) refused();
+      || BigInt(result.otherAmountThreshold) < BigInt(result.outAmount) * 9950n / 10000n) refused('swap_quote_terms_mismatch');
+  if (result.tipInstruction || result.otherInstructions?.length) refused('swap_route_extra_instructions');
   const compute = (result.computeBudgetInstructions ?? []).map(jupiterInstruction);
   if (compute.length > 1 || compute.some(ix => !ix.programId.equals(ComputeBudgetProgram.programId)
-      || ix.data.length !== 9 || ix.data[0] !== 3)) refused();
-  const setup = (result.setupInstructions ?? []).map(jupiterInstruction);
-  if (!setup.every(ix => allowedSetup(ix, taker, nativeAccount, inputMint, outputMint, amount))) refused();
+      || ix.data.length !== 9 || ix.data[0] !== 3)) refused('swap_route_compute_invalid');
   const swap = jupiterInstruction(result.swapInstruction);
-  if (!matchesSwapQuote(swap, taker, result)) refused();
+  if (!matchesSwapQuote(swap, taker, result)) refused('swap_route_instruction_mismatch');
+  const setup = (result.setupInstructions ?? []).map(jupiterInstruction);
+  const intermediateMints = intermediateRouteMints(result.routePlan);
+  if (!setup.every(ix => allowedSetup(ix, taker, nativeAccount, inputMint, outputMint, amount, intermediateMints, swap))) refused('swap_route_setup_invalid');
   const cleanup = result.cleanupInstruction ? [jupiterInstruction(result.cleanupInstruction)] : [];
   if (cleanup.some(ix => !ix.programId.equals(TOKEN_PROGRAM_ID) || ix.data.length !== 1 || ix.data[0] !== 9
       || !ix.keys[0]?.pubkey.equals(nativeAccount) || !ix.keys[1]?.pubkey.equals(taker)
-      || !ix.keys[2]?.pubkey.equals(taker))) refused();
+      || !ix.keys[2]?.pubkey.equals(taker))) refused('swap_route_cleanup_invalid');
   const lookups = Object.entries(result.addressesByLookupTableAddress ?? {}).map(([address, contents]) => (
     new AddressLookupTableAccount({
       key: new PublicKey(address),
@@ -135,8 +149,8 @@ export async function buildJupiterSwap({
     payerKey: taker, recentBlockhash: blockhash,
     instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...compute, ...setup, swap, ...cleanup],
   }).compileToV0Message(lookups);
-  if (message.header.numRequiredSignatures !== 1) refused();
+  if (message.header.numRequiredSignatures !== 1) refused('swap_route_signers_invalid');
   const bytes = new VersionedTransaction(message).serialize();
-  if (bytes.length > 1232) refused();
+  if (bytes.length > 1232) refused('swap_route_too_large');
   return { transaction: Buffer.from(bytes).toString('base64'), minOutput: result.otherAmountThreshold };
 }

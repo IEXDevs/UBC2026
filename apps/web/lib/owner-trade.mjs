@@ -32,7 +32,9 @@ export async function ensureOwnerTradeLoop({
   );
   if (names.has('start_task') || names.has('request_spend')) return null;
   const request = String(message || '').trim();
-  const text = typeof goal === 'string' && goal.trim() ? `${request}\nAgent goal: ${goal.trim()}` : request;
+  const text = typeof goal === 'string' && goal.trim()
+    ? `${request}\nGeneral goal for background context only: ${goal.trim()}`
+    : request;
   const args = { goal: text.slice(0, 2000) };
   if (permission === 'full') args.ownerPermission = 'full';
   let wake = null;

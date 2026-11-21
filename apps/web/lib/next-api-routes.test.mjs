@@ -67,7 +67,7 @@ test('chat move adapter verifies the owner and sealed hold then forwards both ph
   assert.equal(calls.length, 2);
 });
 
-test('sealed swap slides and auto client_sign_required stops return the original spend to the browser helper', async t => {
+test('chat signs eligible Full and Review swaps automatically and sends other swaps to wallet approval', async t => {
   const settings = { NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://swap-runtime.invalid', META_MODEL_API_KEY: 'offline-swap-key' };
   const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
   Object.assign(process.env, settings);
@@ -81,12 +81,13 @@ test('sealed swap slides and auto client_sign_required stops return the original
   const hold = sealAssetSpendHold({ ...toolAccessRequest('ask', 'request_spend', args), idempotencyKey,
     swapTicket: 'original-ticket', expiresAt: Date.now() + 60000 }, { ownerId, botId, secret: settings.META_MODEL_API_KEY });
   const calls = [];
+  let fullResult = { signed: true, signature: '5'.repeat(88) };
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     const body = options?.body ? JSON.parse(options.body) : null;
     calls.push({ url: String(url), body });
     if (String(url).includes('/status')) return Response.json({ pendingSwap: { ...args, idempotencyKey } });
     assert.equal(String(url), `${settings.NEXT_PUBLIC_AGENT_RUNTIME_URL}/api/spend`, 'no model or signing provider call');
-    if (body.autoSwap) return Response.json({ signed: false, state: 'blocked', reason: 'client_sign_required' }, { status: 409 });
+    if (body.autoSwap) return Response.json(fullResult, { status: fullResult.signed ? 200 : 409 });
     return Response.json({ swapPreview: { ticket: 'original-ticket', minOutput: '100', usdMicros: '1000000',
       inputDecimals: 6, outputDecimals: 9, expiresAt: Date.now() + 60000 } });
   });
@@ -104,12 +105,39 @@ test('sealed swap slides and auto client_sign_required stops return the original
     body: JSON.stringify({ message: 'yes', permission: 'full', grants: [hold] }),
   }), { params: { botId } });
   assert.match(await stream.text(), /"clientSwap":\{"spend":/);
-  const auto = await post({ message: 'Review pending swap' });
-  assert.equal(auto.clientSwap?.spend.idempotencyKey, idempotencyKey, JSON.stringify(auto));
-  assert.equal(auto.clientSwap.spend.permission, 'full');
-  assert.equal(auto.clientSwap.swapTicket, 'original-ticket');
-  assert.equal(auto.hold, undefined);
-  assert.equal(calls.filter(call => call.body?.autoSwap === true).length, 1);
+  const manual = await post({ message: 'Review pending swap', permission: 'ask' });
+  assert.equal(manual.clientSwap, undefined);
+  assert.equal(manual.hold?.swapTicket, 'original-ticket');
+  assert.match(manual.hold.prompt, /Approve in your wallet/);
+  assert.equal(calls.some(call => call.body?.autoSwap === true), false);
+  const automatic = await post({ message: 'Review pending swap', reviewCap: '1' });
+  assert.match(automatic.reply, /Submitted automatically: https:\/\/solscan\.io\/tx\/5+/);
+  assert.equal(automatic.clientSwap, undefined);
+  assert.equal(automatic.hold, undefined);
+  const review = await post({ message: 'Review pending swap', permission: 'review', reviewCap: '1000000' });
+  assert.match(review.reply, /Submitted automatically/);
+  const over = await post({ message: 'Review pending swap', permission: 'review', reviewCap: '999999' });
+  assert.equal(over.hold?.swapTicket, 'original-ticket');
+  fullResult = { signed: false, state: 'approval-needed', reason: 'swap_delegation_unavailable' };
+  const fallback = await post({ message: 'Review pending swap' });
+  assert.equal(fallback.clientSwap, undefined);
+  assert.equal(fallback.hold?.swapTicket, 'original-ticket');
+  assert.match(fallback.hold.prompt, /unavailable for automatic signing/);
+  const swapDelegation = { walletAddress: '11111111111111111111111111111111', signerId: 'test-privy-signer' };
+  fullResult = { signed: false, state: 'blocked', reason: 'swap_signer_missing', swapDelegation };
+  const repair = await post({ message: 'Review pending swap', permission: 'review' });
+  assert.equal(repair.clientSwap.spend.permission, 'review');
+  assert.equal(repair.clientSwap.spend.idempotencyKey, idempotencyKey);
+  assert.equal(repair.clientSwap.swapTicket, 'original-ticket');
+  const { expiresAt, ...enrollment } = repair.clientSwap.delegation;
+  assert.deepEqual(enrollment, swapDelegation);
+  assert.ok(expiresAt > Date.now());
+  fullResult = { ...fullResult, swapDelegation: { ...swapDelegation, signerId: '' } };
+  const invalidEnrollment = await post({ message: 'Review pending swap' });
+  assert.equal(invalidEnrollment.clientSwap, undefined);
+  const automaticCalls = calls.filter(call => call.body?.autoSwap === true);
+  assert.equal(automaticCalls.length, 5);
+  assert.ok(automaticCalls.every(call => call.body.swapTicket === 'original-ticket' && !call.body.confirmed));
 });
 
 test('chat Laso endpoints require the sealed slide hold and carry browser prepare/settle without calling the model', async t => {
@@ -1017,6 +1045,8 @@ test('GET /api/portfolio without bearer returns login_required', async () => {
 test('GET /api/portfolio reads linked wallets from the JWT user id', async () => {
   const ownerId = 'did:privy:portfolio-user';
   const address = 'So11111111111111111111111111111111111111112';
+  const agentAddress = '9'.repeat(44);
+  const activityLookups = [];
   const session = privySessionFixture(ownerId);
   const { token } = session;
   const rpcUrl = 'https://example.invalid/portfolio-rpc';
@@ -1039,6 +1069,11 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     if (target.includes('/users/me')) {
       return new Response(JSON.stringify({ error: 'users_me_forbidden' }), { status: 403 });
     }
+    if (target.includes('/v1/wallets?')) {
+      assert.equal(init.method, 'GET');
+      assert.equal(new URL(target).searchParams.get('user_id'), ownerId);
+      return Response.json({ data: [{ id: 'wallet_123456', address: agentAddress, chain_type: 'solana' }] });
+    }
     if (target.includes(`/v1/users/${encodeURIComponent(ownerId)}`)) {
       return new Response(JSON.stringify({
         id: ownerId,
@@ -1052,6 +1087,13 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     }
     if (target === rpcUrl) {
       const body = JSON.parse(init.body);
+      if (body.method === 'getGenesisHash') {
+        return Response.json({ result: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d' });
+      }
+      if (body.method === 'getTransactionsForAddress') {
+        activityLookups.push(body.params[0]);
+        return Response.json({ result: { data: [] } });
+      }
       const results = body.map(row => {
         if (row.method === 'getGenesisHash') {
           return { jsonrpc: '2.0', id: row.id, result: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d' };
@@ -1062,6 +1104,16 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
         return { jsonrpc: '2.0', id: row.id, result: { value: [] } };
       });
       return new Response(JSON.stringify(results), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (target.startsWith('https://perps-api.jup.ag/v1/positions?')) {
+      assert.equal(new URL(target).searchParams.get('walletAddress'), address);
+      assert.equal(init.headers, undefined);
+      return Response.json({ dataList: [] });
+    }
+    if (target.startsWith('https://dlmm.datapi.meteora.ag/portfolio/open?')) {
+      assert.equal(new URL(target).searchParams.get('user'), address);
+      assert.equal(init.headers, undefined);
+      return Response.json({ hasNext: false, pools: [] });
     }
     return new Response(JSON.stringify({ error: 'unmocked' }), { status: 500 });
   };
@@ -1079,6 +1131,7 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     assert.equal(body.cluster, 'mainnet');
     assert.equal(body.authorizesTransaction, false);
     assert.equal(body.wallets[0].address, address);
+    assert.equal(body.providers, undefined);
     assert.equal(calls.some(call => call.url.includes('/users/me')), false);
     assert.equal(calls.some(call => call.method === 'POST' && call.url.includes('privy')), false);
     assert.equal(calls.some(call => call.url === rpcUrl && call.redirect === 'follow'), true);
@@ -1086,6 +1139,23 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     assert.equal(raw.includes(token), false);
     assert.equal(raw.includes('portfolio-app-secret'), false);
     assert.equal(raw.includes(rpcUrl), false);
+    const activityUrl = 'http://localhost/api/portfolio?activity=1&address=' + '8'.repeat(44);
+    const forbidden = await GET(new Request(activityUrl, {
+      headers: { authorization: `Bearer ${token}`, 'x-owner-id': 'did:privy:different-user' },
+    }));
+    assert.equal(forbidden.status, 403);
+    assert.deepEqual(activityLookups, []);
+    const activity = await GET(new Request(activityUrl, {
+      headers: { authorization: `Bearer ${token}`, 'x-owner-id': ownerId },
+    }));
+    assert.equal(activity.status, 200);
+    assert.deepEqual(await activity.json(), { items: [], incomplete: false });
+    assert.deepEqual(new Set(activityLookups), new Set([address, agentAddress]));
+    const providerResponse = await GET(new Request('http://localhost/api/portfolio?cluster=mainnet-beta&positions=1', {
+      headers: { authorization: `Bearer ${token}`, 'x-owner-id': ownerId },
+    }));
+    assert.equal(providerResponse.status, 200);
+    assert.deepEqual((await providerResponse.json()).providers, { positions: [], incomplete: [] });
   } finally {
     globalThis.fetch = previousFetch;
     for (const [name, value] of Object.entries(previous)) {

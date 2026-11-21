@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { browserErrorNote, browserStatusNote } from '../lib/browser-status.mjs';
-import { browserSessionUrl, liveViewFrame, liveSessionKey, reconcileLiveSession } from '../lib/live-view.mjs';
+import { browserSessionUrl, liveViewFrame, liveSessionKey, nextViewerRefreshAt, reconcileLiveSession } from '../lib/live-view.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import LatticeLoader from './bits/LatticeLoader';
 import HoldButton from './HoldButton';
@@ -159,7 +159,9 @@ export default function LiveViewPanel({
         const view = await ownerFetch(url, ownerId, getAccessToken, 'POST', next ? { control: next } : {});
         const nextFrame = liveViewFrame(view);
         if (!nextFrame.src) throw new Error('invalid_provider_response');
-        refreshAt.current = Date.now() + 60_000;
+        // Honor the Worker's connectBefore deadline: remint before the viewer's
+        // connect window closes, not on a flat interval that can outlive it.
+        refreshAt.current = nextViewerRefreshAt(view, Date.now());
         setSession(current => current?.id === id && liveSessionKey(current) === viewingKey
           ? { ...current, frame: nextFrame, control: view.control }
           : current);

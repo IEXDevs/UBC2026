@@ -8,6 +8,32 @@ const transaction = new Uint8Array(100).fill(1);
 const challenge = () => ({ transaction: Buffer.from(transaction).toString('base64'), walletAddress: 'selected',
   expiresAt: Date.now() + 30_000, blockhash: 'blockhash', proof: 'proof' });
 
+test('a missing signer is attached to the exact wallet before retrying the original swap once', async () => {
+  const walletAddress = 'So11111111111111111111111111111111111111112';
+  const signerId = 'test-privy-signer';
+  const spend = { botId: 'bot_1', action: 'swap', permission: 'full', idempotencyKey: 'original', amount: '123' };
+  const calls = [];
+  const input = {
+    spend, swapTicket: 'original-ticket', accessToken: 'test-token', deskGrant: 'test-grant',
+    delegation: { walletAddress, signerId, expiresAt: Date.now() + 30_000 },
+    attachSwapSigner: async grant => calls.push(grant),
+    fetchImpl: async (_url, options) => {
+      calls.push(JSON.parse(options.body));
+      return Response.json({ signed: true, signature: 'mock-signature' });
+    },
+  };
+  assert.equal((await executeClientSignedSwap(input)).signed, true);
+  assert.deepEqual(calls, [{ address: walletAddress, signerId },
+    { ...spend, swapTicket: 'original-ticket', autoSwap: true, confirmed: false }]);
+  assert.equal((await executeClientSignedSwap({ ...input, delegation: { ...input.delegation, expiresAt: 1 } })).failure.code, 'swap_quote_expired');
+  const refused = await executeClientSignedSwap({ ...input, attachSwapSigner: async () => {
+    throw new Error('Specifying signers requires TEE execution. Provider private detail');
+  } });
+  assert.match(refused.reply, /on-device execution/);
+  assert.doesNotMatch(refused.reply, /private detail/);
+  assert.equal(calls.length, 2);
+});
+
 function setup({ signerError, wallets = [{ address: 'selected' }], prepare, broadcast, signal, readSigner } = {}) {
   const calls = [];
   const signCalls = [];
@@ -44,6 +70,7 @@ test('approved swaps prepare, sign the exact selected browser wallet with the sh
   assert.equal(calls[1].body.swapAuthorization.signedTransaction, Buffer.from(new Uint8Array(120).fill(2)).toString('base64'));
   assert.deepEqual(signCalls[0].transaction, transaction);
   assert.equal(signCalls[0].wallet.address, 'selected');
+  assert.equal(signCalls[0].options.uiOptions.showWalletUIs, true);
 });
 
 test('unavailable agent wallets never fall back to signing the Main wallet', async () => {
@@ -56,12 +83,26 @@ test('unavailable agent wallets never fall back to signing the Main wallet', asy
 });
 
 test('client signing rejection is a safe plain reason and never broadcasts', async () => {
-  const { run, calls } = setup({ signerError: new Error('private provider response') });
+  const { run, calls } = setup({ signerError: Object.assign(new Error('private provider response'), { code: 4001 }) });
   const result = await run();
   assert.equal(result.failure.code, 'client_sign_rejected');
   assert.match(result.reply, /Swap — client signing:.*\[client_sign_rejected\]/);
   assert.equal(JSON.stringify(result).includes('private provider'), false);
   assert.equal(calls.length, 1);
+});
+
+test('invalid wallet JWT and unknown provider failures are distinct from cancelling the swap', async () => {
+  const expired = setup({ signerError: Object.assign(new Error('Private error detail'), {
+    cause: { status: 400, data: { error: 'Invalid JWT token provided', code: 'invalid_data' } },
+  }) });
+  const denied = await expired.run();
+  assert.equal(denied.failure.code, 'client_sign_session_required');
+  assert.match(denied.reply, /HTTP 400/);
+  assert.doesNotMatch(JSON.stringify(denied), /Private error detail|Invalid JWT token provided/);
+  assert.equal(expired.calls.length, 1);
+  const unknown = setup({ signerError: new Error('some private error') });
+  assert.equal((await unknown.run()).failure.code, 'client_sign_failed');
+  assert.equal(unknown.calls.length, 1);
 });
 
 test('empty, failed, expired or malformed preparations never sign or broadcast', async () => {

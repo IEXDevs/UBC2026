@@ -4,10 +4,11 @@
  * Worker URL is configured on the server. Empty arrays when unsigned or unconfigured.
  * Never invent PreviewMain / demo bots.
  */
-import { publicCardLoop } from '@ubc2026/contracts/card-loop';
+import { cardLoopDue, publicCardLoop } from '@ubc2026/contracts/card-loop';
 import { parseLasoBrowserPayment } from '../../agent-runtime/src/laso-browser-payment.mjs';
 import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { sanitizeActivity } from './chat-activity.mjs';
+import { taskLabel } from './agent-task.mjs';
 import { catalogPayload } from './file-catalog.mjs';
 import { clipOwnerMessage, MESSAGE_CHAR_CAP } from './context-usage.mjs';
 import { DEFAULT_TRANSFER_CAP } from './roster.mjs';
@@ -51,6 +52,7 @@ export function shellBotFromRemote(row, looks = {}) {
     frozen,
     record: row,
     loop: publicCardLoop(row.loop),
+    loopPaused: row.loopPaused === true,
   };
 }
 
@@ -146,6 +148,7 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
     if (!status.ok) return;
     const loop = publicCardLoop(status.body?.cardLoop);
     if (loop) bot.loop = loop;
+    if (status.body?.ownerPaused === true) bot.loopPaused = true;
   }));
   const source = botsRes.body?.source || walletsRes.body?.source || paymentsRes.body?.source || 'unknown';
   return {
@@ -162,6 +165,27 @@ export async function fetchOwnerLists(ownerId, runtimeBaseOrOptions = 'shell') {
       : [],
     positions: [],
   };
+}
+
+/** The open desk helps recover a due alarm after a browser or runtime interruption. */
+export async function checkDueCardLoops(ownerId, bots, accessToken, pending, fetcher = fetch, now = Date.now()) {
+  if (!accessToken || !OWNER.test(ownerId ?? '')) return;
+  const headers = ownerHeaders(ownerId, accessToken);
+  await Promise.all(bots.map(async bot => {
+    if (!BOT_ID.test(bot?.id ?? '') || bot.enabled === false || bot.frozen || bot.loopPaused || !cardLoopDue(bot.loop, now)) return;
+    const key = ownerId + '/' + bot.id;
+    if (pending.has(key)) return;
+    const url = shellRuntimeUrl('/bots/' + encodeURIComponent(bot.id) + '/card-loop/check');
+    if (!url) return;
+    pending.add(key);
+    try {
+      await fetcher(url, { method: 'POST', headers, cache: 'no-store' });
+    } catch {
+      // The next desk poll or the alarm can retry.
+    } finally {
+      pending.delete(key);
+    }
+  }));
 }
 
 export function emptyMoneyState() {
@@ -243,6 +267,7 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
           : DEFAULT_TRANSFER_CAP,
       }),
       cache: 'no-store',
+      ...(options.signal ? { signal: options.signal } : {}),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -258,17 +283,6 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
   }
 }
 
-/** First non-frozen wallet id from a list (shell or remote). */
-export function firstAssignableWalletId(wallets = []) {
-  if (!Array.isArray(wallets)) return '';
-  for (const wallet of wallets) {
-    if (!wallet || typeof wallet !== 'object') continue;
-    if (wallet.frozen === true) continue;
-    if (typeof wallet.id === 'string' && BOT_ID.test(wallet.id)) return wallet.id;
-  }
-  return '';
-}
-
 /**
  * Same-origin Next route — works without redeploying the agent-runtime Worker.
  * (Worker also exposes the same path after deploy; the shell prefers Next.)
@@ -279,8 +293,11 @@ export function botChatUrl(_runtimeBase, botId) {
 }
 
 function chatResult(body) {
+  const task = taskLabel(body.agentTask);
+  const proposedGoal = task ? taskLabel(body.proposedGoal) : '';
+  const agent = { ...(task ? { agentTask: task } : {}), ...(proposedGoal ? { proposedGoal } : {}) };
   if (body.clientSwap?.spend?.action === 'swap' && typeof body.clientSwap.swapTicket === 'string') {
-    return { ok: true, clientSwap: body.clientSwap };
+    return { ok: true, clientSwap: body.clientSwap, ...agent };
   }
   if (body.moveAuthorization) return { ok: true, moveAuthorization: body.moveAuthorization };
   const lasoPayment = parseLasoBrowserPayment(body.lasoPayment);
@@ -301,6 +318,7 @@ function chatResult(body) {
   const activity = sanitizeActivity(body.activity);
   return {
     ok: true,
+    ...agent,
     reply: reply || replies.at(-1) || hold?.label || '',
     replies: replies.length > 0 ? replies : undefined,
     model: body.model || null,
@@ -309,6 +327,11 @@ function chatResult(body) {
     hold,
     ...(typeof body.claimUrl === 'string' && /^https:\/\/laso\.finance\/agent\/dashboard\/auth\?/.test(body.claimUrl)
       ? { claimUrl: body.claimUrl } : {}),
+    ...(body.lasoCard && typeof body.lasoCard.id === 'string'
+      && typeof body.lasoCard.number === 'string'
+      && /^•••• •••• •••• (?:••••|\d{4})$/.test(body.lasoCard.number)
+      && body.lasoCard.cvv === '•••' && body.lasoCard.revealed !== true
+      ? { lasoCard: body.lasoCard } : {}),
   };
 }
 

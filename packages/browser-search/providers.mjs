@@ -237,6 +237,107 @@ function liveViewOptions({ targetId, interactive }) {
   return body;
 }
 
+// Agent clicks run over the page-scoped CDP websocket: locator + pointer overlay
+// via Runtime.evaluate, then real Input.dispatchMouseEvent presses. The overlay is
+// the only cursor the Live View can show — synthetic input draws none by itself.
+const CLICK_PAUSE_MS = 350;
+const CURSOR_ID = 'ms-agent-cursor';
+const CDP_COMMAND_TIMEOUT_MS = 30000;
+
+function assertClickSelector(selector) {
+  if (typeof selector !== 'string' || !selector.trim() || selector.length > 256) {
+    throw new ProviderError('invalid_selector', 400);
+  }
+  return selector.trim();
+}
+
+function clickTargetExpression(selector) {
+  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;`
+    + ' const r = el.getBoundingClientRect();'
+    + " return { x: r.left + r.width / 2, y: r.top + r.height / 2, tag: el.tagName.toLowerCase(),"
+    + " text: (el.textContent || '').trim().slice(0, 80) }; })()";
+}
+
+function cursorMoveExpression(x, y) {
+  const left = Math.round(x);
+  const top = Math.round(y);
+  return `(() => { let c = document.getElementById('${CURSOR_ID}'); if (!c) {`
+    + ` c = document.createElement('div'); c.id = '${CURSOR_ID}';`
+    + ` c.setAttribute('style', 'position:fixed;left:${left}px;top:${top}px;width:14px;height:14px;`
+    + 'z-index:2147483647;pointer-events:none;background:#111827;border:1.5px solid #f9fafb;'
+    + "border-radius:50% 50% 50% 0;box-shadow:0 1px 4px rgba(0,0,0,0.6);');"
+    + ' document.documentElement.appendChild(c); }'
+    + ` c.style.left = '${left}px'; c.style.top = '${top}px'; return true; })()`;
+}
+
+/** Minimal CDP client over a page-scoped WebSocket upgrade (Workers fetch pattern). */
+async function cdpPageChannel({ fetcher, accountId, apiToken, sessionId, targetId }) {
+  if (!accountId || !apiToken) throw new ProviderError('browser_input_not_configured', 503);
+  const url = `wss://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}`
+    + `/browser-run/devtools/browser/${encodeURIComponent(sessionId)}/page/${encodeURIComponent(targetId)}`;
+  let response;
+  try {
+    response = await fetcher(url, { headers: { Upgrade: 'websocket', Authorization: `Bearer ${apiToken}` } });
+  } catch {
+    throw new ProviderError('provider_unavailable');
+  }
+  const socket = response?.webSocket;
+  if (!socket) {
+    const status = response?.status;
+    if (status === 401 || status === 403) throw new ProviderError('browser_not_configured', 503);
+    if (status === 404 || status === 410) {
+      const expired = new ProviderError('browser_session_expired', 410);
+      expired.providerStatus = status;
+      throw expired;
+    }
+    throw new ProviderError('provider_failed', 502);
+  }
+  let nextId = 0;
+  const pending = new Map();
+  const drain = error => {
+    for (const waiter of pending.values()) waiter.reject(error);
+    pending.clear();
+  };
+  const onMessage = event => {
+    let message;
+    try { message = JSON.parse(typeof event?.data === 'string' ? event.data : ''); } catch { return; }
+    const waiter = pending.get(message?.id);
+    if (!waiter) return;
+    pending.delete(message.id);
+    if (message.error) waiter.reject(new ProviderError('provider_failed', 502));
+    else waiter.resolve(message.result ?? {});
+  };
+  if (typeof socket.addEventListener === 'function') {
+    socket.addEventListener('message', onMessage);
+    socket.addEventListener('close', () => drain(new ProviderError('provider_unavailable')));
+    socket.addEventListener('error', () => drain(new ProviderError('provider_unavailable')));
+  } else {
+    socket.onmessage = onMessage;
+  }
+  return {
+    send(method, params) {
+      return new Promise((resolve, reject) => {
+        const id = ++nextId;
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          reject(new ProviderError('provider_unavailable'));
+        }, CDP_COMMAND_TIMEOUT_MS);
+        pending.set(id, {
+          resolve: value => { clearTimeout(timer); resolve(value); },
+          reject: error => { clearTimeout(timer); reject(error); },
+        });
+        try { socket.send(JSON.stringify({ id, method, params })); }
+        catch {
+          pending.delete(id);
+          clearTimeout(timer);
+          reject(new ProviderError('provider_unavailable'));
+        }
+      });
+    },
+    close() { try { socket.close(); } catch {} },
+  };
+}
+
 function assertSessionId(sessionId) {
   if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
 }
@@ -265,6 +366,11 @@ function createBindingBrowserProvider(binding, restProvider) {
     async closeTab(sessionId, targetId) {
       if (!restProvider) throw new ProviderError('browser_readonly_not_configured', 503);
       return restProvider.closeTab(sessionId, targetId);
+    },
+    async click(sessionId, targetId, selector, options = {}) {
+      assertSessionId(sessionId);
+      if (!restProvider) throw new ProviderError('browser_input_not_configured', 503);
+      return restProvider.click(sessionId, targetId, selector, options);
     },
     async closeSession(sessionId) {
       assertSessionId(sessionId);
@@ -368,6 +474,41 @@ export function createBrowserProvider({ accountId, apiToken, fetcher = fetch, bi
       if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new ProviderError('invalid_session', 400);
       const result = await call(`/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
       return { status: typeof result.status === 'string' ? result.status : 'closing' };
+    },
+    async click(sessionId, targetId, selector, options = {}) {
+      assertSessionId(sessionId);
+      if (typeof targetId !== 'string' || !TARGET_ID.test(targetId)) throw new ProviderError('invalid_target', 400);
+      const pick = assertClickSelector(selector);
+      const channel = await cdpPageChannel({ fetcher, accountId, apiToken, sessionId, targetId });
+      try {
+        const located = await channel.send('Runtime.evaluate', {
+          expression: clickTargetExpression(pick),
+          returnByValue: true,
+        });
+        const found = (located && typeof located === 'object' && 'result' in located && located.result && typeof located.result === 'object')
+          ? located.result.value
+          : located?.value;
+        if (found == null) throw new ProviderError('browser_click_target_missing', 400);
+        if (!Number.isFinite(found.x) || !Number.isFinite(found.y)) throw new ProviderError('invalid_provider_response');
+        await channel.send('Runtime.evaluate', {
+          expression: cursorMoveExpression(found.x, found.y),
+          returnByValue: true,
+        });
+        // Let the Live View render the pointer before the press reads as a click.
+        const pause = Number.isSafeInteger(options.pauseMs) ? options.pauseMs : CLICK_PAUSE_MS;
+        if (pause > 0) await new Promise(resolve => setTimeout(resolve, pause));
+        await channel.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: found.x, y: found.y });
+        await channel.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: found.x, y: found.y, button: 'left', clickCount: 1 });
+        await channel.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: found.x, y: found.y, button: 'left', clickCount: 1 });
+        return {
+          x: Math.round(found.x),
+          y: Math.round(found.y),
+          tag: typeof found.tag === 'string' ? found.tag.slice(0, 40) : '',
+          text: typeof found.text === 'string' ? found.text : '',
+        };
+      } finally {
+        channel.close();
+      }
     },
   };
 }

@@ -11,6 +11,7 @@ import { withHeads } from '../lib/voice-float.mjs';
 import MentionText from './MentionText';
 import { AgentTrace, Reasoning, Sources } from './ai/elements';
 import { sanitizeActivity } from '../lib/chat-activity.mjs';
+import { subagentLabel } from '../lib/subagents-view.mjs';
 import { MESSAGE_CHAR_CAP } from '../lib/context-usage.mjs';
 import { Bubble, BubbleContent } from './ui/bubble';
 import { Message, MessageContent, MessageGroup } from './ui/message';
@@ -26,6 +27,8 @@ export default function ChatBubbles({
   onParty,
   onEdit,
   onAccess,
+  goalProposalId,
+  onGoalDecision,
   focusId = null,
   hideAccessActions = false,
 }) {
@@ -35,6 +38,7 @@ export default function ChatBubbles({
   const booted = useRef(false);
   const rows = withHeads(lines);
   const [editingId, setEditingId] = useState(null);
+  const [openSub, setOpenSub] = useState(null);
   const [draft, setDraft] = useState('');
   const ids = [];
   for (const line of rows) if (line?.id) ids.push(line.id);
@@ -144,6 +148,39 @@ export default function ChatBubbles({
         }
         const urls = urlsIn(line.text);
         const steps = sanitizeActivity(line.activity);
+        if (line.subagent) {
+          const open = openSub === line.id;
+          const label = subagentLabel({ task: line.subagent.task, skill: line.subagent.skill });
+          const text = formatAgentOutput(line.text);
+          return (
+            <Message key={line.id} id={`chat-line-${line.id}`} className={fresh.current.has(line.id) ? 'is-fresh' : undefined} data-hit={focusId === line.id ? '' : undefined}>
+              <MessageContent>
+                <button
+                  type="button"
+                  className="sub-line-head"
+                  aria-expanded={open}
+                  aria-label={`Subagent ${label}. ${open ? 'Collapse' : 'Expand'} chat and thinking log.`}
+                  onClick={() => setOpenSub(open ? null : line.id)}
+                >
+                  <span className={`sub-dot${thinking ? ' is-run' : ''}${line.subagent.status === 'error' ? ' is-err' : ''}`} aria-hidden="true" />
+                  <span className="sub-line-title">Subagent · {label}</span>
+                  {line.subagent.skill ? <span className="sub-line-skill">/{line.subagent.skill}</span> : null}
+                </button>
+                <div className={`sub-line-body${open ? ' is-open' : ''}`}>
+                  <AgentTrace steps={steps} />
+                  <div className={open ? undefined : 'sub-clamp'}>
+                  <Bubble align="start" variant="secondary">
+                    <BubbleContent>
+                      <ChatMarkdown text={text} renderText={value => <AddressText text={value} addresses={[line.mentionAddress]} renderText={part => <MentionText text={part} onParty={onParty} />} />} />
+                    </BubbleContent>
+                  </Bubble>
+                  </div>
+                </div>
+                <Sources urls={urls} />
+              </MessageContent>
+            </Message>
+          );
+        }
         const text = line.role === 'agent' || line.role === 'assistant'
           ? formatAgentOutput(line.text)
           : line.text;
@@ -157,6 +194,12 @@ export default function ChatBubbles({
                 </BubbleContent>
               </Bubble>
               <Sources urls={urls} />
+              {onGoalDecision && line.id === goalProposalId ? (
+                <div className="access-request" role="group" aria-label="General goal proposal">
+                  <button type="button" onClick={() => onGoalDecision(line, true)}>Update goal</button>
+                  <button type="button" onClick={() => onGoalDecision(line, false)}>Keep current goal</button>
+                </div>
+              ) : null}
               {line.access?.kind === 'inline' ? (
                 <div className="access-request" role="group" aria-label={line.access.label}>
                   <p><AddressText text={line.access.label} addresses={[line.access.args?.destination]} /></p>

@@ -7,7 +7,8 @@ import { Attachment01Icon } from '@hugeicons/core-free-icons';
 import ChatBubbles from './ChatBubbles';
 import ContextUsage from './ContextUsage';
 import Attachments, { isImageFile } from './Attachments';
-import { Suggestion } from './ai/elements';
+import { AgentTrace, Suggestion } from './ai/elements';
+import { sanitizeActivity } from '../lib/chat-activity.mjs';
 import GradientAscii from './GradientAscii';
 import { Orb } from '@yogesharc/thinking-orbs';
 import { orbSpeed, voiceOrbLook } from '../lib/voice-orb.mjs';
@@ -18,6 +19,7 @@ import AIProvidersSheet from './AIProvidersSheet';
 import { providerStorage } from '../lib/provider-storage.mjs';
 import { canReleaseChatMessage, modelFreeCommand, needsChatModel } from '../lib/model-free-command.mjs';
 import { cacheSpendConfirmation, isLasoCardRequest, pendingSpendConfirmation } from '../lib/laso-chat.mjs';
+import { clearLasoClaim, rememberLasoCard, writeLasoClaim } from '../lib/laso-card-book.mjs';
 import {
   ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
   selectedModelRequest, visibleModelOptions,
@@ -29,6 +31,7 @@ import {
   startBrowserDictation,
 } from '../lib/dictation.mjs';
 import { mentionIn, recipientHint } from '../lib/profile.mjs';
+import { mainAgentState, boardRowToLine, subagentLabel, visibleSubagents } from '../lib/subagents-view.mjs';
 import AddressCopy from './AddressCopy';
 import {
   DEFAULT_VOICE_SETTINGS,
@@ -41,12 +44,13 @@ import {
   parseVoiceSettings,
 } from '../lib/voice-settings.mjs';
 import {
-  SPEND_PERMISSION_KEY,
   parsePermission,
   permissionById,
   readReviewThreshold,
+  readStoredPermission,
   reviewCapToDollars,
   writeReviewCap,
+  writeStoredPermission,
 } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { fetchPendingSwap, sendBotChat } from '../lib/runtime-data.mjs';
@@ -62,7 +66,7 @@ import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { submitChatSpend } from '../lib/desk-grant-client.mjs';
 import { submitLasoChatPayment } from '../lib/laso-payment-client.mjs';
 import { completeChatSwap, submitChatMove } from '../lib/chat-browser-spend.mjs';
-import { accountStorage } from '../lib/account-state.mjs';
+import { accountStorage, flushAccountState } from '../lib/account-state.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
 import { appendQueued, releaseQueued, takeQueued } from '../lib/message-queue.mjs';
@@ -139,6 +143,7 @@ export default function Composer({
   executeChatSwap = null,
   lines = [],
   onLine,
+  onAgentTask,
   onThinking,
   onVoiceSpan = null,
   hidden = false,
@@ -171,6 +176,8 @@ export default function Composer({
   useEffect(() => {
     pendingSpend.current = null;
     setLasoClaim(null);
+    setSubagents([]);
+    setSubDetail(null);
   }, [ownerId, botId]);
 
   useEffect(() => {
@@ -215,6 +222,9 @@ export default function Composer({
   const [mention, setMention] = useState('');
   const [mentionCopy, setMentionCopy] = useState(null);
   const [thinking, setThinking] = useState(false);
+  const [subagents, setSubagents] = useState([]);
+  const [subDetail, setSubDetail] = useState(null);
+  const [suggesting, setSuggesting] = useState(false);
   const [queue, setQueue] = useState([]);
   const [draftSeed, setDraftSeed] = useState(null);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -324,7 +334,7 @@ export default function Composer({
       setSettings(DEFAULT_VOICE_SETTINGS);
     }
     setSettingsReady(true);
-    setPermission(parsePermission(localStorage.getItem(SPEND_PERMISSION_KEY)));
+    setPermission(readStoredPermission(localStorage));
     setReviewCap(readReviewThreshold(localStorage) || '');
   }, []);
 
@@ -642,6 +652,14 @@ export default function Composer({
     if (!spoken) return null;
     const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
     if (typeof extra?.mentionAddress === 'string' && extra.mentionAddress) line.mentionAddress = extra.mentionAddress;
+    if (extra?.subagent && typeof extra.subagent === 'object') {
+      line.subagent = {
+        task: typeof extra.subagent.task === 'string' ? extra.subagent.task.slice(0, 300) : '',
+        skill: typeof extra.subagent.skill === 'string' ? extra.subagent.skill.slice(0, 32) : '',
+        status: extra.subagent.status === 'error' ? 'error' : 'done',
+        ref: Number.isSafeInteger(extra.subagent.ref) ? extra.subagent.ref : 0,
+      };
+    }
     if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
     if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
     if (access && access.kind === 'inline' && typeof access.name === 'string') line.access = access;
@@ -674,7 +692,12 @@ export default function Composer({
 
   async function settleChat(result, spoken, prior, grants, run, shown = [], firstLineId = null) {
     if (run !== runRef.current) return;
-    if (result?.claimUrl) setLasoClaim({ botId: botIdRef.current, url: result.claimUrl });
+    if (Array.isArray(result?.subagents)) setSubagents(result.subagents.slice(-8));
+    if (result?.claimUrl) {
+      setLasoClaim({ botId: botIdRef.current, url: result.claimUrl });
+      if (ownerId) writeLasoClaim(window.sessionStorage, ownerId, result.claimUrl);
+    }
+    if (result?.lasoCard && ownerId) rememberLasoCard(window.sessionStorage, ownerId, result.lasoCard);
     if (!result?.ok) {
       if (result?.error === 'aborted') return;
       if (shown.length > 0) return;
@@ -684,6 +707,11 @@ export default function Composer({
       return;
     }
     const holdLabel = result.hold ? (result.reply || result.hold.prompt || result.hold.label || '') : '';
+    const subRows = visibleSubagents(result?.subagents, false);
+    for (const [subIndex, subRow] of subRows.entries()) {
+      const subLine = boardRowToLine({ ...subRow, id: subRow.id || `turn-${subIndex}` }, subIndex);
+      pushLine('agent', subLine.text, botIdRef.current, 0, subLine.activity, null, { subagent: subLine.subagent });
+    }
     const lines = Array.isArray(result.replies) && result.replies.length > 0
       ? result.replies
       : (result.reply && !result.hold ? [result.reply] : []);
@@ -702,10 +730,18 @@ export default function Composer({
       if (result.hold.args?.action === 'x402') {
         setLasoClaim(null);
       }
+      const action = result.hold.args?.action ?? 'spend';
+      const walletApproval = result.hold.name === 'request_spend' && !result.hold.budgetOverride
+        && ((action === 'swap' && typeof executeChatSwap === 'function')
+          || (['spend', 'pay'].includes(action) && typeof signChatTransaction === 'function'));
       const label = result.reply || result.hold.prompt || result.hold.label;
       if (label && !shown.includes(label)) {
         pushLine('agent', label, botIdRef.current, 0, [], null, { mentionAddress: result.hold.args?.destination });
-        sayConfirm(label);
+        if (!walletApproval) sayConfirm(label);
+      }
+      if (walletApproval) {
+        await continueChat(spoken, prior, [result.hold]);
+        return;
       }
       setThinking(false);
       onThinking?.(false);
@@ -750,7 +786,10 @@ export default function Composer({
         return;
       }
       pendingSpend.current = null;
-      if (isLasoCardRequest(spoken) || grants?.some(hold => hold.args?.action === 'x402')) setLasoClaim(null);
+      if (isLasoCardRequest(spoken) || grants?.some(hold => hold.args?.action === 'x402')) {
+        setLasoClaim(null);
+        if (ownerId) clearLasoClaim(window.sessionStorage, ownerId);
+      }
       // Every turn, including non-model commands and rejected queued messages,
       // must reach the same finally block to release the queue and busy state.
       if (!selection && modelFreeCommand(spoken) === 'platform-send') return;
@@ -775,6 +814,7 @@ export default function Composer({
       const send = async (spendAuthorization, lasoPayment) => {
         let accessToken = '';
         try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+        if (permissionRef.current !== 'ask') await flushAccountState();
         if (controller.signal.aborted || targetId !== botIdRef.current) return { ok: false, error: 'aborted' };
         return sendBotChat({
           ownerId,
@@ -828,6 +868,8 @@ export default function Composer({
         : confirmedSpend
           ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal, authorize: authorizeSpend })
           : await send();
+      const agentTask = result?.ok ? result.agentTask : '';
+      const proposedGoal = result?.ok ? result.proposedGoal : '';
       if (result?.clientSwap && !controller.signal.aborted && run === runRef.current) {
         const accessToken = (await getAccessToken?.()) || '';
         result = await completeChatSwap(result, executeChatSwap, { ownerId, accessToken,
@@ -837,6 +879,9 @@ export default function Composer({
       if (grants?.some(hold => hold.idempotencyKey === pendingSwap?.idempotencyKey)
           && result?.reply?.startsWith('Swap submitted.')) setPendingSwap(null);
       await settleChat(result, spoken, prior, grants, run, shown, firstLineId);
+      if (agentTask && run === runRef.current && !controller.signal.aborted) {
+        onAgentTask?.({ agentTask, proposedGoal }, targetId, ownerId);
+      }
     } catch {
       if (run === runRef.current && stopHold.current !== run) {
         const note = chatFailureNote('network');
@@ -1177,8 +1222,7 @@ export default function Composer({
       {settingsNode}
       {lasoClaim?.botId === botId ? (
         <p className="voice-note" role="status">
-          <a href={lasoClaim.url} target="_blank" rel="noreferrer">View your Laso card</a>
-          {' · One-time login link, expires in 15 minutes.'}
+          The card is in Cards, in the account menu.
         </p>
       ) : null}
       <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
@@ -1199,6 +1243,45 @@ export default function Composer({
         </div>
       ) : null}
       <div className="composer" aria-label="Message the agent">
+        {visibleSubagents(subagents, suggesting).length > 0 ? (
+          <div className="sub-strip" role="group" aria-label="Subagents">
+            {visibleSubagents(subagents, suggesting).map((row, index) => (
+              <button
+                key={row.id || `sub-${index}`}
+                type="button"
+                className="sub-pill"
+                onClick={() => setSubDetail(index)}
+                title={row.task || 'Subagent'}
+              >
+                <span className={`sub-dot${thinking ? ' is-run' : ''}`} aria-hidden="true" />
+                {subagentLabel(row)}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {subDetail != null && visibleSubagents(subagents, false)[subDetail] ? (
+          <div className="sub-modal-backdrop" onClick={() => setSubDetail(null)}>
+            <div
+              className="sub-modal"
+              role="dialog"
+              aria-label="Subagent details"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="sub-modal-head">
+                <span>{botName} is {mainAgentState(thinking)}</span>
+                <button type="button" className="sub-modal-close" onClick={() => setSubDetail(null)}>Close</button>
+              </div>
+              {visibleSubagents(subagents, false).map((row, index) => (
+                <div key={row.id || `sub-${index}`} className={`sub-row${index === subDetail ? ' is-open' : ''}`}>
+                  <p className="sub-row-task">{subagentLabel(row)}</p>
+                  {row.skill ? <p className="sub-row-skill">/{row.skill}</p> : null}
+                  <AgentTrace steps={sanitizeActivity(row.activity)} />
+                  <p className="sub-row-reply">{row.reply}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <input ref={fileRef} className="sr-only" type="file" multiple aria-label="Attach files" />
         <MessageQueue items={queue} onEdit={editQueued} onSendNow={sendQueuedNow} />
         <PromptBar
@@ -1220,6 +1303,7 @@ export default function Composer({
           width={1200}
           radius={20}
           onDraftChange={setDraft}
+          onSuggestChange={setSuggesting}
           draftSeed={draftSeed}
           onAttach={pickFiles}
           extraReady={files.length > 0}
@@ -1244,7 +1328,8 @@ export default function Composer({
             const mode = parsePermission(next);
             if (mode === permissionRef.current) return;
             setPermission(mode);
-            accountStorage.setItem(SPEND_PERMISSION_KEY, mode);
+            writeStoredPermission(accountStorage, mode);
+            void flushAccountState();
             window.dispatchEvent(new Event('storage'));
             pushLine('note', `Permissions set to ${permissionById(mode).label}`);
           }}
@@ -1252,6 +1337,7 @@ export default function Composer({
             try {
               const saved = writeReviewCap(accountStorage, next);
               setReviewCap(saved);
+              void flushAccountState();
               window.dispatchEvent(new Event('storage'));
               pushLine('note', `Review by AI maximum set to ${reviewCapToDollars(saved)} USD`);
             } catch {

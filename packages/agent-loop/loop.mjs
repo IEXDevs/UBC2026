@@ -49,13 +49,14 @@ function withinReviewCap(policyDecision, reviewCap) {
 /** Whether this policy result still needs a person. Over-budget always does.
  * Ask waits until the owner has confirmed. That confirm is the slide.
  * Full and Review by AI continue when the debit is within the review maximum.
- * Above that maximum the owner confirms, including when Review by AI is off.
+ * Full swaps use the agent's policy limits without the Review by AI maximum.
  * The verify step has already agreed before this function runs.
  * A missing or failed earlier gate is not waived by full permission. */
 export function approvalRequirement(bot, policyDecision, options = {}) {
   if (!policyDecision || typeof policyDecision.state !== 'string') fail('Policy decision is required');
   if (policyDecision.state === 'blocked') return false;
   if (policyDecision.state === 'over-budget') return true;
+  if (options?.ownerPermission === 'full' && options.fullSwap === true) return false;
   if (options?.ownerPermission === 'full' || options?.ownerPermission === 'review') {
     if (withinReviewCap(policyDecision, reviewCapOf(options.reviewCap))) return false;
     return options?.confirmed !== true;
@@ -194,6 +195,7 @@ export async function runPermissionedSpend({
   ownerPermission,
   confirmed = false,
   reviewCap = null,
+  fullSwap = false,
   quote = null,
   signSolana,
   beforeSign,
@@ -242,7 +244,7 @@ export async function runPermissionedSpend({
   }
 
   steps.push('approval-mode');
-  const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed, reviewCap });
+  const approvalNeeded = approvalRequirement(bot, policy, { ownerPermission, confirmed, reviewCap, fullSwap });
   const approvedOnce = approvalNeeded && policy.state === 'over-budget' && confirmed
     && typeof beforeSign === 'function' && typeof signSolana === 'function'
     && validateApproval({

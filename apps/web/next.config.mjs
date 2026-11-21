@@ -4,9 +4,14 @@ import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
 import { resolveBuildId } from './lib/build-id.mjs';
 import { applyRootPublicEnv, readRootEnv } from './lib/root-env.mjs';
 import { publicDevPreviewValue } from './lib/sign-in-gate.mjs';
+import { patchPrivySvgProps } from '../../scripts/patch-privy-svg-props.mjs';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(appDir, '../..');
 const fromApp = (name) => path.join(appDir, 'node_modules', name);
+
+// Ensure installed Privy bundles are patched before bundling.
+patchPrivySvgProps(repoRoot);
 
 // Root `.env.local` holds NEXT_PUBLIC_* for the monorepo; Next would otherwise
 // only read apps/web/.env*. Apply before the config object is used.
@@ -33,6 +38,7 @@ const nextConfig = {
     '@ubc2026/browser-session',
     '@ubc2026/contracts',
     '@ubc2026/prices',
+    '@ubc2026/shopping',
     '@ubc2026/sns',
     '@ubc2026/transfers',
     '@ubc2026/wallets',

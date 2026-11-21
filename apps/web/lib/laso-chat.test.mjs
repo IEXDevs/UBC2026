@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cacheSpendConfirmation, lasoPreparationArgs, lasoPurchaseHold, pendingSpendConfirmation } from './laso-chat.mjs';
+import { cacheSpendConfirmation, LASO_CARD_CHOICE_PROMPT, lasoCardKind, lasoPreparationArgs, lasoPurchaseHold, lasoReloadableChecklist, lasoReloadableReply, lasoResumeDecision, pendingSpendConfirmation } from './laso-chat.mjs';
 import { sealAssetSpendHold, resumeAssetSpend } from './chat-spend-confirmation.mjs';
 import { createChatToolInvoker, serializeToolResult } from './chat-tools.mjs';
 import { completeTextChat } from './text-chat.mjs';
@@ -79,12 +79,32 @@ test('Composer uses the shared local recovery before any model request and still
 test('Laso preparation preserves the requested amount and directly produces an x402 confirmation', () => {
   assert.equal(lasoPreparationArgs({ ...args, amountUsd: 5 }, 'get a Laso card for 10 USDC').amountUsd, '10');
   assert.equal(lasoPreparationArgs(args, 'get a Laso card').amountUsd, '10');
+  assert.equal(lasoPreparationArgs(args, 'get a Laso card').lasoAction, undefined);
+  assert.equal(lasoPreparationArgs(args, 'get a Laso non-reloadable USA card').lasoAction, 'setup');
+  assert.equal(lasoPreparationArgs(args, 'add funds to the Laso card').lasoAction, 'modify');
+  assert.equal(lasoPreparationArgs(args, 'buy a $50 amazon gift card').lasoAction, 'gift');
+  assert.equal(lasoCardKind('get a Laso card'), 'undecided');
+  assert.equal(lasoCardKind('get me a lasso card'), 'undecided');
+  assert.equal(lasoCardKind('get me a laso finance reloadable card'), 'reloadable');
+  assert.equal(lasoCardKind('buy a $50 amazon gift card'), 'gift');
+  assert.equal(LASO_CARD_CHOICE_PROMPT.includes('non-reloadable USA'), true);
+  assert.ok(lasoReloadableChecklist().some((step) => /verify-card-issuer-link/i.test(step)));
+  assert.match(lasoReloadableReply(), /create-reloadable-card/);
+  assert.equal(lasoResumeDecision({ v: 1, kind: 'gift', stage: 'waiting-owner' }, 'done, code entered'), 'verify-now');
+  assert.equal(lasoResumeDecision({ v: 1, kind: 'gift', stage: 'waiting-owner' }, 'still waiting'), 'keep-waiting');
+  assert.equal(lasoResumeDecision(null, 'done'), 'no-open-flow');
   const hold = lasoPurchaseHold(args, JSON.stringify(prepared));
   assert.equal(hold.args.action, 'x402');
   assert.equal(hold.args.amount, '10000000');
   assert.equal(hold.args.lasoTicket, prepared.lasoTicket);
   assert.equal(hold.args.destination, undefined);
-  assert.match(hold.label, /Buy a Laso.*\$10/);
+  assert.match(hold.label, /Buy with Laso.*\$10/);
+  // Fee-bearing quotes may exceed the requested face value; a short quote is rejected.
+  const intlPrepared = { ...prepared, lasoAction: 'intl', proposal: { outflow: '259500000' } };
+  const intlHold = lasoPurchaseHold({ ...args, amountUsd: '250', lasoAction: 'intl' }, JSON.stringify(intlPrepared));
+  assert.equal(intlHold.args.amount, '259500000');
+  assert.equal(lasoPurchaseHold({ ...args, amountUsd: '250', lasoAction: 'intl' }, JSON.stringify({ ...prepared, lasoAction: 'intl', proposal: { outflow: '240000000' } })), null);
+  assert.equal(lasoPurchaseHold({ ...args, lasoAction: 'setup' }, JSON.stringify({ ...prepared, lasoAction: 'modify' })), null);
   for (const bad of [null, '', '{}', 'not json', { error: 'unavailable' }, { ...prepared, lasoTicket: '' }, { ...prepared, proposal: { outflow: '5000000' } }]) {
     assert.equal(lasoPurchaseHold(args, bad), null);
   }
@@ -113,14 +133,38 @@ test('yes and okay approved reuse the same sealed ticket; expiry and another own
 
 test('Laso chat dispatch forwards the owner amount despite a smaller model amount and blocks ordinary spend', async () => {
   let calls = 0;
-  const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get a Laso card for 10 USDC', runtimeBase: 'https://runtime.invalid', fetcher: async (_url, init) => {
+  const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get a Laso non-reloadable USA card for 10 USDC', runtimeBase: 'https://runtime.invalid', fetcher: async (_url, init) => {
     calls++;
-    assert.equal(JSON.parse(init.body).amountUsd, '10');
+    assert.deepEqual(JSON.parse(init.body), { provider: 'laso', lasoAction: 'setup', amountUsd: '10' });
     return Response.json(prepared);
   } });
   await invoke('prepare_shopping', { ...args, amountUsd: 5 });
   assert.equal((await invoke('request_spend', { action: 'spend', destination: 'payTo' })).error, 'laso_requires_x402');
   assert.equal(calls, 1);
+});
+
+test('an undecided Laso card request asks reloadable or non-reloadable before quoting', async () => {
+  let calls = 0;
+  const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get me a lasso card', runtimeBase: 'https://runtime.invalid', fetcher: async () => {
+    calls++;
+    return Response.json(prepared);
+  } });
+  const result = await invoke('prepare_shopping', { ...args, amountUsd: 10 });
+  assert.equal(result.error, 'laso_card_choice_required');
+  assert.match(result.hint, /Reloadable or non-reloadable USA/);
+  assert.equal(calls, 0);
+});
+
+test('a reloadable Laso card request hands over the human steps instead of quoting prepaid', async () => {
+  let calls = 0;
+  const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get me a laso finance reloadable card', runtimeBase: 'https://runtime.invalid', fetcher: async () => {
+    calls++;
+    return Response.json(prepared);
+  } });
+  const result = await invoke('prepare_shopping', { ...args, amountUsd: 10 });
+  assert.equal(result.error, 'laso_reloadable_human_steps');
+  assert.ok(result.steps.some((step) => /kyc/i.test(step)));
+  assert.equal(calls, 0);
 });
 
 test('the model preparation path returns its hold without another model reply or verification call', async () => {
@@ -146,13 +190,12 @@ test('the model preparation path returns its hold without another model reply or
   assert.equal(calls, 1);
 });
 
-test('a named Laso reloadable request prepares the default card even if the model omits or misnames the provider', async () => {
+test('a named Laso reloadable request hands over the human steps even if the model omits or misnames the provider', async () => {
   for (const provider of [undefined, 'reloadable']) {
     let modelCalls = 0;
     let runtimeCalls = 0;
-    const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get me a laso finance reloadable card', runtimeBase: 'https://runtime.invalid', fetcher: async (_url, init) => {
+    const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get me a laso finance reloadable card', runtimeBase: 'https://runtime.invalid', fetcher: async () => {
       runtimeCalls++;
-      assert.deepEqual(JSON.parse(init.body), { provider: 'laso' });
       return Response.json({ ...prepared, botId: context.botId, proposal: { outflow: '5000000' } });
     } });
     const reply = await completeTextChat({
@@ -166,12 +209,33 @@ test('a named Laso reloadable request prepares the default card even if the mode
       },
       invokeTool: async (name, inputs) => serializeToolResult(await invoke(name, inputs)),
     });
-    assert.equal(reply.hold.args.action, 'x402');
-    assert.equal(reply.hold.args.amount, '5000000');
-    assert.equal(reply.hold.args.botId, context.botId);
+    assert.equal(reply.hold, undefined);
+    assert.match(reply.text, /three steps first/);
+    assert.match(reply.text, /verify-card-issuer-link/);
     assert.equal(modelCalls, 1);
-    assert.equal(runtimeCalls, 1);
+    assert.equal(runtimeCalls, 0);
   }
+});
+
+test('an undecided Laso card request asks the choice without a follow-up model call', async () => {
+  let calls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: 'LLM_1607358788850350_testsecretvalue', message: 'get me a lasso card',
+    tools: [{ type: 'function', function: { name: 'prepare_shopping', parameters: { type: 'object' } } }],
+    fetcher: async () => {
+      assert.equal(++calls, 1);
+      return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [
+        { id: 'prepare', type: 'function', function: { name: 'prepare_shopping', arguments: JSON.stringify(args) } },
+      ] } }] });
+    },
+    invokeTool: async (name, inputs) => serializeToolResult(await createChatToolInvoker({
+      ...context, ownerMessage: 'get me a lasso card', runtimeBase: 'https://runtime.invalid',
+      fetcher: async () => assert.fail('undecided cards must not quote'),
+    })(name, inputs)),
+  });
+  assert.equal(reply.hold, undefined);
+  assert.match(reply.text, /Reloadable or non-reloadable USA/);
+  assert.equal(calls, 1);
 });
 
 test('Laso tool failures and empty results return a preparation error without a follow-up model call', async () => {
