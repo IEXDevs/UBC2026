@@ -124,15 +124,18 @@ test('chat returns Full swap receipts, keeps the Review browser path, and offers
   assert.equal(fallback.hold?.swapTicket, 'original-ticket');
   assert.match(fallback.hold.prompt, /unavailable for automatic signing/);
   const swapDelegation = { walletAddress: '11111111111111111111111111111111', signerId: 'test-privy-signer' };
-  fullResult = { signed: false, state: 'approval-needed', reason: 'swap_signer_missing', swapDelegation };
+  fullResult = { signed: false, state: 'blocked', reason: 'swap_signer_missing', swapDelegation };
   const repair = await post({ message: 'Review pending swap', autoSignSwaps: true });
   assert.equal(repair.clientSwap.spend.idempotencyKey, idempotencyKey);
   assert.equal(repair.clientSwap.swapTicket, 'original-ticket');
   const { expiresAt, ...enrollment } = repair.clientSwap.delegation;
   assert.deepEqual(enrollment, swapDelegation);
   assert.ok(expiresAt > Date.now());
+  fullResult = { ...fullResult, swapDelegation: { ...swapDelegation, signerId: '' } };
+  const invalidEnrollment = await post({ message: 'Review pending swap', autoSignSwaps: true });
+  assert.equal(invalidEnrollment.clientSwap, undefined);
   const automaticCalls = calls.filter(call => call.body?.autoSwap === true);
-  assert.equal(automaticCalls.length, 4);
+  assert.equal(automaticCalls.length, 5);
   assert.ok(automaticCalls.every(call => call.body.swapTicket === 'original-ticket' && !call.body.confirmed));
 });
 
