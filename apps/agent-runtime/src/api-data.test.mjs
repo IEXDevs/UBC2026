@@ -1045,8 +1045,15 @@ test('handle lookup chooses the exact stored handle and refuses ambiguous spoken
  * Side effects / state checked: Supabase POST bodies recorded; foreign attempt must not POST bots.
  * Gaps: none for ownership boundary on create
  */
-test('bots.create upserts a shell bot when the wallet belongs to the owner', async () => {
+test('bots.create saves the chosen owner wallet and refuses ineligible wallets', async () => {
   const writes = [];
+  const wallets = {
+    w_main: { id: 'w_main', frozen: false },
+    w_shop: { id: 'w_shop', spendable: true },
+    w_frozen: { id: 'w_frozen', frozen: true },
+    linked_external: { id: 'linked_external', spendable: false },
+    w_retired: { id: 'w_retired', deleted_at: '2026-11-20T00:00:00Z' },
+  };
   const fetcher = async (url, init = {}) => {
     const href = String(url);
     if (init.method === 'POST') {
@@ -1061,11 +1068,10 @@ test('bots.create upserts a shell bot when the wallet belongs to the owner', asy
       return new Response(null, { status: 201 });
     }
     if (href.includes('/rest/v1/wallets?')) {
-      // Owner-scoped query: only w_main exists for this owner.
-      if (href.includes('id=eq.w_main')) {
-        return Response.json([{ id: 'w_main', frozen: false }]);
-      }
-      return Response.json([]);
+      const params = new URL(href).searchParams;
+      assert.equal(params.get('owner_id'), 'eq.user_1');
+      const wallet = wallets[params.get('id')?.slice(3)];
+      return Response.json(wallet ? [wallet] : []);
     }
     return Response.json([]);
   };
@@ -1094,6 +1100,19 @@ test('bots.create upserts a shell bot when the wallet belongs to the owner', asy
   }), env);
   assert.equal(foreignWallet.status, 404);
   assert.equal((await foreignWallet.json()).error, 'wallet_not_found');
+  for (const [walletId, code, status] of [
+    ['w_frozen', 'wallet_frozen', 400],
+    ['linked_external', 'wallet_unspendable', 400],
+    ['w_retired', 'wallet_not_found', 404],
+  ]) {
+    const denied = await worker.fetch(new Request('https://runtime/api/bots', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-owner-id': 'user_1' },
+      body: JSON.stringify({ id: 'bot_local', name: 'Local', walletId }),
+    }), env);
+    assert.equal(denied.status, status);
+    assert.equal((await denied.json()).error, code);
+  }
   assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/bots')), false);
 
   const created = await worker.fetch(new Request('https://runtime/api/bots', {
@@ -1104,15 +1123,15 @@ test('bots.create upserts a shell bot when the wallet belongs to the owner', asy
       name: 'Local',
       goal: 'Watch',
       type: 'trading',
-      walletId: 'w_main',
+      walletId: 'w_shop',
     }),
   }), env);
   assert.equal(created.status, 200);
   const body = await created.json();
   assert.equal(body.ok, true);
   assert.equal(body.bot.id, 'bot_local');
-  assert.equal(body.bot.walletId, 'w_main');
-  assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/bots')), true);
+  assert.equal(body.bot.walletId, 'w_shop');
+  assert.equal(writes.find(entry => entry.href.includes('/rest/v1/bots')).body.wallet_id, 'w_shop');
   assert.equal(writes.some((entry) => entry.href.includes('/rest/v1/spend_ledgers')), true);
 
   writes.length = 0;

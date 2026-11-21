@@ -5,7 +5,6 @@ import {
   deleteBotUrl,
   emptyMoneyState,
   fetchOwnerLists,
-  firstAssignableWalletId,
   runtimeBaseUrl,
   sendBotChat,
   shellBotFromRemote,
@@ -393,21 +392,9 @@ test('sendBotChat retracts a partial reply when the stream fails or ends without
 });
 
 /**
- * Achieves: verifies firstAssignableWalletId skips frozen wallets.
- * Fails when: firstAssignableWalletId skips frozen wallets breaks (e.g. expected '', frozen: true }, { id: 'w_ok' }]).
- * Oracle: assert.equal(firstAssignableWalletId([]), ''); assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }])
- * Side effects / state checked: N/A.
- * Gaps: none.
- */
-test('firstAssignableWalletId skips frozen wallets', () => {
-  assert.equal(firstAssignableWalletId([]), '');
-  assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }]), 'w_ok');
-});
-
-/**
  * Achieves: verifies upsertOwnerBot posts the shell bot to the runtime proxy.
  * Fails when: upsertOwnerBot posts the shell bot to the runtime proxy breaks (e.g. expected true, '/api/runtime/api/bots', 'POST').
- * Oracle: assert.equal(result.ok, true); assert.equal(calls[0].url, '/api/runtime/api/bots'); assert.equal(calls[0].method, 'POST'); assert.equal(calls[0].owner, 'did:privy:abc'); assert.equal(calls[0].body.walletId, 'w_main'); assert.equal(calls[0].body.id, 'bot_local')
+ * Oracle: the create request carries the selected additional wallet and the owner ID.
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
@@ -415,15 +402,14 @@ test('upsertOwnerBot posts the shell bot to the runtime proxy', async () => {
   const calls = [];
   const result = await upsertOwnerBot(
     'did:privy:abc',
-    { id: 'bot_local', name: 'Local', goal: 'Watch', type: 'trading' },
+    { id: 'bot_local', name: 'Local', goal: 'Watch', type: 'trading', walletId: 'w_shop' },
     {
-      walletId: 'w_main',
       accessToken: 'tok',
       fetcher: async (url, init) => {
         calls.push({ url, method: init.method, body: JSON.parse(init.body), owner: init.headers['x-owner-id'] });
         return {
           ok: true,
-          json: async () => ({ ok: true, source: 'supabase', bot: { id: 'bot_local', walletId: 'w_main' } }),
+          json: async () => ({ ok: true, source: 'supabase', bot: { id: 'bot_local', walletId: 'w_shop' } }),
         };
       },
     },
@@ -432,7 +418,7 @@ test('upsertOwnerBot posts the shell bot to the runtime proxy', async () => {
   assert.equal(calls[0].url, '/api/runtime/api/bots');
   assert.equal(calls[0].method, 'POST');
   assert.equal(calls[0].owner, 'did:privy:abc');
-  assert.equal(calls[0].body.walletId, 'w_main');
+  assert.equal(calls[0].body.walletId, 'w_shop');
   assert.equal(calls[0].body.id, 'bot_local');
   const missingWallet = await upsertOwnerBot('did:privy:abc', { id: 'bot_x', name: 'X' }, { fetcher: async () => ({}) });
   assert.equal(missingWallet.error, 'wallet_required');

@@ -87,6 +87,30 @@ test('wallets without positions keep their cards apart', () => {
   assert.ok(right.x - left.x >= 240, `wallet roots ${right.x - left.x}px apart`);
 });
 
+test('the graph links each agent to its wallet and puts unassigned agents on Main', () => {
+  const wallets = [
+    { id: 'main', kind: 'main', label: 'Main' },
+    { id: 'shop', kind: 'additional', label: 'Shop' },
+  ];
+  const bots = [
+    { id: 'bot_ada', name: 'Ada', walletId: 'shop' },
+    { id: 'bot_lee', name: 'Lee' },
+    { id: 'bot_sam', name: 'Sam', walletId: 'unavailable' },
+  ];
+  const book = layoutPositionBook([], bots, wallets);
+  assert.deepEqual(book.agents.map(agent => [agent.id, agent.walletId]), [['agent:bot_lee', 'main'], ['agent:bot_ada', 'shop']]);
+  assert.deepEqual(book.links.map(link => [link.kind, link.fromId, link.toId]), [
+    ['agent', 'main', 'agent:bot_lee'], ['agent', 'shop', 'agent:bot_ada'],
+  ]);
+  for (const agent of book.agents) {
+    const wallet = book.wallets.find(item => item.id === agent.walletId);
+    assert.ok(agent.y > wallet.y + wallet.height / 2);
+    assert.ok(bookFrame(book).maxY >= agent.y + agent.height / 2);
+  }
+  const reassigned = layoutPositionBook([], [{ ...bots[0], walletId: 'main' }, ...bots.slice(1)], wallets);
+  assert.notEqual(positionSceneKey(book), positionSceneKey(reassigned));
+});
+
 test('a single large holding leaves room for its outline at every edge', () => {
   const book = layoutPositionBook([], [], [{ id: 'main', label: 'Main' }], [
     { walletId: 'main', asset: 'SOL', notionalMicroUsdc: '100000000' },

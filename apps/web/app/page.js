@@ -53,7 +53,7 @@ import {
 import { ownerIdFromPrivyUser, privyAccountLabel, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '../lib/profile.mjs';
 import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile-photo.mjs';
-import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
+import { agentWalletChoices, mainAgentWallet, mergeWalletDirectory, withAssignedWallet } from '../lib/wallet-assign.mjs';
 import {
   forgetRetiredWallet,
   readRetiredWalletIds,
@@ -68,7 +68,6 @@ import {
   deleteOwnerBot,
   emptyMoneyState,
   fetchOwnerLists,
-  firstAssignableWalletId,
   shellBotFromRemote,
   shellRuntimeUrl,
   upsertOwnerBot,
@@ -888,12 +887,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     return () => { stop = true; };
   }, [ownerId, signedIn, user, getAccessToken, liveWallets, listsTick]);
 
-  // Backfill local-only roster bots into Supabase once a Supabase wallet exists.
-  // Do not use liveWallets-only ids — bots.create 404s with wallet_not_found.
+  const savedAgentWallets = useMemo(() => agentWalletChoices(withoutRetiredWallets(remoteLists.wallets, retiredIds)),
+    [remoteLists.wallets, retiredIds]);
+  // Backfill old local agents when their wallet is available in the runtime.
   useEffect(() => {
     if (!ownerId || !rosterReady || !signedIn) return undefined;
-    const walletId = firstAssignableWalletId(remoteLists.wallets);
-    if (!walletId) return undefined;
+    if (savedAgentWallets.length === 0) return undefined;
+    const mainWalletId = mainAgentWallet(savedAgentWallets)?.id;
     const remoteIds = new Set((remoteLists.bots || []).map((bot) => bot?.id).filter(Boolean));
     const localBots = mergeRoster([], withoutPlaceholderBots(roster)).bots
       .filter((bot) => bot?.id && !isPlaceholderBotId(bot.id));
@@ -906,10 +906,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       let wrote = 0;
       for (const bot of missing.slice(0, 20)) {
         if (stop) return;
+        const walletId = bot.walletId || mainWalletId;
+        if (!savedAgentWallets.some(wallet => wallet.id === walletId)) continue;
         const saved = await agentRemoval.save(ownerId, bot.id, () => upsertOwnerBot(ownerId, bot, { walletId, accessToken }));
         if (saved.ok) wrote += 1;
-        // Stop hammering when the wallet is not in Supabase yet.
-        if (!saved.ok && (saved.error === 'wallet_not_found' || saved.status === 404)) break;
       }
       if (!wrote || stop) return;
       try {
@@ -918,7 +918,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       } catch { /* keep local */ }
     })();
     return () => { stop = true; };
-  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, getAccessToken, agentRemoval]);
+  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, savedAgentWallets, getAccessToken, agentRemoval]);
 
   const saveProfile = useCallback(async (next) => {
     const { photo, editOnly, ...details } = next;
@@ -1020,7 +1020,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     const sample = previewBot();
     return sample && !removedIds?.has(sample.id) ? [sample] : looked;
   }, [seedBots, looks, devPreview, removedIds]);
-  const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
+  const wallets = useMemo(() => {
+    const listed = withoutRetiredWallets(mergeWalletDirectory(liveWallets, remoteLists.wallets), retiredIds);
+    return devPreview && listed.length === 0 ? previewWallets() : listed;
+  }, [liveWallets, remoteLists.wallets, retiredIds, devPreview]);
+  const assigned = useMemo(() => withAssignedWallet(styled, wallets), [styled, wallets]);
+  const createWallets = devPreview ? wallets : savedAgentWallets;
   const bots = useMemo(() => assigned.bots.map(bot => {
     const saved = looks[bot.id];
     return {
@@ -1064,8 +1069,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (bots.some(item => item.id === activeBot)) return;
     setActiveBot(bots[0].id);
   }, [activeBot, bots]);
-  const listedWallets = withoutRetiredWallets(pickWalletList(assigned.wallets, remoteLists.wallets), retiredIds);
-  const wallets = devPreview && listedWallets.length === 0 ? previewWallets() : listedWallets;
   const walletAddress = assignedWalletAddress(wallets);
   useEffect(() => {
     if (devPreview || !signedIn || !walletAddress) {
@@ -1817,11 +1820,24 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setRecall('');
   }
 
-  function onCreate(created) {
-    if (!ownerId) {
-      toast?.('Sign in to create an agent.');
-      setCreateOpen(false);
-      return;
+  async function onCreate(created) {
+    if (!ownerId) return { ok: false, message: 'Sign in to create an agent.' };
+    if (!createWallets.some(wallet => wallet.id === created.walletId)) {
+      return { ok: false, message: 'Choose a wallet that is ready for agent spending.' };
+    }
+    if (!devPreview) {
+      let accessToken = '';
+      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+      if (!accessToken || currentOwner.current !== ownerId) return { ok: false, message: 'Sign in again to create this agent.' };
+      const saved = await agentRemoval.save(ownerId, created.id, () => upsertOwnerBot(ownerId, created, {
+        accessToken, signal: AbortSignal.timeout(15000),
+      }));
+      if (!saved.ok) return { ok: false, message: 'Could not create the agent with this wallet. Check that the wallet is available and try again.' };
+      if (currentOwner.current !== ownerId) return { ok: false };
+      if (saved.bot) setRemoteLists(current => ({
+        ...current,
+        bots: [...current.bots.filter(item => item.id !== created.id), saved.bot],
+      }));
     }
     setRoster(current => ({
       order: [created.id, ...current.order.filter(id => id !== created.id)],
@@ -1836,20 +1852,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setSlide('right');
     setPane('Main');
     setCreateOpen(false);
-    // Shell create is local-first; persist so voice/text list_bots can see the bot.
-    const walletId = firstAssignableWalletId(remoteLists.wallets) || firstAssignableWalletId(wallets);
-    if (walletId) {
-      void (async () => {
-        let accessToken = '';
-        try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
-        const saved = await agentRemoval.save(ownerId, created.id, () => upsertOwnerBot(ownerId, created, { walletId, accessToken }));
-        if (!saved.ok) return;
-        try {
-          const lists = await fetchOwnerLists(ownerId, { accessToken });
-          if (lists) setRemoteLists(lists);
-        } catch { /* keep local roster */ }
-      })();
-    }
+    return { ok: true };
   }
 
   function onEditLook(id, patch) {
@@ -2420,7 +2423,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           onComputer={() => setComputerOpen(true)}
         />
       ) : null}
-      <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} first={bots.length === 0} />
+      <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} wallets={createWallets} first={bots.length === 0} />
       {walletError && !hideWalletError ? (
         <div className="backdrop is-center">
           <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-label="Wallet setup">

@@ -712,12 +712,15 @@ export async function handleApiData(request, env, matched) {
 
     const walletLookup = await supabaseGet(
       env,
-      `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,frozen`,
+      `wallets?id=eq.${encodeURIComponent(walletId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,frozen,spendable,deleted_at`,
       fetcher,
     );
     const walletRow = walletLookup.rows?.[0];
-    if (!walletRow?.id) return json({ error: 'wallet_not_found' }, 404);
+    if (!walletRow?.id || walletRow.deleted_at) return json({ error: 'wallet_not_found' }, 404);
     if (walletRow.frozen === true) return json({ error: 'wallet_frozen' }, 400);
+    if (walletRow.spendable === false || walletRow.id.startsWith('linked_')) {
+      return json({ error: 'wallet_unspendable' }, 400);
+    }
 
     await supabaseWrite(env, {
       path: 'users',
