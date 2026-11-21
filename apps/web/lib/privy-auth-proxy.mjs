@@ -3,8 +3,8 @@
  * Privy returns the refresh token in JSON, which the page can read.
  * This proxy keeps that token in an HttpOnly cookie and removes it from
  * the body. A later session refresh sends the cookie, not page storage.
- * The access token stays in the body for the open tab and in an HttpOnly
- * cookie: Privy requires it alongside the refresh token after a reload.
+ * Both access tokens stay in the body for the open tab. The HttpOnly cookie
+ * keeps the wallet-capable token so Privy can restore it after a reload.
  */
 
 export const PRIVY_AUTH_ORIGIN = 'https://auth.privy.io';
@@ -115,7 +115,9 @@ export async function proxyPrivyAuth(request, path, fetchImpl = globalThis.fetch
     return Response.json({ error: 'not_found' }, { status: 404, headers: { 'cache-control': 'no-store' } });
   }
   const rawBody = method === 'GET' || method === 'HEAD' ? '' : await request.text();
-  const body = bodyWithStoredRefresh(path, method, rawBody, request.headers.get('cookie'));
+  const requestCookies = request.headers.get('cookie');
+  const storedAccess = readSessionCookie(requestCookies, PRIVY_ACCESS_COOKIE);
+  const body = bodyWithStoredRefresh(path, method, rawBody, requestCookies);
   const headers = new Headers();
   for (const name of FORWARD_HEADERS) {
     const value = request.headers.get(name);
@@ -127,10 +129,7 @@ export async function proxyPrivyAuth(request, path, fetchImpl = globalThis.fetch
   for (const [name, value] of request.headers) {
     if (/^privy-[a-z0-9-]{1,40}$/.test(name) && !headers.has(name) && value.length < 12000 && !/[\r\n]/.test(value)) headers.set(name, value);
   }
-  if (!headers.has('authorization')) {
-    const access = readSessionCookie(request.headers.get('cookie'), PRIVY_ACCESS_COOKIE);
-    if (access) headers.set('authorization', `Bearer ${access}`);
-  }
+  if (!headers.has('authorization') && storedAccess) headers.set('authorization', `Bearer ${storedAccess}`);
   const upstream = await fetchImpl(target, {
     method,
     headers,
@@ -160,7 +159,13 @@ export async function proxyPrivyAuth(request, path, fetchImpl = globalThis.fetch
     }
     if (upstream.ok) {
       let access = '';
-      try { access = JSON.parse(text)?.token; } catch { /* non-JSON response */ }
+      try {
+        const session = JSON.parse(sealed.bodyText);
+        // An "ignore" refresh can return just the token it received. Keep
+        // the wallet token when a tab refreshes with the regular login token.
+        access = session?.privy_access_token
+          || (session?.session_update_action === 'ignore' && storedAccess ? '' : session?.token);
+      } catch { /* non-JSON response */ }
       const accessCookie = sessionCookieHeader(PRIVY_ACCESS_COOKIE, access, { secure });
       if (accessCookie) responseHeaders.append('set-cookie', accessCookie);
     }
