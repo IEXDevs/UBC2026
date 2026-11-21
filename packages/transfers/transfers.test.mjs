@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { Keypair, Transaction, TransactionMessage, VersionedTransaction, ComputeBudgetInstruction } from '@solana/web3.js';
-import { decodeTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { Keypair, SystemProgram, Transaction, TransactionMessage, VersionedTransaction, ComputeBudgetInstruction } from '@solana/web3.js';
+import { createAssociatedTokenAccountIdempotentInstruction, decodeTransferCheckedInstruction, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { assignBotWallet, createAdditionalWallet, createMainWallet } from '@ubc2026/wallets';
 import {
@@ -68,6 +68,38 @@ test('Jupiter swap quote builds use Workers-supported manual redirects and rejec
     } }), { code: `jupiter_http_${status}` });
   }
   await assert.rejects(buildJupiterSwap({ ...args, fetcher: async () => Response.json({}) }), /swap_route_refused/);
+});
+
+test('Jupiter can create a wallet ATA used by an intermediate hop', async () => {
+  const wallet = Keypair.generate().publicKey;
+  const walletAddress = wallet.toBase58();
+  const inputMint = MAINNET_USDC_MINT;
+  const outputMint = 'So11111111111111111111111111111111111111112';
+  const intermediate = Keypair.generate().publicKey;
+  const intermediateMint = intermediate.toBase58();
+  const associated = getAssociatedTokenAddressSync(intermediate, wallet);
+  const ix = createAssociatedTokenAccountIdempotentInstruction(wallet, associated, wallet, intermediate);
+  const setup = { programId: ix.programId.toBase58(), data: Buffer.from(ix.data).toString('base64'),
+    accounts: ix.keys.map(key => ({ ...key, pubkey: key.pubkey.toBase58() })) };
+  const data = Buffer.alloc(34);
+  createHash('sha256').update('global:route_v2').digest().copy(data, 0, 0, 8);
+  data.writeBigUInt64LE(1_000_000n, 8);
+  data.writeBigUInt64LE(10_000_000n, 16);
+  data.writeUInt16LE(50, 24);
+  const swapInstruction = { programId: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', data: data.toString('base64'),
+    accounts: [walletAddress, walletAddress, walletAddress, inputMint, outputMint, associated.toBase58()]
+      .map((pubkey, index) => ({ pubkey, isSigner: index === 0, isWritable: index === 5 })) };
+  const quote = { inputMint, outputMint, inAmount: '1000000', outAmount: '10000000', otherAmountThreshold: '9950000',
+    swapMode: 'ExactIn', slippageBps: 50, swapInstruction, setupInstructions: [setup],
+    routePlan: [{ swapInfo: { inputMint, outputMint: intermediateMint } }, { swapInfo: { inputMint: intermediateMint, outputMint } }],
+  };
+  const build = result => buildJupiterSwap({ walletAddress, inputMint, outputMint, amount: quote.inAmount,
+    blockhash: SystemProgram.programId.toBase58(), apiKey: 'mock-key', fetcher: async () => Response.json(result) });
+  assert.equal((await build(quote)).minOutput, quote.otherAmountThreshold);
+  await assert.rejects(build({ ...quote, routePlan: [] }), { code: 'swap_route_refused' });
+  await assert.rejects(build({ ...quote, swapInstruction: { ...swapInstruction, accounts: swapInstruction.accounts.slice(0, -1) } }), { code: 'swap_route_refused' });
+  const wrongAccount = setup.accounts.map((key, index) => index === 1 ? { ...key, pubkey: Keypair.generate().publicKey.toBase58() } : key);
+  await assert.rejects(build({ ...quote, setupInstructions: [{ ...setup, accounts: wrongAccount }] }), { code: 'swap_route_refused' });
 });
 
 test('x402 builds only bounded compute budget and exact USDC transfer with the sponsor fee payer', () => {

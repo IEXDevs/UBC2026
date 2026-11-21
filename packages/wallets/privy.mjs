@@ -53,6 +53,7 @@ const MAX_TX_BYTES = 1232;
 const SINGLE_SIGNATURE_MESSAGE_OFFSET = 65;
 const CLASSIC_TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const ASSOCIATED_TOKEN_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const privyWalletIdPattern = /^[A-Za-z0-9_-]{10,128}$/;
 const ownerIdPattern = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -1508,11 +1509,20 @@ export function createPrivyWalletClient({
         const reason = value?.err === 'BlockhashNotFound' ? 'swap_blockhash_not_found' : undefined;
         failSimulation(value, { details, reason });
       }
-      const after = swapAccountSnapshot(value.accounts, walletAddress);
+      const createdAccounts = new Map();
+      for (const ix of parsed.message.compiledInstructions) {
+        if (addresses[ix.programIdIndex] !== ASSOCIATED_TOKEN_PROGRAM
+            || ix.data.length > 1 || (ix.data.length === 1 && ix.data[0] > 1)) continue;
+        const [payer, account, owner, mint] = ix.accountKeyIndexes;
+        if (addresses[payer] === walletAddress && addresses[owner] === walletAddress && prior.result.value[account] === null) {
+          createdAccounts.set(account, addresses[mint]);
+        }
+      }
+      const after = swapAccountSnapshot(value.accounts, walletAddress, createdAccounts);
       if (!after) fail('Swap simulated accounts are unavailable', 'swap_simulation_unavailable');
       const effects = verifySwapSimulation({
         err: value.err, fee: fee.result?.value, preBalances: [before.lamports], postBalances: [after.lamports],
-        preTokenBalances: before.tokens, postTokenBalances: after.tokens,
+        preTokenBalances: before.tokens, postTokenBalances: after.tokens, accountRent: after.accountRent,
       }, { wallet: walletAddress, inputMint, outputMint, amount, minOutput });
       if (effects.reason) failSimulation(value, { reason: effects.reason });
       const prepared = Object.freeze({ transaction, ...effects });
