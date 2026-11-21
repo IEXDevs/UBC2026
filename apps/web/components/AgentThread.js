@@ -30,6 +30,7 @@ export default function AgentThread({
   onParty = null,
   onEdit = null,
   onAccess = null,
+  onGoalDecision = null,
   focusLine = null,
   hideAccessActions = false,
 }) {
@@ -122,7 +123,8 @@ export default function AgentThread({
 
   return (
     <div className="agent-thread">
-      <ChatBubbles lines={lines} thinking={thinking} onParty={onParty} onEdit={onEdit} onAccess={onAccess} focusId={focusLine} hideAccessActions={hideAccessActions} />
+      <ChatBubbles lines={lines} thinking={thinking} onParty={onParty} onEdit={onEdit} onAccess={onAccess} focusId={focusLine} hideAccessActions={hideAccessActions}
+        goalProposalId={bot.goalProposal?.id} onGoalDecision={onGoalDecision} />
       {chips.length > 0 ? (
         <div className="agent-chips">
           {chips.map(chip => (

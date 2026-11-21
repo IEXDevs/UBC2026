@@ -141,6 +141,7 @@ export default function Composer({
   executeChatSwap = null,
   lines = [],
   onLine,
+  onAgentTask,
   onThinking,
   onVoiceSpan = null,
   hidden = false,
@@ -846,6 +847,8 @@ export default function Composer({
         : confirmedSpend
           ? await submitChatSpend({ send, unlock: onDeskUnlock, signal: controller.signal, authorize: authorizeSpend })
           : await send();
+      const agentTask = result?.ok ? result.agentTask : '';
+      const proposedGoal = result?.ok ? result.proposedGoal : '';
       if (result?.clientSwap && !controller.signal.aborted && run === runRef.current) {
         const accessToken = (await getAccessToken?.()) || '';
         result = await completeChatSwap(result, executeChatSwap, { ownerId, accessToken,
@@ -855,6 +858,9 @@ export default function Composer({
       if (grants?.some(hold => hold.idempotencyKey === pendingSwap?.idempotencyKey)
           && result?.reply?.startsWith('Swap submitted.')) setPendingSwap(null);
       await settleChat(result, spoken, prior, grants, run, shown, firstLineId);
+      if (agentTask && run === runRef.current && !controller.signal.aborted) {
+        onAgentTask?.({ agentTask, proposedGoal }, targetId, ownerId);
+      }
     } catch {
       if (run === runRef.current && stopHold.current !== run) {
         const note = chatFailureNote('network');

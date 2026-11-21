@@ -26,6 +26,8 @@ export default function ChatBubbles({
   onParty,
   onEdit,
   onAccess,
+  goalProposalId,
+  onGoalDecision,
   focusId = null,
   hideAccessActions = false,
 }) {
@@ -157,6 +159,12 @@ export default function ChatBubbles({
                 </BubbleContent>
               </Bubble>
               <Sources urls={urls} />
+              {onGoalDecision && line.id === goalProposalId ? (
+                <div className="access-request" role="group" aria-label="General goal proposal">
+                  <button type="button" onClick={() => onGoalDecision(line, true)}>Update goal</button>
+                  <button type="button" onClick={() => onGoalDecision(line, false)}>Keep current goal</button>
+                </div>
+              ) : null}
               {line.access?.kind === 'inline' ? (
                 <div className="access-request" role="group" aria-label={line.access.label}>
                   <p><AddressText text={line.access.label} addresses={[line.access.args?.destination]} /></p>

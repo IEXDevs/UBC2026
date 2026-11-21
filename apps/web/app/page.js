@@ -94,6 +94,7 @@ import { ensureAccountCode } from '../lib/account-code.mjs';
 import { accountStorage, bindAccountState, flushAccountState, hydrateAccountState } from '../lib/account-state.mjs';
 import { applyStoredFile, dropCatalogFile, storeAttachedFile, uploadNotice } from '../lib/store-file.mjs';
 import { searchRecall } from '../lib/recall-search.mjs';
+import { GOAL_QUESTION, hasGeneralGoal, proposedGeneralGoal, reviewGeneralGoal, taskFromRequest, taskLabel } from '../lib/agent-task.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 import SignInPage from '../components/SignInPage';
@@ -1020,11 +1021,16 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     return sample && !removedIds?.has(sample.id) ? [sample] : looked;
   }, [seedBots, looks, devPreview, removedIds]);
   const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
-  const bots = assigned.bots.map((bot) => (
-    Object.prototype.hasOwnProperty.call(loopOverrides, bot.id)
-      ? { ...bot, loop: loopOverrides[bot.id] }
-      : bot
-  ));
+  const bots = useMemo(() => assigned.bots.map(bot => {
+    const saved = looks[bot.id];
+    return {
+      ...bot,
+      goal: taskLabel(saved?.generalGoal) || bot.goal,
+      currentTask: taskLabel(saved?.currentTask),
+      goalProposal: saved?.goalProposal ?? null,
+      ...(Object.prototype.hasOwnProperty.call(loopOverrides, bot.id) ? { loop: loopOverrides[bot.id] } : {}),
+    };
+  }), [assigned.bots, looks, loopOverrides]);
   const onMissingFile = useCallback((id) => {
     if (typeof id !== 'string' || !id) return;
     setLibrary(current => dropCatalogFile(current, id));
@@ -1141,6 +1147,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     ? bots
     : bots.filter(bot => bot.name.toLowerCase().includes(recallNeedle) || matchedBots.has(bot.id));
   const bot = bots.find(item => item.id === activeBot) ?? null;
+  const activeGoal = bot?.goal;
+  useEffect(() => {
+    if (!ownerId || !talksReady || !activeBot || pane !== 'Main' || hasGeneralGoal(activeGoal)) return;
+    setTalks(current => current[activeBot]?.length ? current : {
+      ...current,
+      [activeBot]: [{ id: `${activeBot}-goal-intro`, role: 'agent', text: GOAL_QUESTION }],
+    });
+  }, [ownerId, talksReady, activeBot, activeGoal, pane]);
   const money = moneyPane(pane);
   const chainLabel = solanaSpendableLabel(solanaBalance);
   const glance = walletGlance(wallets, positions, transfers, chainLabel, solanaBalance);
@@ -1844,6 +1858,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       const prev = current[id] ?? {};
       const next = {
         ...prev,
+        ...prev,
         name: patch.name ?? currentBot?.name,
         shape: patch.shape ?? currentBot?.shape,
         color: patch.color ?? currentBot?.color,
@@ -1857,6 +1872,37 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         extra: current.extra.map(item => (item.id === id ? { ...item, name: patch.name, color: patch.color, shape: patch.shape } : item)),
       }));
     }
+  }
+
+  function onAgentTask({ agentTask, proposedGoal }, id, forOwner = ownerId) {
+    const task = taskLabel(agentTask);
+    if (!task || !forOwner || forOwner !== currentOwner.current || removedIds?.has(id)) return;
+    const agent = bots.find(item => item.id === id);
+    if (!agent) return;
+    const goal = proposedGeneralGoal(proposedGoal, agent.goal, agent.goalProposal?.text);
+    const proposal = goal ? { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text: goal } : null;
+    setLooks(current => ({
+      ...current,
+      [id]: { ...current[id], currentTask: task, ...(proposal ? { goalProposal: proposal } : {}) },
+    }));
+    if (proposal) appendTalk(id, {
+      id: proposal.id,
+      role: 'agent',
+      text: `Do you want to ${hasGeneralGoal(agent.goal) ? 'change' : 'set'} my general goal to “${goal}”?`,
+    });
+  }
+
+  function onGoalDecision(id, proposalId, accept) {
+    const decision = reviewGeneralGoal(looks[id], proposalId, accept);
+    if (!decision) return;
+    setLooks(current => {
+      const next = reviewGeneralGoal(current[id], proposalId, accept);
+      return next ? { ...current, [id]: next } : current;
+    });
+    appendTalk(id, {
+      id: `${proposalId}-decision`, role: 'agent',
+      text: accept ? `My general goal is now “${decision.generalGoal}”.` : 'I’ll keep my general goal as it is.',
+    });
   }
 
   function onReorder(fromId, toId) {
@@ -2213,6 +2259,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
                   onParty={setParty}
                   onEdit={onEditLine}
                   onAccess={(line, accepted) => accessRef.current?.(line, accepted)}
+                  onGoalDecision={(line, accepted) => onGoalDecision(bot.id, line.id, accepted)}
                   hideAccessActions={voiceLive}
                   focusLine={focusLine?.botId === bot.id ? focusLine.lineId : null}
                 />
@@ -2274,11 +2321,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             signChatTransaction={signChatTransaction}
             executeChatSwap={executeChatSwap}
             lines={talks[bot.id] ?? []}
+            onAgentTask={onAgentTask}
             onLine={(line, forBot) => {
               const id = forBot || bot.id;
               appendTalk(id, line);
               if (line.role === 'agent') setListsTick((tick) => tick + 1);
               if (line.role !== 'user') return;
+              const task = taskFromRequest(line.text);
+              if (task) onAgentTask({ agentTask: task }, id);
               const command = parsePlatformSend(line.text);
               if (!command || !ownerId) return;
               const permission = readStoredPermission(typeof localStorage === 'undefined' ? null : localStorage);
