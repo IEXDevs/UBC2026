@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ArrowUpDown, ChevronDown } from 'lucide-react';
 import { usePrivy } from '@privy-io/react-auth';
 import { useSignTransaction, useWallets, useStandardWallets } from '@privy-io/react-auth/solana';
 import { SOLANA_CLUSTER, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
@@ -13,6 +14,7 @@ import {
   passthroughWallet,
   swapPair,
 } from '../lib/jupiter-plugin.mjs';
+import { TokenIcon, VerifiedBadge } from './PhantomIcons';
 
 export default function JupiterSwap({ address = '', label = '', frozen = false, inputMint = '', onSwapped }) {
   const { wallets } = useWallets();
@@ -100,12 +102,65 @@ export default function JupiterSwap({ address = '', label = '', frozen = false, 
   }, [context, phase]);
 
   return (
-    <div className="jupiter-swap">
-      <p className="quiet">{status === 'ready' ? JUPITER_STATUS_NOTE[status] : `Swap — wallet: ${JUPITER_STATUS_NOTE[status]} [${status}]`}</p>
+    <div className="jupiter-swap phantom-swap-wrap">
+      <p className="quiet phantom-swap-note">{status === 'ready' ? JUPITER_STATUS_NOTE[status] : `Swap — wallet: ${JUPITER_STATUS_NOTE[status]} [${status}]`}</p>
       {embed ? (
-        <div className="jupiter-swap-frame" aria-busy={phase === 'loading'}>
+        <div className="jupiter-swap-frame phantom-swap-frame" aria-busy={phase === 'loading'}>
           <div id={targetId} className="jupiter-swap-target" />
-          {phase === 'loading' ? <p className="quiet jupiter-swap-hold">Loading Jupiter…</p> : null}
+          {phase === 'loading' ? (
+            <div className="phantom-swap-skeleton">
+              {/* "You Pay" Card (Screenshot 3) */}
+              <div className="phantom-swap-card">
+                <div className="phantom-swap-card-head">
+                  <span className="phantom-swap-label">You Pay</span>
+                </div>
+                <div className="phantom-swap-card-body">
+                  <span className="phantom-swap-number">0</span>
+                  <div className="phantom-swap-pill">
+                    <TokenIcon symbol="SOL" size={26} showSolanaBadge={false} />
+                    <strong>SOL</strong>
+                    <VerifiedBadge size={14} />
+                    <ChevronDown size={14} />
+                  </div>
+                </div>
+                <div className="phantom-swap-card-foot">
+                  <span className="phantom-swap-bal">0.04</span>
+                  <div className="phantom-swap-quick">
+                    <span className="phantom-quick-pill">50%</span>
+                    <span className="phantom-quick-pill">100%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Flip Button in between (Screenshot 3) */}
+              <div className="phantom-swap-flip-wrap">
+                <span className="phantom-swap-flip-btn">
+                  <ArrowUpDown size={18} strokeWidth={2.4} />
+                </span>
+              </div>
+
+              {/* "You Receive" Card (Screenshot 3) */}
+              <div className="phantom-swap-card">
+                <div className="phantom-swap-card-head">
+                  <span className="phantom-swap-label">You Receive</span>
+                </div>
+                <div className="phantom-swap-card-body">
+                  <span className="phantom-swap-number">0</span>
+                  <div className="phantom-swap-pill">
+                    <TokenIcon symbol="USDC" size={26} showSolanaBadge={true} />
+                    <strong>USDC</strong>
+                    <VerifiedBadge size={14} />
+                    <ChevronDown size={14} />
+                  </div>
+                </div>
+                <div className="phantom-swap-card-foot">
+                  <span className="phantom-swap-bal">88</span>
+                </div>
+              </div>
+
+              <p className="quiet jupiter-swap-hold phantom-swap-loading-msg">Connecting to Jupiter…</p>
+            </div>
+          ) : null}
           {phase === 'failed' ? <p className="quiet jupiter-swap-hold">{swapFailure({ code: 'plugin_load_failed' }).message}</p> : null}
         </div>
       ) : null}
