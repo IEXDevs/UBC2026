@@ -120,20 +120,20 @@ export async function buildJupiterSwap({
   if (result.inputMint !== inputMint || result.outputMint !== outputMint || result.inAmount !== amount
       || result.swapMode !== 'ExactIn' || result.slippageBps !== SLIPPAGE_BPS || !positiveU64(result.outAmount)
       || !positiveU64(result.otherAmountThreshold) || BigInt(result.otherAmountThreshold) > BigInt(result.outAmount)
-      || BigInt(result.otherAmountThreshold) < BigInt(result.outAmount) * 9950n / 10000n
-      || result.tipInstruction || result.otherInstructions?.length) refused();
+      || BigInt(result.otherAmountThreshold) < BigInt(result.outAmount) * 9950n / 10000n) refused('swap_quote_terms_mismatch');
+  if (result.tipInstruction || result.otherInstructions?.length) refused('swap_route_extra_instructions');
   const compute = (result.computeBudgetInstructions ?? []).map(jupiterInstruction);
   if (compute.length > 1 || compute.some(ix => !ix.programId.equals(ComputeBudgetProgram.programId)
-      || ix.data.length !== 9 || ix.data[0] !== 3)) refused();
+      || ix.data.length !== 9 || ix.data[0] !== 3)) refused('swap_route_compute_invalid');
   const swap = jupiterInstruction(result.swapInstruction);
-  if (!matchesSwapQuote(swap, taker, result)) refused();
+  if (!matchesSwapQuote(swap, taker, result)) refused('swap_route_instruction_mismatch');
   const setup = (result.setupInstructions ?? []).map(jupiterInstruction);
   const intermediateMints = intermediateRouteMints(result.routePlan);
-  if (!setup.every(ix => allowedSetup(ix, taker, nativeAccount, inputMint, outputMint, amount, intermediateMints, swap))) refused();
+  if (!setup.every(ix => allowedSetup(ix, taker, nativeAccount, inputMint, outputMint, amount, intermediateMints, swap))) refused('swap_route_setup_invalid');
   const cleanup = result.cleanupInstruction ? [jupiterInstruction(result.cleanupInstruction)] : [];
   if (cleanup.some(ix => !ix.programId.equals(TOKEN_PROGRAM_ID) || ix.data.length !== 1 || ix.data[0] !== 9
       || !ix.keys[0]?.pubkey.equals(nativeAccount) || !ix.keys[1]?.pubkey.equals(taker)
-      || !ix.keys[2]?.pubkey.equals(taker))) refused();
+      || !ix.keys[2]?.pubkey.equals(taker))) refused('swap_route_cleanup_invalid');
   const lookups = Object.entries(result.addressesByLookupTableAddress ?? {}).map(([address, contents]) => (
     new AddressLookupTableAccount({
       key: new PublicKey(address),
@@ -149,8 +149,8 @@ export async function buildJupiterSwap({
     payerKey: taker, recentBlockhash: blockhash,
     instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...compute, ...setup, swap, ...cleanup],
   }).compileToV0Message(lookups);
-  if (message.header.numRequiredSignatures !== 1) refused();
+  if (message.header.numRequiredSignatures !== 1) refused('swap_route_signers_invalid');
   const bytes = new VersionedTransaction(message).serialize();
-  if (bytes.length > 1232) refused();
+  if (bytes.length > 1232) refused('swap_route_too_large');
   return { transaction: Buffer.from(bytes).toString('base64'), minOutput: result.otherAmountThreshold };
 }

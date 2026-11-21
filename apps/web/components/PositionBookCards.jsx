@@ -45,6 +45,10 @@ export function WalletCard({ wallet }) {
             aria-label={wallet.bubbles.map(bubble => `${bubble.asset} ${bubble.valueLabel}`).join(', ')}
           >
             <defs>
+              <radialGradient id={`${gradientId}-reflection`}>
+                <stop stopColor="#f0f8ff" stopOpacity="0.62" />
+                <stop offset="100%" stopColor="#f0f8ff" stopOpacity="0" />
+              </radialGradient>
               {BUBBLE_PALETTE.map(([highlight, mid, shadow], index) => (
                 <radialGradient key={highlight} id={`${gradientId}-${index}`} cx="32%" cy="22%" r="78%">
                   <stop stopColor={highlight} />
@@ -63,6 +67,13 @@ export function WalletCard({ wallet }) {
                 >
                   <title>{`${bubble.asset} · ${bubble.valueLabel}`}</title>
                 </circle>
+                <ellipse
+                  className="book-wallet-reflection"
+                  cx={bubble.x - bubble.r * 0.28} cy={bubble.y - bubble.r * 0.56}
+                  rx={bubble.r * 0.56} ry={bubble.r * 0.19}
+                  transform={`rotate(-27 ${bubble.x - bubble.r * 0.28} ${bubble.y - bubble.r * 0.56})`}
+                  fill={`url(#${gradientId}-reflection)`}
+                />
                 {bubble.r * 2 >= bubble.asset.length * 5 + 7 && <text x={bubble.x} y={bubble.y}>{bubble.asset}</text>}
               </g>
             ))}

@@ -67,7 +67,7 @@ test('Jupiter swap quote builds use Workers-supported manual redirects and rejec
       return new Response(null, { status, headers: { location: 'https://untrusted.example' } });
     } }), { code: `jupiter_http_${status}` });
   }
-  await assert.rejects(buildJupiterSwap({ ...args, fetcher: async () => Response.json({}) }), /swap_route_refused/);
+  await assert.rejects(buildJupiterSwap({ ...args, fetcher: async () => Response.json({}) }), { code: 'swap_quote_terms_mismatch' });
 });
 
 test('Jupiter can create a wallet ATA used by an intermediate hop', async () => {
@@ -96,10 +96,10 @@ test('Jupiter can create a wallet ATA used by an intermediate hop', async () => 
   const build = result => buildJupiterSwap({ walletAddress, inputMint, outputMint, amount: quote.inAmount,
     blockhash: SystemProgram.programId.toBase58(), apiKey: 'mock-key', fetcher: async () => Response.json(result) });
   assert.equal((await build(quote)).minOutput, quote.otherAmountThreshold);
-  await assert.rejects(build({ ...quote, routePlan: [] }), { code: 'swap_route_refused' });
-  await assert.rejects(build({ ...quote, swapInstruction: { ...swapInstruction, accounts: swapInstruction.accounts.slice(0, -1) } }), { code: 'swap_route_refused' });
+  await assert.rejects(build({ ...quote, routePlan: [] }), { code: 'swap_route_setup_invalid' });
+  await assert.rejects(build({ ...quote, swapInstruction: { ...swapInstruction, accounts: swapInstruction.accounts.slice(0, -1) } }), { code: 'swap_route_setup_invalid' });
   const wrongAccount = setup.accounts.map((key, index) => index === 1 ? { ...key, pubkey: Keypair.generate().publicKey.toBase58() } : key);
-  await assert.rejects(build({ ...quote, setupInstructions: [{ ...setup, accounts: wrongAccount }] }), { code: 'swap_route_refused' });
+  await assert.rejects(build({ ...quote, setupInstructions: [{ ...setup, accounts: wrongAccount }] }), { code: 'swap_route_setup_invalid' });
 });
 
 test('x402 builds only bounded compute budget and exact USDC transfer with the sponsor fee payer', () => {

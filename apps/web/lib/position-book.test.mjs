@@ -86,3 +86,13 @@ test('wallets without positions keep their cards apart', () => {
   const [left, right] = book.wallets;
   assert.ok(right.x - left.x >= 240, `wallet roots ${right.x - left.x}px apart`);
 });
+
+test('a single large holding leaves room for its outline at every edge', () => {
+  const book = layoutPositionBook([], [], [{ id: 'main', label: 'Main' }], [
+    { walletId: 'main', asset: 'SOL', notionalMicroUsdc: '100000000' },
+  ]);
+  const wallet = book.wallets[0];
+  const [{ x, y, r }] = wallet.bubbles;
+  assert.ok(x - r >= 2 && x + r <= wallet.bubbleWidth - 2);
+  assert.ok(y - r >= 2 && y + r <= wallet.bubbleHeight - 2);
+});

@@ -2904,6 +2904,7 @@ button.wallet-export:not(:disabled):hover {
 .book-wallet-bubbles { display: block; width: 100%; }
 .book-wallet-bubble { stroke: rgba(234, 241, 250, 0.32); }
 .book-wallet-bubble:hover { stroke: rgba(234, 241, 250, 0.65); }
+.book-wallet-reflection { pointer-events: none; }
 .book-wallet-bubbles text {
   fill: #f7f9fc;
   font-size: 9px;
