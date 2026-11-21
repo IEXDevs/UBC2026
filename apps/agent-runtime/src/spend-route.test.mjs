@@ -1431,14 +1431,14 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
   assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
 });
 
-async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2000000', autoSignSwaps = () => true,
-  delegated = false, queued = true, freezeWhileSigning = false } = {}) {
+async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2000000',
+  delegated = false, queued = true, freezeWhileSigning = false, maxPerTransaction = '1200000' } = {}) {
   const keypair = Keypair.generate();
   const wallet = { id: 'w_main', ownerId: 'user_1', kind: 'main', label: 'Main', address: keypair.publicKey.toBase58(), frozen: false, provider: 'privy' };
   const sol = 'So11111111111111111111111111111111111111112';
   const grant = '34'.repeat(32);
   const grantHash = await sha256Hex(grant);
-  const usdBot = { ...bot, cap: { mode: 'limited', asset: 'USD', maxOutflow: '5000000', maxPerTransaction: '1200000' } };
+  const usdBot = { ...bot, cap: { mode: 'limited', asset: 'USD', maxOutflow: '5000000', maxPerTransaction } };
   const now = Date.now();
   const machine = new BotStateMachine();
   const intent = createLoopSwapIntent({ bot: usdBot, wallet, now, swap: { inputMint: SOLANA_USDC_MINT, outputMint: sol, inAmount: '1000000' } });
@@ -1506,7 +1506,7 @@ async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2
       }
       if (target.pathname.endsWith('/owner_state')) {
         assert.equal(target.searchParams.get('owner_id'), 'eq.user_1');
-        const value = autoSignSwaps(calls) ? JSON.stringify({ permission, ownerId: 'user_1', autoSignSwaps: true }) : permission;
+        const value = typeof permission === 'function' ? permission(calls) : permission;
         return Response.json([{ name: 'permission', value }, { name: 'reviewCap', value: savedCap }]);
       }
       if (target.pathname.endsWith('/approvals')) return new Response('', { status: 201 });
@@ -1527,12 +1527,8 @@ async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2
  * Side effects: in-memory bot DO; Jupiter, prices, Privy and the ledger are doubles.
  * Gaps: live Jupiter and Privy are not called.
  */
-test('automatic swaps retain review and desk gates and require approval without delegation', async () => {
+test('automatic swaps retain the desk gate and require delegation', async () => {
   const { calls, request, ticket, keypair } = await autoSwapSetup();
-  const over = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '1000000' })).json();
-  assert.equal(over.signed, false);
-  assert.equal(over.state, 'approval-needed');
-  assert.equal(over.failure.step, 'approval');
   const locked = await (await request({ autoSwap: true, swapTicket: ticket }, {})).json();
   assert.equal(locked.signed, false);
   assert.equal(locked.failure.code, 'desk_locked');
@@ -1543,8 +1539,6 @@ test('automatic swaps retain review and desk gates and require approval without 
   assert.equal(auto.signed, false);
   assert.equal(auto.reason, 'swap_signer_missing');
   assert.deepEqual(auto.swapDelegation, { walletAddress: keypair.publicKey.toBase58(), signerId: 'test-signer-id' });
-  const review = await (await request({ autoSwap: true, swapTicket: ticket, permission: 'review' })).json();
-  assert.equal(review.reason, 'client_sign_required');
   assert.equal(calls.signed.length, 0);
   assert.equal(calls.reserved, 0);
 });
@@ -1564,29 +1558,37 @@ for (const queued of [true, false]) test(`delegated Full ${queued ? 'queued' : '
   assert.equal(calls.broadcasts, 1);
 });
 
-test('delegated signing uses the saved permission and clamps a raised request limit', async () => {
+test('delegated signing uses the saved permission and clamps a raised Review limit', async () => {
   const denied = await autoSwapSetup({ delegated: true, queued: false, permission: 'review' });
   const forged = await (await denied.request({ autoSwap: true, swapTicket: denied.ticket })).json();
   assert.equal(forged.reason, 'swap_saved_permission_required');
   assert.equal(denied.calls.reserved, 0);
-  const limited = await autoSwapSetup({ delegated: true, queued: false, savedCap: '1000000' });
-  const raised = await (await limited.request({ autoSwap: true, swapTicket: limited.ticket, reviewCap: '900000000' })).json();
+  const limited = await autoSwapSetup({ delegated: true, queued: false, permission: 'review', savedCap: '1000000' });
+  const raised = await (await limited.request({ autoSwap: true, permission: 'review', swapTicket: limited.ticket, reviewCap: '900000000' })).json();
   assert.equal(raised.state, 'approval-needed');
   assert.equal(limited.calls.reserved, 0);
   assert.equal(limited.calls.signed.length, 0);
 });
 
-test('a saved Full permission alone cannot auto-sign or even reserve funds', async () => {
-  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, queued: false, autoSignSwaps: () => false });
-  const result = await (await request({ autoSwap: true, autoSignSwaps: true, swapTicket: ticket })).json();
-  assert.equal(result.state, 'approval-needed');
-  assert.equal(result.reason, 'swap_saved_permission_required');
-  assert.equal(calls.reserved, 0);
-  assert.equal(calls.signed.length, 0);
+test('Full ignores the Review cap and still enforces the agent budget', async () => {
+  const full = await autoSwapSetup({ delegated: true, queued: false, savedCap: '1' });
+  assert.equal((await (await full.request({ autoSwap: true, swapTicket: full.ticket, reviewCap: '1' })).json()).signed, true);
+  const limited = await autoSwapSetup({ delegated: true, queued: false, maxPerTransaction: '1000000' });
+  const result = await (await limited.request({ autoSwap: true, swapTicket: limited.ticket })).json();
+  assert.equal(result.reason, 'per-transaction');
+  assert.equal(limited.calls.reserved, 0);
 });
 
-test('turning off auto-sign while Privy signs stops broadcast', async () => {
-  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, autoSignSwaps: calls => calls.signed.length === 0 });
+test('Review signs eligible chat swaps with the saved USD threshold', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, queued: false, permission: 'review' });
+  const result = await (await request({ autoSwap: true, permission: 'review', swapTicket: ticket })).json();
+  assert.equal(result.signed, true, JSON.stringify(result));
+  assert.equal(calls.broadcasts, 1);
+});
+
+test('changing permission while Privy signs stops broadcast', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true,
+    permission: calls => calls.signed.length === 0 ? 'full' : 'ask' });
   const result = await (await request({ autoSwap: true, swapTicket: ticket })).json();
   assert.equal(result.reason, 'spend_authorization_changed');
   assert.equal(result.signed, false);

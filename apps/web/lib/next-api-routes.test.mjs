@@ -67,7 +67,7 @@ test('chat move adapter verifies the owner and sealed hold then forwards both ph
   assert.equal(calls.length, 2);
 });
 
-test('chat returns Full swap receipts, keeps the Review browser path, and offers a slide when delegation is unavailable', async t => {
+test('chat signs eligible Full and Review swaps automatically and sends other swaps to wallet approval', async t => {
   const settings = { NEXT_PUBLIC_AGENT_RUNTIME_URL: 'https://swap-runtime.invalid', META_MODEL_API_KEY: 'offline-swap-key' };
   const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
   Object.assign(process.env, settings);
@@ -87,8 +87,7 @@ test('chat returns Full swap receipts, keeps the Review browser path, and offers
     calls.push({ url: String(url), body });
     if (String(url).includes('/status')) return Response.json({ pendingSwap: { ...args, idempotencyKey } });
     assert.equal(String(url), `${settings.NEXT_PUBLIC_AGENT_RUNTIME_URL}/api/spend`, 'no model or signing provider call');
-    if (body.autoSwap && body.permission === 'full') return Response.json(fullResult, { status: fullResult.signed ? 200 : 409 });
-    if (body.autoSwap) return Response.json({ signed: false, state: 'blocked', reason: 'client_sign_required' }, { status: 409 });
+    if (body.autoSwap) return Response.json(fullResult, { status: fullResult.signed ? 200 : 409 });
     return Response.json({ swapPreview: { ticket: 'original-ticket', minOutput: '100', usdMicros: '1000000',
       inputDecimals: 6, outputDecimals: 9, expiresAt: Date.now() + 60000 } });
   });
@@ -106,33 +105,35 @@ test('chat returns Full swap receipts, keeps the Review browser path, and offers
     body: JSON.stringify({ message: 'yes', permission: 'full', grants: [hold] }),
   }), { params: { botId } });
   assert.match(await stream.text(), /"clientSwap":\{"spend":/);
-  const defaultOff = await post({ message: 'Review pending swap' });
-  assert.equal(defaultOff.clientSwap, undefined);
-  assert.equal(defaultOff.hold?.swapTicket, 'original-ticket');
+  const manual = await post({ message: 'Review pending swap', permission: 'ask' });
+  assert.equal(manual.clientSwap, undefined);
+  assert.equal(manual.hold?.swapTicket, 'original-ticket');
+  assert.match(manual.hold.prompt, /Approve in your wallet/);
   assert.equal(calls.some(call => call.body?.autoSwap === true), false);
-  const automatic = await post({ message: 'Review pending swap', autoSignSwaps: true });
-  assert.match(automatic.reply, /Submitted within your review limit: https:\/\/solscan\.io\/tx\/5+/);
+  const automatic = await post({ message: 'Review pending swap', reviewCap: '1' });
+  assert.match(automatic.reply, /Submitted automatically: https:\/\/solscan\.io\/tx\/5+/);
   assert.equal(automatic.clientSwap, undefined);
   assert.equal(automatic.hold, undefined);
-  const review = await post({ message: 'Review pending swap', permission: 'review' });
-  assert.equal(review.clientSwap?.spend.idempotencyKey, idempotencyKey, JSON.stringify(review));
-  assert.equal(review.clientSwap.spend.permission, 'review');
-  assert.equal(review.clientSwap.swapTicket, 'original-ticket');
+  const review = await post({ message: 'Review pending swap', permission: 'review', reviewCap: '1000000' });
+  assert.match(review.reply, /Submitted automatically/);
+  const over = await post({ message: 'Review pending swap', permission: 'review', reviewCap: '999999' });
+  assert.equal(over.hold?.swapTicket, 'original-ticket');
   fullResult = { signed: false, state: 'approval-needed', reason: 'swap_delegation_unavailable' };
-  const fallback = await post({ message: 'Review pending swap', autoSignSwaps: true });
+  const fallback = await post({ message: 'Review pending swap' });
   assert.equal(fallback.clientSwap, undefined);
   assert.equal(fallback.hold?.swapTicket, 'original-ticket');
   assert.match(fallback.hold.prompt, /unavailable for automatic signing/);
   const swapDelegation = { walletAddress: '11111111111111111111111111111111', signerId: 'test-privy-signer' };
   fullResult = { signed: false, state: 'blocked', reason: 'swap_signer_missing', swapDelegation };
-  const repair = await post({ message: 'Review pending swap', autoSignSwaps: true });
+  const repair = await post({ message: 'Review pending swap', permission: 'review' });
+  assert.equal(repair.clientSwap.spend.permission, 'review');
   assert.equal(repair.clientSwap.spend.idempotencyKey, idempotencyKey);
   assert.equal(repair.clientSwap.swapTicket, 'original-ticket');
   const { expiresAt, ...enrollment } = repair.clientSwap.delegation;
   assert.deepEqual(enrollment, swapDelegation);
   assert.ok(expiresAt > Date.now());
   fullResult = { ...fullResult, swapDelegation: { ...swapDelegation, signerId: '' } };
-  const invalidEnrollment = await post({ message: 'Review pending swap', autoSignSwaps: true });
+  const invalidEnrollment = await post({ message: 'Review pending swap' });
   assert.equal(invalidEnrollment.clientSwap, undefined);
   const automaticCalls = calls.filter(call => call.body?.autoSwap === true);
   assert.equal(automaticCalls.length, 5);

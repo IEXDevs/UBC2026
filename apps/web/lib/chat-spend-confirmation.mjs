@@ -49,7 +49,7 @@ export function swapHoldFromPreview(hold, preview) {
   const debit = formatBaseUnits(preview.usdMicros, 6);
   const adjustment = adjusted ? 'The wallet needs SOL for fees and account setup, so this quote uses a smaller amount. ' : '';
   const label = `${adjustment}Swap ${input} ${adjusted ? 'SOL' : hold.args.asset} for at least ${output} ${hold.args.outputAsset} before fees and account setup. The budget charge includes those costs and totals $${debit}.`;
-  return { ...hold, args: { ...hold.args, amount }, label, prompt: `${label} Slide to confirm.`, expiresAt: preview.expiresAt, swapTicket: preview.ticket };
+  return { ...hold, args: { ...hold.args, amount }, label, prompt: `${label} Approve in your wallet.`, expiresAt: preview.expiresAt, swapTicket: preview.ticket };
 }
 
 export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now()) {

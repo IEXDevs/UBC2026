@@ -72,7 +72,7 @@ export default function AgentDetail({
                 {permit.label}
               </span>
               {permit.id === 'review' && permitState.reviewCapLabel ? (
-                <span className="agent-detail-cap">≤ {permitState.reviewCapLabel} USDC</span>
+                <span className="agent-detail-cap">≤ {permitState.reviewCapLabel} USD</span>
               ) : null}
             </span>
           </span>

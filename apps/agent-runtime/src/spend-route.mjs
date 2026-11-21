@@ -84,15 +84,16 @@ async function transferDestination(env, parsed) {
   return WALLET_ADDRESS.test(address || '') && (!parsed.destination || parsed.destination === address) ? address : null;
 }
 
-async function savedFullSwapCap(env, ownerId) {
+async function savedSwapPermission(env, ownerId) {
   const state = await supabaseGet(env,
     `owner_state?owner_id=eq.${encodeURIComponent(ownerId)}&name=in.(permission,reviewCap)&select=name,value`, env.fetch);
   if (state.status !== 200 || !state.rows) return null;
-  const { permission, autoSignSwaps } = parseStoredSpendPreference(state.rows.find(row => row.name === 'permission')?.value, ownerId);
-  if (permission !== 'full' || !autoSignSwaps) return null;
+  const { permission } = parseStoredSpendPreference(state.rows.find(row => row.name === 'permission')?.value, ownerId);
+  if (permission === 'ask') return null;
   const cap = state.rows.find(row => row.name === 'reviewCap');
-  if (!cap) return '30000000'; // The existing $30 default review maximum.
-  return typeof cap.value === 'string' && /^[1-9][0-9]{0,39}$/.test(cap.value) ? cap.value : null;
+  const reviewCap = !cap ? '30000000' // The existing $30 default review maximum.
+    : typeof cap.value === 'string' && /^[1-9][0-9]{0,39}$/.test(cap.value) ? cap.value : null;
+  return { permission, reviewCap };
 }
 
 async function prepareAssetTransfer(env, parsed, wallet, destination, id, blockhash) {
@@ -277,9 +278,8 @@ async function handleSpendRequest(request, env = {}) {
     return matchesLoopSwap(pending?.intent, parsed, context, Number.isSafeInteger(env.spendNow) ? now : Date.now());
   };
   const autoSwap = raw.autoSwap === true;
-  const delegatedSwap = autoSwap && parsed.permission === 'full';
-  const reviewLoopSwap = autoSwap && loopSwap && parsed.permission === 'review';
-  if (autoSwap && (!swap || (!delegatedSwap && !reviewLoopSwap) || parsed.confirmed
+  const delegatedSwap = autoSwap && (parsed.permission === 'full' || parsed.permission === 'review');
+  if (autoSwap && (!swap || !delegatedSwap || parsed.confirmed
       || typeof raw.swapTicket !== 'string' || raw.spendAuthorization !== undefined || overrideToken !== null)) {
     return json({ error: 'invalid_auto_swap', signed: false }, 400);
   }
@@ -324,9 +324,11 @@ async function handleSpendRequest(request, env = {}) {
     if (swapOffer.requiresOwnerApproval !== false) {
       return json({ state: 'approval-needed', reason: 'swap_quote_requires_confirmation', signed: false }, 409);
     }
-    const savedCap = desk.via === 'grant' ? await savedFullSwapCap(env, ownerId) : null;
-    if (!savedCap) return json({ state: 'approval-needed', reason: 'swap_saved_permission_required', signed: false }, 409);
-    if (!reviewCap || BigInt(savedCap) < BigInt(reviewCap)) reviewCap = savedCap;
+    const saved = desk.via === 'grant' ? await savedSwapPermission(env, ownerId) : null;
+    if (saved?.permission !== parsed.permission || (parsed.permission === 'review' && !saved.reviewCap)) {
+      return json({ state: 'approval-needed', reason: 'swap_saved_permission_required', signed: false }, 409);
+    }
+    if (parsed.permission === 'review' && (!reviewCap || BigInt(saved.reviewCap) < BigInt(reviewCap))) reviewCap = saved.reviewCap;
   }
   if (signedSwap && (signedSwap.expiresAt <= now || signedSwap.expiresAt > swapOffer.expiresAt
       || signedSwap.blockhash !== swapOffer.blockhash)) {
@@ -438,14 +440,15 @@ async function handleSpendRequest(request, env = {}) {
   let browserPartial;
   async function checkDelegatedBroadcast() {
     const currentTime = Number.isSafeInteger(env.spendNow) ? now : Date.now();
-    const [latest, lock, cap] = await Promise.all([
-      loadContext(), deskSpendAllowed(env, request, ownerId, env.fetch ?? fetch, currentTime), savedFullSwapCap(env, ownerId),
+    const [latest, lock, saved] = await Promise.all([
+      loadContext(), deskSpendAllowed(env, request, ownerId, env.fetch ?? fetch, currentTime), savedSwapPermission(env, ownerId),
     ]);
     if (!latest?.bot?.enabled || latest.bot.frozen || latest.wallet?.frozen) {
       throw Object.assign(new Error('Swap stopped because the agent or wallet is unavailable or frozen'), { code: 'spend-frozen' });
     }
     if (!lock.ok || lock.via !== 'grant') throw Object.assign(new Error('Desk authorization expired'), { code: 'desk_locked' });
-    if (!cap || BigInt(cap) < BigInt(proposal.outflow) + BigInt(proposal.maxFee)
+    if (saved?.permission !== parsed.permission
+        || (parsed.permission === 'review' && (!saved.reviewCap || BigInt(saved.reviewCap) < BigInt(proposal.outflow) + BigInt(proposal.maxFee)))
         || latest.bot.ownerId !== ownerId || latest.bot.policyVersion !== context.bot.policyVersion
         || latest.bot.walletId !== context.bot.walletId
         || latest.wallet?.ownerId !== ownerId || latest.wallet.id !== context.wallet.id
@@ -622,6 +625,7 @@ async function handleSpendRequest(request, env = {}) {
       ownerPermission: assetTransfer && !autoSwap ? 'ask' : parsed.permission,
       confirmed: autoSwap ? false : parsed.confirmed,
       reviewCap,
+      fullSwap: delegatedSwap && parsed.permission === 'full',
       quote: parsed.quote,
       signSolana,
       beforeSign,
