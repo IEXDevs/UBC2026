@@ -54,14 +54,7 @@ test('identity token patch replaces the published call and the session-token cal
   }
 });
 
-test('the browser wallet signer uses the same-owner identity token after Privy rejects the access JWT', async () => {
-  const rejected = Object.assign(new Error('Wallet operation failed'), {
-    cause: { status: 400, data: { code: 'invalid_data', error: 'Invalid JWT token provided' } },
-  });
-  const token = (sub, ttl = 90) => `header.${Buffer.from(JSON.stringify({ sub, iss: 'privy.io',
-    exp: Math.floor(Date.now() / 1000) + ttl })).toString('base64url')}.signature`;
-  const accessToken = token('did:privy:owner', 60);
-  const identity = token('did:privy:owner');
+test('browser signing and enrollment use the wallet token and preserve Privy MFA errors', async () => {
   for (const file of [SIGNER_ESM, SIGNER_CJS]) {
     const patched = patchPrivyWalletSignerToken(readFileSync(file, 'utf8'));
     assert.equal(patched, patchPrivyWalletSignerToken(patched));
@@ -70,25 +63,29 @@ test('the browser wallet signer uses the same-owner identity token after Privy r
     assert.ok(start > 0);
     const sign = new Function(`${patched.slice(start)}; return maelstromSignWithUserSigner;`)();
     const request = { message: new Uint8Array([1, 2, 3]), targetAppId: 'app' };
-    let refreshedToken = identity;
-    const client = { apiUrl: 'https://desk.example/api/privy-auth', getAccessToken: async () => accessToken,
-      updateUserAndIdToken: async () => { client.maelstromIdentityToken = refreshedToken; } };
+    let walletToken = null;
+    const client = {
+      apiUrl: 'https://desk.example/api/privy-auth',
+      getAccessToken: async () => 'login-jwt',
+      getPrivyAccessToken: async options => {
+        assert.equal(options.disableAutoRefresh, true);
+        return walletToken;
+      },
+    };
     const calls = [];
     const proxy = { signWithUserSigner: async input => {
       calls.push(input);
-      if (input.accessToken === accessToken) throw rejected;
       return { signature: 'signature' };
     } };
+    await assert.rejects(sign(client, proxy, request), { code: 'wallet_signing_session_missing' });
+    assert.deepEqual(calls, []);
+    walletToken = 'wallet-jwt';
     assert.deepEqual(await sign(client, proxy, request), { signature: 'signature' });
-    assert.deepEqual(calls, [{ accessToken, ...request }, { accessToken: identity, ...request }]);
-    for (const unsuitable of [token('did:privy:other'), token('did:privy:owner', -1), null]) {
-      refreshedToken = unsuitable;
-      calls.length = 0;
-      await assert.rejects(sign(client, proxy, request), error => error === rejected);
-      assert.equal(calls.length, 1);
-    }
+    assert.deepEqual(calls, [{ accessToken: 'wallet-jwt', ...request }]);
+    assert.deepEqual(await sign({ apiUrl: 'https://auth.privy.io', getAccessToken: client.getAccessToken }, proxy, request),
+      { signature: 'signature' });
+    assert.deepEqual(calls[1], { accessToken: 'login-jwt', ...request });
     const mfa = Object.assign(new Error('MFA required'), { code: 'mfa_required' });
-    await assert.rejects(sign({ ...client, updateUserAndIdToken: () => assert.fail('MFA must be handled by Privy') },
-      { signWithUserSigner: async () => { throw mfa; } }, request), error => error === mfa);
+    await assert.rejects(sign(client, { signWithUserSigner: async () => { throw mfa; } }, request), error => error === mfa);
   }
 });

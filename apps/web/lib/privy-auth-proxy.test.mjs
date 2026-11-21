@@ -15,6 +15,7 @@ import {
 const REFRESH = 'refresh-token-value';
 const NEXT = 'rotated-refresh-token';
 const ACCESS = 'header.payload.signature';
+const WALLET_ACCESS = 'header.wallet-payload.signature';
 
 test('the Next route forwards Privy’s signed wallet enrollment PATCH unchanged', async t => {
   const walletId = 'wallet-123456';
@@ -203,6 +204,34 @@ test('a later refresh uses the HttpOnly cookie and not page storage', async () =
   assert.equal(refresh.headers.getSetCookie().some((cookie) => cookie.startsWith(`${PRIVY_SESSION_MARKER}=1`)), true);
   assert.equal(bodyWithStoredRefresh('/api/v1/sessions', 'POST', '{"refresh_token":"stale"}', setCookie).includes(REFRESH), true);
   assert.equal(bodyWithStoredRefresh('/api/v1/sessions', 'POST', '{"refresh_token":"stale"}', setCookie).includes('stale'), false);
+});
+
+test('reload uses the Privy wallet token with the refresh token', async () => {
+  const origin = 'https://app.example/api/privy-auth';
+  const loginPath = '/api/v1/oauth/authenticate';
+  const refreshPath = '/api/v1/sessions';
+  const login = await proxyPrivyAuth(requestFor(origin + loginPath), loginPath, async () =>
+    Response.json({ token: ACCESS, privy_access_token: WALLET_ACCESS, refresh_token: REFRESH }));
+  const cookies = login.headers.getSetCookie();
+  assert.ok(cookies.some(cookie => cookie.startsWith(`${PRIVY_ACCESS_COOKIE}=${WALLET_ACCESS}; HttpOnly;`)));
+  assert.deepEqual(await login.json(), { token: ACCESS, privy_access_token: WALLET_ACCESS });
+
+  const cookie = cookies.map(header => header.split(';')[0]).join('; ');
+  const refresh = await proxyPrivyAuth(requestFor(origin + refreshPath, { cookie }), refreshPath, async (_url, init) => {
+    assert.deepEqual(JSON.parse(init.body), { refresh_token: REFRESH });
+    assert.equal(init.headers.get('authorization'), `Bearer ${WALLET_ACCESS}`);
+    return Response.json({ token: null, privy_access_token: WALLET_ACCESS, refresh_token: NEXT, session_update_action: 'ignore' });
+  });
+  assert.deepEqual(await refresh.json(), { token: null, privy_access_token: WALLET_ACCESS, session_update_action: 'ignore' });
+  assert.ok(refresh.headers.getSetCookie().some(header => header.startsWith(`${PRIVY_ACCESS_COOKIE}=${WALLET_ACCESS};`)));
+
+  const otherTab = await proxyPrivyAuth(requestFor(origin + refreshPath, {
+    cookie, headers: { authorization: `Bearer ${ACCESS}` },
+  }), refreshPath, async (_url, init) => {
+    assert.equal(init.headers.get('authorization'), `Bearer ${ACCESS}`);
+    return Response.json({ token: ACCESS, refresh_token: NEXT, session_update_action: 'ignore' });
+  });
+  assert.ok(otherTab.headers.getSetCookie().every(header => !header.startsWith(`${PRIVY_ACCESS_COOKIE}=`)));
 });
 
 /**

@@ -116,8 +116,8 @@ export async function signSelectedWalletTransaction({ from, transaction, signer,
     let code = 'client_sign_failed';
     if (causes.some(item => item?.code === 4001 || ['user_rejected', 'user_cancelled'].includes(item?.code)
         || /^(user (rejected|cancelled)|request rejected by user)/i.test(item?.message ?? ''))) code = 'client_sign_rejected';
-    else if (status === 401 || causes.some(item => ['invalid_jwt', 'missing_auth_token'].includes(item?.code)
-        || /invalid jwt token provided/i.test(item?.message ?? item?.error ?? ''))) code = 'client_sign_session_required';
+    else if (status === 401 || causes.some(item => ['invalid_jwt', 'missing_auth_token', 'wallet_signing_session_missing'].includes(item?.code)
+        || /invalid jwt token provided|privy wallet session expired/i.test(item?.message ?? item?.error ?? ''))) code = 'client_sign_session_required';
     else if (causes.some(item => item?.code === 'policy_violation')) code = 'wallet_policy_rejected';
     throw Object.assign(new Error(code), { code, ...(status ? { signingHttpStatus: status } : {}) });
   }

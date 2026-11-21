@@ -38,8 +38,12 @@ const REPLACEMENTS = Object.freeze([
     REFRESH_GUARD,
   ],
   [
-    '"ignore"===e.session_update_action&&(e.token&&(',
-    '"ignore"===e.session_update_action&&(this.client?.useServerCookies===!0&&this.storeRefreshToken(null),e.token&&(',
+    '"ignore"===e.session_update_action&&(e.token&&(this.storeCustomerAccessToken(e.token),this.storePrivyAccessToken(e.privy_access_token))',
+    '"ignore"===e.session_update_action&&(this.client?.useServerCookies===!0?maelstromStoreRefreshedAccessTokens(this,e):e.token&&(this.storeCustomerAccessToken(e.token),this.storePrivyAccessToken(e.privy_access_token))',
+  ],
+  [
+    '"ignore"===e.session_update_action&&(this.client?.useServerCookies===!0&&this.storeRefreshToken(null),e.token&&(this.storeCustomerAccessToken(e.token),this.storePrivyAccessToken(e.privy_access_token))',
+    '"ignore"===e.session_update_action&&(this.client?.useServerCookies===!0?maelstromStoreRefreshedAccessTokens(this,e):e.token&&(this.storeCustomerAccessToken(e.token),this.storePrivyAccessToken(e.privy_access_token))',
   ],
   [
     'getToken(e){try{let t=B.get(e);return"string"==typeof t?St.throwIfNotWellFormedJwt(t):null}',
@@ -194,6 +198,13 @@ function maelstromWalletRpcClient(client, getLegacyClient, ApiError) {
   return client;
 }
 
+// Privy can return either access token by itself when it leaves a session active.
+function maelstromStoreRefreshedAccessTokens(session, response) {
+  session.storeRefreshToken(null);
+  if (response.token) session.storeCustomerAccessToken(response.token);
+  if (response.privy_access_token) session.storePrivyAccessToken(response.privy_access_token);
+}
+
 export function patchPrivyCookieSession(source) {
   let next = String(source);
   for (const [from, to] of REPLACEMENTS) {
@@ -203,6 +214,9 @@ export function patchPrivyCookieSession(source) {
   if (!next.includes('?"https://auth.privy.io":')) next = rewriteIframeOrigin(next);
   if (next.includes('maelstromWalletRpcClient(new ') && !next.includes('function maelstromWalletRpcClient(')) {
     next += `\n${maelstromWalletRpcClient.toString()}\n`;
+  }
+  if (next.includes('maelstromStoreRefreshedAccessTokens(this,e)') && !next.includes('function maelstromStoreRefreshedAccessTokens(')) {
+    next += `\n${maelstromStoreRefreshedAccessTokens.toString()}\n`;
   }
   return next;
 }
