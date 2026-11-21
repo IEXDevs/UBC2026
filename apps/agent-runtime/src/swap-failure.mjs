@@ -1,4 +1,4 @@
-import { swapSimulationDetails } from '@ubc2026/wallets/swap-diagnostics';
+import { swapSetupNeedsSol, swapSimulationDetails } from '@ubc2026/wallets/swap-diagnostics';
 
 const FAILURES = {
   client_sign_required: ['client signing', 'Approve this swap in the browser with the selected wallet.'],
@@ -92,7 +92,10 @@ export function swapFailure(result = {}) {
   const instruction = [result.simulationReason, result.error].find(value => /^instruction_[0-9]+_(?:[A-Za-z]{1,64}|custom_[0-9]+|unknown)$/.test(value ?? ''));
   if (instruction) {
     const details = swapSimulationDetails(result.simulationDetails ?? result.failure?.simulationDetails);
-    const lines = [`Swap — simulation: A Solana instruction failed before broadcast. [${instruction}]`];
+    const reason = instruction.endsWith('_custom_1') && swapSetupNeedsSol(details)
+      ? 'The sending wallet did not have enough SOL to create a token account for this route. The swap stopped before broadcast.'
+      : 'A Solana instruction failed before broadcast.';
+    const lines = [`Swap — simulation: ${reason} [${instruction}]`];
     if (details?.instructionProgram) lines.push(`Instruction program ${details.instructionProgram}.`);
     if (details) lines.push(...details.logs);
     return { code: instruction, step: 'simulation', message: lines.join('\n'), ...(details ? { simulationDetails: details } : {}) };

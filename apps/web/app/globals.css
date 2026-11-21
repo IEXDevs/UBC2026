@@ -2902,18 +2902,17 @@ button.wallet-export:not(:disabled):hover {
 .book-wallet-head b { flex: none; }
 .book-wallet-surface [data-slot="card-description"] { color: #a3a3a3; font-size: 10px; line-height: 1.2; }
 .book-wallet-bubbles { display: block; width: 100%; }
+.book-wallet-bubble { stroke: rgba(234, 241, 250, 0.32); }
+.book-wallet-bubble:hover { stroke: rgba(234, 241, 250, 0.65); }
 .book-wallet-bubbles text {
-  fill: #fff;
+  fill: #f7f9fc;
   font-size: 9px;
   font-weight: 600;
+  filter: drop-shadow(0 1px 1px rgba(8, 12, 20, 0.56));
   dominant-baseline: central;
   text-anchor: middle;
   pointer-events: none;
 }
-.book-wallet-tone-0 { fill: #345a82; }
-.book-wallet-tone-1 { fill: #56619a; }
-.book-wallet-tone-2 { fill: #29665e; }
-.book-wallet-tone-3 { fill: #795930; }
 
 .book-account-surface {
   width: 148px;

@@ -43,3 +43,17 @@ test('swap diagnostics survive a failed runtime response and appear in plain cha
   assert.ok(message.includes(`Instruction program ${program}.\n${log}`));
   assert.doesNotMatch(message, /secret/);
 });
+
+test('an ATA setup failure identifies a System Program SOL shortfall', () => {
+  const instructionProgram = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+  const fundingLog = 'Program log: Transfer: insufficient lamports 1100000, need 2039280';
+  const systemLog = 'Program 11111111111111111111111111111111 failed: custom program error: 0x1';
+  const setupLog = `Program ${instructionProgram} failed: custom program error: 0x1`;
+  const error = 'instruction_6_custom_1';
+  const failure = swapFailure({ error, simulationDetails: { instructionProgram, logs: [fundingLog, systemLog, setupLog] } });
+  assert.match(failure.message, /did not have enough SOL to create a token account/);
+  assert.ok(failure.message.includes(fundingLog));
+  assert.equal(spendFailureMessage({ error, failure }), failure.message);
+  const ambiguous = swapFailure({ error, simulationDetails: { instructionProgram, logs: [fundingLog, setupLog] } });
+  assert.doesNotMatch(ambiguous.message, /enough SOL|insufficient lamports/);
+});
