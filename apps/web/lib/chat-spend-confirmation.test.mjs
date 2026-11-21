@@ -71,7 +71,7 @@ test('Laso preparation needs no slide; its ticket-bound purchase does, and retur
   const ticket = `payload.${'a'.repeat(64)}`;
   const args = { botId, action: 'x402', amount: '10000000', asset: 'USDC', lasoTicket: ticket };
   const hold = sealAssetSpendHold(toolAccessRequest('full', 'request_spend', args), context, 1000);
-  assert.match(hold.label, /Buy a Laso.*\$10/);
+  assert.match(hold.label, /Buy with Laso.*\$10/);
   assert.equal(hold.args.lasoTicket, ticket);
   const changed = await resumeAssetSpend({ ...hold, args: { ...args, lasoTicket: 'changed' } }, context, () => assert.fail('changed ticket invoked'), 2000);
   assert.match(changed.text, /invalid or expired/);
@@ -83,10 +83,14 @@ test('Laso preparation needs no slide; its ticket-bound purchase does, and retur
   }, 2000);
   assert.match(reply.text, /Laso card card_123: \$10, pending/);
   assert.equal(reply.claimUrl, claimUrl);
+  assert.equal(reply.lasoCard.id, 'card_123');
+  assert.equal(reply.lasoCard.number, '•••• •••• •••• ••••');
+  assert.equal(reply.lasoCard.cvv, '•••');
+  assert.equal(reply.lasoCard.revealed, false);
   assert.equal(JSON.stringify(reply.activity).includes('owner-only'), false);
   assert.equal(reply.text.includes('owner-only'), false);
   const failed = await resumeAssetSpend(hold, context, async () => ({ error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' }), 2000);
-  assert.match(failed.text, /insufficient_funds/);
+  assert.match(failed.text, /does not have enough USDC/);
 });
 
 test('USDC swaps display confirmed minimum output and bind the quote ticket to the slide', async () => {
@@ -108,6 +112,25 @@ test('USDC swaps display confirmed minimum output and bind the quote ticket to t
   assert.equal(confirmed.idempotencyKey, sealed.idempotencyKey);
   const failed = await resumeAssetSpend(sealed, context, async () => ({ error: 'simulation_failed', simulationReason: 'insufficient_funds' }), 2000);
   assert.match(failed.text, /Swap — simulation:.*\[insufficient_funds\]/);
+});
+
+test('a reduced SOL quote binds a fresh slide to the displayed smaller amount', async () => {
+  const args = { botId, action: 'swap', asset: 'SOL', outputAsset: 'USDC', amount: '100000000' };
+  const hold = toolAccessRequest('full', 'request_spend', args);
+  const preview = { inputDecimals: 9, outputDecimals: 6, inputAmount: '95970720', minOutput: '9000000',
+    usdMicros: '9801500', expiresAt: 2500, ticket: 'reduced-swap-ticket' };
+  const quoted = swapHoldFromPreview(hold, preview);
+  assert.match(quoted.label, /fees and account setup.*Swap 0\.09597072 SOL/);
+  assert.equal(quoted.args.amount, preview.inputAmount);
+  assert.equal(swapHoldFromPreview(hold, { ...preview, inputAmount: '100000001' }), null);
+  assert.equal(swapHoldFromPreview({ ...hold, idempotencyKey: 'loop_swap_test' }, preview), null);
+  const sealed = sealAssetSpendHold(quoted, context, 1000);
+  const edited = await resumeAssetSpend({ ...sealed, args }, context, () => assert.fail('unexpected spend'), 2000);
+  assert.match(edited.text, /invalid or expired/);
+  await resumeAssetSpend(sealed, context, async (_tool, terms) => {
+    assert.equal(terms.amount, preview.inputAmount);
+    return { signed: false, error: 'desk_lock_unavailable' };
+  }, 2000);
 });
 
 test('a slide submits the original SOL payment directly and returns its Solscan receipt', async () => {

@@ -150,14 +150,17 @@ test('owner browser authorization signs legacy multi-signer and v0 messages with
   }
 });
 
-test('swap preparation derives balances from requested RPC account snapshots, not transaction metadata', async () => {
-  const signer = Keypair.generate().publicKey;
+test('delegated swap signing uses only the exact transaction verified by RPC account snapshots', async () => {
+  const signerKey = Keypair.generate();
+  const signer = signerKey.publicKey;
+  const signerId = 'test-delegated-signer';
+  const wallet = { ...createMainWallet({ ownerId: baseBot.ownerId, address: signer.toBase58(), id: walletId }), privyWalletId: walletId };
+  const bot = { ...baseBot, walletId };
   const tokenAccount = Keypair.generate().publicKey;
   const mint = new PublicKey(address);
   const transaction = Buffer.from(new VersionedTransaction(new TransactionMessage({
     payerKey: signer, recentBlockhash: SystemProgram.programId.toBase58(),
-    instructions: [new TransactionInstruction({ programId: SystemProgram.programId,
-      keys: [{ pubkey: signer, isSigner: true, isWritable: true }, { pubkey: tokenAccount, isSigner: false, isWritable: true }], data: Buffer.alloc(0) })],
+    instructions: [SystemProgram.transfer({ fromPubkey: signer, toPubkey: tokenAccount, lamports: 10_000_000 })],
   }).compileToV0Message()).serialize()).toString('base64');
   const account = amount => {
     const data = Buffer.alloc(165);
@@ -167,12 +170,39 @@ test('swap preparation derives balances from requested RPC account snapshots, no
     return { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280, data: [data.toString('base64'), 'base64'] };
   };
   let missing = false;
+  let enrolled = true;
+  let lookupStatus = 200;
+  let signMode = 'valid';
+  let clock = 1_000;
   let simulationError = null;
   const system = SystemProgram.programId.toBase58();
   const token = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-  const failureLogs = [`Program ${token} failed: custom program error: 0x1`, `Program ${system} failed: custom program error: 0x1`];
+  const failureLogs = [
+    'Program log: Transfer: insufficient lamports 9000000, need 10000000',
+    `Program ${token} failed: custom program error: 0x1`, `Program ${system} failed: custom program error: 0x1`,
+  ];
   const calls = [];
-  const fetcher = async (_url, init) => {
+  const fetcher = async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === `/v1/wallets/${walletId}`) {
+      assert.equal(init.headers['privy-authorization-signature'], undefined);
+      if (lookupStatus !== 200) return Response.json({ error: 'private lookup detail' }, { status: lookupStatus });
+      return Response.json({ id: walletId, address: wallet.address, chain_type: 'solana',
+        additional_signers: [{ signer_id: enrolled ? signerId : 'other-configured-signer' }] });
+    }
+    if (path === `/v1/wallets/${walletId}/rpc`) {
+      calls.push('privySign');
+      assert.ok(init.headers['privy-authorization-signature']);
+      assert.equal(JSON.parse(init.body).method, 'signTransaction');
+      assert.equal(JSON.parse(init.body).params.transaction, transaction);
+      if (signMode === 'denied') return Response.json({}, { status: 401 });
+      const signed = VersionedTransaction.deserialize(Buffer.from(transaction, 'base64'));
+      if (signMode === 'changed') signed.message.recentBlockhash = signer.toBase58();
+      if (signMode !== 'unsigned') signed.sign([signerKey]);
+      if (signMode === 'late') clock = 2_000;
+      return Response.json({ data: { signed_transaction: Buffer.from(signed.serialize()).toString('base64') } });
+    }
+    assert.equal(url, rpcUrl);
     const { method, params } = JSON.parse(init.body);
     calls.push(method);
     let result;
@@ -186,18 +216,56 @@ test('swap preparation derives balances from requested RPC account snapshots, no
         err: simulationError, accounts: missing ? null : [{ lamports: 989995000 }, account('1000000'), null],
         logs: ['Program log: https://rpc.invalid/private-key', 'Program data: private-data', ...failureLogs],
       } };
+    } else if (method === 'sendTransaction') {
+      const sent = VersionedTransaction.deserialize(Buffer.from(params[0], 'base64'));
+      assert.deepEqual(sent.message.serialize(), VersionedTransaction.deserialize(Buffer.from(transaction, 'base64')).message.serialize());
+      assert.ok(sent.signatures[0].some(byte => byte !== 0));
+      result = txSignature;
     } else assert.fail(`unexpected RPC ${method}`);
     return Response.json({ jsonrpc: '2.0', id: 1, result });
   };
-  const privy = client({ fetcher });
+  const privy = client({ fetcher, signerId, authorizationKey, now: () => clock });
   const intent = { transaction, walletAddress: signer.toBase58(), inputMint: 'So11111111111111111111111111111111111111112', outputMint: address, amount: '10000000', minOutput: '950000' };
   const prepared = await privy.prepareSolanaSwap(intent);
   assert.equal(prepared.maxSolCost, '5000');
   assert.equal(calls.includes('sendTransaction'), false);
+  assert.deepEqual(await privy.inspectSwapDelegation({ bot, wallet }), { ready: true });
+  enrolled = false;
+  assert.deepEqual(await privy.inspectSwapDelegation({ bot, wallet }), {
+    reason: 'swap_signer_missing', delegation: { walletAddress: wallet.address, signerId },
+  });
+  assert.deepEqual(await privy.inspectSwapDelegation({ bot, wallet: { ...wallet, spendable: false } }), {
+    reason: 'swap_wallet_not_delegatable',
+  });
+  lookupStatus = 401;
+  const deniedLookup = await privy.inspectSwapDelegation({ bot, wallet });
+  assert.equal(deniedLookup.reason, 'swap_wallet_lookup_failed');
+  assert.equal(deniedLookup.privyFailure.status, 401);
+  assert.equal(deniedLookup.delegation, undefined);
+  lookupStatus = 200;
+  enrolled = true;
+  const signSwap = (prepared, checkPermission = async () => {}) =>
+    privy.signPreparedSolanaSwap({ bot, wallet, prepared, expiresAt: 2_000, checkPermission });
+  await assert.rejects(signSwap({ ...prepared }), { code: 'simulation_required' });
+  assert.equal(calls.includes('privySign'), false);
+  assert.deepEqual(await signSwap(prepared), { cluster: 'mainnet-beta', signature: txSignature });
+  await assert.rejects(signSwap(prepared), { code: 'simulation_required' });
+  await assert.rejects(signSwap(await privy.prepareSolanaSwap(intent), async () => {
+    assert.equal(calls.at(-2), 'privySign');
+    throw Object.assign(new Error('frozen during signing'), { code: 'spend-frozen' });
+  }), { code: 'spend-frozen' });
+  for (const [mode, code] of [['changed', 'transaction_mismatch'], ['unsigned', 'transaction_mismatch'],
+    ['denied', 'wallet_authorization_required'], ['late', 'swap_quote_expired']]) {
+    signMode = mode;
+    await assert.rejects(signSwap(await privy.prepareSolanaSwap(intent)), { code });
+  }
+  assert.equal(calls.filter(method => method === 'sendTransaction').length, 1);
+  assert.equal(calls.filter(method => method === 'privySign').length, 6);
   simulationError = { InstructionError: [0, { Custom: 1 }] };
   await assert.rejects(privy.prepareSolanaSwap(intent), error => {
     assert.equal(error.code, 'simulation_failed');
     assert.equal(error.simulationReason, 'instruction_0_custom_1');
+    assert.equal(error.solWrapReached, true);
     assert.deepEqual(error.simulationDetails, { instructionProgram: system, logs: failureLogs });
     return true;
   });
@@ -208,8 +276,59 @@ test('swap preparation derives balances from requested RPC account snapshots, no
   missing = true;
   await assert.rejects(privy.prepareSolanaSwap(intent), { code: 'swap_simulation_unavailable' });
   assert.equal(swapAccountSnapshot(null, signer.toBase58()), null);
-  assert.deepEqual(swapAccountSnapshot([{ lamports: 1 }, null], signer.toBase58()), { lamports: 1, tokens: [] });
+  assert.deepEqual(swapAccountSnapshot([{ lamports: 1 }, null], signer.toBase58()), { lamports: 1, tokens: [], accountRent: '0' });
   assert.equal(swapAccountSnapshot([{ lamports: 1 }, { ...account('1'), data: ['bad', 'base64'] }], signer.toBase58()), null);
+});
+
+test('SOL-output swaps count newly created wallet token account rent against the approved cost', async () => {
+  const payer = Keypair.generate().publicKey;
+  const wallet = payer.toBase58();
+  const token = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+  const associated = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+  const intermediate = Keypair.generate().publicKey;
+  const [created] = PublicKey.findProgramAddressSync([payer.toBuffer(), token.toBuffer(), intermediate.toBuffer()], associated);
+  const source = Keypair.generate().publicKey;
+  const transaction = Buffer.from(new VersionedTransaction(new TransactionMessage({
+    payerKey: payer, recentBlockhash: SystemProgram.programId.toBase58(),
+    instructions: [new TransactionInstruction({ programId: associated, data: Buffer.from([1]), keys:
+      [payer, created, payer, intermediate, SystemProgram.programId, token, source].map((pubkey, index) => ({
+        pubkey, isSigner: index === 0, isWritable: [0, 1, 6].includes(index),
+      })) })],
+  }).compileToV0Message()).serialize()).toString('base64');
+  const rent = 2039280;
+  const fee = 5000;
+  const before = 100_000_000;
+  let accountExists = false;
+  let retained = 0n;
+  const tokenAccount = (mint, amount) => {
+    const data = Buffer.alloc(165);
+    mint.toBuffer().copy(data, 0);
+    payer.toBuffer().copy(data, 32);
+    data.writeBigUInt64LE(amount, 64);
+    return { owner: token.toBase58(), lamports: rent, data: [data.toString('base64'), 'base64'] };
+  };
+  const snapshot = (addresses, after) => addresses.map(key => {
+    if (key === wallet) return { lamports: after ? before + 10_000_000 - rent - fee : before };
+    if (key === source.toBase58()) return tokenAccount(new PublicKey(address), after ? 0n : 1_000_000n);
+    if (key === created.toBase58() && (after || accountExists)) return tokenAccount(intermediate, after ? retained : 0n);
+    return null;
+  });
+  const privy = client({ fetcher: async (_url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+    if (method === 'getMultipleAccounts') return Response.json({ result: { context: { slot: 42 }, value: snapshot(params[0], false) } });
+    if (method === 'getFeeForMessage') return Response.json({ result: { value: fee } });
+    assert.equal(method, 'simulateTransaction');
+    return Response.json({ result: { value: { err: null, accounts: snapshot(params[1].accounts.addresses, true) } } });
+  } });
+  const intent = { transaction, walletAddress: wallet, inputMint: address, outputMint: 'So11111111111111111111111111111111111111112',
+    amount: '1000000', minOutput: '9950000' };
+  assert.equal((await privy.prepareSolanaSwap(intent)).maxSolCost, String(rent + fee));
+  retained = 1n;
+  await assert.rejects(privy.prepareSolanaSwap(intent), { simulationReason: 'swap_other_token_changed' });
+  retained = 0n;
+  accountExists = true;
+  await assert.rejects(privy.prepareSolanaSwap(intent), { simulationReason: 'swap_output_below_minimum' });
 });
 
 test('x402 partial signing binds the simulated message and leaves the facilitator signature empty without broadcasting', async () => {
@@ -235,11 +354,36 @@ test('x402 partial signing binds the simulated message and leaves the facilitato
       return Response.json({ data: { signed_transaction: Buffer.from(tx.serialize()).toString('base64'), encoding: 'base64' } });
     }
     if (req.method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+    if (req.method === 'getTokenAccountsByOwner') {
+      const listed = mode === 'listed-source' ? [{
+        pubkey: built.sourceTokenAccount,
+        account: { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: { parsed: { type: 'account', info: {
+          owner: wallet.address, mint: accepted.asset, state: 'initialized', tokenAmount: { amount: '10000000', decimals: 6 },
+        } } } },
+      }] : [];
+      return Response.json({ result: { value: listed } });
+    }
     if (req.method === 'getAccountInfo') {
       const source = req.params[0] === built.sourceTokenAccount;
-      return Response.json({ result: { value: mode === (source ? 'source-missing' : 'recipient-missing') ? null : {
+      if (source && mode === 'source-base64') {
+        const bytes = Buffer.alloc(165);
+        bytes.set(new PublicKey(accepted.asset).toBytes(), 0);
+        bytes.set(new PublicKey(wallet.address).toBytes(), 32);
+        bytes.writeBigUInt64LE(10000000n, 64);
+        bytes[108] = 1;
+        return Response.json({ result: { value: {
+          owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: [bytes.toString('base64'), 'base64'],
+        } } });
+      }
+      const missing = (source && (mode === 'listed-source' || mode === 'source-missing')) || (!source && mode === 'recipient-missing');
+      return Response.json({ result: { value: missing ? null : {
         owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-        data: { parsed: { type: 'account', info: { owner: source ? wallet.address : mode === 'wrong-recipient' ? wallet.address : payTo, mint: accepted.asset, state: 'initialized' } } },
+        data: { parsed: { type: 'account', info: {
+          owner: source ? wallet.address : mode === 'wrong-recipient' ? wallet.address : payTo,
+          mint: accepted.asset,
+          state: mode === 'source-open' && source ? undefined : 'initialized',
+          ...(source && mode === 'source-short' ? { tokenAmount: { amount: '1000000', decimals: 6 } } : {}),
+        } } },
       } } });
     }
     assert.equal(req.method, 'simulateTransaction', 'must never broadcast');
@@ -272,6 +416,17 @@ test('x402 partial signing binds the simulated message and leaves the facilitato
   for (mode of ['changed', 'sponsor-signed', 'invalid-signature']) {
     await assert.rejects(privy.signPreparedSolanaX402Payment({ bot, wallet, prepared: await prepare() }), { code: 'transaction_mismatch' });
   }
+  for (const found of ['source-base64', 'source-open', 'listed-source']) {
+    mode = found;
+    assert.equal((await prepare()).transaction, built.transaction);
+  }
+  mode = 'listed-source';
+  assert.deepEqual(await privy.listSolanaUsdcAccounts({ address: wallet.address }), [{ address: built.sourceTokenAccount, amount: '10000000' }]);
+  mode = 'ok';
+  assert.deepEqual(await privy.listSolanaUsdcAccounts({ address: wallet.address }), []);
+  mode = 'source-short';
+  await assert.rejects(prepare(), error => error.code === 'simulation_failed' && error.simulationReason === 'insufficient_funds' && error.usdcBalance === '1000000');
+  mode = 'ok';
   const before = signing;
   for (const [bad, reason] of [['recipient-missing', 'recipient_account_not_found'], ['source-missing', 'source_account_not_found'],
     ['wrong-recipient', 'recipient_account_not_found'], ['simulation-error', 'instruction_2_custom_1']]) {

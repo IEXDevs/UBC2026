@@ -62,7 +62,6 @@ export default function RecallSearch({ query, hits = [], onQuery, onSelect }) {
         '--gs-text': '#f5f5f5',
         '--gs-radius': '10px',
         '--gs-inner-radius': '6px',
-        '--gs-chip': '36px',
         '--gs-row': '32px',
         '--gs-font': '13px',
         '--gs-menu-w': '100%',

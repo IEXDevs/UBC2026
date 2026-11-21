@@ -102,7 +102,7 @@ export default function PortfolioGraph({
                       onClick={() => onRemove?.(wallet.address)}
                       disabled={removing === wallet.address}
                     >
-                      Remove
+                      {removing === wallet.address ? 'Unlinking' : 'Unlink'}
                     </button>
                   )}
                 </div>

@@ -21,7 +21,7 @@ import './PromptBar.css';
 import GlideSelect from './GlideSelect';
 import { PERMISSIONS, dollarsToBaseUnits, permissionById } from '../lib/spend-permission.mjs';
 import { shouldClosePermitMenu } from './permit-menu.mjs';
-import { exclusiveBarMenu } from '../lib/bar-menu.mjs';
+import { exclusiveBarMenu, menuViewportShift } from '../lib/bar-menu.mjs';
 import { filterMentionSuggestions } from '../lib/mention-handles.mjs';
 
 const ARROW_UP = [12, 4.5, 18.5, 11, 14.25, 11, 14.25, 19.5, 9.75, 19.5, 9.75, 11, 5.5, 11];
@@ -211,7 +211,7 @@ function PermitMenu({ selected, reviewCapDollars, onPermissionChange, onReviewCa
                     inputMode="decimal"
                     autoComplete="off"
                     value={capDraft}
-                    aria-label="Review by AI threshold in USDC"
+                    aria-label="Review by AI threshold in USD"
                     aria-invalid={capInvalid || undefined}
                     onChange={(event) => {
                       setCapDraft(event.target.value);
@@ -223,10 +223,10 @@ function PermitMenu({ selected, reviewCapDollars, onPermissionChange, onReviewCa
                       saveCap();
                     }}
                   />
-                  <span aria-hidden="true">USDC</span>
+                  <span aria-hidden="true">USD</span>
                 </div>
               ) : reviewCapDollars ? (
-                <span className="permit-cap-value" title={`${reviewCapDollars} USDC`}>{reviewCapDollars} USDC</span>
+                <span className="permit-cap-value" title={`${reviewCapDollars} USD`}>{reviewCapDollars} USD</span>
               ) : null}
               <button
                 ref={editRef}
@@ -266,6 +266,7 @@ export default function PromptBar({
   onDraftChange,
   onChipClick,
   onRemoveAttachment,
+  onSuggestChange,
   accessory = null,
   endSlot = null,
   permission = '',
@@ -294,7 +295,6 @@ export default function PromptBar({
   const reduce = useReducedMotion();
   const rootRef = useRef(null);
   const inputRef = useRef(null);
-  const effortAnchor = useRef(null);
   const sparkRef = useRef(null);
   const typing = useRef({ energy: 0, strokes: 0 });
   const boost = useRef(sparkBoost);
@@ -303,7 +303,7 @@ export default function PromptBar({
   const dictationJob = useRef(null);
   const dictateBase = useRef('');
   const latest = useRef({});
-  latest.current = { onSend, onStop, onAttach, onDictate, onEffortChange, onDraftChange, onChipClick, onRemoveAttachment };
+  latest.current = { onSend, onStop, onAttach, onDictate, onEffortChange, onDraftChange, onChipClick, onRemoveAttachment, onSuggestChange };
 
   const [draft, setDraft] = useState('');
   const seedId = useRef('');
@@ -322,8 +322,6 @@ export default function PromptBar({
     if (models.some(item => item.key === defaultModel)) setModelKey(defaultModel);
   }, [defaultModel, models]);
   const [bar, setBar] = useState(null);
-  const [modelClose, setModelClose] = useState(0);
-  const [contextClose, setContextClose] = useState(0);
   const [effortIndex, setEffortIndex] = useState(() => {
     const i = efforts.indexOf(defaultEffort);
     return i >= 0 ? i : Math.max(0, Math.floor((efforts.length - 1) / 2));
@@ -344,7 +342,6 @@ export default function PromptBar({
   const permitOpen = bar === 'permit';
   const permitRef = useRef(null);
   const permitButtonRef = useRef(null);
-  const [effortLeft, setEffortLeft] = useState(0);
   const permit = permission ? permissionById(permission) : null;
 
   const model = models.find((m) => m.key === modelKey) ?? models[0];
@@ -352,7 +349,7 @@ export default function PromptBar({
     ? null
     : parseToken(draft);
   const handleMenu = token?.kind === 'at';
-  const open = plusOpen ? 'at' : effortOpen ? 'effort' : handleMenu ? 'handle' : (token?.kind ?? null);
+  const open = plusOpen ? 'at' : handleMenu ? 'handle' : (token?.kind ?? null);
   const query = plusOpen ? '' : (token?.query ?? '');
   const list = useMemo(() => {
     if (open === 'handle') return filterMentionSuggestions(handles, query);
@@ -361,6 +358,10 @@ export default function PromptBar({
     return [];
   }, [open, query, handles, sources, commands]);
   const menuOpen = open && (open !== 'handle' || list.length > 0);
+  const suggestOpen = Boolean(menuOpen);
+  useEffect(() => {
+    latest.current.onSuggestChange?.(suggestOpen);
+  }, [suggestOpen]);
   const cursor = Math.min(active, Math.max(0, list.length - 1));
   const blocked = typeof sendDisabled === 'function' ? sendDisabled(draft) : sendDisabled;
   const canSend = !blocked && (draft.trim().length > 0 || attachments.length > 0 || extraReady);
@@ -369,19 +370,14 @@ export default function PromptBar({
   const maxed = efforts.length > 1 && effortIndex === efforts.length - 1;
 
   const focusInput = () => inputRef.current?.focus({ preventScroll: true });
-  const quietOthers = useCallback((name) => {
-    if (name !== 'model') setModelClose(count => count + 1);
-    if (name !== 'context') setContextClose(count => count + 1);
-  }, []);
   const openOnly = useCallback((name) => {
     setBar(current => exclusiveBarMenu(current, name));
     setDismissed(name !== 'token');
-    quietOthers(name);
-  }, [quietOthers]);
+  }, []);
   const closeMenus = useCallback(() => {
     setBar(current => (current === 'token' ? current : null));
-    quietOthers(null);
-  }, [quietOthers]);
+  }, []);
+  const closeMenu = useCallback((name) => setBar(current => (current === name ? null : current)), []);
 
   useEffect(() => {
     if (!bar && !token) return undefined;
@@ -389,20 +385,46 @@ export default function PromptBar({
       if (rootRef.current?.contains(event.target)) return;
       setBar(null);
       setDismissed(true);
-      quietOthers(null);
     };
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
-  }, [bar, token, quietOthers]);
+  }, [bar, token]);
 
   useEffect(() => {
     if (!permitOpen) return undefined;
     const onDown = (event) => {
-      if (shouldClosePermitMenu(permitOpen, event.target, permitRef.current)) setBar(null);
+      if (shouldClosePermitMenu(permitOpen, event.target, permitRef.current)) closeMenu('permit');
     };
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
-  }, [permitOpen]);
+  }, [permitOpen, closeMenu]);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const toolbar = root?.querySelector('.prompt-bar__bar');
+    const menu = root?.querySelector('.glide-select__menu, .prompt-bar__menu[data-kind="effort"], .permit-menu, .context-card');
+    const anchor = menu?.offsetParent;
+    if (!toolbar || !menu || !anchor) return;
+
+    function positionMenu() {
+      const { left, top, width } = anchor.getBoundingClientRect();
+      const shift = menuViewportShift(left + width / 2, menu.offsetWidth, document.documentElement.clientWidth);
+      const rise = Math.max(0, top - toolbar.getBoundingClientRect().top);
+      menu.style.setProperty('--pb-menu-shift', `${shift}px`);
+      menu.style.setProperty('--pb-menu-rise', `${rise}px`);
+    }
+
+    positionMenu();
+    const observer = new ResizeObserver(positionMenu);
+    observer.observe(toolbar);
+    observer.observe(anchor);
+    observer.observe(menu);
+    window.addEventListener('resize', positionMenu);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', positionMenu);
+    };
+  }, [bar]);
 
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -632,7 +654,7 @@ export default function PromptBar({
       }
     }
     if (e.key === 'Escape') {
-      if (open) {
+      if (open || bar) {
         e.preventDefault();
         setDismissed(true);
         closeMenus();
@@ -670,57 +692,11 @@ export default function PromptBar({
       {menuOpen ? (
         <div
           className="prompt-bar__menu"
-          role={open === 'effort' ? 'dialog' : 'listbox'}
-          aria-label={open === 'handle' ? 'Handles' : open === 'at' ? 'Sources' : open === 'slash' ? 'Commands' : open === 'model' ? 'Models' : 'Effort'}
+          role="listbox"
+          aria-label={open === 'handle' ? 'Handles' : open === 'at' ? 'Sources' : 'Commands'}
           data-kind={open}
-          style={open === 'effort' ? { left: effortLeft } : undefined}
         >
-          {open === 'effort' ? (
-            <>
-              <div className="prompt-bar__effort-head">
-                <span className="prompt-bar__effort-title">Effort</span>
-                <span className="prompt-bar__effort-level">{level}</span>
-              </div>
-              <div className="prompt-bar__effort-ends">
-                <span>Faster</span>
-                <span>Smarter</span>
-              </div>
-              <div
-                className="prompt-bar__effort-track"
-                role="slider"
-                tabIndex={0}
-                aria-label="Effort"
-                aria-valuemin={0}
-                aria-valuemax={efforts.length - 1}
-                aria-valuenow={effortIndex}
-                aria-valuetext={level}
-                data-max={maxed ? '' : undefined}
-                style={{ '--pb-effort-x': stepAt(effortIndex), '--pb-effort-fill': fillAt(effortIndex) }}
-                onPointerDown={(e) => {
-                  if (e.button !== 0) return;
-                  try {
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                  } catch {
-                    /* pointer capture is optional */
-                  }
-                  e.currentTarget.focus({ preventScroll: true });
-                  effortFromPointer(e);
-                }}
-                onPointerMove={(e) => {
-                  if (e.buttons & 1) effortFromPointer(e);
-                }}
-                onKeyDown={onEffortKey}
-              >
-                <span className="prompt-bar__effort-fill">
-                  {maxed ? <canvas ref={sparkRef} className="prompt-bar__sparks" aria-hidden="true" /> : null}
-                </span>
-                {efforts.map((label, i) => (
-                  <i key={label} className="prompt-bar__effort-dot" style={{ left: stepAt(i) }} />
-                ))}
-                <span className="prompt-bar__effort-thumb" />
-              </div>
-            </>
-          ) : open === 'slash' ? (
+          {open === 'slash' ? (
             <>
               {slashSections(list).map(section => (
                 <div key={section.label} className="prompt-bar__group" role="group" aria-label={section.label}>
@@ -854,10 +830,10 @@ export default function PromptBar({
               <GlideSelect
                 options={models.map((item) => ({ value: item.key, label: item.name, tag: item.tag }))}
                 value={model?.key ?? ''}
-                closeSignal={modelClose}
+                menuActive={bar === 'model'}
                 onOpenChange={(isOpen) => {
                   if (isOpen) openOnly('model');
-                  else setBar(current => (current === 'model' ? null : current));
+                  else closeMenu('model');
                 }}
                 onChange={(key) => {
                   setModelKey(key);
@@ -867,7 +843,7 @@ export default function PromptBar({
                 size="sm"
                 menuWidth={210}
                 placement="top"
-                align="left"
+                align="center"
                 ariaLabel="Choose model"
                 textColor={color}
                 surfaceColor="var(--pb-control-bg)"
@@ -877,30 +853,68 @@ export default function PromptBar({
             </span>
           ) : onAddProvider ? <button type="button" className="prompt-bar__pick" onClick={onAddProvider}>No models shown</button> : null}
           {efforts.length > 0 ? (
-            <button
-              ref={effortAnchor}
-              type="button"
-              className="prompt-bar__pick"
-              aria-label="Choose effort"
-              aria-expanded={effortOpen}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                const root = rootRef.current;
-                const button = effortAnchor.current;
-                if (root && button) {
-                  const bar = root.getBoundingClientRect();
-                  const btn = button.getBoundingClientRect();
-                  const width = 248;
-                  const left = btn.left - bar.left + btn.width / 2 - width / 2;
-                  setEffortLeft(Math.max(8, Math.min(left, bar.width - width - 8)));
-                }
-                openOnly('effort');
-                focusInput();
-              }}
-            >
-              <HugeiconsIcon icon={SparklesIcon} size={16} strokeWidth={2} />
-              <span>{level}</span>
-            </button>
+            <div className="prompt-bar__effort" onClick={(event) => event.stopPropagation()}>
+              <button
+                type="button"
+                className="prompt-bar__pick"
+                aria-label="Choose effort"
+                aria-expanded={effortOpen}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => openOnly('effort')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') closeMenu('effort');
+                }}
+              >
+                <HugeiconsIcon icon={SparklesIcon} size={16} strokeWidth={2} />
+                <span>{level}</span>
+              </button>
+              {effortOpen ? (
+                <div className="prompt-bar__menu" data-kind="effort" role="dialog" aria-label="Effort">
+                  <div className="prompt-bar__effort-head">
+                    <span className="prompt-bar__effort-title">Effort</span>
+                    <span className="prompt-bar__effort-level">{level}</span>
+                  </div>
+                  <div className="prompt-bar__effort-ends">
+                    <span>Faster</span>
+                    <span>Smarter</span>
+                  </div>
+                  <div
+                    className="prompt-bar__effort-track"
+                    role="slider"
+                    tabIndex={0}
+                    aria-label="Effort"
+                    aria-valuemin={0}
+                    aria-valuemax={efforts.length - 1}
+                    aria-valuenow={effortIndex}
+                    aria-valuetext={level}
+                    data-max={maxed ? '' : undefined}
+                    style={{ '--pb-effort-x': stepAt(effortIndex), '--pb-effort-fill': fillAt(effortIndex) }}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      } catch {
+                        /* pointer capture is optional */
+                      }
+                      e.currentTarget.focus({ preventScroll: true });
+                      effortFromPointer(e);
+                    }}
+                    onPointerMove={(e) => {
+                      if (e.buttons & 1) effortFromPointer(e);
+                    }}
+                    onKeyDown={onEffortKey}
+                  >
+                    <span className="prompt-bar__effort-fill">
+                      {maxed ? <canvas ref={sparkRef} className="prompt-bar__sparks" aria-hidden="true" /> : null}
+                    </span>
+                    {efforts.map((label, i) => (
+                      <i key={label} className="prompt-bar__effort-dot" style={{ left: stepAt(i) }} />
+                    ))}
+                    <span className="prompt-bar__effort-thumb" />
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {permit ? (
             <div ref={permitRef} className="permit" onClick={(event) => event.stopPropagation()}>
@@ -912,6 +926,9 @@ export default function PromptBar({
                 aria-expanded={permitOpen}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => openOnly('permit')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') closeMenu('permit');
+                }}
               >
                 <span>{permit.label}</span>
                 <HugeiconsIcon className="permit-chevron" icon={ArrowDown01Icon} size={11} strokeWidth={2} aria-hidden="true" />
@@ -931,9 +948,9 @@ export default function PromptBar({
             </div>
           ) : null}
           {isValidElement(accessory) ? cloneElement(accessory, {
-            closeSignal: contextClose,
+            open: bar === 'context',
             onOpen: () => openOnly('context'),
-            onClose: () => setBar(current => (current === 'context' ? null : current)),
+            onClose: () => closeMenu('context'),
           }) : accessory}
           <span className="prompt-bar__spacer" />
           {onDictate ? (

@@ -2,12 +2,14 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 /**
  * POST /api/spend — the permissioned spend voice, the glass UI, and Grok Bot share.
  * Order is trust, verify, freeze, policy, approval, then sign.
- * Swaps are browser-signed; broadcasts go through @ubc2026/wallets.
+ * Eligible Full-permission swaps use delegated signing. Both signing paths
+ * broadcast through @ubc2026/wallets.
  * Responses carry a signature and a state, never a key or a signed payload.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createSnsResolver, resolveSnsOwner } from '@ubc2026/sns';
 import {
-  parsePermissionedSpendBody, parsePrivySigningFailure, parseSpendAuthorizationSignature, spendApprovalMessage,
+  parsePermissionedSpendBody, parsePrivySigningFailure, parseSpendAuthorizationSignature, parseStoredSpendPreference, spendApprovalMessage,
 } from '@ubc2026/contracts';
 import { mainnetQuoteBlocksSpend, runPermissionedSpend } from '@ubc2026/agent-loop';
 import { proposalDigest } from '@ubc2026/bot-policy';
@@ -25,6 +27,13 @@ import { valueUsdSpend } from './usd-budget.mjs';
 import { prepareLasoPayment, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
 import { swapFailure } from './swap-failure.mjs';
 import { parseLasoBrowserPayment } from './laso-browser-payment.mjs';
+
+function usd(units) {
+  const value = BigInt(units);
+  const whole = value / 1_000_000n;
+  const frac = (value % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : `${whole}.00`;
+}
 import { parseSwapAuthorization, swapAuthorizationProof, validSwapSignature } from './swap-client-sign.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
@@ -54,6 +63,25 @@ async function spendTrustScore(env, mint) {
 }
 
 async function transferDestination(env, parsed) {
+  if (parsed.domain) {
+    try {
+      const resolver = createSnsResolver({
+        resolveFn: typeof env.resolveSns === 'function'
+          ? env.resolveSns
+          : async (domain) => {
+            const demo = env.SNS_DEMO_MAP && typeof env.SNS_DEMO_MAP === 'object' ? env.SNS_DEMO_MAP : {};
+            if (demo[domain]) return demo[domain];
+            const resolved = await resolveSnsOwner(domain, { fetcher: env.fetch || fetch });
+            return resolved.address;
+          },
+      });
+      const resolved = await resolver(parsed.domain);
+      const address = typeof resolved === 'object' && resolved ? resolved.address : resolved;
+      return WALLET_ADDRESS.test(address || '') ? address : null;
+    } catch {
+      return null;
+    }
+  }
   if (!parsed.handle) return parsed.destination;
   const profile = await supabaseGet(env, `profiles?handle=eq.${encodeURIComponent(parsed.handle)}&select=owner_id&limit=1`, env.fetch);
   const ownerId = profile.rows?.[0]?.owner_id;
@@ -61,6 +89,18 @@ async function transferDestination(env, parsed) {
   const wallet = await supabaseGet(env, `wallets?owner_id=eq.${encodeURIComponent(ownerId)}&kind=eq.main&select=address&limit=1`, env.fetch);
   const address = wallet.rows?.[0]?.address;
   return WALLET_ADDRESS.test(address || '') && (!parsed.destination || parsed.destination === address) ? address : null;
+}
+
+async function savedSwapPermission(env, ownerId) {
+  const state = await supabaseGet(env,
+    `owner_state?owner_id=eq.${encodeURIComponent(ownerId)}&name=in.(permission,reviewCap)&select=name,value`, env.fetch);
+  if (state.status !== 200 || !state.rows) return null;
+  const { permission } = parseStoredSpendPreference(state.rows.find(row => row.name === 'permission')?.value, ownerId);
+  if (permission === 'ask') return null;
+  const cap = state.rows.find(row => row.name === 'reviewCap');
+  const reviewCap = !cap ? '30000000' // The existing $30 default review maximum.
+    : typeof cap.value === 'string' && /^[1-9][0-9]{0,39}$/.test(cap.value) ? cap.value : null;
+  return { permission, reviewCap };
 }
 
 async function prepareAssetTransfer(env, parsed, wallet, destination, id, blockhash) {
@@ -206,18 +246,17 @@ async function handleSpendRequest(request, env = {}) {
     return json({ error: 'invalid_spend_authorization', signed: false }, 403);
   }
   const solHandleApproval = approvalKey && parsed.asset === 'SOL' && parsed.action === 'spend'
-    && parsed.confirmed && parsed.handle && parsed.destination && parsed.idempotencyKey;
+    && parsed.confirmed && (parsed.handle || parsed.destination) && parsed.destination && parsed.idempotencyKey;
   if (overrideToken !== null && (!solHandleApproval || (desk.ok && desk.via !== 'grant'))) {
     return json({ error: 'invalid_spend_approval', signed: false }, 403);
   }
   if (assetTransfer && mainnetQuoteBlocksSpend(parsed.quote)) return json({ state: 'quote-not-authorization', signed: false }, 409);
 
-  let context = null;
-  if (typeof env.loadSpendContext === 'function') {
-    context = await env.loadSpendContext({ botId: parsed.botId, ownerId });
-  } else if (supabaseConfig(env)) {
-    context = await loadOwnerLoopContext(env, { botId: parsed.botId, ownerId }, env.fetch ?? fetch);
-  }
+  const contextArgs = { botId: parsed.botId, ownerId };
+  const loadContext = () => typeof env.loadSpendContext === 'function'
+    ? env.loadSpendContext(contextArgs)
+    : approvalKey ? loadOwnerLoopContext(env, contextArgs, env.fetch ?? fetch) : null;
+  const context = await loadContext();
   if (!context?.bot || !context.wallet || !context.ledger) {
     return json({ error: 'context_missing', signed: false }, 409);
   }
@@ -245,10 +284,9 @@ async function handleSpendRequest(request, env = {}) {
     const pending = await useLoopSwap(env, ownerId, parsed);
     return matchesLoopSwap(pending?.intent, parsed, context, Number.isSafeInteger(env.spendNow) ? now : Date.now());
   };
-  // A queued agent swap runs without the slide only on the same terms as an agent send:
-  // Full or Review permission, within the review cap, trusted, and through the same desk check.
   const autoSwap = raw.autoSwap === true;
-  if (autoSwap && (!swap || !loopSwap || (parsed.permission !== 'full' && parsed.permission !== 'review')
+  const delegatedSwap = autoSwap && (parsed.permission === 'full' || parsed.permission === 'review');
+  if (autoSwap && (!swap || !delegatedSwap || parsed.confirmed
       || typeof raw.swapTicket !== 'string' || raw.spendAuthorization !== undefined || overrideToken !== null)) {
     return json({ error: 'invalid_auto_swap', signed: false }, 400);
   }
@@ -268,7 +306,7 @@ async function handleSpendRequest(request, env = {}) {
     }
     if (!parsed.confirmed && !autoSwap) {
       try {
-        const preview = await previewLiveSwap(env, context, parsed, approvalKey, now);
+        const preview = await previewLiveSwap(env, context, parsed, approvalKey, now, { allowReducedSolQuote: !loopSwap });
         return json({ state: 'approval-needed', signed: false, swapPreview: preview });
       } catch (error) {
         const failure = swapFailure({ error: error?.code || error?.message, simulationReason: error?.simulationReason });
@@ -288,6 +326,17 @@ async function handleSpendRequest(request, env = {}) {
   }
   const swapOffer = swap ? readSwapTicket(raw.swapTicket, context, parsed, approvalKey, now) : null;
   if (swap && !swapOffer) return json({ error: 'swap_quote_expired', signed: false }, 409);
+  let reviewCap = parsed.reviewCap;
+  if (delegatedSwap) {
+    if (swapOffer.requiresOwnerApproval !== false) {
+      return json({ state: 'approval-needed', reason: 'swap_quote_requires_confirmation', signed: false }, 409);
+    }
+    const saved = desk.via === 'grant' ? await savedSwapPermission(env, ownerId) : null;
+    if (saved?.permission !== parsed.permission || (parsed.permission === 'review' && !saved.reviewCap)) {
+      return json({ state: 'approval-needed', reason: 'swap_saved_permission_required', signed: false }, 409);
+    }
+    if (parsed.permission === 'review' && (!reviewCap || BigInt(saved.reviewCap) < BigInt(reviewCap))) reviewCap = saved.reviewCap;
+  }
   if (signedSwap && (signedSwap.expiresAt <= now || signedSwap.expiresAt > swapOffer.expiresAt
       || signedSwap.blockhash !== swapOffer.blockhash)) {
     return json({ error: 'spend_authorization_expired', signed: false }, 409);
@@ -305,7 +354,7 @@ async function handleSpendRequest(request, env = {}) {
   }
   const trustUnavailable = lookedUp.unavailable === true;
   const trustScore = trustUnavailable ? undefined : lookedUp.score;
-  const recipient = laso ? lasoOffer.accepted.payTo : swap ? context.wallet.address : (assetTransfer || usdBudget)
+  const recipient = laso ? lasoOffer.accepted.payTo : swap ? context.wallet.address : (assetTransfer || usdBudget || parsed.domain)
     ? await transferDestination(env, parsed)
     : (parsed.destination || parsed.handle || (parsed.selfCustody ? context.wallet.address : ''));
   if (typeof recipient !== 'string' || recipient.length < 1) {
@@ -319,7 +368,7 @@ async function handleSpendRequest(request, env = {}) {
   if ((laso || usdBudget || (assetTransfer && desk.ok && parsed.confirmed && context.bot.cap?.asset === parsed.asset))
       && !context.wallet.frozen && !context.bot.frozen) {
     if (!parsed.idempotencyKey && assetTransfer) return json({ error: 'idempotency_key_required', signed: false }, 400);
-    if (!env.ledgerApi?.reserveBudget || !(browserMove ? env.transferClient?.broadcastSignedSolana : laso ? (browserPayment ? env.transferClient?.verifyPreparedSolanaX402Payment : env.transferClient?.signPreparedSolanaX402Payment) : env.transferClient?.signPreparedSolanaTransfer)) {
+    if (!swap && (!env.ledgerApi?.reserveBudget || !(browserMove ? env.transferClient?.broadcastSignedSolana : laso ? (browserPayment ? env.transferClient?.verifyPreparedSolanaX402Payment : env.transferClient?.signPreparedSolanaX402Payment) : env.transferClient?.signPreparedSolanaTransfer))) {
       return json({ error: 'asset_transfer_unavailable', signed: false }, 503);
     }
     try {
@@ -345,11 +394,21 @@ async function handleSpendRequest(request, env = {}) {
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
       const simulationReason = typeof error?.simulationReason === 'string'
         && /^[a-zA-Z0-9_]{1,100}$/.test(error.simulationReason) ? error.simulationReason : null;
-      const hint = code === 'simulation_failed' && !laso && !swap
+      const usdcBalance = typeof error?.usdcBalance === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(error.usdcBalance) ? error.usdcBalance : null;
+      const short = simulationReason === 'insufficient_funds' || simulationReason === 'instruction_2_custom_1';
+      const needed = /^(0|[1-9][0-9]{0,19})$/.test(parsed.amount ?? '') ? parsed.amount : null;
+      const hint = code === 'simulation_failed' && laso && simulationReason === 'source_account_not_found'
+        ? `Payment checked agent wallet ${context.wallet.address} for a USDC account that covers this amount. Nothing was submitted.`
+        : code === 'simulation_failed' && laso && short
+        ? usdcBalance && needed
+          ? `Agent wallet ${context.wallet.address} has ${usd(usdcBalance)} USDC. This card needs ${usd(needed)} USDC. Nothing was submitted.`
+          : `The USDC account for agent wallet ${context.wallet.address} cannot cover this card. Nothing was submitted.`
+        : code === 'simulation_failed' && !laso && !swap
         ? 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.'
         : '';
       return json({
         error: code, ...(hint ? { hint } : {}), signed: false, ...(simulationReason ? { simulationReason } : {}),
+        ...(usdcBalance ? { usdcBalance } : {}),
         ...(swap ? { simulationDetails: error?.simulationDetails } : {}),
       }, 409);
     }
@@ -390,11 +449,30 @@ async function handleSpendRequest(request, env = {}) {
   let beforeSign;
   let privyFailure;
   let authorizationChallenge;
-  let clientSwapFailure;
+  let swapDelegation;
+  let swapExecutionFailure;
   let lasoReceipt;
   let lasoFailure;
   let lasoChallenge;
   let browserPartial;
+  async function checkDelegatedBroadcast() {
+    const currentTime = Number.isSafeInteger(env.spendNow) ? now : Date.now();
+    const [latest, lock, saved] = await Promise.all([
+      loadContext(), deskSpendAllowed(env, request, ownerId, env.fetch ?? fetch, currentTime), savedSwapPermission(env, ownerId),
+    ]);
+    if (!latest?.bot?.enabled || latest.bot.frozen || latest.wallet?.frozen) {
+      throw Object.assign(new Error('Swap stopped because the agent or wallet is unavailable or frozen'), { code: 'spend-frozen' });
+    }
+    if (!lock.ok || lock.via !== 'grant') throw Object.assign(new Error('Desk authorization expired'), { code: 'desk_locked' });
+    if (saved?.permission !== parsed.permission
+        || (parsed.permission === 'review' && (!saved.reviewCap || BigInt(saved.reviewCap) < BigInt(proposal.outflow) + BigInt(proposal.maxFee)))
+        || latest.bot.ownerId !== ownerId || latest.bot.policyVersion !== context.bot.policyVersion
+        || latest.bot.walletId !== context.bot.walletId
+        || latest.wallet?.ownerId !== ownerId || latest.wallet.id !== context.wallet.id
+        || latest.wallet.address !== context.wallet.address || latest.wallet.spendable === false) {
+      throw Object.assign(new Error('Swap authorization changed'), { code: 'spend_authorization_changed' });
+    }
+  }
   if (prepared) {
     const accessToken = request.headers.get('authorization')?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
     signSolana = async ({ bot, wallet }) => {
@@ -405,12 +483,23 @@ async function handleSpendRequest(request, env = {}) {
           return sent;
         }
         if (swap) {
+          if (delegatedSwap) {
+            try {
+              return await env.transferClient.signPreparedSolanaSwap({
+                bot, wallet, prepared, expiresAt: swapOffer.expiresAt, checkPermission: checkDelegatedBroadcast,
+              });
+            } catch (error) {
+              swapExecutionFailure = swapFailure({ code: error?.code }).code;
+              if (swapExecutionFailure === 'swap_failed') swapExecutionFailure = 'sign-rejected';
+              throw error;
+            }
+          }
           try {
             const sent = await env.transferClient.broadcastSignedSolana({ signedTransaction: signedSwap.signedTransaction });
             if (sent?.cluster !== SOLANA_CLUSTER || typeof sent.signature !== 'string' || !sent.signature) throw new Error('broadcast_failed');
             return sent;
           } catch {
-            clientSwapFailure = 'broadcast_failed';
+            swapExecutionFailure = 'broadcast_failed';
             throw new Error('broadcast_failed');
           }
         }
@@ -463,7 +552,18 @@ async function handleSpendRequest(request, env = {}) {
           bot, wallet, prepared, signedTransaction: browserPayment.transaction,
         });
       }
-      if (swap) {
+      if (delegatedSwap) {
+        const client = env.transferClient;
+        const delegation = client.signPreparedSolanaSwap && await client.inspectSwapDelegation?.({ bot, wallet });
+        if (swapOffer.expiresAt <= (Number.isSafeInteger(env.spendNow) ? now : Date.now())) {
+          return { state: 'blocked', reason: 'swap_quote_expired' };
+        }
+        if (!delegation?.ready) {
+          swapDelegation = delegation?.delegation;
+          privyFailure = delegation?.privyFailure;
+          return { state: 'approval-needed', reason: delegation?.reason ?? 'swap_signer_not_configured' };
+        }
+      } else if (swap) {
         if (!prepareSwap && !signedSwap) return { state: 'blocked', reason: 'client_sign_required' };
         if (signedSwap && signedSwap.expiresAt <= (Number.isSafeInteger(env.spendNow) ? now : Date.now())) {
           return { state: 'blocked', reason: 'spend_authorization_expired' };
@@ -500,12 +600,13 @@ async function handleSpendRequest(request, env = {}) {
       });
     };
   } else if (!assetTransfer && !usdBudget && grantOk) {
-    if (parsed.destination && env.transferClient) signSolana = async ({ bot, wallet, memo }) => {
+    const targetAddress = parsed.destination || (parsed.domain && !parsed.selfCustody ? recipient : null);
+    if (targetAddress && env.transferClient) signSolana = async ({ bot, wallet, memo }) => {
       const sent = await transferSolanaUsdc({
         client: env.transferClient,
         bot,
         wallet,
-        destination: parsed.destination,
+        destination: targetAddress,
         amount: parsed.amount,
         memo,
       });
@@ -532,7 +633,7 @@ async function handleSpendRequest(request, env = {}) {
         : async () => verifierFacts({
           facts,
           proposal: valuation ? { ...proposal, asset: parsed.asset, outflow: parsed.amount } : proposal,
-          parsed: assetTransfer || usdBudget ? { ...parsed, destination: recipient } : parsed,
+          parsed: assetTransfer || usdBudget || parsed.domain ? { ...parsed, destination: recipient } : parsed,
           trustScore,
           trustUnavailable,
           mint,
@@ -540,7 +641,8 @@ async function handleSpendRequest(request, env = {}) {
       now,
       ownerPermission: assetTransfer && !autoSwap ? 'ask' : parsed.permission,
       confirmed: autoSwap ? false : parsed.confirmed,
-      reviewCap: parsed.reviewCap,
+      reviewCap,
+      fullSwap: delegatedSwap && parsed.permission === 'full',
       quote: parsed.quote,
       signSolana,
       beforeSign,
@@ -560,7 +662,7 @@ async function handleSpendRequest(request, env = {}) {
   let state = result.state;
   const perTransferLimit = result.state === 'approval-needed' && result.reason === 'per-transaction';
   if (!grantOk && (state === 'signer-not-configured' || (solHandleApproval && perTransferLimit))) state = 'desk_locked';
-  else if (state === 'signer-not-configured' && !assetTransfer && !parsed.destination && !parsed.selfCustody) state = 'recipient_address_missing';
+  else if (state === 'signer-not-configured' && !assetTransfer && !parsed.destination && !parsed.domain && !parsed.selfCustody) state = 'recipient_address_missing';
   const body = {
     ok: result.signed === true,
     state,
@@ -568,10 +670,11 @@ async function handleSpendRequest(request, env = {}) {
     signed: result.signed === true,
     ...(laso ? { provider: 'laso' } : {}),
     cluster: SOLANA_CLUSTER,
-    reason: clientSwapFailure || result.reason || null,
+    reason: swapExecutionFailure || result.reason || null,
     ...(privyFailure ? { privyFailure } : {}),
+    ...(swapDelegation ? { swapDelegation } : {}),
     ...(lasoFailure ? { error: lasoFailure } : {}),
-    ...(clientSwapFailure ? { error: clientSwapFailure } : {}),
+    ...(swapExecutionFailure ? { error: swapExecutionFailure } : {}),
     ...(prepared ? { feeLamports: prepared.feeLamports } : {}),
     ...(overrideToken === null && approvalTerms && perTransferLimit ? { approvalTerms } : {}),
   };

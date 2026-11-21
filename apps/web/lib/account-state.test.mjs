@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAccountMirror, mirrorEntries } from './account-state.mjs';
 import { catalogStorageKey } from './file-catalog.mjs';
-import { acceptanceStorageKey, REVIEW_THRESHOLD_KEY, SPEND_PERMISSION_KEY } from './spend-permission.mjs';
+import { acceptanceStorageKey, readStoredPermission, REVIEW_THRESHOLD_KEY, SPEND_PERMISSION_KEY,
+  writeStoredPermission } from './spend-permission.mjs';
 import { adoptLegacyRoster, LEGACY_ROSTER_KEY, looksStorageKey, rosterStorageKey, writeLooks, writeRoster } from './roster.mjs';
 import { talkStorageKey, writeTalks } from './talk-store.mjs';
 import { accountStorageKey } from './account-code.mjs';
@@ -44,6 +45,19 @@ function harness({ server = [], deletedAgentIds = [], listStatus = 200, source =
   });
   return { storage, posts, timers, mirror };
 }
+
+test('a legacy permission stays selected and later changes sync as plain modes', async () => {
+  const server = [{ name: 'permission', value: JSON.stringify({ permission: 'full', ownerId: 'alice', autoSignSwaps: true }) }];
+  const { mirror, storage } = harness({ server });
+  await mirror.hydrate();
+  assert.equal(readStoredPermission(storage), 'full');
+  writeStoredPermission(mirror.storage, 'ask');
+  await mirror.flush();
+  const otherBrowser = harness({ server });
+  await otherBrowser.mirror.hydrate();
+  assert.equal(readStoredPermission(otherBrowser.storage), 'ask');
+  assert.equal(server.find(row => row.name === 'permission').value, 'ask');
+});
 
 test('starting an empty desk does not overwrite another browser’s first save', async () => {
   const server = [];

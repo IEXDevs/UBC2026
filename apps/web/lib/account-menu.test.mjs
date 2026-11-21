@@ -7,6 +7,7 @@ test('profile menu keeps account destinations without a Computer entry', () => {
   const destinations = [...source.matchAll(/\{ id: '([^']+)', label: '[^']+', icon: /g)].map((match) => match[1]);
   assert.ok(destinations.includes('security'));
   assert.ok(destinations.includes('wallet'));
+  assert.ok(destinations.includes('cards'));
   assert.ok(destinations.includes('profile'));
   assert.ok(destinations.includes('logs'));
   assert.ok(destinations.includes('logout'));

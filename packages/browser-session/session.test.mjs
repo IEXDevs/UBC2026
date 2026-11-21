@@ -113,7 +113,7 @@ test('expired views persist closed records while unrelated failures keep session
 test('agent tools cover search, scrape, and owned browser lifecycle', () => {
   assert.deepEqual(
     agentTools.map(tool => tool.name),
-    ['web_search', 'web_scrape', 'browser_open', 'browser_navigate', 'browser_live_view', 'browser_release'],
+    ['web_search', 'web_scrape', 'browser_open', 'browser_navigate', 'browser_live_view', 'browser_click', 'browser_release'],
   );
 });
 
@@ -270,6 +270,29 @@ test('live view is owner-only, no-store, and embeds the verified Live View host'
   const redacted = await svc.invokeTool('browser_live_view', { sessionRecordId: 'rec-1' }, { ownerId: 'u1', botId: 'b1' });
   assert.equal(redacted.viewerUrl, undefined);
   assert.equal(JSON.stringify(redacted).includes('jwt'), false);
+});
+
+test('browser_click presses via visible cursor overlay and rejects other owners', async () => {
+  const clicks = [];
+  const svc = service({
+    browsers: {
+      createSession: async () => ({ sessionId: 'prov-1' }),
+      openTab: async () => ({ targetId: 'T1', url: 'https://example.com/', title: 'Page' }),
+      click: async (sessionId, targetId, selector) => {
+        clicks.push([sessionId, targetId, selector]);
+        return { x: 10, y: 20, tag: 'button', text: 'Go' };
+      },
+      readonlyView: async () => ({ viewerUrl: 'https://live.browser.run/ui/view?jwt=test' }),
+    },
+  });
+  await svc.openSession({ ownerId: 'u1', botId: 'b1', url: 'https://example.com/' });
+  const clicked = await svc.invokeTool('browser_click', { sessionRecordId: 'rec-1', selector: 'button[type=submit]' }, { ownerId: 'u1', botId: 'b1' });
+  assert.equal(clicked.x, 10);
+  assert.equal(clicked.tag, 'button');
+  assert.equal(clicked.event.name, 'browser_click');
+  assert.deepEqual(clicks, [['prov-1', 'T1', 'button[type=submit]']]);
+  await assert.rejects(svc.click({ ownerId: 'other', botId: 'b1', sessionRecordId: 'rec-1', selector: 'button' }), SessionError);
+  await assert.rejects(svc.click({ ownerId: 'u1', botId: 'b1', sessionRecordId: 'rec-1', selector: '' }), { code: 'invalid_selector' });
 });
 
 /**
@@ -461,4 +484,145 @@ test('a navigation failure other than expiry does not open a new session', async
   const opened = await svc.openSession({ ...identity, url: 'https://example.com/a' });
   await assert.rejects(svc.navigateSession({ ...identity, sessionRecordId: opened.sessionRecordId, url: 'https://example.com/b' }), ProviderError);
   assert.equal(created, 1);
+});
+
+/**
+ * Achieves: At capacity with no url, open probes the newest run before reusing it;
+ * an expired probe closes the record and opens a fresh session instead of adopting a dead run.
+ * Fails when: the probe never runs, the third open returns the dead record, or the record stays open.
+ * Oracle: probed === ['prov-2']; third is rec-3 with reused false and created 3; store rec-2 closed.
+ * Side effects: memory store record transitions only.
+ * Gaps: binding-only configs without a readonly view are covered by the fallback tests below.
+ */
+test('no-url reuse verifies the newest run and opens fresh when it expired', async () => {
+  const store = createMemoryStore();
+  let created = 0;
+  let ids = 0;
+  let at = 1000;
+  const probed = [];
+  const svc = service({
+    store,
+    clock: () => ++at,
+    idFactory: () => `rec-${++ids}`,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${++created}` }),
+      readonlyView: async sessionId => {
+        probed.push(sessionId);
+        if (sessionId === 'prov-2') throw new ProviderError('browser_session_expired', 410);
+        return { viewerUrl: 'https://live.browser.run/ui/view?jwt=x' };
+      },
+    },
+  });
+  const identity = { ownerId: 'u1', botId: 'b1' };
+  await svc.openSession(identity);
+  const second = await svc.openSession(identity);
+  const third = await svc.openSession(identity);
+  assert.deepEqual(probed, ['prov-2']);
+  assert.equal(third.reused, false);
+  assert.notEqual(third.sessionRecordId, second.sessionRecordId);
+  assert.equal(created, 3);
+  const dead = await store.get('browser:u1:b1:rec-2');
+  assert.equal(dead.status, 'closed');
+  assert.ok(dead.closedAt > 0);
+  const { sessions } = await svc.listOpenSessions(identity);
+  assert.deepEqual(sessions.map(row => row.sessionRecordId).sort(), ['rec-1', 'rec-3']);
+});
+
+/**
+ * Achieves: A liveness probe that succeeds keeps reuse at capacity without creating a session.
+ * Fails when: no probe is issued, a fresh session is created, or the wrong record is returned.
+ * Oracle: probed === ['prov-2']; third.reused true with the newest record id; created stays 2.
+ * Side effects: memory store reads only.
+ * Gaps: none for the readonly provider shape.
+ */
+test('no-url reuse returns a verified run without creating a session', async () => {
+  let created = 0;
+  let ids = 0;
+  let at = 1000;
+  const probed = [];
+  const svc = service({
+    clock: () => ++at,
+    idFactory: () => `rec-${++ids}`,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${++created}` }),
+      readonlyView: async sessionId => {
+        probed.push(sessionId);
+        return { viewerUrl: 'https://live.browser.run/ui/view?jwt=x' };
+      },
+    },
+  });
+  const identity = { ownerId: 'u1', botId: 'b1' };
+  await svc.openSession(identity);
+  const second = await svc.openSession(identity);
+  const third = await svc.openSession(identity);
+  assert.deepEqual(probed, ['prov-2']);
+  assert.equal(third.reused, true);
+  assert.equal(third.sessionRecordId, second.sessionRecordId);
+  assert.equal(created, 2);
+});
+
+/**
+ * Achieves: A probe failure other than expiry does not fail open or force a new session;
+ * the record stays open and the next navigate/live-view still closes it on real expiry.
+ * Fails when: open rejects, a fresh session is created, or the expiry-only close misfires.
+ * Oracle: probed === ['prov-2']; third reuses rec-2; created stays 2; rec-2 still open.
+ * Side effects: memory store reads only.
+ * Gaps: transient probe failures on live infrastructure are not simulated beyond one code.
+ */
+test('a probe failure other than expiry keeps the reused session', async () => {
+  const store = createMemoryStore();
+  let created = 0;
+  let ids = 0;
+  let at = 1000;
+  const probed = [];
+  const svc = service({
+    store,
+    clock: () => ++at,
+    idFactory: () => `rec-${++ids}`,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${++created}` }),
+      readonlyView: async sessionId => {
+        probed.push(sessionId);
+        throw new ProviderError('provider_failed', 502);
+      },
+    },
+  });
+  const identity = { ownerId: 'u1', botId: 'b1' };
+  await svc.openSession(identity);
+  const second = await svc.openSession(identity);
+  const third = await svc.openSession(identity);
+  assert.deepEqual(probed, ['prov-2']);
+  assert.equal(third.reused, true);
+  assert.equal(third.sessionRecordId, second.sessionRecordId);
+  assert.equal(created, 2);
+  const record = await store.get('browser:u1:b1:rec-2');
+  assert.equal(record.status, 'open');
+});
+
+/**
+ * Achieves: Without a readonly view on the provider, no-url reuse keeps its previous
+ * shape instead of crashing on a missing probe method.
+ * Fails when: open rejects or a fresh session is created.
+ * Oracle: third.reused true with the newest record id; created stays 2.
+ * Side effects: memory store reads only.
+ * Gaps: binding-only providers delegate readonlyView themselves and are not mocked here.
+ */
+test('no-url reuse without a readonly view keeps reusing', async () => {
+  let created = 0;
+  let ids = 0;
+  let at = 1000;
+  const svc = service({
+    clock: () => ++at,
+    idFactory: () => `rec-${++ids}`,
+    browsers: {
+      createSession: async () => ({ sessionId: `prov-${++created}` }),
+    },
+  });
+  const identity = { ownerId: 'u1', botId: 'b1' };
+  await svc.openSession(identity);
+  const second = await svc.openSession(identity);
+  const third = await svc.openSession(identity);
+  assert.equal(third.reused, true);
+  assert.equal(third.sessionRecordId, second.sessionRecordId);
+  assert.equal(created, 2);
 });

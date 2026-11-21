@@ -138,7 +138,7 @@
 }
 
 .glide-select__menu[data-side='top'] {
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 6px + var(--pb-menu-rise, 0px));
 }
 
 .glide-select__menu[data-align='left'] {
@@ -147,6 +147,12 @@
 
 .glide-select__menu[data-align='right'] {
   right: 0;
+}
+
+.glide-select__menu[data-align='center'] {
+  left: calc(50% + var(--pb-menu-shift, 0px));
+  max-width: calc(100vw - 16px);
+  translate: -50% 0;
 }
 
 .glide-select__list {

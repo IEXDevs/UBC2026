@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   botChatUrl,
+  checkDueCardLoops,
   deleteBotUrl,
   emptyMoneyState,
   fetchOwnerLists,
-  firstAssignableWalletId,
   runtimeBaseUrl,
   sendBotChat,
   shellBotFromRemote,
@@ -123,6 +123,37 @@ test('shell runtime URLs stay on the same-origin proxy', () => {
 function jsonResponse(body, ok = true) {
   return { ok, json: async () => body };
 }
+
+test('the desk checks only due loops for signed-in enabled agents and skips overlapping requests', async () => {
+  const bot = { id: 'bot_due', loop: { active: true, nextWakeAt: 1000 } };
+  const bots = [
+    bot,
+    { ...bot, id: 'bot_frozen', frozen: true },
+    { ...bot, id: 'bot_paused', loopPaused: true },
+    { ...bot, id: 'bot_disabled', enabled: false },
+    { ...bot, id: 'bot_later', loop: { active: true, nextWakeAt: 2000 } },
+    { ...bot, id: 'bot_inactive', loop: null },
+  ];
+  const calls = [];
+  let resolve;
+  const waiting = new Promise(done => { resolve = done; });
+  const fetcher = async (url, init) => {
+    calls.push({ url, method: init.method, headers: init.headers });
+    return waiting;
+  };
+  const pending = new Set();
+  await checkDueCardLoops('did:privy:owner', bots, '', pending, fetcher, 1000);
+  assert.deepEqual(calls, []);
+  const request = checkDueCardLoops('did:privy:owner', bots, 'fixture-token', pending, fetcher, 1000);
+  await checkDueCardLoops('did:privy:owner', bots, 'fixture-token', pending, fetcher, 1000);
+  resolve(jsonResponse({ ok: true }));
+  await request;
+  assert.deepEqual(calls, [{
+    url: '/api/runtime/bots/bot_due/card-loop/check', method: 'POST',
+    headers: { 'x-owner-id': 'did:privy:owner', authorization: 'Bearer fixture-token' },
+  }]);
+  assert.equal(pending.size, 0);
+});
 
 /**
  * Achieves: verifies owner lists load live records and ignore historical paper positions.
@@ -364,6 +395,17 @@ test('sendBotChat forwards reply deltas and retractions without turning them int
   assert.equal(result.reply, replies[0]);
 });
 
+test('sendBotChat delivers the card task and proposed general goal as separate fields', async t => {
+  const done = { done: true, reply: 'I’ll check the rates.', agentTask: 'Check USDC rates.', proposedGoal: 'Track stablecoin yields.' };
+  t.mock.method(globalThis, 'fetch', async () => new Response(`data: ${JSON.stringify(done)}\n\n`, {
+    headers: { 'content-type': 'text/event-stream' },
+  }));
+  const result = await sendBotChat({ ownerId: 'did:privy:abc', botId: 'bot_1', message: 'Focus on stablecoin yields going forward' });
+  assert.equal(result.agentTask, 'Check USDC rates');
+  assert.equal(result.proposedGoal, 'Track stablecoin yields');
+  assert.equal(result.reply, 'I’ll check the rates.');
+});
+
 test('sendBotChat retracts a partial reply when the stream fails or ends without a final reply', async t => {
   for (const error of [false, true]) {
     const events = [];
@@ -382,21 +424,9 @@ test('sendBotChat retracts a partial reply when the stream fails or ends without
 });
 
 /**
- * Achieves: verifies firstAssignableWalletId skips frozen wallets.
- * Fails when: firstAssignableWalletId skips frozen wallets breaks (e.g. expected '', frozen: true }, { id: 'w_ok' }]).
- * Oracle: assert.equal(firstAssignableWalletId([]), ''); assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }])
- * Side effects / state checked: N/A.
- * Gaps: none.
- */
-test('firstAssignableWalletId skips frozen wallets', () => {
-  assert.equal(firstAssignableWalletId([]), '');
-  assert.equal(firstAssignableWalletId([{ id: 'w_frozen', frozen: true }, { id: 'w_ok' }]), 'w_ok');
-});
-
-/**
  * Achieves: verifies upsertOwnerBot posts the shell bot to the runtime proxy.
  * Fails when: upsertOwnerBot posts the shell bot to the runtime proxy breaks (e.g. expected true, '/api/runtime/api/bots', 'POST').
- * Oracle: assert.equal(result.ok, true); assert.equal(calls[0].url, '/api/runtime/api/bots'); assert.equal(calls[0].method, 'POST'); assert.equal(calls[0].owner, 'did:privy:abc'); assert.equal(calls[0].body.walletId, 'w_main'); assert.equal(calls[0].body.id, 'bot_local')
+ * Oracle: the create request carries the selected additional wallet and the owner ID.
  * Side effects / state checked: fetch/test-double request shapes and responses.
  * Gaps: none.
  */
@@ -404,15 +434,14 @@ test('upsertOwnerBot posts the shell bot to the runtime proxy', async () => {
   const calls = [];
   const result = await upsertOwnerBot(
     'did:privy:abc',
-    { id: 'bot_local', name: 'Local', goal: 'Watch', type: 'trading' },
+    { id: 'bot_local', name: 'Local', goal: 'Watch', type: 'trading', walletId: 'w_shop' },
     {
-      walletId: 'w_main',
       accessToken: 'tok',
       fetcher: async (url, init) => {
         calls.push({ url, method: init.method, body: JSON.parse(init.body), owner: init.headers['x-owner-id'] });
         return {
           ok: true,
-          json: async () => ({ ok: true, source: 'supabase', bot: { id: 'bot_local', walletId: 'w_main' } }),
+          json: async () => ({ ok: true, source: 'supabase', bot: { id: 'bot_local', walletId: 'w_shop' } }),
         };
       },
     },
@@ -421,7 +450,7 @@ test('upsertOwnerBot posts the shell bot to the runtime proxy', async () => {
   assert.equal(calls[0].url, '/api/runtime/api/bots');
   assert.equal(calls[0].method, 'POST');
   assert.equal(calls[0].owner, 'did:privy:abc');
-  assert.equal(calls[0].body.walletId, 'w_main');
+  assert.equal(calls[0].body.walletId, 'w_shop');
   assert.equal(calls[0].body.id, 'bot_local');
   const missingWallet = await upsertOwnerBot('did:privy:abc', { id: 'bot_x', name: 'X' }, { fetcher: async () => ({}) });
   assert.equal(missingWallet.error, 'wallet_required');

@@ -22,6 +22,28 @@ test('the refresh request needs a session marker or an actual refresh token', ()
   }
 });
 
+test('the SDK restores a wallet-only refresh and preserves that token on a login-only refresh', () => {
+  for (const file of [ESM, CJS]) {
+    const patched = patchPrivyCookieSession(readFileSync(file, 'utf8'));
+    const start = patched.indexOf('handleTokenResponse(e){');
+    const end = patched.indexOf('_storeAllTokens(e){', start);
+    const helper = patched.indexOf('\nfunction maelstromStoreRefreshedAccessTokens(');
+    assert.ok(start > 0 && end > start && helper > 0);
+    const { handleTokenResponse } = new Function(`${patched.slice(helper)}\nreturn {${patched.slice(start, end)}};`)();
+    const tokens = {};
+    const session = {
+      client: { useServerCookies: true },
+      storeRefreshToken: token => { tokens.refresh = token; },
+      storeCustomerAccessToken: token => { tokens.customer = token; },
+      storePrivyAccessToken: token => { tokens.wallet = token; },
+    };
+    handleTokenResponse.call(session, { session_update_action: 'ignore', token: null, privy_access_token: 'wallet-jwt' });
+    assert.deepEqual(tokens, { refresh: null, wallet: 'wallet-jwt' });
+    handleTokenResponse.call(session, { session_update_action: 'ignore', token: 'login-jwt' });
+    assert.deepEqual(tokens, { refresh: null, wallet: 'wallet-jwt', customer: 'login-jwt' });
+  }
+});
+
 /**
  * Achieves: verifies cookie mode does not persist the session secrets in localStorage.
  * Fails when: the refresh token is still written with B.put or s.s.put while useServerCookies is on.

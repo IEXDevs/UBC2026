@@ -59,22 +59,25 @@ export function buildEarningsSeries({ payments = [] } = {}) {
 
 function connectedClient(wallet) {
   const client = typeof wallet?.client === 'string' ? wallet.client.trim().toLowerCase() : '';
-  return client !== '' && client !== 'privy';
+  return client !== '' && client !== 'privy' && client !== 'privy-v2';
 }
 
-export function mergeWalletPositions({ wallets = [], portfolio = null } = {}) {
+export function mergeWalletPositions({ wallets = [], portfolio = null, retiredIds = [] } = {}) {
+  const retired = new Set(Array.isArray(retiredIds) ? retiredIds.map(id => (typeof id === 'string' ? id.trim() : id)).filter(Boolean) : []);
   const byAddress = new Map();
   for (const wallet of wallets) {
     if (wallet && typeof wallet.address === 'string' && BASE58.test(wallet.address) && !byAddress.has(wallet.address)) {
+      if (retired.has(wallet.id) || retired.has(wallet.address)) continue;
       byAddress.set(wallet.address, { ...wallet });
     }
   }
   const cluster = SOLANA_CLUSTER === 'mainnet-beta' ? 'mainnet' : SOLANA_CLUSTER;
-  const linked = portfolio?.authorizesTransaction === false && portfolio.broadcast !== true && portfolio.cluster === cluster
-    && Array.isArray(portfolio.wallets) ? portfolio.wallets : [];
+  const verifiedPortfolio = portfolio?.authorizesTransaction === false && portfolio.broadcast !== true && portfolio.cluster === cluster;
+  const linked = verifiedPortfolio && Array.isArray(portfolio.wallets) ? portfolio.wallets : [];
   const priced = new Map();
   for (const wallet of linked) {
     if (!wallet || typeof wallet.address !== 'string' || !BASE58.test(wallet.address)) continue;
+    if (retired.has(wallet.id) || retired.has(wallet.address)) continue;
     priced.set(wallet.address, wallet.holdings);
     const connected = connectedClient(wallet);
     const record = byAddress.get(wallet.address) ?? {
@@ -85,8 +88,9 @@ export function mergeWalletPositions({ wallets = [], portfolio = null } = {}) {
     byAddress.set(wallet.address, record);
   }
 
-  const positions = [];
+  const holdingsRows = [];
   for (const wallet of byAddress.values()) {
+    if (retired.has(wallet.id) || retired.has(wallet.address)) continue;
     const chainRows = (wallet.holdings || []).filter(row => row?.cluster === SOLANA_CLUSTER).map(row => {
       if (row.asset === 'SOL' && !row.mint) return { ...row, mint: SOL_MINT, native: true };
       if (row.mint === SOL_MINT) return { ...row, symbol: 'wSOL', native: false };
@@ -102,16 +106,24 @@ export function mergeWalletPositions({ wallets = [], portfolio = null } = {}) {
       const key = holding.native === false ? `${holding.mint}:wrapped` : holding.mint;
       if (seen.has(key)) continue;
       seen.add(key);
-      positions.push({
+      holdingsRows.push({
         id: `wallet:${wallet.address}:${key}`,
         botId: null, walletId: wallet.id, holder: wallet.label || 'Wallet',
         asset: typeof holding.symbol === 'string' && holding.symbol.trim() ? holding.symbol.trim() : 'Token',
         mint: holding.mint, amount: holding.amount, decimals: holding.decimals,
-        notionalMicroUsdc: units(holding.usdMicro) ? holding.usdMicro : null,
+        notionalMicroUsdc: units(holding.usdMicro) != null ? holding.usdMicro : null,
         quoteSource: 'Wallet balance', venue: 'Balance', side: 'balance',
         readOnly: wallet.readOnly === true, cluster: SOLANA_CLUSTER,
       });
     }
   }
-  return { positions, wallets: [...byAddress.values()] };
+  const providerRows = verifiedPortfolio && Array.isArray(portfolio.providers?.positions) ? portfolio.providers.positions : [];
+  const positions = [];
+  for (const position of providerRows) {
+    if (!position || (position.walletAddress && retired.has(position.walletAddress))) continue;
+    const wallet = byAddress.get(position?.walletAddress);
+    if (!wallet || position.cluster !== SOLANA_CLUSTER) continue;
+    positions.push({ ...position, walletId: wallet.id, holder: wallet.label || 'Wallet', readOnly: wallet.readOnly === true });
+  }
+  return { positions, holdings: holdingsRows, wallets: [...byAddress.values()] };
 }

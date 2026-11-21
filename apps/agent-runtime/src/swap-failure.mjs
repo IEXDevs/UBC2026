@@ -1,9 +1,17 @@
-import { swapSimulationDetails } from '@ubc2026/wallets/swap-diagnostics';
+import { SYSTEM_PROGRAM, swapSetupNeedsSol, swapSimulationDetails } from '@ubc2026/wallets/swap-diagnostics';
 
 const FAILURES = {
   client_sign_required: ['client signing', 'Approve this swap in the browser with the selected wallet.'],
+  swap_delegation_unavailable: ['wallet authorization', 'This wallet is unavailable for automatic signing. Approve the swap with the selected wallet or enable its Privy signer.'],
+  swap_signer_not_configured: ['wallet authorization', 'The Worker does not have an automatic swap signer configured.'],
+  swap_wallet_not_delegatable: ['wallet authorization', 'This agent needs an owned Privy Solana wallet to swap automatically.'],
+  swap_wallet_identity_mismatch: ['wallet authorization', 'The wallet ID, address, or chain in Privy differs from the agent’s spending wallet.'],
+  swap_wallet_lookup_failed: ['wallet authorization', 'The Worker could not verify the wallet’s signer list with Privy.'],
+  swap_signer_missing: ['wallet authorization', 'The agent’s wallet needs the Maelstrom signer.'],
   aborted: ['client signing', 'The swap request was cancelled. Nothing further was submitted.'],
   client_sign_rejected: ['client signing', 'The selected wallet declined or cancelled signing.'],
+  client_sign_failed: ['client signing', 'The selected wallet could not sign the swap. Nothing was submitted.'],
+  client_sign_session_required: ['client signing', 'Privy needs a fresh wallet session. Sign out and sign back in before retrying. Nothing was submitted.'],
   wallet_connection_required: ['client signing', 'The selected wallet is not available in this browser. Connect that exact wallet; server-only wallets cannot use browser signing.'],
   broadcast_failed: ['broadcast', 'The server could not broadcast the signed swap. Submission status may be unknown; check activity before retrying.'],
   swap_quote_unavailable: ['quote', 'Jupiter could not prepare a swap quote.'],
@@ -12,6 +20,14 @@ const FAILURES = {
   jupiter_redirect_refused: ['quote', 'Jupiter redirected the quote request. The Worker stopped before sending the API key to another URL.'],
   jupiter_quote_invalid_response: ['quote', 'Jupiter did not return a valid swap response.'],
   swap_route_refused: ['quote validation', 'The Jupiter route failed the transaction safety checks. Try a different amount or pair.'],
+  swap_quote_terms_mismatch: ['quote validation', 'The Jupiter quote failed the check for the requested tokens, input amount, slippage, or minimum output.'],
+  swap_route_extra_instructions: ['quote validation', 'Jupiter added a tip or an extra instruction outside the permitted swap steps.'],
+  swap_route_compute_invalid: ['quote validation', 'The route included an unsupported compute budget instruction.'],
+  swap_route_instruction_mismatch: ['quote validation', 'Maelstrom could not match the Jupiter swap instruction to the quoted terms and wallet.'],
+  swap_route_setup_invalid: ['quote validation', 'Maelstrom could not verify a token account or SOL transfer in the route setup.'],
+  swap_route_cleanup_invalid: ['quote validation', 'Maelstrom could not verify the route’s wrapped SOL cleanup.'],
+  swap_route_signers_invalid: ['quote validation', 'The route required an unexpected additional signer.'],
+  swap_route_too_large: ['quote validation', 'The route is too large for one Solana transaction.'],
   swap_mint_invalid: ['mint metadata', 'The mint address, network, or decimals could not be verified.'],
   insufficient_funds: ['simulation', 'The wallet needs enough input tokens and SOL for fees and account rent.'],
   account_not_found: ['simulation', 'A required wallet or token account was not found.'],
@@ -33,7 +49,7 @@ const FAILURES = {
   owner_auth_required: ['permission', 'Sign in as the wallet owner before swapping.'],
   invalid_authorization_key: ['Privy signing', 'The configured signing authorization key is invalid.'],
   invalid_wallet: ['Privy signing', 'The wallet has no valid signing identity.'],
-  transaction_mismatch: ['Privy signing', 'The signed transaction did not match the simulated swap.'],
+  transaction_mismatch: ['Privy signing', 'Privy returned a changed transaction or an invalid signature. The swap stopped before broadcast.'],
   simulation_required: ['simulation', 'A verified simulation is required before signing.'],
   swap_quote_expired: ['quote', 'The quote expired or changed. Request a fresh quote.'],
   swap_unavailable: ['quote', 'Swap execution is not configured (Jupiter key, wallet client, or budget service).'],
@@ -42,7 +58,9 @@ const FAILURES = {
   'trust-unavailable': ['trust', 'The token trust score could not be verified.'],
   'approval-needed': ['approval', 'The review threshold requires owner approval.'],
   owner_approval_required: ['permission', 'Ask-every-time permission requires owner approval.'],
-  invalid_auto_swap: ['permission', 'Automatic execution requires Full or Review permission and a queued swap.'],
+  invalid_auto_swap: ['permission', 'Automatic swaps require a valid quote and either Full permissions or Review by AI.'],
+  swap_saved_permission_required: ['permission', 'The saved permission mode or Review by AI threshold does not authorize this automatic swap.'],
+  swap_quote_requires_confirmation: ['approval', 'This quote requires owner approval. Review the quoted amount before continuing.'],
   desk_locked: ['desk lock', 'Unlock the desk before approving this swap.'],
   desk_lock_unavailable: ['desk lock', 'The desk lock service is unavailable.'],
   'per-transaction': ['budget', 'The swap exceeds the per-transaction budget.'],
@@ -71,6 +89,7 @@ const FAILURES = {
   wrong_cluster: ['network', 'The RPC network does not match Solana mainnet.'],
   'spend-frozen': ['wallet', 'The agent or wallet is frozen or disabled.'],
   wallet_owner_session_required: ['Privy signing', 'Sign in again as the wallet owner.'],
+  wallet_authorization_required: ['Privy signing', 'Privy did not accept the configured signer for this wallet. The swap stopped before broadcast.'],
   wallet_authorization_failed: ['Privy signing', 'Privy rejected the wallet authorization.'],
   wallet_policy_rejected: ['Privy signing', 'The Privy wallet policy rejected this swap.'],
   privy_failed: ['Privy signing', 'Privy could not sign the swap.'],
@@ -92,7 +111,15 @@ export function swapFailure(result = {}) {
   const instruction = [result.simulationReason, result.error].find(value => /^instruction_[0-9]+_(?:[A-Za-z]{1,64}|custom_[0-9]+|unknown)$/.test(value ?? ''));
   if (instruction) {
     const details = swapSimulationDetails(result.simulationDetails ?? result.failure?.simulationDetails);
-    const lines = [`Swap — simulation: A Solana instruction failed before broadcast. [${instruction}]`];
+    let reason = 'A Solana instruction failed before broadcast.';
+    if (instruction.endsWith('_custom_1')) {
+      if (swapSetupNeedsSol(details)) {
+        reason = 'The sending wallet did not have enough SOL to create a token account for this route. The swap stopped before broadcast.';
+      } else if (details?.instructionProgram === SYSTEM_PROGRAM) {
+        reason = 'The sending wallet ran short of SOL during swap setup. The wallet must cover the swap input, fees, and any account rent. The swap stopped before broadcast.';
+      }
+    }
+    const lines = [`Swap — simulation: ${reason} [${instruction}]`];
     if (details?.instructionProgram) lines.push(`Instruction program ${details.instructionProgram}.`);
     if (details) lines.push(...details.logs);
     return { code: instruction, step: 'simulation', message: lines.join('\n'), ...(details ? { simulationDetails: details } : {}) };
@@ -100,5 +127,11 @@ export function swapFailure(result = {}) {
   const code = [result.simulationReason, result.reason, result.error, result.state, result.code]
     .find(value => Object.hasOwn(FAILURES, value)) || 'swap_failed';
   const [step, reason] = FAILURES[code];
-  return { code, step, message: `Swap — ${step}: ${reason} [${code}]` };
+  const status = result.privyFailure?.status;
+  const lookup = code === 'swap_wallet_lookup_failed' && Number.isInteger(status) && status >= 100 && status <= 599
+    ? ` Privy wallet lookup returned HTTP ${status}.` : '';
+  const signingStatus = result.signingHttpStatus;
+  const walletStatus = Number.isInteger(signingStatus) && signingStatus >= 400 && signingStatus <= 599
+    ? ` The wallet provider returned HTTP ${signingStatus}.` : '';
+  return { code, step, message: `Swap — ${step}: ${reason}${lookup}${walletStatus} [${code}]` };
 }

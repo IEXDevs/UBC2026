@@ -849,6 +849,9 @@ function validateParameters(toolDef, parameters) {
   if (toolDef.properties.provider && parameters.provider != null) {
     if (parameters.provider !== 'sandbox' && parameters.provider !== 'laso') return false;
   }
+  if (toolDef.properties.lasoAction && parameters.lasoAction != null && parameters.lasoAction !== '') {
+    if (!['setup', 'modify', 'intl', 'gift'].includes(parameters.lasoAction)) return false;
+  }
   if (toolDef.properties.domain && parameters.domain != null) {
     if (typeof parameters.domain !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}\.sol$/i.test(parameters.domain)) return false;
   }

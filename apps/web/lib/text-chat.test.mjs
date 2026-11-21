@@ -351,7 +351,7 @@ test('a latest-model question searches once and does not open a browser', async 
 });
 
 test('browser and research replies bypass final verification for successful, empty and failed results', async () => {
-  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+  for (const name of ['browser_open', 'browser_navigate', 'browser_click', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
     for (const result of [{ ok: true }, { items: [] }, { error: 'provider_unavailable' }]) {
       let round = 0;
       let verified = 0;
@@ -640,7 +640,7 @@ test('Laso browser and research restrictions follow the current request or an un
     { message: 'yes', grants: [{ ...pending, args: { action: 'swap' } }], blocked: false },
     { message: 'yes', blocked: false },
   ];
-  for (const name of ['browser_open', 'browser_navigate', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
+  for (const name of ['browser_open', 'browser_navigate', 'browser_click', 'browser_live_view', 'browser_release', 'web_search', 'web_scrape']) {
     for (const scenario of cases) {
       let modelCalls = 0;
       const invoked = [];
@@ -1563,4 +1563,61 @@ test('a send posts the Solscan URL before the model is asked to close the turn',
   assert.equal(order[2], '1 SOL is on the way to @hi.');
   assert.deepEqual(result.messages, [`Sent. ${url}`, '1 SOL is on the way to @hi.']);
   assert.equal(result.text, '1 SOL is on the way to @hi.');
+});
+
+test('chat lookup_recipient and request_spend support raw addresses and .sol SNS domains', async () => {
+  const destination = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const seen = [];
+  const toolCalls = [
+    ['lookup_recipient', { q: destination }],
+    ['lookup_recipient', { q: 'alex.sol' }],
+    ['request_spend', { amount: '1000000', asset: 'USDC', destination }],
+    ['request_spend', { amount: '2000000', asset: 'USDC', domain: 'alex.sol' }],
+  ];
+  let rounds = 0;
+  const result = await completeTextChat({
+    modelApiKey: META_KEY,
+    message: 'Check recipient and send funds',
+    permissionMode: 'full',
+    grants: [
+      { name: 'request_spend', args: { amount: '1000000', asset: 'USDC', destination } },
+      { name: 'request_spend', args: { amount: '2000000', asset: 'USDC', domain: 'alex.sol' } },
+    ],
+    tools: [...new Set(toolCalls.map(([name]) => name))].map(name => ({
+      type: 'function', function: { name, parameters: { type: 'object' } },
+    })),
+    invokeTool: async (name, args) => {
+      seen.push([name, args]);
+      return { ok: true, recipient: { address: destination } };
+    },
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      rounds += 1;
+      if (rounds === 1) {
+        return Response.json({
+          choices: [{
+            finish_reason: 'tool_calls',
+            message: {
+              tool_calls: toolCalls.map(([name, args], index) => ({
+                id: `c${index}`,
+                type: 'function',
+                function: { name, arguments: JSON.stringify(args) },
+              })),
+            },
+          }],
+        });
+      }
+      return Response.json({ choices: [{ message: { content: 'Payments completed.' } }] });
+    },
+  });
+  assert.equal(seen.length, 4);
+  assert.equal(seen[0][0], 'lookup_recipient');
+  assert.equal(seen[0][1].q, destination);
+  assert.equal(seen[1][0], 'lookup_recipient');
+  assert.equal(seen[1][1].q, 'alex.sol');
+  assert.equal(seen[2][0], 'request_spend');
+  assert.equal(seen[2][1].destination, destination);
+  assert.equal(seen[3][0], 'request_spend');
+  assert.equal(seen[3][1].domain, 'alex.sol');
+  assert.equal(result.text, 'Payments completed.');
 });

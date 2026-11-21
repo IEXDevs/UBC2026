@@ -115,17 +115,18 @@ export function createAccountMirror({
   let deletedAgents = new Set();
   let timer = null;
   let retries = 0;
+  let lastWrite = null;
   let live = Boolean(storage) && entries.length > 0;
   // Nothing is pushed until the account copy was read. A browser that could not
   // read it must not overwrite what the account already holds.
   let open = false;
 
-  async function send(items, { keepalive = false } = {}) {
-    const url = shellRuntimeUrl('/api/state');
-    if (!url) return false;
-    const headers = await ownerAuthHeaders(ownerId, getAccessToken, { 'content-type': 'application/json' });
-    const body = JSON.stringify({ items });
-    try {
+  function send(items, { keepalive = false } = {}) {
+    async function post() {
+      const url = shellRuntimeUrl('/api/state');
+      if (!live || !url) return false;
+      const headers = await ownerAuthHeaders(ownerId, getAccessToken, { 'content-type': 'application/json' });
+      const body = JSON.stringify({ items });
       const response = await fetchImpl(url, {
         method: 'POST',
         headers,
@@ -134,9 +135,11 @@ export function createAccountMirror({
         ...(keepalive && body.length < KEEPALIVE_MAX ? { keepalive: true } : {}),
       });
       return response.ok;
-    } catch {
-      return false;
     }
+    const write = (lastWrite ? lastWrite.then(post) : post()).catch(() => false);
+    lastWrite = write;
+    void write.then(() => { if (lastWrite === write) lastWrite = null; });
+    return write;
   }
 
   async function flush({ keepalive = false } = {}) {
@@ -267,7 +270,7 @@ export function createAccountMirror({
     pending.clear();
   }
 
-  return { storage: mirrored, hydrate, flush, stop, entries };
+  return { ownerId, storage: mirrored, hydrate, flush, stop, entries };
 }
 
 /* Singleton used by the desk. Components import `accountStorage` for mirrored writes. */

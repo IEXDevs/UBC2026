@@ -39,6 +39,7 @@ test('runtime proxy allowlist is the live owner and bot routes', () => {
   assert.equal(isAllowedRuntimePath('/bots/bot_1/card-loop/break'), true);
   assert.equal(isAllowedRuntimePath('/bots/bot_1/sns/send'), true);
   assert.equal(isAllowedRuntimePath('/bots/bot_1/browser/sessions/rec_1/live-view'), true);
+  assert.equal(isAllowedRuntimePath('/bots/bot_1/browser/sessions/rec_1/click'), true);
   assert.equal(isAllowedRuntimePath('/security/grab-back'), true);
   assert.equal(isAllowedRuntimePath('/api/routes'), false);
   assert.equal(isAllowedRuntimePath('/api/bots/../wallets'), false);
@@ -119,6 +120,8 @@ test('runtime proxy rejects path traversal, null bytes, and overlong query value
 test('runtime proxy allowlist covers shopping, commerce is not proxied from shell', () => {
   assert.equal(isAllowedRuntimePath('/bots/bot_1/shopping/prepare'), true);
   assert.equal(isAllowedRuntimePath('/bots/bot_1/shopping/settle'), true);
+  assert.equal(isAllowedRuntimePath('/bots/bot_1/laso/checkpoint'), true);
+  assert.equal(isAllowedRuntimePath('/bots/bot_1/laso/status'), true);
   assert.equal(isAllowedRuntimePath('/bots/bot_1/commerce/signals/sig_1'), false);
   assert.equal(isAllowedRuntimePath('/voice/agent'), true);
   assert.equal(isAllowedRuntimePath('/voice/tools/list_bots'), false);

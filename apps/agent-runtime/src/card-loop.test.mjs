@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BotStateMachine, INTERNAL_CARD_LOOP_VALUE, INTERNAL_POSITION_HEADER } from './bot-do.mjs';
+import { BotDurableObject, BotStateMachine, INTERNAL_CARD_LOOP_VALUE, INTERNAL_POSITION_HEADER } from './bot-do.mjs';
 import worker from './owner-auth.fixture.mjs';
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
 
@@ -165,4 +165,119 @@ test('public card-loop routes require the owner', async () => {
     body: JSON.stringify({ purpose: 'Check positions', cooldownMinutes: '15' }),
   }), env);
   assert.equal(response.status, 401);
+});
+
+test('an alarm loads the saved owner and wallet, runs the loop and arms the next wake', async () => {
+  const records = new Map();
+  const alarms = [];
+  const storage = {
+    get: key => records.get(key),
+    put: (key, value) => records.set(key, value),
+    setAlarm: at => alarms.push(at),
+  };
+  const reads = [];
+  const models = [];
+  const durable = new BotDurableObject({ storage }, {
+    SUPABASE_URL: 'https://supabase.example',
+    SUPABASE_SERVICE_ROLE_KEY: 'fixture-key',
+    fetch: async (url, init) => {
+      assert.equal(init.method, 'GET');
+      const { pathname, searchParams } = new URL(url);
+      reads.push(pathname);
+      if (pathname.endsWith('/bots')) {
+        assert.equal(searchParams.get('owner_id'), 'eq.' + bot.ownerId);
+        return Response.json([{
+          id: bot.id, owner_id: bot.ownerId, wallet_id: wallet.id, cap_asset: 'USDC',
+          name: bot.name, goal: bot.goal, type: bot.type, enabled: true, frozen: false,
+          approval_mode: bot.approvalMode, policy_version: bot.policyVersion,
+          cap_mode: bot.cap.mode, max_outflow: bot.cap.maxOutflow, max_per_transaction: bot.cap.maxPerTransaction,
+        }]);
+      }
+      if (pathname.endsWith('/wallets')) {
+        assert.equal(searchParams.get('owner_id'), 'eq.' + bot.ownerId);
+        return Response.json([{ ...wallet, owner_id: wallet.ownerId }]);
+      }
+      assert.ok(pathname.endsWith('/spend_ledgers'));
+      return Response.json([{ asset: 'USDC' }]);
+    },
+    openRouter: {
+      async complete({ role, goal }) {
+        models.push(role);
+        if (role === 'research') {
+          assert.equal(goal, 'Check positions');
+          return { text: 'No change.' };
+        }
+        return { text: role === 'verify' ? '{"allow":true}' : '{"proposal":null}' };
+      },
+    },
+  });
+  const create = await durable.fetch(post('/card-loop', { botId: bot.id, purpose: 'Check positions', cooldownMinutes: '15' }));
+  assert.equal(create.status, 200);
+  assert.equal(alarms.length, 1);
+  records.set('cardLoop', { ...records.get('cardLoop'), nextWakeAt: NOW });
+  await durable.alarm();
+  assert.deepEqual(reads, ['/rest/v1/bots', '/rest/v1/wallets', '/rest/v1/spend_ledgers']);
+  assert.deepEqual(models, ['research', 'verify', 'decide']);
+  assert.equal(records.get('run').checkpoints.research.status, 'done');
+  const loop = records.get('cardLoop');
+  assert.equal(loop.nextWakeAt, loop.lastWakeAt + 15 * 60_000);
+  assert.equal(alarms.at(-1), loop.nextWakeAt);
+});
+
+test('desk checks use server time and share a single wake with cron', async () => {
+  const machine = new BotStateMachine();
+  await machine.handle(post('/card-loop', { botId: bot.id, purpose: 'Check positions', cooldownMinutes: '15' }));
+  const loop = await machine.get('cardLoop');
+  const early = await machine.handle(post('/card-loop/check', { now: loop.nextWakeAt }));
+  assert.equal((await early.json()).reason, 'cooling');
+  const forbidden = await machine.handle(post('/card-loop/check', {}, { 'x-owner-id': 'user_2' }));
+  assert.equal(forbidden.status, 403);
+
+  await machine.put('cardLoop', { ...loop, nextWakeAt: NOW });
+  let release;
+  let calls = 0;
+  const loaded = new Promise(resolve => { release = resolve; });
+  let began;
+  const started = new Promise(resolve => { began = resolve; });
+  const env = {
+    loadLoopContext: async () => {
+      calls += 1;
+      began();
+      return loaded;
+    },
+  };
+  const desk = machine.handle(post('/card-loop/check', {}), env);
+  await started;
+  const cron = await machine.handle(post('/card-loop/tick', { now: NOW }, {
+    [INTERNAL_POSITION_HEADER]: INTERNAL_CARD_LOOP_VALUE,
+  }), env);
+  assert.equal((await cron.json()).reason, 'running');
+  const stopped = await machine.handle(post('/card-loop/break', {}, { 'x-loop-break': 'owner-asked' }));
+  assert.equal(stopped.status, 200);
+  release({ bot, wallet, ledger });
+  assert.equal((await (await desk).json()).reason, 'schedule_changed');
+  assert.equal(calls, 1);
+  assert.equal(await machine.get('cardLoop'), null);
+  assert.equal(await machine.get('run'), null);
+});
+
+test('cron asks only enabled and unfrozen owned agents to check due loops', async () => {
+  const requests = [];
+  const work = [];
+  await worker.scheduled({ cron: '5,20,35,50 * * * *', scheduledTime: NOW }, {
+    listScheduledBots: async () => [
+      { ...bot, id: 'ready' }, { ...bot, id: 'disabled', enabled: false }, { ...bot, id: 'frozen', frozen: true },
+    ],
+    readStreamHealth: async () => ({ lastEventAt: NOW, status: 'up' }),
+    BOT: {
+      idFromName: name => name,
+      get: id => ({ fetch: async request => {
+        requests.push({ id, path: new URL(request.url).pathname, owner: request.headers.get('x-owner-id'),
+          internal: request.headers.get(INTERNAL_POSITION_HEADER) });
+        return Response.json({ ok: true });
+      } }),
+    },
+  }, { waitUntil: promise => work.push(promise) });
+  await Promise.all(work);
+  assert.deepEqual(requests, [{ id: 'ready', path: '/card-loop/tick', owner: bot.ownerId, internal: INTERNAL_CARD_LOOP_VALUE }]);
 });

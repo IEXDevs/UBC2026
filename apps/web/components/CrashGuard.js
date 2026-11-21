@@ -14,6 +14,10 @@ class RenderBoundary extends Component {
     return { crashed: true };
   }
 
+  componentDidCatch(error, errorInfo) {
+    console.error('[CrashGuard] Component render error:', error, errorInfo);
+  }
+
   render() {
     if (this.state.crashed) return <NotFoundScreen />;
     return this.props.children;
@@ -29,6 +33,7 @@ export default function CrashGuard({ children }) {
     const origin = window.location.origin;
 
     const onError = (event) => {
+      console.error('[CrashGuard] Window error event:', event?.error || event?.message, event);
       if (!shouldCrashOnError({
         message: event?.message,
         filename: event?.filename,
@@ -38,6 +43,7 @@ export default function CrashGuard({ children }) {
     };
 
     const onReject = (event) => {
+      console.error('[CrashGuard] Unhandled promise rejection:', event?.reason);
       if (!shouldCrashOnRejection(event?.reason, { origin })) return;
       setCrashed(true);
     };

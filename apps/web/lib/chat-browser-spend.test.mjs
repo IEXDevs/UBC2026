@@ -33,7 +33,7 @@ test('approved sends use move prepare, shared browser signer, then move broadcas
   assert.equal(calls[1].body.signedTransaction, Buffer.from(transaction).toString('base64'));
   assert.equal(calls[0].headers.authorization, 'Bearer test-token');
   assert.equal(calls[1].headers['x-desk-grant'], 'test-grant');
-  assert.deepEqual(signs, [{ walletAddress: 'selected', transaction }]);
+  assert.deepEqual(signs, [{ walletAddress: 'selected', transaction, requireWalletApproval: true }]);
 });
 
 test('missing, expired and malformed preparations never sign; cancellation and empty signatures never broadcast', async () => {

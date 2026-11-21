@@ -14,8 +14,8 @@ import { blockCopy } from '../lib/block-copy.mjs';
 
 const COPY = Object.freeze({
   ask: 'You approve every spend. Nothing moves until you confirm it.',
-  review: 'You set a maximum. At or under that amount the spend can continue after the server check. Above it, you approve.',
-  full: 'The agent can manage funds. You still slide to confirm, and a price quote never authorizes a transaction.',
+  review: 'Eligible swaps sign automatically at or below your USD maximum. Above it, you approve in your wallet.',
+  full: 'Eligible swaps sign automatically within the agent’s spending limits.',
 });
 
 function storedDraft(ownerId) {

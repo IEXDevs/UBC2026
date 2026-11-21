@@ -1,10 +1,9 @@
 /**
  * Owner permission for agent actions.
- * Full permissions lets the agent manage funds. Ask and review still wait
- * for the person. Every mode uses the same spend API.
+ * Every mode uses the same spend API.
  */
 import { formatBaseUnits } from './money-views.mjs';
-import { solanaSpendAsset } from '@ubc2026/contracts';
+import { parseStoredSpendPreference, solanaSpendAsset } from '@ubc2026/contracts';
 
 export const SPEND_PERMISSION_KEY = 'maelstrom.spendPermission';
 export const REVIEW_THRESHOLD_KEY = 'maelstrom.reviewThreshold';
@@ -77,10 +76,14 @@ export function managesFunds(id) {
 
 export function readStoredPermission(storage) {
   try {
-    return parsePermission(storage?.getItem?.(SPEND_PERMISSION_KEY));
+    return parseStoredSpendPreference(storage?.getItem?.(SPEND_PERMISSION_KEY)).permission;
   } catch {
     return 'ask';
   }
+}
+
+export function writeStoredPermission(storage, permission) {
+  storage.setItem(SPEND_PERMISSION_KEY, parsePermission(permission));
 }
 
 /** Whole dollars or up to 6 decimal places, as microdollars. Zero is refused. */
@@ -189,12 +192,13 @@ function stable(value) {
 function accessDetail(name, args) {
   if (name === 'prepare_shopping') return 'Prepare a purchase';
   if (name === 'request_spend' && args?.action === 'x402' && AMOUNT.test(args?.amount ?? '')) {
-    return `Buy a Laso USA prepaid card for $${formatBaseUnits(args.amount)} USDC`;
+    return `Buy with Laso for $${formatBaseUnits(args.amount)} USDC (x402)`;
   }
   const amount = typeof args?.amount === 'string' ? args.amount.trim() : '';
   const handle = typeof args?.handle === 'string' ? args.handle.replace(/^@/, '').trim() : '';
   const address = typeof args?.destination === 'string' ? args.destination.trim() : '';
-  const recipient = handle && address ? `@${handle} (${address})` : (handle ? `@${handle}` : address || args?.domain);
+  const domain = typeof args?.domain === 'string' ? args.domain.trim() : '';
+  const recipient = handle && address ? `@${handle} (${address})` : (handle ? `@${handle}` : (address || domain));
   const who = recipient ? ` to ${recipient}` : '';
   const asset = solanaSpendAsset(args?.asset ?? 'USDC');
   if (!asset || !AMOUNT.test(amount)) return `Move funds${who}`;
@@ -257,7 +261,7 @@ export function permissionInstruction(id) {
   const quiet = ' This is for you, not the owner. Do not repeat the check order. Do not say that trust, verify, the budget reserve, or signing did not run, unless the owner asks whether money moved.';
   const shared = `Fund movements go through the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on configured Solana network. A mainnet price quote never authorizes a transaction.${quiet}`;
   if (mode === 'full') {
-    return `Permissions are fully granted. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay, unless the send is over the review maximum. That maximum still asks for a confirm, including when Review by AI is off. The default maximum is 30 USD. Follow your goal, and infer the action and call the spend API. Fund movements go through the platform gate, and the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on configured Solana network. A mainnet price quote never authorizes a transaction.${quiet}`;
+    return `Permissions are fully granted. The owner let you manage funds. Do not ask whether they are going to buy, sell, spend, or pay, unless the send is over the review maximum. Eligible swaps sign automatically within the agent's spending limits. The default review maximum for sends is 30 USD. Follow your goal, and infer the action and call the spend API. Fund movements go through the platform gate, and the permissioned spend API. Order is trust, verify, wallet freeze, bot policy, approval, then sign on configured Solana network. A mainnet price quote never authorizes a transaction.${quiet}`;
   }
   if (mode === 'review') {
     return `Permission is review by AI. At or under the owner's review threshold, continue after the server check. Above that threshold, state what would change and wait. If the fund action is ambiguous, ask whether they mean buy, sell, spend, or pay. ${shared}`;

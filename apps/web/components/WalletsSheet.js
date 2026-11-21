@@ -5,7 +5,18 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useConnectWallet, useImportSeedPhrase, useLinkAccount, usePrivy } from '@privy-io/react-auth';
 import { useCreateWallet, useImportWallet, useWallets } from '@privy-io/react-auth/solana';
-import { ChevronDown, Plus, Settings2, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  ChevronDown,
+  CircleDollarSign,
+  Copy,
+  Plus,
+  QrCode,
+  Repeat,
+  Settings2,
+  X,
+} from 'lucide-react';
 import BotHistory from './BotHistory';
 import AddressCopy from './AddressCopy';
 import GlideSelect from './GlideSelect';
@@ -81,7 +92,9 @@ export default function WalletsSheet({
   const [balanceRevision, setBalanceRevision] = useState(0);
   const [sendPortfolio, setSendPortfolio] = useState(null);
   const [preferredAsset, setPreferredAsset] = useState(null);
+  const [accountsOpen, setAccountsOpen] = useState(false);
   const settingsRef = useRef(null);
+  const activityRef = useRef(null);
   const transferRef = useRef(null);
   const bodyRef = useRef(null);
   const [transfer, setTransfer] = useState('send');
@@ -100,15 +113,22 @@ export default function WalletsSheet({
   useEffect(() => {
     if (!open) return undefined;
     function onKey(event) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        if (accountsOpen) setAccountsOpen(false);
+        else onClose();
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, accountsOpen]);
 
   useEffect(() => {
     if (open && focusId) setWalletId(focusId);
   }, [open, focusId]);
+
+  useEffect(() => {
+    if (open && activityRef.current) activityRef.current.open = false;
+  }, [open]);
 
   useEffect(() => {
     const key = tokenStorageKey(ownerId);
@@ -123,13 +143,6 @@ export default function WalletsSheet({
       setPrefs(emptyTokenPrefs());
     }
   }, [ownerId, open]);
-
-  function savePrefs(next) {
-    const clean = normalizeTokenPrefs(next);
-    setPrefs(clean);
-    const key = tokenStorageKey(ownerId);
-    if (key) accountStorage.setItem(key, JSON.stringify(clean));
-  }
 
   function chooseTransfer(section) {
     const next = TRANSFER.findIndex(item => item.id === section);
@@ -185,7 +198,6 @@ export default function WalletsSheet({
       !ownDestinations.some(item => item.caption.toLowerCase() === row.caption.toLowerCase())
     )),
   ];
-  const heading = TRANSFER.find(item => item.id === transfer)?.label || 'Send';
   const previewBook = useMemo(() => (
     devPreview && activeRaw?.address
       ? previewPortfolioFor([{ kind: 'main', address: activeRaw.address, label: activeRaw.label }])
@@ -200,45 +212,151 @@ export default function WalletsSheet({
 
   if (!mounted || !root) return null;
 
+  const displayHandle = handle ? (handle.startsWith('@') ? handle : `@${handle}`) : (sns ? sns : '@user');
+  const activeInitial = (active?.label || 'W').slice(0, 2).toUpperCase();
+
   return createPortal(
     <div className={`backdrop is-center wallet-backdrop ${leaving ? 'is-leaving' : ''}`} onMouseDown={onClose}>
       <section
-        className="sheet wallets-sheet"
+        className="sheet wallets-sheet phantom-wallets-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="wallets-title"
         onMouseDown={event => event.stopPropagation()}
       >
-        <header className="wallet-header">
-          <div>
-            <h2 id="wallets-title">Wallet</h2>
-            <p className="quiet">Your assets, transfers, and activity. Together.</p>
-          </div>
-          <div className="wallet-header-actions">
-            <button type="button" className="ghost wallet-manage" onClick={() => {
-              if (!settingsRef.current) return;
-              settingsRef.current.open = true;
-              scrollToSection(settingsRef.current);
-            }}>
-              <Settings2 size={15} aria-hidden="true" />
-              Manage wallets
+        {/* Phantom Left Accounts Rail / Drawer (matching Screenshot 4) */}
+        <AnimatePresence>
+          {accountsOpen ? (
+            <motion.aside
+              className="phantom-accounts-drawer"
+              initial={{ x: -180, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -180, opacity: 0 }}
+              transition={{ duration: 0.28, ease: TRANSFER_EASE }}
+              aria-label="Account switcher"
+            >
+              <div className="phantom-drawer-header">
+                <button
+                  type="button"
+                  className="phantom-drawer-back"
+                  onClick={() => setAccountsOpen(false)}
+                  aria-label="Back"
+                >
+                  <ArrowLeft size={18} strokeWidth={2.2} />
+                </button>
+              </div>
+
+              <div className="phantom-drawer-list">
+                {rows.map((row, idx) => {
+                  const isActive = (active?.id || '') === row.id;
+                  const labelInitial = row.label ? row.label.slice(0, 2).toUpperCase() : `A${idx + 1}`;
+                  return (
+                    <button
+                      key={row.id}
+                      type="button"
+                      className={`phantom-drawer-avatar-btn ${isActive ? 'is-active' : ''}`}
+                      onClick={() => {
+                        setWalletId(row.id);
+                        setAccountsOpen(false);
+                      }}
+                      title={row.label}
+                    >
+                      <span className="phantom-drawer-avatar">{labelInitial}</span>
+                      <span className="phantom-drawer-name">{row.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="phantom-drawer-footer">
+                <button
+                  type="button"
+                  className="phantom-drawer-foot-btn"
+                  title="Add new wallet"
+                  onClick={() => {
+                    setAccountsOpen(false);
+                    if (!settingsRef.current) return;
+                    settingsRef.current.open = true;
+                    scrollToSection(settingsRef.current);
+                  }}
+                >
+                  <Plus size={18} strokeWidth={2} />
+                </button>
+                <button
+                  type="button"
+                  className="phantom-drawer-foot-btn"
+                  title="Wallet settings"
+                  onClick={() => {
+                    setAccountsOpen(false);
+                    if (!settingsRef.current) return;
+                    settingsRef.current.open = true;
+                    scrollToSection(settingsRef.current);
+                  }}
+                >
+                  <Settings2 size={18} strokeWidth={2} />
+                </button>
+              </div>
+            </motion.aside>
+          ) : null}
+        </AnimatePresence>
+
+        {/* Header */}
+        <header className="wallet-header phantom-top-header">
+          <div className="phantom-header-left">
+            <button
+              type="button"
+              className="phantom-account-pill-btn"
+              onClick={() => setAccountsOpen(prev => !prev)}
+              title="Switch wallet"
+            >
+              <div className="phantom-avatar-circle">
+                <span>{activeInitial}</span>
+              </div>
+              <div className="phantom-account-text">
+                <span className="phantom-account-handle">{displayHandle}</span>
+                <span className="phantom-account-sub">
+                  {active?.label || 'wallet'}
+                  <ChevronDown size={12} className="phantom-chevron" />
+                </span>
+              </div>
             </button>
-            <button type="button" className="icon-btn" aria-label="Close wallets" onClick={onClose}>
-              <X size={18} strokeWidth={1.75} />
+          </div>
+
+          <div className="wallet-header-actions phantom-header-actions">
+            <button
+              type="button"
+              className="ghost wallet-manage phantom-manage-btn"
+              onClick={() => {
+                if (!settingsRef.current) return;
+                settingsRef.current.open = true;
+                scrollToSection(settingsRef.current);
+              }}
+            >
+              <Settings2 size={16} aria-hidden="true" />
+              <span>Manage</span>
+            </button>
+            <button type="button" className="icon-btn phantom-close-btn" aria-label="Close wallets" onClick={onClose}>
+              <X size={18} strokeWidth={2} />
             </button>
           </div>
         </header>
-        <div className="wallet-body" ref={bodyRef}>
+
+        <div className="wallet-body phantom-wallet-body" ref={bodyRef}>
           <div className="wallet-overview">
-            <section className="wallet-card wallet-assets" aria-label="Wallet assets">
-              <WalletPick rows={rows} wallets={wallets} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} />
+            <section className="wallet-card wallet-assets phantom-assets-card" aria-label="Wallet assets">
+              <div className="phantom-select-row">
+                <WalletPick rows={rows} wallets={wallets} handle={handle} activeId={active?.id || ''} onSelect={setWalletId} />
+              </div>
+
               {active?.address ? (
-                <div className="wallet-identity">
+                <div className="wallet-identity sr-only">
                   <AddressCopy address={active.address} compact />
                   <span className="wallet-status">{active.frozen ? 'Frozen' : observing ? 'Linked' : 'Ready'}</span>
                 </div>
               ) : null}
+
               {signedIn && observing ? <WalletConnection key={`connection:${active.id}`} wallet={activeRaw} /> : null}
+
               {signedIn && active?.address ? (
                 <TokenScreen
                   key={active.id}
@@ -258,43 +376,56 @@ export default function WalletsSheet({
                   }}
                 />
               ) : <p className="quiet">{signedIn ? 'Add a wallet to see its assets here.' : 'Sign in to read the assets in your wallets.'}</p>}
-              <details className="wallet-fold wallet-allocation" onToggle={event => setPortfolioOpen(event.currentTarget.open)}>
+
+              <details className="wallet-fold wallet-allocation phantom-allocation-fold" onToggle={event => setPortfolioOpen(event.currentTarget.open)}>
                 <summary>Portfolio breakdown<ChevronDown size={16} aria-hidden="true" /></summary>
                 <div className="wallet-fold-body">
-                  {signedIn ? <ConnectedPortfolio key={balanceRevision} open={open && portfolioOpen} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>}
+                  {signedIn ? <ConnectedPortfolio key={balanceRevision} open={open && portfolioOpen} previewPortfolio={previewBook} onRetire={onRetire} onCreated={onWalletCreated} /> : <p className="quiet">Sign in to read balances.</p>}
                 </div>
               </details>
             </section>
-            <section className="wallet-card wallet-transfers" aria-label="Transfer" ref={transferRef}>
-              <div className="wallet-switch wallet-action-switch" role="group" aria-label="Transfer actions">
-                {TRANSFER.map(item => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-pressed={transfer === item.id}
-                    className={transfer === item.id ? 'is-on' : ''}
-                    onClick={() => chooseTransfer(item.id)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
+
+            <section className="wallet-card wallet-transfers phantom-transfers-card" aria-label="Transfer" ref={transferRef}>
+              <div className="phantom-action-tiles" role="group" aria-label="Transfer actions">
+                {TRANSFER.map(item => {
+                  const isCurrent = transfer === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-pressed={isCurrent}
+                      className={`phantom-action-tile ${isCurrent ? 'is-on' : ''}`}
+                      onClick={() => chooseTransfer(item.id)}
+                    >
+                      <span className="phantom-action-tile-icon">
+                        {item.id === 'send' ? <ArrowUpRight size={22} strokeWidth={2.4} /> : null}
+                        {item.id === 'swap' ? <Repeat size={20} strokeWidth={2.4} /> : null}
+                        {item.id === 'receive' ? <QrCode size={20} strokeWidth={2.4} /> : null}
+                      </span>
+                      <span className="phantom-action-tile-label">{item.label}</span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="phantom-action-tile phantom-tile-buy"
+                  onClick={() => {
+                    if (!settingsRef.current) return;
+                    settingsRef.current.open = true;
+                    scrollToSection(settingsRef.current);
+                  }}
+                >
+                  <span className="phantom-action-tile-icon">
+                    <CircleDollarSign size={20} strokeWidth={2.4} />
+                  </span>
+                  <span className="phantom-action-tile-label">Buy</span>
+                </button>
               </div>
-              <h3 className="wallet-action-title">
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={transfer}
-                    className="transfer-title"
-                    initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: reduceMotion ? 0 : -6 }}
-                    transition={{ duration: reduceMotion ? 0 : 0.32, ease: TRANSFER_EASE }}
-                  >{heading}</motion.span>
-                </AnimatePresence>
-              </h3>
+
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
                   key={`${active?.id || 'empty'}:${transfer}`}
-                  className="transfer-stage"
+                  className="transfer-stage phantom-transfer-stage"
                   initial={{ opacity: 0, x: reduceMotion ? 0 : transferDir * 18 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: reduceMotion ? 0 : transferDir * -14 }}
@@ -327,7 +458,8 @@ export default function WalletsSheet({
               </AnimatePresence>
             </section>
           </div>
-          <details className="wallet-fold" open>
+
+          <details className="wallet-fold phantom-fold" ref={activityRef}>
             <summary>Recent activity<ChevronDown size={16} aria-hidden="true" /></summary>
             <div className="wallet-fold-body">
               {bot ? (
@@ -352,37 +484,10 @@ export default function WalletsSheet({
               )}
             </div>
           </details>
-          <details className="wallet-fold wallet-settings" ref={settingsRef}>
+
+          <details className="wallet-fold wallet-settings phantom-fold" ref={settingsRef}>
             <summary>Wallet settings<ChevronDown size={16} aria-hidden="true" /></summary>
             <div className="wallet-fold-body wallet-settings-grid">
-              <section aria-label="Manage wallets">
-                <h3>Manage wallets</h3>
-                {signedIn ? (
-                <WalletAdd getAccessToken={getAccessToken} ownerId={ownerId} onCreated={onWalletCreated} />
-              ) : <p className="quiet">Sign in to create or import a wallet.</p>}
-                <WalletRoster
-                  rows={rows}
-                  handle={handle}
-                  activeId={active?.id || ''}
-                  onSelect={setWalletId}
-                  retiring={retiring}
-                  onRetire={async (row) => {
-                    setRetiring(row.id);
-                    setRetireNote('');
-                    try {
-                      const result = await onRetire?.(row);
-                      setRetireNote(result?.ok
-                        ? `${row.label} is no longer on this account.`
-                        : (result?.message || 'That wallet is still on the account.'));
-                    } catch {
-                      setRetireNote('That wallet is still on the account.');
-                    } finally {
-                      setRetiring('');
-                    }
-                  }}
-                />
-                {retireNote ? <p className="quiet" role="status">{retireNote}</p> : null}
-              </section>
               <section aria-label="Sign-in and keys">
                 <h3>Sign-in methods</h3>
                 {signedIn ? <LinkedLogins /> : <p className="quiet">Sign in to link email, Google, GitHub, or Discord.</p>}
@@ -396,9 +501,36 @@ export default function WalletsSheet({
                   getAccessToken={getAccessToken}
                 />
               </section>
-              <section className="wallet-token-settings" aria-label="Token preferences">
-                <h3>Token preferences</h3>
-                <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} />
+              <section aria-label="Manage wallets">
+                <h3>Manage wallets</h3>
+                {signedIn ? (
+                  <WalletAdd getAccessToken={getAccessToken} ownerId={ownerId} onCreated={onWalletCreated} />
+                ) : <p className="quiet">Sign in to create or import a wallet.</p>}
+                <WalletRoster
+                  rows={rows}
+                  handle={handle}
+                  activeId={active?.id || ''}
+                  onSelect={setWalletId}
+                  retiring={retiring}
+                  onRetire={async (row) => {
+                    setRetiring(row.id);
+                    setRetireNote('');
+                    try {
+                      const result = await onRetire?.(row);
+                      if (result?.ok && walletId === row.id) {
+                        setWalletId('');
+                      }
+                      setRetireNote(result?.ok
+                        ? `${row.label} is no longer on this account.`
+                        : (result?.message || 'That wallet is still on the account.'));
+                    } catch {
+                      setRetireNote('That wallet is still on the account.');
+                    } finally {
+                      setRetiring('');
+                    }
+                  }}
+                />
+                {retireNote ? <p className="quiet" role="status">{retireNote}</p> : null}
               </section>
             </div>
           </details>
@@ -416,11 +548,17 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-function ConnectedPortfolio({ open, previewPortfolio = null }) {
+function ConnectedPortfolio({ open, previewPortfolio = null, onRetire = null, onCreated = null }) {
   const { user, getAccessToken, unlinkWallet, ready, authenticated } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
   const { linkWallet } = useLinkAccount({
+    onSuccess: (userResult, linkMethod, linkedAccount) => {
+      const address = linkedAccount?.address || userResult?.linkedAccounts?.slice(-1)[0]?.address;
+      if (address) {
+        onCreated?.({ id: linkedAccount?.id || `wallet_${address}`, address, kind: 'additional' });
+      }
+    },
     onError: () => setError('That wallet could not be linked. If it already belongs to another account, sign in with it instead.'),
   });
   const [loading, setLoading] = useState(false);
@@ -504,9 +642,17 @@ function ConnectedPortfolio({ open, previewPortfolio = null }) {
     setRemoving(address);
     setError('');
     try {
-      await unlinkWallet(address);
+      if (onRetire) {
+        const result = await onRetire({ id: `wallet_${address}`, address, kind: 'additional' });
+        if (result && result.ok === false) {
+          setError(result.message || 'Could not unlink that wallet.');
+          return;
+        }
+      } else {
+        await unlinkWallet(address);
+      }
     } catch {
-      setError('Could not remove that wallet.');
+      setError('Could not unlink that wallet.');
     } finally {
       setRemoving('');
     }
@@ -543,9 +689,20 @@ export function WalletAdd({ getAccessToken = null, ownerId = '', onCreated = nul
   const [note, setNote] = useState('');
   const [hint, setHint] = useState('');
   const { linkWallet } = useLinkAccount({
-    onSuccess: () => {
+    onSuccess: (userResult, linkMethod, linkedAccount) => {
       if (!connecting.current) return;
       connecting.current = false;
+      const address = linkedAccount?.address
+        || userResult?.linkedAccounts?.slice(-1)[0]?.address
+        || user?.linkedAccounts?.slice(-1)[0]?.address;
+      if (address) {
+        onCreated?.({
+          id: linkedAccount?.id || `wallet_${address}`,
+          address,
+          kind: 'additional',
+          label: linkedAccount?.walletClientType ? `${linkedAccount.walletClientType}` : 'Wallet',
+        });
+      }
       setNote('Wallet connected.');
     },
     onError: () => {
@@ -572,10 +729,10 @@ export function WalletAdd({ getAccessToken = null, ownerId = '', onCreated = nul
   }
 
   return (
-    <div className="wallet-add">
+    <div className="wallet-add phantom-wallet-add">
       <button
         type="button"
-        className="wallet-add-connect"
+        className="wallet-add-connect phantom-connect-btn"
         disabled={busy}
         {...showHint('Opens Phantom, Solflare, Backpack, or another Solana wallet and links it to this account.')}
         onClick={() => {
@@ -726,12 +883,12 @@ function WalletRoster({ rows, handle = '', activeId, onSelect, onRetire, retirin
   const name = typeof handle === 'string' ? handle.trim().replace(/^@/, '') : '';
   if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one above, or generate a new one.</p>;
   return (
-    <div className="wallet-roster" role="list" aria-label="Wallets">
+    <div className="wallet-roster phantom-roster" role="list" aria-label="Wallets">
       {rows.map(row => (
-        <div key={row.id} className={`wallet-roster-row${activeId === row.id ? ' is-on' : ''}`}>
+        <div key={row.id} className={`wallet-roster-row phantom-roster-row${activeId === row.id ? ' is-on' : ''}`}>
           <button
             type="button"
-            className="wallet-roster-pick"
+            className="wallet-roster-pick phantom-roster-pick"
             aria-pressed={activeId === row.id}
             onClick={() => onSelect(row.id)}
           >
@@ -747,7 +904,7 @@ function WalletRoster({ rows, handle = '', activeId, onSelect, onRetire, retirin
               disabled={retiring === row.id}
               onClick={() => onRetire?.(row)}
             >
-              {retiring === row.id ? 'Removing' : 'Remove'}
+              {retiring === row.id ? 'Unlinking' : 'Unlink'}
             </button>
           ) : null}
         </div>
@@ -760,17 +917,16 @@ function WalletPick({ rows, wallets = [], handle = '', activeId, onSelect }) {
   const name = typeof handle === 'string' ? handle.trim().replace(/^@/, '') : '';
   if (!rows.length) return <p className="quiet">No wallet on this account yet. Connect one in settings, or generate a new one.</p>;
   return (
-    <label className="wallet-pick-label">
-      Wallet
+    <div className="wallet-pick-wrap">
       <GlideSelect
         className="wallet-pick"
         ariaLabel="Wallet"
         size="md"
         menuWidth={420}
-        accentColor="#e4c27a"
-        surfaceColor="#1a2422"
-        highlightColor="#243833"
-        textColor="#f6f3ea"
+        accentColor="#ffffff"
+        surfaceColor="#111111"
+        highlightColor="#1e1e1e"
+        textColor="#ffffff"
         value={activeId}
         options={rows.map(row => ({
           value: row.id,
@@ -779,7 +935,7 @@ function WalletPick({ rows, wallets = [], handle = '', activeId, onSelect }) {
         }))}
         onChange={onSelect}
       />
-    </label>
+    </div>
   );
 }
 
@@ -788,7 +944,7 @@ function WalletConnection({ wallet }) {
   const { connectWallet } = useConnectWallet();
   const connected = wallets.some(item => item.address === wallet.address);
   return (
-    <div className="wallet-form">
+    <div className="wallet-form phantom-card-inset">
       <p className="quiet">{wallet.label} approves sends and swaps in its own wallet prompt.</p>
       {!connected ? (
         <button type="button" className="ghost" disabled={wallet.frozen} onClick={() => connectWallet(walletConnectionOptions(wallet))}>
@@ -818,6 +974,7 @@ function SendPane({
   const [sendComplete, setSendComplete] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [folded, setFolded] = useState(false);
+
   useEffect(() => {
     if (!tokens.some(token => token.id === assetId)) {
       setAssetId(tokens[0]?.id || '');
@@ -825,6 +982,7 @@ function SendPane({
     }
   }, [tokens, assetId]);
   useEffect(() => { if (preferredAsset) { setAssetId(preferredAsset); setAmount(''); } }, [preferredAsset]);
+
   const asset = tokens.find(token => token.id === assetId) || tokens[0] || null;
   const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
   const target = picked?.kind === 'recent'
@@ -837,6 +995,7 @@ function SendPane({
   const [snsFailed, setSnsFailed] = useState(false);
   const [handleRecipient, setHandleRecipient] = useState(null);
   const [handleLooking, setHandleLooking] = useState(false);
+
   useEffect(() => {
     if (target?.kind !== 'sns') {
       setSnsAddress('');
@@ -857,6 +1016,7 @@ function SendPane({
       .catch(() => { if (!stop) setSnsFailed(true); });
     return () => { stop = true; };
   }, [target?.kind, target?.domain]);
+
   useEffect(() => {
     if (target?.kind !== 'handle') {
       setHandleRecipient(null);
@@ -884,6 +1044,7 @@ function SendPane({
       });
     return () => { stop = true; };
   }, [target?.kind, target?.handle, resolveRecipient]);
+
   const walletReady = target?.kind === 'wallet' && !target.frozen;
   const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
   const destinationAddress = target?.kind === 'wallet' || target?.kind === 'address'
@@ -912,11 +1073,14 @@ function SendPane({
   }) : null;
 
   return (
-    <form className="wallet-form field" onSubmit={event => event.preventDefault()}>
-      <p className="quiet">{active ? `From ${active.label}.` : 'No wallet yet.'} {observing ? 'A slide opens this wallet’s approval prompt. Nothing sends without its approval.' : 'A slide confirms the send. Nothing is signed before that.'}</p>
+    <form className="wallet-form field phantom-send-form" onSubmit={event => event.preventDefault()}>
+      <p className="quiet phantom-instruction sr-only">
+        {active ? `From ${active.label}.` : 'No wallet yet.'} {observing ? 'A slide opens this wallet’s approval prompt. Nothing sends without its approval.' : 'A slide confirms the send. Nothing is signed before that.'}
+      </p>
       {frozen ? <p className="quiet" role="status">This wallet is frozen.</p> : null}
-      <label>
-        To
+
+      <div className="phantom-input-card">
+        <label className="phantom-field-label">Recipient</label>
         <SendToField
           value={to}
           destinations={destinations}
@@ -924,46 +1088,76 @@ function SendPane({
           onChange={(next) => { setTo(next); setStatus(''); setFolded(false); }}
           onPick={(row) => setPickedId(row?.id || '')}
         />
-      </label>
-      {target?.kind === 'sns' && snsFailed ? (
-        <p className="quiet" role="status">Failed.</p>
-      ) : target?.kind === 'sns' && snsAddress ? (
-        <AddressCopy address={snsAddress} prefix={target.domain} />
-      ) : target?.kind === 'handle' && sendHandleReady(handleRecipient) ? (
-        <AddressCopy
-          address={handleRecipient.address}
-          prefix={handleRecipient.displayName || `@${handleRecipient.handle}`}
-        />
-      ) : target?.kind === 'handle' ? (
-        <p className="quiet" role="status">
-          {sendHandleHint(handleRecipient, { looking: handleLooking, handle: target.handle })}
-        </p>
-      ) : target?.kind === 'invalid-address' || target?.kind === 'address' ? (
-        <p className="quiet" role="status">{targetHint(target)}</p>
-      ) : (
-        <p className="quiet">{targetHint(target)}</p>
-      )}
-      <label>
-        Amount
-        <input
-          value={amount}
-          inputMode="decimal"
-          placeholder="0.00"
-          onChange={event => { setAmount(event.target.value); setStatus(''); setFolded(false); }}
-        />
-      </label>
-      <label>
-        Asset
-        <GlideSelect
-          ariaLabel="Asset"
-          value={asset?.id || ''}
-          options={tokens.map(token => ({ value: token.id, label: `${token.symbol} · ${formatAmount(token.amount, token.decimals)}`, tag: token.id === 'SOL' ? 'Native' : shortAddress(token.mint) }))}
-          onChange={id => { setAssetId(id); setAmount(''); setStatus(''); setFolded(false); }}
-        />
-      </label>
-      {!asset ? <p className="quiet" role="status">No sendable balance loaded for this wallet.</p> : <p className="quiet">Available: {formatAmount(asset.amount, asset.decimals)} {asset.symbol}. Sends this asset directly, plus SOL network fees.</p>}
-      {asset && units && !enough ? <p className="quiet" role="status">Amount exceeds this wallet’s balance.</p> : null}
+        {target?.kind === 'sns' && snsFailed ? (
+          <p className="quiet" role="status">Failed.</p>
+        ) : target?.kind === 'sns' && snsAddress ? (
+          <AddressCopy address={snsAddress} prefix={target.domain} />
+        ) : target?.kind === 'handle' && sendHandleReady(handleRecipient) ? (
+          <AddressCopy
+            address={handleRecipient.address}
+            prefix={handleRecipient.displayName || `@${handleRecipient.handle}`}
+          />
+        ) : target?.kind === 'handle' ? (
+          <p className="quiet" role="status">
+            {sendHandleHint(handleRecipient, { looking: handleLooking, handle: target.handle })}
+          </p>
+        ) : target?.kind === 'invalid-address' || target?.kind === 'address' ? (
+          <p className="quiet" role="status">{targetHint(target)}</p>
+        ) : (
+          <p className="quiet">{targetHint(target)}</p>
+        )}
+      </div>
+
+      <div className="phantom-input-card">
+        <div className="phantom-card-row">
+          <label className="phantom-field-label">Amount</label>
+          {asset ? (
+            <button
+              type="button"
+              className="phantom-max-btn"
+              onClick={() => {
+                setAmount(formatAmount(asset.amount, asset.decimals));
+                setStatus('');
+                setFolded(false);
+              }}
+            >
+              MAX
+            </button>
+          ) : null}
+        </div>
+        <div className="phantom-amount-row">
+          <input
+            className="phantom-amount-input"
+            value={amount}
+            inputMode="decimal"
+            placeholder="0.00"
+            onChange={event => { setAmount(event.target.value); setStatus(''); setFolded(false); }}
+          />
+          <div className="phantom-asset-select-wrap">
+            <GlideSelect
+              ariaLabel="Asset"
+              value={asset?.id || ''}
+              options={tokens.map(token => ({
+                value: token.id,
+                label: `${token.symbol}`,
+                tag: `${formatAmount(token.amount, token.decimals)}`,
+              }))}
+              onChange={id => { setAssetId(id); setAmount(''); setStatus(''); setFolded(false); }}
+            />
+          </div>
+        </div>
+        {!asset ? (
+          <p className="quiet" role="status">No sendable balance loaded for this wallet.</p>
+        ) : (
+          <p className="quiet phantom-avail">
+            Balance: {formatAmount(asset.amount, asset.decimals)} {asset.symbol}
+          </p>
+        )}
+        {asset && units && !enough ? <p className="quiet phantom-error-text" role="status">Amount exceeds this wallet’s balance.</p> : null}
+      </div>
+
       <TxnPreview preview={preview} folded={folded} onToggle={() => setFolded(false)} />
+
       <SlideCommit
         label="Slide to send"
         doneLabel={sendComplete ? 'Sent' : 'Sending'}
@@ -1009,98 +1203,24 @@ function targetHint(target) {
 }
 
 function ReceivePane({ active, handle }) {
-  return (
-    <div className="wallet-form">
-      <p className="quiet">Share the address, or your @handle.</p>
-      {handle ? <p className="wallet-handle">@{handle}</p> : <p className="quiet">Claim a @handle to get paid by name.</p>}
-      <AddressCopy address={active?.address || ''} />
-    </div>
-  );
-}
-
-function TokenPane({ tokens, prefs, onSave }) {
-  const [symbol, setSymbol] = useState('');
-  const [mint, setMint] = useState('');
-  const [decimals, setDecimals] = useState('6');
-  const [note, setNote] = useState('');
-
-  function toggle(list, value) {
-    return list.includes(value) ? list.filter(item => item !== value) : [...list, value];
-  }
+  const display = handle ? (handle.startsWith('@') ? handle : `@${handle}`) : '';
 
   return (
-    <div className="wallet-form">
-      <p className="quiet">Hidden tokens leave the asset list. Restricted tokens stay visible and cannot be sent here. USDC stays on both.</p>
-      <ul className="token-rows">
-        {tokens.map(token => (
-          <li key={token.symbol} className="token-settings">
-            <strong>{token.symbol}</strong>
-            <span>{token.amountLabel}</span>
-            {token.symbol === 'USDC' ? <small>Always listed</small> : (
-              <span className="wallet-switch">
-                <button
-                  type="button"
-                  className={token.hidden ? 'is-on' : ''}
-                  aria-pressed={token.hidden}
-                  onClick={() => onSave({ ...prefs, hidden: toggle(prefs.hidden, token.symbol) })}
-                >
-                  {token.hidden ? 'Hidden' : 'Hide'}
-                </button>
-                <button
-                  type="button"
-                  className={!token.tradeable ? 'is-on' : ''}
-                  aria-pressed={!token.tradeable}
-                  onClick={() => onSave({ ...prefs, restricted: toggle(prefs.restricted, token.symbol) })}
-                >
-                  {token.tradeable ? 'Tradeable' : 'Restricted'}
-                </button>
-                {token.core ? null : (
-                  <button
-                    type="button"
-                    onClick={() => onSave({ ...prefs, extra: prefs.extra.filter(row => row.symbol !== token.symbol) })}
-                  >
-                    Remove
-                  </button>
-                )}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-      <form
-        className="field"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const next = normalizeTokenPrefs({
-            ...prefs,
-            extra: [...prefs.extra, { symbol, mint, decimals: Number(decimals) }],
-          });
-          if (next.extra.length === prefs.extra.length) {
-            setNote('Use a new symbol, a Solana mint, and decimals from 0 to 9.');
-            return;
-          }
-          onSave(next);
-          setSymbol('');
-          setMint('');
-          setDecimals('6');
-          setNote('Added.');
-        }}
-      >
-        <label>
-          Symbol
-          <input value={symbol} maxLength={12} autoCapitalize="characters" onChange={event => setSymbol(event.target.value)} />
-        </label>
-        <label>
-          Mint
-          <input value={mint} spellCheck={false} autoCapitalize="none" onChange={event => setMint(event.target.value.trim())} />
-        </label>
-        <label>
-          Decimals
-          <input value={decimals} inputMode="numeric" onChange={event => setDecimals(event.target.value)} />
-        </label>
-        <button type="submit" className="ghost">Add token</button>
-      </form>
-      {note ? <p className="quiet" role="status">{note}</p> : null}
+    <div className="wallet-form phantom-receive-card">
+      <p className="quiet phantom-receive-hint">Share your @handle or address to receive funds.</p>
+      {display ? (
+        <p className="wallet-handle phantom-receive-handle">{display}</p>
+      ) : (
+        <p className="quiet">Claim a @handle to get paid by name.</p>
+      )}
+
+      <div className="phantom-receive-address-box">
+        <AddressCopy address={active?.address || ''} />
+      </div>
+
+      <p className="quiet phantom-network-note">
+        This address can only receive Solana and SPL tokens.
+      </p>
     </div>
   );
 }

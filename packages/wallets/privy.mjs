@@ -1,7 +1,7 @@
 import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
-import { AddressLookupTableAccount, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { AddressLookupTableAccount, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { swapAccountSnapshot, verifySwapSimulation } from './swap-simulation.mjs';
-import { swapSimulationDetails } from './swap-diagnostics.mjs';
+import { SYSTEM_PROGRAM, swapSimulationDetails } from './swap-diagnostics.mjs';
 /**
  * Privy Solana wallet path for Maelstrom.
  * Login provisioning (main wallet at sign-up, additional wallets) and
@@ -33,10 +33,11 @@ export function simulationFailureReason(value) {
   return 'simulation_unavailable';
 }
 
-function failSimulation(value, { details, reason = simulationFailureReason(value) } = {}) {
+function failSimulation(value, { details, reason = simulationFailureReason(value), solWrapReached = false } = {}) {
   const error = new WalletError('Solana transfer simulation failed', 'simulation_failed');
   error.simulationReason = reason;
   if (details) error.simulationDetails = details;
+  if (solWrapReached) error.solWrapReached = true;
   throw error;
 }
 
@@ -53,6 +54,7 @@ const MAX_TX_BYTES = 1232;
 const SINGLE_SIGNATURE_MESSAGE_OFFSET = 65;
 const CLASSIC_TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const ASSOCIATED_TOKEN_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const privyWalletIdPattern = /^[A-Za-z0-9_-]{10,128}$/;
 const ownerIdPattern = /^[a-zA-Z0-9:_.-]{1,256}$/;
@@ -955,7 +957,7 @@ export function createPrivyWalletClient({
     return { cluster: SOLANA_CLUSTER };
   }
 
-  async function checkPrivyWalletAccess(walletId, walletAddress, attempt) {
+  async function readPrivyWallet(walletId, walletAddress, attempt) {
     try {
       const response = await fetcher(`${privyApi}/v1/wallets/${encodeURIComponent(walletId)}`, {
         method: 'GET',
@@ -970,20 +972,20 @@ export function createPrivyWalletClient({
           && wallet.chain_type === 'solana'
           && wallet.address === walletAddress;
         attempt.detail = matchesWallet ? 'wallet-matched' : 'wallet-mismatch';
-        return matchesWallet ? 200 : null;
+        return matchesWallet ? wallet : null;
       }
       if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
         attempt.transport = 'redirect';
       }
       await response.body?.cancel().catch(() => {});
-      return response.status;
+      return null;
     } catch (error) {
       attempt.transport = privyTransportFailure(error, attempt);
       return null;
     }
   }
 
-  async function signWithPrivy(walletId, transaction, userAuthorization) {
+  async function signWithPrivy(walletId, transaction, userAuthorization, { appOnly = false } = {}) {
     const unsigned = decodeBase64(transaction, 'Transaction');
     if (unsigned.length > MAX_TX_BYTES) fail('Transaction exceeds the Solana packet limit', 'invalid_transaction');
     const url = `${privyApi}/v1/wallets/${encodeURIComponent(walletId)}/rpc`;
@@ -991,8 +993,8 @@ export function createPrivyWalletClient({
       method: 'signTransaction',
       params: { transaction, encoding: 'base64' },
     };
-    const appAttempt = userAuthorization ? { stage: 'app-sign' } : undefined;
-    const report = appAttempt ? { at: now(), requests: [appAttempt] } : null;
+    const appAttempt = userAuthorization || appOnly ? { stage: 'app-sign' } : undefined;
+    const report = userAuthorization ? { at: now(), requests: [appAttempt] } : null;
     try {
       const headers = privyHeaders({ method: 'POST', url, body });
       if (report) report.appSignature = Boolean(headers['privy-authorization-signature']);
@@ -1002,12 +1004,15 @@ export function createPrivyWalletClient({
         body,
         signingAttempt: appAttempt,
       }, 'privy_failed');
-      if (userAuthorization && typeof signedBody?.data?.signed_transaction !== 'string') {
+      if (appAttempt && typeof signedBody?.data?.signed_transaction !== 'string') {
         appAttempt.detail = 'missing-signed-transaction';
         failSigning('Privy returned no signed transaction', 'privy_failed', { transport: 'invalid-response' });
       }
       return signedBody?.data?.signed_transaction;
     } catch (error) {
+      if (appOnly && error?.code === 'privy_failed' && error.privyFailure?.status === 401) {
+        failSigning('Privy rejected delegated wallet authorization', 'wallet_authorization_required', error.privyFailure);
+      }
       if (!userAuthorization) throw error;
       const { ownerId, accessToken, walletAddress } = userAuthorization;
       let requiresOwnerAuthorization = error?.code === 'wallet_authorization_required';
@@ -1018,7 +1023,8 @@ export function createPrivyWalletClient({
       if (error?.code === 'privy_failed' && diagnostic?.status === 401 && !diagnostic.code) {
         const lookup = { stage: 'wallet-lookup' };
         report.requests.push(lookup);
-        walletLookupStatus = await checkPrivyWalletAccess(walletId, walletAddress, lookup);
+        const matched = await readPrivyWallet(walletId, walletAddress, lookup);
+        walletLookupStatus = matched ? 200 : lookup.status === 200 ? null : lookup.status ?? null;
         requiresOwnerAuthorization = walletLookupStatus === 200;
       }
       if (requiresOwnerAuthorization) report.session = ownerSessionChecks(accessToken, ownerId, id, report.at);
@@ -1135,7 +1141,7 @@ export function createPrivyWalletClient({
     }
   }
 
-  async function sendSigned(signedTransaction, { privy = false } = {}) {
+  async function sendSigned(signedTransaction, { privy = false, beforeBroadcast } = {}) {
     const signed = decodeBase64(signedTransaction, 'Signed transaction');
     if (signed.length <= 64) {
       fail(
@@ -1147,6 +1153,7 @@ export function createPrivyWalletClient({
     }
     if (signed.length > MAX_TX_BYTES) fail('Signed transaction exceeds the Solana packet limit', 'invalid_transaction');
     await assertSolana();
+    if (beforeBroadcast) await beforeBroadcast();
     const sent = await rpc('sendTransaction', [
       signedTransaction,
       { encoding: 'base64', preflightCommitment: 'confirmed' },
@@ -1159,6 +1166,14 @@ export function createPrivyWalletClient({
 
   const simulatedTransfers = new WeakSet();
   const simulatedX402 = new WeakSet();
+  const simulatedSwaps = new WeakMap();
+
+  function delegatedSwapWalletId({ bot, wallet }) {
+    assertSpendAllowed({ bot, wallet });
+    if (bot.ownerId !== wallet.ownerId || wallet.provider !== 'privy' || wallet.spendable === false
+        || /^(linked_|client_)/.test(wallet.id) || !signer || !authKey || wallet.privyWalletId !== wallet.id) return null;
+    return assertPrivyWalletId(wallet.privyWalletId);
+  }
 
   function x402Message(transaction, walletAddress, feePayer) {
     let parsed;
@@ -1169,6 +1184,59 @@ export function createPrivyWalletClient({
       fail('x402 requires the ticket fee payer and wallet signer', 'invalid_transaction');
     }
     return parsed;
+  }
+
+  function classicTokenAccount(value) {
+    if (value?.owner !== CLASSIC_TOKEN_PROGRAM) return null;
+    const parsed = value.data?.parsed;
+    if (parsed?.type === 'account' && typeof parsed.info?.mint === 'string' && typeof parsed.info?.owner === 'string') {
+      const state = parsed.info.state;
+      return {
+        mint: parsed.info.mint,
+        owner: parsed.info.owner,
+        state: state === 'frozen' || state === 'uninitialized' ? state : 'initialized',
+      };
+    }
+    const data = value.data;
+    if (!Array.isArray(data) || data[1] !== 'base64' || typeof data[0] !== 'string') return null;
+    const bytes = Buffer.from(data[0], 'base64');
+    if (bytes.length !== 165) return null;
+    let mint;
+    let owner;
+    try {
+      mint = new PublicKey(bytes.subarray(0, 32)).toBase58();
+      owner = new PublicKey(bytes.subarray(32, 64)).toBase58();
+    } catch { return null; }
+    const stateByte = bytes[108];
+    return {
+      mint,
+      owner,
+      state: stateByte === 1 ? 'initialized' : stateByte === 2 ? 'frozen' : 'uninitialized',
+      amount: bytes.readBigUInt64LE(64).toString(),
+    };
+  }
+
+  function usdcAccountOwnedBy(value, owner) {
+    const info = classicTokenAccount(value);
+    return Boolean(info && info.owner === owner && info.mint === SOLANA_USDC_MINT && info.state === 'initialized');
+  }
+
+  function usdcAmount(value) {
+    const raw = value?.data?.parsed?.info?.tokenAmount?.amount ?? classicTokenAccount(value)?.amount;
+    return typeof raw === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(raw) ? raw : null;
+  }
+
+  async function ownedUsdcAccount(tokenAccount, owner) {
+    if (!base58.test(tokenAccount || '') || !base58.test(owner || '')) return null;
+    const read = await rpc('getAccountInfo', [tokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+    if (usdcAccountOwnedBy(read.result?.value, owner)) return { amount: usdcAmount(read.result.value) };
+    const listed = await rpc('getTokenAccountsByOwner', [
+      owner, { mint: SOLANA_USDC_MINT }, { encoding: 'jsonParsed', commitment: 'confirmed' },
+    ]);
+    const rows = listed.result?.value;
+    if (!Array.isArray(rows)) return null;
+    const row = rows.find(entry => entry?.pubkey === tokenAccount && usdcAccountOwnedBy(entry.account, owner));
+    return row ? { amount: usdcAmount(row.account) } : null;
   }
 
   function singleSignerMessage(transaction) {
@@ -1244,6 +1312,10 @@ export function createPrivyWalletClient({
       }
       const session = await this.readSession({ accessToken: token, ownerId, origin });
       return session.user;
+    },
+
+    listOwnedSolanaWallets(privyUserId) {
+      return listSolanaWallets(assertOwnerId(privyUserId));
     },
 
     /**
@@ -1411,23 +1483,43 @@ export function createPrivyWalletClient({
       return prepared;
     },
 
+    async listSolanaUsdcAccounts({ address } = {}) {
+      if (!base58.test(address || '')) fail('Wallet address is required', 'invalid_wallet');
+      await assertSolana();
+      const listed = await rpc('getTokenAccountsByOwner', [
+        address, { mint: SOLANA_USDC_MINT }, { encoding: 'jsonParsed', commitment: 'confirmed' },
+      ]);
+      const rows = listed.result?.value;
+      if (!Array.isArray(rows)) fail('Token balance unavailable', 'rpc_rejected');
+      const accounts = [];
+      for (const row of rows) {
+        const info = classicTokenAccount(row?.account);
+        const raw = row?.account?.data?.parsed?.info?.tokenAmount?.amount ?? info?.amount ?? null;
+        if (!info || info.owner !== address || info.mint !== SOLANA_USDC_MINT || info.state !== 'initialized') continue;
+        if (!base58.test(row?.pubkey || '') || typeof raw !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(raw) || raw === '0') continue;
+        accounts.push({ address: row.pubkey, amount: raw });
+      }
+      return accounts;
+    },
+
     async prepareSolanaX402Payment({ transaction, walletAddress, accepted, sourceTokenAccount, destinationTokenAccount } = {}) {
       const parsed = x402Message(transaction, walletAddress, accepted?.extra?.feePayer);
       await assertSolana();
-      const sourceAccount = await rpc('getAccountInfo', [sourceTokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
-      const sourceValue = sourceAccount.result?.value;
-      const sourceInfo = sourceValue?.data?.parsed?.info;
-      if (sourceValue?.owner !== CLASSIC_TOKEN_PROGRAM || sourceValue?.data?.parsed?.type !== 'account'
-          || sourceInfo?.owner !== walletAddress || sourceInfo?.mint !== SOLANA_USDC_MINT || sourceInfo?.state !== 'initialized') {
+      const source = await ownedUsdcAccount(sourceTokenAccount, walletAddress);
+      const needed = typeof accepted?.amount === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(accepted.amount) ? BigInt(accepted.amount) : null;
+      if (!source) {
         const error = new WalletError('Source USDC account is unavailable', 'simulation_failed');
         error.simulationReason = 'source_account_not_found';
         throw error;
       }
+      if (source.amount != null && needed != null && BigInt(source.amount) < needed) {
+        const error = new WalletError('Source USDC balance is short', 'simulation_failed');
+        error.simulationReason = 'insufficient_funds';
+        error.usdcBalance = source.amount;
+        throw error;
+      }
       const account = await rpc('getAccountInfo', [destinationTokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
-      const value = account.result?.value;
-      const info = value?.data?.parsed?.info;
-      if (value?.owner !== CLASSIC_TOKEN_PROGRAM || value?.data?.parsed?.type !== 'account'
-          || info?.owner !== accepted.payTo || info?.mint !== SOLANA_USDC_MINT || info?.state !== 'initialized') {
+      if (!usdcAccountOwnedBy(account.result?.value, accepted.payTo)) {
         const error = new WalletError('Laso recipient token account is unavailable', 'simulation_failed');
         error.simulationReason = 'recipient_account_not_found';
         throw error;
@@ -1506,18 +1598,69 @@ export function createPrivyWalletClient({
         const instruction = Number.isInteger(index) ? parsed.message.compiledInstructions[index] : null;
         const details = swapSimulationDetails({ instructionProgram: addresses[instruction?.programIdIndex], logs: value?.logs });
         const reason = value?.err === 'BlockhashNotFound' ? 'swap_blockhash_not_found' : undefined;
-        failSimulation(value, { details, reason });
+        const solWrapReached = instruction && parsed.message.compiledInstructions.slice(0, index + 1)
+          .some(ix => addresses[ix.programIdIndex] === SYSTEM_PROGRAM && addresses[ix.accountKeyIndexes[0]] === walletAddress
+            && ix.data.length === 12 && Buffer.from(ix.data).readUInt32LE(0) === 2);
+        failSimulation(value, { details, reason, solWrapReached });
       }
-      const after = swapAccountSnapshot(value.accounts, walletAddress);
+      const createdAccounts = new Map();
+      for (const ix of parsed.message.compiledInstructions) {
+        if (addresses[ix.programIdIndex] !== ASSOCIATED_TOKEN_PROGRAM
+            || ix.data.length > 1 || (ix.data.length === 1 && ix.data[0] > 1)) continue;
+        const [payer, account, owner, mint] = ix.accountKeyIndexes;
+        if (addresses[payer] === walletAddress && addresses[owner] === walletAddress && prior.result.value[account] === null) {
+          createdAccounts.set(account, addresses[mint]);
+        }
+      }
+      const after = swapAccountSnapshot(value.accounts, walletAddress, createdAccounts);
       if (!after) fail('Swap simulated accounts are unavailable', 'swap_simulation_unavailable');
       const effects = verifySwapSimulation({
         err: value.err, fee: fee.result?.value, preBalances: [before.lamports], postBalances: [after.lamports],
-        preTokenBalances: before.tokens, postTokenBalances: after.tokens,
+        preTokenBalances: before.tokens, postTokenBalances: after.tokens, accountRent: after.accountRent,
       }, { wallet: walletAddress, inputMint, outputMint, amount, minOutput });
       if (effects.reason) failSimulation(value, { reason: effects.reason });
       const prepared = Object.freeze({ transaction, ...effects });
-      simulatedTransfers.add(prepared);
+      simulatedSwaps.set(prepared, walletAddress);
       return prepared;
+    },
+
+    async inspectSwapDelegation({ bot, wallet } = {}) {
+      const walletId = delegatedSwapWalletId({ bot, wallet });
+      if (!walletId) return { reason: signer && authKey ? 'swap_wallet_not_delegatable' : 'swap_signer_not_configured' };
+      const lookup = { stage: 'wallet-lookup' };
+      const record = await readPrivyWallet(walletId, wallet.address, lookup);
+      if (lookup.detail === 'wallet-mismatch') return { reason: 'swap_wallet_identity_mismatch' };
+      if (!Array.isArray(record?.additional_signers)) {
+        return { reason: 'swap_wallet_lookup_failed', privyFailure: parsePrivySigningFailure({
+          status: lookup.status, requests: [lookup],
+        }) };
+      }
+      if (record.additional_signers.some(entry => entry?.signer_id === signer)) return { ready: true };
+      return { reason: 'swap_signer_missing', delegation: { walletAddress: wallet.address, signerId: signer } };
+    },
+
+    async signPreparedSolanaSwap({ bot, wallet, prepared, expiresAt, checkPermission } = {}) {
+      const walletId = delegatedSwapWalletId({ bot, wallet });
+      if (!walletId) fail('The wallet has no delegated signer', 'swap_delegation_unavailable');
+      if (typeof checkPermission !== 'function') fail('Live swap approval is required', 'swap_saved_permission_required');
+      if (simulatedSwaps.get(prepared) !== wallet.address) fail('Swap simulation is required', 'simulation_required');
+      simulatedSwaps.delete(prepared);
+      await assertSolana();
+      if (!Number.isSafeInteger(expiresAt) || now() >= expiresAt) fail('Swap quote expired', 'swap_quote_expired');
+      const signed = await signWithPrivy(walletId, prepared.transaction, null, { appOnly: true });
+      const message = singleSignerMessage(signed);
+      const parsed = VersionedTransaction.deserialize(decodeBase64(signed, 'Signed transaction'));
+      const publicKey = createPublicKey({ key: Buffer.concat([
+        Buffer.from('302a300506032b6570032100', 'hex'), parsed.message.staticAccountKeys[0].toBuffer(),
+      ]), format: 'der', type: 'spki' });
+      if (!message.equals(singleSignerMessage(prepared.transaction)) || !cryptoVerify(null, message, publicKey, parsed.signatures[0])) {
+        fail('Signed swap differs from the simulation or has an invalid signature', 'transaction_mismatch');
+      }
+      const signature = await sendSigned(signed, { privy: true, beforeBroadcast: async () => {
+        await checkPermission();
+        if (now() >= expiresAt) fail('Swap quote expired before broadcast', 'swap_quote_expired');
+      } });
+      return { cluster: SOLANA_CLUSTER, signature };
     },
 
     ownerAuthorizationPayload({ ownerId, wallet, transaction, expiresAt } = {}) {

@@ -46,7 +46,8 @@ export async function submitChatMove({ hold, permission, reviewCap, ownerId, get
         || typeof challenge.transaction !== 'string' || challenge.transaction.length < 80
         || challenge.transaction.length > 1644) return failure();
     const signed = await sign({ walletAddress: challenge.walletAddress,
-      transaction: Uint8Array.from(atob(challenge.transaction), char => char.charCodeAt(0)) });
+      transaction: Uint8Array.from(atob(challenge.transaction), char => char.charCodeAt(0)),
+      requireWalletApproval: !hold.budgetOverride });
     if (stopped()) return { ok: false, error: 'aborted' };
     if (challenge.expiresAt <= now() || !(signed instanceof Uint8Array) || signed.length > 1232 || signed.length <= 64) return failure();
     const result = await post('broadcast', challenge, btoa(String.fromCharCode(...signed)));

@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { SOLANA_CLUSTER, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 import { buildJupiterSwap } from '@ubc2026/transfers';
+import { SYSTEM_PROGRAM, swapSolShortfall } from '@ubc2026/wallets/swap-diagnostics';
 import { SOL_MINT, valueUsdSpend } from './usd-budget.mjs';
 
 const TTL = 55_000;
@@ -69,7 +70,7 @@ function checkedSwapPreparation(prepared, transaction, approvedSolCost = null) {
   return prepared;
 }
 
-export async function previewLiveSwap(env, context, parsed, key, now) {
+export async function previewLiveSwap(env, context, parsed, key, now, { allowReducedSolQuote = false } = {}) {
   const client = env.transferClient;
   const inputMint = mintForAsset(parsed.asset);
   const outputMint = mintForAsset(parsed.outputAsset);
@@ -77,24 +78,41 @@ export async function previewLiveSwap(env, context, parsed, key, now) {
     client.getSolanaBlockhash(), mintDecimals(client, inputMint), mintDecimals(client, outputMint),
   ]);
   if (block?.cluster !== SOLANA_CLUSTER) throw new Error('wrong_cluster');
-  const offer = await buildJupiterSwap({
-    walletAddress: context.wallet.address, inputMint, outputMint, amount: parsed.amount,
-    blockhash: block.blockhash, apiKey: env.JUPITER_API_KEY, fetcher: env.fetch ?? fetch,
-  });
-  const prepared = checkedSwapPreparation(await client.prepareSolanaSwap(swapSimulation(context, parsed, offer)), offer.transaction);
-  const valuation = await valueUsdSpend(env, {
-    mint: inputMint, decimals: inputDecimals, amount: parsed.amount, feeLamports: prepared.maxSolCost, now,
-  });
-  const expiresAt = now + TTL;
-  const terms = {
-    transaction: offer.transaction, blockhash: block.blockhash, minOutput: offer.minOutput,
-    expiresAt, maxSolCost: prepared.maxSolCost, ...valuation,
-  };
-  return {
-    expiresAt, inputDecimals, outputDecimals, minOutput: offer.minOutput,
-    usdMicros: (BigInt(valuation.outflow) + BigInt(valuation.maxFee)).toString(),
-    ticket: bindSwapTicket(terms, context, parsed, key),
-  };
+  let amount = parsed.amount;
+  for (let attempt = 0; ; attempt += 1) {
+    const quoted = { ...parsed, amount };
+    const offer = await buildJupiterSwap({
+      walletAddress: context.wallet.address, inputMint, outputMint, amount,
+      blockhash: block.blockhash, apiKey: env.JUPITER_API_KEY, fetcher: env.fetch ?? fetch,
+    });
+    let prepared;
+    try {
+      prepared = checkedSwapPreparation(await client.prepareSolanaSwap(swapSimulation(context, quoted, offer)), offer.transaction);
+    } catch (error) {
+      if (inputMint !== SOL_MINT || !allowReducedSolQuote || attempt >= 2 || !error?.solWrapReached
+          || !/^instruction_[0-9]+_custom_1$/.test(error.simulationReason ?? '')) throw error;
+      const funding = swapSolShortfall(error.simulationDetails);
+      if (!funding || (error.simulationDetails.instructionProgram === SYSTEM_PROGRAM && funding.needed !== BigInt(amount))) throw error;
+      const reduced = BigInt(amount) - (funding.needed - funding.available);
+      if (reduced <= 0n) throw error;
+      amount = reduced.toString();
+      continue;
+    }
+    const valuation = await valueUsdSpend(env, {
+      mint: inputMint, decimals: inputDecimals, amount, feeLamports: prepared.maxSolCost, now,
+    });
+    const expiresAt = now + TTL;
+    const terms = {
+      transaction: offer.transaction, blockhash: block.blockhash, minOutput: offer.minOutput,
+      expiresAt, maxSolCost: prepared.maxSolCost, ...valuation, requiresOwnerApproval: amount !== parsed.amount,
+    };
+    return {
+      expiresAt, inputDecimals, outputDecimals, minOutput: offer.minOutput,
+      ...(amount !== parsed.amount ? { inputAmount: amount } : {}),
+      usdMicros: (BigInt(valuation.outflow) + BigInt(valuation.maxFee)).toString(),
+      ticket: bindSwapTicket(terms, context, quoted, key),
+    };
+  }
 }
 
 export async function prepareApprovedSwap(env, context, parsed, offer) {

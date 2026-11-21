@@ -1,0 +1,181 @@
+.laso-sheet {
+  position: relative;
+  width: min(440px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 28px 24px 24px;
+  border: 1px solid #2e2e2e;
+  border-radius: 28px;
+  background: #111;
+}
+
+.laso-sheet h2 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+
+.laso-sheet .quiet { margin: 0 0 16px; }
+
+.laso-cards {
+  display: grid;
+  gap: 14px;
+  max-width: 380px;
+}
+
+.laso-sheet .laso-cards { max-width: none; }
+
+.laso-billing-fold {
+  border: 1px solid #2b2b2b;
+  border-radius: 16px;
+  background: #161616;
+}
+
+.laso-billing-fold > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  cursor: pointer;
+  list-style: none;
+  color: #f4f4f5;
+}
+
+.laso-billing-fold > summary strong { font-weight: 700; }
+
+.laso-billing-fold > summary::-webkit-details-marker { display: none; }
+
+.laso-billing-fold > summary svg {
+  flex: none;
+  color: #999;
+  transition: transform 240ms ease;
+}
+
+.laso-billing-fold[open] > summary svg { transform: rotate(180deg); }
+
+.laso-billing-body { padding: 0 18px 16px; }
+
+.laso-card {
+  display: grid;
+  gap: 10px;
+}
+
+.laso-card-face {
+  position: relative;
+  display: grid;
+  align-content: space-between;
+  min-height: 210px;
+  padding: 18px 18px 16px;
+  border-radius: 18px;
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(61, 214, 198, 0.35), transparent 42%),
+    linear-gradient(145deg, #10242c 0%, #071016 58%, #0c2a28 100%);
+  color: #f4f7f8;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.laso-card-top,
+.laso-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.laso-chip {
+  width: 42px;
+  height: 32px;
+  border-radius: 7px;
+  background:
+    linear-gradient(#d7c08a, #d7c08a) 0 10px / 100% 2px,
+    linear-gradient(#d7c08a, #d7c08a) 0 20px / 100% 2px,
+    linear-gradient(90deg, #e6d3a1, #b99758);
+  background-repeat: no-repeat;
+}
+
+.laso-brand {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.laso-card-face button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #f4f7f8;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.laso-card-face button:disabled {
+  opacity: 0.7;
+}
+
+.laso-number {
+  margin: 18px 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 22px;
+  letter-spacing: 0.12em;
+}
+
+.laso-card-bottom span {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.laso-card-bottom small {
+  color: rgba(244, 247, 248, 0.62);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.laso-billing,
+.laso-pay {
+  display: grid;
+  gap: 8px;
+}
+
+.laso-billing p,
+.laso-pay p {
+  margin: 0;
+}
+
+.laso-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.laso-fields label,
+.laso-pay label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.laso-fields label.wide,
+.laso-pay label {
+  grid-column: 1 / -1;
+}
+
+.laso-cards > label input,
+.laso-fields input,
+.laso-pay input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #141414;
+  color: var(--text);
+  font: inherit;
+}

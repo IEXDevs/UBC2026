@@ -17,6 +17,7 @@ import PaneDock from '../components/PaneDock';
 import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
 import ProfileSheet from '../components/ProfileSheet';
+import LasoCardsSheet from '../components/LasoCardsSheet';
 import ProfileConnections, { LiveProfileConnections } from '../components/ProfileConnections';
 import WalletsSheet from '../components/WalletsSheet';
 import ClaimHandle from '../components/ClaimHandle';
@@ -52,17 +53,22 @@ import {
 import { ownerIdFromPrivyUser, privyAccountLabel, sessionReadyForWallets } from '../lib/privy-config.mjs';
 import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '../lib/profile.mjs';
 import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile-photo.mjs';
-import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
-import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
+import { agentWalletChoices, mainAgentWallet, mergeWalletDirectory, withAssignedWallet } from '../lib/wallet-assign.mjs';
+import {
+  forgetRetiredWallet,
+  readRetiredWalletIds,
+  rememberRetiredWallet,
+  withoutRetiredWallets,
+} from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { browserCanSign, createOwnerAuthorizationSigner, waitForBrowserSigner, withLinkedSolanaWallets, signSelectedWalletTransaction, signWalletMoveTransaction } from '../lib/wallet-signing.mjs';
 import { executeClientSignedSwap } from '../lib/swap-client-sign.mjs';
 import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
+  checkDueCardLoops,
   deleteOwnerBot,
   emptyMoneyState,
   fetchOwnerLists,
-  firstAssignableWalletId,
   shellBotFromRemote,
   shellRuntimeUrl,
   upsertOwnerBot,
@@ -88,6 +94,7 @@ import { ensureAccountCode } from '../lib/account-code.mjs';
 import { accountStorage, bindAccountState, flushAccountState, hydrateAccountState } from '../lib/account-state.mjs';
 import { applyStoredFile, dropCatalogFile, storeAttachedFile, uploadNotice } from '../lib/store-file.mjs';
 import { searchRecall } from '../lib/recall-search.mjs';
+import { GOAL_QUESTION, hasGeneralGoal, proposedGeneralGoal, reviewGeneralGoal, taskFromRequest, taskLabel } from '../lib/agent-task.mjs';
 import { reviseThread } from '../lib/talk-edit.mjs';
 import { useToast } from '../components/bits/SwipeToast';
 import SignInPage from '../components/SignInPage';
@@ -161,7 +168,7 @@ function SessionHold() {
 }
 
 function AuthedShell() {
-  const { ready, authenticated, user, login, logout, getAccessToken: privyGetAccessToken } = usePrivy();
+  const { ready, authenticated, user, login, logout, getAccessToken: privyGetAccessToken, unlinkWallet } = usePrivy();
   const { generateAuthorizationSignature } = useAuthorizationSignature();
   const signedIn = ready && authenticated;
   const hostedPreview = useHostedPreview();
@@ -172,6 +179,7 @@ function AuthedShell() {
   const [walletNote, setWalletNote] = useState('');
   const [walletError, setWalletError] = useState('');
   const [deskEntry, setDeskEntry] = useState(null);
+  const [deskLogout, setDeskLogout] = useState(null);
   const ownerId = ownerIdFromPrivyUser(user, signedIn);
   const deskOwner = devPreview && devAllowed ? null : ownerId;
   const deskChecked = Boolean(deskOwner && deskEntry?.ownerId === deskOwner);
@@ -184,6 +192,16 @@ function AuthedShell() {
   const { signerId } = usePrivyPublic();
   const { addSigners } = useSigners();
   const signerTried = useRef(new Set());
+  const signerUpdates = useRef(new Map());
+  const attachSwapSigner = useCallback(({ address, signerId: requestedSigner }) => {
+    const key = `${address}:${requestedSigner}`;
+    const pending = signerUpdates.current.get(key);
+    if (pending) return pending;
+    const update = addSigners({ address, signers: [{ signerId: requestedSigner, policyIds: [] }] })
+      .finally(() => signerUpdates.current.delete(key));
+    signerUpdates.current.set(key, update);
+    return update;
+  }, [addSigners]);
 
   useEffect(() => {
     if (!signedIn) return undefined;
@@ -193,19 +211,14 @@ function AuthedShell() {
       for (const address of pending) {
         signerTried.current.add(address);
         try {
-          await addSigners({ address, signers: [{ signerId }] });
+          await attachSwapSigner({ address, signerId });
         } catch (error) {
-          const failure = serverSignerFailure(error);
-          if (failure.status === 401) {
-            console.debug(`[wallets] server signer not added for ${address} (legacy quorum-owned):`, failure.message);
-          } else {
-            console.warn(`[wallets] server signer not added for ${address}:`, failure.message, failure);
-          }
+          console.error('[wallets] server signer not added', serverSignerFailure(error), error);
         }
       }
     })();
     return undefined;
-  }, [signedIn, accountsKey, signerId, addSigners]);
+  }, [signedIn, accountsKey, signerId, attachSwapSigner]);
 
   useEffect(() => {
     if (!deskOwner) {
@@ -222,7 +235,9 @@ function AuthedShell() {
           ownerId: deskOwner,
           getAccessToken: () => deskToken.current(),
         });
-      } catch { /* require the desk password if this session cannot resume */ }
+      } catch (err) {
+        console.error('[desk] restoreDeskEntry error:', err);
+      }
       if (!stopped) setDeskEntry({ ownerId: deskOwner, until });
     })();
     return () => { stopped = true; };
@@ -230,12 +245,25 @@ function AuthedShell() {
 
   const onLogout = useCallback(async () => {
     if (ownerId) {
-      try { clearDeskSession(window.localStorage, ownerId); } catch { /* the in-memory desk still locks */ }
-      try { clearDeskGrant(window.sessionStorage, ownerId); } catch { /* the in-memory desk still locks */ }
+      try { clearDeskSession(window.localStorage, ownerId); } catch (err) { console.error('[desk] clearDeskSession error:', err); }
+      try { clearDeskGrant(window.sessionStorage, ownerId); } catch (err) { console.error('[desk] clearDeskGrant error:', err); }
       setDeskEntry({ ownerId, until: 0 });
     }
     await withPrivyLogout(window, () => logout());
   }, [logout, ownerId]);
+
+  const onDeskStatusUnavailable = useCallback(async () => {
+    setDeskLogout('signing-out');
+    try {
+      await onLogout();
+    } catch {
+      setDeskLogout('retry');
+    }
+  }, [onLogout]);
+
+  useEffect(() => {
+    if (ready && !authenticated) setDeskLogout(null);
+  }, [ready, authenticated]);
 
   useEffect(() => {
     if (!devAllowed) return undefined;
@@ -345,7 +373,8 @@ function AuthedShell() {
         setLiveWallets(mergeObservedWallets(body.wallets, user, ownerIdFromPrivyUser(user, true)));
         setWalletNote(walletProvisionNote(body, { ok: true }));
         setWalletError('');
-      } catch {
+      } catch (error) {
+        console.error('[wallets] wallet setup/refresh error:', error);
         if (!stopped) {
           applyWalletFallback(user, {}, setLiveWallets, setWalletNote, setWalletError);
         }
@@ -370,23 +399,25 @@ function AuthedShell() {
         onLogout={leaveDevPreview}
         privyLive
         liveWallets={null}
-        onRetireWallet={(id) => {
-          setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id) : current));
+        onRetireWallet={(id, address) => {
+          setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id && (!address || wallet?.address !== address)) : current));
         }}
+        unlinkWallet={unlinkWallet}
         getAccessToken={async () => null}
       />
     );
   }
 
-  if (showSessionHold({ privyConfigured: true, ready })) {
+  if (!deskLogout && showSessionHold({ privyConfigured: true, ready })) {
     return <SessionHold />;
   }
 
-  if (signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
+  if (deskLogout || signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
     return (
       <SignInPage
-        disabled={signInHold || authenticated}
+        disabled={!ready || signInHold || authenticated}
         onLogin={login}
+        onRetrySignOut={deskLogout === 'retry' && authenticated ? onDeskStatusUnavailable : null}
         onDeveloperPreview={devAllowed ? enterDevPreview : null}
         onHoldChange={setSignInHold}
       />
@@ -403,6 +434,7 @@ function AuthedShell() {
         accountLabel={privyAccountLabel(user)}
         getAccessToken={getAccessToken}
         onSignOut={onLogout}
+        onStatusUnavailable={onDeskStatusUnavailable}
         onUnlock={until => {
           try { writeDeskSession(window.localStorage, deskOwner, until); } catch { /* this tab can still enter */ }
           setDeskEntry({ ownerId: deskOwner, until });
@@ -428,11 +460,17 @@ function AuthedShell() {
       walletError={walletError}
       getAccessToken={getAccessToken}
       authorizeSpend={generateAuthorizationSignature}
-      onRetireWallet={(id) => {
-        setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id) : current));
+      attachSwapSigner={attachSwapSigner}
+      onRetireWallet={(id, address) => {
+        setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id && (!address || wallet?.address !== address)) : current));
       }}
+      unlinkWallet={unlinkWallet}
       onWalletCreated={(wallet) => {
         const incoming = Array.isArray(wallet) ? wallet : [wallet];
+        const unretire = incoming.flatMap((item) => [item?.id, item?.address]).filter(Boolean);
+        if (unretire.length && deskOwner) {
+          forgetRetiredWallet(window.localStorage, deskOwner, ...unretire);
+        }
         setLiveWallets((current) => {
           const list = Array.isArray(current) ? [...current] : [];
           for (const item of incoming) {
@@ -502,15 +540,18 @@ function DepositSigner({ signerRef, signWithOwnerAuthorization }) {
   return null;
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, onWalletCreated = null, privyLive = false }) {
+const EMPTY_DESK_LOG_PANES = Object.freeze(['Main', 'Logs']);
+
+function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, attachSwapSigner = null, onRetireWallet = null, onWalletCreated = null, privyLive = false, unlinkWallet = null }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
-  const signChatTransaction = useCallback(async ({ walletAddress, transaction }) => signSelectedWalletTransaction({
+  const signChatTransaction = useCallback(async ({ walletAddress, transaction, requireWalletApproval }) => signSelectedWalletTransaction({
     from: { address: walletAddress }, transaction,
     signer: await waitForBrowserSigner(() => depositSignerRef.current, [{ address: walletAddress }]),
+    requireWalletApproval,
   }), []);
   const executeChatSwap = useCallback(input => executeClientSignedSwap({ ...input, signer: depositSignerRef.current,
-    readSigner: () => depositSignerRef.current }), []);
+    readSigner: () => depositSignerRef.current, attachSwapSigner }), [attachSwapSigner]);
   const [looks, setLooks] = useState({});
   const [savedPhoto, setSavedPhoto] = useState(null);
   const [roster, setRoster] = useState({ order: [], extra: [] });
@@ -531,6 +572,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const [slide, setSlide] = useState('right');
   const [createOpen, setCreateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [cardsOpen, setCardsOpen] = useState(false);
   const [walletsOpen, setWalletsOpen] = useState(false);
   const [walletFocus, setWalletFocus] = useState('');
   const [retiredIds, setRetiredIds] = useState([]);
@@ -546,7 +588,9 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const currentOwner = useRef(ownerId);
   currentOwner.current = ownerId;
   const [loopOverrides, setLoopOverrides] = useState({});
+  const loopChecks = useRef(new Set());
   const [listsTick, setListsTick] = useState(0);
+  const WALLET_REFRESH_MS = 5000;
   const [remoteLists, setRemoteLists] = useState(() => emptyMoneyState());
   const [profile, setProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
@@ -587,6 +631,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setProfileOpen(false);
   }, []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
+  const closeCards = useCallback(() => setCardsOpen(false), []);
   const closeAIProviders = useCallback(() => setAIProvidersOpen(false), []);
   const closeStats = useCallback(() => setStatsOpen(false), []);
   const closeComputer = useCallback(() => setComputerOpen(false), []);
@@ -827,6 +872,18 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   }, [ownerId, getAccessToken, signedIn, user]);
 
   useEffect(() => {
+    if (!ownerId) return undefined;
+    const refresh = () => setListsTick(tick => tick + 1);
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    const id = window.setInterval(refresh, WALLET_REFRESH_MS);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [ownerId, WALLET_REFRESH_MS]);
+
+  useEffect(() => {
     if (!ownerId) {
       setRemoteLists(emptyMoneyState());
       return undefined;
@@ -841,6 +898,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         const lists = await fetchOwnerLists(ownerId, { accessToken });
         if (!stop && lists) {
           setRemoteLists(lists);
+          if (signedIn) void checkDueCardLoops(ownerId, lists.bots, accessToken, loopChecks.current);
           setLoopOverrides((current) => {
             const next = { ...current };
             for (const row of lists.bots || []) {
@@ -856,12 +914,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     return () => { stop = true; };
   }, [ownerId, signedIn, user, getAccessToken, liveWallets, listsTick]);
 
-  // Backfill local-only roster bots into Supabase once a Supabase wallet exists.
-  // Do not use liveWallets-only ids — bots.create 404s with wallet_not_found.
+  const savedAgentWallets = useMemo(() => agentWalletChoices(withoutRetiredWallets(remoteLists.wallets, retiredIds)),
+    [remoteLists.wallets, retiredIds]);
+  // Backfill old local agents when their wallet is available in the runtime.
   useEffect(() => {
     if (!ownerId || !rosterReady || !signedIn) return undefined;
-    const walletId = firstAssignableWalletId(remoteLists.wallets);
-    if (!walletId) return undefined;
+    if (savedAgentWallets.length === 0) return undefined;
+    const mainWalletId = mainAgentWallet(savedAgentWallets)?.id;
     const remoteIds = new Set((remoteLists.bots || []).map((bot) => bot?.id).filter(Boolean));
     const localBots = mergeRoster([], withoutPlaceholderBots(roster)).bots
       .filter((bot) => bot?.id && !isPlaceholderBotId(bot.id));
@@ -874,10 +933,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       let wrote = 0;
       for (const bot of missing.slice(0, 20)) {
         if (stop) return;
+        const walletId = bot.walletId || mainWalletId;
+        if (!savedAgentWallets.some(wallet => wallet.id === walletId)) continue;
         const saved = await agentRemoval.save(ownerId, bot.id, () => upsertOwnerBot(ownerId, bot, { walletId, accessToken }));
         if (saved.ok) wrote += 1;
-        // Stop hammering when the wallet is not in Supabase yet.
-        if (!saved.ok && (saved.error === 'wallet_not_found' || saved.status === 404)) break;
       }
       if (!wrote || stop) return;
       try {
@@ -886,7 +945,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       } catch { /* keep local */ }
     })();
     return () => { stop = true; };
-  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, remoteLists.wallets, getAccessToken, agentRemoval]);
+  }, [ownerId, rosterReady, signedIn, roster, remoteLists.bots, savedAgentWallets, getAccessToken, agentRemoval]);
 
   const saveProfile = useCallback(async (next) => {
     const { photo, editOnly, ...details } = next;
@@ -988,12 +1047,22 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     const sample = previewBot();
     return sample && !removedIds?.has(sample.id) ? [sample] : looked;
   }, [seedBots, looks, devPreview, removedIds]);
-  const assigned = useMemo(() => withAssignedWallet(styled, liveWallets), [styled, liveWallets]);
-  const bots = assigned.bots.map((bot) => (
-    Object.prototype.hasOwnProperty.call(loopOverrides, bot.id)
-      ? { ...bot, loop: loopOverrides[bot.id] }
-      : bot
-  ));
+  const wallets = useMemo(() => {
+    const listed = withoutRetiredWallets(mergeWalletDirectory(liveWallets, remoteLists.wallets), retiredIds);
+    return devPreview && listed.length === 0 ? previewWallets() : listed;
+  }, [liveWallets, remoteLists.wallets, retiredIds, devPreview]);
+  const assigned = useMemo(() => withAssignedWallet(styled, wallets), [styled, wallets]);
+  const createWallets = devPreview ? wallets : savedAgentWallets;
+  const bots = useMemo(() => assigned.bots.map(bot => {
+    const saved = looks[bot.id];
+    return {
+      ...bot,
+      goal: taskLabel(saved?.generalGoal) || bot.goal,
+      currentTask: taskLabel(saved?.currentTask),
+      goalProposal: saved?.goalProposal ?? null,
+      ...(Object.prototype.hasOwnProperty.call(loopOverrides, bot.id) ? { loop: loopOverrides[bot.id] } : {}),
+    };
+  }), [assigned.bots, looks, loopOverrides]);
   const onMissingFile = useCallback((id) => {
     if (typeof id !== 'string' || !id) return;
     setLibrary(current => dropCatalogFile(current, id));
@@ -1027,8 +1096,6 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (bots.some(item => item.id === activeBot)) return;
     setActiveBot(bots[0].id);
   }, [activeBot, bots]);
-  const listedWallets = withoutRetiredWallets(pickWalletList(assigned.wallets, remoteLists.wallets), retiredIds);
-  const wallets = devPreview && listedWallets.length === 0 ? previewWallets() : listedWallets;
   const walletAddress = assignedWalletAddress(wallets);
   useEffect(() => {
     if (devPreview || !signedIn || !walletAddress) {
@@ -1095,7 +1162,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       }
     })();
     return () => { stop = true; };
-  }, [walletAddress, signedIn, ownerId, getAccessToken, devPreview, walletsOpen]);
+  }, [walletAddress, signedIn, ownerId, getAccessToken, devPreview, walletsOpen, listsTick]);
   const payments = remoteLists.payments || [];
   const paymentCrossCheck = remoteLists.paymentCrossCheck || [];
   const positions = remoteLists.positions || [];
@@ -1110,6 +1177,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     ? bots
     : bots.filter(bot => bot.name.toLowerCase().includes(recallNeedle) || matchedBots.has(bot.id));
   const bot = bots.find(item => item.id === activeBot) ?? null;
+  const activeGoal = bot?.goal;
+  useEffect(() => {
+    if (!ownerId || !talksReady || !activeBot || pane !== 'Main' || hasGeneralGoal(activeGoal)) return;
+    setTalks(current => current[activeBot]?.length ? current : {
+      ...current,
+      [activeBot]: [{ id: `${activeBot}-goal-intro`, role: 'agent', text: GOAL_QUESTION }],
+    });
+  }, [ownerId, talksReady, activeBot, activeGoal, pane]);
   const money = moneyPane(pane);
   const chainLabel = solanaSpendableLabel(solanaBalance);
   const glance = walletGlance(wallets, positions, transfers, chainLabel, solanaBalance);
@@ -1179,13 +1254,44 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   useEffect(() => {
     setRetiredIds(readRetiredWalletIds(window.localStorage, ownerId));
   }, [ownerId]);
+  const handleWalletCreated = useCallback((wallet) => {
+    const incoming = Array.isArray(wallet) ? wallet : [wallet];
+    const unretire = incoming.flatMap((item) => [item?.id, item?.address]).filter(Boolean);
+    if (unretire.length && ownerId) {
+      const next = forgetRetiredWallet(window.localStorage, ownerId, ...unretire);
+      setRetiredIds(next);
+    }
+    setRemoteLists((current) => {
+      const existing = current.wallets || [];
+      const added = incoming.filter((item) => item?.address && !existing.some((row) => row.id === item.id || row.address === item.address));
+      return added.length ? { ...current, wallets: [...existing, ...added] } : current;
+    });
+    onWalletCreated?.(wallet);
+  }, [onWalletCreated, ownerId]);
   const retireWallet = useCallback(async (wallet) => {
     if (!wallet || wallet.kind !== 'additional' || typeof wallet.id !== 'string') {
       return { ok: false, message: 'The main wallet stays on the account.' };
     }
+    if (devPreview) {
+      const next = rememberRetiredWallet(window.localStorage, ownerId, wallet.id, wallet.address);
+      setRetiredIds(next);
+      onRetireWallet?.(wallet.id, wallet.address);
+      setRemoteLists((current) => ({
+        ...current,
+        wallets: (current.wallets || []).filter((item) => item?.id !== wallet.id && (!wallet.address || item?.address !== wallet.address)),
+      }));
+      return { ok: true };
+    }
+    if (wallet.address) {
+      try {
+        await unlinkWallet?.(wallet.address);
+      } catch {
+        // Embedded wallets cannot be unlinked from Privy; ignore
+      }
+    }
     let token = '';
     try { token = (await getAccessToken?.()) || ''; } catch { token = ''; }
-    if (!token) return { ok: false, message: 'Sign in again, then remove the wallet.' };
+    if (!token) return { ok: false, message: 'Sign in again, then unlink the wallet.' };
     try {
       const response = await fetch('/api/wallets/retire', {
         method: 'POST',
@@ -1194,29 +1300,30 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           authorization: `Bearer ${token}`,
           ...(ownerId ? { 'x-owner-id': ownerId } : {}),
         },
-        body: JSON.stringify({ id: wallet.id }),
+        body: JSON.stringify({ id: wallet.id, address: wallet.address }),
         cache: 'no-store',
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body.ok !== true) {
         return { ok: false, message: 'That wallet is still on the account.' };
       }
-      const next = rememberRetiredWallet(window.localStorage, ownerId, wallet.id);
+      const next = rememberRetiredWallet(window.localStorage, ownerId, wallet.id, wallet.address);
       setRetiredIds(next);
-      onRetireWallet?.(wallet.id);
+      onRetireWallet?.(wallet.id, wallet.address);
       setRemoteLists((current) => ({
         ...current,
-        wallets: (current.wallets || []).filter((item) => item?.id !== wallet.id),
+        wallets: (current.wallets || []).filter((item) => item?.id !== wallet.id && (!wallet.address || item?.address !== wallet.address)),
       }));
       return { ok: true };
     } catch {
       return { ok: false, message: 'That wallet is still on the account.' };
     }
-  }, [getAccessToken, onRetireWallet, ownerId]);
+  }, [devPreview, getAccessToken, onRetireWallet, ownerId, unlinkWallet]);
   const openWallet = useCallback((walletId) => {
     setAIProvidersOpen(false);
     setCreateOpen(false);
     setProfileOpen(false);
+    setCardsOpen(false);
     setStatsOpen(false);
     setWalletFocus(typeof walletId === 'string' ? walletId : '');
     if (deskLockOnRef.current && !unlockedRef.current) {
@@ -1651,6 +1758,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (lockIntentRef.current?.type === 'chat-spend') lockIntentRef.current.resolve(false);
     lockIntentRef.current = null;
     setWalletsOpen(false);
+    setCardsOpen(false);
     setPendingSend(null);
     finishSlideConfirm(false);
   }, [ownerId, finishSlideConfirm]);
@@ -1722,6 +1830,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setCreateOpen(false);
     setWalletsOpen(false);
     setProfileOpen(false);
+    setCardsOpen(false);
     setStatsOpen(false);
     setActiveBot(id);
     if (pane !== 'Main') {
@@ -1738,11 +1847,24 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setRecall('');
   }
 
-  function onCreate(created) {
-    if (!ownerId) {
-      toast?.('Sign in to create an agent.');
-      setCreateOpen(false);
-      return;
+  async function onCreate(created) {
+    if (!ownerId) return { ok: false, message: 'Sign in to create an agent.' };
+    if (!createWallets.some(wallet => wallet.id === created.walletId)) {
+      return { ok: false, message: 'Choose a wallet that is ready for agent spending.' };
+    }
+    if (!devPreview) {
+      let accessToken = '';
+      try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+      if (!accessToken || currentOwner.current !== ownerId) return { ok: false, message: 'Sign in again to create this agent.' };
+      const saved = await agentRemoval.save(ownerId, created.id, () => upsertOwnerBot(ownerId, created, {
+        accessToken, signal: AbortSignal.timeout(15000),
+      }));
+      if (!saved.ok) return { ok: false, message: 'Could not create the agent with this wallet. Check that the wallet is available and try again.' };
+      if (currentOwner.current !== ownerId) return { ok: false };
+      if (saved.bot) setRemoteLists(current => ({
+        ...current,
+        bots: [...current.bots.filter(item => item.id !== created.id), saved.bot],
+      }));
     }
     setRoster(current => ({
       order: [created.id, ...current.order.filter(id => id !== created.id)],
@@ -1757,20 +1879,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setSlide('right');
     setPane('Main');
     setCreateOpen(false);
-    // Shell create is local-first; persist so voice/text list_bots can see the bot.
-    const walletId = firstAssignableWalletId(remoteLists.wallets) || firstAssignableWalletId(wallets);
-    if (walletId) {
-      void (async () => {
-        let accessToken = '';
-        try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
-        const saved = await agentRemoval.save(ownerId, created.id, () => upsertOwnerBot(ownerId, created, { walletId, accessToken }));
-        if (!saved.ok) return;
-        try {
-          const lists = await fetchOwnerLists(ownerId, { accessToken });
-          if (lists) setRemoteLists(lists);
-        } catch { /* keep local roster */ }
-      })();
-    }
+    return { ok: true };
   }
 
   function onEditLook(id, patch) {
@@ -1778,6 +1887,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setLooks(current => {
       const prev = current[id] ?? {};
       const next = {
+        ...prev,
         ...prev,
         name: patch.name ?? currentBot?.name,
         shape: patch.shape ?? currentBot?.shape,
@@ -1792,6 +1902,37 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         extra: current.extra.map(item => (item.id === id ? { ...item, name: patch.name, color: patch.color, shape: patch.shape } : item)),
       }));
     }
+  }
+
+  function onAgentTask({ agentTask, proposedGoal }, id, forOwner = ownerId) {
+    const task = taskLabel(agentTask);
+    if (!task || !forOwner || forOwner !== currentOwner.current || removedIds?.has(id)) return;
+    const agent = bots.find(item => item.id === id);
+    if (!agent) return;
+    const goal = proposedGeneralGoal(proposedGoal, agent.goal, agent.goalProposal?.text);
+    const proposal = goal ? { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text: goal } : null;
+    setLooks(current => ({
+      ...current,
+      [id]: { ...current[id], currentTask: task, ...(proposal ? { goalProposal: proposal } : {}) },
+    }));
+    if (proposal) appendTalk(id, {
+      id: proposal.id,
+      role: 'agent',
+      text: `Do you want to ${hasGeneralGoal(agent.goal) ? 'change' : 'set'} my general goal to “${goal}”?`,
+    });
+  }
+
+  function onGoalDecision(id, proposalId, accept) {
+    const decision = reviewGeneralGoal(looks[id], proposalId, accept);
+    if (!decision) return;
+    setLooks(current => {
+      const next = reviewGeneralGoal(current[id], proposalId, accept);
+      return next ? { ...current, [id]: next } : current;
+    });
+    appendTalk(id, {
+      id: `${proposalId}-decision`, role: 'agent',
+      text: accept ? `My general goal is now “${decision.generalGoal}”.` : 'I’ll keep my general goal as it is.',
+    });
   }
 
   function onReorder(fromId, toId) {
@@ -1845,13 +1986,22 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setComputerOpen(id === 'computer');
     if (id === 'profile') {
       setWalletsOpen(false);
+      setCardsOpen(false);
       setStatsOpen(false);
       setProfileOpen(true);
+      return;
+    }
+    if (id === 'cards') {
+      setProfileOpen(false);
+      setWalletsOpen(false);
+      setStatsOpen(false);
+      setCardsOpen(true);
       return;
     }
     if (id === 'computer') {
       setProfileOpen(false);
       setWalletsOpen(false);
+      setCardsOpen(false);
       setStatsOpen(false);
       setComputerOpen(true);
       return;
@@ -1859,6 +2009,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (id === 'statistics') {
       setProfileOpen(false);
       setWalletsOpen(false);
+      setCardsOpen(false);
       setStatsOpen(true);
       return;
     }
@@ -1877,11 +2028,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (id === 'ai-providers') {
       setProfileOpen(false);
       setWalletsOpen(false);
+      setCardsOpen(false);
       setStatsOpen(false);
       return;
     }
     setProfileOpen(false);
     setWalletsOpen(false);
+    setCardsOpen(false);
     setStatsOpen(false);
     if (id === 'security') choosePane('Security', 'right');
     if (id === 'logs') choosePane('Logs', 'right');
@@ -2060,7 +2213,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         />
         <div className="side-tools">
           <RecallSearch query={recall} hits={recallHits} onQuery={setRecall} onSelect={onRecall} />
-          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
+          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setCardsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
         </div>
@@ -2096,15 +2249,15 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       </aside>
 
       <section className={`stage${pane === 'Positions' ? ' is-book' : ''}`}>
-        {noAgents ? null : (
+        {noAgents && pane !== 'Logs' ? null : (
         <header className="topbar">
           <span className="topbar-side" />
-          <PaneDock panes={SHELL_PANES} pane={pane} onChange={choosePane} />
+          <PaneDock panes={noAgents ? EMPTY_DESK_LOG_PANES : SHELL_PANES} pane={pane} onChange={choosePane} />
         </header>
         )}
         <div key={`${pane}-${slide}`} className={`thread slide-${slide}${pane === 'Positions' ? ' is-book' : ''}${pane === 'Main' ? ' is-chat' : ''}`}>
           <article className={`bubble${pane === 'Positions' ? ' is-book' : ''}`} aria-label={pane}>
-            {noAgents ? (
+            {noAgents && pane !== 'Logs' ? (
                 <div className={`empty-hold${createOpen ? ' is-away' : ''}`}>
                   <p className="empty-hold__title">Create your first agent</p>
                   <div className="empty-hold__control">
@@ -2136,6 +2289,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
                   onParty={setParty}
                   onEdit={onEditLine}
                   onAccess={(line, accepted) => accessRef.current?.(line, accepted)}
+                  onGoalDecision={(line, accepted) => onGoalDecision(bot.id, line.id, accepted)}
                   hideAccessActions={voiceLive}
                   focusLine={focusLine?.botId === bot.id ? focusLine.lineId : null}
                 />
@@ -2143,14 +2297,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             {!noAgents && money ? (
               <MoneyPane
                 pane={money}
-                state={{ bots, wallets, payments, positions, transfers, paymentCrossCheck }}
+                state={{ bots, wallets, payments, positions, transfers, paymentCrossCheck, retiredIds }}
                 onParty={setParty}
                 ownerId={ownerId}
                 getAccessToken={getAccessToken}
                 onWallet={openWallet}
               />
             ) : null}
-            {!noAgents && pane === 'Logs' ? (
+            {pane === 'Logs' ? (
               <LogsPanel
                 key={ownerId}
                 ownerId={ownerId}
@@ -2197,11 +2351,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             signChatTransaction={signChatTransaction}
             executeChatSwap={executeChatSwap}
             lines={talks[bot.id] ?? []}
+            onAgentTask={onAgentTask}
             onLine={(line, forBot) => {
               const id = forBot || bot.id;
               appendTalk(id, line);
               if (line.role === 'agent') setListsTick((tick) => tick + 1);
               if (line.role !== 'user') return;
+              const task = taskFromRequest(line.text);
+              if (task) onAgentTask({ agentTask: task }, id);
               const command = parsePlatformSend(line.text);
               if (!command || !ownerId) return;
               const permission = readStoredPermission(typeof localStorage === 'undefined' ? null : localStorage);
@@ -2293,7 +2450,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           onComputer={() => setComputerOpen(true)}
         />
       ) : null}
-      <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} first={bots.length === 0} />
+      <CreateBotDialog open={createOpen} onClose={closeCreate} onCreate={onCreate} wallets={createWallets} first={bots.length === 0} />
       {walletError && !hideWalletError ? (
         <div className="backdrop is-center">
           <section className="sheet wallet-gate" role="dialog" aria-modal="true" aria-label="Wallet setup">
@@ -2340,6 +2497,11 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           }}
         />
       ) : null}
+      <LasoCardsSheet
+        open={cardsOpen}
+        onClose={closeCards}
+        ownerId={ownerId || ''}
+      />
       <WalletsSheet
         open={walletsOpen}
         onClose={closeWallets}
@@ -2359,7 +2521,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         resolveRecipient={resolveMention}
         solanaBalance={solanaBalance}
         onRetire={retireWallet}
-        onWalletCreated={onWalletCreated}
+        onWalletCreated={handleWalletCreated}
       />
       <PartySheet
         open={Boolean(party)}
