@@ -11,6 +11,15 @@ const BONK = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263';
 
 export const DEV_PREVIEW_OWNER = 'developer';
 
+/**
+ * The developer preview renders fixture data and must never poll the agent
+ * runtime. Polling without a session fills the console with auth failures
+ * and hammers the hosted runtime from every preview tab.
+ */
+export function isPreviewOwnerId(ownerId) {
+  return typeof ownerId === 'string' && ownerId !== '' && ownerId === DEV_PREVIEW_OWNER;
+}
+
 /** Sample wallets so the preview desk can open the sheet and show Send destinations. */
 export function previewWallets() {
   return [

@@ -53,6 +53,7 @@ import {
   writeStoredPermission,
 } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
+import { isPreviewOwnerId } from '../lib/dev-preview.mjs';
 import { fetchPendingSwap, sendBotChat } from '../lib/runtime-data.mjs';
 import { browserSituation } from '../lib/owner-situation.mjs';
 import { claimVoiceLock, refreshVoiceLock, releaseVoiceLock } from '../lib/voice-lock.mjs';
@@ -182,7 +183,7 @@ export default function Composer({
 
   useEffect(() => {
     setPendingSwap(null);
-    if (hidden || !ownerId || !botId) return undefined;
+    if (hidden || !ownerId || !botId || isPreviewOwnerId(ownerId)) return undefined;
     const controller = new AbortController();
     let reading = false;
     async function refresh() {

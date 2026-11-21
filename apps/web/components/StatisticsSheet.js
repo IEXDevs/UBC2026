@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ModalClose from './ModalClose';
 import AccountStats from './AccountStats';
+import { isPreviewOwnerId } from '../lib/dev-preview.mjs';
 import { pickOwnerRollup } from '../lib/overview.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
@@ -62,7 +63,7 @@ export default function StatisticsSheet({
   useEffect(() => {
     if (!open) return undefined;
     const url = shellRuntimeUrl('/api/metrics');
-    if (!url || !ownerId) return undefined;
+    if (!url || !ownerId || isPreviewOwnerId(ownerId)) return undefined;
     let stop = false;
     async function load() {
       try {
