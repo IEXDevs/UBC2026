@@ -278,6 +278,7 @@ export async function POST(request, context) {
     permissionMode,
     reviewCap,
     grants,
+    trackAgentTask: true,
     invokeTool: async (name, args) => {
       const hit = await dispatchHarness(name, args, harnessCtx);
       if (hit) return serializeToolResult(hit);
@@ -402,6 +403,8 @@ export async function POST(request, context) {
       ok: true,
       botId,
       reply: reply.text,
+      ...(reply.agentTask ? { agentTask: reply.agentTask } : {}),
+      ...(reply.proposedGoal ? { proposedGoal: reply.proposedGoal } : {}),
       ...(reply.clientSwap ? { clientSwap: reply.clientSwap } : {}),
       ...(moveAuthorization === 'prepare' && reply.moveAuthorization ? { moveAuthorization: reply.moveAuthorization } : {}),
       ...(assetConfirmation?.args?.action === 'x402' && reply.claimUrl ? { claimUrl: reply.claimUrl } : {}),

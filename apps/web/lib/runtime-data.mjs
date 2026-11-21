@@ -8,6 +8,7 @@ import { publicCardLoop } from '@ubc2026/contracts/card-loop';
 import { parseLasoBrowserPayment } from '../../agent-runtime/src/laso-browser-payment.mjs';
 import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
 import { sanitizeActivity } from './chat-activity.mjs';
+import { taskLabel } from './agent-task.mjs';
 import { catalogPayload } from './file-catalog.mjs';
 import { clipOwnerMessage, MESSAGE_CHAR_CAP } from './context-usage.mjs';
 import { DEFAULT_TRANSFER_CAP } from './roster.mjs';
@@ -279,8 +280,11 @@ export function botChatUrl(_runtimeBase, botId) {
 }
 
 function chatResult(body) {
+  const task = taskLabel(body.agentTask);
+  const proposedGoal = task ? taskLabel(body.proposedGoal) : '';
+  const agent = { ...(task ? { agentTask: task } : {}), ...(proposedGoal ? { proposedGoal } : {}) };
   if (body.clientSwap?.spend?.action === 'swap' && typeof body.clientSwap.swapTicket === 'string') {
-    return { ok: true, clientSwap: body.clientSwap };
+    return { ok: true, clientSwap: body.clientSwap, ...agent };
   }
   if (body.moveAuthorization) return { ok: true, moveAuthorization: body.moveAuthorization };
   const lasoPayment = parseLasoBrowserPayment(body.lasoPayment);
@@ -301,6 +305,7 @@ function chatResult(body) {
   const activity = sanitizeActivity(body.activity);
   return {
     ok: true,
+    ...agent,
     reply: reply || replies.at(-1) || hold?.label || '',
     replies: replies.length > 0 ? replies : undefined,
     model: body.model || null,

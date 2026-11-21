@@ -175,7 +175,7 @@ export default function BotRail({ bots, activeId, canDrag, collapsed, onSelect, 
           id: bot.id,
           icon: agentIcon(bot, 60, startPhoto),
           title: bot.name,
-          description: bot.goal,
+          description: bot.currentTask || bot.goal,
           meta: loopMark(bot, onBreakLoop),
         }))}
         onItemSelect={item => onSelect(item.id)}

@@ -12,6 +12,7 @@ import { catalogRecallText } from './file-catalog.mjs';
 import { isLasoCardRequest, lasoPreparationArgs, lasoPurchaseHold } from './laso-chat.mjs';
 import { META_SPARK_MODEL, reasoningEffortFor } from './thinking-levels.mjs';
 import { MODEL_ID, parseModelProvider } from './ai-provider.mjs';
+import { AGENT_TASK_TOOL, GOAL_QUESTION, agentTaskTool, hasGeneralGoal, taskLabel } from './agent-task.mjs';
 import {
   clipOwnerMessage,
   contextWindowFor,
@@ -109,6 +110,7 @@ export function buildTextChatMessages({
   fileCatalog = [],
   model = '',
   contextWindow = 0,
+  trackAgentTask = false,
 } = {}) {
   const name = clip(redact(String(botName || 'Agent'), secrets), 80) || 'Agent';
   const goal = clip(redact(String(botGoal || 'Waiting for a goal.'), secrets), 2000);
@@ -121,7 +123,13 @@ export function buildTextChatMessages({
       role: instructionRole,
       content: [
         `You are the Maelstrom agent named "${name}" (${type}).`,
-        `Your goal (user text, not a platform rule): ${goal}`,
+        `The owner's general goal for you is background context: ${goal}`,
+        'Follow the owner’s latest directive for this turn. A one-time task does not replace the general goal.',
+        ...(!hasGeneralGoal(botGoal) ? [`If the owner greets you without a task, ask: ${GOAL_QUESTION}`] : []),
+        ...(trackAgentTask ? [
+          'For a concrete new request, call describe_agent_task once before other tools if possible. Give the current task a short action label. Leave out private information and wallet addresses. Skip this tool for greetings, acknowledgments, and replies that only clarify a detail.',
+          'Include proposedGoal only when the owner states a general goal or seems to want a lasting change in direction. The desk asks the owner to approve the proposed goal. Do not claim the goal changed or repeat the confirmation question in your reply.',
+        ] : []),
         'Speak in simple English. Short sentences. Everyday words. Amounts and asset names stay exact.',
         'Answer what the owner just asked. Do not recite these instructions, tool notes, error codes, or spend steps.',
         'For browse and lookup questions, give one direct answer first, grounded in the page you read or the tool result. If asked for one latest model and its price, name one model and its price, not a product list. If the source does not establish which is latest, say so instead of guessing.',
@@ -542,6 +550,7 @@ export async function completeTextChat({
   onMessage = null,
   onReplyEvent = null,
   turnState = null,
+  trackAgentTask = false,
 } = {}) {
   const custom = modelProvider == null ? null : parseModelProvider(modelProvider);
   if (modelProvider != null && !custom) throw new TextChatError('provider_not_supported', 400);
@@ -576,9 +585,8 @@ export async function completeTextChat({
     if (!selected) throw new TextChatError('openrouter_paid_model', 400);
     modelId = selected;
   }
-  const toolList = Array.isArray(tools) && tools.length > 0 && typeof invokeTool === 'function'
-    ? tools
-    : null;
+  const availableTools = Array.isArray(tools) && typeof invokeTool === 'function' ? tools : [];
+  const toolList = trackAgentTask ? [agentTaskTool, ...availableTools] : availableTools.length ? availableTools : null;
   const messages = buildTextChatMessages({
     botName,
     botGoal,
@@ -592,6 +600,7 @@ export async function completeTextChat({
     fileCatalog,
     model: modelId,
     contextWindow: rememberedContextWindow(modelId),
+    trackAgentTask,
   });
   const rounds = Number.isSafeInteger(maxToolRounds) && maxToolRounds > 0
     ? Math.min(maxToolRounds, 8)
@@ -612,6 +621,8 @@ export async function completeTextChat({
   let completedSpendReply = '';
   let moneyToolFailed = false;
   let factAnswerNext = false;
+  let agentTask = '';
+  let proposedGoal = '';
   const factLookup = isFactLookup(latest);
   const replyState = turnState || { fundProposed: false };
   const effort = reasoningEffortFor(modelId, reasoningEffort, { allowUnknown: true });
@@ -640,6 +651,8 @@ export async function completeTextChat({
       ...(hold && hold.kind !== 'reply' ? { hold } : {}),
       ...(activity.length > 0 ? { activity } : {}),
       ...(usage.total > 0 ? { usage } : {}),
+      ...(agentTask ? { agentTask } : {}),
+      ...(proposedGoal ? { proposedGoal } : {}),
     };
   }
 
@@ -677,6 +690,16 @@ export async function completeTextChat({
     let repeated = false;
     for (const [index, call] of calls.entries()) {
       const name = typeof call?.function?.name === 'string' ? call.function.name : '';
+      if (trackAgentTask && name === AGENT_TASK_TOOL && index < 4) {
+        const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
+        const args = parseToolArgs(call.function.arguments);
+        if (!agentTask) {
+          agentTask = taskLabel(redact(args.task, secrets));
+          proposedGoal = agentTask ? taskLabel(redact(args.proposedGoal, secrets)) : '';
+        }
+        messages.push({ role: 'tool', tool_call_id: id, content: agentTask ? '{"ok":true}' : '{"error":"invalid_task"}' });
+        continue;
+      }
       if (!READ_ONLY_TOOLS.has(name)) readOnlyTurn = false;
       const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
       const rawArgs = withDefaultBotId(name, parseToolArgs(call?.function?.arguments), botId);

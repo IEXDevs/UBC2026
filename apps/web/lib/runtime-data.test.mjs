@@ -364,6 +364,17 @@ test('sendBotChat forwards reply deltas and retractions without turning them int
   assert.equal(result.reply, replies[0]);
 });
 
+test('sendBotChat delivers the card task and proposed general goal as separate fields', async t => {
+  const done = { done: true, reply: 'I’ll check the rates.', agentTask: 'Check USDC rates.', proposedGoal: 'Track stablecoin yields.' };
+  t.mock.method(globalThis, 'fetch', async () => new Response(`data: ${JSON.stringify(done)}\n\n`, {
+    headers: { 'content-type': 'text/event-stream' },
+  }));
+  const result = await sendBotChat({ ownerId: 'did:privy:abc', botId: 'bot_1', message: 'Focus on stablecoin yields going forward' });
+  assert.equal(result.agentTask, 'Check USDC rates');
+  assert.equal(result.proposedGoal, 'Track stablecoin yields');
+  assert.equal(result.reply, 'I’ll check the rates.');
+});
+
 test('sendBotChat retracts a partial reply when the stream fails or ends without a final reply', async t => {
   for (const error of [false, true]) {
     const events = [];
