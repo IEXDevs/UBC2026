@@ -428,6 +428,7 @@ async function handleSpendRequest(request, env = {}) {
   let beforeSign;
   let privyFailure;
   let authorizationChallenge;
+  let swapDelegation;
   let swapExecutionFailure;
   let lasoReceipt;
   let lasoFailure;
@@ -531,11 +532,14 @@ async function handleSpendRequest(request, env = {}) {
       }
       if (delegatedSwap) {
         const client = env.transferClient;
-        if (!client.signPreparedSolanaSwap || !await client.canSignDelegatedSwap?.({ bot, wallet })) {
-          return { state: 'approval-needed', reason: 'swap_delegation_unavailable' };
-        }
+        const delegation = client.signPreparedSolanaSwap && await client.inspectSwapDelegation?.({ bot, wallet });
         if (swapOffer.expiresAt <= (Number.isSafeInteger(env.spendNow) ? now : Date.now())) {
           return { state: 'blocked', reason: 'swap_quote_expired' };
+        }
+        if (!delegation?.ready) {
+          swapDelegation = delegation?.delegation;
+          privyFailure = delegation?.privyFailure;
+          return { state: 'approval-needed', reason: delegation?.reason ?? 'swap_signer_not_configured' };
         }
       } else if (swap) {
         if (!prepareSwap && !signedSwap) return { state: 'blocked', reason: 'client_sign_required' };
@@ -645,6 +649,7 @@ async function handleSpendRequest(request, env = {}) {
     cluster: SOLANA_CLUSTER,
     reason: swapExecutionFailure || result.reason || null,
     ...(privyFailure ? { privyFailure } : {}),
+    ...(swapDelegation ? { swapDelegation } : {}),
     ...(lasoFailure ? { error: lasoFailure } : {}),
     ...(swapExecutionFailure ? { error: swapExecutionFailure } : {}),
     ...(prepared ? { feeLamports: prepared.feeLamports } : {}),

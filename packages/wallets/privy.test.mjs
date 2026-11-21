@@ -171,6 +171,7 @@ test('delegated swap signing uses only the exact transaction verified by RPC acc
   };
   let missing = false;
   let enrolled = true;
+  let lookupStatus = 200;
   let signMode = 'valid';
   let clock = 1_000;
   let simulationError = null;
@@ -184,8 +185,10 @@ test('delegated swap signing uses only the exact transaction verified by RPC acc
   const fetcher = async (url, init) => {
     const path = new URL(url).pathname;
     if (path === `/v1/wallets/${walletId}`) {
+      assert.equal(init.headers['privy-authorization-signature'], undefined);
+      if (lookupStatus !== 200) return Response.json({ error: 'private lookup detail' }, { status: lookupStatus });
       return Response.json({ id: walletId, address: wallet.address, chain_type: 'solana',
-        additional_signers: enrolled ? [{ signer_id: signerId }] : [] });
+        additional_signers: [{ signer_id: enrolled ? signerId : 'other-configured-signer' }] });
     }
     if (path === `/v1/wallets/${walletId}/rpc`) {
       calls.push('privySign');
@@ -226,10 +229,20 @@ test('delegated swap signing uses only the exact transaction verified by RPC acc
   const prepared = await privy.prepareSolanaSwap(intent);
   assert.equal(prepared.maxSolCost, '5000');
   assert.equal(calls.includes('sendTransaction'), false);
-  assert.equal(await privy.canSignDelegatedSwap({ bot, wallet }), true);
+  assert.deepEqual(await privy.inspectSwapDelegation({ bot, wallet }), { ready: true });
   enrolled = false;
-  assert.equal(await privy.canSignDelegatedSwap({ bot, wallet }), false);
-  assert.equal(await privy.canSignDelegatedSwap({ bot, wallet: { ...wallet, spendable: false } }), false);
+  assert.deepEqual(await privy.inspectSwapDelegation({ bot, wallet }), {
+    reason: 'swap_signer_missing', delegation: { walletAddress: wallet.address, signerId },
+  });
+  assert.deepEqual(await privy.inspectSwapDelegation({ bot, wallet: { ...wallet, spendable: false } }), {
+    reason: 'swap_wallet_not_delegatable',
+  });
+  lookupStatus = 401;
+  const deniedLookup = await privy.inspectSwapDelegation({ bot, wallet });
+  assert.equal(deniedLookup.reason, 'swap_wallet_lookup_failed');
+  assert.equal(deniedLookup.privyFailure.status, 401);
+  assert.equal(deniedLookup.delegation, undefined);
+  lookupStatus = 200;
   enrolled = true;
   const signSwap = (prepared, checkPermission = async () => {}) =>
     privy.signPreparedSolanaSwap({ bot, wallet, prepared, expiresAt: 2_000, checkPermission });

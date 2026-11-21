@@ -8,6 +8,32 @@ const transaction = new Uint8Array(100).fill(1);
 const challenge = () => ({ transaction: Buffer.from(transaction).toString('base64'), walletAddress: 'selected',
   expiresAt: Date.now() + 30_000, blockhash: 'blockhash', proof: 'proof' });
 
+test('a missing signer is attached to the exact wallet before retrying the original swap once', async () => {
+  const walletAddress = 'So11111111111111111111111111111111111111112';
+  const signerId = 'test-privy-signer';
+  const spend = { botId: 'bot_1', action: 'swap', permission: 'full', idempotencyKey: 'original', amount: '123' };
+  const calls = [];
+  const input = {
+    spend, swapTicket: 'original-ticket', accessToken: 'test-token', deskGrant: 'test-grant',
+    delegation: { walletAddress, signerId, expiresAt: Date.now() + 30_000 },
+    attachSwapSigner: async grant => calls.push(grant),
+    fetchImpl: async (_url, options) => {
+      calls.push(JSON.parse(options.body));
+      return Response.json({ signed: true, signature: 'mock-signature' });
+    },
+  };
+  assert.equal((await executeClientSignedSwap(input)).signed, true);
+  assert.deepEqual(calls, [{ address: walletAddress, signerId },
+    { ...spend, swapTicket: 'original-ticket', autoSwap: true, confirmed: false }]);
+  assert.equal((await executeClientSignedSwap({ ...input, delegation: { ...input.delegation, expiresAt: 1 } })).failure.code, 'swap_quote_expired');
+  const refused = await executeClientSignedSwap({ ...input, attachSwapSigner: async () => {
+    throw new Error('Specifying signers requires TEE execution. Provider private detail');
+  } });
+  assert.match(refused.reply, /on-device execution/);
+  assert.doesNotMatch(refused.reply, /private detail/);
+  assert.equal(calls.length, 2);
+});
+
 function setup({ signerError, wallets = [{ address: 'selected' }], prepare, broadcast, signal, readSigner } = {}) {
   const calls = [];
   const signCalls = [];

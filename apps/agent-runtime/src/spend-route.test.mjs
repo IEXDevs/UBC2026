@@ -1467,7 +1467,9 @@ async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2
       signPreparedSolanaTransfer: async (request) => {
         assert.fail('swaps must not use transfer signing');
       },
-      canSignDelegatedSwap: async () => delegated,
+      inspectSwapDelegation: async () => (typeof delegated === 'function' ? delegated() : delegated) ? { ready: true } : {
+        reason: 'swap_signer_missing', delegation: { walletAddress: wallet.address, signerId: 'test-signer-id' },
+      },
       signPreparedSolanaSwap: async (request) => {
         assert.equal(calls.reserved, 1);
         assert.equal(request.wallet, wallet);
@@ -1524,7 +1526,7 @@ async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2
  * Gaps: live Jupiter and Privy are not called.
  */
 test('automatic swaps retain review and desk gates and require approval without delegation', async () => {
-  const { calls, request, ticket } = await autoSwapSetup();
+  const { calls, request, ticket, keypair } = await autoSwapSetup();
   const over = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '1000000' })).json();
   assert.equal(over.signed, false);
   assert.equal(over.state, 'approval-needed');
@@ -1537,7 +1539,8 @@ test('automatic swaps retain review and desk gates and require approval without 
   assert.equal(calls.signed.length, 0);
   const auto = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
   assert.equal(auto.signed, false);
-  assert.equal(auto.reason, 'swap_delegation_unavailable');
+  assert.equal(auto.reason, 'swap_signer_missing');
+  assert.deepEqual(auto.swapDelegation, { walletAddress: keypair.publicKey.toBase58(), signerId: 'test-signer-id' });
   const review = await (await request({ autoSwap: true, swapTicket: ticket, permission: 'review' })).json();
   assert.equal(review.reason, 'client_sign_required');
   assert.equal(calls.signed.length, 0);
@@ -1578,6 +1581,29 @@ test('a wallet frozen while Privy signs never broadcasts', async () => {
   assert.equal(result.signed, false);
   assert.equal(calls.signed.length, 1);
   assert.equal(calls.broadcasts, 0);
+});
+
+test('browser enrollment resumes the original Full swap through the Worker exactly once', async () => {
+  const { executeClientSignedSwap } = await import('../../web/lib/swap-client-sign.mjs');
+  let attached = false;
+  const { calls, request, ticket, keypair, env } = await autoSwapSetup({ delegated: () => attached, queued: false });
+  const pending = await (await request({ autoSwap: true, swapTicket: ticket })).json();
+  assert.equal(pending.reason, 'swap_signer_missing');
+  assert.equal(calls.reserved, 0);
+  const result = await executeClientSignedSwap({
+    spend: { action: 'swap', permission: 'full' }, swapTicket: ticket, accessToken: 'mock-owner-token', deskGrant: 'mock-grant',
+    delegation: { ...pending.swapDelegation, expiresAt: env.spendNow + 55_000 },
+    attachSwapSigner: async ({ address, signerId }) => {
+      assert.equal(address, keypair.publicKey.toBase58());
+      assert.equal(signerId, 'test-signer-id');
+      assert.equal(calls.reserved, 0);
+      attached = true;
+    },
+    fetchImpl: async (_url, init) => request(JSON.parse(init.body)),
+  });
+  assert.equal(result.signed, true, JSON.stringify(result));
+  assert.equal(calls.reserved, 1);
+  assert.equal(calls.broadcasts, 1);
 });
 
 /**
