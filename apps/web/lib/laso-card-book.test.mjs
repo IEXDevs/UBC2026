@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readLasoCards, rememberLasoCard, stampBilling, writeLasoBilling } from './laso-card-book.mjs';
+import { readLasoCards, readLasoClaim, rememberLasoCard, stampBilling, writeLasoBilling, writeLasoClaim } from './laso-card-book.mjs';
 
 test('the card book keeps one billing address and drops card numbers', () => {
   const storage = new Map();
@@ -17,6 +17,10 @@ test('the card book keeps one billing address and drops card numbers', () => {
   const saved = readLasoCards(memory, 'owner_1');
   assert.equal(saved.length, 1);
   assert.equal(JSON.stringify(saved).includes('4111'), false);
+  const claim = 'https://laso.finance/agent/dashboard/auth?token=owner-only';
+  assert.equal(writeLasoClaim(memory, 'owner_1', claim), claim);
+  assert.equal(readLasoClaim(memory, 'owner_1'), claim);
+  assert.equal(writeLasoClaim(memory, 'owner_1', 'https://example.invalid/card'), '');
   const face = stampBilling(saved[0], billing);
   assert.equal(face.holder, 'Ada Lovelace');
   assert.equal(face.billing.line1, '1 Main St');

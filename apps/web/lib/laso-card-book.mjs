@@ -3,8 +3,16 @@
  */
 import { billingAddress, presentLasoCard, publicLasoCard } from '@ubc2026/shopping/laso-card.mjs';
 
+export const LASO_CARDS_EVENT = 'maelstrom-laso-cards';
+const CLAIM = /^https:\/\/laso\.finance\/agent\/dashboard\/auth\?/;
+
 function key(ownerId, name) {
   return typeof ownerId === 'string' && ownerId ? `maelstrom.laso.${name}.${ownerId}` : '';
+}
+
+function notify(ownerId) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(LASO_CARDS_EVENT, { detail: { ownerId } }));
 }
 
 function readJson(storage, id) {
@@ -31,6 +39,7 @@ export function writeLasoBilling(storage, ownerId, billing) {
   if (!storage || !id) return null;
   const shared = billingAddress(billing);
   storage.setItem(id, JSON.stringify(shared));
+  notify(ownerId);
   return shared;
 }
 
@@ -52,7 +61,28 @@ export function rememberLasoCard(storage, ownerId, card) {
     last4: item.last4,
     amountUsd: item.amountUsd,
   }))));
+  notify(ownerId);
   return next;
+}
+
+export function readLasoClaim(storage, ownerId) {
+  const saved = readJson(storage, key(ownerId, 'claim'));
+  return typeof saved === 'string' && CLAIM.test(saved) ? saved : '';
+}
+
+export function writeLasoClaim(storage, ownerId, url) {
+  const id = key(ownerId, 'claim');
+  if (!storage || !id || !CLAIM.test(url || '')) return '';
+  storage.setItem(id, JSON.stringify(url));
+  notify(ownerId);
+  return url;
+}
+
+export function clearLasoClaim(storage, ownerId) {
+  const id = key(ownerId, 'claim');
+  if (!storage || !id) return;
+  storage.removeItem(id);
+  notify(ownerId);
 }
 
 export function stampBilling(card, billing) {

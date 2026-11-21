@@ -1,8 +1,29 @@
+.laso-sheet {
+  position: relative;
+  width: min(440px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 28px 24px 24px;
+  border: 1px solid #2e2e2e;
+  border-radius: 28px;
+  background: #111;
+}
+
+.laso-sheet h2 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+
+.laso-sheet .quiet { margin: 0 0 16px; }
+
 .laso-cards {
   display: grid;
   gap: 14px;
   max-width: 380px;
 }
+
+.laso-sheet .laso-cards { max-width: none; }
 
 .laso-card {
   display: grid;

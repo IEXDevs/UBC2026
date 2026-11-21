@@ -18,8 +18,7 @@ import AIProvidersSheet from './AIProvidersSheet';
 import { providerStorage } from '../lib/provider-storage.mjs';
 import { canReleaseChatMessage, modelFreeCommand, needsChatModel } from '../lib/model-free-command.mjs';
 import { cacheSpendConfirmation, isLasoCardRequest, pendingSpendConfirmation } from '../lib/laso-chat.mjs';
-import { readLasoBilling, readLasoCards, rememberLasoCard, writeLasoBilling } from '../lib/laso-card-book.mjs';
-import LasoCard, { LasoBillingForm } from './LasoCard';
+import { clearLasoClaim, rememberLasoCard, writeLasoClaim } from '../lib/laso-card-book.mjs';
 import {
   ACCOUNT_PROVIDER, MODEL_SETTINGS_EVENT, announceModelSettings, saveModelCatalog,
   selectedModelRequest, visibleModelOptions,
@@ -169,14 +168,10 @@ export default function Composer({
   const [reviewCap, setReviewCap] = useState('');
   const [pendingSwap, setPendingSwap] = useState(null);
   const [lasoClaim, setLasoClaim] = useState(null);
-  const [lasoCards, setLasoCards] = useState([]);
-  const [lasoBilling, setLasoBilling] = useState(null);
   const pendingSpend = useRef(null);
   useEffect(() => {
     pendingSpend.current = null;
     setLasoClaim(null);
-    setLasoBilling(readLasoBilling(window.sessionStorage, ownerId));
-    setLasoCards(readLasoCards(window.sessionStorage, ownerId));
   }, [ownerId, botId]);
 
   useEffect(() => {
@@ -680,8 +675,11 @@ export default function Composer({
 
   async function settleChat(result, spoken, prior, grants, run, shown = [], firstLineId = null) {
     if (run !== runRef.current) return;
-    if (result?.claimUrl) setLasoClaim({ botId: botIdRef.current, url: result.claimUrl });
-    if (result?.lasoCard && ownerId) setLasoCards(rememberLasoCard(window.sessionStorage, ownerId, result.lasoCard));
+    if (result?.claimUrl) {
+      setLasoClaim({ botId: botIdRef.current, url: result.claimUrl });
+      if (ownerId) writeLasoClaim(window.sessionStorage, ownerId, result.claimUrl);
+    }
+    if (result?.lasoCard && ownerId) rememberLasoCard(window.sessionStorage, ownerId, result.lasoCard);
     if (!result?.ok) {
       if (result?.error === 'aborted') return;
       if (shown.length > 0) return;
@@ -757,7 +755,10 @@ export default function Composer({
         return;
       }
       pendingSpend.current = null;
-      if (isLasoCardRequest(spoken) || grants?.some(hold => hold.args?.action === 'x402')) setLasoClaim(null);
+      if (isLasoCardRequest(spoken) || grants?.some(hold => hold.args?.action === 'x402')) {
+        setLasoClaim(null);
+        if (ownerId) clearLasoClaim(window.sessionStorage, ownerId);
+      }
       // Every turn, including non-model commands and rejected queued messages,
       // must reach the same finally block to release the queue and busy state.
       if (!selection && modelFreeCommand(spoken) === 'platform-send') return;
@@ -1182,26 +1183,10 @@ export default function Composer({
       {stageNode}
       {floatNode}
       {settingsNode}
-      {lasoCards.length > 0 || lasoClaim?.botId === botId ? (
-        <div className="laso-cards">
-          <LasoBillingForm
-            key={`${ownerId || 'signed-out'}:${lasoBilling?.postalCode || ''}`}
-            value={lasoBilling}
-            onSave={(next) => {
-              if (!ownerId) return;
-              setLasoBilling(writeLasoBilling(window.sessionStorage, ownerId, next));
-            }}
-          />
-          {lasoCards.map(card => (
-            <LasoCard key={card.id} card={card} billing={lasoBilling} />
-          ))}
-          {lasoClaim?.botId === botId ? (
-            <p className="voice-note" role="status">
-              <a href={lasoClaim.url} target="_blank" rel="noreferrer">Open the Laso dashboard</a>
-              {' · One-time login link, expires in 15 minutes.'}
-            </p>
-          ) : null}
-        </div>
+      {lasoClaim?.botId === botId ? (
+        <p className="voice-note" role="status">
+          The card is in Cards, in the account menu.
+        </p>
       ) : null}
       <AIProvidersSheet ownerId={ownerId} open={aiProvidersOpen} onClose={() => setAIProvidersOpen(false)} />
       {note && presence === 'off' ? <p className="voice-note" role="status">{note}</p> : null}

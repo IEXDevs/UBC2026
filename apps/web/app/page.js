@@ -17,6 +17,7 @@ import PaneDock from '../components/PaneDock';
 import Composer from '../components/Composer';
 import CreateBotDialog from '../components/CreateBotDialog';
 import ProfileSheet from '../components/ProfileSheet';
+import LasoCardsSheet from '../components/LasoCardsSheet';
 import ProfileConnections, { LiveProfileConnections } from '../components/ProfileConnections';
 import WalletsSheet from '../components/WalletsSheet';
 import ClaimHandle from '../components/ClaimHandle';
@@ -526,6 +527,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const [slide, setSlide] = useState('right');
   const [createOpen, setCreateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [cardsOpen, setCardsOpen] = useState(false);
   const [walletsOpen, setWalletsOpen] = useState(false);
   const [walletFocus, setWalletFocus] = useState('');
   const [retiredIds, setRetiredIds] = useState([]);
@@ -582,6 +584,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setProfileOpen(false);
   }, []);
   const closeWallets = useCallback(() => setWalletsOpen(false), []);
+  const closeCards = useCallback(() => setCardsOpen(false), []);
   const closeAIProviders = useCallback(() => setAIProvidersOpen(false), []);
   const closeStats = useCallback(() => setStatsOpen(false), []);
   const closeComputer = useCallback(() => setComputerOpen(false), []);
@@ -1212,6 +1215,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setAIProvidersOpen(false);
     setCreateOpen(false);
     setProfileOpen(false);
+    setCardsOpen(false);
     setStatsOpen(false);
     setWalletFocus(typeof walletId === 'string' ? walletId : '');
     if (deskLockOnRef.current && !unlockedRef.current) {
@@ -1646,6 +1650,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (lockIntentRef.current?.type === 'chat-spend') lockIntentRef.current.resolve(false);
     lockIntentRef.current = null;
     setWalletsOpen(false);
+    setCardsOpen(false);
     setPendingSend(null);
     finishSlideConfirm(false);
   }, [ownerId, finishSlideConfirm]);
@@ -1717,6 +1722,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setCreateOpen(false);
     setWalletsOpen(false);
     setProfileOpen(false);
+    setCardsOpen(false);
     setStatsOpen(false);
     setActiveBot(id);
     if (pane !== 'Main') {
@@ -1840,13 +1846,22 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     setComputerOpen(id === 'computer');
     if (id === 'profile') {
       setWalletsOpen(false);
+      setCardsOpen(false);
       setStatsOpen(false);
       setProfileOpen(true);
+      return;
+    }
+    if (id === 'cards') {
+      setProfileOpen(false);
+      setWalletsOpen(false);
+      setStatsOpen(false);
+      setCardsOpen(true);
       return;
     }
     if (id === 'computer') {
       setProfileOpen(false);
       setWalletsOpen(false);
+      setCardsOpen(false);
       setStatsOpen(false);
       setComputerOpen(true);
       return;
@@ -1854,6 +1869,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (id === 'statistics') {
       setProfileOpen(false);
       setWalletsOpen(false);
+      setCardsOpen(false);
       setStatsOpen(true);
       return;
     }
@@ -1872,11 +1888,13 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     if (id === 'ai-providers') {
       setProfileOpen(false);
       setWalletsOpen(false);
+      setCardsOpen(false);
       setStatsOpen(false);
       return;
     }
     setProfileOpen(false);
     setWalletsOpen(false);
+    setCardsOpen(false);
     setStatsOpen(false);
     if (id === 'security') choosePane('Security', 'right');
     if (id === 'logs') choosePane('Logs', 'right');
@@ -2055,7 +2073,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         />
         <div className="side-tools">
           <RecallSearch query={recall} hits={recallHits} onQuery={setRecall} onSelect={onRecall} />
-          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
+          <button type="button" className="add-agent" aria-label="Add agent" onClick={() => { setProfileOpen(false); setWalletsOpen(false); setCardsOpen(false); setStatsOpen(false); setCreateOpen(true); }}>
             <Plus size={16} strokeWidth={1.75} />
           </button>
         </div>
@@ -2335,6 +2353,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           }}
         />
       ) : null}
+      <LasoCardsSheet
+        open={cardsOpen}
+        onClose={closeCards}
+        ownerId={ownerId || ''}
+        getAccessToken={getAccessToken}
+        bot={bot}
+        bots={bots}
+      />
       <WalletsSheet
         open={walletsOpen}
         onClose={closeWallets}
