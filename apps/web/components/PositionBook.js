@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
 import {
-  agentWireSegments, bookFrame, layoutPositionBook, placeWalletGroup, positionSceneKey,
+  agentWirePaths, bookFrame, layoutPositionBook, placeWalletGroup, positionSceneKey,
   stepBubbleFollow, translatedBounds, walletGroupBounds,
 } from '../lib/position-book.mjs';
 import AddressCopy from './AddressCopy';
@@ -204,7 +204,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       });
       const joint = new THREE.CircleGeometry(5, 20);
       const jointMaterial = new THREE.MeshBasicMaterial({ color: 0xf5f5f5 });
-      const agentWireMaterial = new THREE.LineBasicMaterial({ color: 0x747480, transparent: true, opacity: 0.85, depthWrite: false });
+      const agentWireMaterial = new THREE.MeshBasicMaterial({ color: 0x868694, transparent: true, opacity: 0.88, depthWrite: false, side: THREE.DoubleSide });
 
       function ribbonPositions(link) {
         const start = new THREE.Vector3(link.from.x, link.from.y, 0.2);
@@ -219,8 +219,10 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         );
         const curve = new THREE.QuadraticBezierCurve3(start, control, end);
         const wide = link.kind === 'provider' || link.kind === 'shared';
-        const points = curve.getPoints(wide ? 64 : 18);
-        const width = wide ? 3.2 : 1.5;
+        return ribbonFromPoints(curve.getPoints(wide ? 64 : 18), wide ? 3.2 : 1.5);
+      }
+
+      function ribbonFromPoints(points, width) {
         const positions = [];
         const progress = [];
         for (let i = 0; i < points.length; i += 1) {
@@ -265,8 +267,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         return spot;
       }
 
-      function addLink(link) {
-        const { positions, progress } = ribbonPositions(link);
+      function ribbonGeometry({ positions, progress }) {
         const ribbon = new THREE.BufferGeometry();
         ribbon.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
         ribbon.setAttribute('aT', new THREE.Float32BufferAttribute(progress, 1));
@@ -277,13 +278,18 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
           indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
         }
         ribbon.setIndex(indices);
+        linkGeometries.push(ribbon);
+        return ribbon;
+      }
+
+      function addLink(link) {
+        const ribbon = ribbonGeometry(ribbonPositions(link));
         const material = linkMaterial.clone();
         material.uniforms.uTime = linkMaterial.uniforms.uTime;
         material.uniforms.uOpacity = { value: 1 };
         linkMaterials.push(material);
         const mesh = new THREE.Mesh(ribbon, material);
         scene.add(mesh);
-        linkGeometries.push(ribbon);
         linkMeshes.push({ id: link.id, material });
         bindings.push({ geometry: ribbon, link: { ...link } });
       }
@@ -338,13 +344,12 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       for (const agent of book.agents) addCard(agent, 'agent');
       for (const wallet of book.wallets) {
         const links = book.links.filter(link => link.kind === 'agent' && link.walletId === wallet.id);
-        const segments = agentWireSegments(links);
-        if (!segments.length) continue;
-        const vertices = segments.flatMap(segment => segment.flatMap(point => [point.x - wallet.x, point.y - wallet.y, 0.2]));
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-        cardObjects.get(wallet.id).add(new THREE.LineSegments(geometry, agentWireMaterial));
-        linkGeometries.push(geometry);
+        for (const path of agentWirePaths(links)) {
+          const points = path.map(point => new THREE.Vector3(point.x - wallet.x, point.y - wallet.y, 0.2));
+          const curve = new THREE.CubicBezierCurve3(...points);
+          const ribbon = ribbonGeometry(ribbonFromPoints(curve.getPoints(24), 1.8));
+          cardObjects.get(wallet.id).add(new THREE.Mesh(ribbon, agentWireMaterial));
+        }
       }
       for (const account of book.accounts) addCard(account, 'account');
       for (const card of book.cards) addCard(card, 'position');
