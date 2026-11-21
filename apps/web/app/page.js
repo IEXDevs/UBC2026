@@ -54,7 +54,12 @@ import { ownerIdFromPrivyUser, privyAccountLabel, sessionReadyForWallets } from 
 import { profileAfterDirectoryRead, profileRailLabel, profileSaveResult } from '../lib/profile.mjs';
 import { profilePhoto, withProfilePhoto, saveProfilePhoto } from '../lib/profile-photo.mjs';
 import { pickWalletList, withAssignedWallet } from '../lib/wallet-assign.mjs';
-import { readRetiredWalletIds, rememberRetiredWallet, withoutRetiredWallets } from '../lib/wallet-retire.mjs';
+import {
+  forgetRetiredWallet,
+  readRetiredWalletIds,
+  rememberRetiredWallet,
+  withoutRetiredWallets,
+} from '../lib/wallet-retire.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { browserCanSign, createOwnerAuthorizationSigner, waitForBrowserSigner, withLinkedSolanaWallets, signSelectedWalletTransaction, signWalletMoveTransaction } from '../lib/wallet-signing.mjs';
 import { executeClientSignedSwap } from '../lib/swap-client-sign.mjs';
@@ -162,7 +167,7 @@ function SessionHold() {
 }
 
 function AuthedShell() {
-  const { ready, authenticated, user, login, logout, getAccessToken: privyGetAccessToken } = usePrivy();
+  const { ready, authenticated, user, login, logout, getAccessToken: privyGetAccessToken, unlinkWallet } = usePrivy();
   const { generateAuthorizationSignature } = useAuthorizationSignature();
   const signedIn = ready && authenticated;
   const hostedPreview = useHostedPreview();
@@ -379,9 +384,10 @@ function AuthedShell() {
         onLogout={leaveDevPreview}
         privyLive
         liveWallets={null}
-        onRetireWallet={(id) => {
-          setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id) : current));
+        onRetireWallet={(id, address) => {
+          setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id && (!address || wallet?.address !== address)) : current));
         }}
+        unlinkWallet={unlinkWallet}
         getAccessToken={async () => null}
       />
     );
@@ -438,11 +444,16 @@ function AuthedShell() {
       getAccessToken={getAccessToken}
       authorizeSpend={generateAuthorizationSignature}
       attachSwapSigner={attachSwapSigner}
-      onRetireWallet={(id) => {
-        setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id) : current));
+      onRetireWallet={(id, address) => {
+        setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id && (!address || wallet?.address !== address)) : current));
       }}
+      unlinkWallet={unlinkWallet}
       onWalletCreated={(wallet) => {
         const incoming = Array.isArray(wallet) ? wallet : [wallet];
+        const unretire = incoming.flatMap((item) => [item?.id, item?.address]).filter(Boolean);
+        if (unretire.length && deskOwner) {
+          forgetRetiredWallet(window.localStorage, deskOwner, ...unretire);
+        }
         setLiveWallets((current) => {
           const list = Array.isArray(current) ? [...current] : [];
           for (const item of incoming) {
@@ -512,7 +523,7 @@ function DepositSigner({ signerRef, signWithOwnerAuthorization }) {
   return null;
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, attachSwapSigner = null, onRetireWallet = null, onWalletCreated = null, privyLive = false }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, attachSwapSigner = null, onRetireWallet = null, onWalletCreated = null, privyLive = false, unlinkWallet = null }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
   const signChatTransaction = useCallback(async ({ walletAddress, transaction }) => signSelectedWalletTransaction({
@@ -1198,13 +1209,44 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   useEffect(() => {
     setRetiredIds(readRetiredWalletIds(window.localStorage, ownerId));
   }, [ownerId]);
+  const handleWalletCreated = useCallback((wallet) => {
+    const incoming = Array.isArray(wallet) ? wallet : [wallet];
+    const unretire = incoming.flatMap((item) => [item?.id, item?.address]).filter(Boolean);
+    if (unretire.length && ownerId) {
+      const next = forgetRetiredWallet(window.localStorage, ownerId, ...unretire);
+      setRetiredIds(next);
+    }
+    setRemoteLists((current) => {
+      const existing = current.wallets || [];
+      const added = incoming.filter((item) => item?.address && !existing.some((row) => row.id === item.id || row.address === item.address));
+      return added.length ? { ...current, wallets: [...existing, ...added] } : current;
+    });
+    onWalletCreated?.(wallet);
+  }, [onWalletCreated, ownerId]);
   const retireWallet = useCallback(async (wallet) => {
     if (!wallet || wallet.kind !== 'additional' || typeof wallet.id !== 'string') {
       return { ok: false, message: 'The main wallet stays on the account.' };
     }
+    if (devPreview) {
+      const next = rememberRetiredWallet(window.localStorage, ownerId, wallet.id, wallet.address);
+      setRetiredIds(next);
+      onRetireWallet?.(wallet.id, wallet.address);
+      setRemoteLists((current) => ({
+        ...current,
+        wallets: (current.wallets || []).filter((item) => item?.id !== wallet.id && (!wallet.address || item?.address !== wallet.address)),
+      }));
+      return { ok: true };
+    }
+    if (wallet.address) {
+      try {
+        await unlinkWallet?.(wallet.address);
+      } catch {
+        // Embedded wallets cannot be unlinked from Privy; ignore
+      }
+    }
     let token = '';
     try { token = (await getAccessToken?.()) || ''; } catch { token = ''; }
-    if (!token) return { ok: false, message: 'Sign in again, then remove the wallet.' };
+    if (!token) return { ok: false, message: 'Sign in again, then unlink the wallet.' };
     try {
       const response = await fetch('/api/wallets/retire', {
         method: 'POST',
@@ -1213,25 +1255,25 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           authorization: `Bearer ${token}`,
           ...(ownerId ? { 'x-owner-id': ownerId } : {}),
         },
-        body: JSON.stringify({ id: wallet.id }),
+        body: JSON.stringify({ id: wallet.id, address: wallet.address }),
         cache: 'no-store',
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body.ok !== true) {
         return { ok: false, message: 'That wallet is still on the account.' };
       }
-      const next = rememberRetiredWallet(window.localStorage, ownerId, wallet.id);
+      const next = rememberRetiredWallet(window.localStorage, ownerId, wallet.id, wallet.address);
       setRetiredIds(next);
-      onRetireWallet?.(wallet.id);
+      onRetireWallet?.(wallet.id, wallet.address);
       setRemoteLists((current) => ({
         ...current,
-        wallets: (current.wallets || []).filter((item) => item?.id !== wallet.id),
+        wallets: (current.wallets || []).filter((item) => item?.id !== wallet.id && (!wallet.address || item?.address !== wallet.address)),
       }));
       return { ok: true };
     } catch {
       return { ok: false, message: 'That wallet is still on the account.' };
     }
-  }, [getAccessToken, onRetireWallet, ownerId]);
+  }, [devPreview, getAccessToken, onRetireWallet, ownerId, unlinkWallet]);
   const openWallet = useCallback((walletId) => {
     setAIProvidersOpen(false);
     setCreateOpen(false);
@@ -2177,7 +2219,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
             {!noAgents && money ? (
               <MoneyPane
                 pane={money}
-                state={{ bots, wallets, payments, positions, transfers, paymentCrossCheck }}
+                state={{ bots, wallets, payments, positions, transfers, paymentCrossCheck, retiredIds }}
                 onParty={setParty}
                 ownerId={ownerId}
                 getAccessToken={getAccessToken}
@@ -2398,7 +2440,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         resolveRecipient={resolveMention}
         solanaBalance={solanaBalance}
         onRetire={retireWallet}
-        onWalletCreated={onWalletCreated}
+        onWalletCreated={handleWalletCreated}
       />
       <PartySheet
         open={Boolean(party)}

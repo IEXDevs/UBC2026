@@ -14,6 +14,7 @@ import {
 } from '../lib/money-views.mjs';
 import { enrichPortfolio } from '../lib/dex-token.mjs';
 import { buildEarningsSeries, mergeWalletPositions } from '../lib/earnings-chart.mjs';
+import { readRetiredWalletIds } from '../lib/wallet-retire.mjs';
 import { linkedWalletKey } from '../lib/wallet-provision.mjs';
 import { flowName, partyFromToken } from '../lib/party-book.mjs';
 import AddressCopy from './AddressCopy';
@@ -233,7 +234,8 @@ function Positions({ state, ownerId, getAccessToken, onWallet }) {
   const merged = useMemo(() => mergeWalletPositions({
     wallets: state.wallets,
     portfolio: portfolio?.ownerId === ownerId ? portfolio.data : null,
-  }), [ownerId, state.wallets, portfolio]);
+    retiredIds: state.retiredIds || readRetiredWalletIds(typeof window !== 'undefined' ? window.localStorage : null, ownerId),
+  }), [ownerId, state.wallets, state.retiredIds, portfolio]);
   const earnings = useMemo(() => buildEarningsSeries({
     payments: state.payments,
   }), [state.payments]);

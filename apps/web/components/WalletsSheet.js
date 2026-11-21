@@ -377,7 +377,7 @@ export default function WalletsSheet({
               <details className="wallet-fold wallet-allocation phantom-allocation-fold" onToggle={event => setPortfolioOpen(event.currentTarget.open)}>
                 <summary>Portfolio breakdown<ChevronDown size={16} aria-hidden="true" /></summary>
                 <div className="wallet-fold-body">
-                  {signedIn ? <ConnectedPortfolio key={balanceRevision} open={open && portfolioOpen} previewPortfolio={previewBook} /> : <p className="quiet">Sign in to read balances.</p>}
+                  {signedIn ? <ConnectedPortfolio key={balanceRevision} open={open && portfolioOpen} previewPortfolio={previewBook} onRetire={onRetire} onCreated={onWalletCreated} /> : <p className="quiet">Sign in to read balances.</p>}
                 </div>
               </details>
             </section>
@@ -529,6 +529,9 @@ export default function WalletsSheet({
                     setRetireNote('');
                     try {
                       const result = await onRetire?.(row);
+                      if (result?.ok && walletId === row.id) {
+                        setWalletId('');
+                      }
                       setRetireNote(result?.ok
                         ? `${row.label} is no longer on this account.`
                         : (result?.message || 'That wallet is still on the account.'));
@@ -596,11 +599,17 @@ function linkedKey(user) {
   return accounts.map(account => (typeof account?.address === 'string' ? account.address : '')).join('|');
 }
 
-function ConnectedPortfolio({ open, previewPortfolio = null }) {
+function ConnectedPortfolio({ open, previewPortfolio = null, onRetire = null, onCreated = null }) {
   const { user, getAccessToken, unlinkWallet, ready, authenticated } = usePrivy();
   const [portfolio, setPortfolio] = useState(null);
   const [error, setError] = useState('');
   const { linkWallet } = useLinkAccount({
+    onSuccess: (userResult, linkMethod, linkedAccount) => {
+      const address = linkedAccount?.address || userResult?.linkedAccounts?.slice(-1)[0]?.address;
+      if (address) {
+        onCreated?.({ id: linkedAccount?.id || `wallet_${address}`, address, kind: 'additional' });
+      }
+    },
     onError: () => setError('That wallet could not be linked. If it already belongs to another account, sign in with it instead.'),
   });
   const [loading, setLoading] = useState(false);
@@ -684,9 +693,17 @@ function ConnectedPortfolio({ open, previewPortfolio = null }) {
     setRemoving(address);
     setError('');
     try {
-      await unlinkWallet(address);
+      if (onRetire) {
+        const result = await onRetire({ id: `wallet_${address}`, address, kind: 'additional' });
+        if (result && result.ok === false) {
+          setError(result.message || 'Could not unlink that wallet.');
+          return;
+        }
+      } else {
+        await unlinkWallet(address);
+      }
     } catch {
-      setError('Could not remove that wallet.');
+      setError('Could not unlink that wallet.');
     } finally {
       setRemoving('');
     }
@@ -723,9 +740,20 @@ export function WalletAdd({ getAccessToken = null, ownerId = '', onCreated = nul
   const [note, setNote] = useState('');
   const [hint, setHint] = useState('');
   const { linkWallet } = useLinkAccount({
-    onSuccess: () => {
+    onSuccess: (userResult, linkMethod, linkedAccount) => {
       if (!connecting.current) return;
       connecting.current = false;
+      const address = linkedAccount?.address
+        || userResult?.linkedAccounts?.slice(-1)[0]?.address
+        || user?.linkedAccounts?.slice(-1)[0]?.address;
+      if (address) {
+        onCreated?.({
+          id: linkedAccount?.id || `wallet_${address}`,
+          address,
+          kind: 'additional',
+          label: linkedAccount?.walletClientType ? `${linkedAccount.walletClientType}` : 'Wallet',
+        });
+      }
       setNote('Wallet connected.');
     },
     onError: () => {
@@ -927,7 +955,7 @@ function WalletRoster({ rows, handle = '', activeId, onSelect, onRetire, retirin
               disabled={retiring === row.id}
               onClick={() => onRetire?.(row)}
             >
-              {retiring === row.id ? 'Removing' : 'Remove'}
+              {retiring === row.id ? 'Unlinking' : 'Unlink'}
             </button>
           ) : null}
         </div>
