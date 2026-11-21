@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { PencilEdit01Icon } from '@hugeicons/core-free-icons';
+import { cardLoopReport } from '@ubc2026/contracts/card-loop';
 import Dock from './Dock';
 import AnimatedList from './AnimatedList';
 import BotMark from './BotMark';
@@ -46,12 +47,18 @@ function loopMark(bot, onBreak) {
   if (!loop || loop.active !== true || typeof loop.cooldownLabel !== 'string' || !loop.cooldownLabel) return null;
   const label = loop.cooldownLabel;
   const purpose = typeof loop.purpose === 'string' ? loop.purpose : '';
+  const report = cardLoopReport(loop);
+  const title = [
+    purpose,
+    report ? new Date(report.at).toLocaleString() + ' · ' + report.summary : '',
+    'Break loop',
+  ].filter(Boolean).join('\n');
   return (
     <button
       type="button"
       className="agent-loop"
-      aria-label={purpose ? `Loop every ${label}. ${purpose}. Break loop.` : `Loop every ${label}. Break loop.`}
-      title={purpose ? purpose + ' · Break loop' : 'Break loop'}
+      aria-label={['Loop every ' + label + '.', purpose, report?.summary, 'Break loop.'].filter(Boolean).join(' ')}
+      title={title}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.preventDefault();

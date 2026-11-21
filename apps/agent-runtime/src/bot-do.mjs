@@ -22,7 +22,7 @@ import { createOpenRouterFromEnv, OpenRouterError } from './openrouter.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
 import { resolveTrustLookup } from './trust-lookup.mjs';
 import { assessPositions } from './schedules.mjs';
-import { alertFromGate, alertFromPauseReason, rememberBotAlert, rememberDecisionMemo } from './bot-alerts.mjs';
+import { alertFromGate, alertFromPauseReason, cardLoopEvent, rememberBotAlert, rememberCardLoopRun, rememberDecisionMemo } from './bot-alerts.mjs';
 import { handleLasoRequest } from './laso-do.mjs';
 import { enrichEnv } from './runtime-env.mjs';
 
@@ -405,6 +405,11 @@ export class BotStateMachine {
       if (!ownerId) return Response.json({ error: 'owner_required' }, { status: 401 });
       const prior = await this.get('alerts');
       const items = (Array.isArray(prior) ? prior : []).filter(event => event && event.ownerId === ownerId);
+      const meta = await this.get('meta');
+      if (meta?.ownerId === ownerId) {
+        const latest = cardLoopEvent(await this.get('cardLoop'), ownerId);
+        if (latest && !items.some(event => event.id === latest.id)) items.push(latest);
+      }
       return Response.json({ ok: true, items });
     }
 
@@ -778,6 +783,7 @@ export class BotStateMachine {
     };
     await this.put('cardLoop', next);
     if (await this.get('ownerPaused') !== true) await this.armAlarm(next.nextWakeAt);
+    await rememberCardLoopRun(env, this, next, ownerId);
     return { woke: true, gate, throughGate: true, spent, loop: publicCardLoop(next) };
   }
 

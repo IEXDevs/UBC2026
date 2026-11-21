@@ -37,7 +37,8 @@ export function traceModel(entries) {
   const sections = [];
   for (const entry of list) {
     if (!entry || typeof entry.id !== 'string' || typeof entry.summary !== 'string') continue;
-    const label = KIND[entry.kind] ?? entry.kind ?? 'Event';
+    const scheduled = entry.kind === 'run.checkpoint' && entry.id.startsWith('evt_loop_');
+    const label = scheduled ? 'Scheduled checks' : KIND[entry.kind] ?? entry.kind ?? 'Event';
     if (CHIP_KINDS.has(entry.kind)) {
       chips.push({
         id: entry.id,
