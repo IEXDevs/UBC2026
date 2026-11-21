@@ -2,6 +2,7 @@
 
 import { randomShape, SHAPES } from './bot-look.mjs';
 import { solanaSpendAsset } from '@ubc2026/contracts';
+import { validWalletId } from './wallet-assign.mjs';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const ID = /^bot_[a-z0-9_]{1,40}$/;
@@ -160,7 +161,7 @@ export function draftTransferCap(asset, maxOutflow, maxPerTransaction) {
   return { mode: 'limited', asset: identifier, maxOutflow, maxPerTransaction };
 }
 
-export function draftBot({ name, shape, color, id, cap } = {}) {
+export function draftBot({ name, shape, color, id, cap, walletId } = {}) {
   const trimmed = typeof name === 'string' ? name.trim().slice(0, 64) : '';
   if (!trimmed || typeof color !== 'string' || !HEX.test(color)) return null;
   const nextShape = SHAPES.includes(shape) ? shape : (shape == null ? randomShape() : null);
@@ -175,7 +176,7 @@ export function draftBot({ name, shape, color, id, cap } = {}) {
     type: 'trading',
     status: 'idle',
     goal: 'Waiting for a goal.',
-    walletId: null,
+    walletId: validWalletId(walletId) ? walletId : null,
     ...(transferCap ? { cap: transferCap } : {}),
   };
 }

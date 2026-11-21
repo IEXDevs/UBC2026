@@ -1,62 +1,47 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickWalletList, withAssignedWallet } from './wallet-assign.mjs';
+import { agentWalletChoices, mergeWalletDirectory, withAssignedWallet } from './wallet-assign.mjs';
 
-/**
- * Achieves: verifies a live spendable main wallet is assigned to every bot.
- * Fails when: null wallets mutate bot ids, or main wallet is not applied to all bots.
- * Oracle: null → bots unchanged; main w_main_owner replaces every bot.walletId.
- * Side effects / state checked: returned bots/wallets only.
- * Gaps: none for assignment happy path.
- */
-test('a live main wallet replaces the assignment on every bot', () => {
+test('Main fills empty assignments and preserves every explicit assignment', () => {
   const bots = [
-    { id: 'bot_meteora', walletId: 'wallet_main' },
+    { id: 'bot_new', walletId: null },
     { id: 'bot_shop', walletId: 'wallet_shop' },
+    { id: 'bot_old', walletId: 'wallet_unavailable' },
   ];
-  const untouched = withAssignedWallet(bots, null);
-  assert.equal(untouched.wallets, null);
-  assert.equal(untouched.bots[1].walletId, 'wallet_shop');
-
+  assert.equal(withAssignedWallet(bots, null).bots, bots);
   const live = withAssignedWallet(bots, [
-    { id: 'wallet_extra', kind: 'additional' },
-    { id: 'w_main_owner', kind: 'main', address: 'Addr' },
+    { id: 'wallet_shop', kind: 'additional' },
+    { id: 'w_main_owner', kind: 'main', frozen: true },
   ]);
-  assert.equal(live.wallets.length, 2);
-  assert.deepEqual(live.bots.map(bot => bot.walletId), ['w_main_owner', 'w_main_owner']);
+  assert.deepEqual(live.bots.map(bot => bot.walletId), ['w_main_owner', 'wallet_shop', 'wallet_unavailable']);
 });
 
-/**
- * Achieves: verifies non-spendable connected wallets cannot become the agent spend wallet.
- * Fails when: spendable:false main overwrites bot walletId, or spendable additional is ignored.
- * Oracle: phantom spendable:false keeps wallet_shop; spendable additional becomes assigned id.
- * Side effects / state checked: returned bots only.
- * Gaps: none.
- */
-test('a connected wallet cannot become the agent spend wallet', () => {
-  const bots = [{ id: 'bot_shop', walletId: 'wallet_shop' }];
-  const live = withAssignedWallet(bots, [
-    { id: 'phantom', kind: 'main', spendable: false, address: 'So11111111111111111111111111111111111111112' },
+test('the wallet picker offers spendable unfrozen wallets, with Main first', () => {
+  const choices = agentWalletChoices([
+    { id: 'wallet_shop', kind: 'additional', spendable: true },
+    { id: 'w_frozen', kind: 'additional', frozen: true },
+    { id: 'w_external', kind: 'main', spendable: false },
+    { id: 'w_external_2', kind: 'additional', readOnly: true },
+    { id: 'w_retired', kind: 'additional', deletedAt: '2026-11-21' },
+    { id: 'linked_external', kind: 'additional' },
+    { id: 'w_main', kind: 'main', spendable: true },
   ]);
-  assert.equal(live.wallets.length, 1);
-  assert.equal(live.bots[0].walletId, 'wallet_shop');
-
-  const mixed = withAssignedWallet(bots, [
-    { id: 'phantom', kind: 'main', spendable: false },
-    { id: 'w_main_owner', kind: 'additional', spendable: true },
-  ]);
-  assert.equal(mixed.bots[0].walletId, 'w_main_owner');
+  assert.deepEqual(choices.map(wallet => wallet.id), ['w_main', 'wallet_shop']);
 });
 
-/**
- * Achieves: verifies pickWalletList skips empty arrays so later non-empty sources win.
- * Fails when: empty first source blocks later wallets, or first non-empty is skipped.
- * Oracle: [], null, [{id:w1}] → [{id:w1}]; live beats remote; all empty → [].
- * Side effects / state checked: N/A.
- * Gaps: none.
- */
-test('pickWalletList skips empty arrays so later sources can win', () => {
-  assert.deepEqual(pickWalletList([], null, [{ id: 'w1' }]), [{ id: 'w1' }]);
-  assert.deepEqual(pickWalletList([{ id: 'live' }], [{ id: 'remote' }]), [{ id: 'live' }]);
-  assert.deepEqual(pickWalletList([], []), []);
+test('an external or additional wallet does not take the default when Main is absent', () => {
+  const bots = [{ id: 'bot_new', walletId: null }];
+  const live = withAssignedWallet(bots, [
+    { id: 'w_external', kind: 'main', spendable: false },
+    { id: 'wallet_shop', kind: 'additional' },
+  ]);
+  assert.equal(live.bots[0].walletId, null);
+});
+
+test('the wallet directory preserves the server assignment ID and includes wallets from both lists', () => {
+  const live = [{ id: 'client_main', address: 'main', label: 'Main' }, { id: 'linked_wallet', address: 'external' }];
+  const persisted = [{ id: 'wallet_main', address: 'main', frozen: true }, { id: 'wallet_shop', address: 'shop' }];
+  const directory = mergeWalletDirectory(live, persisted);
+  assert.deepEqual(directory.map(wallet => wallet.id), ['wallet_main', 'linked_wallet', 'wallet_shop']);
+  assert.deepEqual(directory[0], { id: 'wallet_main', address: 'main', label: 'Main', frozen: true });
 });

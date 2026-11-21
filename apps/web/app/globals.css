@@ -4010,6 +4010,26 @@ button.wallet-export:not(:disabled):hover {
 }
 
 .book-account .book-logo { width: 22px; height: 22px; border-radius: 6px; }
+.book-agent-surface {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 6px 9px;
+  border: 1px solid #3f3f46;
+  border-radius: 12px;
+  background: #18181b;
+}
+.book-agent-surface .mark { flex: none; }
+.book-agent-surface [data-slot="card-title"] {
+  min-width: 0;
+  overflow: hidden;
+  color: #f5f5f5;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .book-account [data-slot="card-title"] { font-size: 13px; }
 .book-account [data-slot="card-description"] { font-size: 10px; line-height: 1.2; letter-spacing: 0.04em; text-transform: uppercase; }
 .book-glance-copy { display: grid; min-width: 0; }
@@ -6360,6 +6380,24 @@ body:has(.backdrop.is-cover) {
 .create-look .bot-look-name,
 .create-look .swatch-name,
 .create-look .swatches { margin: 0; }
+.create-wallets { display: grid; gap: 8px; max-height: 240px; overflow-y: auto; }
+.create-wallet-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #141414;
+  cursor: pointer;
+}
+.create-wallet-option:has(input:checked) { border-color: #a1a1aa; background: #242424; }
+.create-wallet-option:has(input:focus-visible) { outline: 2px solid #f5f5f5; outline-offset: -2px; }
+.create-wallet-option input { flex: none; margin: 0; accent-color: #f5f5f5; }
+.create-wallet-option span { display: grid; min-width: 0; gap: 2px; }
+.create-wallet-option strong { min-width: 0; overflow-wrap: anywhere; }
+.create-wallet-option small { color: var(--muted); font-variant-numeric: tabular-nums; }
 .create-limits {
   display: grid;
   gap: 14px;

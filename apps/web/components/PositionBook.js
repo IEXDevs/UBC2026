@@ -8,7 +8,7 @@ import { bookFrame, layoutPositionBook, positionSceneKey, stepBubbleFollow } fro
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
 import EarningsChart from './EarningsChart';
-import { ProviderGroupCard, ProviderPositionCard, WalletCard, usdLabel } from './PositionBookCards';
+import { AgentCard, ProviderGroupCard, ProviderPositionCard, WalletCard, usdLabel } from './PositionBookCards';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 
@@ -84,6 +84,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
   const sceneKey = useMemo(() => positionSceneKey(book), [book]);
   const content = useMemo(() => new Map([
     ...book.wallets.map(wallet => [wallet.id, <WalletCard wallet={wallet} />]),
+    ...book.agents.map(agent => [agent.id, <AgentCard agent={agent} />]),
     ...book.accounts.map(account => [account.id, <ProviderGroupCard account={account} />]),
     ...book.cards.map(card => [card.id, <ProviderPositionCard card={card} />]),
   ]), [book]);
@@ -284,6 +285,10 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
           host.style.setProperty('--wallet-width', `${item.width}px`);
           host.style.setProperty('--wallet-height', `${item.height}px`);
         }
+        if (kind === 'agent') {
+          host.style.width = `${item.width}px`;
+          host.style.height = `${item.height}px`;
+        }
         const spot = placedSpot(places, item);
         const object = new CSS3DObject(host);
         object.position.set(spot.x, spot.y, 0);
@@ -295,16 +300,22 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       }
 
       for (const wallet of book.wallets) addCard(wallet, 'wallet');
+      for (const agent of book.agents) addCard(agent, 'agent');
       for (const account of book.accounts) addCard(account, 'account');
       for (const card of book.cards) addCard(card, 'position');
       setSceneCards({ sceneKey, hosts });
 
       const walletHeights = new Map(book.wallets.map(wallet => [wallet.id, wallet.height]));
+      const agentHeights = new Map(book.agents.map(agent => [agent.id, agent.height]));
       function anchorPoint(id, role, kind) {
         const pos = anchors.get(id);
         if (!pos) return { x: 0, y: 0 };
         if (kind === 'spoke' && role === 'to') return { x: pos.x, y: pos.y + 88 };
         if (kind === 'account' && role === 'from') return { x: pos.x, y: pos.y - (walletHeights.get(id) ?? 0) / 2 };
+        if (kind === 'agent') {
+          const offset = role === 'from' ? walletHeights.get(id) / 2 : -agentHeights.get(id) / 2;
+          return { x: pos.x, y: pos.y + offset };
+        }
         if (kind === 'provider' && role === 'from') return { x: pos.x, y: pos.y + 28 };
         return { x: pos.x, y: pos.y };
       }
@@ -413,6 +424,16 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
 
       function detailPayload(id, point) {
         const book = bookRef.current;
+        const agent = book.agents.find(item => item.id === id);
+        if (agent) {
+          const owner = book.wallets.find(item => item.id === agent.walletId);
+          return {
+            title: agent.name,
+            kicker: 'Agent',
+            rows: [['Wallet', owner?.label], ['Status', agent.status], ['Current task', agent.currentTask]].filter(([, value]) => value),
+            point,
+          };
+        }
         const wallet = book.wallets.find(item => item.id === id);
         if (wallet) {
           return {

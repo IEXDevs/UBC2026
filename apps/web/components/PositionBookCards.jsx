@@ -2,6 +2,7 @@ import { useId } from 'react';
 import { Wallet } from 'lucide-react';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
+import BotMark from './BotMark';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 
 const BUBBLE_PALETTE = [
@@ -103,6 +104,15 @@ export function ProviderGroupCard({ account }) {
         <CardTitle>{account.venue}</CardTitle>
         <CardDescription>{account.count} {account.count === 1 ? 'position' : 'positions'}</CardDescription>
       </CardHeader>
+    </Card>
+  );
+}
+
+export function AgentCard({ agent }) {
+  return (
+    <Card className="book-agent-surface" aria-label={`Agent ${agent.name}`}>
+      <BotMark name={agent.name} color={agent.color} image={agent.image} size={24} />
+      <CardTitle title={agent.name}>{agent.name}</CardTitle>
     </Card>
   );
 }

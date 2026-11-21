@@ -5,14 +5,16 @@ import { createPortal } from 'react-dom';
 import ModalClose from './ModalClose';
 import { colorLabel, colorsForPicker, randomShape } from '../lib/bot-look.mjs';
 import { draftBot, draftTransferCap } from '../lib/roster.mjs';
+import { shortAddress } from '../lib/money-views.mjs';
 import { dollarsToBaseUnits } from '../lib/spend-permission.mjs';
 import { AgentPhoto } from './AgentEdit';
 import { usePresence } from './usePresence';
 
-const STEPS = ['name', 'look', 'limits'];
+const STEPS = ['name', 'look', 'wallet', 'limits'];
 const STEP_TITLES = {
   name: 'Create new agent',
   look: 'Choose a color',
+  wallet: 'Choose a wallet',
   limits: 'Set spending limits',
 };
 
@@ -47,7 +49,7 @@ const CONFETTI = Array.from({ length: 42 }, (_, i) => {
   };
 });
 
-function LimitField({ id, label, value, onChange, autoFocus, exceedsTotal = false }) {
+function LimitField({ id, label, value, onChange, autoFocus, disabled = false, exceedsTotal = false }) {
   const invalid = Boolean(value.trim()) && !dollarsToBaseUnits(value);
   return (
     <div className="field">
@@ -58,6 +60,7 @@ function LimitField({ id, label, value, onChange, autoFocus, exceedsTotal = fals
         inputMode="decimal"
         placeholder="0.00"
         autoFocus={autoFocus}
+        disabled={disabled}
         aria-describedby={exceedsTotal ? 'agent-limit-error' : invalid ? `${id}-error` : undefined}
         aria-invalid={exceedsTotal || invalid}
         onChange={event => onChange(event.target.value)}
@@ -67,16 +70,21 @@ function LimitField({ id, label, value, onChange, autoFocus, exceedsTotal = fals
   );
 }
 
-export default function CreateBotDialog({ open, onClose, onCreate, first = false }) {
+export default function CreateBotDialog({ open, onClose, onCreate, wallets = [], first = false }) {
   const { mounted, leaving } = usePresence(open);
   const [name, setName] = useState('');
   const [color, setColor] = useState('#7c5cff');
   const [image, setImage] = useState('');
   const [shape, setShape] = useState('circle');
+  const [walletId, setWalletId] = useState('');
   const [maxOutflow, setMaxOutflow] = useState('');
   const [maxPerTransaction, setMaxPerTransaction] = useState('');
   const [celebrate, setCelebrate] = useState(false);
   const [step, setStep] = useState('name');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const draftId = useRef(null);
+  const pending = useRef(false);
   const stepTitle = useRef(null);
   const [seenOpen, setSeenOpen] = useState(open);
   if (open !== seenOpen) {
@@ -90,22 +98,26 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
     setColor('#7c5cff');
     setImage('');
     setShape(randomShape());
+    setWalletId('');
     setMaxOutflow('');
     setMaxPerTransaction('');
     setStep('name');
+    setError('');
+    draftId.current = null;
     function onKey(event) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !pending.current) onClose();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
   useEffect(() => {
-    if (open && step === 'look') stepTitle.current?.focus();
+    if (open && (step === 'look' || step === 'wallet')) stepTitle.current?.focus();
   }, [open, step]);
 
   if (!mounted || typeof document === 'undefined') return null;
   const stepIndex = STEPS.indexOf(step);
+  const wallet = wallets.find(item => item.id === walletId) ?? (!walletId && wallets.length === 1 ? wallets[0] : null);
   const total = dollarsToBaseUnits(maxOutflow);
   const perTransfer = dollarsToBaseUnits(maxPerTransaction);
   const cap = draftTransferCap('USD', total, perTransfer);
@@ -113,23 +125,42 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
   const canContinue = {
     name: Boolean(name.trim()),
     look: true,
-    limits: Boolean(cap),
+    wallet: Boolean(wallet),
+    limits: Boolean(wallet && cap),
   }[step];
 
-  function submit(event) {
+  function close() {
+    if (!pending.current) onClose();
+  }
+
+  async function submit(event) {
     event.preventDefault();
-    if (!open || !canContinue) return;
+    if (!open || !canContinue || pending.current) return;
     if (step !== 'limits') {
+      if (step === 'wallet') setWalletId(wallet.id);
       setStep(STEPS[stepIndex + 1]);
       return;
     }
-    const bot = draftBot({ name, shape, color, cap });
+    const bot = draftBot({ id: draftId.current, name, shape, color, cap, walletId: wallet.id });
     if (!bot) return;
-    onCreate({ ...bot, image });
+    draftId.current = bot.id;
+    pending.current = true;
+    setSaving(true);
+    setError('');
+    const failed = 'Could not create the agent. Try again.';
+    try {
+      const result = await onCreate({ ...bot, image });
+      if (!result?.ok) setError(result?.message || failed);
+    } catch {
+      setError(failed);
+    } finally {
+      pending.current = false;
+      setSaving(false);
+    }
   }
 
   return createPortal(
-    <div className={`backdrop is-center${first ? ' is-cover' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={onClose}>
+    <div className={`backdrop is-center${first ? ' is-cover' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={close}>
       {celebrate ? (
         <div className="create-splash" aria-hidden="true">
           {SPLASH.map(piece => (
@@ -155,7 +186,7 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
         onMouseDown={event => event.stopPropagation()}
         onSubmit={submit}
       >
-        <ModalClose label="Close create agent" onClick={onClose} />
+        <ModalClose label="Close create agent" onClick={close} />
         {celebrate ? (
           <>
             <div className="create-scrim" aria-hidden="true" />
@@ -222,29 +253,45 @@ export default function CreateBotDialog({ open, onClose, onCreate, first = false
               </div>
             </div>
           )}
+          {step === 'wallet' && (
+            <div className="create-wallets" role="radiogroup" aria-label="Agent wallet">
+              {wallets.map(item => (
+                <label key={item.id} className="create-wallet-option">
+                  <input type="radio" name="agent-wallet" checked={wallet?.id === item.id} onChange={() => setWalletId(item.id)} />
+                  <span><strong>{item.label || 'Wallet'}</strong><small>{shortAddress(item.address)}</small></span>
+                </label>
+              ))}
+              {wallets.length === 0 && <p className="hint">No spendable wallet is ready. Add or unfreeze a wallet, then try again.</p>}
+            </div>
+          )}
           {step === 'limits' && (
             <div className="create-limits">
               <p className="hint">
-                These limits cover all tokens and network fees.
+                {wallet ? `These limits apply to ${wallet.label || 'the selected wallet'} and cover all tokens and network fees.`
+                  : 'The selected wallet is unavailable. Go back and choose a wallet.'}
               </p>
               <LimitField id="agent-total-limit" label="Total limit"
-                value={maxOutflow} onChange={setMaxOutflow} autoFocus />
+                value={maxOutflow} onChange={setMaxOutflow} disabled={saving} autoFocus />
               <LimitField id="agent-transfer-limit" label="Per-transaction limit"
-                value={maxPerTransaction} onChange={setMaxPerTransaction} exceedsTotal={perTransferTooHigh} />
+                value={maxPerTransaction} onChange={setMaxPerTransaction} disabled={saving} exceedsTotal={perTransferTooHigh} />
               {perTransferTooHigh && (
                 <p id="agent-limit-error" className="hint create-limit-error" role="status">
                   The per-transaction limit must be at or below the total limit.
                 </p>
               )}
+              {error && <p className="hint create-limit-error" role="alert">{error}</p>}
             </div>
           )}
         </div>
         <div className="sheet-actions">
-          <button type="button" className="ghost" onClick={step === 'name' ? onClose : () => setStep(STEPS[stepIndex - 1])}>
+          <button type="button" className="ghost" disabled={saving} onClick={step === 'name' ? close : () => {
+            setError('');
+            setStep(STEPS[stepIndex - 1]);
+          }}>
             {step === 'name' ? 'Cancel' : 'Back'}
           </button>
-          <button type="submit" className="solid" disabled={!canContinue}>
-            {step === 'limits' ? 'Create agent' : 'Continue'}
+          <button type="submit" className="solid" disabled={!canContinue || saving}>
+            {saving ? 'Creating…' : step === 'limits' ? 'Create agent' : 'Continue'}
           </button>
         </div>
       </form>

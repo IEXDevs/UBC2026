@@ -116,12 +116,14 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   }
 });
 
-test('agent creation goes from color straight to USD spending limits', () => {
+test('agent creation selects its wallet after color and before USD spending limits', () => {
   const dialog = readFileSync(new URL('../components/CreateBotDialog.js', import.meta.url), 'utf8');
   assert.match(dialog, /className=\{`sheet create-agent/);
   assert.match(dialog, /colorsForPicker\(color, true\)/);
   assert.equal(dialog.includes('More colors'), false);
-  assert.match(dialog, /const STEPS = \['name', 'look', 'limits'\]/);
+  assert.match(dialog, /const STEPS = \['name', 'look', 'wallet', 'limits'\]/);
+  assert.match(dialog, /role="radiogroup" aria-label="Agent wallet"/);
+  assert.match(dialog, /draftBot\(\{[^}]*walletId: wallet\.id/);
   assert.match(dialog, /step === 'limits' && \(\s+<div className="create-limits"/);
   assert.match(dialog, /draftTransferCap\('USD', total, perTransfer\)/);
   assert.match(dialog, /dollarsToBaseUnits\(maxOutflow\)/);

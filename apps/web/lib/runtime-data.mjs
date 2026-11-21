@@ -244,6 +244,7 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
           : DEFAULT_TRANSFER_CAP,
       }),
       cache: 'no-store',
+      ...(options.signal ? { signal: options.signal } : {}),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -257,17 +258,6 @@ export async function upsertOwnerBot(ownerId, bot, runtimeBaseOrOptions = 'shell
   } catch {
     return { ok: false, error: 'network' };
   }
-}
-
-/** First non-frozen wallet id from a list (shell or remote). */
-export function firstAssignableWalletId(wallets = []) {
-  if (!Array.isArray(wallets)) return '';
-  for (const wallet of wallets) {
-    if (!wallet || typeof wallet !== 'object') continue;
-    if (wallet.frozen === true) continue;
-    if (typeof wallet.id === 'string' && BOT_ID.test(wallet.id)) return wallet.id;
-  }
-  return '';
 }
 
 /**

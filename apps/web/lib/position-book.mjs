@@ -1,6 +1,7 @@
 /** Places live positions on an open plane, one cluster per venue. */
 
 import { describePositions, formatAmount, formatBaseUnits, shortAddress } from './money-views.mjs';
+import { withAssignedWallet } from './wallet-assign.mjs';
 
 export const VENUE_LOGOS = Object.freeze({
   Kamino: '/venues/kamino.webp',
@@ -82,25 +83,33 @@ function walletBubbles(rows, width, height) {
 export function positionSceneKey(book) {
   const geometry = item => [item.id, item.x, item.y, item.width, item.height, item.walletId];
   return JSON.stringify([
-    book.wallets.map(geometry), book.accounts.map(geometry), book.cards.map(geometry), book.venues, book.links,
+    book.wallets.map(geometry), book.agents.map(geometry), book.accounts.map(geometry),
+    book.cards.map(geometry), book.venues, book.links,
   ]);
 }
 
 export function layoutPositionBook(positions, bots, wallets = [], holdings = []) {
   const source = Array.isArray(positions) ? positions : [];
-  const rows = describePositions(source, bots).map((row, index) => ({
+  const assignedBots = withAssignedWallet(bots, wallets).bots;
+  const rows = describePositions(source, assignedBots).map((row, index) => ({
     ...row,
-    walletId: walletFor(source[index], bots),
+    walletId: walletFor(source[index], assignedBots),
     mint: typeof source[index].mint === 'string' ? source[index].mint : null,
   }));
   const cards = [];
   const venues = [];
   const links = [];
   const walletNodes = [];
+  const agents = [];
   const accounts = [];
   const LEAF = 236;
   const BRANCH = 28;
   const WALLET_SPAN = 240;
+  const AGENT_WIDTH = 144;
+  const AGENT_HEIGHT = 42;
+  const AGENT_STEP = AGENT_WIDTH + 18;
+  const agentsByWallet = new Map(wallets.map(wallet => [wallet.id, []]));
+  for (const bot of assignedBots) agentsByWallet.get(bot.walletId)?.push(bot);
   const holdingsByWallet = new Map(wallets.map(wallet => [wallet.id, []]));
   for (const row of holdings) holdingsByWallet.get(row.walletId)?.push(row);
   const totals = new Map([...holdingsByWallet].map(([id, rows]) => [id, addMicro(rows, 'notionalMicroUsdc')]));
@@ -115,7 +124,9 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [])
       return { name, leaves, width };
     });
     const total = branches.reduce((sum, branch) => sum + branch.width, 0) + Math.max(0, branches.length - 1) * BRANCH;
-    const span = Math.max(total, WALLET_SPAN);
+    const assigned = agentsByWallet.get(wallet.id);
+    const columns = Math.min(3, assigned.length);
+    const span = Math.max(total, WALLET_SPAN, columns * AGENT_STEP);
     const rootX = cursor + span / 2;
     const rootY = 220;
     const walletHoldings = holdingsByWallet.get(wallet.id);
@@ -147,6 +158,31 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [])
       venues: venueNames,
       notionalLabel: `${formatBaseUnits(addMicro(owned, 'notionalMicroUsdc').toString())} USDC`,
       count: owned.length,
+    });
+    assigned.forEach((bot, index) => {
+      const slot = index % columns;
+      const row = Math.floor(index / columns);
+      const rowCount = Math.min(columns, assigned.length - row * columns);
+      const agent = {
+        ...bot,
+        id: `agent:${bot.id}`,
+        walletId: wallet.id,
+        x: rootX + (slot - (rowCount - 1) / 2) * AGENT_STEP,
+        y: rootY + height / 2 + 64 + row * 76,
+        width: AGENT_WIDTH,
+        height: AGENT_HEIGHT,
+      };
+      agents.push(agent);
+      links.push({
+        id: `${wallet.id}-${agent.id}`,
+        fromId: wallet.id,
+        toId: agent.id,
+        walletId: wallet.id,
+        kind: 'agent',
+        from: { x: rootX, y: rootY + height / 2 },
+        to: { x: agent.x, y: agent.y - AGENT_HEIGHT / 2 },
+        lift: 0,
+      });
     });
     let branchX = cursor + (span - total) / 2;
     branches.forEach(branch => {
@@ -221,8 +257,8 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [])
     for (const card of cards) {
       if (card.walletId === wallet.id) nodes.add(card.id);
     }
-    for (const account of accounts) {
-      if (account.walletId === wallet.id) nodes.add(account.id);
+    for (const agent of agents) {
+      if (agent.walletId === wallet.id) nodes.add(agent.id);
     }
     for (const link of links) {
       const owns = link.walletId === wallet.id || (link.walletIds ?? []).includes(wallet.id);
@@ -244,6 +280,7 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [])
     cards,
     venues,
     wallets: walletNodes,
+    agents,
     accounts,
     links,
     webs,
@@ -271,6 +308,7 @@ export function bookFrame(book) {
   for (const card of book.cards ?? []) add(card.x, card.y, 130, 110);
   for (const venue of book.venues ?? []) add(venue.x, venue.y, 90, 36);
   for (const wallet of book.wallets ?? []) add(wallet.x, wallet.y, wallet.width / 2, wallet.height / 2);
+  for (const agent of book.agents ?? []) add(agent.x, agent.y, agent.width / 2, agent.height / 2);
   for (const account of book.accounts ?? []) add(account.x, account.y, 80, 30);
   if (!Number.isFinite(minX)) return { x: 0, y: 0, minX: -200, maxX: 200, minY: -200, maxY: 200 };
   return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, minX, maxX, minY, maxY };
