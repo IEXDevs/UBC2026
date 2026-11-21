@@ -358,7 +358,7 @@ test('x402 partial signing binds the simulated message and leaves the facilitato
       const listed = mode === 'listed-source' ? [{
         pubkey: built.sourceTokenAccount,
         account: { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: { parsed: { type: 'account', info: {
-          owner: wallet.address, mint: accepted.asset, state: 'initialized', tokenAmount: { amount: '5000000', decimals: 6 },
+          owner: wallet.address, mint: accepted.asset, state: 'initialized', tokenAmount: { amount: '10000000', decimals: 6 },
         } } } },
       }] : [];
       return Response.json({ result: { value: listed } });
@@ -369,7 +369,7 @@ test('x402 partial signing binds the simulated message and leaves the facilitato
         const bytes = Buffer.alloc(165);
         bytes.set(new PublicKey(accepted.asset).toBytes(), 0);
         bytes.set(new PublicKey(wallet.address).toBytes(), 32);
-        bytes.writeBigUInt64LE(5000000n, 64);
+        bytes.writeBigUInt64LE(10000000n, 64);
         bytes[108] = 1;
         return Response.json({ result: { value: {
           owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: [bytes.toString('base64'), 'base64'],
@@ -378,7 +378,12 @@ test('x402 partial signing binds the simulated message and leaves the facilitato
       const missing = (source && (mode === 'listed-source' || mode === 'source-missing')) || (!source && mode === 'recipient-missing');
       return Response.json({ result: { value: missing ? null : {
         owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-        data: { parsed: { type: 'account', info: { owner: source ? wallet.address : mode === 'wrong-recipient' ? wallet.address : payTo, mint: accepted.asset, state: mode === 'source-open' && source ? undefined : 'initialized' } } },
+        data: { parsed: { type: 'account', info: {
+          owner: source ? wallet.address : mode === 'wrong-recipient' ? wallet.address : payTo,
+          mint: accepted.asset,
+          state: mode === 'source-open' && source ? undefined : 'initialized',
+          ...(source && mode === 'source-short' ? { tokenAmount: { amount: '1000000', decimals: 6 } } : {}),
+        } } },
       } } });
     }
     assert.equal(req.method, 'simulateTransaction', 'must never broadcast');
@@ -416,9 +421,12 @@ test('x402 partial signing binds the simulated message and leaves the facilitato
     assert.equal((await prepare()).transaction, built.transaction);
   }
   mode = 'listed-source';
-  assert.deepEqual(await privy.listSolanaUsdcAccounts({ address: wallet.address }), [{ address: built.sourceTokenAccount, amount: '5000000' }]);
+  assert.deepEqual(await privy.listSolanaUsdcAccounts({ address: wallet.address }), [{ address: built.sourceTokenAccount, amount: '10000000' }]);
   mode = 'ok';
   assert.deepEqual(await privy.listSolanaUsdcAccounts({ address: wallet.address }), []);
+  mode = 'source-short';
+  await assert.rejects(prepare(), error => error.code === 'simulation_failed' && error.simulationReason === 'insufficient_funds' && error.usdcBalance === '1000000');
+  mode = 'ok';
   const before = signing;
   for (const [bad, reason] of [['recipient-missing', 'recipient_account_not_found'], ['source-missing', 'source_account_not_found'],
     ['wrong-recipient', 'recipient_account_not_found'], ['simulation-error', 'instruction_2_custom_1']]) {

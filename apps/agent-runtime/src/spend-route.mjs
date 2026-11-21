@@ -27,6 +27,13 @@ import { valueUsdSpend } from './usd-budget.mjs';
 import { prepareLasoPayment, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
 import { swapFailure } from './swap-failure.mjs';
 import { parseLasoBrowserPayment } from './laso-browser-payment.mjs';
+
+function usd(units) {
+  const value = BigInt(units);
+  const whole = value / 1_000_000n;
+  const frac = (value % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : `${whole}.00`;
+}
 import { parseSwapAuthorization, swapAuthorizationProof, validSwapSignature } from './swap-client-sign.mjs';
 
 const SOL_TRUST_MINT = 'So11111111111111111111111111111111111111112';
@@ -385,13 +392,21 @@ async function handleSpendRequest(request, env = {}) {
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
       const simulationReason = typeof error?.simulationReason === 'string'
         && /^[a-zA-Z0-9_]{1,100}$/.test(error.simulationReason) ? error.simulationReason : null;
+      const usdcBalance = typeof error?.usdcBalance === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(error.usdcBalance) ? error.usdcBalance : null;
+      const short = simulationReason === 'insufficient_funds' || simulationReason === 'instruction_2_custom_1';
+      const needed = /^(0|[1-9][0-9]{0,19})$/.test(parsed.amount ?? '') ? parsed.amount : null;
       const hint = code === 'simulation_failed' && laso && simulationReason === 'source_account_not_found'
         ? `Payment checked agent wallet ${context.wallet.address} for a USDC account that covers this amount. Nothing was submitted.`
+        : code === 'simulation_failed' && laso && short
+        ? usdcBalance && needed
+          ? `Agent wallet ${context.wallet.address} has ${usd(usdcBalance)} USDC. This card needs ${usd(needed)} USDC. Nothing was submitted.`
+          : `The USDC account for agent wallet ${context.wallet.address} cannot cover this card. Nothing was submitted.`
         : code === 'simulation_failed' && !laso && !swap
         ? 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.'
         : '';
       return json({
         error: code, ...(hint ? { hint } : {}), signed: false, ...(simulationReason ? { simulationReason } : {}),
+        ...(usdcBalance ? { usdcBalance } : {}),
         ...(swap ? { simulationDetails: error?.simulationDetails } : {}),
       }, 409);
     }

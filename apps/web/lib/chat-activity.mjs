@@ -277,10 +277,12 @@ export function spendFailureMessage(result) {
   }
   switch (parsed?.error || parsed?.state) {
     case 'simulation_failed':
-      if (parsed.simulationReason === 'source_account_not_found') {
-        return typeof parsed.hint === 'string' && parsed.hint.length > 0 && parsed.hint.length <= 240
-          ? parsed.hint
-          : 'The agent wallet has no USDC account that covers this payment. Nothing was submitted.';
+      if (parsed.simulationReason === 'source_account_not_found' || parsed.simulationReason === 'insufficient_funds' || parsed.simulationReason === 'instruction_2_custom_1') {
+        const hint = typeof parsed.hint === 'string' && parsed.hint.length > 0 && parsed.hint.length <= 240 ? parsed.hint : '';
+        if (hint) return hint;
+        return parsed.simulationReason === 'source_account_not_found'
+          ? 'The agent wallet has no USDC account that covers this payment. Nothing was submitted.'
+          : 'The agent wallet does not have enough USDC for this card. Nothing was submitted.';
       }
       return `Payment simulation failed${/^[a-zA-Z0-9_]{1,100}$/.test(parsed.simulationReason ?? '') ? `: ${parsed.simulationReason}` : ''}. No payment was submitted.`;
     case 'laso_ticket_invalid':

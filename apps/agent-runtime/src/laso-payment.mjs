@@ -28,11 +28,20 @@ export function readLasoTicket(ticket, ownerId, botId, key, now = Date.now()) {
   } catch { return null; }
 }
 
-function paymentError(reason) {
+function paymentError(reason, usdcBalance) {
   const error = new Error('simulation_failed');
   error.code = 'simulation_failed';
   error.simulationReason = reason;
+  if (typeof usdcBalance === 'string') error.usdcBalance = usdcBalance;
   return error;
+}
+
+function totalUsdc(accounts) {
+  let total = 0n;
+  for (const row of Array.isArray(accounts) ? accounts : []) {
+    if (typeof row?.amount === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(row.amount)) total += BigInt(row.amount);
+  }
+  return total;
 }
 
 export async function prepareLasoPayment(env, context, ticket, blockhash) {
@@ -47,7 +56,10 @@ export async function prepareLasoPayment(env, context, ticket, blockhash) {
   if (typeof client.listSolanaUsdcAccounts === 'function') {
     const accounts = await client.listSolanaUsdcAccounts({ address: context.wallet.address });
     sourceTokenAccount = selectX402SourceAccount(context.wallet.address, accounts, ticket.accepted.amount);
-    if (!sourceTokenAccount) throw paymentError('source_account_not_found');
+    if (!sourceTokenAccount) {
+      const total = totalUsdc(accounts);
+      throw paymentError(total > 0n ? 'insufficient_funds' : 'source_account_not_found', total > 0n ? total.toString() : undefined);
+    }
   }
   const built = buildSolanaX402Transaction({
     sourceOwner: context.wallet.address, sourceTokenAccount, accepted: ticket.accepted, recentBlockhash: blockhash,

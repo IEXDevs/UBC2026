@@ -34,7 +34,12 @@ test('Laso payment spends the USDC token account that holds the balance', async 
   env.transferClient.listSolanaUsdcAccounts = async () => [{ address: funded, amount: '4999999' }];
   await assert.rejects(
     prepareLasoPayment(env, { wallet: { address: walletAddress } }, ticket),
-    error => error.code === 'simulation_failed' && error.simulationReason === 'source_account_not_found',
+    error => error.code === 'simulation_failed' && error.simulationReason === 'insufficient_funds' && error.usdcBalance === '4999999',
+  );
+  env.transferClient.listSolanaUsdcAccounts = async () => [];
+  await assert.rejects(
+    prepareLasoPayment(env, { wallet: { address: walletAddress } }, ticket),
+    error => error.simulationReason === 'source_account_not_found' && error.usdcBalance === undefined,
   );
 });
 
@@ -190,7 +195,10 @@ for (const asset of ['USDC', 'USD']) for (const browser of [false, true]) test(`
   assert.equal((await request({ confirmed: true })).signed, false);
   bot.cap.maxPerTransaction = '20000000';
   simulationError = true;
-  assert.deepEqual(await request({ confirmed: true }), { error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' });
+  assert.deepEqual(await request({ confirmed: true }), {
+    error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds',
+    hint: `The USDC account for agent wallet ${wallet.address} cannot cover this card. Nothing was submitted.`,
+  });
   simulationError = 'source_account_not_found';
   const missingSource = await request({ confirmed: true });
   assert.equal(missingSource.signed, false);

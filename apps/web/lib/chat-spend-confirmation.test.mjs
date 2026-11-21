@@ -90,7 +90,7 @@ test('Laso preparation needs no slide; its ticket-bound purchase does, and retur
   assert.equal(JSON.stringify(reply.activity).includes('owner-only'), false);
   assert.equal(reply.text.includes('owner-only'), false);
   const failed = await resumeAssetSpend(hold, context, async () => ({ error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' }), 2000);
-  assert.match(failed.text, /insufficient_funds/);
+  assert.match(failed.text, /does not have enough USDC/);
 });
 
 test('USDC swaps display confirmed minimum output and bind the quote ticket to the slide', async () => {

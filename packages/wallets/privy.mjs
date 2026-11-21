@@ -1221,16 +1221,22 @@ export function createPrivyWalletClient({
     return Boolean(info && info.owner === owner && info.mint === SOLANA_USDC_MINT && info.state === 'initialized');
   }
 
+  function usdcAmount(value) {
+    const raw = value?.data?.parsed?.info?.tokenAmount?.amount ?? classicTokenAccount(value)?.amount;
+    return typeof raw === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(raw) ? raw : null;
+  }
+
   async function ownedUsdcAccount(tokenAccount, owner) {
-    if (!base58.test(tokenAccount || '') || !base58.test(owner || '')) return false;
+    if (!base58.test(tokenAccount || '') || !base58.test(owner || '')) return null;
     const read = await rpc('getAccountInfo', [tokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
-    if (usdcAccountOwnedBy(read.result?.value, owner)) return true;
+    if (usdcAccountOwnedBy(read.result?.value, owner)) return { amount: usdcAmount(read.result.value) };
     const listed = await rpc('getTokenAccountsByOwner', [
       owner, { mint: SOLANA_USDC_MINT }, { encoding: 'jsonParsed', commitment: 'confirmed' },
     ]);
     const rows = listed.result?.value;
-    if (!Array.isArray(rows)) return false;
-    return rows.some(row => row?.pubkey === tokenAccount && usdcAccountOwnedBy(row.account, owner));
+    if (!Array.isArray(rows)) return null;
+    const row = rows.find(entry => entry?.pubkey === tokenAccount && usdcAccountOwnedBy(entry.account, owner));
+    return row ? { amount: usdcAmount(row.account) } : null;
   }
 
   function singleSignerMessage(transaction) {
@@ -1495,9 +1501,17 @@ export function createPrivyWalletClient({
     async prepareSolanaX402Payment({ transaction, walletAddress, accepted, sourceTokenAccount, destinationTokenAccount } = {}) {
       const parsed = x402Message(transaction, walletAddress, accepted?.extra?.feePayer);
       await assertSolana();
-      if (!(await ownedUsdcAccount(sourceTokenAccount, walletAddress))) {
+      const source = await ownedUsdcAccount(sourceTokenAccount, walletAddress);
+      const needed = typeof accepted?.amount === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(accepted.amount) ? BigInt(accepted.amount) : null;
+      if (!source) {
         const error = new WalletError('Source USDC account is unavailable', 'simulation_failed');
         error.simulationReason = 'source_account_not_found';
+        throw error;
+      }
+      if (source.amount != null && needed != null && BigInt(source.amount) < needed) {
+        const error = new WalletError('Source USDC balance is short', 'simulation_failed');
+        error.simulationReason = 'insufficient_funds';
+        error.usdcBalance = source.amount;
         throw error;
       }
       const account = await rpc('getAccountInfo', [destinationTokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
