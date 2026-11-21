@@ -1637,3 +1637,81 @@ test('client-signed swaps reject unsigned or expired messages before reserving a
   assert.equal(calls.signed.length, 0);
   assert.equal(calls.reserved, 1);
 });
+
+test('USDC spend directly to an SNS domain resolves destination and signs and broadcasts', async () => {
+  const targetAddress = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const autoBot = {
+    ...bot,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
+  };
+  let signed = false;
+  const client = {
+    async getSolanaBlockhash() {
+      return { cluster: 'mainnet-beta', blockhash: DESTINATION };
+    },
+    async signAndBroadcastSolana() {
+      signed = true;
+      return { cluster: 'mainnet-beta', signature: 'sig_sns_spend' };
+    },
+  };
+  const env = spendEnv({
+    transferClient: client,
+    loadSpendContext: async () => ({ bot: autoBot, wallet, ledger }),
+    resolveSns: async (domain) => {
+      if (domain === 'alex.sol') return targetAddress;
+      throw new Error('not found');
+    },
+  });
+  const res = await worker.fetch(spendRequest({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'spend',
+    amount: '1000000',
+    asset: 'USDC',
+    destination: 'alex.sol',
+  }), env);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.signed, true);
+  assert.equal(signed, true);
+  assert.equal(body.signature, 'sig_sns_spend');
+  assert.equal(body.state, 'signed');
+});
+
+test('USDC spend directly to a raw base58 address signs and broadcasts', async () => {
+  const targetAddress = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const autoBot = {
+    ...bot,
+    approvalMode: 'fully-automatic',
+    cap: { mode: 'limited', asset: 'USDC', maxOutflow: '10000000', maxPerTransaction: '5000000' },
+  };
+  let signed = false;
+  const client = {
+    async getSolanaBlockhash() {
+      return { cluster: 'mainnet-beta', blockhash: DESTINATION };
+    },
+    async signAndBroadcastSolana() {
+      signed = true;
+      return { cluster: 'mainnet-beta', signature: 'sig_raw_addr_spend' };
+    },
+  };
+  const env = spendEnv({
+    transferClient: client,
+    loadSpendContext: async () => ({ bot: autoBot, wallet, ledger }),
+  });
+  const res = await worker.fetch(spendRequest({
+    permission: 'full',
+    botId: 'bot_1',
+    action: 'spend',
+    amount: '1000000',
+    asset: 'USDC',
+    destination: targetAddress,
+  }), env);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.signed, true);
+  assert.equal(signed, true);
+  assert.equal(body.signature, 'sig_raw_addr_spend');
+  assert.equal(body.state, 'signed');
+});

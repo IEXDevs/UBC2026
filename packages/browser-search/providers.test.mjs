@@ -506,3 +506,129 @@ test('binding diagnostics redact viewer URLs and tokens before mapping errors', 
   assert.match(lines[0], /Browser binding acquire: TypeError: failed/);
   assert.doesNotMatch(lines[0], /https|browser\.run|private|short|credential|abcdefghijklmnopqrstuvwxyz|\n/);
 });
+
+/** Scripted CDP page socket: replies from `scripted(message)`; undefined reply means silence. */
+function cdpSocket(scripted, log = []) {
+  const listeners = new Map();
+  const socket = {
+    send: raw => {
+      const message = JSON.parse(raw);
+      log.push(message);
+      const result = scripted(message);
+      if (result === undefined) return;
+      queueMicrotask(() => listeners.get('message')?.({ data: JSON.stringify({ id: message.id, ...result }) }));
+    },
+    addEventListener: (kind, handler) => listeners.set(kind, handler),
+    close() { socket.closed = true; },
+  };
+  return socket;
+}
+
+/**
+ * Achieves: click connects to the page CDP socket, locates the element, draws the
+ * pointer overlay at its coordinates, then dispatches moved/pressed/released input.
+ * Fails when: wrong ws URL or auth header, overlay before press missing, input order
+ * or params drift, or the socket stays open.
+ * Oracle: exact wss URL + Bearer; sent method sequence; deep input params; closed flag.
+ * Side effects: none (injected fetcher upgrade + scripted socket).
+ * Gaps: live Cloudflare CDP behavior is not exercised here.
+ */
+test('click resolves the element, shows the pointer, then presses through CDP', async () => {
+  const sent = [];
+  const socket = cdpSocket(message => {
+    if (message.method === 'Runtime.evaluate' && message.params.expression.includes('querySelector')) {
+      return { result: { value: { x: 120, y: 40, tag: 'button', text: 'Add to cart' } } };
+    }
+    return { result: { value: true } };
+  }, sent);
+  let upgrade = null;
+  const provider = createBrowserProvider({
+    accountId: 'acct', apiToken: 'tok',
+    fetcher: async (url, options) => {
+      upgrade = { url, headers: options.headers };
+      return { status: 101, webSocket: socket };
+    },
+  });
+  const clicked = await provider.click('abc', 'TARGET1', '#add', { pauseMs: 0 });
+  assert.deepEqual(clicked, { x: 120, y: 40, tag: 'button', text: 'Add to cart' });
+  assert.equal(upgrade.url, 'wss://api.cloudflare.com/client/v4/accounts/acct/browser-run/devtools/browser/abc/page/TARGET1');
+  assert.equal(upgrade.headers.Upgrade, 'websocket');
+  assert.equal(upgrade.headers.Authorization, 'Bearer tok');
+  assert.deepEqual(sent.map(message => message.method), [
+    'Runtime.evaluate', 'Runtime.evaluate',
+    'Input.dispatchMouseEvent', 'Input.dispatchMouseEvent', 'Input.dispatchMouseEvent',
+  ]);
+  assert.match(sent[1].params.expression, /ms-agent-cursor/);
+  assert.match(sent[1].params.expression, /left:120px/);
+  assert.match(sent[1].params.expression, /top:40px/);
+  assert.deepEqual(sent[2].params, { type: 'mouseMoved', x: 120, y: 40 });
+  assert.deepEqual(sent[3].params, { type: 'mousePressed', x: 120, y: 40, button: 'left', clickCount: 1 });
+  assert.deepEqual(sent[4].params, { type: 'mouseReleased', x: 120, y: 40, button: 'left', clickCount: 1 });
+  assert.equal(socket.closed, true);
+});
+
+/**
+ * Achieves: a missing element never dispatches input; bad selectors, targets, and
+ * non-finite coordinates fail closed before any socket traffic.
+ * Fails when: input events fire after a miss, or validation happens after the connect.
+ * Oracle: sent log length 1 on a miss; invalid_selector / invalid_target /
+ * invalid_provider_response codes with no fetcher call.
+ * Side effects: none.
+ * Gaps: selector-specificity behavior is the page's own.
+ */
+test('click fails closed before input when the target, selector, or coordinates are bad', async () => {
+  const sent = [];
+  const missing = cdpSocket(message => (
+    message.method === 'Runtime.evaluate' ? { result: { value: null } } : undefined
+  ), sent);
+  const provider = createBrowserProvider({ accountId: 'a', apiToken: 't', fetcher: async () => ({ status: 101, webSocket: missing }) });
+  await assert.rejects(provider.click('abc', 'TARGET1', '#gone', { pauseMs: 0 }), { code: 'browser_click_target_missing' });
+  assert.equal(sent.length, 1);
+
+  const hostile = cdpSocket(() => ({ result: { value: { x: 'nope', y: 2, tag: 'b', text: '' } } }));
+  const guarded = createBrowserProvider({ accountId: 'a', apiToken: 't', fetcher: async () => ({ status: 101, webSocket: hostile }) });
+  await assert.rejects(guarded.click('abc', 'TARGET1', '#x', { pauseMs: 0 }), { code: 'invalid_provider_response' });
+
+  const offline = createBrowserProvider({ fetcher: async () => assert.fail('must not connect without credentials') });
+  await assert.rejects(offline.click('abc', 'TARGET1', '#x'), { code: 'browser_input_not_configured', status: 503 });
+  const busy = createBrowserProvider({ accountId: 'a', apiToken: 't', fetcher: async () => assert.fail('must not connect for a bad selector') });
+  await assert.rejects(busy.click('abc', 'TARGET1', '  '), { code: 'invalid_selector' });
+  await assert.rejects(busy.click('abc', 'TARGET1', `#${'x'.repeat(256)}`), { code: 'invalid_selector' });
+  await assert.rejects(busy.click('abc', '../bad', '#x'), { code: 'invalid_target' });
+});
+
+/**
+ * Achieves: a dead page session (404/410 upgrade) maps to browser_session_expired and
+ * auth failures (401/403) stay configuration errors, matching the REST error contract.
+ * Fails when: expiry codes flip, or auth failures masquerade as outages.
+ * Oracle: status/code pairs asserted in order.
+ * Side effects: none.
+ * Gaps: 5xx upgrades fall through to provider_failed and are not enumerated.
+ */
+test('a dead CDP page session expires while auth failures stay config errors', async () => {
+  for (const [status, code] of [[404, 'browser_session_expired'], [410, 'browser_session_expired'], [401, 'browser_not_configured'], [403, 'browser_not_configured']]) {
+    const provider = createBrowserProvider({ accountId: 'a', apiToken: 't', fetcher: async () => ({ status }) });
+    await assert.rejects(provider.click('abc', 'TARGET1', '#x'), { code });
+  }
+});
+
+/**
+ * Achieves: binding providers delegate clicks to the REST CDP channel and fail closed
+ * with browser_input_not_configured when no REST credentials exist.
+ * Fails when: binding-only configs pretend to click, or delegation drops the call.
+ * Oracle: unconfigured code 503 without a socket; delegated click returns element info.
+ * Side effects: none.
+ * Gaps: binding-native CDP input is not available in this repo's binding surface.
+ */
+test('binding providers delegate clicks to REST and stay honest without it', async () => {
+  const binding = { acquire() {}, devtools: { newTarget() {} } };
+  const refused = createBrowserProvider({ binding, fetcher: async () => assert.fail('no REST') });
+  await assert.rejects(refused.click('abc', 'TARGET1', '#x'), { code: 'browser_input_not_configured', status: 503 });
+  const socket = cdpSocket(message => (
+    message.method === 'Runtime.evaluate' && message.params.expression.includes('querySelector')
+      ? { result: { value: { x: 1, y: 2, tag: 'a', text: 'link' } } }
+      : { result: { value: true } }
+  ));
+  const delegated = createBrowserProvider({ binding, accountId: 'a', apiToken: 't', fetcher: async () => ({ status: 101, webSocket: socket }) });
+  assert.deepEqual(await delegated.click('abc', 'TARGET1', 'a.next', { pauseMs: 0 }), { x: 1, y: 2, tag: 'a', text: 'link' });
+});

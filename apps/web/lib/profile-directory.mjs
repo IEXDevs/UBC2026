@@ -12,6 +12,7 @@ import {
   postgrestEq,
   publicDisplayName,
 } from '@ubc2026/contracts';
+import { resolveSnsOwner, SnsError } from '@ubc2026/sns';
 
 const OWNER = /^[a-zA-Z0-9:_-]{1,128}$/;
 
@@ -69,11 +70,22 @@ export function useLocalProfileDirectory(env = {}) {
 export async function localHandleLookup(request, { env = {}, fetcher = fetch } = {}) {
   const ownerId = (request.headers.get('x-owner-id') || '').trim();
   if (!OWNER.test(ownerId)) return json({ error: 'owner_required' }, 401);
+  const parsed = parseLookupQuery(new URL(request.url).searchParams.get('q') || '');
+  if (parsed?.kind === 'address') {
+    return json({ ok: true, recipient: { kind: 'address', address: parsed.address } });
+  }
+  if (parsed?.kind === 'sns') {
+    try {
+      const resolved = await resolveSnsOwner(parsed.domain, { fetcher });
+      return json({ ok: true, recipient: { kind: 'sns', domain: resolved.domain, address: resolved.address } });
+    } catch (error) {
+      const code = error instanceof SnsError ? 'sns_not_found' : 'sns_failed';
+      return json({ error: code, recipient: { kind: 'sns', domain: parsed.domain } }, 404);
+    }
+  }
   const origin = supabaseOrigin(env.SUPABASE_URL);
   const key = typeof env.SUPABASE_SERVICE_ROLE_KEY === 'string' ? env.SUPABASE_SERVICE_ROLE_KEY.trim() : '';
   if (!origin || !key) return json({ ok: false, error: 'directory_unconfigured', source: 'unconfigured' }, 503);
-  const parsed = parseLookupQuery(new URL(request.url).searchParams.get('q') || '');
-  if (parsed?.kind === 'sns') return json({ error: 'invalid_recipient' }, 400);
   const handle = parsed?.kind === 'handle' ? parsed.handle : '';
   if (!handle) return json({ error: 'invalid_recipient' }, 400);
   let response;

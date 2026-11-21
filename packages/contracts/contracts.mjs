@@ -338,12 +338,13 @@ export function directoryFailureCode(status, parsed) {
   return '';
 }
 
-/** `@alex` is a Maelstrom handle. `@richclub.sol` is an SNS name. */
+/** `@alex` is a Maelstrom handle. `@richclub.sol` is an SNS name. Base58 is an address. */
 export function parseRecipient(value) {
   if (typeof value !== 'string') return null;
   const token = value.trim().replace(/^@/, '');
   if (!token || token.length > 80) return null;
   if (SNS_NAME.test(token.toLowerCase())) return { kind: 'sns', domain: token.toLowerCase() };
+  if (base58.test(token)) return { kind: 'address', address: token };
   const handle = normalizeHandle(token);
   if (handle) return { kind: 'handle', handle };
   return null;
@@ -400,11 +401,15 @@ export function parseLookupQuery(value) {
   if (typeof value !== 'string') return null;
   const raw = value.trim();
   if (!raw || raw.length > 240) return null;
-  const bareHandle = normalizeHandle(raw);
-  if (bareHandle) return { kind: 'handle', handle: lookupHandleKey(bareHandle) };
+  const cleaned = raw.replace(/^@/, '');
+  if (base58.test(cleaned)) return { kind: 'address', address: cleaned };
   const lower = raw.toLowerCase().replace(/[’']s\b/g, '').replace(/[’']/g, '');
   const sns = lower.match(/\b([a-z0-9][a-z0-9-]{0,62}\.sol)\b/);
   if (sns && SNS_NAME.test(sns[1])) return { kind: 'sns', domain: sns[1] };
+  const addr = raw.match(/\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/);
+  if (addr && base58.test(addr[1])) return { kind: 'address', address: addr[1] };
+  const bareHandle = normalizeHandle(raw);
+  if (bareHandle) return { kind: 'handle', handle: lookupHandleKey(bareHandle) };
   const at = lower.match(/@([\s\S]+)$/);
   if (at) {
     const handle = takeSpokenName(lookupWords(at[1]));
@@ -595,6 +600,11 @@ export function parsePermissionedSpendBody(body) {
   try { units = amount(spendUnits(body.amount)); } catch { return null; }
   if (units === '0') return null;
   const destination = typeof body.destination === 'string' && base58.test(body.destination) ? body.destination : null;
+  const domain = typeof body.domain === 'string' && SNS_NAME.test(body.domain.toLowerCase())
+    ? body.domain.toLowerCase()
+    : (typeof body.destination === 'string' && SNS_NAME.test(body.destination.toLowerCase())
+      ? body.destination.toLowerCase()
+      : null);
   const handle = typeof body.handle === 'string' ? normalizeHandle(body.handle) : null;
   const action = FUND_ACTIONS.includes(body.action) ? body.action : 'spend';
   const asset = solanaSpendAsset(body.asset ?? 'USDC');
@@ -602,16 +612,16 @@ export function parsePermissionedSpendBody(body) {
   const swap = action === 'swap';
   const x402 = action === 'x402';
   if (x402 && (asset !== 'USDC' || typeof body.lasoTicket !== 'string' || body.lasoTicket.length > 5000
-      || !/^[A-Za-z0-9_-]+\.[0-9a-f]{64}$/.test(body.lasoTicket) || body.destination != null || body.handle != null
+      || !/^[A-Za-z0-9_-]+\.[0-9a-f]{64}$/.test(body.lasoTicket) || body.destination != null || body.handle != null || body.domain != null
       || body.quote != null || body.quoteCluster != null || body.outputAsset != null)) return null;
   if (!x402 && body.lasoTicket != null) return null;
   const outputAsset = swap ? solanaSpendAsset(body.outputAsset) : null;
-  if (swap && (!outputAsset || asset === outputAsset || body.destination != null || body.handle != null
+  if (swap && (!outputAsset || asset === outputAsset || body.destination != null || body.handle != null || body.domain != null
       || body.quote != null || body.quoteCluster != null || BigInt(units) > 18446744073709551615n)) return null;
   if (asset !== 'USDC' && (action === 'buy' || action === 'sell' || BigInt(units) > 18446744073709551615n)) return null;
   // A USDC buy of wrapped SOL stays in the assigned wallet. The spend is the cap asset.
-  const selfCustody = action === 'buy' && !destination && !handle;
-  if (!destination && !handle && !selfCustody && !swap && !x402) return null;
+  const selfCustody = action === 'buy' && !destination && !handle && !domain;
+  if (!destination && !handle && !domain && !selfCustody && !swap && !x402) return null;
   if (body.quoteCluster != null && body.quoteCluster !== SOLANA_CLUSTER && body.quoteCluster !== 'mainnet') return null;
   let quote = sanitizeSpendQuote(body.quote);
   if (body.quote != null && quote == null && body.quote !== null) return null;
@@ -630,6 +640,7 @@ export function parsePermissionedSpendBody(body) {
     ...(swap ? { outputAsset } : {}),
     ...(x402 ? { lasoTicket: body.lasoTicket } : {}),
     destination,
+    domain,
     handle,
     selfCustody,
     confirmed: body.confirmed === true,

@@ -52,6 +52,7 @@ function envStarts() {
 }
 
 function rootEnv() {
+  if (process.env.NODE_TEST_CONTEXT) return {};
   if (cached) return cached;
   let root = findEnvRoot(process.cwd());
   for (const start of envStarts()) {

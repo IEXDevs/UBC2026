@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node ../../scripts/patch-privy-svg-props.mjs",
     "dev": "next dev --webpack",
     "prebuild": "node ../../scripts/patch-privy-svg-props.mjs",
     "build": "next build --webpack",
     "start": "next start",
+    "prebuild:worker": "node ../../scripts/patch-privy-svg-props.mjs",
     "build:worker": "opennextjs-cloudflare build",
     "deploy:worker": "opennextjs-cloudflare deploy",
     "deploy:worker:dev": "opennextjs-cloudflare deploy -- --env=dev",

@@ -7,6 +7,7 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
  * Responses carry a signature and a state, never a key or a signed payload.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createSnsResolver, resolveSnsOwner } from '@ubc2026/sns';
 import {
   parsePermissionedSpendBody, parsePrivySigningFailure, parseSpendAuthorizationSignature, spendApprovalMessage,
 } from '@ubc2026/contracts';
@@ -55,6 +56,25 @@ async function spendTrustScore(env, mint) {
 }
 
 async function transferDestination(env, parsed) {
+  if (parsed.domain) {
+    try {
+      const resolver = createSnsResolver({
+        resolveFn: typeof env.resolveSns === 'function'
+          ? env.resolveSns
+          : async (domain) => {
+            const demo = env.SNS_DEMO_MAP && typeof env.SNS_DEMO_MAP === 'object' ? env.SNS_DEMO_MAP : {};
+            if (demo[domain]) return demo[domain];
+            const resolved = await resolveSnsOwner(domain, { fetcher: env.fetch || fetch });
+            return resolved.address;
+          },
+      });
+      const resolved = await resolver(parsed.domain);
+      const address = typeof resolved === 'object' && resolved ? resolved.address : resolved;
+      return WALLET_ADDRESS.test(address || '') ? address : null;
+    } catch {
+      return null;
+    }
+  }
   if (!parsed.handle) return parsed.destination;
   const profile = await supabaseGet(env, `profiles?handle=eq.${encodeURIComponent(parsed.handle)}&select=owner_id&limit=1`, env.fetch);
   const ownerId = profile.rows?.[0]?.owner_id;
@@ -216,7 +236,7 @@ async function handleSpendRequest(request, env = {}) {
     return json({ error: 'invalid_spend_authorization', signed: false }, 403);
   }
   const solHandleApproval = approvalKey && parsed.asset === 'SOL' && parsed.action === 'spend'
-    && parsed.confirmed && parsed.handle && parsed.destination && parsed.idempotencyKey;
+    && parsed.confirmed && (parsed.handle || parsed.destination) && parsed.destination && parsed.idempotencyKey;
   if (overrideToken !== null && (!solHandleApproval || (desk.ok && desk.via !== 'grant'))) {
     return json({ error: 'invalid_spend_approval', signed: false }, 403);
   }
@@ -323,7 +343,7 @@ async function handleSpendRequest(request, env = {}) {
   }
   const trustUnavailable = lookedUp.unavailable === true;
   const trustScore = trustUnavailable ? undefined : lookedUp.score;
-  const recipient = laso ? lasoOffer.accepted.payTo : swap ? context.wallet.address : (assetTransfer || usdBudget)
+  const recipient = laso ? lasoOffer.accepted.payTo : swap ? context.wallet.address : (assetTransfer || usdBudget || parsed.domain)
     ? await transferDestination(env, parsed)
     : (parsed.destination || parsed.handle || (parsed.selfCustody ? context.wallet.address : ''));
   if (typeof recipient !== 'string' || recipient.length < 1) {
@@ -554,12 +574,13 @@ async function handleSpendRequest(request, env = {}) {
       });
     };
   } else if (!assetTransfer && !usdBudget && grantOk) {
-    if (parsed.destination && env.transferClient) signSolana = async ({ bot, wallet, memo }) => {
+    const targetAddress = parsed.destination || (parsed.domain && !parsed.selfCustody ? recipient : null);
+    if (targetAddress && env.transferClient) signSolana = async ({ bot, wallet, memo }) => {
       const sent = await transferSolanaUsdc({
         client: env.transferClient,
         bot,
         wallet,
-        destination: parsed.destination,
+        destination: targetAddress,
         amount: parsed.amount,
         memo,
       });
@@ -586,7 +607,7 @@ async function handleSpendRequest(request, env = {}) {
         : async () => verifierFacts({
           facts,
           proposal: valuation ? { ...proposal, asset: parsed.asset, outflow: parsed.amount } : proposal,
-          parsed: assetTransfer || usdBudget ? { ...parsed, destination: recipient } : parsed,
+          parsed: assetTransfer || usdBudget || parsed.domain ? { ...parsed, destination: recipient } : parsed,
           trustScore,
           trustUnavailable,
           mint,
@@ -614,7 +635,7 @@ async function handleSpendRequest(request, env = {}) {
   let state = result.state;
   const perTransferLimit = result.state === 'approval-needed' && result.reason === 'per-transaction';
   if (!grantOk && (state === 'signer-not-configured' || (solHandleApproval && perTransferLimit))) state = 'desk_locked';
-  else if (state === 'signer-not-configured' && !assetTransfer && !parsed.destination && !parsed.selfCustody) state = 'recipient_address_missing';
+  else if (state === 'signer-not-configured' && !assetTransfer && !parsed.destination && !parsed.domain && !parsed.selfCustody) state = 'recipient_address_missing';
   const body = {
     ok: result.signed === true,
     state,
