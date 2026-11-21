@@ -3,6 +3,11 @@ import { SYSTEM_PROGRAM, swapSetupNeedsSol, swapSimulationDetails } from '@ubc20
 const FAILURES = {
   client_sign_required: ['client signing', 'Approve this swap in the browser with the selected wallet.'],
   swap_delegation_unavailable: ['wallet authorization', 'This wallet is unavailable for automatic signing. Approve the swap with the selected wallet or enable its Privy signer.'],
+  swap_signer_not_configured: ['wallet authorization', 'The Worker does not have an automatic swap signer configured.'],
+  swap_wallet_not_delegatable: ['wallet authorization', 'This agent needs an owned Privy Solana wallet to swap automatically.'],
+  swap_wallet_identity_mismatch: ['wallet authorization', 'The wallet ID, address, or chain in Privy differs from the agent’s spending wallet.'],
+  swap_wallet_lookup_failed: ['wallet authorization', 'The Worker could not verify the wallet’s signer list with Privy.'],
+  swap_signer_missing: ['wallet authorization', 'The agent’s wallet needs the Maelstrom signer.'],
   aborted: ['client signing', 'The swap request was cancelled. Nothing further was submitted.'],
   client_sign_rejected: ['client signing', 'The selected wallet declined or cancelled signing.'],
   wallet_connection_required: ['client signing', 'The selected wallet is not available in this browser. Connect that exact wallet; server-only wallets cannot use browser signing.'],
@@ -120,5 +125,8 @@ export function swapFailure(result = {}) {
   const code = [result.simulationReason, result.reason, result.error, result.state, result.code]
     .find(value => Object.hasOwn(FAILURES, value)) || 'swap_failed';
   const [step, reason] = FAILURES[code];
-  return { code, step, message: `Swap — ${step}: ${reason} [${code}]` };
+  const status = result.privyFailure?.status;
+  const lookup = code === 'swap_wallet_lookup_failed' && Number.isInteger(status) && status >= 100 && status <= 599
+    ? ` Privy wallet lookup returned HTTP ${status}.` : '';
+  return { code, step, message: `Swap — ${step}: ${reason}${lookup} [${code}]` };
 }

@@ -36,6 +36,7 @@ import {
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
 import { isLasoCardRequest, lasoPreparationArgs } from './laso-chat.mjs';
+import { privySignerId } from './privy-signers.mjs';
 
 const MAX_TOOL_RESULT = 6000;
 const DASHBOARD_NAMES = new Set(DASHBOARD_TOOLS.map((tool) => tool.name));
@@ -128,6 +129,14 @@ async function workerJson(fetcher, url, ownerId, method, body, accessToken = '',
     const err = new Error(code);
     err.code = code;
     err.detail = gateFields(data);
+    // Only the chat route holding the quote can pass enrollment to the owner UI.
+    if (body?.action === 'swap' && body.autoSwap === true && body.swapTicket && data.reason === 'swap_signer_missing') {
+      const signerId = privySignerId(data.swapDelegation?.signerId);
+      const walletAddress = data.swapDelegation?.walletAddress;
+      if (signerId && typeof walletAddress === 'string' && ADDRESS.test(walletAddress)) {
+        err.swapDelegation = { walletAddress, signerId };
+      }
+    }
     throw err;
   }
   return data;
@@ -795,7 +804,8 @@ export function createChatToolInvoker({
       }
       return await local.invokeTool(name, args, identity);
     } catch (error) {
-      return toolErrorPayload(error);
+      const payload = toolErrorPayload(error);
+      return error?.swapDelegation ? { ...payload, swapDelegation: error.swapDelegation } : payload;
     }
   };
 }

@@ -185,6 +185,16 @@ function AuthedShell() {
   const { signerId } = usePrivyPublic();
   const { addSigners } = useSigners();
   const signerTried = useRef(new Set());
+  const signerUpdates = useRef(new Map());
+  const attachSwapSigner = useCallback(({ address, signerId: requestedSigner }) => {
+    const key = `${address}:${requestedSigner}`;
+    const pending = signerUpdates.current.get(key);
+    if (pending) return pending;
+    const update = addSigners({ address, signers: [{ signerId: requestedSigner, policyIds: [] }] })
+      .finally(() => signerUpdates.current.delete(key));
+    signerUpdates.current.set(key, update);
+    return update;
+  }, [addSigners]);
 
   useEffect(() => {
     if (!signedIn) return undefined;
@@ -194,14 +204,14 @@ function AuthedShell() {
       for (const address of pending) {
         signerTried.current.add(address);
         try {
-          await addSigners({ address, signers: [{ signerId, policyIds: [] }] });
+          await attachSwapSigner({ address, signerId });
         } catch (error) {
           console.warn('[wallets] server signer not added', serverSignerFailure(error));
         }
       }
     })();
     return undefined;
-  }, [signedIn, accountsKey, signerId, addSigners]);
+  }, [signedIn, accountsKey, signerId, attachSwapSigner]);
 
   useEffect(() => {
     if (!deskOwner) {
@@ -424,6 +434,7 @@ function AuthedShell() {
       walletError={walletError}
       getAccessToken={getAccessToken}
       authorizeSpend={generateAuthorizationSignature}
+      attachSwapSigner={attachSwapSigner}
       onRetireWallet={(id) => {
         setLiveWallets((current) => (Array.isArray(current) ? current.filter((wallet) => wallet?.id !== id) : current));
       }}
@@ -498,7 +509,7 @@ function DepositSigner({ signerRef, signWithOwnerAuthorization }) {
   return null;
 }
 
-function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, onRetireWallet = null, onWalletCreated = null, privyLive = false }) {
+function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, attachSwapSigner = null, onRetireWallet = null, onWalletCreated = null, privyLive = false }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
   const signChatTransaction = useCallback(async ({ walletAddress, transaction }) => signSelectedWalletTransaction({
@@ -506,7 +517,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     signer: await waitForBrowserSigner(() => depositSignerRef.current, [{ address: walletAddress }]),
   }), []);
   const executeChatSwap = useCallback(input => executeClientSignedSwap({ ...input, signer: depositSignerRef.current,
-    readSigner: () => depositSignerRef.current }), []);
+    readSigner: () => depositSignerRef.current, attachSwapSigner }), [attachSwapSigner]);
   const [looks, setLooks] = useState({});
   const [savedPhoto, setSavedPhoto] = useState(null);
   const [roster, setRoster] = useState({ order: [], extra: [] });

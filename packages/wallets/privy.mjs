@@ -957,7 +957,7 @@ export function createPrivyWalletClient({
     return { cluster: SOLANA_CLUSTER };
   }
 
-  async function checkPrivyWalletAccess(walletId, walletAddress, attempt) {
+  async function readPrivyWallet(walletId, walletAddress, attempt) {
     try {
       const response = await fetcher(`${privyApi}/v1/wallets/${encodeURIComponent(walletId)}`, {
         method: 'GET',
@@ -972,13 +972,13 @@ export function createPrivyWalletClient({
           && wallet.chain_type === 'solana'
           && wallet.address === walletAddress;
         attempt.detail = matchesWallet ? 'wallet-matched' : 'wallet-mismatch';
-        return matchesWallet ? 200 : null;
+        return matchesWallet ? wallet : null;
       }
       if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
         attempt.transport = 'redirect';
       }
       await response.body?.cancel().catch(() => {});
-      return response.status;
+      return null;
     } catch (error) {
       attempt.transport = privyTransportFailure(error, attempt);
       return null;
@@ -1023,7 +1023,8 @@ export function createPrivyWalletClient({
       if (error?.code === 'privy_failed' && diagnostic?.status === 401 && !diagnostic.code) {
         const lookup = { stage: 'wallet-lookup' };
         report.requests.push(lookup);
-        walletLookupStatus = await checkPrivyWalletAccess(walletId, walletAddress, lookup);
+        const matched = await readPrivyWallet(walletId, walletAddress, lookup);
+        walletLookupStatus = matched ? 200 : lookup.status === 200 ? null : lookup.status ?? null;
         requiresOwnerAuthorization = walletLookupStatus === 200;
       }
       if (requiresOwnerAuthorization) report.session = ownerSessionChecks(accessToken, ownerId, id, report.at);
@@ -1546,16 +1547,19 @@ export function createPrivyWalletClient({
       return prepared;
     },
 
-    async canSignDelegatedSwap({ bot, wallet } = {}) {
+    async inspectSwapDelegation({ bot, wallet } = {}) {
       const walletId = delegatedSwapWalletId({ bot, wallet });
-      if (!walletId) return false;
-      try {
-        const record = await privy('GET', `/v1/wallets/${encodeURIComponent(walletId)}`);
-        return record?.id === walletId && record.address === wallet.address && record.chain_type === 'solana'
-          && Array.isArray(record.additional_signers) && record.additional_signers.some(entry => entry?.signer_id === signer);
-      } catch {
-        return false;
+      if (!walletId) return { reason: signer && authKey ? 'swap_wallet_not_delegatable' : 'swap_signer_not_configured' };
+      const lookup = { stage: 'wallet-lookup' };
+      const record = await readPrivyWallet(walletId, wallet.address, lookup);
+      if (lookup.detail === 'wallet-mismatch') return { reason: 'swap_wallet_identity_mismatch' };
+      if (!Array.isArray(record?.additional_signers)) {
+        return { reason: 'swap_wallet_lookup_failed', privyFailure: parsePrivySigningFailure({
+          status: lookup.status, requests: [lookup],
+        }) };
       }
+      if (record.additional_signers.some(entry => entry?.signer_id === signer)) return { ready: true };
+      return { reason: 'swap_signer_missing', delegation: { walletAddress: wallet.address, signerId: signer } };
     },
 
     async signPreparedSolanaSwap({ bot, wallet, prepared, expiresAt, checkPermission } = {}) {
