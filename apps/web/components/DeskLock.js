@@ -63,7 +63,20 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
     setSeedProof('');
     (async () => {
       try {
-        const token = await tokenReader.current?.();
+        // Privy can return an empty token for the first ticks after a hard
+        // reload while the session restores. Poll briefly before treating a
+        // missing token as a failure so a fresh login does not hard-fail.
+        let token = '';
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (controller.signal.aborted) return;
+          try {
+            token = await tokenReader.current?.() || '';
+          } catch {
+            token = '';
+          }
+          if (token) break;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
         if (!token) {
           console.error('[desk-lock] getAccessToken returned empty or null token for ownerId:', ownerId);
         }
@@ -73,9 +86,16 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
           console.error('[desk-lock] Failed to read desk lock state:', { ownerId, hasToken: Boolean(token), state });
         }
         if (!controller.signal.aborted) {
-          setStatus(state?.ok ? (state.locked ? 'configured' : 'missing') : 'unavailable');
-          if (!state?.ok && state?.error) {
-            setNote(`Desk status unavailable: ${state.error}`);
+          if (!token) {
+            setStatus('unavailable');
+            setNote('Could not confirm your sign-in. Try again.');
+          } else {
+            setStatus(state?.ok ? (state.locked ? 'configured' : 'missing') : 'unavailable');
+            if (!state?.ok && state?.error) {
+              setNote(state.error === 'login_required'
+                ? 'Could not confirm your sign-in. Try again.'
+                : `Desk status unavailable: ${state.error}`);
+            }
           }
         }
       } catch (err) {

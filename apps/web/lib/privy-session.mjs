@@ -106,11 +106,24 @@ export async function getPrivyAccessToken(getAccessToken, storage = globalThis.l
     return stored;
   }
 
-  try {
-    const token = await getAccessToken();
-    if (typeof token === 'string' && token.trim()) return token.trim();
-  } catch (err) {
-    console.error('[privy-session] getAccessToken threw error:', err);
+  // Hard reload right after login races Privy session restore: the SDK can
+  // return an empty token for the first ticks while the session hydrates.
+  // Retry briefly before giving up so callers do not treat a transient
+  // empty as signed-out.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const token = await getAccessToken();
+      if (typeof token === 'string' && token.trim()) return token.trim();
+    } catch (err) {
+      console.error('[privy-session] getAccessToken threw error:', err);
+      break;
+    }
+    if (attempt < 4) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      // A refresh or access token may have landed while waiting.
+      const landed = readStoredAccessToken(storage);
+      if (landed && landed !== stored) return landed;
+    }
   }
   return readStoredAccessToken(storage) || stored;
 }
