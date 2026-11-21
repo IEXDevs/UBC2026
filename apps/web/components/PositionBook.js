@@ -8,6 +8,7 @@ import {
   agentWirePaths, bookFrame, layoutPositionBook, placeWalletGroup, positionSceneKey,
   stepBubbleFollow, translatedBounds, walletGroupBounds,
 } from '../lib/position-book.mjs';
+import { renderHoldingSprites } from '../lib/position-bubble-sprites.mjs';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
 import EarningsChart from './EarningsChart';
@@ -84,7 +85,9 @@ function starTexture() {
 
 export default function PositionBook({ positions, holdings = [], status, bots, wallets = [], earnings = null, onWallet }) {
   const mountRef = useRef(null);
+  const bookRef = useRef(null);
   const [measureName, setMeasureName] = useState(null);
+  const [sphereSprites, setSphereSprites] = useState(null);
   useLayoutEffect(() => {
     const mount = mountRef.current;
     const canvas = document.createElement('canvas').getContext('2d');
@@ -92,19 +95,32 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
     canvas.font = `600 12px ${window.getComputedStyle(mount).fontFamily}`;
     setMeasureName(() => name => canvas.measureText(name).width);
   }, []);
-  const book = useMemo(() => layoutPositionBook(positions, bots, wallets, holdings, measureName),
+  const book = useMemo(() => layoutPositionBook(positions, bots, wallets, holdings, measureName, bookRef.current),
     [positions, bots, wallets, holdings, measureName]);
+  useLayoutEffect(() => { bookRef.current = book; }, [book]);
+  const showHoldings = book.wallets.some(wallet => wallet.bubbles.length > 0);
+  useEffect(() => {
+    if (!showHoldings || sphereSprites) return undefined;
+    let stopped = false;
+    (async () => {
+      try {
+        const THREE = await import('three');
+        if (!stopped) setSphereSprites(renderHoldingSprites(THREE));
+      } catch {
+        if (!stopped) setSphereSprites([]);
+      }
+    })();
+    return () => { stopped = true; };
+  }, [showHoldings, sphereSprites]);
   const sceneKey = useMemo(() => positionSceneKey(book), [book]);
   const content = useMemo(() => new Map([
-    ...book.wallets.map(wallet => [wallet.id, <WalletCard wallet={wallet} />]),
+    ...book.wallets.map(wallet => [wallet.id, <WalletCard wallet={wallet} sprites={sphereSprites} />]),
     ...book.agents.map(agent => [agent.id, <AgentCard agent={agent} />]),
     ...book.accounts.map(account => [account.id, <ProviderGroupCard account={account} />]),
     ...book.cards.map(card => [card.id, <ProviderPositionCard card={card} />]),
-  ]), [book]);
+  ]), [book, sphereSprites]);
   const cameraRef = useRef(null);
   const savedView = useRef(null);
-  const bookRef = useRef(book);
-  bookRef.current = book;
   const openRef = useRef(null);
   const walletRef = useRef(onWallet);
   const [sceneCards, setSceneCards] = useState(null);
@@ -657,6 +673,8 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       }
 
       let lastFrame = performance.now();
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      let sheenOffset = '';
 
       function render(now) {
         const dt = Math.min(48, Math.max(0, now - lastFrame));
@@ -673,6 +691,21 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
             camera.position.z += dz * k;
             aim();
           }
+        }
+        if (!reducedMotion.matches) {
+          const depth = THREE.MathUtils.clamp(1 - camera.position.z / home.z, 0, 0.65);
+          const x = THREE.MathUtils.clamp((camera.position.x - home.x) / camera.position.z * 6, -3, 3);
+          const y = THREE.MathUtils.clamp((camera.position.y - home.y) / camera.position.z * 6, -3, 3) - depth * 2;
+          const offset = `${x.toFixed(1)}px ${y.toFixed(1)}px`;
+          if (offset !== sheenOffset) {
+            mount.style.setProperty('--book-view-x', `${x.toFixed(1)}px`);
+            mount.style.setProperty('--book-view-y', `${y.toFixed(1)}px`);
+            sheenOffset = offset;
+          }
+        } else if (sheenOffset) {
+          mount.style.removeProperty('--book-view-x');
+          mount.style.removeProperty('--book-view-y');
+          sheenOffset = '';
         }
         linkMaterial.uniforms.uTime.value = now * 0.001;
         for (const [id, state] of tiltState) {
@@ -701,7 +734,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
 
       function down(event) {
         if (event.button !== 0) return;
-        if (event.target.closest('.book-tools, .book-caption, .book-modal, .address-copy')) return;
+        if (event.target.closest('.book-tools, .book-caption, .book-modal, .address-copy, .book-wallet-bubble')) return;
         const card = event.target.closest('.book-card');
         if (card) {
           gesture = {
@@ -841,6 +874,8 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         renderer.domElement.remove();
         labels.domElement.remove();
         mount.classList.remove('is-panning');
+        mount.style.removeProperty('--book-view-x');
+        mount.style.removeProperty('--book-view-y');
         cameraRef.current = null;
       };
     })();

@@ -16,7 +16,7 @@ const bundled = await build({
   format: 'cjs',
   jsx: 'automatic',
   loader: { '.js': 'jsx' },
-  external: ['react', 'react/jsx-runtime'],
+  external: ['react', 'react/jsx-runtime', 'react-dom'],
 });
 const module = { exports: {} };
 new Function('require', 'module', 'exports', bundled.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
@@ -38,11 +38,11 @@ test('registry cards show the provider position apart from wallet USD holdings',
   assert.match(wallet, /So111\.\.\.11112/);
   assert.match(wallet, /\$125/);
   assert.match(wallet, /SOL \$100, USDC \$25/);
-  assert.match(wallet, /<title>SOL · \$100 · 1\.250000001 SOL<\/title>/);
-  assert.match(wallet, /<title>USDC · \$25 · 25 USDC<\/title>/);
+  assert.match(wallet, /<title>SOL · \$100 · 1\.250000001 SOL · 80%<\/title>/);
+  assert.match(wallet, /<title>USDC · \$25 · 25 USDC · 20%<\/title>/);
   const gradient = wallet.match(/<radialGradient id="([^"]+-0)"/)[1];
   assert.ok(wallet.includes(`fill="url(#${gradient})"`));
-  assert.match(wallet, /<ellipse[^>]*class="book-wallet-reflection"[^>]*fill="url\(#[^"]+-reflection\)"/);
+  assert.match(wallet, /class="book-wallet-sheen"[^>]*><ellipse[^>]*fill="url\(#[^"]+-sheen\)"/);
   assert.match(wallet, /1 unpriced/);
   assert.doesNotMatch(wallet, /Jupiter/);
 
