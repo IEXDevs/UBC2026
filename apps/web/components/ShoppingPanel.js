@@ -5,6 +5,7 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { sandboxSettleBody, shoppingComparisonView } from '../lib/shopping-comparison.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
+import { rememberLasoCard } from '../lib/laso-card-book.mjs';
 import SlideCommit from './bits/SlideCommit';
 
 /**
@@ -86,6 +87,7 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
         return;
       }
       setResult(data);
+      if (data.provider === 'laso' && data.card && ownerId) rememberLasoCard(window.sessionStorage, ownerId, data.card);
       onEvent?.({
         kind: 'tool.call',
         summary: provider === 'laso'
@@ -144,6 +146,7 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
       <h2>Shopping</h2>
       <p className="hint">
         Compare the x402 sandbox catalog on price and quality, or open a Laso card challenge.
+        The card itself opens from Cards in the account menu.
         The result is a proposal. Nothing is bought until you approve.
         {SOLANA_CLUSTER === 'mainnet-beta' ? ' Sandbox purchases are unavailable.' : null}
       </p>
