@@ -108,11 +108,12 @@ export const DASHBOARD_TOOLS = Object.freeze([
     call('GET', '/api/bots'),
     call('POST', '/bots/:botId/pause'),
   ]),
-  dashboard('prepare_shopping', 'Prepare a purchase, not a payment. For Laso pass the requested amountUsd ($5–$1000). Buy only with request_spend action x402 and the returned lasoTicket; NEVER send a plain transfer to Laso payTo.', ['botId'], {
+  dashboard('prepare_shopping', 'Prepare a purchase, not a payment. For a Laso card pass provider laso, lasoAction setup or modify, and amountUsd. setup is a new USA card ($5–$1000). modify adds funds to the card balance ($5–$10000). Buy only with request_spend action x402 and the returned lasoTicket; NEVER send a plain transfer to Laso payTo.', ['botId'], {
     botId,
     provider: { type: 'string', description: 'sandbox or laso' },
-    amountUsd: { type: ['number', 'string'], description: 'Requested Laso card value in USD, $5–$1000. Defaults to 5 only when omitted.' },
-  }, [call('POST', '/bots/:botId/shopping/prepare', { body: ['provider', 'amountUsd'] })]),
+    lasoAction: { type: 'string', description: 'setup follows GET /get-card. modify follows GET /fund-card-balance. Both are x402 quotes.' },
+    amountUsd: { type: ['number', 'string'], description: 'USD amount. $5–$1000 for setup, $5–$10000 for modify. Defaults to 5 only when omitted.' },
+  }, [call('POST', '/bots/:botId/shopping/prepare', { body: ['provider', 'lasoAction', 'amountUsd'] })]),
   dashboard(
     'request_spend',
     'Use swap for a live Solana trade in the agent’s assigned wallet. Pass the input asset, exact input amount in base units, and outputAsset. The owner sees the quote and approves it in the desk. Use pay or spend with a destination for transfers. USD budgets account for SOL and routable token mints.',
@@ -207,7 +208,7 @@ export function sharedToolsInstruction() {
     `For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled ${EXECUTION_LABEL}. It does not sign, broadcast, or authorize a transaction. Execution stays on the configured Solana network.`,
     'Use get_price to research an exact mint. For a specific live trade call request_spend with action swap, the input amount in base units, and both asset identifiers. Use start_task when the owner asks you to find a trade. The desk quotes and confirms those real swaps with the owner. Report a swap as submitted only if the spend API returned a transaction signature.',
     'request_spend posts the shared spend route. A locked desk is not an approval hold and does not replace trust, verify, reserve, or the permission gate. Fully-automatic still runs those gates. 1000000 is 1 USDC in base units. For swaps the output goes to the assigned wallet. Do not pass a destination, handle, or price quote for a swap.',
-    'For a Laso prepaid card call prepare_shopping with provider laso and the requested amountUsd. Preparation is NOT a purchase. Buy only with request_spend action x402, asset USDC, the exact proposed amount and lasoTicket; the owner confirms the purchase. NEVER send a plain transfer to Laso payTo. Only report a purchase after a settlement signature is returned. A pending card is not ready yet; the owner can use the separate Laso dashboard link.',
+    'For a Laso card call prepare_shopping with provider laso. lasoAction setup orders a USA card. lasoAction modify adds funds with the x402 card-balance quote. Pass amountUsd. Preparation is NOT a purchase. Buy only with request_spend action x402, asset USDC, the exact proposed amount and lasoTicket; the owner confirms the purchase. NEVER send a plain transfer to Laso payTo. Only report a purchase after a settlement signature is returned. A pending card is not ready yet; the owner sees it on the card and can use the separate Laso dashboard link. Do not ask for or repeat the card number or CVV.',
     'When the owner names a .sol SNS domain, an @handle, or a wallet address, call lookup_recipient with q set to that token. It hits GET /api/profiles/lookup (SNS resolve or handle directory). Never web_search for .sol names or handles. Speak the resolved address as first5...last5.',
     'When the owner asks you to open or use a specific website: browser_open, then browser_navigate to that https URL. Prefer a direct URL over searching. The owner watches Live View for form entry.',
     'For Laso pass the owner’s requested amountUsd unchanged; never reduce it to the wallet balance. Let spend simulation report insufficient funds. Preparation opens the ticket-bound purchase confirmation directly: do not ask for another yes or prepare again on approval. Never use payTo as a plain transfer destination. Do not open a browser for the card or its claim link.',

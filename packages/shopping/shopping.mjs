@@ -13,6 +13,7 @@ import {
   paymentFeedEntry,
 } from '@ubc2026/x402';
 import { evaluateProposal, proposalDigest } from '@ubc2026/bot-policy';
+import { LasoCardError, billingAddress, lasoCardAction, presentLasoCard } from './laso-card.mjs';
 
 export class ShoppingError extends Error {}
 const fail = message => { throw new ShoppingError(message); };
@@ -208,14 +209,16 @@ function decodePaymentRequiredHeader(header) {
 }
 
 /**
- * Laso Finance tiny-card challenge on Solana mainnet USDC.
- * Returns a proposal for owner approval. Does not sign or broadcast —
- * mainnet settlement stays with the owner / managed Laso agent wallet.
+ * Laso card setup or balance change on Solana mainnet USDC.
+ * setup follows GET /get-card. modify follows GET /fund-card-balance.
+ * Returns the x402 challenge for the owner. Does not sign or broadcast.
  */
-export async function prepareLasoTinyCardPurchase({
+export async function prepareLasoCardAction({
   bot,
   ledger,
+  action = 'setup',
   amountUsd = LASO_TINY_CARD_USD,
+  billing = null,
   fetcher = fetch,
   baseUrl = LASO_BASE_URL,
   now = Date.now(),
@@ -223,10 +226,36 @@ export async function prepareLasoTinyCardPurchase({
   if (!bot?.id) fail('Bot is required');
   const usd = Number(amountUsd);
   const units = Math.round(usd * 1_000_000);
-  if (!['number', 'string'].includes(typeof amountUsd) || !Number.isFinite(usd) || usd < 5 || usd > 1000
-      || Math.abs(units / 1_000_000 - usd) > Number.EPSILON * usd) fail('Laso card amount must be $5–$1000 with at most 6 decimals');
+  const ceiling = action === 'modify' ? 10000 : action === 'setup' ? 1000 : 0;
+  if (!['number', 'string'].includes(typeof amountUsd) || !Number.isFinite(usd) || usd < 5 || usd > ceiling
+      || Math.abs(units / 1_000_000 - usd) > Number.EPSILON * usd) {
+    fail(action === 'modify'
+      ? 'Laso card amount must be $5–$10000 with at most 6 decimals'
+      : 'Laso card amount must be $5–$1000 with at most 6 decimals');
+  }
+  let spec;
+  try {
+    spec = lasoCardAction(action, usd);
+  } catch (error) {
+    if (error instanceof LasoCardError && error.code === 'invalid_amount') {
+      fail(action === 'modify'
+        ? 'Laso card amount must be $5–$10000 with at most 6 decimals'
+        : 'Laso card amount must be $5–$1000 with at most 6 decimals');
+    }
+    if (error instanceof LasoCardError) fail('Laso card action must be setup or modify');
+    throw error;
+  }
+  let shared = null;
+  if (billing) {
+    try {
+      shared = billingAddress(billing);
+    } catch (error) {
+      if (error instanceof LasoCardError) fail('A billing address is required for every Laso card');
+      throw error;
+    }
+  }
 
-  const url = new URL('/get-card', baseUrl);
+  const url = new URL(spec.path, baseUrl);
   url.searchParams.set('amount', String(usd));
 
   let response;
@@ -237,11 +266,11 @@ export async function prepareLasoTinyCardPurchase({
       signal: AbortSignal.timeout(20000),
     });
   } catch {
-    fail('Laso get-card unavailable');
+    fail('Laso card quote unavailable');
   }
 
   if (response.status !== 402) {
-    fail(`Laso get-card expected 402, got ${response.status}`);
+    fail(`Laso ${spec.path} expected 402, got ${response.status}`);
   }
 
   const header = response.headers.get('PAYMENT-REQUIRED')
@@ -267,16 +296,23 @@ export async function prepareLasoTinyCardPurchase({
   const outflow = solana.amount;
   const recipient = solana.payTo;
 
+  const card = presentLasoCard({
+    id: `laso_${bot.id}_${spec.action}_${units}`,
+    status: 'pending',
+    kind: spec.kind,
+    amountUsd: usd,
+  }, { reveal: false, billing: shared });
+
   const proposal = {
-    id: `prop_${bot.id}_laso_${units}`,
+    id: `prop_${bot.id}_laso_${spec.action}_${units}`,
     botId: bot.id,
     cluster: 'mainnet-read',
     asset: 'USDC',
     recipient,
-    quoteId: `laso:get-card:${usd}`,
+    quoteId: `laso:${spec.path.slice(1)}:${usd}`,
     outflow,
     expectedReceive: '1',
-    expectedReceiveAsset: `laso:card:${usd}`,
+    expectedReceiveAsset: `laso:${spec.kind}:${usd}`,
     maxFee: '0',
     expiresAt: now + 120_000,
     network: NETWORKS.mainnet,
@@ -311,8 +347,15 @@ export async function prepareLasoTinyCardPurchase({
 
   return {
     provider: 'laso',
+    lasoAction: spec.action,
     amountUsd: usd,
-    resource: { url: url.href, description: 'Laso USA prepaid card', mimeType: 'application/json' },
+    card,
+    billing: shared,
+    resource: {
+      url: url.href,
+      description: spec.action === 'modify' ? 'Laso card balance' : 'Laso USA prepaid card',
+      mimeType: 'application/json',
+    },
     proposal,
     digest: proposalDigest({
       ...proposal,
@@ -329,4 +372,9 @@ export async function prepareLasoTinyCardPurchase({
     },
     next: policy.state === 'blocked' ? 'blocked' : 'await-owner-mainnet-approval',
   };
+}
+
+/** USA prepaid card challenge. Same owner gate as prepareLasoCardAction({ action: 'setup' }). */
+export async function prepareLasoTinyCardPurchase(args = {}) {
+  return prepareLasoCardAction({ ...args, action: 'setup' });
 }
