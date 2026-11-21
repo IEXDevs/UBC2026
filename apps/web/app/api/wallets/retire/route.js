@@ -60,12 +60,31 @@ export async function POST(request) {
   } catch {
     return Response.json({ error: 'retire_failed' }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
   }
-  const rows = await response.json().catch(() => null);
+  let rows = await response.json().catch(() => null);
   if (!response.ok) {
     return Response.json({ error: 'retire_failed' }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
   }
-  if (!Array.isArray(rows) || rows.length < 1) {
-    return Response.json({ error: 'wallet_missing' }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  if ((!Array.isArray(rows) || rows.length < 1) && typeof body?.address === 'string' && body.address.trim()) {
+    const addressPath = `wallets?address=eq.${encodeURIComponent(body.address.trim())}&owner_id=eq.${encodeURIComponent(target.ownerId)}&kind=eq.additional`;
+    try {
+      const addrRes = await fetch(`${origin}/rest/v1/${addressPath}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: key,
+          authorization: `Bearer ${key}`,
+          accept: 'application/json',
+          'content-type': 'application/json',
+          prefer: 'return=representation',
+        },
+        body: JSON.stringify({ deleted_at: deletedAt }),
+        redirect: 'manual',
+      });
+      if (addrRes.ok) {
+        rows = await addrRes.json().catch(() => null);
+      }
+    } catch {
+      // Continue to ok if absent from db
+    }
   }
   return Response.json({ ok: true, id: target.id, deletedAt }, { headers: { 'Cache-Control': 'no-store' } });
 }

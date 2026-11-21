@@ -62,10 +62,12 @@ function connectedClient(wallet) {
   return client !== '' && client !== 'privy' && client !== 'privy-v2';
 }
 
-export function mergeWalletPositions({ wallets = [], portfolio = null } = {}) {
+export function mergeWalletPositions({ wallets = [], portfolio = null, retiredIds = [] } = {}) {
+  const retired = new Set(Array.isArray(retiredIds) ? retiredIds.map(id => (typeof id === 'string' ? id.trim() : id)).filter(Boolean) : []);
   const byAddress = new Map();
   for (const wallet of wallets) {
     if (wallet && typeof wallet.address === 'string' && BASE58.test(wallet.address) && !byAddress.has(wallet.address)) {
+      if (retired.has(wallet.id) || retired.has(wallet.address)) continue;
       byAddress.set(wallet.address, { ...wallet });
     }
   }
@@ -75,6 +77,7 @@ export function mergeWalletPositions({ wallets = [], portfolio = null } = {}) {
   const priced = new Map();
   for (const wallet of linked) {
     if (!wallet || typeof wallet.address !== 'string' || !BASE58.test(wallet.address)) continue;
+    if (retired.has(wallet.id) || retired.has(wallet.address)) continue;
     priced.set(wallet.address, wallet.holdings);
     const connected = connectedClient(wallet);
     const record = byAddress.get(wallet.address) ?? {
@@ -87,6 +90,7 @@ export function mergeWalletPositions({ wallets = [], portfolio = null } = {}) {
 
   const holdingsRows = [];
   for (const wallet of byAddress.values()) {
+    if (retired.has(wallet.id) || retired.has(wallet.address)) continue;
     const chainRows = (wallet.holdings || []).filter(row => row?.cluster === SOLANA_CLUSTER).map(row => {
       if (row.asset === 'SOL' && !row.mint) return { ...row, mint: SOL_MINT, native: true };
       if (row.mint === SOL_MINT) return { ...row, symbol: 'wSOL', native: false };
@@ -116,6 +120,7 @@ export function mergeWalletPositions({ wallets = [], portfolio = null } = {}) {
   const providerRows = verifiedPortfolio && Array.isArray(portfolio.providers?.positions) ? portfolio.providers.positions : [];
   const positions = [];
   for (const position of providerRows) {
+    if (!position || (position.walletAddress && retired.has(position.walletAddress))) continue;
     const wallet = byAddress.get(position?.walletAddress);
     if (!wallet || position.cluster !== SOLANA_CLUSTER) continue;
     positions.push({ ...position, walletId: wallet.id, holder: wallet.label || 'Wallet', readOnly: wallet.readOnly === true });

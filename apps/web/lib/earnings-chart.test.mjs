@@ -63,3 +63,26 @@ test('wallet holdings stay separate from provider positions', () => {
   assert.equal(mergeWalletPositions({ wallets, portfolio: { ...portfolio, cluster: 'testnet' } }).holdings.length, 1);
   assert.equal(mergeWalletPositions({ portfolio: { ...portfolio, authorizesTransaction: true } }).positions.length, 0);
 });
+
+test('unlinked/retired wallets and their positions stay out of mergeWalletPositions until reconnected', () => {
+  const wallets = [
+    { id: 'embedded', address: EMBEDDED, label: 'Main' },
+    { id: 'phantom', address: PHANTOM, label: 'Phantom' },
+  ];
+  const provider = { id: 'perp', venue: 'Jupiter', asset: 'SOL', walletAddress: PHANTOM, cluster: 'mainnet-beta',
+    sizeLabel: '$150 size', notionalMicroUsdc: '25000000', pnlMicroUsdc: '1000000' };
+  const portfolio = { cluster: 'mainnet', authorizesTransaction: false, providers: { positions: [provider] }, wallets: [
+    { address: EMBEDDED, client: 'privy-v2', holdings: [SOL] },
+    { address: PHANTOM, label: 'Phantom', client: 'phantom', holdings: [SOL] },
+  ] };
+
+  const filtered = mergeWalletPositions({ wallets, portfolio, retiredIds: ['phantom', PHANTOM] });
+  assert.equal(filtered.wallets.some(w => w.address === PHANTOM), false);
+  assert.equal(filtered.holdings.some(h => h.holder === 'Phantom'), false);
+  assert.equal(filtered.positions.some(p => p.walletAddress === PHANTOM), false);
+
+  const restored = mergeWalletPositions({ wallets, portfolio, retiredIds: [] });
+  assert.equal(restored.wallets.some(w => w.address === PHANTOM), true);
+  assert.equal(restored.holdings.some(h => h.holder === 'Phantom'), true);
+  assert.equal(restored.positions.some(p => p.walletAddress === PHANTOM), true);
+});

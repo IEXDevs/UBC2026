@@ -93,7 +93,7 @@ test('unified wallet stays viewport-mounted and resets transfer drafts when the 
   assert.equal((sheet.match(/onParty=\{openParty\}/g) || []).length, 2);
   const tokenScreen = readFileSync(new URL('../components/TokenScreen.js', import.meta.url), 'utf8');
   assert.match(tokenScreen, /previewPortfolio = null, refreshKey = 0/);
-  assert.match(tokenScreen, /\[open, accounts, getAccessToken, user\?\.id, previewPortfolio, refreshKey\]/);
+  assert.match(tokenScreen, /\[open, accounts, getAccessToken, user\?\.id, previewPortfolio, refreshKey, pollTick\]/);
   assert.match(tokenScreen, /enrichPortfolio\(previewPortfolio, \{ storage: window\.localStorage \}\)/);
   for (const source of [tokenScreen, sheet]) {
     assert.doesNotMatch(source, /rememberPortfolio\(cacheKey, body\)/);
