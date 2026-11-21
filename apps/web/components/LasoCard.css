@@ -25,6 +25,22 @@
 
 .laso-sheet .laso-cards { max-width: none; }
 
+.laso-billing-fold {
+  border-top: 1px solid #2a2a2a;
+  padding-top: 12px;
+}
+
+.laso-billing-fold > summary {
+  cursor: pointer;
+  list-style: none;
+  color: #a1a1aa;
+  font-size: 13px;
+}
+
+.laso-billing-fold > summary::-webkit-details-marker { display: none; }
+
+.laso-billing-fold[open] > summary { margin-bottom: 12px; }
+
 .laso-card {
   display: grid;
   gap: 10px;

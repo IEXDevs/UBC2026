@@ -69,14 +69,6 @@ export default function LasoCardsSheet({ open, onClose, ownerId = '' }) {
         <h2>Laso cards</h2>
         <p className="quiet">Agents set these up. One billing address is used on every card.</p>
         <div className="laso-cards">
-          <LasoBillingForm
-            key={`${ownerId || 'signed-out'}:${billing?.postalCode || ''}`}
-            value={billing}
-            onSave={(next) => {
-              if (!ownerId) return;
-              setBilling(writeLasoBilling(window.sessionStorage, ownerId, next));
-            }}
-          />
           {cards.length === 0 ? <p className="quiet">No cards yet.</p> : cards.map(card => (
             <LasoCard key={card.id} card={card} billing={billing} />
           ))}
@@ -86,6 +78,17 @@ export default function LasoCardsSheet({ open, onClose, ownerId = '' }) {
               {' · One-time login link, expires in 15 minutes.'}
             </p>
           ) : null}
+          <details className="laso-billing-fold">
+            <summary>Billing address</summary>
+            <LasoBillingForm
+              key={`${ownerId || 'signed-out'}:${billing?.postalCode || ''}`}
+              value={billing}
+              onSave={(next) => {
+                if (!ownerId) return;
+                setBilling(writeLasoBilling(window.sessionStorage, ownerId, next));
+              }}
+            />
+          </details>
         </div>
       </motion.section>
     </div>,
