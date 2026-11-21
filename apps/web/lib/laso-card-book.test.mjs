@@ -24,5 +24,5 @@ test('the card book keeps one billing address and drops card numbers', () => {
   const face = stampBilling(saved[0], billing);
   assert.equal(face.holder, 'Ada Lovelace');
   assert.equal(face.billing.line1, '1 Main St');
-  assert.match(face.number, /••••/);
+  assert.match(face.number, /XXXX/);
 });

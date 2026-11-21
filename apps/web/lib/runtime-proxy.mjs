@@ -44,12 +44,12 @@ const ALLOWED = Object.freeze([
   new RegExp(`^/bots/${BOT}/browser/sessions$`),
   new RegExp(`^/bots/${BOT}/browser/sessions/${REC}/(?:live-view|release|navigate|click)$`),
   new RegExp(`^/bots/${BOT}/shopping/(?:prepare|settle)$`),
-  new RegExp(`^/bots/${BOT}/laso/(?:checkpoint|status)$`),
+  new RegExp(`^/bots/${BOT}/laso/(?:checkpoint|status|reveal)$`),
   /^\/security\/grab-back$/,
   /^\/voice\/agent$/,
 ]);
 
-const QUERY_KEYS = new Set(['botId', 'q', 'limit']);
+const QUERY_KEYS = new Set(['botId', 'q', 'limit', 'view', 'card_id', 'card_type']);
 
 export function isAllowedRuntimePath(pathname) {
   if (typeof pathname !== 'string' || !pathname.startsWith('/')) return false;

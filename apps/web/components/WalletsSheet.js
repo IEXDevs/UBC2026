@@ -984,13 +984,16 @@ function SendPane({
   useEffect(() => { if (preferredAsset) { setAssetId(preferredAsset); setAmount(''); } }, [preferredAsset]);
 
   const asset = tokens.find(token => token.id === assetId) || tokens[0] || null;
+  const effectiveAsset = target?.kind === 'sns'
+    ? (tokens.find(token => token.symbol === 'USDC') || asset)
+    : asset;
   const picked = destinations.find(row => row.id === pickedId && to === row.caption) || null;
   const target = picked?.kind === 'recent'
     ? parseSendTarget(picked.caption)
     : picked
       ? { kind: 'wallet', id: picked.id, address: picked.address, caption: picked.caption, frozen: picked.frozen, walletKind: picked.walletKind }
       : parseSendTarget(to);
-  const units = asset ? displayToUnits(amount, asset.decimals) : null;
+  const units = effectiveAsset ? displayToUnits(amount, effectiveAsset.decimals) : null;
   const [snsAddress, setSnsAddress] = useState('');
   const [snsFailed, setSnsFailed] = useState(false);
   const [handleRecipient, setHandleRecipient] = useState(null);
@@ -1049,7 +1052,7 @@ function SendPane({
   const handleReady = target?.kind === 'handle' && !handleLooking && sendHandleReady(handleRecipient);
   const destinationAddress = target?.kind === 'wallet' || target?.kind === 'address'
     ? target.address : target?.kind === 'sns' ? snsAddress : handleReady ? handleRecipient.address : '';
-  const enough = asset && units && BigInt(units) <= BigInt(asset.amount);
+  const enough = effectiveAsset && units && BigInt(units) <= BigInt(effectiveAsset.amount);
   const ready = Boolean(
     active && !frozen && target && enough && destinationAddress && destinationAddress !== active.address
     && (
@@ -1069,7 +1072,7 @@ function SendPane({
   const preview = ready ? sendPreview({
     from: active?.label || 'Agent wallet',
     to: destination,
-    amountLabel: `${amount.trim()} ${asset.symbol}`,
+    amountLabel: `${amount.trim()} ${effectiveAsset.symbol}`,
   }) : null;
 
   return (
@@ -1162,17 +1165,17 @@ function SendPane({
         label="Slide to send"
         doneLabel={sendComplete ? 'Sent' : 'Sending'}
         disabled={!ready}
-        resetKey={`${resetKey}:${to}:${amount}:${asset?.id || ''}`}
+        resetKey={`${resetKey}:${to}:${amount}:${effectiveAsset?.id || ''}`}
         onCommit={() => {
           setSendComplete(false);
           const pending = {
             target,
-            walletAsset: asset.id,
+            walletAsset: effectiveAsset.id,
             destination: destinationAddress,
-            decimals: asset.decimals,
+            decimals: effectiveAsset.decimals,
             fromWalletId: active.id,
             amount: units,
-            asset: asset.symbol,
+            asset: effectiveAsset.symbol,
             amountText: amount.trim(),
           };
           Promise.resolve(onSend?.(pending)).then(result => {

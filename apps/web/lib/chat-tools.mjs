@@ -191,6 +191,16 @@ function shellWalletItems(shellWallets) {
       ...(typeof wallet.usdcBalance === 'string' ? { usdcBalance: wallet.usdcBalance } : {}),
       ...(typeof wallet.usdcBalanceLabel === 'string' ? { usdcBalanceLabel: wallet.usdcBalanceLabel } : {}),
       ...(typeof wallet.displayUsdcLabel === 'string' ? { displayUsdcLabel: wallet.displayUsdcLabel } : {}),
+      ...(typeof wallet.solLamports === 'string' ? { solLamports: wallet.solLamports } : {}),
+      ...(typeof wallet.solBalanceLabel === 'string' ? { solBalanceLabel: wallet.solBalanceLabel } : {}),
+      ...(Array.isArray(wallet.tokens) ? { tokens: wallet.tokens } : {}),
+      ...(typeof wallet.tokensLabel === 'string' ? { tokensLabel: wallet.tokensLabel } : {}),
+      ...(Array.isArray(wallet.holdings) ? { holdings: wallet.holdings } : {}),
+      ...(typeof wallet.displayBalanceLabel === 'string' ? { displayBalanceLabel: wallet.displayBalanceLabel } : {}),
+      ...(typeof wallet.displaySolLabel === 'string' ? { displaySolLabel: wallet.displaySolLabel } : {}),
+      ...(typeof wallet.balanceStatus === 'string' ? { balanceStatus: wallet.balanceStatus } : {}),
+      ...(typeof wallet.cluster === 'string' ? { cluster: wallet.cluster } : {}),
+      ...(typeof wallet.displaySource === 'string' ? { displaySource: wallet.displaySource } : {}),
     }));
 }
 

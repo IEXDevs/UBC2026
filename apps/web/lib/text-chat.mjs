@@ -9,7 +9,7 @@ import { publicApiSummary, thinkStep, toolStep } from './chat-activity.mjs';
 import { txReceiptFromResult, withSolscanUrl } from './tx-receipt.mjs';
 import { grantCovers, isFundTool, toolAccessRequest, withDefaultBotId } from './spend-permission.mjs';
 import { catalogRecallText } from './file-catalog.mjs';
-import { isLasoCardRequest, LASO_CARD_CHOICE_PROMPT, lasoPreparationArgs, lasoPurchaseHold, lasoReloadableReply } from './laso-chat.mjs';
+import { isLasoCardRequest, LASO_CARD_CHOICE_PROMPT, lasoCardKind, lasoPreparationArgs, lasoPurchaseHold, lasoReloadableReply } from './laso-chat.mjs';
 import { META_SPARK_MODEL, reasoningEffortFor } from './thinking-levels.mjs';
 import { MODEL_ID, parseModelProvider } from './ai-provider.mjs';
 import { AGENT_TASK_TOOL, GOAL_QUESTION, agentTaskTool, hasGeneralGoal, taskLabel } from './agent-task.mjs';
@@ -616,6 +616,8 @@ export async function completeTextChat({
   const toolFailures = new Set();
   let forceAnswer = false;
   let nudged = false;
+  let lasoNudged = false;
+  let prepareShoppingSeen = false;
   let readOnlyTurn = true;
   let readOnlyToolRan = false;
   let successfulNonSpendTurn = true;
@@ -703,6 +705,7 @@ export async function completeTextChat({
         continue;
       }
       if (!READ_ONLY_TOOLS.has(name)) readOnlyTurn = false;
+      if (name === 'prepare_shopping') prepareShoppingSeen = true;
       const id = typeof call?.id === 'string' ? call.id : `call_${toolRounds}`;
       const rawArgs = withDefaultBotId(name, parseToolArgs(call?.function?.arguments), botId);
       const args = name === 'prepare_shopping' && cardCheckout(latest, history) ? lasoPreparationArgs(rawArgs, latest) : rawArgs;
@@ -765,13 +768,24 @@ export async function completeTextChat({
           if (step && activity.length < 12) activity.push(step);
           return purchase;
         }
-        if (name === 'prepare_shopping' && args.provider === 'laso') {
+        if (name === 'prepare_shopping') {
           const prepared = typeof result === 'string' ? parseToolArgs(result) : result;
-          if (prepared?.error === 'laso_card_choice_required') {
+          const checkpointBotId = (typeof botId === 'string' && botId) || args?.botId || rawArgs?.botId;
+          if (prepared?.error === 'laso_card_choice_required' && args.provider === 'laso') {
+            try {
+              if (typeof invokeTool === 'function' && typeof checkpointBotId === 'string' && checkpointBotId) {
+                await invokeTool('laso_checkpoint', { botId: checkpointBotId, kind: 'undecided', stage: 'waiting-owner' });
+              }
+            } catch { /* checkpoint is best-effort; the choice prompt is the contract */ }
             return { kind: 'reply', label: LASO_CARD_CHOICE_PROMPT };
           }
           if (prepared?.error === 'laso_reloadable_human_steps') {
-            return { kind: 'reply', label: lasoReloadableReply() };
+            try {
+              if (typeof invokeTool === 'function' && typeof checkpointBotId === 'string' && checkpointBotId) {
+                await invokeTool('laso_checkpoint', { botId: checkpointBotId, kind: 'reloadable', stage: 'waiting-owner', note: 'reloadable human steps handed over' });
+              }
+            } catch { /* checkpoint is best-effort; the handover reply is the contract */ }
+            return { kind: 'reply', label: `${lasoReloadableReply()}\nReply done when you finish the owner steps and I will continue from the checkpoint.` };
           }
           if (!prepared || Object.keys(prepared).length === 0 || prepared.error || prepared.ok === false) {
             return { kind: 'reply', label: 'I could not prepare the Laso card. The card service or request validation failed. No purchase was submitted. Please try again with an amount from $5 to $1000.' };
@@ -874,6 +888,19 @@ export async function completeTextChat({
         if (held) return finish(held.label, held);
         forceAnswer = true;
         continue;
+      }
+      if (!prepareShoppingSeen && !lasoNudged && toolRounds < rounds && isLasoCardRequest(latest)) {
+        let kind = '';
+        try { kind = lasoCardKind(latest); } catch { kind = ''; }
+        if (kind === 'reloadable') {
+          lasoNudged = true;
+          forceAnswer = false;
+          messages.push({
+            role: 'user',
+            content: 'Call prepare_shopping for the Laso card now. Do not answer from scraped docs alone.',
+          });
+          continue;
+        }
       }
       let text = ownerReply(redact((split.answer || (!calls.length ? rawContent : '')).trim(), secrets));
       if (!text) {

@@ -731,6 +731,7 @@ export const API_ROUTES = Object.freeze([
   { id: 'bots.laso.checkpoint.save', method: 'POST', path: '/bots/:botId/laso/checkpoint', phase: 6, auth: 'owner', status: 'live', action: 'laso/checkpoint' },
   { id: 'bots.laso.checkpoint.read', method: 'GET', path: '/bots/:botId/laso/checkpoint', phase: 6, auth: 'owner', status: 'live', action: 'laso/checkpoint' },
   { id: 'bots.laso.status', method: 'GET', path: '/bots/:botId/laso/status', phase: 6, auth: 'owner', status: 'live', action: 'laso/status' },
+  { id: 'bots.laso.reveal', method: 'GET', path: '/bots/:botId/laso/reveal', phase: 6, auth: 'owner', status: 'live', action: 'laso/reveal' },
   { id: 'bots.shopping.settle', method: 'POST', path: '/bots/:botId/shopping/settle', phase: 6, auth: 'owner', status: 'live' },
   { id: 'bots.commerce.signal', method: 'GET', path: '/bots/:botId/commerce/signals/:signalId', phase: 6, auth: 'none', status: 'guarded' },
   { id: 'bots.commerce.signal.settle', method: 'POST', path: '/bots/:botId/commerce/signals/:signalId/settle', phase: 6, auth: 'none', status: 'guarded' },

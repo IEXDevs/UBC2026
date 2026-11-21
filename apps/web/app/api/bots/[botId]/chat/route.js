@@ -49,7 +49,7 @@ function secretFrom(cfEnv, name) {
   return typeof process.env[name] === 'string' ? process.env[name].trim() : '';
 }
 
-function budgetApprovalReply(hold, gate) {
+function budgetApprovalReply(hold, gate, approvalContext) {
   const terms = parseSpendApprovalTerms(gate?.approvalTerms);
   const { action, asset, handle, destination, amount } = hold.args;
   if (hold.budgetOverride || action !== 'spend' || asset !== 'SOL'
@@ -58,7 +58,8 @@ function budgetApprovalReply(hold, gate) {
   const who = handle ? `@${handle} (${shortAddress(destination)})` : shortAddress(destination);
   const label = `Approve once: send ${formatBaseUnits(amount, 9)} SOL to ${who} plus a ${formatBaseUnits(terms.feeLamports, 9)} SOL fee.`;
   const prompt = `${label} This overrides the agent’s per-transfer limit and, if needed, its remaining budget for this payment only. The limits won’t change. Slide to approve once.`;
-  return { provider: 'desk', toolRounds: 1, text: prompt, hold: { ...hold, budgetOverride: terms, label, prompt } };
+  const resealed = sealAssetSpendHold({ ...hold, budgetOverride: terms, label, prompt }, approvalContext);
+  return { provider: 'desk', toolRounds: 1, text: prompt, hold: resealed };
 }
 
 async function chatToolEnv() {
@@ -306,7 +307,7 @@ export async function POST(request, context) {
         });
         return gate;
       });
-      return (gate && approvalContext.attestBudgetApproval && budgetApprovalReply(assetConfirmation, gate)) || reply;
+      return (gate && approvalContext.attestBudgetApproval && budgetApprovalReply(assetConfirmation, gate, approvalContext)) || reply;
     }
     if (reviewSwap) {
       const hold = await loadPendingSwapHold();

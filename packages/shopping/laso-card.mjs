@@ -166,8 +166,8 @@ export function cardFromLasoDetails(payload = {}) {
 }
 
 function maskedNumber(last4) {
-  const tail = last4 && /^\d{4}$/.test(last4) ? last4 : '••••';
-  return `•••• •••• •••• ${tail}`;
+  const tail = last4 && /^\d{4}$/.test(last4) ? last4 : 'XXXX';
+  return `XXXX - XXXX - XXXX - ${tail}`;
 }
 
 /**
@@ -180,26 +180,33 @@ export function presentLasoCard(card, { reveal = false, billing = null } = {}) {
     id: cardId(card?.id),
     pan: null,
     cvv: null,
+    expiry: typeof card?.expiry === 'string' ? card.expiry : null,
     status: card?.status || 'pending',
     kind: card?.kind === 'reloadable' ? 'reloadable' : 'prepaid',
   };
   const shared = billing ? billingAddress(billing) : null;
   const last4 = record.pan ? record.pan.slice(-4) : (typeof card?.last4 === 'string' && /^\d{4}$/.test(card.last4) ? card.last4 : null);
   const show = Boolean(reveal && record.pan);
+  const label = typeof card?.label === 'string' && card.label.trim().slice(0, 40) ? card.label.trim().slice(0, 40) : (typeof card?.name === 'string' && card.name.trim().slice(0, 40) ? card.name.trim().slice(0, 40) : null);
+  const transactions = Array.isArray(card?.transactions) ? card.transactions.slice(0, 25) : [];
+  const updatedAt = Number.isSafeInteger(card?.updatedAt) ? card.updatedAt : (Number.isSafeInteger(card?.lastRefreshedAt) ? card.lastRefreshedAt : null);
   return {
     id: record.id,
     brand: 'Laso',
     kind: record.kind,
     status: record.status,
+    label,
     holder: shared?.name || card?.holder || 'Cardholder',
-    expiry: show ? (record.expiry || '••/••') : '••/••',
+    expiry: show ? (record.expiry || 'XX/XX') : 'XX/XX',
     last4,
     number: show ? groupPan(record.pan) : maskedNumber(last4),
-    cvv: show && record.cvv ? record.cvv : '•••',
+    cvv: show && record.cvv ? record.cvv : 'XXX',
     revealed: show,
     canReveal: Boolean(record.pan),
     amountUsd: record.amountUsd ?? card?.amountUsd ?? null,
     billing: shared,
+    transactions,
+    updatedAt,
   };
 }
 
@@ -228,6 +235,10 @@ export function publicLasoCard(card) {
     amountUsd: card.usd_amount ?? card.amountUsd ?? null,
     kind: card.kind === 'reloadable' ? 'reloadable' : 'prepaid',
     last4: card.last4,
+    expiry: card.expiry ?? null,
+    label: card.label ?? card.name ?? null,
+    transactions: card.transactions ?? [],
+    updatedAt: card.updatedAt ?? card.lastRefreshedAt ?? null,
   }, { reveal: false });
   const leaked = `${face.number}${face.cvv}`.replace(/\D/g, '');
   if (leaked.length > 4) return null;

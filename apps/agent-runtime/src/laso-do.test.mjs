@@ -146,3 +146,38 @@ test('settle stashes the fresh session without echoing it', async () => {
   assert.equal(JSON.stringify(settled).includes('fresh-token'), false);
   assert.equal(await saveLasoSession({}, ticket, 'x', 60), false);
 });
+
+test('Laso reveal is owner-gated and returns only card details', async () => {
+  const machine = new BotStateMachine();
+  await machine.put('meta', { botId: 'bot_1', ownerId: 'user_1' });
+  const anon = await machine.handle(new Request('https://bot/laso/reveal?card_id=card_1'));
+  assert.equal((await anon.json()).error, 'owner_required');
+  const foreign = await machine.handle(new Request('https://bot/laso/reveal?card_id=card_1', { headers: { 'x-owner-id': 'user_2' } }));
+  assert.ok([401, 403].includes(foreign.status));
+  const noSession = await machine.handle(get('/laso/reveal?card_id=card_1'));
+  assert.equal((await noSession.json()).error, 'laso_session_expired');
+  await machine.put('lasoSession', { idToken: 'tok_123', expiresAt: Date.now() + 3600_000 });
+  const bad = await machine.handle(get('/laso/reveal?card_id=bad!!id'));
+  assert.equal((await bad.json()).error, 'invalid_card');
+  const env = { fetch: async (url) => {
+    assert.match(String(url), /get-card-data\?card_id=card_1/);
+    return Response.json({
+      card_id: 'card_1', status: 'ready', last4: '4242',
+      card_details: { card_number: '4111111111111111', cvv: '123', expiry: '07/31' },
+    });
+  } };
+  const ok = await machine.handle(get('/laso/reveal?card_id=card_1'), env);
+  const payload = await ok.json();
+  assert.equal(payload.card_number, '4111111111111111');
+  assert.equal(payload.cvv, '123');
+  assert.equal(payload.expiry, '07/31');
+  assert.equal(payload.last4, '4242');
+  assert.equal('transactions' in payload, false);
+  const needEnv = { fetch: async () => Response.json({
+    card_id: 'card_9', status: 'open',
+    card_details: null,
+    details_approval: { status: 'pending', approval_id: 'appr_1' },
+  }) };
+  const approval = await machine.handle(get('/laso/reveal?card_id=card_9'), needEnv);
+  assert.equal((await approval.json()).needs_approval, true);
+});

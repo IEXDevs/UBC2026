@@ -240,9 +240,72 @@ export async function handleLasoStatus(machine, request, env, now) {
   return done({ cards, note: typeof result.data?.note === 'string' ? result.data.note.slice(0, 300) : undefined });
 }
 
+
+export async function handleLasoReveal(machine, request, env, now) {
+  const denied = await machine.requireBoundOwner(request);
+  if (denied) return denied;
+  if (request.method !== 'GET') return noStore({ error: 'method_not_allowed' }, 405);
+  const session = await readSession(machine, now);
+  if (!session) return noStore({ error: 'laso_session_expired' }, 409);
+  const url = new URL(request.url);
+  const cardId = url.searchParams.get('card_id') || '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(cardId)) return noStore({ error: 'invalid_card' }, 400);
+  const fetcher = env.fetch ?? fetch;
+  let result;
+  try {
+    const response = await fetcher(`https://laso.finance/get-card-data?card_id=${encodeURIComponent(cardId)}`, {
+      headers: { Authorization: `Bearer ${session.idToken}` },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10000),
+    });
+    if (response.status === 401) {
+      await machine.delete(SESSION_KEY);
+      return noStore({ error: 'laso_session_expired' }, 409);
+    }
+    if (!response.ok) return noStore({ error: 'laso_reveal_unavailable' }, 502);
+    const data = await response.json().catch(() => null);
+    if (!data || typeof data !== 'object') return noStore({ error: 'laso_reveal_unavailable' }, 502);
+    result = data;
+  } catch {
+    return noStore({ error: 'laso_reveal_unavailable' }, 502);
+  }
+  const out = { ok: true, card_id: cardId };
+  const details = result.card_details ?? result.cardDetails ?? null;
+  if (details && typeof details === 'object') {
+    const pan = typeof details.card_number === 'string' ? details.card_number.replace(/\D/g, '') : (typeof details.cardNumber === 'string' ? details.cardNumber.replace(/\D/g, '') : '');
+    const cvv = typeof details.cvv === 'string' ? details.cvv.replace(/\D/g, '') : '';
+    const expiry = typeof details.expiry === 'string' ? details.expiry : (typeof details.exp_month === 'string' ? `${details.exp_month}/${String(details.exp_year || '').slice(-2)}` : null);
+    if (pan && (pan.length < 13 || pan.length > 19)) return noStore({ error: 'laso_reveal_unavailable' }, 502);
+    if (pan) {
+      out.card_number = pan;
+      if (cvv && cvv.length >= 3 && cvv.length <= 4) out.cvv = cvv;
+      if (expiry && typeof expiry === 'string') out.expiry = expiry.slice(0, 5);
+      if (typeof result.last4 === 'string') out.last4 = result.last4;
+      else if (pan) out.last4 = pan.slice(-4);
+      const billing = result.card_details?.billing_address ?? result.billing_address ?? null;
+      if (billing && typeof billing === 'object') out.billing_address = billing;
+      return noStore(out);
+    }
+  }
+  const approval = result.details_approval ?? result.detailsApproval ?? null;
+  if (approval && typeof approval === 'object') {
+    out.needs_approval = true;
+    if (typeof approval.status === 'string') out.approval_status = approval.status.slice(0, 32);
+    if (typeof approval.approval_id === 'string') out.approval_id = approval.approval_id.slice(0, 128);
+    if (typeof approval.note === 'string') out.note = approval.note.slice(0, 300);
+    else out.note = 'The account holder was emailed an approve/deny link. Once they approve, try Show again.';
+    return noStore(out);
+  }
+  const derr = result.details_error ?? result.detailsError ?? null;
+  if (typeof derr === 'string' && derr) return noStore({ error: 'laso_reveal_unavailable', note: derr.slice(0, 300) }, 502);
+  return noStore({ error: 'laso_reveal_unavailable' }, 502);
+}
+
 export async function handleLasoRequest(machine, request, env, now, pathname) {
   if (pathname === '/laso/session') return handleLasoSession(machine, request, env, now);
   if (pathname === '/laso/checkpoint') return handleLasoCheckpoint(machine, request, env, now);
   if (pathname === '/laso/status') return handleLasoStatus(machine, request, env, now);
+  if (pathname === '/laso/reveal') return handleLasoReveal(machine, request, env, now);
   return noStore({ error: 'not_found' }, 404);
 }
+

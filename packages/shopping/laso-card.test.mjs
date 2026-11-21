@@ -29,8 +29,8 @@ test('one billing address is stamped on every card and secrets stay hidden', () 
   assert.equal(shared.country, 'US');
   const hidden = presentLasoCard({ id: 'card_123', pan, cvv: '123', expiry: '07/31', status: 'ready' }, { billing: shared });
   const shown = presentLasoCard({ id: 'card_123', pan, cvv: '123', expiry: '07/31', status: 'ready' }, { reveal: true, billing: shared });
-  assert.equal(hidden.number, '•••• •••• •••• 1111');
-  assert.equal(hidden.cvv, '•••');
+  assert.equal(hidden.number, 'XXXX - XXXX - XXXX - 1111');
+  assert.equal(hidden.cvv, 'XXX');
   assert.equal(hidden.revealed, false);
   assert.equal(shown.number, '4111 1111 1111 1111');
   assert.equal(shown.cvv, '123');
@@ -81,7 +81,7 @@ test('modify quotes the card balance route and returns a masked card', async () 
   });
   assert.equal(result.lasoAction, 'modify');
   assert.equal(result.card.kind, 'reloadable');
-  assert.equal(result.card.number, '•••• •••• •••• ••••');
+  assert.equal(result.card.number, 'XXXX - XXXX - XXXX - XXXX');
   assert.equal(result.card.billing.line1, '1 Main St');
   assert.equal(result.next, 'await-owner-mainnet-approval');
 });

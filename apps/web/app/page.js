@@ -1407,6 +1407,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           return failed(messages[body.error] || 'The asset send did not post. Nothing was marked sent.');
         }
         const amountLabel = `${pending.amountText} ${pending.asset}`;
+        setListsTick(tick => tick + 1);
         return {
           ok: true,
           message: `Sent ${amountLabel}.`,
@@ -1455,18 +1456,19 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         if (!response.ok || !body.signature) {
           return failed(`The send to ${where} did not post.`);
         }
-        const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
+        setListsTick(tick => tick + 1);
+        const snsAmountLabel = `${formatBaseUnits(pending.amount)} USDC`;
         return {
           ok: true,
-          message: `Sent ${amountLabel} to ${target.domain} (${where}).`,
+          message: `Sent ${snsAmountLabel} to ${target.domain} (${where}).`,
           signature: body.signature,
           receipt: {
             id: `sns_${body.signature}`,
             at: new Date().toISOString(),
-            title: `Send ${amountLabel}`,
+            title: `Send ${snsAmountLabel}`,
             lines: [
               { label: 'To', value: `${target.domain} (${where})` },
-              { label: 'Amount', value: amountLabel },
+              { label: 'Amount', value: snsAmountLabel },
               { label: 'Signature', value: body.signature },
             ],
             signature: body.signature,
@@ -1545,6 +1547,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
           if (body.error === 'wallet_frozen') return failed('That wallet is frozen.');
           if (body.error === 'transaction_mismatch') return failed('The signed transfer did not match the deposit.');
           if (!response.ok || !body.signature) return failed(`The send to ${where} did not post.`);
+          setListsTick(tick => tick + 1);
           const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
           return {
             ok: true,
@@ -1600,6 +1603,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         if (body.error === 'wallet_frozen') return failed('That wallet is frozen.');
         if (body.error === 'invalid_destination') return failed('Pick a different wallet.');
         if (!response.ok || !body.signature) return failed(`The send to ${where} did not post.`);
+        setListsTick(tick => tick + 1);
         const amountLabel = `${formatBaseUnits(pending.amount)} USDC`;
         return {
           ok: true,
@@ -2112,6 +2116,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       }
       if (body.signed === true && body.signature) {
         const amountLabel = `${formatBaseUnits(pending.command.amount)} USDC`;
+        setListsTick(tick => tick + 1);
         pushReceipt({
           id: body.signature,
           at: new Date().toISOString(),
@@ -2501,6 +2506,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         open={cardsOpen}
         onClose={closeCards}
         ownerId={ownerId || ''}
+        botId={activeBot || ''}
+        getAccessToken={getAccessToken}
       />
       <WalletsSheet
         open={walletsOpen}

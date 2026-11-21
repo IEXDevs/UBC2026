@@ -354,7 +354,7 @@ async function handleSpendRequest(request, env = {}) {
   }
   const trustUnavailable = lookedUp.unavailable === true;
   const trustScore = trustUnavailable ? undefined : lookedUp.score;
-  const recipient = laso ? lasoOffer.accepted.payTo : swap ? context.wallet.address : (assetTransfer || usdBudget || parsed.domain)
+  const recipient = laso ? lasoOffer.accepted.payTo : swap ? context.wallet.address : (assetTransfer || usdBudget || parsed.domain || parsed.handle)
     ? await transferDestination(env, parsed)
     : (parsed.destination || parsed.handle || (parsed.selfCustody ? context.wallet.address : ''));
   if (typeof recipient !== 'string' || recipient.length < 1) {

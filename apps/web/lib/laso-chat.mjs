@@ -43,6 +43,8 @@ export function lasoPreparationArgs(args, message) {
     args = { ...args, provider: 'laso', lasoAction: 'setup' };
   } else if (kind === 'gift') {
     args = { ...args, provider: 'laso', lasoAction: 'gift' };
+  } else if (kind === 'intl') {
+    args = { ...args, provider: 'laso', lasoAction: 'intl' };
   }
   const amount = requestedLasoAmount(text);
   return args?.provider === 'laso' && amount != null ? { ...args, amountUsd: amount } : args;

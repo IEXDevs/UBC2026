@@ -193,13 +193,13 @@ test('the model preparation path returns its hold without another model reply or
 test('a named Laso reloadable request hands over the human steps even if the model omits or misnames the provider', async () => {
   for (const provider of [undefined, 'reloadable']) {
     let modelCalls = 0;
-    let runtimeCalls = 0;
-    const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get me a laso finance reloadable card', runtimeBase: 'https://runtime.invalid', fetcher: async () => {
-      runtimeCalls++;
-      return Response.json({ ...prepared, botId: context.botId, proposal: { outflow: '5000000' } });
+    const checkpointCalls = [];
+    const invoke = createChatToolInvoker({ ...context, ownerMessage: 'get me a laso finance reloadable card', runtimeBase: 'https://runtime.invalid', fetcher: async (url, init) => {
+      checkpointCalls.push(String(url));
+      return Response.json({ ok: true });
     } });
     const reply = await completeTextChat({
-      modelApiKey: 'LLM_1607358788850350_testsecretvalue', message: 'get me a laso finance reloadable card',
+      modelApiKey: 'LLM_1607358788850350_testsecretvalue', message: 'get me a laso finance reloadable card', botId: context.botId,
       tools: [{ type: 'function', function: { name: 'prepare_shopping', parameters: { type: 'object' } } }],
       fetcher: async () => {
         assert.equal(++modelCalls, 1);
@@ -212,13 +212,16 @@ test('a named Laso reloadable request hands over the human steps even if the mod
     assert.equal(reply.hold, undefined);
     assert.match(reply.text, /three steps first/);
     assert.match(reply.text, /verify-card-issuer-link/);
+    assert.match(reply.text, /Reply done/);
     assert.equal(modelCalls, 1);
-    assert.equal(runtimeCalls, 0);
+    assert.equal(checkpointCalls.length, 1);
+    assert.match(checkpointCalls[0], /\/laso\/checkpoint$/);
   }
 });
 
 test('an undecided Laso card request asks the choice without a follow-up model call', async () => {
   let calls = 0;
+  const checkpointCalls = [];
   const reply = await completeTextChat({
     modelApiKey: 'LLM_1607358788850350_testsecretvalue', message: 'get me a lasso card',
     tools: [{ type: 'function', function: { name: 'prepare_shopping', parameters: { type: 'object' } } }],
@@ -230,12 +233,19 @@ test('an undecided Laso card request asks the choice without a follow-up model c
     },
     invokeTool: async (name, inputs) => serializeToolResult(await createChatToolInvoker({
       ...context, ownerMessage: 'get me a lasso card', runtimeBase: 'https://runtime.invalid',
-      fetcher: async () => assert.fail('undecided cards must not quote'),
+      fetcher: async (url) => {
+        if (String(url).includes('/laso/checkpoint')) {
+          checkpointCalls.push(String(url));
+          return Response.json({ ok: true });
+        }
+        assert.fail('undecided cards must not quote');
+      },
     })(name, inputs)),
   });
   assert.equal(reply.hold, undefined);
   assert.match(reply.text, /Reloadable or non-reloadable USA/);
   assert.equal(calls, 1);
+  assert.equal(checkpointCalls.length, 1);
 });
 
 test('Laso tool failures and empty results return a preparation error without a follow-up model call', async () => {
@@ -257,4 +267,46 @@ test('Laso tool failures and empty results return a preparation error without a 
     assert.doesNotMatch(reply.text, /model call failed/);
     assert.equal(calls, 1);
   }
+});
+
+test('a reloadable request that only scrapes docs is nudged to prepare instead of stalling', async () => {
+  let modelCalls = 0;
+  const checkpointCalls = [];
+  const ownerMessage = 'actually no, reloadable';
+  const invoke = createChatToolInvoker({ ...context, ownerMessage, runtimeBase: 'https://runtime.invalid', fetcher: async (url) => {
+    checkpointCalls.push(String(url));
+    return Response.json({ ok: true });
+  } });
+  const tools = [
+    { type: 'function', function: { name: 'web_scrape', parameters: { type: 'object' } } },
+    { type: 'function', function: { name: 'prepare_shopping', parameters: { type: 'object' } } },
+  ];
+  const reply = await completeTextChat({
+    modelApiKey: 'LLM_1607358788850350_testsecretvalue', message: ownerMessage, botId: context.botId,
+    history: [{ role: 'user', content: 'hey make me a card' }, { role: 'user', content: 'non reloadable' }],
+    tools,
+    fetcher: async () => {
+      modelCalls++;
+      if (modelCalls === 1) {
+        return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [
+          { id: 'scrape', type: 'function', function: { name: 'web_scrape', arguments: JSON.stringify({ url: 'https://laso.finance/SKILL.md' }) } },
+        ] } }] });
+      }
+      if (modelCalls === 2) {
+        return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [
+          { id: 'prepare', type: 'function', function: { name: 'prepare_shopping', arguments: JSON.stringify(args) } },
+        ] } }] });
+      }
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content: 'stall' } }] });
+    },
+    invokeTool: async (name, inputs) => {
+      if (name === 'web_scrape') return { page: { title: 'Laso docs' } };
+      return serializeToolResult(await invoke(name, inputs));
+    },
+  });
+  assert.equal(reply.hold, undefined);
+  assert.match(reply.text, /three steps first/);
+  assert.match(reply.text, /Reply done/);
+  assert.equal(modelCalls, 2);
+  assert.equal(checkpointCalls.length, 1);
 });

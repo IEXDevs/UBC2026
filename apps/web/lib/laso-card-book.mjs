@@ -53,13 +53,77 @@ export function rememberLasoCard(storage, ownerId, card) {
   const id = key(ownerId, 'cards');
   const face = publicLasoCard(card);
   if (!storage || !id || !face) return readLasoCards(storage, ownerId);
-  const next = [face, ...readLasoCards(storage, ownerId).filter(item => item.id !== face.id)].slice(0, 8);
+  const prev = readLasoCards(storage, ownerId).find(item => item.id === face.id);
+  // Chat-supplied cards (model path) must never inject transactions or timestamps.
+  // Only rememberLasoTransactions (live /laso/status API) writes those.
+  const merged = {
+    ...face,
+    label: typeof card?.label === 'string' && card.label.trim() ? card.label.trim().slice(0, 40) : (prev?.label || face.label || null),
+    transactions: prev?.transactions || [],
+    updatedAt: prev?.updatedAt || null,
+    expiry: face.expiry && face.expiry !== 'XX/XX' ? face.expiry : (prev?.expiry || null),
+  };
+  const next = [merged, ...readLasoCards(storage, ownerId).filter(item => item.id !== face.id)].slice(0, 8);
   storage.setItem(id, JSON.stringify(next.map(item => ({
     id: item.id,
     kind: item.kind,
     status: item.status,
     last4: item.last4,
     amountUsd: item.amountUsd,
+    label: item.label || null,
+    transactions: item.transactions || [],
+    updatedAt: item.updatedAt || null,
+    expiry: item.expiry || null,
+  }))));
+  notify(ownerId);
+  return next;
+}
+
+export function setLasoLabel(storage, ownerId, cardId, label) {
+  const id = key(ownerId, 'cards');
+  if (!storage || !id) return readLasoCards(storage, ownerId);
+  const clean = typeof label === 'string' && label.trim() ? label.trim().slice(0, 40) : null;
+  const next = readLasoCards(storage, ownerId).map(item => (
+    item.id === cardId ? { ...item, label: clean } : item
+  ));
+  storage.setItem(id, JSON.stringify(next.map(item => ({
+    id: item.id,
+    kind: item.kind,
+    status: item.status,
+    last4: item.last4,
+    amountUsd: item.amountUsd,
+    label: item.label || null,
+    transactions: item.transactions || [],
+    updatedAt: item.updatedAt || null,
+    expiry: item.expiry || null,
+  }))));
+  notify(ownerId);
+  return next;
+}
+
+export function rememberLasoTransactions(storage, ownerId, cardId, { transactions = [], updatedAt = null, status = null, amountUsd = null, expiry = null, last4 = null } = {}) {
+  const id = key(ownerId, 'cards');
+  if (!storage || !id) return readLasoCards(storage, ownerId);
+  const next = readLasoCards(storage, ownerId).map(item => (
+    item.id === cardId ? {
+      ...item,
+      transactions: Array.isArray(transactions) ? transactions.slice(0, 25) : (item.transactions || []),
+      updatedAt: Number.isSafeInteger(updatedAt) ? updatedAt : Date.now(),
+      ...(status ? { status } : {}),
+      ...(amountUsd != null ? { amountUsd } : {}),
+      ...(typeof expiry === 'string' && expiry ? { expiry } : {}),
+      ...(typeof last4 === 'string' && /^\d{4}$/.test(last4) ? { last4 } : {}),
+    } : item
+  ));
+  storage.setItem(id, JSON.stringify(next.map(item => ({
+    id: item.id,
+    kind: item.kind,
+    status: item.status,
+    last4: item.last4,
+    amountUsd: item.amountUsd,
+    label: item.label || null,
+    transactions: item.transactions || [],
+    updatedAt: item.updatedAt || null,
   }))));
   notify(ownerId);
   return next;

@@ -48,6 +48,7 @@ const OWNER_BOT_ACTIONS = new Set([
   'card-loop/break',
   'laso/checkpoint',
   'laso/status',
+  'laso/reveal',
 ]);
 
 function isOwnerBotAction(action) {

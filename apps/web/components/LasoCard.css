@@ -179,3 +179,48 @@
   color: var(--text);
   font: inherit;
 }
+
+.laso-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.laso-card-head strong { font-size: 15px; }
+.laso-tx-fold {
+  border: 1px solid #2b2b2b;
+  border-radius: 14px;
+  background: #141414;
+}
+.laso-tx-fold > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+  color: #f4f5f5;
+}
+.laso-tx-fold > summary::-webkit-details-marker { display: none; }
+.laso-tx-body { display: grid; gap: 8px; padding: 0 14px 14px; }
+.laso-tx-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid #242424;
+}
+.laso-tx-row strong { font-size: 13px; }
+.laso-rename { display: flex; gap: 8px; margin-top: 8px; }
+.laso-rename input {
+  flex: 1;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #141414;
+  color: var(--text);
+  font: inherit;
+}

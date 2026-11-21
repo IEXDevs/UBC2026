@@ -329,8 +329,8 @@ function chatResult(body) {
       ? { claimUrl: body.claimUrl } : {}),
     ...(body.lasoCard && typeof body.lasoCard.id === 'string'
       && typeof body.lasoCard.number === 'string'
-      && /^•••• •••• •••• (?:••••|\d{4})$/.test(body.lasoCard.number)
-      && body.lasoCard.cvv === '•••' && body.lasoCard.revealed !== true
+      && /^(?:XXXX - XXXX - XXXX|XXXX XXXX XXXX|•••• •••• ••••) (?:XXXX|••••|\d{4})$/.test(body.lasoCard.number)
+      && (body.lasoCard.cvv === 'XXX' || body.lasoCard.cvv === '•••') && body.lasoCard.revealed !== true
       ? { lasoCard: body.lasoCard } : {}),
   };
 }
