@@ -193,7 +193,6 @@ export default function WalletsSheet({
       !ownDestinations.some(item => item.caption.toLowerCase() === row.caption.toLowerCase())
     )),
   ];
-  const heading = TRANSFER.find(item => item.id === transfer)?.label || 'Send';
   const previewBook = useMemo(() => (
     devPreview && activeRaw?.address
       ? previewPortfolioFor([{ kind: 'main', address: activeRaw.address, label: activeRaw.label }])
@@ -382,8 +381,7 @@ export default function WalletsSheet({
             </section>
 
             <section className="wallet-card wallet-transfers phantom-transfers-card" aria-label="Transfer" ref={transferRef}>
-              {/* Phantom 4 Action Buttons Row (matching Screenshot 1) */}
-              <div className="wallet-switch wallet-action-switch phantom-action-tiles" role="group" aria-label="Transfer actions">
+              <div className="phantom-action-tiles" role="group" aria-label="Transfer actions">
                 {TRANSFER.map(item => {
                   const isCurrent = transfer === item.id;
                   return (
@@ -418,19 +416,6 @@ export default function WalletsSheet({
                   <span className="phantom-action-tile-label">Buy</span>
                 </button>
               </div>
-
-              <h3 className="wallet-action-title phantom-stage-title">
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={transfer}
-                    className="transfer-title"
-                    initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: reduceMotion ? 0 : -6 }}
-                    transition={{ duration: reduceMotion ? 0 : 0.32, ease: TRANSFER_EASE }}
-                  >{heading}</motion.span>
-                </AnimatePresence>
-              </h3>
 
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
