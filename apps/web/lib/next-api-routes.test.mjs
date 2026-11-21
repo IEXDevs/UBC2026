@@ -1063,6 +1063,16 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
       });
       return new Response(JSON.stringify(results), { status: 200, headers: { 'content-type': 'application/json' } });
     }
+    if (target.startsWith('https://perps-api.jup.ag/v1/positions?')) {
+      assert.equal(new URL(target).searchParams.get('walletAddress'), address);
+      assert.equal(init.headers, undefined);
+      return Response.json({ dataList: [] });
+    }
+    if (target.startsWith('https://dlmm.datapi.meteora.ag/portfolio/open?')) {
+      assert.equal(new URL(target).searchParams.get('user'), address);
+      assert.equal(init.headers, undefined);
+      return Response.json({ hasNext: false, pools: [] });
+    }
     return new Response(JSON.stringify({ error: 'unmocked' }), { status: 500 });
   };
   try {
@@ -1079,6 +1089,7 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     assert.equal(body.cluster, 'mainnet');
     assert.equal(body.authorizesTransaction, false);
     assert.equal(body.wallets[0].address, address);
+    assert.equal(body.providers, undefined);
     assert.equal(calls.some(call => call.url.includes('/users/me')), false);
     assert.equal(calls.some(call => call.method === 'POST' && call.url.includes('privy')), false);
     assert.equal(calls.some(call => call.url === rpcUrl && call.redirect === 'follow'), true);
@@ -1086,6 +1097,11 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     assert.equal(raw.includes(token), false);
     assert.equal(raw.includes('portfolio-app-secret'), false);
     assert.equal(raw.includes(rpcUrl), false);
+    const providerResponse = await GET(new Request('http://localhost/api/portfolio?cluster=mainnet-beta&positions=1', {
+      headers: { authorization: `Bearer ${token}`, 'x-owner-id': ownerId },
+    }));
+    assert.equal(providerResponse.status, 200);
+    assert.deepEqual((await providerResponse.json()).providers, { positions: [], incomplete: [] });
   } finally {
     globalThis.fetch = previousFetch;
     for (const [name, value] of Object.entries(previous)) {

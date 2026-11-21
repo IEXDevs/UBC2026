@@ -148,11 +148,9 @@ function cardElement(card) {
   const asset = document.createElement('strong');
   addressText(asset, card.asset, card.mint);
   names.append(asset);
-  if (card.side) {
-    const side = document.createElement('span');
-    side.textContent = card.side;
-    names.append(side);
-  }
+  const source = document.createElement('span');
+  source.textContent = [card.venue, card.side].filter(Boolean).join(' · ');
+  names.append(source);
   heading.append(names);
 
   const size = document.createElement('p');
@@ -182,7 +180,7 @@ function cardElement(card) {
   metric(body, 'Leverage', card.leverage);
   metric(body, 'Health', card.healthLabel);
   metric(body, 'APY', card.apyLabel);
-  metric(body, 'PnL', card.pnlLabel, card.pnlDown ? 'book-pnl is-down' : 'book-pnl is-up');
+  metric(body, 'PnL', usdLabel(card.pnlLabel), card.pnlDown ? 'book-pnl is-down' : 'book-pnl is-up');
   const agent = document.createElement('small');
   agent.textContent = card.botName;
   back.append(top, body, agent);
@@ -237,23 +235,56 @@ function walletIcon() {
 function walletElement(wallet) {
   const article = document.createElement('article');
   article.className = 'book-card book-wallet';
+  article.style.setProperty('--wallet-width', `${wallet.width}px`);
+  article.style.setProperty('--wallet-height', `${wallet.height}px`);
   article.dataset.positionId = wallet.id;
   article.dataset.kind = 'wallet';
   const head = document.createElement('div');
   head.className = 'book-wallet-head';
   const title = document.createElement('strong');
   title.append(walletIcon());
-  title.append(document.createTextNode(wallet.label));
+  const name = document.createElement('span');
+  name.textContent = wallet.label;
+  name.title = wallet.label;
+  title.append(name);
   const size = document.createElement('b');
-  size.textContent = wallet.notionalLabel.replace(' USDC', '');
+  size.textContent = wallet.holdingsLabel;
   head.append(title, size);
   const sub = document.createElement('p');
-  sub.textContent = wallet.frozen
-    ? 'Frozen'
-    : wallet.readOnly
-      ? `Read-only · ${wallet.count} positions`
-      : `${wallet.venues.length} providers · ${wallet.count} positions`;
+  addressText(sub, wallet.address, wallet.fullAddress);
+  if (wallet.frozen || wallet.readOnly) sub.append(wallet.frozen ? ' · Frozen' : ' · Read-only');
   article.append(head, sub);
+  if (wallet.bubbles.length) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'book-wallet-bubbles');
+    svg.setAttribute('viewBox', `0 0 ${wallet.bubbleWidth} ${wallet.bubbleHeight}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', wallet.bubbles.map(bubble => `${bubble.asset} ${bubble.valueLabel}`).join(', '));
+    wallet.bubbles.forEach((bubble, index) => {
+      const circle = document.createElementNS(svg.namespaceURI, 'circle');
+      circle.setAttribute('cx', bubble.x);
+      circle.setAttribute('cy', bubble.y);
+      circle.setAttribute('r', bubble.r);
+      circle.setAttribute('class', `book-wallet-tone-${index % 4}`);
+      const value = document.createElementNS(svg.namespaceURI, 'title');
+      value.textContent = `${bubble.asset} · ${bubble.valueLabel}`;
+      circle.append(value);
+      svg.append(circle);
+      if (bubble.r * 2 >= bubble.asset.length * 5 + 7) {
+        const label = document.createElementNS(svg.namespaceURI, 'text');
+        label.setAttribute('x', bubble.x);
+        label.setAttribute('y', bubble.y);
+        label.textContent = bubble.asset;
+        svg.append(label);
+      }
+    });
+    article.append(svg);
+  }
+  if (wallet.unpriced) {
+    const note = document.createElement('p');
+    note.textContent = `${wallet.unpriced} unpriced`;
+    article.append(note);
+  }
   return article;
 }
 
@@ -306,8 +337,8 @@ function starTexture() {
   return canvas;
 }
 
-export default function PositionBook({ positions, bots, wallets = [], earnings = null, onWallet }) {
-  const book = useMemo(() => layoutPositionBook(positions, bots, wallets), [positions, bots, wallets]);
+export default function PositionBook({ positions, holdings = [], status, bots, wallets = [], earnings = null, onWallet }) {
+  const book = useMemo(() => layoutPositionBook(positions, bots, wallets, holdings), [positions, bots, wallets, holdings]);
   const mountRef = useRef(null);
   const cameraRef = useRef(null);
   const openRef = useRef(null);
@@ -518,11 +549,12 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
         tiltState.set(card.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
       }
 
+      const walletHeights = new Map(book.wallets.map(wallet => [wallet.id, wallet.height]));
       function anchorPoint(id, role, kind) {
         const pos = anchors.get(id);
         if (!pos) return { x: 0, y: 0 };
         if (kind === 'spoke' && role === 'to') return { x: pos.x, y: pos.y + 88 };
-        if (kind === 'account' && role === 'from') return { x: pos.x, y: pos.y + 36 };
+        if (kind === 'account' && role === 'from') return { x: pos.x, y: pos.y - (walletHeights.get(id) ?? 0) / 2 };
         if (kind === 'provider' && role === 'from') return { x: pos.x, y: pos.y + 28 };
         return { x: pos.x, y: pos.y };
       }
@@ -703,17 +735,18 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
           rows: [
             ['Asset', card.asset],
             ['Side', card.side],
-            ['USD', card.notionalLabel],
+            ['Value', usdLabel(card.notionalLabel)],
             ['Market', card.market],
             ['Entry', card.entry],
             ['Mark', card.mark],
             ['Leverage', card.leverage],
             ['Health', card.healthLabel],
             ['APY', card.apyLabel],
-            ['PnL', card.pnlLabel],
+            ['PnL', usdLabel(card.pnlLabel)],
             ['Agent', card.botName],
             ['Wallet', owner?.label],
             ['Mint', card.mint],
+            ['Account', card.positionAddress],
           ].filter(([, value]) => value),
           note: card.note,
           point,
@@ -1018,16 +1051,15 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
   return (
     <section className="position-book" aria-label="Positions" ref={mountRef}>
       <EarningsChart series={earnings} />
-      <p className="book-caption">
-        {book.summary.count === 0 ? (
-          <span>No Positions Yet.</span>
-        ) : (
-          <>
-            <strong>{book.summary.notionalLabel}</strong>
-            <span>{book.summary.count} positions · {book.summary.venues} venues{book.summary.pnlLabel ? ` · PnL ${book.summary.pnlLabel}` : ''}</span>
-          </>
+      <div className="book-caption">
+        {book.summary.count > 0 && (
+          <div className="book-summary">
+            <strong>{usdLabel(book.summary.notionalLabel)}</strong>
+            <span>{book.summary.count} {book.summary.count === 1 ? 'position card' : 'position cards'} · {book.summary.venues} {book.summary.venues === 1 ? 'provider' : 'providers'}</span>
+          </div>
         )}
-      </p>
+        {(status || book.summary.count === 0) && <span role="status">{status || 'No open Jupiter Perps or Meteora DLMM positions.'}</span>}
+      </div>
       <div className="book-tools">
         <button type="button" aria-label="Zoom in" onClick={() => zoomBy(0.86)}>
           <Plus size={16} strokeWidth={1.75} />
@@ -1057,7 +1089,7 @@ export default function PositionBook({ positions, bots, wallets = [], earnings =
               {detail.rows.map(([label, value]) => (
                 <div key={label}>
                   <dt>{label}</dt>
-                  <dd>{label === 'Address' || label === 'Mint' ? <AddressCopy address={value} /> : <AddressText text={value} addresses={detail.copyAddresses} />}</dd>
+                  <dd>{['Address', 'Mint', 'Account'].includes(label) ? <AddressCopy address={value} /> : <AddressText text={value} addresses={detail.copyAddresses} />}</dd>
                 </div>
               ))}
             </dl>

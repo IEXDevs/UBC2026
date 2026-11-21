@@ -1,6 +1,6 @@
 /** Places live positions on an open plane, one cluster per venue. */
 
-import { describePositions, formatBaseUnits, shortAddress } from './money-views.mjs';
+import { describePositions, formatAmount, formatBaseUnits, shortAddress } from './money-views.mjs';
 
 export const VENUE_LOGOS = Object.freeze({
   Kamino: '/venues/kamino.webp',
@@ -24,7 +24,50 @@ function walletFor(position, bots) {
   return bots.find(bot => bot.id === position.botId)?.walletId ?? null;
 }
 
-export function layoutPositionBook(positions, bots, wallets = []) {
+function holdingUsd(value) {
+  if (value > 0n && value < 10000n) return '<$0.01';
+  return `$${formatAmount((value / 10000n).toString(), 2)}`;
+}
+
+function walletBubbles(rows, width, height) {
+  const circles = rows.filter(row => row.notionalMicroUsdc != null && BigInt(row.notionalMicroUsdc) > 0n)
+    .map(row => ({ asset: row.asset, value: BigInt(row.notionalMicroUsdc) }))
+    .sort((left, right) => left.value === right.value ? 0 : left.value > right.value ? -1 : 1);
+  if (!circles.length) return [];
+  const maximum = Number(circles[0].value);
+  const largest = circles.slice(0, 11);
+  if (circles.length > largest.length) {
+    const value = circles.slice(largest.length).reduce((sum, circle) => sum + circle.value, 0n);
+    largest.push({ asset: 'Other', value });
+  }
+  const gap = 3;
+  const lines = Array.from({ length: largest.length > 2 ? 2 : 1 }, () => ({ sum: 0, tallest: 0, circles: [] }));
+  for (const circle of largest) {
+    const radius = Math.sqrt(Number(circle.value) / maximum);
+    const line = lines.length === 2 && lines[1].sum < lines[0].sum ? lines[1] : lines[0];
+    line.sum += radius * 2;
+    line.tallest = Math.max(line.tallest, radius * 2);
+    line.circles.push({ ...circle, radius });
+  }
+  const bubbleHeight = lines.reduce((sum, line) => sum + line.tallest, 0);
+  const scale = Math.min((height - gap * (lines.length - 1)) / bubbleHeight,
+    ...lines.map(line => (width - gap * Math.max(0, line.circles.length - 1)) / line.sum));
+  if (scale <= 0) return [];
+  let y = (height - bubbleHeight * scale - gap * (lines.length - 1)) / 2;
+  return lines.flatMap(line => {
+    let x = (width - line.sum * scale - gap * (line.circles.length - 1)) / 2;
+    const centerY = y + line.tallest * scale / 2;
+    y += line.tallest * scale + gap;
+    return line.circles.map(circle => {
+      const r = circle.radius * scale;
+      const bubble = { asset: circle.asset, valueLabel: holdingUsd(circle.value), x: x + r, y: centerY, r };
+      x += 2 * r + gap;
+      return bubble;
+    });
+  });
+}
+
+export function layoutPositionBook(positions, bots, wallets = [], holdings = []) {
   const source = Array.isArray(positions) ? positions : [];
   const rows = describePositions(source, bots).map((row, index) => ({
     ...row,
@@ -39,6 +82,10 @@ export function layoutPositionBook(positions, bots, wallets = []) {
   const LEAF = 236;
   const BRANCH = 28;
   const WALLET_SPAN = 240;
+  const holdingsByWallet = new Map(wallets.map(wallet => [wallet.id, []]));
+  for (const row of holdings) holdingsByWallet.get(row.walletId)?.push(row);
+  const totals = new Map([...holdingsByWallet].map(([id, rows]) => [id, addMicro(rows, 'notionalMicroUsdc')]));
+  const maximum = Math.max(1, ...[...totals.values()].map(Number));
   let cursor = 0;
   wallets.forEach(wallet => {
     const owned = rows.filter(row => row.walletId === wallet.id);
@@ -52,7 +99,14 @@ export function layoutPositionBook(positions, bots, wallets = []) {
     const span = Math.max(total, WALLET_SPAN);
     const rootX = cursor + span / 2;
     const rootY = 220;
-    const notional = addMicro(owned, 'notionalMicroUsdc');
+    const walletHoldings = holdingsByWallet.get(wallet.id);
+    const holdingTotal = totals.get(wallet.id);
+    const scale = Math.sqrt(Number(holdingTotal) / maximum);
+    const width = Math.round(146 + 86 * scale);
+    const height = Math.round(90 + 54 * scale);
+    const unpriced = walletHoldings.filter(row => row.notionalMicroUsdc == null).length;
+    const bubbleWidth = width - 20;
+    const bubbleHeight = height - 62;
     walletNodes.push({
       id: wallet.id,
       kind: 'wallet',
@@ -64,8 +118,15 @@ export function layoutPositionBook(positions, bots, wallets = []) {
       readOnly: wallet.readOnly === true,
       x: rootX,
       y: rootY,
+      width,
+      height,
+      bubbleWidth,
+      bubbleHeight,
+      bubbles: walletBubbles(walletHoldings, bubbleWidth, bubbleHeight),
+      unpriced,
+      holdingsLabel: unpriced > 0 && unpriced === walletHoldings.length ? 'Unpriced' : holdingUsd(holdingTotal),
       venues: venueNames,
-      notionalLabel: `${formatBaseUnits(notional.toString())} USDC`,
+      notionalLabel: `${formatBaseUnits(addMicro(owned, 'notionalMicroUsdc').toString())} USDC`,
       count: owned.length,
     });
     let branchX = cursor + (span - total) / 2;
@@ -190,7 +251,7 @@ export function bookFrame(book) {
   };
   for (const card of book.cards ?? []) add(card.x, card.y, 130, 110);
   for (const venue of book.venues ?? []) add(venue.x, venue.y, 90, 36);
-  for (const wallet of book.wallets ?? []) add(wallet.x, wallet.y, 120, 36);
+  for (const wallet of book.wallets ?? []) add(wallet.x, wallet.y, wallet.width / 2, wallet.height / 2);
   for (const account of book.accounts ?? []) add(account.x, account.y, 80, 30);
   if (!Number.isFinite(minX)) return { x: 0, y: 0, minX: -200, maxX: 200, minY: -200, maxY: 200 };
   return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, minX, maxX, minY, maxY };
