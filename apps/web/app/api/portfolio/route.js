@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createPrivyWalletClient, sanitizeOrigin } from '@ubc2026/wallets/privy';
 import { choosePortfolioRpc, loadPortfolio, PortfolioError } from '../../../lib/portfolio.mjs';
+import { loadProviderPositions } from '../../../lib/provider-positions.mjs';
 import { accessTokenFromRequest } from '../../../lib/privy-cookie-session.mjs';
 import { verifyPrivyAccessToken } from '../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../lib/root-env.mjs';
@@ -74,7 +75,8 @@ export async function GET(request) {
       { status: 503, headers: { 'Cache-Control': 'no-store' } },
     );
   }
-  const requestedCluster = new URL(request.url).searchParams.get('cluster') || '';
+  const params = new URL(request.url).searchParams;
+  const requestedCluster = params.get('cluster') || '';
   const rpc = choosePortfolioRpc(env, requestedCluster);
   if (!rpc.rpcUrl) {
     return Response.json(
@@ -117,6 +119,9 @@ export async function GET(request) {
       fetcher: globalThis.fetch.bind(globalThis),
     });
     if (requestedCluster === SOLANA_CLUSTER && portfolio.cluster !== (SOLANA_CLUSTER === 'mainnet-beta' ? 'mainnet' : SOLANA_CLUSTER)) throw new PortfolioError('unsupported_cluster');
+    if (portfolio.cluster === 'mainnet' && params.get('positions') === '1') {
+      portfolio.providers = await loadProviderPositions(portfolio.wallets, { fetcher: globalThis.fetch.bind(globalThis) });
+    }
     return Response.json(portfolio, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = error instanceof PortfolioError ? error.code : walletErrorCode(error);

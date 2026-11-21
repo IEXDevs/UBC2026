@@ -312,7 +312,7 @@ export function describePositions(positions, bots) {
     return {
       id: position.id,
       asset: position.asset,
-      amountLabel: `${formatBaseUnits(position.amount, decimals)} ${position.asset}`,
+      amountLabel: position.sizeLabel ?? `${formatBaseUnits(position.amount, decimals)} ${position.asset}`,
       pnlLabel: pnl == null ? null : `${formatBaseUnits(pnl)} USDC`,
       pnlDown: pnl?.startsWith('-') === true,
       pnlMicroUsdc: pnl,
@@ -321,11 +321,12 @@ export function describePositions(positions, bots) {
       botName: named ?? holder ?? botName(bots, position.botId),
       venue: typeof position.venue === 'string' && position.venue.trim() ? position.venue.trim() : 'Book',
       market: typeof position.market === 'string' && position.market.trim() ? position.market.trim() : position.asset,
+      positionAddress: position.positionAddress ?? null,
       side: typeof position.side === 'string' ? position.side : null,
       entry: typeof position.entry === 'string' ? position.entry : null,
       mark: typeof position.mark === 'string' ? position.mark : null,
-      leverage: typeof position.leverage === 'string' && /^(0|[1-9][0-9]{0,2})$/.test(position.leverage)
-        ? `${position.leverage}x`
+      leverage: typeof position.leverage === 'string' && /^(0|[1-9][0-9]{0,2})(?:\.[0-9]{1,2})?$/.test(position.leverage)
+        ? `${position.leverage.replace(/(\.[0-9]*?)0+$/, '$1').replace(/\.$/, '')}x`
         : null,
       healthLabel: percentWhole(position.healthPct),
       apyLabel: percentFromBps(position.apyBps),

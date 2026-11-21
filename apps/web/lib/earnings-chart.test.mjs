@@ -23,29 +23,43 @@ test('the earnings line only includes confirmed USDC movements on the active net
   assert.equal(buildEarningsSeries({ payments: [{ ...incoming, txSignature: '' }] }), null);
 });
 
-test('the positions book shows chain balances for linked and runtime wallets without inventing PnL', () => {
+test('wallet holdings stay separate from provider positions', () => {
   const wallets = [
     { id: 'embedded', address: EMBEDDED, label: 'Main' },
     { id: 'agent', address: RUNTIME_WALLET, label: 'Agent wallet', holdings: [
-      { ...SOL, asset: 'SOL', mint: null, amount: '1000000000', cluster: 'mainnet-beta' },
+      { ...SOL, asset: 'SOL', mint: null, amount: '1000000000', cluster: 'mainnet-beta', usdMicro: null },
       { ...SOL, cluster: 'testnet', amount: '5000000000' },
     ] },
   ];
-  const portfolio = { cluster: 'mainnet', authorizesTransaction: false, wallets: [
-    { address: EMBEDDED, client: 'privy', holdings: [SOL] },
+  const provider = { id: 'perp', venue: 'Jupiter', asset: 'SOL', walletAddress: EMBEDDED, cluster: 'mainnet-beta',
+    sizeLabel: '$150 size', notionalMicroUsdc: '25000000', pnlMicroUsdc: '1000000' };
+  const portfolio = { cluster: 'mainnet', authorizesTransaction: false, providers: { positions: [
+    provider, { ...provider, id: 'foreign', walletAddress: '6'.repeat(44) }, { ...provider, id: 'wrong-network', cluster: 'devnet' },
+  ] }, wallets: [
+    { address: EMBEDDED, client: 'privy-v2', holdings: [SOL,
+      { mint: RUNTIME_WALLET, symbol: 'USDC', amount: '50000000', decimals: 6, usdMicro: '50000000' },
+    ] },
     { address: PHANTOM, label: 'Phantom', client: 'phantom', holdings: [SOL] },
   ] };
-  const { positions, wallets: merged } = mergeWalletPositions({
+  const { positions, holdings, wallets: merged } = mergeWalletPositions({
     wallets, portfolio, positions: [{ id: 'old-paper-lot', amount: '99' }],
   });
-  assert.equal(positions.length, 3);
-  assert.equal(positions.find(position => position.walletId === 'embedded').amount, SOL.amount);
-  assert.equal(positions.find(position => position.walletId === 'agent').amount, '1000000000');
-  assert.equal(positions.find(position => position.holder === 'Phantom').readOnly, true);
+  assert.deepEqual(positions.map(({ id, walletId }) => [id, walletId]), [['perp', 'embedded']]);
+  assert.equal(holdings.length, 4);
+  assert.equal(holdings.find(position => position.walletId === 'embedded').amount, SOL.amount);
+  assert.equal(holdings.find(position => position.walletId === 'agent').amount, '1000000000');
+  assert.equal(holdings.find(position => position.holder === 'Phantom').readOnly, true);
   assert.equal(merged.find(wallet => wallet.address === EMBEDDED).readOnly, undefined);
-  const book = layoutPositionBook(positions, [], merged);
-  assert.equal(book.summary.pnlLabel, null);
-  assert.ok(book.cards.every(card => card.pnlLabel === null));
-  assert.equal(mergeWalletPositions({ wallets, portfolio: { ...portfolio, cluster: 'testnet' } }).positions.length, 1);
+  const book = layoutPositionBook(positions, [], merged, holdings);
+  assert.deepEqual(book.cards.map(card => card.venue), ['Jupiter']);
+  assert.equal(book.summary.notionalLabel, '25 USDC');
+  assert.equal(book.summary.pnlLabel, '1 USDC');
+  const main = book.wallets.find(wallet => wallet.id === 'embedded');
+  const linked = book.wallets.find(wallet => wallet.readOnly);
+  assert.equal(main.holdingsLabel, '$250');
+  assert.ok(main.width > linked.width && main.height > linked.height);
+  assert.equal(main.bubbles[0].r / main.bubbles[1].r, 2);
+  assert.equal(book.wallets.find(wallet => wallet.id === 'agent').holdingsLabel, 'Unpriced');
+  assert.equal(mergeWalletPositions({ wallets, portfolio: { ...portfolio, cluster: 'testnet' } }).holdings.length, 1);
   assert.equal(mergeWalletPositions({ portfolio: { ...portfolio, authorizesTransaction: true } }).positions.length, 0);
 });
