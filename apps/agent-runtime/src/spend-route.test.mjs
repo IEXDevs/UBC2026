@@ -1608,6 +1608,7 @@ test('browser enrollment resumes the original Full swap through the Worker exact
   let attached = false;
   const { calls, request, ticket, keypair, env } = await autoSwapSetup({ delegated: () => attached, queued: false });
   const pending = await (await request({ autoSwap: true, swapTicket: ticket })).json();
+  assert.equal(pending.state, 'blocked');
   assert.equal(pending.reason, 'swap_signer_missing');
   assert.equal(calls.reserved, 0);
   const result = await executeClientSignedSwap({

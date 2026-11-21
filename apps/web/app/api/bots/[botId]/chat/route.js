@@ -336,7 +336,7 @@ export async function POST(request, context) {
       return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted within your review limit: https://solscan.io/tx/${sent.signature}`;
     }
     const needsBrowserSigner = (sent?.reason ?? sent?.error) === 'client_sign_required';
-    if (permissionMode === 'full' && sent?.state === 'approval-needed' && sent.reason === 'swap_signer_missing'
+    if (permissionMode === 'full' && sent?.signed === false && sent.reason === 'swap_signer_missing'
         && sent.swapDelegation) {
       return { clientSwap: { spend: { ...hold.args, botId, permission: 'full',
         reviewCap: effectiveReviewCap(reviewCap), idempotencyKey: hold.idempotencyKey }, swapTicket: swapHold.swapTicket,
