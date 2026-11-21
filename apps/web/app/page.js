@@ -558,6 +558,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   currentOwner.current = ownerId;
   const [loopOverrides, setLoopOverrides] = useState({});
   const [listsTick, setListsTick] = useState(0);
+  const WALLET_REFRESH_MS = 5000;
   const [remoteLists, setRemoteLists] = useState(() => emptyMoneyState());
   const [profile, setProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
@@ -839,6 +840,12 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   }, [ownerId, getAccessToken, signedIn, user]);
 
   useEffect(() => {
+    if (!ownerId) return undefined;
+    const id = window.setInterval(() => setListsTick((tick) => tick + 1), WALLET_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [ownerId, WALLET_REFRESH_MS]);
+
+  useEffect(() => {
     if (!ownerId) {
       setRemoteLists(emptyMoneyState());
       return undefined;
@@ -1107,7 +1114,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       }
     })();
     return () => { stop = true; };
-  }, [walletAddress, signedIn, ownerId, getAccessToken, devPreview, walletsOpen]);
+  }, [walletAddress, signedIn, ownerId, getAccessToken, devPreview, walletsOpen, listsTick]);
   const payments = remoteLists.payments || [];
   const paymentCrossCheck = remoteLists.paymentCrossCheck || [];
   const positions = remoteLists.positions || [];

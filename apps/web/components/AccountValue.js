@@ -10,7 +10,14 @@ import { rememberPortfolio } from '../lib/portfolio-cache.mjs';
 
 export default function AccountValue({ ownerId, getAccessToken, wallets = [], devPreview = false, refreshKey = '' }) {
   const [portfolio, setPortfolio] = useState(null);
+  const [pollTick, setPollTick] = useState(0);
   const walletKey = wallets.map(wallet => wallet?.address || '').filter(Boolean).sort().join(',');
+
+  useEffect(() => {
+    if (!ownerId) return undefined;
+    const id = window.setInterval(() => setPollTick((tick) => tick + 1), 5000);
+    return () => window.clearInterval(id);
+  }, [ownerId]);
 
   useEffect(() => {
     setPortfolio(null);
@@ -39,7 +46,7 @@ export default function AccountValue({ ownerId, getAccessToken, wallets = [], de
       } catch { /* An unavailable quote is not a zero-dollar balance. */ }
     })();
     return () => { stopped = true; controller.abort(); };
-  }, [ownerId, getAccessToken, walletKey, devPreview, refreshKey]);
+  }, [ownerId, getAccessToken, walletKey, devPreview, refreshKey, pollTick]);
 
   const partial = Number(portfolio?.unpriced) > 0;
   const title = !portfolio

@@ -34,7 +34,14 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
   const [activeTab, setActiveTab] = useState('tokens');
+  const [pollTick, setPollTick] = useState(0);
   const accounts = linkedKey(user);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const id = window.setInterval(() => setPollTick((tick) => tick + 1), 5000);
+    return () => window.clearInterval(id);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -102,7 +109,7 @@ export default function TokenScreen({ open, address = '', onSend, onReceive, onS
       }
     })();
     return () => { stopped = true; };
-  }, [open, accounts, getAccessToken, user?.id, previewPortfolio, refreshKey]);
+  }, [open, accounts, getAccessToken, user?.id, previewPortfolio, refreshKey, pollTick]);
 
   const scoped = address && Array.isArray(portfolio?.wallets)
     ? { ...portfolio, wallets: portfolio.wallets.filter(row => row?.address === address) }
