@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
-import { bookFrame, layoutPositionBook, stepBubbleFollow } from '../lib/position-book.mjs';
+import { bookFrame, layoutPositionBook, positionSceneKey, stepBubbleFollow } from '../lib/position-book.mjs';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
 import EarningsChart from './EarningsChart';
@@ -81,8 +81,17 @@ function starTexture() {
 
 export default function PositionBook({ positions, holdings = [], status, bots, wallets = [], earnings = null, onWallet }) {
   const book = useMemo(() => layoutPositionBook(positions, bots, wallets, holdings), [positions, bots, wallets, holdings]);
+  const sceneKey = useMemo(() => positionSceneKey(book), [book]);
+  const content = useMemo(() => new Map([
+    ...book.wallets.map(wallet => [wallet.id, <WalletCard wallet={wallet} />]),
+    ...book.accounts.map(account => [account.id, <ProviderGroupCard account={account} />]),
+    ...book.cards.map(card => [card.id, <ProviderPositionCard card={card} />]),
+  ]), [book]);
   const mountRef = useRef(null);
   const cameraRef = useRef(null);
+  const savedView = useRef(null);
+  const bookRef = useRef(book);
+  bookRef.current = book;
   const openRef = useRef(null);
   const walletRef = useRef(onWallet);
   const [sceneCards, setSceneCards] = useState(null);
@@ -96,6 +105,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return undefined;
+    const book = bookRef.current;
     let alive = true;
     let cleanup = () => {};
 
@@ -105,10 +115,12 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       if (!alive) return;
 
       const home = { x: 0, y: 0, z: HOME_Z };
-      const focus = { x: home.x, y: home.y, z: home.z };
+      const view = driftedRef.current ? savedView.current : null;
+      const focus = { ...(view?.focus ?? home) };
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(40, 1, 1, 20000);
-      camera.position.set(home.x, home.y, home.z);
+      const initial = view?.position ?? home;
+      camera.position.set(initial.x, initial.y, initial.z);
 
       function aim() {
         camera.lookAt(camera.position.x, camera.position.y, 0);
@@ -246,7 +258,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         scene.add(mesh);
         linkGeometries.push(ribbon);
         linkMeshes.push({ id: link.id, material });
-        bindings.push({ geometry: ribbon, link });
+        bindings.push({ geometry: ribbon, link: { ...link } });
       }
 
       for (const link of book.links) addLink(link);
@@ -262,7 +274,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         anchors.set(venue.id, object.position);
       }
 
-      function addCard(item, kind, content) {
+      function addCard(item, kind) {
         const host = document.createElement('article');
         host.className = kind === 'position' ? 'book-card' : `book-card book-${kind}`;
         host.dataset.positionId = item.id;
@@ -279,13 +291,13 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         cardObjects.set(item.id, object);
         anchors.set(item.id, object.position);
         if (kind === 'position') tiltState.set(item.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
-        hosts.push({ host, content, id: item.id });
+        hosts.push({ host, id: item.id });
       }
 
-      for (const wallet of book.wallets) addCard(wallet, 'wallet', <WalletCard wallet={wallet} />);
-      for (const account of book.accounts) addCard(account, 'account', <ProviderGroupCard account={account} />);
-      for (const card of book.cards) addCard(card, 'position', <ProviderPositionCard card={card} />);
-      setSceneCards({ book, hosts });
+      for (const wallet of book.wallets) addCard(wallet, 'wallet');
+      for (const account of book.accounts) addCard(account, 'account');
+      for (const card of book.cards) addCard(card, 'position');
+      setSceneCards({ sceneKey, hosts });
 
       const walletHeights = new Map(book.wallets.map(wallet => [wallet.id, wallet.height]));
       function anchorPoint(id, role, kind) {
@@ -400,6 +412,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       }
 
       function detailPayload(id, point) {
+        const book = bookRef.current;
         const wallet = book.wallets.find(item => item.id === id);
         if (wallet) {
           return {
@@ -743,6 +756,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       loop(performance.now());
 
       cleanup = () => {
+        savedView.current = { position: camera.position.clone(), focus: { ...focus } };
         flushPlaces();
         cancelAnimationFrame(frame);
         observer.disconnect();
@@ -760,6 +774,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         renderer.dispose();
         renderer.domElement.remove();
         labels.domElement.remove();
+        mount.classList.remove('is-panning');
         cameraRef.current = null;
       };
     })();
@@ -768,7 +783,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       alive = false;
       cleanup();
     };
-  }, [book]);
+  }, [sceneKey]);
 
   function reset() {
     const view = cameraRef.current;
@@ -788,7 +803,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
 
   return (
     <section className="position-book" aria-label="Positions" ref={mountRef}>
-      {sceneCards?.book === book && sceneCards.hosts.map(({ host, content, id }) => createPortal(content, host, id))}
+      {sceneCards?.sceneKey === sceneKey && sceneCards.hosts.map(({ host, id }) => createPortal(content.get(id), host, id))}
       <EarningsChart series={earnings} />
       <div className="book-caption">
         {book.summary.count > 0 && (

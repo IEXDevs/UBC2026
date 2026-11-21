@@ -31,14 +31,22 @@ function holdingUsd(value) {
 
 function walletBubbles(rows, width, height) {
   const circles = rows.filter(row => row.notionalMicroUsdc != null && BigInt(row.notionalMicroUsdc) > 0n)
-    .map(row => ({ asset: row.asset, value: BigInt(row.notionalMicroUsdc) }))
+    .map(row => ({
+      id: row.id ?? row.asset,
+      asset: row.asset,
+      value: BigInt(row.notionalMicroUsdc),
+      amountLabel: typeof row.amount === 'string' && Number.isInteger(row.decimals)
+        ? `${formatAmount(row.amount, row.decimals)} ${row.asset}`
+        : '',
+    }))
     .sort((left, right) => left.value === right.value ? 0 : left.value > right.value ? -1 : 1);
   if (!circles.length) return [];
   const maximum = Number(circles[0].value);
   const largest = circles.slice(0, 11);
   if (circles.length > largest.length) {
-    const value = circles.slice(largest.length).reduce((sum, circle) => sum + circle.value, 0n);
-    largest.push({ asset: 'Other', value });
+    const rest = circles.slice(largest.length);
+    const value = rest.reduce((sum, circle) => sum + circle.value, 0n);
+    largest.push({ id: 'other', asset: 'Other', value, amountLabel: `${rest.length} ${rest.length === 1 ? 'asset' : 'assets'}` });
   }
   const gap = 3;
   const inset = 2;
@@ -61,11 +69,21 @@ function walletBubbles(rows, width, height) {
     y += line.tallest * scale + gap;
     return line.circles.map(circle => {
       const r = circle.radius * scale;
-      const bubble = { asset: circle.asset, valueLabel: holdingUsd(circle.value), x: x + r, y: centerY, r };
+      const bubble = {
+        id: circle.id, asset: circle.asset, valueLabel: holdingUsd(circle.value), amountLabel: circle.amountLabel,
+        x: x + r, y: centerY, r,
+      };
       x += 2 * r + gap;
       return bubble;
     });
   });
+}
+
+export function positionSceneKey(book) {
+  const geometry = item => [item.id, item.x, item.y, item.width, item.height, item.walletId];
+  return JSON.stringify([
+    book.wallets.map(geometry), book.accounts.map(geometry), book.cards.map(geometry), book.venues, book.links,
+  ]);
 }
 
 export function layoutPositionBook(positions, bots, wallets = [], holdings = []) {
