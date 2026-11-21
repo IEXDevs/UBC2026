@@ -1045,6 +1045,8 @@ test('GET /api/portfolio without bearer returns login_required', async () => {
 test('GET /api/portfolio reads linked wallets from the JWT user id', async () => {
   const ownerId = 'did:privy:portfolio-user';
   const address = 'So11111111111111111111111111111111111111112';
+  const agentAddress = '9'.repeat(44);
+  const activityLookups = [];
   const session = privySessionFixture(ownerId);
   const { token } = session;
   const rpcUrl = 'https://example.invalid/portfolio-rpc';
@@ -1067,6 +1069,11 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     if (target.includes('/users/me')) {
       return new Response(JSON.stringify({ error: 'users_me_forbidden' }), { status: 403 });
     }
+    if (target.includes('/v1/wallets?')) {
+      assert.equal(init.method, 'GET');
+      assert.equal(new URL(target).searchParams.get('user_id'), ownerId);
+      return Response.json({ data: [{ id: 'wallet_123456', address: agentAddress, chain_type: 'solana' }] });
+    }
     if (target.includes(`/v1/users/${encodeURIComponent(ownerId)}`)) {
       return new Response(JSON.stringify({
         id: ownerId,
@@ -1080,6 +1087,13 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     }
     if (target === rpcUrl) {
       const body = JSON.parse(init.body);
+      if (body.method === 'getGenesisHash') {
+        return Response.json({ result: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d' });
+      }
+      if (body.method === 'getTransactionsForAddress') {
+        activityLookups.push(body.params[0]);
+        return Response.json({ result: { data: [] } });
+      }
       const results = body.map(row => {
         if (row.method === 'getGenesisHash') {
           return { jsonrpc: '2.0', id: row.id, result: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d' };
@@ -1125,6 +1139,18 @@ test('GET /api/portfolio reads linked wallets from the JWT user id', async () =>
     assert.equal(raw.includes(token), false);
     assert.equal(raw.includes('portfolio-app-secret'), false);
     assert.equal(raw.includes(rpcUrl), false);
+    const activityUrl = 'http://localhost/api/portfolio?activity=1&address=' + '8'.repeat(44);
+    const forbidden = await GET(new Request(activityUrl, {
+      headers: { authorization: `Bearer ${token}`, 'x-owner-id': 'did:privy:different-user' },
+    }));
+    assert.equal(forbidden.status, 403);
+    assert.deepEqual(activityLookups, []);
+    const activity = await GET(new Request(activityUrl, {
+      headers: { authorization: `Bearer ${token}`, 'x-owner-id': ownerId },
+    }));
+    assert.equal(activity.status, 200);
+    assert.deepEqual(await activity.json(), { items: [], incomplete: false });
+    assert.deepEqual(new Set(activityLookups), new Set([address, agentAddress]));
     const providerResponse = await GET(new Request('http://localhost/api/portfolio?cluster=mainnet-beta&positions=1', {
       headers: { authorization: `Bearer ${token}`, 'x-owner-id': ownerId },
     }));

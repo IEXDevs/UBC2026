@@ -70,3 +70,17 @@ test('log rows keep a timestamp, the transfer, and a solscan link', () => {
   assert.deepEqual(swap.lines.map(line => line.label), ['Pay', 'Receive', 'Route']);
   assert.equal(swap.lines[1].value, 'Quoted when you slide');
 });
+
+test('wallet history fills gaps after a reload and deduplicates it against receipts and stream events', () => {
+  const signature = '4'.repeat(64);
+  const history = [{
+    id: 'chain:' + signature, at: 1500, title: 'Transaction confirmed',
+    lines: [{ label: 'Main', value: '-0.1 SOL' }], signature, cluster: 'mainnet-beta',
+  }];
+  const events = [{ id: 'stream:' + signature, kind: 'tx.confirmed', at: 1500 }];
+  const rows = logRows({ history, events });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].lines[0].value, '-0.1 SOL');
+  const receipts = [{ id: 'send', at: 1500, title: 'Send 0.1 SOL', signature, cluster: 'mainnet-beta' }];
+  assert.deepEqual(logRows({ receipts, history, events }).map(row => row.id), ['send']);
+});
