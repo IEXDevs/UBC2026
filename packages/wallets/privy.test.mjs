@@ -156,8 +156,7 @@ test('swap preparation derives balances from requested RPC account snapshots, no
   const mint = new PublicKey(address);
   const transaction = Buffer.from(new VersionedTransaction(new TransactionMessage({
     payerKey: signer, recentBlockhash: SystemProgram.programId.toBase58(),
-    instructions: [new TransactionInstruction({ programId: SystemProgram.programId,
-      keys: [{ pubkey: signer, isSigner: true, isWritable: true }, { pubkey: tokenAccount, isSigner: false, isWritable: true }], data: Buffer.alloc(0) })],
+    instructions: [SystemProgram.transfer({ fromPubkey: signer, toPubkey: tokenAccount, lamports: 10_000_000 })],
   }).compileToV0Message()).serialize()).toString('base64');
   const account = amount => {
     const data = Buffer.alloc(165);
@@ -170,7 +169,10 @@ test('swap preparation derives balances from requested RPC account snapshots, no
   let simulationError = null;
   const system = SystemProgram.programId.toBase58();
   const token = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-  const failureLogs = [`Program ${token} failed: custom program error: 0x1`, `Program ${system} failed: custom program error: 0x1`];
+  const failureLogs = [
+    'Program log: Transfer: insufficient lamports 9000000, need 10000000',
+    `Program ${token} failed: custom program error: 0x1`, `Program ${system} failed: custom program error: 0x1`,
+  ];
   const calls = [];
   const fetcher = async (_url, init) => {
     const { method, params } = JSON.parse(init.body);
@@ -198,6 +200,7 @@ test('swap preparation derives balances from requested RPC account snapshots, no
   await assert.rejects(privy.prepareSolanaSwap(intent), error => {
     assert.equal(error.code, 'simulation_failed');
     assert.equal(error.simulationReason, 'instruction_0_custom_1');
+    assert.equal(error.solWrapReached, true);
     assert.deepEqual(error.simulationDetails, { instructionProgram: system, logs: failureLogs });
     return true;
   });

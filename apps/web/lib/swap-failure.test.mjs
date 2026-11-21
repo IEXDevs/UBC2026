@@ -57,3 +57,11 @@ test('an ATA setup failure identifies a System Program SOL shortfall', () => {
   const ambiguous = swapFailure({ error, simulationDetails: { instructionProgram, logs: [fundingLog, setupLog] } });
   assert.doesNotMatch(ambiguous.message, /enough SOL|insufficient lamports/);
 });
+
+test('a direct System Program transfer reports the SOL shortfall and available lamports', () => {
+  const instructionProgram = '11111111111111111111111111111111';
+  const log = 'Program log: Transfer: insufficient lamports 97000000, need 100000000';
+  const failure = swapFailure({ error: 'instruction_3_custom_1', simulationDetails: { instructionProgram, logs: [log] } });
+  assert.match(failure.message, /ran short of SOL during swap setup/);
+  assert.ok(failure.message.includes(log));
+});

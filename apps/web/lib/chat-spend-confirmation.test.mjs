@@ -114,6 +114,25 @@ test('USDC swaps display confirmed minimum output and bind the quote ticket to t
   assert.match(failed.text, /Swap — simulation:.*\[insufficient_funds\]/);
 });
 
+test('a reduced SOL quote binds a fresh slide to the displayed smaller amount', async () => {
+  const args = { botId, action: 'swap', asset: 'SOL', outputAsset: 'USDC', amount: '100000000' };
+  const hold = toolAccessRequest('full', 'request_spend', args);
+  const preview = { inputDecimals: 9, outputDecimals: 6, inputAmount: '95970720', minOutput: '9000000',
+    usdMicros: '9801500', expiresAt: 2500, ticket: 'reduced-swap-ticket' };
+  const quoted = swapHoldFromPreview(hold, preview);
+  assert.match(quoted.label, /fees and account setup.*Swap 0\.09597072 SOL/);
+  assert.equal(quoted.args.amount, preview.inputAmount);
+  assert.equal(swapHoldFromPreview(hold, { ...preview, inputAmount: '100000001' }), null);
+  assert.equal(swapHoldFromPreview({ ...hold, idempotencyKey: 'loop_swap_test' }, preview), null);
+  const sealed = sealAssetSpendHold(quoted, context, 1000);
+  const edited = await resumeAssetSpend({ ...sealed, args }, context, () => assert.fail('unexpected spend'), 2000);
+  assert.match(edited.text, /invalid or expired/);
+  await resumeAssetSpend(sealed, context, async (_tool, terms) => {
+    assert.equal(terms.amount, preview.inputAmount);
+    return { signed: false, error: 'desk_lock_unavailable' };
+  }, 2000);
+});
+
 test('a slide submits the original SOL payment directly and returns its Solscan receipt', async () => {
   const hold = sealAssetSpendHold(toolAccessRequest('full', 'request_spend', args), context, 1000);
   const confirmed = JSON.parse(JSON.stringify(hold));
