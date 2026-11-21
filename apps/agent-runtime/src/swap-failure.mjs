@@ -57,7 +57,7 @@ const FAILURES = {
   'approval-needed': ['approval', 'The review threshold requires owner approval.'],
   owner_approval_required: ['permission', 'Ask-every-time permission requires owner approval.'],
   invalid_auto_swap: ['permission', 'Automatic execution requires a valid swap quote and Full permissions, or a queued swap in Review by AI.'],
-  swap_saved_permission_required: ['permission', 'The Worker could not verify that Full permissions and a review limit are saved for this desk. Approve this swap to continue.'],
+  swap_saved_permission_required: ['permission', 'Automatic swaps require Full permissions, Auto-sign swaps enabled in Wallet settings, and a valid review limit. Approve this swap to continue.'],
   swap_quote_requires_confirmation: ['approval', 'This quote requires owner approval. Review the quoted amount before continuing.'],
   desk_locked: ['desk lock', 'Unlock the desk before approving this swap.'],
   desk_lock_unavailable: ['desk lock', 'The desk lock service is unavailable.'],

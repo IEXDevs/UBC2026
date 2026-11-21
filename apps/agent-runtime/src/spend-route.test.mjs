@@ -1431,7 +1431,8 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
   assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
 });
 
-async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2000000', delegated = false, queued = true, freezeWhileSigning = false } = {}) {
+async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2000000', autoSignSwaps = () => true,
+  delegated = false, queued = true, freezeWhileSigning = false } = {}) {
   const keypair = Keypair.generate();
   const wallet = { id: 'w_main', ownerId: 'user_1', kind: 'main', label: 'Main', address: keypair.publicKey.toBase58(), frozen: false, provider: 'privy' };
   const sol = 'So11111111111111111111111111111111111111112';
@@ -1505,7 +1506,8 @@ async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2
       }
       if (target.pathname.endsWith('/owner_state')) {
         assert.equal(target.searchParams.get('owner_id'), 'eq.user_1');
-        return Response.json([{ name: 'permission', value: permission }, { name: 'reviewCap', value: savedCap }]);
+        const value = autoSignSwaps(calls) ? JSON.stringify({ permission, ownerId: 'user_1', autoSignSwaps: true }) : permission;
+        return Response.json([{ name: 'permission', value }, { name: 'reviewCap', value: savedCap }]);
       }
       if (target.pathname.endsWith('/approvals')) return new Response('', { status: 201 });
       return new Response('[]');
@@ -1572,6 +1574,24 @@ test('delegated signing uses the saved permission and clamps a raised request li
   assert.equal(raised.state, 'approval-needed');
   assert.equal(limited.calls.reserved, 0);
   assert.equal(limited.calls.signed.length, 0);
+});
+
+test('a saved Full permission alone cannot auto-sign or even reserve funds', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, queued: false, autoSignSwaps: () => false });
+  const result = await (await request({ autoSwap: true, autoSignSwaps: true, swapTicket: ticket })).json();
+  assert.equal(result.state, 'approval-needed');
+  assert.equal(result.reason, 'swap_saved_permission_required');
+  assert.equal(calls.reserved, 0);
+  assert.equal(calls.signed.length, 0);
+});
+
+test('turning off auto-sign while Privy signs stops broadcast', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, autoSignSwaps: calls => calls.signed.length === 0 });
+  const result = await (await request({ autoSwap: true, swapTicket: ticket })).json();
+  assert.equal(result.reason, 'spend_authorization_changed');
+  assert.equal(result.signed, false);
+  assert.equal(calls.signed.length, 1);
+  assert.equal(calls.broadcasts, 0);
 });
 
 test('a wallet frozen while Privy signs never broadcasts', async () => {

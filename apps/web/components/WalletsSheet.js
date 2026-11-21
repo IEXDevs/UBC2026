@@ -51,7 +51,8 @@ import {
   tradeableTokens,
 } from '../lib/wallet-desk.mjs';
 import { sendHandleHint, sendHandleReady } from '../lib/profile.mjs';
-import { accountStorage } from '../lib/account-state.mjs';
+import { accountStorage, saveAccountPermission } from '../lib/account-state.mjs';
+import { readAutoSignSwaps, readStoredPermission, spendPreferenceValue } from '../lib/spend-permission.mjs';
 import { sendPreview } from '../lib/txn-preview.mjs';
 import { previewPortfolioFor } from '../lib/dev-preview.mjs';
 import { walletSendAssets, NATIVE_SOL_MINT } from '../lib/wallet-send-assets.mjs';
@@ -505,6 +506,7 @@ export default function WalletsSheet({
           <details className="wallet-fold wallet-settings phantom-fold" ref={settingsRef}>
             <summary>Wallet settings<ChevronDown size={16} aria-hidden="true" /></summary>
             <div className="wallet-fold-body wallet-settings-grid">
+              {signedIn && ownerId ? <AutoSignSwapSetting key={ownerId} open={open} ownerId={ownerId} /> : null}
               <section aria-label="Manage wallets">
                 <h3>Manage wallets</h3>
                 {signedIn ? (
@@ -556,6 +558,45 @@ export default function WalletsSheet({
       </section>
     </div>,
     root,
+  );
+}
+
+function AutoSignSwapSetting({ open, ownerId }) {
+  const [enabled, setEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setEnabled(readAutoSignSwaps(accountStorage, ownerId));
+    setError('');
+  }, [open, ownerId]);
+
+  async function change(next) {
+    setSaving(true);
+    setError('');
+    try {
+      const value = spendPreferenceValue(readStoredPermission(accountStorage), ownerId, next);
+      if (await saveAccountPermission(ownerId, value)) setEnabled(next);
+      else setError('Could not save Auto-sign swaps. Try again.');
+    } catch {
+      setError('Could not save Auto-sign swaps. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section aria-label="Swap permissions">
+      <label className="ai-model-toggle">
+        <strong>Auto-sign swaps</strong>
+        <input type="checkbox" role="switch" checked={enabled} disabled={saving}
+          aria-describedby="wallet-auto-sign-description" onChange={event => void change(event.target.checked)} />
+        <span className="ai-model-switch" aria-hidden="true" />
+      </label>
+      <p className="quiet" id="wallet-auto-sign-description">Allow eligible Full-permission agents to sign swaps within your USD review limit while the desk is unlocked.</p>
+      {error ? <p className="quiet" role="status">{error}</p> : null}
+    </section>
   );
 }
 

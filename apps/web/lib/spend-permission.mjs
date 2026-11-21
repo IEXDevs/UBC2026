@@ -4,7 +4,7 @@
  * for the person. Every mode uses the same spend API.
  */
 import { formatBaseUnits } from './money-views.mjs';
-import { solanaSpendAsset } from '@ubc2026/contracts';
+import { parseStoredSpendPreference, solanaSpendAsset } from '@ubc2026/contracts';
 
 export const SPEND_PERMISSION_KEY = 'maelstrom.spendPermission';
 export const REVIEW_THRESHOLD_KEY = 'maelstrom.reviewThreshold';
@@ -77,10 +77,26 @@ export function managesFunds(id) {
 
 export function readStoredPermission(storage) {
   try {
-    return parsePermission(storage?.getItem?.(SPEND_PERMISSION_KEY));
+    return parseStoredSpendPreference(storage?.getItem?.(SPEND_PERMISSION_KEY)).permission;
   } catch {
     return 'ask';
   }
+}
+
+export function readAutoSignSwaps(storage, ownerId) {
+  try { return parseStoredSpendPreference(storage?.getItem?.(SPEND_PERMISSION_KEY), ownerId).autoSignSwaps; }
+  catch { return false; }
+}
+
+export function spendPreferenceValue(permission, ownerId, autoSignSwaps) {
+  const mode = parsePermission(permission);
+  return autoSignSwaps === true && ownerId
+    ? JSON.stringify({ permission: mode, ownerId, autoSignSwaps: true })
+    : mode;
+}
+
+export function writeStoredPermission(storage, ownerId, permission) {
+  storage.setItem(SPEND_PERMISSION_KEY, spendPreferenceValue(permission, ownerId, readAutoSignSwaps(storage, ownerId)));
 }
 
 /** Whole dollars or up to 6 decimal places, as microdollars. Zero is refused. */
