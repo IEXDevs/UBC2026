@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
-import { buildSolanaX402Transaction } from '@ubc2026/transfers';
+import { buildSolanaX402Transaction, selectX402SourceAccount } from '@ubc2026/transfers';
 
 const TTL = 300_000;
 const mac = (key, payload) => createHmac('sha256', key).update(payload).digest();
@@ -28,6 +28,13 @@ export function readLasoTicket(ticket, ownerId, botId, key, now = Date.now()) {
   } catch { return null; }
 }
 
+function paymentError(reason) {
+  const error = new Error('simulation_failed');
+  error.code = 'simulation_failed';
+  error.simulationReason = reason;
+  return error;
+}
+
 export async function prepareLasoPayment(env, context, ticket, blockhash) {
   if (SOLANA_CLUSTER !== 'mainnet-beta') throw new Error('wrong_cluster');
   const client = env.transferClient;
@@ -36,8 +43,14 @@ export async function prepareLasoPayment(env, context, ticket, blockhash) {
     if (block?.cluster !== SOLANA_CLUSTER) throw new Error('wrong_cluster');
     blockhash = block.blockhash;
   }
+  let sourceTokenAccount;
+  if (typeof client.listSolanaUsdcAccounts === 'function') {
+    const accounts = await client.listSolanaUsdcAccounts({ address: context.wallet.address });
+    sourceTokenAccount = selectX402SourceAccount(context.wallet.address, accounts, ticket.accepted.amount);
+    if (!sourceTokenAccount) throw paymentError('source_account_not_found');
+  }
   const built = buildSolanaX402Transaction({
-    sourceOwner: context.wallet.address, accepted: ticket.accepted, recentBlockhash: blockhash,
+    sourceOwner: context.wallet.address, sourceTokenAccount, accepted: ticket.accepted, recentBlockhash: blockhash,
   });
   const prepared = await client.prepareSolanaX402Payment({
     ...built, walletAddress: context.wallet.address, accepted: ticket.accepted,

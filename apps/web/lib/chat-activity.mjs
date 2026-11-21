@@ -277,6 +277,11 @@ export function spendFailureMessage(result) {
   }
   switch (parsed?.error || parsed?.state) {
     case 'simulation_failed':
+      if (parsed.simulationReason === 'source_account_not_found') {
+        return typeof parsed.hint === 'string' && parsed.hint.length > 0 && parsed.hint.length <= 240
+          ? parsed.hint
+          : 'The agent wallet has no USDC account that covers this payment. Nothing was submitted.';
+      }
       return `Payment simulation failed${/^[a-zA-Z0-9_]{1,100}$/.test(parsed.simulationReason ?? '') ? `: ${parsed.simulationReason}` : ''}. No payment was submitted.`;
     case 'laso_ticket_invalid':
       return 'The Laso purchase expired or its details changed. Prepare a fresh card purchase.';

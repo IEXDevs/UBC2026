@@ -1,5 +1,5 @@
 import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
-import { AddressLookupTableAccount, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { AddressLookupTableAccount, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { swapAccountSnapshot, verifySwapSimulation } from './swap-simulation.mjs';
 import { SYSTEM_PROGRAM, swapSimulationDetails } from './swap-diagnostics.mjs';
 /**
@@ -1186,6 +1186,53 @@ export function createPrivyWalletClient({
     return parsed;
   }
 
+  function classicTokenAccount(value) {
+    if (value?.owner !== CLASSIC_TOKEN_PROGRAM) return null;
+    const parsed = value.data?.parsed;
+    if (parsed?.type === 'account' && typeof parsed.info?.mint === 'string' && typeof parsed.info?.owner === 'string') {
+      const state = parsed.info.state;
+      return {
+        mint: parsed.info.mint,
+        owner: parsed.info.owner,
+        state: state === 'frozen' || state === 'uninitialized' ? state : 'initialized',
+      };
+    }
+    const data = value.data;
+    if (!Array.isArray(data) || data[1] !== 'base64' || typeof data[0] !== 'string') return null;
+    const bytes = Buffer.from(data[0], 'base64');
+    if (bytes.length !== 165) return null;
+    let mint;
+    let owner;
+    try {
+      mint = new PublicKey(bytes.subarray(0, 32)).toBase58();
+      owner = new PublicKey(bytes.subarray(32, 64)).toBase58();
+    } catch { return null; }
+    const stateByte = bytes[108];
+    return {
+      mint,
+      owner,
+      state: stateByte === 1 ? 'initialized' : stateByte === 2 ? 'frozen' : 'uninitialized',
+      amount: bytes.readBigUInt64LE(64).toString(),
+    };
+  }
+
+  function usdcAccountOwnedBy(value, owner) {
+    const info = classicTokenAccount(value);
+    return Boolean(info && info.owner === owner && info.mint === SOLANA_USDC_MINT && info.state === 'initialized');
+  }
+
+  async function ownedUsdcAccount(tokenAccount, owner) {
+    if (!base58.test(tokenAccount || '') || !base58.test(owner || '')) return false;
+    const read = await rpc('getAccountInfo', [tokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+    if (usdcAccountOwnedBy(read.result?.value, owner)) return true;
+    const listed = await rpc('getTokenAccountsByOwner', [
+      owner, { mint: SOLANA_USDC_MINT }, { encoding: 'jsonParsed', commitment: 'confirmed' },
+    ]);
+    const rows = listed.result?.value;
+    if (!Array.isArray(rows)) return false;
+    return rows.some(row => row?.pubkey === tokenAccount && usdcAccountOwnedBy(row.account, owner));
+  }
+
   function singleSignerMessage(transaction) {
     const bytes = decodeBase64(transaction, 'Transaction');
     if (bytes.length <= SINGLE_SIGNATURE_MESSAGE_OFFSET || bytes.length > MAX_TX_BYTES || bytes[0] !== 1) {
@@ -1426,23 +1473,35 @@ export function createPrivyWalletClient({
       return prepared;
     },
 
+    async listSolanaUsdcAccounts({ address } = {}) {
+      if (!base58.test(address || '')) fail('Wallet address is required', 'invalid_wallet');
+      await assertSolana();
+      const listed = await rpc('getTokenAccountsByOwner', [
+        address, { mint: SOLANA_USDC_MINT }, { encoding: 'jsonParsed', commitment: 'confirmed' },
+      ]);
+      const rows = listed.result?.value;
+      if (!Array.isArray(rows)) fail('Token balance unavailable', 'rpc_rejected');
+      const accounts = [];
+      for (const row of rows) {
+        const info = classicTokenAccount(row?.account);
+        const raw = row?.account?.data?.parsed?.info?.tokenAmount?.amount ?? info?.amount ?? null;
+        if (!info || info.owner !== address || info.mint !== SOLANA_USDC_MINT || info.state !== 'initialized') continue;
+        if (!base58.test(row?.pubkey || '') || typeof raw !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(raw) || raw === '0') continue;
+        accounts.push({ address: row.pubkey, amount: raw });
+      }
+      return accounts;
+    },
+
     async prepareSolanaX402Payment({ transaction, walletAddress, accepted, sourceTokenAccount, destinationTokenAccount } = {}) {
       const parsed = x402Message(transaction, walletAddress, accepted?.extra?.feePayer);
       await assertSolana();
-      const sourceAccount = await rpc('getAccountInfo', [sourceTokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
-      const sourceValue = sourceAccount.result?.value;
-      const sourceInfo = sourceValue?.data?.parsed?.info;
-      if (sourceValue?.owner !== CLASSIC_TOKEN_PROGRAM || sourceValue?.data?.parsed?.type !== 'account'
-          || sourceInfo?.owner !== walletAddress || sourceInfo?.mint !== SOLANA_USDC_MINT || sourceInfo?.state !== 'initialized') {
+      if (!(await ownedUsdcAccount(sourceTokenAccount, walletAddress))) {
         const error = new WalletError('Source USDC account is unavailable', 'simulation_failed');
         error.simulationReason = 'source_account_not_found';
         throw error;
       }
       const account = await rpc('getAccountInfo', [destinationTokenAccount, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
-      const value = account.result?.value;
-      const info = value?.data?.parsed?.info;
-      if (value?.owner !== CLASSIC_TOKEN_PROGRAM || value?.data?.parsed?.type !== 'account'
-          || info?.owner !== accepted.payTo || info?.mint !== SOLANA_USDC_MINT || info?.state !== 'initialized') {
+      if (!usdcAccountOwnedBy(account.result?.value, accepted.payTo)) {
         const error = new WalletError('Laso recipient token account is unavailable', 'simulation_failed');
         error.simulationReason = 'recipient_account_not_found';
         throw error;

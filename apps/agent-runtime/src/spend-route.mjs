@@ -385,7 +385,9 @@ async function handleSpendRequest(request, env = {}) {
       const code = known.includes(error?.code) ? error.code : known.includes(error?.message) ? error.message : 'transfer_preparation_failed';
       const simulationReason = typeof error?.simulationReason === 'string'
         && /^[a-zA-Z0-9_]{1,100}$/.test(error.simulationReason) ? error.simulationReason : null;
-      const hint = code === 'simulation_failed' && !laso && !swap
+      const hint = code === 'simulation_failed' && laso && simulationReason === 'source_account_not_found'
+        ? `Payment checked agent wallet ${context.wallet.address} for a USDC account that covers this amount. Nothing was submitted.`
+        : code === 'simulation_failed' && !laso && !swap
         ? 'The USDC transfer did not simulate. The wallet needs the USDC and a little SOL for the fee. Nothing was sent.'
         : '';
       return json({

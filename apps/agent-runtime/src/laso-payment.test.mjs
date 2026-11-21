@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { issueLasoTicket, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
+import { Keypair } from '@solana/web3.js';
+import { issueLasoTicket, prepareLasoPayment, readLasoTicket, settleLasoPayment } from './laso-payment.mjs';
 import worker from './owner-auth.fixture.mjs';
 import { sha256Hex } from './desk-grant.mjs';
 
@@ -11,6 +12,31 @@ const accepted = { scheme: 'exact', network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKq
   extra: { feePayer: 'BENrLoUbndxoNMUS5JXApGMtNykLjFXXixMtpDwDR9SP' } };
 const resource = { url: 'https://laso.finance/get-card?amount=10' };
 const result = { challenge: { accepted }, resource };
+
+test('Laso payment spends the USDC token account that holds the balance', async () => {
+  const walletAddress = Keypair.generate().publicKey.toBase58();
+  const funded = Keypair.generate().publicKey.toBase58();
+  let seen;
+  const env = { transferClient: {
+    getSolanaBlockhash: async () => ({ cluster: 'mainnet-beta', blockhash: Keypair.generate().publicKey.toBase58() }),
+    listSolanaUsdcAccounts: async ({ address }) => {
+      assert.equal(address, walletAddress);
+      return [{ address: funded, amount: '5000000' }];
+    },
+    prepareSolanaX402Payment: async input => {
+      seen = input.sourceTokenAccount;
+      return { transaction: input.transaction };
+    },
+  } };
+  const ticket = { accepted: { ...accepted, amount: '5000000' } };
+  await prepareLasoPayment(env, { wallet: { address: walletAddress } }, ticket);
+  assert.equal(seen, funded);
+  env.transferClient.listSolanaUsdcAccounts = async () => [{ address: funded, amount: '4999999' }];
+  await assert.rejects(
+    prepareLasoPayment(env, { wallet: { address: walletAddress } }, ticket),
+    error => error.code === 'simulation_failed' && error.simulationReason === 'source_account_not_found',
+  );
+});
 
 test('Laso HMAC tickets bind every payment term, identity, URL and timeout', () => {
   for (const timeout of [30, 300, 600]) {
@@ -94,7 +120,7 @@ for (const asset of ['USDC', 'USD']) for (const browser of [false, true]) test(`
         assert.equal(input.accepted.extra.feePayer, accepted.extra.feePayer);
         assert.ok(input.sourceTokenAccount);
         assert.ok(input.destinationTokenAccount);
-        if (simulationError) throw Object.assign(new Error('private RPC details'), { code: 'simulation_failed', simulationReason: 'insufficient_funds' });
+        if (simulationError) throw Object.assign(new Error('private RPC details'), { code: 'simulation_failed', simulationReason: simulationError === true ? 'insufficient_funds' : simulationError });
         return { transaction: input.transaction, feeLamports: '0', maxSolCost: '0' };
       },
       signPreparedSolanaX402Payment: async ({ prepared }) => { signs++; return { transaction: prepared.transaction }; },
@@ -165,6 +191,11 @@ for (const asset of ['USDC', 'USD']) for (const browser of [false, true]) test(`
   bot.cap.maxPerTransaction = '20000000';
   simulationError = true;
   assert.deepEqual(await request({ confirmed: true }), { error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' });
+  simulationError = 'source_account_not_found';
+  const missingSource = await request({ confirmed: true });
+  assert.equal(missingSource.signed, false);
+  assert.equal(missingSource.simulationReason, 'source_account_not_found');
+  assert.match(missingSource.hint, new RegExp(wallet.address));
   simulationError = false;
   assert.equal(signs, 0);
   assert.equal(reservations.size, 0);
