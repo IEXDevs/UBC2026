@@ -158,9 +158,39 @@ test('walletsFromPrivyUser also keeps connected external Solana wallets', () => 
   assert.equal(wallets.length, 2);
   assert.equal(wallets[0].address, embedded);
   assert.equal(wallets[0].spendable, true);
+  assert.equal(wallets[0].kind, 'main');
   assert.equal(wallets[1].address, phantom);
   assert.equal(wallets[1].walletClientType, 'phantom');
   assert.equal(wallets[1].label, 'Phantom');
+  assert.equal(wallets[1].spendable, false);
+  assert.equal(wallets[1].kind, 'additional');
+});
+
+test('spendable Maelstrom assigned wallet is always main even if external wallet is first in linked accounts', () => {
+  const embedded = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const phantom = 'So11111111111111111111111111111111111111112';
+  const wallets = walletsFromPrivyUser({
+    linkedAccounts: [
+      {
+        type: 'wallet',
+        address: phantom,
+        chainType: 'solana',
+        walletClientType: 'phantom',
+      },
+      {
+        type: 'wallet',
+        address: embedded,
+        chainType: 'solana',
+        walletClientType: 'privy',
+      },
+    ],
+  }, 'did:privy:user1');
+  assert.equal(wallets.length, 2);
+  assert.equal(wallets[0].address, embedded);
+  assert.equal(wallets[0].kind, 'main');
+  assert.equal(wallets[0].spendable, true);
+  assert.equal(wallets[1].address, phantom);
+  assert.equal(wallets[1].kind, 'additional');
   assert.equal(wallets[1].spendable, false);
 });
 
