@@ -2874,7 +2874,7 @@ button.wallet-export:not(:disabled):hover {
 .book-card.is-dim, .book-venue.is-dim { opacity: 0.16; }
 .book-card.is-lit, .book-venue.is-lit { opacity: 1; }
 
-.book-wallet, .book-account {
+.book-wallet-surface, .book-account-surface {
   box-sizing: border-box;
   border-radius: 16px;
   background: #141414;
@@ -2882,10 +2882,11 @@ button.wallet-export:not(:disabled):hover {
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.4);
 }
 
-.book-wallet {
+.book-wallet-surface {
   display: grid;
   align-content: start;
   gap: 3px;
+  padding: 7px 9px;
 }
 
 .book-wallet-head {
@@ -2895,11 +2896,11 @@ button.wallet-export:not(:disabled):hover {
   gap: 6px;
 }
 
-.book-wallet-head strong, .book-wallet-head b { font-size: 12px; letter-spacing: -0.02em; font-weight: 600; }
-.book-wallet-head strong { min-width: 0; }
-.book-wallet-head strong span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.book-wallet-name, .book-wallet-head b { font-size: 12px; letter-spacing: -0.02em; font-weight: 600; }
+.book-wallet-name { min-width: 0; }
+.book-wallet-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .book-wallet-head b { flex: none; }
-.book-wallet p { margin: 0; color: #a3a3a3; font-size: 10px; line-height: 1.2; }
+.book-wallet-surface [data-slot="card-description"] { color: #a3a3a3; font-size: 10px; line-height: 1.2; }
 .book-wallet-bubbles { display: block; width: 100%; }
 .book-wallet-bubbles text {
   fill: #fff;
@@ -2914,7 +2915,7 @@ button.wallet-export:not(:disabled):hover {
 .book-wallet-tone-2 { fill: #29665e; }
 .book-wallet-tone-3 { fill: #795930; }
 
-.book-account {
+.book-account-surface {
   width: 148px;
   height: 52px;
   display: flex;
@@ -2924,11 +2925,9 @@ button.wallet-export:not(:disabled):hover {
 }
 
 .book-account .book-logo { width: 22px; height: 22px; border-radius: 6px; }
-.book-account .book-glance-copy strong { font-size: 13px; }
-.book-account .book-glance-copy span { font-size: 10px; line-height: 1.2; letter-spacing: 0.04em; }
+.book-account [data-slot="card-title"] { font-size: 13px; }
+.book-account [data-slot="card-description"] { font-size: 10px; line-height: 1.2; letter-spacing: 0.04em; text-transform: uppercase; }
 .book-glance-copy { display: grid; min-width: 0; }
-.book-glance-copy strong { font-size: 14px; }
-.book-glance-copy span { color: #a3a3a3; font-size: 11px; line-height: 1.2; letter-spacing: 0.06em; text-transform: uppercase; }
 
 .book-modal {
   position: absolute;
@@ -2958,7 +2957,7 @@ button.wallet-export:not(:disabled):hover {
 .book-modal-card dl div { display: flex; justify-content: space-between; gap: 16px; }
 .book-modal-card dt { color: #a3a3a3; }
 .book-modal-card dd { margin: 0; font-weight: 600; }
-.book-modal-card button {
+.book-modal-close {
   margin-top: 16px;
   border: 0;
   border-radius: 999px;
@@ -3106,10 +3105,9 @@ button.wallet-export:not(:disabled):hover {
 .book-card.book-wallet {
   width: var(--wallet-width);
   height: var(--wallet-height);
-  padding: 7px 9px;
 }
 
-.book-wallet-head strong {
+.book-wallet-name {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -3204,7 +3202,7 @@ button.wallet-export:not(:disabled):hover {
 
 .book-glance { display: flex; align-items: center; gap: 10px; }
 .book-glance strong { display: block; font-size: 15px; line-height: 1.15; letter-spacing: -0.02em; }
-.book-glance span {
+.book-position-source {
   display: block;
   margin-top: 2px;
   color: #a3a3a3;
