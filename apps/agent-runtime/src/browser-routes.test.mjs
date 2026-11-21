@@ -182,3 +182,17 @@ test('durable store pages session records past the first page', async () => {
   assert.equal(listed[0].n, 0);
   assert.equal(listed[100].n, 100);
 });
+
+test('browser click rejects a bad selector without spending a provider call', async () => {
+  const { machine, env } = machineWithBrowsers();
+  const opened = await (await machine.handle(new Request('https://bot/id/bot_1/browser/sessions', {
+    method: 'POST', headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+    body: JSON.stringify({ url: 'https://example.com/' }),
+  }), env)).json();
+  const bad = await machine.handle(new Request(`https://bot/id/bot_1/browser/sessions/${opened.sessionRecordId}/click`, {
+    method: 'POST', headers: { 'x-owner-id': 'user_1', 'content-type': 'application/json' },
+    body: JSON.stringify({ selector: '' }),
+  }), env);
+  assert.equal(bad.status, 400);
+  assert.equal((await bad.json()).error, 'invalid_selector');
+});

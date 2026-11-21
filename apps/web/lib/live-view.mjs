@@ -20,7 +20,7 @@ export function browserSessionUrl(runtimeBase, botId, { sessionRecordId, action 
     if (typeof botId !== 'string' || !BOT_ID.test(botId)) return null;
     const bot = encodeURIComponent(botId);
     if (!sessionRecordId) return shellRuntimeUrl(`/bots/${bot}/browser/sessions`);
-    if (action !== 'live-view' && action !== 'release' && action !== 'navigate') return null;
+    if (action !== 'live-view' && action !== 'release' && action !== 'navigate' && action !== 'click') return null;
     if (typeof sessionRecordId !== 'string' || !BOT_ID.test(sessionRecordId)) return null;
     return shellRuntimeUrl(`/bots/${bot}/browser/sessions/${encodeURIComponent(sessionRecordId)}/${action}`);
   }
@@ -31,7 +31,7 @@ export function browserSessionUrl(runtimeBase, botId, { sessionRecordId, action 
   const root = `${base.origin}${base.pathname.replace(/\/$/, '')}`;
   const bot = encodeURIComponent(botId);
   if (!sessionRecordId) return `${root}/bots/${bot}/browser/sessions`;
-  if (action !== 'live-view' && action !== 'release' && action !== 'navigate') return null;
+  if (action !== 'live-view' && action !== 'release' && action !== 'navigate' && action !== 'click') return null;
   return `${root}/bots/${bot}/browser/sessions/${encodeURIComponent(sessionRecordId)}/${action}`;
 }
 

@@ -35,7 +35,7 @@ import {
 } from '@ubc2026/wallets/balances';
 import { browserSessionUrl } from './live-view.mjs';
 import { ownerApiUrl, runtimeBaseUrl } from './runtime-data.mjs';
-import { isLasoCardRequest, lasoPreparationArgs } from './laso-chat.mjs';
+import { isLasoCardRequest, LASO_CARD_CHOICE_PROMPT, lasoCardKind, lasoPreparationArgs, lasoReloadableChecklist } from './laso-chat.mjs';
 import { privySignerId } from './privy-signers.mjs';
 
 const MAX_TOOL_RESULT = 6000;
@@ -491,7 +491,7 @@ export function createChatToolInvoker({
   async function invokeBrowser(name, args = {}) {
     const openUrl = browserSessionUrl(root, botId);
     let sessionRecordId = typeof args.sessionRecordId === 'string' ? args.sessionRecordId.trim() : '';
-    if (['browser_navigate', 'browser_live_view', 'browser_release'].includes(name) && !sessionRecordId) {
+    if (['browser_navigate', 'browser_live_view', 'browser_release', 'browser_click'].includes(name) && !sessionRecordId) {
       const listed = openUrl ? await callWorker(openUrl, 'GET') : await local.listOpenSessions(identity);
       const sessions = (Array.isArray(listed.sessions) ? listed.sessions : []).filter(session =>
         session?.status === 'open' && typeof session.sessionRecordId === 'string' && session.sessionRecordId.trim());
@@ -584,6 +584,21 @@ export function createChatToolInvoker({
           : 'Live View is ready, but the session is still on about:blank — call browser_navigate with an https url.',
       };
     }
+    if (name === 'browser_click') {
+      if (typeof args.selector !== 'string' || !args.selector.trim() || args.selector.length > 256) {
+        return { error: 'invalid_selector' };
+      }
+      const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'click' });
+      const clicked = await callWorker(url, 'POST', { selector: args.selector.trim() });
+      return {
+        sessionRecordId: clicked.sessionRecordId || sessionRecordId,
+        x: clicked.x,
+        y: clicked.y,
+        tag: clicked.tag,
+        text: clicked.text,
+        note: 'Clicked via the visible cursor overlay in Live View.',
+      };
+    }
     if (name === 'browser_release') {
       const url = browserSessionUrl(root, botId, { sessionRecordId, action: 'release' });
       const released = await callWorker(url, 'POST', {});
@@ -671,7 +686,21 @@ export function createChatToolInvoker({
   return async function invokeTool(name, args = {}, { approveOnce, spendAuthorization, swapTicket, lasoPayment, moveAuthorization } = {}) {
     args = applySituation(name, args, situation);
     if (isLasoCardRequest(ownerMessage)) {
-      if (name === 'prepare_shopping') args = lasoPreparationArgs(args, ownerMessage);
+      if (name === 'prepare_shopping') {
+        const kind = lasoCardKind(ownerMessage);
+        if (kind === 'undecided') {
+          return { ok: false, error: 'laso_card_choice_required', hint: LASO_CARD_CHOICE_PROMPT };
+        }
+        if (kind === 'reloadable') {
+          return {
+            ok: false,
+            error: 'laso_reloadable_human_steps',
+            steps: lasoReloadableChecklist(),
+            hint: 'A new reloadable card is KYC plus a card-issuer code plus funding. Hand the steps to the owner instead of preparing a prepaid card.',
+          };
+        }
+        args = lasoPreparationArgs(args, ownerMessage);
+      }
       if (name === 'request_spend' && args.action !== 'x402') {
         return { error: 'laso_requires_x402', hint: 'Use action x402 with the prepared lasoTicket, never a plain transfer to Laso payTo.' };
       }
@@ -725,6 +754,7 @@ export function createChatToolInvoker({
         name === 'browser_open'
         || name === 'browser_navigate'
         || name === 'browser_live_view'
+        || name === 'browser_click'
         || name === 'browser_release'
       ) {
         return await invokeBrowser(name, args);

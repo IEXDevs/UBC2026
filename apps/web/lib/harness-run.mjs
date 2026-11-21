@@ -134,7 +134,7 @@ export async function runDelegatedAgent(ctx, args = {}) {
         harnessPrompt(ctx.connectors, skill?.id || '', ctx.situation),
         'You are a subagent. Use the tools. Do not delegate. Reply with what you found.',
       ].join('\n'),
-      maxToolRounds: 3,
+      maxToolRounds: 6,
       invokeTool: async (name, toolArgs) => {
         const hit = await dispatchHarness(name, toolArgs, { ...ctx, depth: (ctx.depth || 0) + 1 });
         if (hit) return hit;
@@ -226,7 +226,7 @@ export async function runVoiceAgentTurn({
       reviewCap: cap,
       model,
       fetcher,
-      maxToolRounds: 3,
+      maxToolRounds: 6,
       ...opts,
     }),
   };

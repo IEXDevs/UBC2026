@@ -48,6 +48,14 @@ test('browser session URLs stay on the runtime origin', () => {
     browserSessionUrl('shell', 'bot_1', { sessionRecordId: 'rec_1', action: 'live-view' }),
     '/api/runtime/bots/bot_1/browser/sessions/rec_1/live-view',
   );
+  assert.equal(
+    browserSessionUrl('shell', 'bot_1', { sessionRecordId: 'rec_1', action: 'click' }),
+    '/api/runtime/bots/bot_1/browser/sessions/rec_1/click',
+  );
+  assert.equal(
+    browserSessionUrl('https://runtime.example', 'bot_1', { sessionRecordId: 'rec_1', action: 'click' }),
+    'https://runtime.example/bots/bot_1/browser/sessions/rec_1/click',
+  );
 });
 
 /**

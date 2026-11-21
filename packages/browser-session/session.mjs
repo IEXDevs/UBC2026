@@ -107,6 +107,19 @@ export const agentTools = Object.freeze([
     },
   },
   {
+    name: 'browser_click',
+    description: 'Click a page element in an agent-owned browser session via CSS selector. Shows a visible cursor overlay in Live View before the press so the owner can follow the agent. Use after browser_open/navigate when the owner asks to use a site, form, or button. Do not use for a product fact; use web_search for that.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['sessionRecordId', 'selector'],
+      properties: {
+        sessionRecordId: { type: 'string', minLength: 1, maxLength: 128, description: 'Optional when exactly one session is open; otherwise required' },
+        selector: { type: 'string', minLength: 1, maxLength: 256, description: 'CSS selector for the element to click, e.g. button[type=submit] or a[href="/login"]' },
+      },
+    },
+  },
+  {
     name: 'browser_release',
     description: 'Release a bot-owned browser session so concurrency slots free up.',
     parameters: {
@@ -434,6 +447,40 @@ export function createBrowserSessionService({
       };
     },
 
+    async click({ ownerId, botId, sessionRecordId, selector }) {
+      if (![ownerId, botId].every(idOk)) fail('invalid_identity');
+      if (!browsers) throw new ProviderError('browser_not_configured', 503);
+      if (typeof browsers.click !== 'function') throw new ProviderError('browser_not_configured', 503);
+      let recordId = sessionRecordId;
+      if (!recordId) {
+        const open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
+        if (open.length === 0) fail('session_not_found', 404);
+        open.sort((a, b) => Number(b.updatedAt ?? b.createdAt ?? 0) - Number(a.updatedAt ?? a.createdAt ?? 0));
+        recordId = open[0].sessionRecordId;
+      }
+      const record = await requireOwned(ownerId, botId, recordId);
+      if (record.control === 'owner') fail('owner_has_control', 409);
+      if (typeof selector !== 'string' || !selector.trim() || selector.length > 256) fail('invalid_selector', 400);
+      if (!record.targetId) fail('session_not_found', 404);
+      const clicked = await withSession(record, () => browsers.click(record.providerSessionId, record.targetId, selector.trim()));
+      const updated = { ...record, revision: (record.revision ?? 0) + 1, updatedAt: clock() };
+      await store.put(keyFor(ownerId, botId, record.sessionRecordId), updated);
+      return {
+        sessionRecordId: record.sessionRecordId,
+        x: clicked.x,
+        y: clicked.y,
+        tag: clicked.tag,
+        text: clicked.text,
+        event: {
+          type: 'tool',
+          name: 'browser_click',
+          status: 'ok',
+          sessionRecordId: record.sessionRecordId,
+          at: clock(),
+        },
+      };
+    },
+
     async releaseSession({ ownerId, botId, sessionRecordId }) {
       const record = await requireOwned(ownerId, botId, sessionRecordId);
       if (browsers && typeof browsers.closeSession === 'function') {
@@ -503,6 +550,12 @@ export function createBrowserSessionService({
             event: view.event,
           };
         }
+        case 'browser_click':
+          return this.click({
+            ...identity,
+            sessionRecordId: args?.sessionRecordId,
+            selector: args?.selector,
+          });
         case 'browser_release':
           return this.releaseSession({ ...identity, sessionRecordId: args?.sessionRecordId });
         default:
