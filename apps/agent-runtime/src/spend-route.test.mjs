@@ -238,6 +238,8 @@ test('a manual SOL swap offers a fresh smaller quote for wrapping and later setu
   assert.deepEqual(simulated, amounts);
   const originalAmount = await (await request({ confirmed: true, swapTicket: preview.swapPreview.ticket, swapAuthorization: 'prepare' })).json();
   assert.equal(originalAmount.error, 'swap_quote_expired');
+  const automatic = await (await request({ amount: amounts[2], autoSwap: true, swapTicket: preview.swapPreview.ticket })).json();
+  assert.equal(automatic.reason, 'swap_quote_requires_confirmation');
   assert.deepEqual(simulated, amounts);
   const approved = await (await request({ amount: amounts[2], confirmed: true,
     swapTicket: preview.swapPreview.ticket, swapAuthorization: 'prepare' })).json();
@@ -1429,7 +1431,7 @@ test('a within-cap USDC buy continues when Jupiter trust is unavailable by forci
   assert.equal((await ledgerApi.snapshot()).ledgers[0].reserved, '1000000');
 });
 
-async function autoSwapSetup({ trust = '800' } = {}) {
+async function autoSwapSetup({ trust = '800', permission = 'full', savedCap = '2000000', delegated = false, queued = true, freezeWhileSigning = false } = {}) {
   const keypair = Keypair.generate();
   const wallet = { id: 'w_main', ownerId: 'user_1', kind: 'main', label: 'Main', address: keypair.publicKey.toBase58(), frozen: false, provider: 'privy' };
   const sol = 'So11111111111111111111111111111111111111112';
@@ -1442,7 +1444,7 @@ async function autoSwapSetup({ trust = '800' } = {}) {
   await machine.put('meta', { botId: bot.id, ownerId: bot.ownerId, cluster: 'mainnet-beta' });
   await machine.put('run', { botId: bot.id, step: 'decide', paused: true, pauseReason: LOOP_SWAP_PENDING, events: [],
     checkpoints: { decide: { status: 'waiting', reason: LOOP_SWAP_PENDING, swapIntent: intent } } });
-  const calls = { signed: [], reserved: 0 };
+  const calls = { signed: [], reserved: 0, broadcasts: 0 };
   const env = spendEnv({
     spendNow: now,
     BOT: { idFromName: name => name, get: () => ({ fetch: request => machine.handle(request) }) },
@@ -1450,7 +1452,9 @@ async function autoSwapSetup({ trust = '800' } = {}) {
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'test-role',
     spendTrustScore: trust,
-    loadSpendContext: async () => ({ bot: usdBot, wallet, ledger: { ...ledger, asset: 'USD' } }),
+    loadSpendContext: async () => ({ bot: usdBot,
+      wallet: freezeWhileSigning && calls.signed.length ? { ...wallet, frozen: true } : wallet,
+      ledger: { ...ledger, asset: 'USD' } }),
     lookupSpendPrice: async mint => ({
       mint, pricingCluster: 'mainnet', executionCluster: 'mainnet-beta',
       priceUsd: mint === sol ? '100' : '1', fetchedAt: new Date(now).toISOString(),
@@ -1461,7 +1465,16 @@ async function autoSwapSetup({ trust = '800' } = {}) {
       prepareSolanaSwap: async input => ({ transaction: input.transaction, feeLamports: '5000', maxSolCost: '5000' }),
       formatPreparedSpendAuthorization: () => Buffer.from('swap-owner-authorization-payload'.repeat(2)).toString('base64'),
       signPreparedSolanaTransfer: async (request) => {
+        assert.fail('swaps must not use transfer signing');
+      },
+      canSignDelegatedSwap: async () => delegated,
+      signPreparedSolanaSwap: async (request) => {
+        assert.equal(calls.reserved, 1);
+        assert.equal(request.wallet, wallet);
+        assert.equal(request.accessToken, undefined);
         calls.signed.push(request);
+        await request.checkPermission();
+        calls.broadcasts += 1;
         return { cluster: 'mainnet-beta', signature: '6'.repeat(64) };
       },
       broadcastSignedSolana: () => assert.fail('no browser signature provided'),
@@ -1488,11 +1501,16 @@ async function autoSwapSetup({ trust = '800' } = {}) {
       if (target.pathname.endsWith('/desk_locks')) {
         return Response.json([{ grant_hash: grantHash, grant_until: new Date(now + 120_000).toISOString() }]);
       }
+      if (target.pathname.endsWith('/owner_state')) {
+        assert.equal(target.searchParams.get('owner_id'), 'eq.user_1');
+        return Response.json([{ name: 'permission', value: permission }, { name: 'reviewCap', value: savedCap }]);
+      }
       if (target.pathname.endsWith('/approvals')) return new Response('', { status: 201 });
       return new Response('[]');
     },
   });
-  const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000', idempotencyKey: intent.idempotencyKey };
+  const swap = { botId: bot.id, permission: 'full', action: 'swap', asset: 'USDC', outputAsset: 'SOL', amount: '1000000',
+    idempotencyKey: queued ? intent.idempotencyKey : `spend_${crypto.randomUUID()}` };
   const request = (body, headers = { 'x-desk-grant': grant }) => worker.fetch(spendRequest({ ...swap, ...body }, headers), env);
   const ticket = (await (await request()).json()).swapPreview.ticket;
   return { calls, request, ticket, machine, env, keypair };
@@ -1500,12 +1518,12 @@ async function autoSwapSetup({ trust = '800' } = {}) {
 
 /**
  * Achieves: a queued agent swap runs without the slide only on an agent send's terms.
- * Fails when: an auto swap skips review, desk or browser-signing requirements.
- * Oracle: unsigned results, no reservation, and a specific client-signing requirement under the cap.
+ * Fails when: an auto swap skips review, desk or signer requirements.
+ * Oracle: unsigned results and no reservation when delegation is unavailable.
  * Side effects: in-memory bot DO; Jupiter, prices, Privy and the ledger are doubles.
  * Gaps: live Jupiter and Privy are not called.
  */
-test('an auto agent swap retains review and desk gates and requires browser signing', async () => {
+test('automatic swaps retain review and desk gates and require approval without delegation', async () => {
   const { calls, request, ticket } = await autoSwapSetup();
   const over = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '1000000' })).json();
   assert.equal(over.signed, false);
@@ -1519,9 +1537,47 @@ test('an auto agent swap retains review and desk gates and requires browser sign
   assert.equal(calls.signed.length, 0);
   const auto = await (await request({ autoSwap: true, swapTicket: ticket, reviewCap: '2000000' })).json();
   assert.equal(auto.signed, false);
-  assert.equal(auto.reason, 'client_sign_required');
+  assert.equal(auto.reason, 'swap_delegation_unavailable');
+  const review = await (await request({ autoSwap: true, swapTicket: ticket, permission: 'review' })).json();
+  assert.equal(review.reason, 'client_sign_required');
   assert.equal(calls.signed.length, 0);
   assert.equal(calls.reserved, 0);
+});
+
+for (const queued of [true, false]) test(`delegated Full ${queued ? 'queued' : 'chat'} swap reserves and signs once`, async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, queued });
+  assert.equal(calls.reserved, 0);
+  const body = { autoSwap: true, swapTicket: ticket, reviewCap: '2000000' };
+  const sent = await (await request(body)).json();
+  assert.equal(sent.signed, true, JSON.stringify(sent));
+  assert.equal(sent.signature, '6'.repeat(64));
+  assert.equal(sent.swapAuthorization, undefined);
+  const again = await (await request(body)).json();
+  assert.equal(again.signed, false);
+  assert.equal(again.reason ?? again.error, queued ? 'swap_intent_unavailable' : 'duplicate-spend');
+  assert.equal(calls.signed.length, 1);
+  assert.equal(calls.broadcasts, 1);
+});
+
+test('delegated signing uses the saved permission and clamps a raised request limit', async () => {
+  const denied = await autoSwapSetup({ delegated: true, queued: false, permission: 'review' });
+  const forged = await (await denied.request({ autoSwap: true, swapTicket: denied.ticket })).json();
+  assert.equal(forged.reason, 'swap_saved_permission_required');
+  assert.equal(denied.calls.reserved, 0);
+  const limited = await autoSwapSetup({ delegated: true, queued: false, savedCap: '1000000' });
+  const raised = await (await limited.request({ autoSwap: true, swapTicket: limited.ticket, reviewCap: '900000000' })).json();
+  assert.equal(raised.state, 'approval-needed');
+  assert.equal(limited.calls.reserved, 0);
+  assert.equal(limited.calls.signed.length, 0);
+});
+
+test('a wallet frozen while Privy signs never broadcasts', async () => {
+  const { calls, request, ticket } = await autoSwapSetup({ delegated: true, freezeWhileSigning: true });
+  const result = await (await request({ autoSwap: true, swapTicket: ticket })).json();
+  assert.equal(result.reason, 'spend-frozen');
+  assert.equal(result.signed, false);
+  assert.equal(calls.signed.length, 1);
+  assert.equal(calls.broadcasts, 0);
 });
 
 /**

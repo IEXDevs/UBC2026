@@ -150,8 +150,12 @@ test('owner browser authorization signs legacy multi-signer and v0 messages with
   }
 });
 
-test('swap preparation derives balances from requested RPC account snapshots, not transaction metadata', async () => {
-  const signer = Keypair.generate().publicKey;
+test('delegated swap signing uses only the exact transaction verified by RPC account snapshots', async () => {
+  const signerKey = Keypair.generate();
+  const signer = signerKey.publicKey;
+  const signerId = 'test-delegated-signer';
+  const wallet = { ...createMainWallet({ ownerId: baseBot.ownerId, address: signer.toBase58(), id: walletId }), privyWalletId: walletId };
+  const bot = { ...baseBot, walletId };
   const tokenAccount = Keypair.generate().publicKey;
   const mint = new PublicKey(address);
   const transaction = Buffer.from(new VersionedTransaction(new TransactionMessage({
@@ -166,6 +170,9 @@ test('swap preparation derives balances from requested RPC account snapshots, no
     return { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280, data: [data.toString('base64'), 'base64'] };
   };
   let missing = false;
+  let enrolled = true;
+  let signMode = 'valid';
+  let clock = 1_000;
   let simulationError = null;
   const system = SystemProgram.programId.toBase58();
   const token = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -174,7 +181,25 @@ test('swap preparation derives balances from requested RPC account snapshots, no
     `Program ${token} failed: custom program error: 0x1`, `Program ${system} failed: custom program error: 0x1`,
   ];
   const calls = [];
-  const fetcher = async (_url, init) => {
+  const fetcher = async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === `/v1/wallets/${walletId}`) {
+      return Response.json({ id: walletId, address: wallet.address, chain_type: 'solana',
+        additional_signers: enrolled ? [{ signer_id: signerId }] : [] });
+    }
+    if (path === `/v1/wallets/${walletId}/rpc`) {
+      calls.push('privySign');
+      assert.ok(init.headers['privy-authorization-signature']);
+      assert.equal(JSON.parse(init.body).method, 'signTransaction');
+      assert.equal(JSON.parse(init.body).params.transaction, transaction);
+      if (signMode === 'denied') return Response.json({}, { status: 401 });
+      const signed = VersionedTransaction.deserialize(Buffer.from(transaction, 'base64'));
+      if (signMode === 'changed') signed.message.recentBlockhash = signer.toBase58();
+      if (signMode !== 'unsigned') signed.sign([signerKey]);
+      if (signMode === 'late') clock = 2_000;
+      return Response.json({ data: { signed_transaction: Buffer.from(signed.serialize()).toString('base64') } });
+    }
+    assert.equal(url, rpcUrl);
     const { method, params } = JSON.parse(init.body);
     calls.push(method);
     let result;
@@ -188,14 +213,41 @@ test('swap preparation derives balances from requested RPC account snapshots, no
         err: simulationError, accounts: missing ? null : [{ lamports: 989995000 }, account('1000000'), null],
         logs: ['Program log: https://rpc.invalid/private-key', 'Program data: private-data', ...failureLogs],
       } };
+    } else if (method === 'sendTransaction') {
+      const sent = VersionedTransaction.deserialize(Buffer.from(params[0], 'base64'));
+      assert.deepEqual(sent.message.serialize(), VersionedTransaction.deserialize(Buffer.from(transaction, 'base64')).message.serialize());
+      assert.ok(sent.signatures[0].some(byte => byte !== 0));
+      result = txSignature;
     } else assert.fail(`unexpected RPC ${method}`);
     return Response.json({ jsonrpc: '2.0', id: 1, result });
   };
-  const privy = client({ fetcher });
+  const privy = client({ fetcher, signerId, authorizationKey, now: () => clock });
   const intent = { transaction, walletAddress: signer.toBase58(), inputMint: 'So11111111111111111111111111111111111111112', outputMint: address, amount: '10000000', minOutput: '950000' };
   const prepared = await privy.prepareSolanaSwap(intent);
   assert.equal(prepared.maxSolCost, '5000');
   assert.equal(calls.includes('sendTransaction'), false);
+  assert.equal(await privy.canSignDelegatedSwap({ bot, wallet }), true);
+  enrolled = false;
+  assert.equal(await privy.canSignDelegatedSwap({ bot, wallet }), false);
+  assert.equal(await privy.canSignDelegatedSwap({ bot, wallet: { ...wallet, spendable: false } }), false);
+  enrolled = true;
+  const signSwap = (prepared, checkPermission = async () => {}) =>
+    privy.signPreparedSolanaSwap({ bot, wallet, prepared, expiresAt: 2_000, checkPermission });
+  await assert.rejects(signSwap({ ...prepared }), { code: 'simulation_required' });
+  assert.equal(calls.includes('privySign'), false);
+  assert.deepEqual(await signSwap(prepared), { cluster: 'mainnet-beta', signature: txSignature });
+  await assert.rejects(signSwap(prepared), { code: 'simulation_required' });
+  await assert.rejects(signSwap(await privy.prepareSolanaSwap(intent), async () => {
+    assert.equal(calls.at(-2), 'privySign');
+    throw Object.assign(new Error('frozen during signing'), { code: 'spend-frozen' });
+  }), { code: 'spend-frozen' });
+  for (const [mode, code] of [['changed', 'transaction_mismatch'], ['unsigned', 'transaction_mismatch'],
+    ['denied', 'wallet_authorization_required'], ['late', 'swap_quote_expired']]) {
+    signMode = mode;
+    await assert.rejects(signSwap(await privy.prepareSolanaSwap(intent)), { code });
+  }
+  assert.equal(calls.filter(method => method === 'sendTransaction').length, 1);
+  assert.equal(calls.filter(method => method === 'privySign').length, 6);
   simulationError = { InstructionError: [0, { Custom: 1 }] };
   await assert.rejects(privy.prepareSolanaSwap(intent), error => {
     assert.equal(error.code, 'simulation_failed');
