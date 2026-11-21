@@ -42,9 +42,10 @@ export default function JupiterSwap({ address = '', label = '', frozen = false, 
         signingFailure.current = '';
         setResult('');
         try {
-          return await signSelectedWalletTransaction({ from: { address, frozen }, transaction, signer: { wallets: [signer], signTransaction } });
+          return await signSelectedWalletTransaction({ from: { address, frozen }, transaction,
+            signer: { wallets: [signer], signTransaction }, forSwap: true });
         } catch (error) {
-          signingFailure.current = swapFailure({ code: error?.code === 'wallet_approval_cancelled' ? 'client_sign_rejected' : error?.code }).message;
+          signingFailure.current = swapFailure({ code: error?.code, signingHttpStatus: error?.signingHttpStatus }).message;
           setResult(signingFailure.current);
           throw error;
         }

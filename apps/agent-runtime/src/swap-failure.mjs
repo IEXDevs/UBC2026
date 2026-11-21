@@ -10,6 +10,8 @@ const FAILURES = {
   swap_signer_missing: ['wallet authorization', 'The agent’s wallet needs the Maelstrom signer.'],
   aborted: ['client signing', 'The swap request was cancelled. Nothing further was submitted.'],
   client_sign_rejected: ['client signing', 'The selected wallet declined or cancelled signing.'],
+  client_sign_failed: ['client signing', 'The selected wallet could not sign the swap. Nothing was submitted.'],
+  client_sign_session_required: ['client signing', 'The wallet provider rejected the signing session. Sign in again before retrying. Nothing was submitted.'],
   wallet_connection_required: ['client signing', 'The selected wallet is not available in this browser. Connect that exact wallet; server-only wallets cannot use browser signing.'],
   broadcast_failed: ['broadcast', 'The server could not broadcast the signed swap. Submission status may be unknown; check activity before retrying.'],
   swap_quote_unavailable: ['quote', 'Jupiter could not prepare a swap quote.'],
@@ -128,5 +130,8 @@ export function swapFailure(result = {}) {
   const status = result.privyFailure?.status;
   const lookup = code === 'swap_wallet_lookup_failed' && Number.isInteger(status) && status >= 100 && status <= 599
     ? ` Privy wallet lookup returned HTTP ${status}.` : '';
-  return { code, step, message: `Swap — ${step}: ${reason}${lookup} [${code}]` };
+  const signingStatus = result.signingHttpStatus;
+  const walletStatus = Number.isInteger(signingStatus) && signingStatus >= 400 && signingStatus <= 599
+    ? ` The wallet provider returned HTTP ${signingStatus}.` : '';
+  return { code, step, message: `Swap — ${step}: ${reason}${lookup}${walletStatus} [${code}]` };
 }

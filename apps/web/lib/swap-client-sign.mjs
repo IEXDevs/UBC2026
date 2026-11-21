@@ -70,9 +70,10 @@ export async function executeClientSignedSwap({ spend, swapTicket, signer, readS
     signed = await signSelectedWalletTransaction({
       from,
       transaction: Uint8Array.from(atob(challenge.transaction), char => char.charCodeAt(0)), signer: browserSigner,
+      forSwap: true,
     });
   } catch (error) {
-    return failed({ error: error?.code === 'wallet_approval_cancelled' ? 'client_sign_rejected' : error?.code });
+    return failed({ error: error?.code, signingHttpStatus: error?.signingHttpStatus });
   }
   if (signal?.aborted) return failed({ error: 'aborted' });
   if (challenge.expiresAt <= Date.now()) return failed({ error: 'spend_authorization_expired' });
