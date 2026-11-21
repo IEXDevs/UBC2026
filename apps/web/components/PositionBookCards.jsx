@@ -1,7 +1,15 @@
+import { useId } from 'react';
 import { Wallet } from 'lucide-react';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+
+const BUBBLE_PALETTE = [
+  ['#5b84ab', '#355b80', '#20384f'],
+  ['#807cad', '#575583', '#363553'],
+  ['#53948a', '#326b64', '#204840'],
+  ['#a2875e', '#755b37', '#4b3822'],
+];
 
 export function usdLabel(notionalLabel) {
   if (!notionalLabel) return '';
@@ -14,6 +22,7 @@ function VenueLogo({ src }) {
 }
 
 export function WalletCard({ wallet }) {
+  const gradientId = useId();
   return (
     <Card className="book-wallet-surface size-full gap-0 p-0">
       <CardHeader className="book-wallet-head p-0">
@@ -35,9 +44,23 @@ export function WalletCard({ wallet }) {
             role="img"
             aria-label={wallet.bubbles.map(bubble => `${bubble.asset} ${bubble.valueLabel}`).join(', ')}
           >
+            <defs>
+              {BUBBLE_PALETTE.map(([highlight, mid, shadow], index) => (
+                <radialGradient key={highlight} id={`${gradientId}-${index}`} cx="32%" cy="22%" r="78%">
+                  <stop stopColor={highlight} />
+                  <stop offset="62%" stopColor={mid} />
+                  <stop offset="100%" stopColor={shadow} />
+                </radialGradient>
+              ))}
+            </defs>
             {wallet.bubbles.map((bubble, index) => (
               <g key={`${bubble.asset}-${index}`}>
-                <circle cx={bubble.x} cy={bubble.y} r={bubble.r} className={`book-wallet-tone-${index % 4}`}>
+                <circle
+                  className="book-wallet-bubble"
+                  cx={bubble.x} cy={bubble.y} r={bubble.r}
+                  fill={`url(#${gradientId}-${index % BUBBLE_PALETTE.length})`}
+                  strokeWidth={Math.min(0.9, bubble.r / 5)}
+                >
                   <title>{`${bubble.asset} · ${bubble.valueLabel}`}</title>
                 </circle>
                 {bubble.r * 2 >= bubble.asset.length * 5 + 7 && <text x={bubble.x} y={bubble.y}>{bubble.asset}</text>}

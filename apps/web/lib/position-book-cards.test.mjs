@@ -38,6 +38,8 @@ test('registry cards show the provider position apart from wallet USD holdings',
   assert.match(wallet, /So111\.\.\.11112/);
   assert.match(wallet, /\$125/);
   assert.match(wallet, /SOL \$100, USDC \$25/);
+  const gradient = wallet.match(/<radialGradient id="([^"]+)"/)[1];
+  assert.ok(wallet.includes(`fill="url(#${gradient})"`));
   assert.match(wallet, /1 unpriced/);
   assert.doesNotMatch(wallet, /Jupiter/);
 
