@@ -104,7 +104,7 @@ export async function previewLiveSwap(env, context, parsed, key, now, { allowRed
     const expiresAt = now + TTL;
     const terms = {
       transaction: offer.transaction, blockhash: block.blockhash, minOutput: offer.minOutput,
-      expiresAt, maxSolCost: prepared.maxSolCost, ...valuation,
+      expiresAt, maxSolCost: prepared.maxSolCost, ...valuation, requiresOwnerApproval: amount !== parsed.amount,
     };
     return {
       expiresAt, inputDecimals, outputDecimals, minOutput: offer.minOutput,

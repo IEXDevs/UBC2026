@@ -985,7 +985,7 @@ export function createPrivyWalletClient({
     }
   }
 
-  async function signWithPrivy(walletId, transaction, userAuthorization) {
+  async function signWithPrivy(walletId, transaction, userAuthorization, { appOnly = false } = {}) {
     const unsigned = decodeBase64(transaction, 'Transaction');
     if (unsigned.length > MAX_TX_BYTES) fail('Transaction exceeds the Solana packet limit', 'invalid_transaction');
     const url = `${privyApi}/v1/wallets/${encodeURIComponent(walletId)}/rpc`;
@@ -993,8 +993,8 @@ export function createPrivyWalletClient({
       method: 'signTransaction',
       params: { transaction, encoding: 'base64' },
     };
-    const appAttempt = userAuthorization ? { stage: 'app-sign' } : undefined;
-    const report = appAttempt ? { at: now(), requests: [appAttempt] } : null;
+    const appAttempt = userAuthorization || appOnly ? { stage: 'app-sign' } : undefined;
+    const report = userAuthorization ? { at: now(), requests: [appAttempt] } : null;
     try {
       const headers = privyHeaders({ method: 'POST', url, body });
       if (report) report.appSignature = Boolean(headers['privy-authorization-signature']);
@@ -1004,12 +1004,15 @@ export function createPrivyWalletClient({
         body,
         signingAttempt: appAttempt,
       }, 'privy_failed');
-      if (userAuthorization && typeof signedBody?.data?.signed_transaction !== 'string') {
+      if (appAttempt && typeof signedBody?.data?.signed_transaction !== 'string') {
         appAttempt.detail = 'missing-signed-transaction';
         failSigning('Privy returned no signed transaction', 'privy_failed', { transport: 'invalid-response' });
       }
       return signedBody?.data?.signed_transaction;
     } catch (error) {
+      if (appOnly && error?.code === 'privy_failed' && error.privyFailure?.status === 401) {
+        failSigning('Privy rejected delegated wallet authorization', 'wallet_authorization_required', error.privyFailure);
+      }
       if (!userAuthorization) throw error;
       const { ownerId, accessToken, walletAddress } = userAuthorization;
       let requiresOwnerAuthorization = error?.code === 'wallet_authorization_required';
@@ -1137,7 +1140,7 @@ export function createPrivyWalletClient({
     }
   }
 
-  async function sendSigned(signedTransaction, { privy = false } = {}) {
+  async function sendSigned(signedTransaction, { privy = false, beforeBroadcast } = {}) {
     const signed = decodeBase64(signedTransaction, 'Signed transaction');
     if (signed.length <= 64) {
       fail(
@@ -1149,6 +1152,7 @@ export function createPrivyWalletClient({
     }
     if (signed.length > MAX_TX_BYTES) fail('Signed transaction exceeds the Solana packet limit', 'invalid_transaction');
     await assertSolana();
+    if (beforeBroadcast) await beforeBroadcast();
     const sent = await rpc('sendTransaction', [
       signedTransaction,
       { encoding: 'base64', preflightCommitment: 'confirmed' },
@@ -1161,6 +1165,14 @@ export function createPrivyWalletClient({
 
   const simulatedTransfers = new WeakSet();
   const simulatedX402 = new WeakSet();
+  const simulatedSwaps = new WeakMap();
+
+  function delegatedSwapWalletId({ bot, wallet }) {
+    assertSpendAllowed({ bot, wallet });
+    if (bot.ownerId !== wallet.ownerId || wallet.provider !== 'privy' || wallet.spendable === false
+        || /^(linked_|client_)/.test(wallet.id) || !signer || !authKey || wallet.privyWalletId !== wallet.id) return null;
+    return assertPrivyWalletId(wallet.privyWalletId);
+  }
 
   function x402Message(transaction, walletAddress, feePayer) {
     let parsed;
@@ -1530,8 +1542,44 @@ export function createPrivyWalletClient({
       }, { wallet: walletAddress, inputMint, outputMint, amount, minOutput });
       if (effects.reason) failSimulation(value, { reason: effects.reason });
       const prepared = Object.freeze({ transaction, ...effects });
-      simulatedTransfers.add(prepared);
+      simulatedSwaps.set(prepared, walletAddress);
       return prepared;
+    },
+
+    async canSignDelegatedSwap({ bot, wallet } = {}) {
+      const walletId = delegatedSwapWalletId({ bot, wallet });
+      if (!walletId) return false;
+      try {
+        const record = await privy('GET', `/v1/wallets/${encodeURIComponent(walletId)}`);
+        return record?.id === walletId && record.address === wallet.address && record.chain_type === 'solana'
+          && Array.isArray(record.additional_signers) && record.additional_signers.some(entry => entry?.signer_id === signer);
+      } catch {
+        return false;
+      }
+    },
+
+    async signPreparedSolanaSwap({ bot, wallet, prepared, expiresAt, checkPermission } = {}) {
+      const walletId = delegatedSwapWalletId({ bot, wallet });
+      if (!walletId) fail('The wallet has no delegated signer', 'swap_delegation_unavailable');
+      if (typeof checkPermission !== 'function') fail('Live swap approval is required', 'swap_saved_permission_required');
+      if (simulatedSwaps.get(prepared) !== wallet.address) fail('Swap simulation is required', 'simulation_required');
+      simulatedSwaps.delete(prepared);
+      await assertSolana();
+      if (!Number.isSafeInteger(expiresAt) || now() >= expiresAt) fail('Swap quote expired', 'swap_quote_expired');
+      const signed = await signWithPrivy(walletId, prepared.transaction, null, { appOnly: true });
+      const message = singleSignerMessage(signed);
+      const parsed = VersionedTransaction.deserialize(decodeBase64(signed, 'Signed transaction'));
+      const publicKey = createPublicKey({ key: Buffer.concat([
+        Buffer.from('302a300506032b6570032100', 'hex'), parsed.message.staticAccountKeys[0].toBuffer(),
+      ]), format: 'der', type: 'spki' });
+      if (!message.equals(singleSignerMessage(prepared.transaction)) || !cryptoVerify(null, message, publicKey, parsed.signatures[0])) {
+        fail('Signed swap differs from the simulation or has an invalid signature', 'transaction_mismatch');
+      }
+      const signature = await sendSigned(signed, { privy: true, beforeBroadcast: async () => {
+        await checkPermission();
+        if (now() >= expiresAt) fail('Swap quote expired before broadcast', 'swap_quote_expired');
+      } });
+      return { cluster: SOLANA_CLUSTER, signature };
     },
 
     ownerAuthorizationPayload({ ownerId, wallet, transaction, expiresAt } = {}) {

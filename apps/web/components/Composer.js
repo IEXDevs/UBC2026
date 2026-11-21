@@ -63,7 +63,7 @@ import { readDeskGrant } from '../lib/desk-lock.mjs';
 import { submitChatSpend } from '../lib/desk-grant-client.mjs';
 import { submitLasoChatPayment } from '../lib/laso-payment-client.mjs';
 import { completeChatSwap, submitChatMove } from '../lib/chat-browser-spend.mjs';
-import { accountStorage } from '../lib/account-state.mjs';
+import { accountStorage, flushAccountState } from '../lib/account-state.mjs';
 import { stageKind } from '../lib/file-view.mjs';
 import { clipOwnerMessage, contextWindowFor } from '../lib/context-usage.mjs';
 import { appendQueued, releaseQueued, takeQueued } from '../lib/message-queue.mjs';
@@ -783,6 +783,7 @@ export default function Composer({
       const send = async (spendAuthorization, lasoPayment) => {
         let accessToken = '';
         try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
+        if (permissionRef.current === 'full') await flushAccountState();
         if (controller.signal.aborted || targetId !== botIdRef.current) return { ok: false, error: 'aborted' };
         return sendBotChat({
           ownerId,

@@ -314,8 +314,10 @@ export async function POST(request, context) {
     return completeTextChat({ ...turnArgs, onMessage: trading ? null : onMessage, onReplyEvent: trading ? null : onReplyEvent });
   }
 
-  /** A queued agent swap runs on the terms an agent send would: Full or Review, within the review cap. The runtime re-checks trust, policy and the desk. */
-  async function autoLoopSwap(hold, swapHold, swapPreview) {
+  async function tryAutoSwap(hold, swapHold, swapPreview) {
+    if (swapHold.args.amount !== hold.args.amount) return null;
+    const queued = hold.idempotencyKey?.startsWith('loop_swap_');
+    if (!queued && permissionMode !== 'full') return null;
     const approvalReason = (permissionMode !== 'full' && permissionMode !== 'review') ? 'owner_approval_required'
       : amountOverReviewCap(swapPreview.usdMicros, reviewCap) ? 'approval-needed' : null;
     if (approvalReason) {
@@ -324,21 +326,21 @@ export async function POST(request, context) {
       swapHold.label = `${message} ${swapHold.label}`;
       return null;
     }
-    if (!hold.idempotencyKey?.startsWith('loop_swap_')) return null;
     const sent = await invokeRaw('request_spend', {
       ...hold.args, botId, permission: permissionMode, reviewCap: effectiveReviewCap(reviewCap),
-      idempotencyKey: hold.idempotencyKey, autoSwap: true,
+      idempotencyKey: hold.idempotencyKey, autoSwap: true, confirmed: false,
     }, { swapTicket: swapHold.swapTicket });
     if (sent?.signed === true && typeof sent.signature === 'string') {
       return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted within your review limit: https://solscan.io/tx/${sent.signature}`;
     }
-    if (sent?.reason === 'client_sign_required' || sent?.error === 'client_sign_required') {
+    const needsBrowserSigner = (sent?.reason ?? sent?.error) === 'client_sign_required';
+    if (needsBrowserSigner && permissionMode === 'review') {
       return { clientSwap: { spend: { ...hold.args, botId, permission: permissionMode,
         reviewCap: effectiveReviewCap(reviewCap), idempotencyKey: hold.idempotencyKey }, swapTicket: swapHold.swapTicket } };
     }
     // Only a swap stopped before its reservation can still go to the slide under the same key.
     const beforeReserve = sent?.state === 'approval-needed' || sent?.state === 'trust-confirmation-required'
-      || sent?.error === 'desk_locked';
+      || sent?.error === 'desk_locked' || needsBrowserSigner;
     if (beforeReserve) {
       swapHold.prompt = `${swapFailure(sent).message} ${swapHold.prompt}`;
       swapHold.label = `${swapFailure(sent).message} ${swapHold.label}`;
@@ -376,7 +378,7 @@ export async function POST(request, context) {
         ...reply.hold.args, botId, permission: 'ask', idempotencyKey: reply.hold.idempotencyKey,
       });
       const swapHold = swapHoldFromPreview(reply.hold, preview?.swapPreview);
-      const auto = swapHold && await autoLoopSwap(reply.hold, swapHold, preview.swapPreview);
+      const auto = swapHold && await tryAutoSwap(reply.hold, swapHold, preview.swapPreview);
       reply = auto?.clientSwap
         ? { ...reply, text: '', hold: null, clientSwap: auto.clientSwap }
         : auto
