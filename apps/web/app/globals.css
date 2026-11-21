@@ -4016,18 +4016,17 @@ button.wallet-export:not(:disabled):hover {
   align-items: center;
   gap: 6px;
   height: 100%;
-  padding: 6px 9px;
+  padding: 6px 8px;
   border: 1px solid #3f3f46;
   border-radius: 12px;
   background: #18181b;
 }
 .book-agent-surface .mark { flex: none; }
 .book-agent-surface [data-slot="card-title"] {
-  min-width: 0;
-  overflow: hidden;
+  flex: none;
   color: #f5f5f5;
   font-size: 12px;
-  text-overflow: ellipsis;
+  font-weight: 600;
   white-space: nowrap;
 }
 .book-account [data-slot="card-title"] { font-size: 13px; }

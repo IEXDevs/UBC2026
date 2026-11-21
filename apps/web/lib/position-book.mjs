@@ -88,7 +88,99 @@ export function positionSceneKey(book) {
   ]);
 }
 
-export function layoutPositionBook(positions, bots, wallets = [], holdings = []) {
+const AGENT_HEIGHT = 36;
+const AGENT_GAP = 14;
+const AGENT_RAIL = 16;
+const WALLET_GAP = 28;
+
+function arrangeAgents(bots, measureName) {
+  const nodes = bots.map(bot => {
+    const name = typeof bot.name === 'string' ? bot.name.trim().replace(/\s+/g, ' ') : '';
+    const text = name || 'Agent';
+    const labelWidth = measureName?.(text) ?? Array.from(text).length * 12;
+    return { ...bot, name: text, width: Math.max(56, Math.ceil(labelWidth) + 50), height: AGENT_HEIGHT };
+  });
+  if (nodes.length <= 3) {
+    const width = nodes.reduce((sum, node) => sum + node.width, 0) + Math.max(0, nodes.length - 1) * AGENT_GAP;
+    let left = -width / 2;
+    for (const node of nodes) {
+      Object.assign(node, { x: left + node.width / 2, y: 28 + node.height / 2, attach: 'bottom' });
+      left += node.width + AGENT_GAP;
+    }
+    return { nodes, width };
+  }
+
+  const width = 2 * (AGENT_RAIL + Math.max(...nodes.map(node => node.width)));
+  nodes.forEach((node, index) => {
+    const right = index % 2 === 1;
+    const offset = AGENT_RAIL + node.width / 2;
+    Object.assign(node, {
+      x: right ? offset : -offset,
+      y: 26 + node.height / 2 + Math.floor(index / 2) * (node.height + AGENT_GAP),
+      attach: right ? 'left' : 'right',
+    });
+  });
+  return { nodes, width };
+}
+
+/** Shared branches run through the gaps between the wallet and its agent cards. */
+export function agentWireSegments(links) {
+  if (links.length === 0) return [];
+  const [{ from, to, attach }] = links;
+  if (attach !== 'bottom') {
+    return [
+      [from, { x: from.x, y: Math.max(...links.map(link => link.to.y)) }],
+      ...links.map(link => [{ x: from.x, y: link.to.y }, link.to]),
+    ];
+  }
+  if (links.length === 1) return [[from, to]];
+  const y = (from.y + to.y) / 2;
+  return [
+    [from, { x: from.x, y }],
+    [{ x: to.x, y }, { x: links.at(-1).to.x, y }],
+    ...links.map(link => [{ x: link.to.x, y }, link.to]),
+  ];
+}
+
+export function walletGroupBounds(wallet, agents) {
+  const bounds = { minX: -wallet.width / 2, maxX: wallet.width / 2, minY: -wallet.height / 2, maxY: wallet.height / 2 };
+  for (const agent of agents) {
+    bounds.minX = Math.min(bounds.minX, agent.x - wallet.x - agent.width / 2);
+    bounds.maxX = Math.max(bounds.maxX, agent.x - wallet.x + agent.width / 2);
+    bounds.maxY = Math.max(bounds.maxY, agent.y - wallet.y + agent.height / 2);
+  }
+  return bounds;
+}
+
+export function translatedBounds(bounds, { x, y }) {
+  return { minX: bounds.minX + x, maxX: bounds.maxX + x, minY: bounds.minY + y, maxY: bounds.maxY + y };
+}
+
+export function placeWalletGroup(bounds, requested, occupied) {
+  const fits = ({ x, y }) => occupied.every(other => (
+    x <= other.minX - WALLET_GAP - bounds.maxX || x >= other.maxX + WALLET_GAP - bounds.minX
+    || y <= other.minY - WALLET_GAP - bounds.maxY || y >= other.maxY + WALLET_GAP - bounds.minY
+  ));
+  if (fits(requested)) return requested;
+
+  const candidates = occupied.flatMap(other => [
+    { x: other.minX - WALLET_GAP - bounds.maxX, y: requested.y },
+    { x: other.maxX + WALLET_GAP - bounds.minX, y: requested.y },
+    { x: requested.x, y: other.minY - WALLET_GAP - bounds.maxY },
+    { x: requested.x, y: other.maxY + WALLET_GAP - bounds.minY },
+  ]);
+  let nearest = requested;
+  let distance = Infinity;
+  for (const point of candidates) {
+    const delta = Math.abs(point.x - requested.x) + Math.abs(point.y - requested.y);
+    if (delta >= distance || !fits(point)) continue;
+    distance = delta;
+    nearest = point;
+  }
+  return nearest;
+}
+
+export function layoutPositionBook(positions, bots, wallets = [], holdings = [], measureName) {
   const source = Array.isArray(positions) ? positions : [];
   const assignedBots = withAssignedWallet(bots, wallets).bots;
   const rows = describePositions(source, assignedBots).map((row, index) => ({
@@ -105,9 +197,6 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [])
   const LEAF = 236;
   const BRANCH = 28;
   const WALLET_SPAN = 240;
-  const AGENT_WIDTH = 144;
-  const AGENT_HEIGHT = 42;
-  const AGENT_STEP = AGENT_WIDTH + 18;
   const agentsByWallet = new Map(wallets.map(wallet => [wallet.id, []]));
   for (const bot of assignedBots) agentsByWallet.get(bot.walletId)?.push(bot);
   const holdingsByWallet = new Map(wallets.map(wallet => [wallet.id, []]));
@@ -124,9 +213,8 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [])
       return { name, leaves, width };
     });
     const total = branches.reduce((sum, branch) => sum + branch.width, 0) + Math.max(0, branches.length - 1) * BRANCH;
-    const assigned = agentsByWallet.get(wallet.id);
-    const columns = Math.min(3, assigned.length);
-    const span = Math.max(total, WALLET_SPAN, columns * AGENT_STEP);
+    const assigned = arrangeAgents(agentsByWallet.get(wallet.id), measureName);
+    const span = Math.max(total, WALLET_SPAN, assigned.width);
     const rootX = cursor + span / 2;
     const rootY = 220;
     const walletHoldings = holdingsByWallet.get(wallet.id);
@@ -159,31 +247,29 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [])
       notionalLabel: `${formatBaseUnits(addMicro(owned, 'notionalMicroUsdc').toString())} USDC`,
       count: owned.length,
     });
-    assigned.forEach((bot, index) => {
-      const slot = index % columns;
-      const row = Math.floor(index / columns);
-      const rowCount = Math.min(columns, assigned.length - row * columns);
+    for (const bot of assigned.nodes) {
       const agent = {
         ...bot,
         id: `agent:${bot.id}`,
         walletId: wallet.id,
-        x: rootX + (slot - (rowCount - 1) / 2) * AGENT_STEP,
-        y: rootY + height / 2 + 64 + row * 76,
-        width: AGENT_WIDTH,
-        height: AGENT_HEIGHT,
+        x: rootX + bot.x,
+        y: rootY + height / 2 + bot.y,
       };
       agents.push(agent);
+      const to = bot.attach === 'bottom'
+        ? { x: agent.x, y: agent.y - agent.height / 2 }
+        : { x: agent.x + (bot.attach === 'right' ? agent.width / 2 : -agent.width / 2), y: agent.y };
       links.push({
         id: `${wallet.id}-${agent.id}`,
         fromId: wallet.id,
         toId: agent.id,
         walletId: wallet.id,
         kind: 'agent',
+        attach: bot.attach,
         from: { x: rootX, y: rootY + height / 2 },
-        to: { x: agent.x, y: agent.y - AGENT_HEIGHT / 2 },
-        lift: 0,
+        to,
       });
-    });
+    }
     let branchX = cursor + (span - total) / 2;
     branches.forEach(branch => {
       const center = branchX + branch.width / 2;
@@ -293,23 +379,24 @@ export function layoutPositionBook(positions, bots, wallets = [], holdings = [])
   };
 }
 
-export function bookFrame(book) {
+export function bookFrame(book, position = item => item) {
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
   let maxY = -Infinity;
-  const add = (x, y, halfX, halfY) => {
+  const add = (item, halfX, halfY) => {
+    const { x, y } = position(item);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     minX = Math.min(minX, x - halfX);
     maxX = Math.max(maxX, x + halfX);
     minY = Math.min(minY, y - halfY);
     maxY = Math.max(maxY, y + halfY);
   };
-  for (const card of book.cards ?? []) add(card.x, card.y, 130, 110);
-  for (const venue of book.venues ?? []) add(venue.x, venue.y, 90, 36);
-  for (const wallet of book.wallets ?? []) add(wallet.x, wallet.y, wallet.width / 2, wallet.height / 2);
-  for (const agent of book.agents ?? []) add(agent.x, agent.y, agent.width / 2, agent.height / 2);
-  for (const account of book.accounts ?? []) add(account.x, account.y, 80, 30);
+  for (const card of book.cards ?? []) add(card, 130, 110);
+  for (const venue of book.venues ?? []) add(venue, 90, 36);
+  for (const wallet of book.wallets ?? []) add(wallet, wallet.width / 2, wallet.height / 2);
+  for (const agent of book.agents ?? []) add(agent, agent.width / 2, agent.height / 2);
+  for (const account of book.accounts ?? []) add(account, 80, 30);
   if (!Number.isFinite(minX)) return { x: 0, y: 0, minX: -200, maxX: 200, minY: -200, maxY: 200 };
   return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, minX, maxX, minY, maxY };
 }

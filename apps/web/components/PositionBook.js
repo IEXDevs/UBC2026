@@ -1,10 +1,13 @@
 'use client';
 
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LocateFixed, Minus, Plus } from 'lucide-react';
-import { bookFrame, layoutPositionBook, positionSceneKey, stepBubbleFollow } from '../lib/position-book.mjs';
+import {
+  agentWireSegments, bookFrame, layoutPositionBook, placeWalletGroup, positionSceneKey,
+  stepBubbleFollow, translatedBounds, walletGroupBounds,
+} from '../lib/position-book.mjs';
 import AddressCopy from './AddressCopy';
 import AddressText from './AddressText';
 import EarningsChart from './EarningsChart';
@@ -80,7 +83,17 @@ function starTexture() {
 }
 
 export default function PositionBook({ positions, holdings = [], status, bots, wallets = [], earnings = null, onWallet }) {
-  const book = useMemo(() => layoutPositionBook(positions, bots, wallets, holdings), [positions, bots, wallets, holdings]);
+  const mountRef = useRef(null);
+  const [measureName, setMeasureName] = useState(null);
+  useLayoutEffect(() => {
+    const mount = mountRef.current;
+    const canvas = document.createElement('canvas').getContext('2d');
+    if (!mount || !canvas) return;
+    canvas.font = `600 12px ${window.getComputedStyle(mount).fontFamily}`;
+    setMeasureName(() => name => canvas.measureText(name).width);
+  }, []);
+  const book = useMemo(() => layoutPositionBook(positions, bots, wallets, holdings, measureName),
+    [positions, bots, wallets, holdings, measureName]);
   const sceneKey = useMemo(() => positionSceneKey(book), [book]);
   const content = useMemo(() => new Map([
     ...book.wallets.map(wallet => [wallet.id, <WalletCard wallet={wallet} />]),
@@ -88,7 +101,6 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
     ...book.accounts.map(account => [account.id, <ProviderGroupCard account={account} />]),
     ...book.cards.map(card => [card.id, <ProviderPositionCard card={card} />]),
   ]), [book]);
-  const mountRef = useRef(null);
   const cameraRef = useRef(null);
   const savedView = useRef(null);
   const bookRef = useRef(book);
@@ -192,6 +204,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       });
       const joint = new THREE.CircleGeometry(5, 20);
       const jointMaterial = new THREE.MeshBasicMaterial({ color: 0xf5f5f5 });
+      const agentWireMaterial = new THREE.LineBasicMaterial({ color: 0x747480, transparent: true, opacity: 0.85, depthWrite: false });
 
       function ribbonPositions(link) {
         const start = new THREE.Vector3(link.from.x, link.from.y, 0.2);
@@ -238,6 +251,19 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       const tiltState = new Map();
       const places = readPlaces();
       const linkMaterials = [];
+      const walletGroups = new Map(book.wallets.map(wallet => [wallet.id, {
+        wallet,
+        bounds: walletGroupBounds(wallet, book.agents.filter(agent => agent.walletId === wallet.id)),
+      }]));
+      const occupied = new Map();
+
+      function walletSpot(id, requested) {
+        const bounds = walletGroups.get(id).bounds;
+        const neighbors = [...occupied].filter(([other]) => other !== id).map(([, area]) => area);
+        const spot = placeWalletGroup(bounds, requested, neighbors);
+        occupied.set(id, translatedBounds(bounds, spot));
+        return spot;
+      }
 
       function addLink(link) {
         const { positions, progress } = ribbonPositions(link);
@@ -262,7 +288,9 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         bindings.push({ geometry: ribbon, link: { ...link } });
       }
 
-      for (const link of book.links) addLink(link);
+      for (const link of book.links) {
+        if (link.kind !== 'agent') addLink(link);
+      }
       for (const venue of book.venues) {
         const dot = new THREE.Mesh(joint, jointMaterial);
         dot.position.set(venue.x, venue.y, 0.3);
@@ -289,10 +317,17 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
           host.style.width = `${item.width}px`;
           host.style.height = `${item.height}px`;
         }
-        const spot = placedSpot(places, item);
         const object = new CSS3DObject(host);
-        object.position.set(spot.x, spot.y, 0);
-        scene.add(object);
+        if (kind === 'agent') {
+          const { wallet } = walletGroups.get(item.walletId);
+          object.position.set(item.x - wallet.x, item.y - wallet.y, 0);
+          cardObjects.get(wallet.id).add(object);
+        } else {
+          const requested = placedSpot(places, item);
+          const spot = kind === 'wallet' ? walletSpot(item.id, requested) : requested;
+          object.position.set(spot.x, spot.y, 0);
+          scene.add(object);
+        }
         cardObjects.set(item.id, object);
         anchors.set(item.id, object.position);
         if (kind === 'position') tiltState.set(item.id, { rx: 0, ry: 0, s: 1, targetRx: 0, targetRy: 0, targetS: 1 });
@@ -301,21 +336,26 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
 
       for (const wallet of book.wallets) addCard(wallet, 'wallet');
       for (const agent of book.agents) addCard(agent, 'agent');
+      for (const wallet of book.wallets) {
+        const links = book.links.filter(link => link.kind === 'agent' && link.walletId === wallet.id);
+        const segments = agentWireSegments(links);
+        if (!segments.length) continue;
+        const vertices = segments.flatMap(segment => segment.flatMap(point => [point.x - wallet.x, point.y - wallet.y, 0.2]));
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        cardObjects.get(wallet.id).add(new THREE.LineSegments(geometry, agentWireMaterial));
+        linkGeometries.push(geometry);
+      }
       for (const account of book.accounts) addCard(account, 'account');
       for (const card of book.cards) addCard(card, 'position');
       setSceneCards({ sceneKey, hosts });
 
       const walletHeights = new Map(book.wallets.map(wallet => [wallet.id, wallet.height]));
-      const agentHeights = new Map(book.agents.map(agent => [agent.id, agent.height]));
       function anchorPoint(id, role, kind) {
         const pos = anchors.get(id);
         if (!pos) return { x: 0, y: 0 };
         if (kind === 'spoke' && role === 'to') return { x: pos.x, y: pos.y + 88 };
         if (kind === 'account' && role === 'from') return { x: pos.x, y: pos.y - (walletHeights.get(id) ?? 0) / 2 };
-        if (kind === 'agent') {
-          const offset = role === 'from' ? walletHeights.get(id) / 2 : -agentHeights.get(id) / 2;
-          return { x: pos.x, y: pos.y + offset };
-        }
         if (kind === 'provider' && role === 'from') return { x: pos.x, y: pos.y + 28 };
         return { x: pos.x, y: pos.y };
       }
@@ -348,12 +388,14 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       const bodies = [];
       const bodyById = new Map();
       for (const [id, object] of cardObjects) {
+        if (object.element.dataset.kind === 'agent') continue;
         const body = { id, x: object.position.x, y: object.position.y, pin: false, lag: null, ox: 0, oy: 0, dirty: false };
         bodies.push(body);
         bodyById.set(id, body);
       }
       const neighbors = new Map();
       for (const link of book.links) {
+        if (link.kind === 'shared') continue;
         if (!bodyById.has(link.fromId) || !bodyById.has(link.toId)) continue;
         if (!neighbors.has(link.fromId)) neighbors.set(link.fromId, []);
         if (!neighbors.has(link.toId)) neighbors.set(link.toId, []);
@@ -362,14 +404,19 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       }
       let trailing = false;
 
-      function applyBodies() {
-        for (const body of bodies) {
-          const object = cardObjects.get(body.id);
-          if (!object) continue;
-          object.position.x = body.x;
-          object.position.y = body.y;
+      function moveBody(body) {
+        const object = cardObjects.get(body.id);
+        if (object.position.x === body.x && object.position.y === body.y) return false;
+        if (walletGroups.has(body.id)) {
+          const spot = walletSpot(body.id, body);
+          body.x = spot.x;
+          body.y = spot.y;
         }
-        refreshLinks();
+        if (object.position.x === body.x && object.position.y === body.y) return false;
+        object.position.x = body.x;
+        object.position.y = body.y;
+        body.dirty = true;
+        return true;
       }
 
       function flushPlaces() {
@@ -407,14 +454,9 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         const stretch = stepBubbleFollow(bodies, dt);
         let moved = false;
         for (const body of bodies) {
-          const object = cardObjects.get(body.id);
-          if (!object) continue;
-          if (Math.hypot(object.position.x - body.x, object.position.y - body.y) > 0.05) {
-            body.dirty = true;
-            moved = true;
-          }
+          if (moveBody(body)) moved = true;
         }
-        if (moved) applyBodies();
+        if (moved) refreshLinks();
         if (!(gesture && gesture.moved) && (stretch < 0.75 || !moved)) {
           for (const body of bodies) body.pin = false;
           flushPlaces();
@@ -526,7 +568,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       }
 
       // Phones stack the chart, zoom tools and caption over the book, so frame it in the gap they leave.
-      function safeArea() {
+      function safeArea(frame) {
         const width = mount.clientWidth || 1;
         const height = mount.clientHeight || 1;
         const full = { left: 0, top: 0, right: width, bottom: height };
@@ -553,7 +595,6 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
           // Below the chart on portrait phones, beside it on short landscape ones: whichever shows the book larger.
           const below = { ...area, top: earnings.bottom - box.top + SAFE_GAP };
           const beside = { ...area, top: earnings.top - box.top, left: earnings.right - box.left + SAFE_GAP };
-          const frame = bookFrame(book);
           const scale = r => Math.min((r.right - r.left) / Math.max(frame.maxX - frame.minX, 1), (r.bottom - r.top) / Math.max(frame.maxY - frame.minY, 1));
           const fits = [below, beside].filter(r => r.right - r.left >= MIN_SAFE && r.bottom - r.top >= MIN_SAFE);
           if (fits.length) return fits.reduce((a, b) => (scale(b) > scale(a) ? b : a));
@@ -565,9 +606,8 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         return area;
       }
 
-      function framedDistance(area) {
+      function framedDistance(area, frame) {
         const height = mount.clientHeight || 1;
-        const frame = bookFrame(book);
         const worldW = Math.max(frame.maxX - frame.minX, 1);
         const worldH = Math.max(frame.maxY - frame.minY, 1);
         const tan = Math.tan((camera.fov * Math.PI) / 360);
@@ -579,9 +619,10 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
       function applyHome(snap = true) {
         const width = mount.clientWidth || 1;
         const height = mount.clientHeight || 1;
-        const frame = bookFrame(book);
-        const area = safeArea();
-        home.z = framedDistance(area);
+        const spot = new THREE.Vector3();
+        const frame = bookFrame(book, item => cardObjects.get(item.id)?.getWorldPosition(spot) ?? item);
+        const area = safeArea(frame);
+        home.z = framedDistance(area, frame);
         const perPixel = (2 * Math.tan((camera.fov * Math.PI) / 360) * home.z) / height;
         home.x = frame.x - ((area.left + area.right) / 2 - width / 2) * perPixel;
         home.y = frame.y + ((area.top + area.bottom) / 2 - height / 2) * perPixel;
@@ -660,6 +701,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         if (card) {
           gesture = {
             id: card.dataset.positionId,
+            dragId: card.dataset.kind === 'agent' ? card.dataset.walletId : card.dataset.positionId,
             x: event.clientX,
             y: event.clientY,
             moved: false,
@@ -680,20 +722,17 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
             cardObjects.get(gesture.id)?.element.classList.add('is-dragging');
           }
           if (gesture.moved) {
-            const object = cardObjects.get(gesture.id);
-            const body = bodyById.get(gesture.id);
-            if (!object || !body) return;
+            const body = bodyById.get(gesture.dragId);
+            if (!body) return;
             const scale = worldPerPixel();
-            if (!body.pin) pinOnly(gesture.id);
+            if (!body.pin) pinOnly(gesture.dragId);
             body.x += (event.clientX - gesture.x) * scale;
             body.y -= (event.clientY - gesture.y) * scale;
-            body.dirty = true;
-            object.position.x = body.x;
-            object.position.y = body.y;
+            moveBody(body);
             gesture.x = event.clientX;
             gesture.y = event.clientY;
             trailing = true;
-            refreshLinks(gesture.id);
+            refreshLinks(gesture.dragId);
           }
           return;
         }
@@ -792,6 +831,7 @@ export default function PositionBook({ positions, holdings = [], status, bots, w
         for (const material of linkMaterials) material.dispose();
         joint.dispose();
         jointMaterial.dispose();
+        agentWireMaterial.dispose();
         renderer.dispose();
         renderer.domElement.remove();
         labels.domElement.remove();

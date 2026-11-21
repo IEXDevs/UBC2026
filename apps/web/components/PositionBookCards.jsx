@@ -111,7 +111,7 @@ export function ProviderGroupCard({ account }) {
 export function AgentCard({ agent }) {
   return (
     <Card className="book-agent-surface" aria-label={`Agent ${agent.name}`}>
-      <BotMark name={agent.name} color={agent.color} image={agent.image} size={24} />
+      <BotMark name={agent.name} color={agent.color} image={agent.image} size={22} />
       <CardTitle title={agent.name}>{agent.name}</CardTitle>
     </Card>
   );
