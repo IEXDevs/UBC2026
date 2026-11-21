@@ -952,10 +952,15 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   const address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const fetcher = async (url) => {
     const href = String(url);
-    if (new URL(href).searchParams.get('handle') === 'eq.alex') {
+    const target = new URL(href);
+    if (target.pathname.includes('/wallets')) {
+      if (target.searchParams.get('address') === `eq.${address}`) return Response.json([{ address, owner_id: 'user_2' }]);
+      if (target.searchParams.get('owner_id') === 'eq.user_2') return Response.json([{ address, owner_id: 'user_2' }]);
+      return Response.json([]);
+    }
+    if (target.searchParams.get('handle') === 'eq.alex' || target.searchParams.get('owner_id') === 'eq.user_2') {
       return Response.json([{ owner_id: 'user_2', handle: 'alex', display_name: 'Alex', avatar_url: null }]);
     }
-    if (href.includes('wallets?')) return Response.json([{ address }]);
     return new Response('[]', { status: 201, headers: { 'content-type': 'application/json' } });
   };
   const env = fakeEnv({
@@ -981,6 +986,23 @@ test('profile lookup sends a handle to its owner and a .sol name through SNS', a
   assert.equal(snsBody.recipient.kind, 'sns');
   assert.equal(snsBody.recipient.domain, 'richclub.sol');
   assert.equal(snsBody.recipient.address, address);
+
+  const rawAddressLookup = await worker.fetch(new Request(`https://runtime/api/profiles/lookup?q=${address}`, {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  const rawAddressBody = await rawAddressLookup.json();
+  assert.equal(rawAddressBody.recipient.kind, 'address');
+  assert.equal(rawAddressBody.recipient.address, address);
+  assert.equal(rawAddressBody.recipient.handle, 'alex');
+
+  const unknownAddress = '11111111111111111111111111111111';
+  const unknownAddressLookup = await worker.fetch(new Request(`https://runtime/api/profiles/lookup?q=${unknownAddress}`, {
+    headers: { 'x-owner-id': 'user_1' },
+  }), env);
+  const unknownAddressBody = await unknownAddressLookup.json();
+  assert.equal(unknownAddressBody.recipient.kind, 'address');
+  assert.equal(unknownAddressBody.recipient.address, unknownAddress);
+  assert.equal(unknownAddressBody.recipient.handle, undefined);
 });
 
 test('handle lookup chooses the exact stored handle and refuses ambiguous spoken matches', async () => {

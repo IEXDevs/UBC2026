@@ -59,6 +59,20 @@ export function pickOpenSession(payload) {
  * Decide how the owner UI should show a Live View URL.
  * The URL is a bearer credential: callers may set iframe src or an href, never text.
  */
+/**
+ * When the panel should remint the viewer. The Worker returns connectBefore on
+ * live-view: the ISO deadline by which the viewer must connect. Remint no later
+ * than 15s before that deadline, clamped into [at+5s, at+60s]; a missing, invalid,
+ * or already-past deadline keeps the flat 60s poll.
+ */
+export function nextViewerRefreshAt(view, at) {
+  const before = typeof view?.connectBefore === 'string'
+    ? Date.parse(view.connectBefore)
+    : Number(view?.connectBefore);
+  if (!Number.isFinite(before) || before <= at) return at + 60_000;
+  return Math.max(at + 5_000, Math.min(at + 60_000, before - 15_000));
+}
+
 export function liveViewFrame(view) {
   const hidden = { embed: false, fallback: 'open-viewer-in-separate-tab', src: null, referrerPolicy: 'no-referrer' };
   if (!view || typeof view.viewerUrl !== 'string') return hidden;

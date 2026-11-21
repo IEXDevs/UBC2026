@@ -4,7 +4,13 @@ import { readFileSync } from 'node:fs';
 import { transformSync } from 'esbuild';
 import React from 'react';
 import { browserErrorNote, browserStatusNote } from './browser-status.mjs';
-import { browserSessionUrl, liveViewFrame, liveSessionKey, reconcileLiveSession } from './live-view.mjs';
+import {
+  browserSessionUrl,
+  liveViewFrame,
+  liveSessionKey,
+  nextViewerRefreshAt,
+  reconcileLiveSession,
+} from './live-view.mjs';
 
 function panelHarness(fetcher) {
   const source = readFileSync(new URL('../components/LiveViewPanel.js', import.meta.url), 'utf8')
@@ -15,7 +21,9 @@ function panelHarness(fetcher) {
   let index = 0;
   let dirty = true;
   let tree;
-  let now = 1000;
+  // Base the fake clock on the real one so ISO connectBefore deadlines minted in
+  // test fetchers compare sensibly against the component's Date.now().
+  let now = Date.now();
   const timers = new Set();
   const changed = (a, b) => !a || a.length !== b.length || a.some((value, i) => value !== b[i]);
   function useState(initial) {
@@ -42,11 +50,12 @@ function panelHarness(fetcher) {
       slots[id] = { deps, cleanup: callback() };
     });
   }
-  const names = ['React', 'useState', 'useRef', 'useCallback', 'useEffect', 'fetch', 'browserErrorNote', 'browserStatusNote', 'browserSessionUrl', 'liveViewFrame', 'liveSessionKey', 'reconcileLiveSession', 'ownerAuthHeaders', 'LatticeLoader', 'HoldButton', 'setInterval', 'clearInterval', 'Date'];
+  const names = ['React', 'useState', 'useRef', 'useCallback', 'useEffect', 'fetch', 'browserErrorNote', 'browserStatusNote', 'browserSessionUrl', 'liveViewFrame', 'liveSessionKey', 'reconcileLiveSession', 'nextViewerRefreshAt', 'ownerAuthHeaders', 'LatticeLoader', 'HoldButton', 'setInterval', 'clearInterval', 'Date'];
   const Panel = new Function(...names, `${code}; return LiveViewPanel;`)(
     React, useState, useRef, useCallback, useEffect, fetcher, browserErrorNote, browserStatusNote,
-    browserSessionUrl, liveViewFrame, liveSessionKey, reconcileLiveSession, async () => ({}),
-    () => null, () => null, callback => { timers.add(callback); return callback; }, callback => timers.delete(callback),
+    browserSessionUrl, liveViewFrame, liveSessionKey, reconcileLiveSession, nextViewerRefreshAt,
+    async () => ({}), () => null, () => null,
+    callback => { timers.add(callback); return callback; }, callback => timers.delete(callback),
     { now: () => now },
   );
   async function settle() {
@@ -68,6 +77,7 @@ function panelHarness(fetcher) {
   return {
     settle,
     async poll() { now += 64_000; [...timers].forEach(callback => callback()); await settle(); },
+    async tick(ms) { now += ms; [...timers].forEach(callback => callback()); await settle(); },
     frame: () => nodes(tree, 'iframe')[0]?.props.src,
     alerts: () => nodes(tree, 'p').filter(node => node.props.role === 'alert').map(node => node.props.children).join(' '),
     async release() { await nodes(tree).find(node => node.props?.onHold)?.props.onHold(); await settle(); },
@@ -120,4 +130,34 @@ test('Computer displays polling and provider failures instead of silently swallo
   await panel.settle();
   assert.match(panel.alerts(), /browser_not_configured \(403 API token rejected\)/);
   assert.equal(panel.frame(), undefined);
+});
+
+test('Computer remints the viewer by the connectBefore deadline instead of the flat interval', async () => {
+  let row = { sessionRecordId: 'record', revision: 0, status: 'open', url: 'https://example.com/current' };
+  const views = [];
+  const panel = panelHarness(async (url, options) => {
+    if (url.endsWith('/live-view')) {
+      views.push(1);
+      return Response.json({
+        viewerUrl: `https://live.browser.run/ui/view?mint=${views.length}`,
+        embedVerified: true,
+        control: 'agent',
+        connectBefore: new Date(Date.now() + 30_000).toISOString(),
+      });
+    }
+    if (options.method === 'POST') {
+      row = { sessionRecordId: 'record', revision: 0, status: 'open' };
+      return Response.json(row);
+    }
+    return Response.json({ sessions: [row] });
+  });
+  await panel.settle();
+  // Settle may race an extra mint while state commits; the deadline behavior under
+  // test is the delta across tick, not the absolute count at settle.
+  const settled = views.length;
+  assert.ok(settled >= 1);
+  assert.match(panel.frame(), /mint=/);
+  // connectBefore 30s out means remint by ~15s (15s margin), not the flat 60s.
+  await panel.tick(16_000);
+  assert.equal(views.length, settled + 1);
 });

@@ -1252,6 +1252,41 @@ export async function handleApiData(request, env, matched) {
     const query = new URL(request.url).searchParams.get('q') || '';
     const parsed = parseLookupQuery(query);
     if (!parsed) return json({ error: 'invalid_recipient' }, 400);
+    if (parsed.kind === 'address') {
+      let recipient = { kind: 'address', address: parsed.address };
+      if (supabaseConfig(env)) {
+        try {
+          const wallet = await supabaseGet(
+            env,
+            `wallets?address=eq.${encodeURIComponent(parsed.address)}&select=owner_id&limit=1`,
+            fetcher,
+          );
+          const walletOwner = wallet.rows?.[0]?.owner_id;
+          if (walletOwner) {
+            const columns = 'owner_id,handle,display_name,avatar_url';
+            const profile = await supabaseGet(
+              env,
+              `profiles?owner_id=eq.${encodeURIComponent(walletOwner)}&select=${columns}&limit=1`,
+              fetcher,
+            );
+            const row = profile.rows?.[0];
+            if (row?.handle) {
+              recipient = {
+                kind: 'address',
+                address: parsed.address,
+                handle: row.handle,
+                displayName: publicDisplayName(row.display_name) || `@${row.handle}`,
+                avatarUrl: row.avatar_url || null,
+                self: row.owner_id === ownerId,
+              };
+            }
+          }
+        } catch {
+          /* Keep bare address */
+        }
+      }
+      return json({ ok: true, recipient });
+    }
     if (parsed.kind === 'sns') {
       try {
         const resolver = createSnsResolver({

@@ -206,11 +206,12 @@ export function createBrowserSessionService({
       // At capacity: reuse the newest open session (navigate when url is set) instead of
       // failing with concurrency_limit — chat kept calling open and getting stuck.
       if (open.length >= maxSessionsPerBot) {
-        const newest = [...open].sort((a, b) => {
+        const newestOpen = rows => [...rows].sort((a, b) => {
           const aAt = Number(a.updatedAt ?? a.createdAt ?? 0);
           const bAt = Number(b.updatedAt ?? b.createdAt ?? 0);
           return bAt - aAt;
         })[0];
+        let newest = newestOpen(open);
         if (!newest?.sessionRecordId) fail('concurrency_limit', 429);
         let navigated = null;
         if (url != null && url !== '') {
@@ -226,6 +227,22 @@ export function createBrowserSessionService({
             // Cloudflare expired the reused session; its record is now closed, so open a fresh one below.
             if (error?.code !== 'browser_session_expired') throw error;
             open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
+          }
+        } else if (typeof browsers.readonlyView === 'function') {
+          // Cloudflare ends a Browser Run ~10 minutes after its last activity, but a record
+          // stays open until a provider call notices the expiry. Without a url there is no
+          // provider contact at all, so verify the reused run is alive before returning it.
+          // A probe that cannot run or fails without an expiry code keeps the reuse below;
+          // the next navigate/live-view still closes the record on real expiry.
+          try {
+            await withSession(newest, () => browsers.readonlyView(newest.providerSessionId, {
+              targetId: typeof newest.targetId === 'string' ? newest.targetId : undefined,
+              interactive: false,
+            }));
+          } catch (error) {
+            if (error?.code === 'browser_session_expired') {
+              open = (await store.list(prefixFor(ownerId, botId))).filter(row => row.status === 'open');
+            }
           }
         }
         if (navigated) {
@@ -248,24 +265,29 @@ export function createBrowserSessionService({
             },
           };
         }
-        if (open.length >= maxSessionsPerBot) return {
-          sessionRecordId: newest.sessionRecordId,
-          purpose: newest.purpose || purpose,
-          status: 'open',
-          url: typeof newest.url === 'string' ? newest.url : null,
-          title: '',
-          reused: true,
-          note: 'Reused an existing session (at concurrency limit). Call browser_navigate with an https url to change the page.',
-          event: {
-            type: 'tool',
-            name: 'browser_open',
-            status: 'ok',
+        if (open.length >= maxSessionsPerBot) {
+          newest = newestOpen(open);
+          if (!newest?.sessionRecordId) fail('concurrency_limit', 429);
+          return {
             sessionRecordId: newest.sessionRecordId,
+            purpose: newest.purpose || purpose,
+            status: 'open',
             url: typeof newest.url === 'string' ? newest.url : null,
+            title: '',
             reused: true,
-            at: clock(),
-          },
-        };
+            note: 'Reused an existing session (at concurrency limit). Call browser_navigate with an https url to change the page.',
+            event: {
+              type: 'tool',
+              name: 'browser_open',
+              status: 'ok',
+              sessionRecordId: newest.sessionRecordId,
+              url: typeof newest.url === 'string' ? newest.url : null,
+              reused: true,
+              at: clock(),
+            },
+          };
+        }
+        // The reused run was expired and its record closed, freeing a slot: open fresh below.
       }
       const { sessionId } = await browsers.createSession();
       let pageUrl = null;

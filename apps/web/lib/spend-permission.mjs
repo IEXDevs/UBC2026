@@ -194,7 +194,8 @@ function accessDetail(name, args) {
   const amount = typeof args?.amount === 'string' ? args.amount.trim() : '';
   const handle = typeof args?.handle === 'string' ? args.handle.replace(/^@/, '').trim() : '';
   const address = typeof args?.destination === 'string' ? args.destination.trim() : '';
-  const recipient = handle && address ? `@${handle} (${address})` : (handle ? `@${handle}` : address || args?.domain);
+  const domain = typeof args?.domain === 'string' ? args.domain.trim() : '';
+  const recipient = handle && address ? `@${handle} (${address})` : (handle ? `@${handle}` : (address || domain));
   const who = recipient ? ` to ${recipient}` : '';
   const asset = solanaSpendAsset(args?.asset ?? 'USDC');
   if (!asset || !AMOUNT.test(amount)) return `Move funds${who}`;
