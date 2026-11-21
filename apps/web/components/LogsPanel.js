@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import MentionText from './MentionText';
+import { isPreviewOwnerId } from '../lib/dev-preview.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
 import { formatLogTime, logRows } from '../lib/txn-preview.mjs';
@@ -11,6 +12,12 @@ export default function LogsPanel({ ownerId, getAccessToken, onParty, receipts, 
   const [activity, setActivity] = useState({ items: [], status: 'loading' });
   useEffect(() => {
     if (!ownerId) return undefined;
+    if (isPreviewOwnerId(ownerId)) {
+      // The preview has no wallet activity store. Show this browser's
+      // receipts without a failing network round-trip.
+      setActivity({ items: [], status: 'ready' });
+      return undefined;
+    }
     const controller = new AbortController();
     let timer;
     async function load() {
@@ -46,7 +53,7 @@ export default function LogsPanel({ ownerId, getAccessToken, onParty, receipts, 
 
   useEffect(() => {
     const url = shellRuntimeUrl('/api/events');
-    if (!url || !ownerId) return undefined;
+    if (!url || !ownerId || isPreviewOwnerId(ownerId)) return undefined;
     let stop = false;
     async function load() {
       try {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ModalClose from './ModalClose';
+import { isPreviewOwnerId } from '../lib/dev-preview.mjs';
 import { loopStepsFromRun } from '../lib/loop-steps.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
@@ -37,7 +38,7 @@ export default function ComputerSheet({ open, onClose, bot, ownerId = null, getA
   useEffect(() => {
     if (!mounted || !syncedBotId) return undefined;
     const url = shellRuntimeUrl(`/bots/${encodeURIComponent(syncedBotId)}/status`);
-    if (!ownerId || !url) {
+    if (!ownerId || !url || isPreviewOwnerId(ownerId)) {
       setSteps(loopStepsFromRun(null));
       setLoopNote(ownerId ? 'This agent cannot be loaded from the runtime.' : 'Sign in to load this agent’s loop.');
       return undefined;

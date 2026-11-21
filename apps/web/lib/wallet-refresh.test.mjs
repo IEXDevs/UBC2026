@@ -56,3 +56,25 @@ test('the portfolio graph tolerates missing usdMicro values', () => {
   assert.doesNotMatch(graph, /BigInt\(row\.usdMicro\) \* 10000n\) \/ BigInt\(wallet\.totalUsdMicro\)/);
   assert.match(graph, /\/\^\[0-9\]\+\$\/\.test\(row\.usdMicro\)/);
 });
+
+test('the send pane keeps the typed amount while balances reload', () => {
+  const sheet = source('components/WalletsSheet.js');
+  const sendPane = sheet.slice(sheet.indexOf('function SendPane('));
+  const effectAt = sendPane.indexOf('const list = Array.isArray(tokens)');
+  assert.ok(effectAt >= 0);
+  assert.match(sendPane.slice(effectAt), /if \(!list\.length\) return;/);
+});
+
+test('the developer preview never polls the runtime', () => {
+  const page = source('app/page.js');
+  assert.match(page, /if \(!ownerId \|\| devPreview\) \{\s*\n\s*setTransfers\(\[\]\);/);
+  assert.match(page, /if \(!ownerId \|\| devPreview\) \{\s*\n\s*setRemoteLists\(emptyMoneyState\(\)\);/);
+  assert.match(page, /if \(!ownerId \|\| devPreview\) return undefined;/);
+});
+
+test('the developer preview runs on the browser copy without account sync', () => {
+  const page = source('app/page.js');
+  assert.match(page, /if \(devPreview\) \{\s*\n\s*\/\/ The preview has no account store/);
+  assert.match(page, /bindAccountState\(\{\}\);\s*\n\s*setHydratedOwner\(ownerId\);/);
+  assert.match(page, /The preview has no directory row/);
+});

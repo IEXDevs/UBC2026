@@ -654,11 +654,18 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       bindAccountState({});
       return undefined;
     }
+    if (devPreview) {
+      // The preview has no account store. Bind local-only storage (no
+      // runtime reads or pushes) and mark the desk ready for this browser.
+      bindAccountState({});
+      setHydratedOwner(ownerId);
+      return undefined;
+    }
     let stop = false;
     bindAccountState({ ownerId, getAccessToken: () => accessTokenRef.current?.() });
     hydrateAccountState().finally(() => { if (!stop) setHydratedOwner(ownerId); });
     return () => { stop = true; };
-  }, [ownerId]);
+  }, [ownerId, devPreview]);
 
   useEffect(() => {
     if (!ready) return undefined;
@@ -794,7 +801,8 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
     }
     const profileUrl = shellRuntimeUrl('/api/profiles/me');
     const accountUrl = shellRuntimeUrl('/api/me');
-    if (!profileUrl) {
+    if (!profileUrl || devPreview) {
+      // The preview has no directory row. Keep the profile stored on this device.
       setProfileReady(true);
       return undefined;
     }
@@ -826,10 +834,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       }
     })();
     return () => { stop = true; };
-  }, [ownerId]);
+  }, [ownerId, devPreview]);
 
   useEffect(() => {
-    if (!ownerId) {
+    if (!ownerId || devPreview) {
       setTransfers([]);
       return undefined;
     }
@@ -854,10 +862,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       }
     })();
     return () => { stop = true; };
-  }, [ownerId, getAccessToken, signedIn, user]);
+  }, [ownerId, getAccessToken, signedIn, user, devPreview]);
 
   useEffect(() => {
-    if (!ownerId) return undefined;
+    if (!ownerId || devPreview) return undefined;
     const refresh = () => setListsTick(tick => tick + 1);
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     const id = window.setInterval(refresh, WALLET_REFRESH_MS);
@@ -866,10 +874,10 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [ownerId, WALLET_REFRESH_MS]);
+  }, [ownerId, devPreview, WALLET_REFRESH_MS]);
 
   useEffect(() => {
-    if (!ownerId) {
+    if (!ownerId || devPreview) {
       setRemoteLists(emptyMoneyState());
       return undefined;
     }
@@ -897,7 +905,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
       }
     })();
     return () => { stop = true; };
-  }, [ownerId, signedIn, user, getAccessToken, liveWallets, listsTick]);
+  }, [ownerId, signedIn, user, getAccessToken, liveWallets, listsTick, devPreview]);
 
   const savedAgentWallets = useMemo(() => agentWalletChoices(withoutRetiredWallets(remoteLists.wallets, retiredIds)),
     [remoteLists.wallets, retiredIds]);
