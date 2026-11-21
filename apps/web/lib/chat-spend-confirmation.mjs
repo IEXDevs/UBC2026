@@ -41,7 +41,7 @@ export function swapHoldFromPreview(hold, preview) {
   const input = formatBaseUnits(hold.args.amount, preview.inputDecimals);
   const output = formatBaseUnits(preview.minOutput, preview.outputDecimals);
   const debit = formatBaseUnits(preview.usdMicros, 6);
-  const label = `Swap ${input} ${hold.args.asset} for at least ${output} ${hold.args.outputAsset}. Budget charge including fees is $${debit}.`;
+  const label = `Swap ${input} ${hold.args.asset} for at least ${output} ${hold.args.outputAsset} before fees and account setup. The budget charge includes those costs and totals $${debit}.`;
   return { ...hold, label, prompt: `${label} Slide to confirm.`, expiresAt: preview.expiresAt, swapTicket: preview.ticket };
 }
 

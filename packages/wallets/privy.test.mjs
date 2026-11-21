@@ -208,8 +208,59 @@ test('swap preparation derives balances from requested RPC account snapshots, no
   missing = true;
   await assert.rejects(privy.prepareSolanaSwap(intent), { code: 'swap_simulation_unavailable' });
   assert.equal(swapAccountSnapshot(null, signer.toBase58()), null);
-  assert.deepEqual(swapAccountSnapshot([{ lamports: 1 }, null], signer.toBase58()), { lamports: 1, tokens: [] });
+  assert.deepEqual(swapAccountSnapshot([{ lamports: 1 }, null], signer.toBase58()), { lamports: 1, tokens: [], accountRent: '0' });
   assert.equal(swapAccountSnapshot([{ lamports: 1 }, { ...account('1'), data: ['bad', 'base64'] }], signer.toBase58()), null);
+});
+
+test('SOL-output swaps count newly created wallet token account rent against the approved cost', async () => {
+  const payer = Keypair.generate().publicKey;
+  const wallet = payer.toBase58();
+  const token = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+  const associated = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+  const intermediate = Keypair.generate().publicKey;
+  const [created] = PublicKey.findProgramAddressSync([payer.toBuffer(), token.toBuffer(), intermediate.toBuffer()], associated);
+  const source = Keypair.generate().publicKey;
+  const transaction = Buffer.from(new VersionedTransaction(new TransactionMessage({
+    payerKey: payer, recentBlockhash: SystemProgram.programId.toBase58(),
+    instructions: [new TransactionInstruction({ programId: associated, data: Buffer.from([1]), keys:
+      [payer, created, payer, intermediate, SystemProgram.programId, token, source].map((pubkey, index) => ({
+        pubkey, isSigner: index === 0, isWritable: [0, 1, 6].includes(index),
+      })) })],
+  }).compileToV0Message()).serialize()).toString('base64');
+  const rent = 2039280;
+  const fee = 5000;
+  const before = 100_000_000;
+  let accountExists = false;
+  let retained = 0n;
+  const tokenAccount = (mint, amount) => {
+    const data = Buffer.alloc(165);
+    mint.toBuffer().copy(data, 0);
+    payer.toBuffer().copy(data, 32);
+    data.writeBigUInt64LE(amount, 64);
+    return { owner: token.toBase58(), lamports: rent, data: [data.toString('base64'), 'base64'] };
+  };
+  const snapshot = (addresses, after) => addresses.map(key => {
+    if (key === wallet) return { lamports: after ? before + 10_000_000 - rent - fee : before };
+    if (key === source.toBase58()) return tokenAccount(new PublicKey(address), after ? 0n : 1_000_000n);
+    if (key === created.toBase58() && (after || accountExists)) return tokenAccount(intermediate, after ? retained : 0n);
+    return null;
+  });
+  const privy = client({ fetcher: async (_url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    if (method === 'getGenesisHash') return Response.json({ result: SOLANA_GENESIS_HASH });
+    if (method === 'getMultipleAccounts') return Response.json({ result: { context: { slot: 42 }, value: snapshot(params[0], false) } });
+    if (method === 'getFeeForMessage') return Response.json({ result: { value: fee } });
+    assert.equal(method, 'simulateTransaction');
+    return Response.json({ result: { value: { err: null, accounts: snapshot(params[1].accounts.addresses, true) } } });
+  } });
+  const intent = { transaction, walletAddress: wallet, inputMint: address, outputMint: 'So11111111111111111111111111111111111111112',
+    amount: '1000000', minOutput: '9950000' };
+  assert.equal((await privy.prepareSolanaSwap(intent)).maxSolCost, String(rent + fee));
+  retained = 1n;
+  await assert.rejects(privy.prepareSolanaSwap(intent), { simulationReason: 'swap_other_token_changed' });
+  retained = 0n;
+  accountExists = true;
+  await assert.rejects(privy.prepareSolanaSwap(intent), { simulationReason: 'swap_output_below_minimum' });
 });
 
 test('x402 partial signing binds the simulated message and leaves the facilitator signature empty without broadcasting', async () => {
