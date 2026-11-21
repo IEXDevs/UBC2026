@@ -81,13 +81,13 @@ export async function waitForBrowserSigner(readSigner, wallets, timeoutMs = 5000
   }
 }
 
-export async function signSelectedWalletTransaction({ from, transaction, signer, forSwap = false } = {}) {
+export async function signSelectedWalletTransaction({ from, transaction, signer, forSwap = false, requireWalletApproval = forSwap } = {}) {
   if (!from?.address || from.frozen) fail('wallet_frozen');
   if (!(transaction instanceof Uint8Array) || transaction.length <= 64) fail('invalid_transaction');
   const wallets = Array.isArray(signer?.wallets) ? signer.wallets : [];
   const wallet = wallets.find(item => item?.address === from.address)
     || (!forSwap && wallets.find(item => typeof item?.address === 'string' && item.address.toLowerCase() === from.address.toLowerCase()));
-  if (from.kind !== 'main' && typeof signer?.signWithOwnerAuthorization === 'function'
+  if (!requireWalletApproval && from.kind !== 'main' && typeof signer?.signWithOwnerAuthorization === 'function'
       && (!wallet || signer.preferOwnerAuthorization)) {
     try {
       const signed = await signer.signWithOwnerAuthorization({ address: from.address, transaction });
@@ -105,9 +105,11 @@ export async function signSelectedWalletTransaction({ from, transaction, signer,
   }
   let signed;
   try {
+    const input = { transaction, chain: SOLANA_PRIVY_CHAIN,
+      ...(requireWalletApproval ? { options: { uiOptions: { showWalletUIs: true } } } : {}) };
     signed = wallet.standardWallet && typeof wallet.signTransaction === 'function'
-      ? await wallet.signTransaction({ transaction, chain: SOLANA_PRIVY_CHAIN })
-      : await signer.signTransaction({ transaction, wallet, chain: SOLANA_PRIVY_CHAIN });
+      ? await wallet.signTransaction(input)
+      : await signer.signTransaction({ ...input, wallet });
   } catch (error) {
     if (!forSwap) fail('wallet_approval_cancelled');
     const causes = [error, error?.cause, error?.data, error?.cause?.data];

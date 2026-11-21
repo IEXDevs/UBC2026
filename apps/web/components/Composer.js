@@ -44,7 +44,6 @@ import {
 import {
   parsePermission,
   permissionById,
-  readAutoSignSwaps,
   readReviewThreshold,
   readStoredPermission,
   reviewCapToDollars,
@@ -709,10 +708,18 @@ export default function Composer({
       if (result.hold.args?.action === 'x402') {
         setLasoClaim(null);
       }
+      const action = result.hold.args?.action ?? 'spend';
+      const walletApproval = result.hold.name === 'request_spend' && !result.hold.budgetOverride
+        && ((action === 'swap' && typeof executeChatSwap === 'function')
+          || (['spend', 'pay'].includes(action) && typeof signChatTransaction === 'function'));
       const label = result.reply || result.hold.prompt || result.hold.label;
       if (label && !shown.includes(label)) {
         pushLine('agent', label, botIdRef.current, 0, [], null, { mentionAddress: result.hold.args?.destination });
-        sayConfirm(label);
+        if (!walletApproval) sayConfirm(label);
+      }
+      if (walletApproval) {
+        await continueChat(spoken, prior, [result.hold]);
+        return;
       }
       setThinking(false);
       onThinking?.(false);
@@ -785,7 +792,7 @@ export default function Composer({
       const send = async (spendAuthorization, lasoPayment) => {
         let accessToken = '';
         try { accessToken = (await getAccessToken?.()) || ''; } catch { accessToken = ''; }
-        if (permissionRef.current === 'full') await flushAccountState();
+        if (permissionRef.current !== 'ask') await flushAccountState();
         if (controller.signal.aborted || targetId !== botIdRef.current) return { ok: false, error: 'aborted' };
         return sendBotChat({
           ownerId,
@@ -796,7 +803,6 @@ export default function Composer({
           goal: botGoal,
           type: botType,
           permission: permissionRef.current,
-          autoSignSwaps: readAutoSignSwaps(accountStorage, ownerId),
           grants,
           spendAuthorization,
           lasoPayment,
@@ -1255,7 +1261,8 @@ export default function Composer({
             const mode = parsePermission(next);
             if (mode === permissionRef.current) return;
             setPermission(mode);
-            writeStoredPermission(accountStorage, ownerId, mode);
+            writeStoredPermission(accountStorage, mode);
+            void flushAccountState();
             window.dispatchEvent(new Event('storage'));
             pushLine('note', `Permissions set to ${permissionById(mode).label}`);
           }}
@@ -1263,6 +1270,7 @@ export default function Composer({
             try {
               const saved = writeReviewCap(accountStorage, next);
               setReviewCap(saved);
+              void flushAccountState();
               window.dispatchEvent(new Event('storage'));
               pushLine('note', `Review by AI maximum set to ${reviewCapToDollars(saved)} USD`);
             } catch {

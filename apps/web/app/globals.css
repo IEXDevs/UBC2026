@@ -1691,7 +1691,6 @@ button.add-agent:not(:disabled):hover {
 .wallet-settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
 .wallet-settings-grid > section { min-width: 0; }
 .wallet-settings h3 { margin: 0 0 14px; font-size: 14px; color: #ffffff; font-weight: 650; }
-.wallet-auto-sign-setting { margin-bottom: 24px; }
 .wallet-settings .linked-logins { margin-bottom: 24px; }
 .wallet-token-settings { grid-column: 1 / -1; border-top: 1px solid #1c1c1c; padding-top: 22px; }
 .wallet-settings .wallet-roster-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }

@@ -270,16 +270,7 @@ export function createAccountMirror({
     pending.clear();
   }
 
-  async function savePermission(value) {
-    if (!live || !open || typeof value !== 'string' || !pushable(value)) return false;
-    await lastWrite;
-    if (!await flush()) return false;
-    if (!await send([{ name: 'permission', value }]) || !live) return false;
-    safeSet(storage, SPEND_PERMISSION_KEY, value);
-    return true;
-  }
-
-  return { ownerId, storage: mirrored, hydrate, flush, savePermission, stop, entries };
+  return { ownerId, storage: mirrored, hydrate, flush, stop, entries };
 }
 
 /* Singleton used by the desk. Components import `accountStorage` for mirrored writes. */
@@ -333,8 +324,4 @@ export function hydrateAccountState() {
 /** Push queued desk state now. A missing mirror is a no-op. */
 export function flushAccountState() {
   return current ? current.flush() : Promise.resolve(false);
-}
-
-export function saveAccountPermission(ownerId, value) {
-  return ownerId && current?.ownerId === ownerId ? current.savePermission(value) : Promise.resolve(false);
 }

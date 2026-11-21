@@ -211,7 +211,7 @@ function PermitMenu({ selected, reviewCapDollars, onPermissionChange, onReviewCa
                     inputMode="decimal"
                     autoComplete="off"
                     value={capDraft}
-                    aria-label="Review by AI threshold in USDC"
+                    aria-label="Review by AI threshold in USD"
                     aria-invalid={capInvalid || undefined}
                     onChange={(event) => {
                       setCapDraft(event.target.value);
@@ -223,10 +223,10 @@ function PermitMenu({ selected, reviewCapDollars, onPermissionChange, onReviewCa
                       saveCap();
                     }}
                   />
-                  <span aria-hidden="true">USDC</span>
+                  <span aria-hidden="true">USD</span>
                 </div>
               ) : reviewCapDollars ? (
-                <span className="permit-cap-value" title={`${reviewCapDollars} USDC`}>{reviewCapDollars} USDC</span>
+                <span className="permit-cap-value" title={`${reviewCapDollars} USD`}>{reviewCapDollars} USD</span>
               ) : null}
               <button
                 ref={editRef}

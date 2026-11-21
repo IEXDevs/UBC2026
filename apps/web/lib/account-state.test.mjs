@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAccountMirror, mirrorEntries } from './account-state.mjs';
 import { catalogStorageKey } from './file-catalog.mjs';
-import { acceptanceStorageKey, readAutoSignSwaps, readStoredPermission, REVIEW_THRESHOLD_KEY, SPEND_PERMISSION_KEY,
-  spendPreferenceValue, writeStoredPermission } from './spend-permission.mjs';
+import { acceptanceStorageKey, readStoredPermission, REVIEW_THRESHOLD_KEY, SPEND_PERMISSION_KEY,
+  writeStoredPermission } from './spend-permission.mjs';
 import { adoptLegacyRoster, LEGACY_ROSTER_KEY, looksStorageKey, rosterStorageKey, writeLooks, writeRoster } from './roster.mjs';
 import { talkStorageKey, writeTalks } from './talk-store.mjs';
 import { accountStorageKey } from './account-code.mjs';
@@ -46,25 +46,15 @@ function harness({ server = [], deletedAgentIds = [], listStatus = 200, source =
   return { storage, posts, timers, mirror };
 }
 
-test('auto-sign is opt-in, follows the same account, and preserves the selected spend mode', async () => {
-  const server = [{ name: 'permission', value: 'full' }];
-  const { mirror, storage, posts } = harness({ server });
-  const enabled = spendPreferenceValue('full', 'alice', true);
-  assert.equal(await mirror.savePermission(enabled), false);
-  assert.deepEqual(posts, []);
+test('a legacy permission stays selected and later changes sync as plain modes', async () => {
+  const server = [{ name: 'permission', value: JSON.stringify({ permission: 'full', ownerId: 'alice', autoSignSwaps: true }) }];
+  const { mirror, storage } = harness({ server });
   await mirror.hydrate();
-  assert.equal(readAutoSignSwaps(storage, 'alice'), false);
-  assert.equal(await mirror.savePermission(enabled), true);
-  assert.equal(readAutoSignSwaps(storage, 'alice'), true);
-  assert.equal(readAutoSignSwaps(storage, 'bob'), false);
-  writeStoredPermission(mirror.storage, 'alice', 'ask');
+  assert.equal(readStoredPermission(storage), 'full');
+  writeStoredPermission(mirror.storage, 'ask');
   await mirror.flush();
   const otherBrowser = harness({ server });
   await otherBrowser.mirror.hydrate();
-  assert.equal(readStoredPermission(otherBrowser.storage), 'ask');
-  assert.equal(readAutoSignSwaps(otherBrowser.storage, 'alice'), true);
-  assert.equal(await otherBrowser.mirror.savePermission(spendPreferenceValue('ask', 'alice', false)), true);
-  assert.equal(readAutoSignSwaps(otherBrowser.storage, 'alice'), false);
   assert.equal(readStoredPermission(otherBrowser.storage), 'ask');
   assert.equal(server.find(row => row.name === 'permission').value, 'ask');
 });

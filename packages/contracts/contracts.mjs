@@ -24,14 +24,14 @@ export const APPROVAL_MODES = Object.freeze(['fully-automatic', 'capped-automati
 export const CLUSTERS = Object.freeze([SOLANA_CLUSTER]);
 export const BUILTIN_TEMPLATES = Object.freeze(['trading', 'shopping', 'position-management']);
 
-/** The account's existing permission row also stores the owner-scoped swap opt-in. */
+/** Read the current permission string or the legacy account-scoped preference. */
 export function parseStoredSpendPreference(value, ownerId) {
-  if (value === 'ask' || value === 'review' || value === 'full') return { permission: value, autoSignSwaps: false };
+  if (value === 'ask' || value === 'review' || value === 'full') return { permission: value };
   let saved;
-  try { saved = JSON.parse(value); } catch { return { permission: 'ask', autoSignSwaps: false }; }
+  try { saved = JSON.parse(value); } catch { return { permission: 'ask' }; }
   const mode = saved?.permission;
-  if (mode !== 'ask' && mode !== 'review' && mode !== 'full') return { permission: 'ask', autoSignSwaps: false };
-  return { permission: mode, autoSignSwaps: idOk(ownerId) && saved.ownerId === ownerId && saved.autoSignSwaps === true };
+  if (ownerId != null && (!idOk(ownerId) || saved?.ownerId !== ownerId)) return { permission: 'ask' };
+  return { permission: mode === 'review' || mode === 'full' ? mode : 'ask' };
 }
 
 export const EVENT_KINDS = Object.freeze([

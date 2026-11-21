@@ -317,11 +317,9 @@ export async function POST(request, context) {
 
   async function tryAutoSwap(hold, swapHold, swapPreview) {
     if (swapHold.args.amount !== hold.args.amount) return null;
-    if (permissionMode === 'full' && body.autoSignSwaps !== true) return null;
-    const queued = hold.idempotencyKey?.startsWith('loop_swap_');
-    if (!queued && permissionMode !== 'full') return null;
-    const approvalReason = (permissionMode !== 'full' && permissionMode !== 'review') ? 'owner_approval_required'
-      : amountOverReviewCap(swapPreview.usdMicros, reviewCap) ? 'approval-needed' : null;
+    if (permissionMode === 'ask') return null;
+    const approvalReason = permissionMode === 'review' && amountOverReviewCap(swapPreview.usdMicros, reviewCap)
+      ? 'approval-needed' : null;
     if (approvalReason) {
       const message = swapFailure({ error: approvalReason }).message;
       swapHold.prompt = `${message} ${swapHold.prompt}`;
@@ -333,22 +331,17 @@ export async function POST(request, context) {
       idempotencyKey: hold.idempotencyKey, autoSwap: true, confirmed: false,
     }, { swapTicket: swapHold.swapTicket });
     if (sent?.signed === true && typeof sent.signature === 'string') {
-      return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted within your review limit: https://solscan.io/tx/${sent.signature}`;
+      return `${swapHold.label.replace(/ Budget charge.*$/, '')} Submitted automatically: https://solscan.io/tx/${sent.signature}`;
     }
-    const needsBrowserSigner = (sent?.reason ?? sent?.error) === 'client_sign_required';
-    if (permissionMode === 'full' && sent?.signed === false && sent.reason === 'swap_signer_missing'
+    if (sent?.signed === false && sent.reason === 'swap_signer_missing'
         && sent.swapDelegation) {
-      return { clientSwap: { spend: { ...hold.args, botId, permission: 'full',
+      return { clientSwap: { spend: { ...hold.args, botId, permission: permissionMode,
         reviewCap: effectiveReviewCap(reviewCap), idempotencyKey: hold.idempotencyKey }, swapTicket: swapHold.swapTicket,
         delegation: { ...sent.swapDelegation, expiresAt: swapHold.expiresAt } } };
     }
-    if (needsBrowserSigner && permissionMode === 'review') {
-      return { clientSwap: { spend: { ...hold.args, botId, permission: permissionMode,
-        reviewCap: effectiveReviewCap(reviewCap), idempotencyKey: hold.idempotencyKey }, swapTicket: swapHold.swapTicket } };
-    }
     // Only a swap stopped before its reservation can still go to the slide under the same key.
     const beforeReserve = sent?.state === 'approval-needed' || sent?.state === 'trust-confirmation-required'
-      || sent?.error === 'desk_locked' || needsBrowserSigner;
+      || sent?.error === 'desk_locked';
     if (beforeReserve) {
       swapHold.prompt = `${swapFailure(sent).message} ${swapHold.prompt}`;
       swapHold.label = `${swapFailure(sent).message} ${swapHold.label}`;

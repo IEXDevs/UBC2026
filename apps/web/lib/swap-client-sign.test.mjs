@@ -70,6 +70,7 @@ test('approved swaps prepare, sign the exact selected browser wallet with the sh
   assert.equal(calls[1].body.swapAuthorization.signedTransaction, Buffer.from(new Uint8Array(120).fill(2)).toString('base64'));
   assert.deepEqual(signCalls[0].transaction, transaction);
   assert.equal(signCalls[0].wallet.address, 'selected');
+  assert.equal(signCalls[0].options.uiOptions.showWalletUIs, true);
 });
 
 test('unavailable agent wallets never fall back to signing the Main wallet', async () => {

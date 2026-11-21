@@ -526,9 +526,10 @@ function DepositSigner({ signerRef, signWithOwnerAuthorization }) {
 function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil = 0, devPreview = false, loginDisabled, onLogin, onLogout, liveWallets = null, walletNote = '', walletError = '', getAccessToken = null, authorizeSpend = null, attachSwapSigner = null, onRetireWallet = null, onWalletCreated = null, privyLive = false, unlinkWallet = null }) {
   const toast = useToast();
   const depositSignerRef = useRef(null);
-  const signChatTransaction = useCallback(async ({ walletAddress, transaction }) => signSelectedWalletTransaction({
+  const signChatTransaction = useCallback(async ({ walletAddress, transaction, requireWalletApproval }) => signSelectedWalletTransaction({
     from: { address: walletAddress }, transaction,
     signer: await waitForBrowserSigner(() => depositSignerRef.current, [{ address: walletAddress }]),
+    requireWalletApproval,
   }), []);
   const executeChatSwap = useCallback(input => executeClientSignedSwap({ ...input, signer: depositSignerRef.current,
     readSigner: () => depositSignerRef.current, attachSwapSigner }), [attachSwapSigner]);
