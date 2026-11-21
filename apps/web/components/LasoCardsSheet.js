@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { ChevronDown } from 'lucide-react';
 import { motion } from 'motion/react';
 import ModalClose from './ModalClose';
 import LasoCard, { LasoBillingForm } from './LasoCard';
@@ -79,7 +80,11 @@ export default function LasoCardsSheet({ open, onClose, ownerId = '' }) {
             </p>
           ) : null}
           <details className="laso-billing-fold">
-            <summary>Billing address</summary>
+            <summary>
+              <strong>Billing address</strong>
+              <ChevronDown size={16} aria-hidden="true" />
+            </summary>
+            <div className="laso-billing-body">
             <LasoBillingForm
               key={`${ownerId || 'signed-out'}:${billing?.postalCode || ''}`}
               value={billing}
@@ -88,6 +93,7 @@ export default function LasoCardsSheet({ open, onClose, ownerId = '' }) {
                 setBilling(writeLasoBilling(window.sessionStorage, ownerId, next));
               }}
             />
+            </div>
           </details>
         </div>
       </motion.section>

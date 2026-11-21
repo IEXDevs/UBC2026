@@ -8,5 +8,7 @@ test('the billing address stays closed at the bottom of the cards sheet', () => 
   const fold = source.indexOf('className="laso-billing-fold"');
   assert.ok(cards > 0 && fold > cards);
   assert.match(source, /<details className="laso-billing-fold">/);
+  assert.match(source, /<strong>Billing address<\/strong>/);
+  assert.match(source, /<ChevronDown /);
   assert.doesNotMatch(source, /<details[^>]*\sopen/);
 });
