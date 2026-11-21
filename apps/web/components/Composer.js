@@ -7,7 +7,8 @@ import { Attachment01Icon } from '@hugeicons/core-free-icons';
 import ChatBubbles from './ChatBubbles';
 import ContextUsage from './ContextUsage';
 import Attachments, { isImageFile } from './Attachments';
-import { Suggestion } from './ai/elements';
+import { AgentTrace, Suggestion } from './ai/elements';
+import { sanitizeActivity } from '../lib/chat-activity.mjs';
 import GradientAscii from './GradientAscii';
 import { Orb } from '@yogesharc/thinking-orbs';
 import { orbSpeed, voiceOrbLook } from '../lib/voice-orb.mjs';
@@ -30,6 +31,7 @@ import {
   startBrowserDictation,
 } from '../lib/dictation.mjs';
 import { mentionIn, recipientHint } from '../lib/profile.mjs';
+import { mainAgentState, boardRowToLine, subagentLabel, visibleSubagents } from '../lib/subagents-view.mjs';
 import AddressCopy from './AddressCopy';
 import {
   DEFAULT_VOICE_SETTINGS,
@@ -174,6 +176,8 @@ export default function Composer({
   useEffect(() => {
     pendingSpend.current = null;
     setLasoClaim(null);
+    setSubagents([]);
+    setSubDetail(null);
   }, [ownerId, botId]);
 
   useEffect(() => {
@@ -218,6 +222,9 @@ export default function Composer({
   const [mention, setMention] = useState('');
   const [mentionCopy, setMentionCopy] = useState(null);
   const [thinking, setThinking] = useState(false);
+  const [subagents, setSubagents] = useState([]);
+  const [subDetail, setSubDetail] = useState(null);
+  const [suggesting, setSuggesting] = useState(false);
   const [queue, setQueue] = useState([]);
   const [draftSeed, setDraftSeed] = useState(null);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -645,6 +652,14 @@ export default function Composer({
     if (!spoken) return null;
     const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
     if (typeof extra?.mentionAddress === 'string' && extra.mentionAddress) line.mentionAddress = extra.mentionAddress;
+    if (extra?.subagent && typeof extra.subagent === 'object') {
+      line.subagent = {
+        task: typeof extra.subagent.task === 'string' ? extra.subagent.task.slice(0, 300) : '',
+        skill: typeof extra.subagent.skill === 'string' ? extra.subagent.skill.slice(0, 32) : '',
+        status: extra.subagent.status === 'error' ? 'error' : 'done',
+        ref: Number.isSafeInteger(extra.subagent.ref) ? extra.subagent.ref : 0,
+      };
+    }
     if (Number.isSafeInteger(tokens) && tokens > 0) line.tokens = tokens;
     if (Array.isArray(activity) && activity.length > 0) line.activity = activity;
     if (access && access.kind === 'inline' && typeof access.name === 'string') line.access = access;
@@ -677,6 +692,7 @@ export default function Composer({
 
   async function settleChat(result, spoken, prior, grants, run, shown = [], firstLineId = null) {
     if (run !== runRef.current) return;
+    if (Array.isArray(result?.subagents)) setSubagents(result.subagents.slice(-8));
     if (result?.claimUrl) {
       setLasoClaim({ botId: botIdRef.current, url: result.claimUrl });
       if (ownerId) writeLasoClaim(window.sessionStorage, ownerId, result.claimUrl);
@@ -691,6 +707,11 @@ export default function Composer({
       return;
     }
     const holdLabel = result.hold ? (result.reply || result.hold.prompt || result.hold.label || '') : '';
+    const subRows = visibleSubagents(result?.subagents, false);
+    for (const [subIndex, subRow] of subRows.entries()) {
+      const subLine = boardRowToLine({ ...subRow, id: subRow.id || `turn-${subIndex}` }, subIndex);
+      pushLine('agent', subLine.text, botIdRef.current, 0, subLine.activity, null, { subagent: subLine.subagent });
+    }
     const lines = Array.isArray(result.replies) && result.replies.length > 0
       ? result.replies
       : (result.reply && !result.hold ? [result.reply] : []);
@@ -1222,6 +1243,45 @@ export default function Composer({
         </div>
       ) : null}
       <div className="composer" aria-label="Message the agent">
+        {visibleSubagents(subagents, suggesting).length > 0 ? (
+          <div className="sub-strip" role="group" aria-label="Subagents">
+            {visibleSubagents(subagents, suggesting).map((row, index) => (
+              <button
+                key={row.id || `sub-${index}`}
+                type="button"
+                className="sub-pill"
+                onClick={() => setSubDetail(index)}
+                title={row.task || 'Subagent'}
+              >
+                <span className={`sub-dot${thinking ? ' is-run' : ''}`} aria-hidden="true" />
+                {subagentLabel(row)}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {subDetail != null && visibleSubagents(subagents, false)[subDetail] ? (
+          <div className="sub-modal-backdrop" onClick={() => setSubDetail(null)}>
+            <div
+              className="sub-modal"
+              role="dialog"
+              aria-label="Subagent details"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="sub-modal-head">
+                <span>{botName} is {mainAgentState(thinking)}</span>
+                <button type="button" className="sub-modal-close" onClick={() => setSubDetail(null)}>Close</button>
+              </div>
+              {visibleSubagents(subagents, false).map((row, index) => (
+                <div key={row.id || `sub-${index}`} className={`sub-row${index === subDetail ? ' is-open' : ''}`}>
+                  <p className="sub-row-task">{subagentLabel(row)}</p>
+                  {row.skill ? <p className="sub-row-skill">/{row.skill}</p> : null}
+                  <AgentTrace steps={sanitizeActivity(row.activity)} />
+                  <p className="sub-row-reply">{row.reply}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <input ref={fileRef} className="sr-only" type="file" multiple aria-label="Attach files" />
         <MessageQueue items={queue} onEdit={editQueued} onSendNow={sendQueuedNow} />
         <PromptBar
@@ -1243,6 +1303,7 @@ export default function Composer({
           width={1200}
           radius={20}
           onDraftChange={setDraft}
+          onSuggestChange={setSuggesting}
           draftSeed={draftSeed}
           onAttach={pickFiles}
           extraReady={files.length > 0}

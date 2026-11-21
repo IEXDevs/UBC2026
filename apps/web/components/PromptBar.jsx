@@ -266,6 +266,7 @@ export default function PromptBar({
   onDraftChange,
   onChipClick,
   onRemoveAttachment,
+  onSuggestChange,
   accessory = null,
   endSlot = null,
   permission = '',
@@ -302,7 +303,7 @@ export default function PromptBar({
   const dictationJob = useRef(null);
   const dictateBase = useRef('');
   const latest = useRef({});
-  latest.current = { onSend, onStop, onAttach, onDictate, onEffortChange, onDraftChange, onChipClick, onRemoveAttachment };
+  latest.current = { onSend, onStop, onAttach, onDictate, onEffortChange, onDraftChange, onChipClick, onRemoveAttachment, onSuggestChange };
 
   const [draft, setDraft] = useState('');
   const seedId = useRef('');
@@ -357,6 +358,10 @@ export default function PromptBar({
     return [];
   }, [open, query, handles, sources, commands]);
   const menuOpen = open && (open !== 'handle' || list.length > 0);
+  const suggestOpen = Boolean(menuOpen);
+  useEffect(() => {
+    latest.current.onSuggestChange?.(suggestOpen);
+  }, [suggestOpen]);
   const cursor = Math.min(active, Math.max(0, list.length - 1));
   const blocked = typeof sendDisabled === 'function' ? sendDisabled(draft) : sendDisabled;
   const canSend = !blocked && (draft.trim().length > 0 || attachments.length > 0 || extraReady);
