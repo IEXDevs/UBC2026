@@ -178,6 +178,7 @@ function AuthedShell() {
   const [walletNote, setWalletNote] = useState('');
   const [walletError, setWalletError] = useState('');
   const [deskEntry, setDeskEntry] = useState(null);
+  const [deskLogout, setDeskLogout] = useState(null);
   const ownerId = ownerIdFromPrivyUser(user, signedIn);
   const deskOwner = devPreview && devAllowed ? null : ownerId;
   const deskChecked = Boolean(deskOwner && deskEntry?.ownerId === deskOwner);
@@ -249,6 +250,19 @@ function AuthedShell() {
     }
     await withPrivyLogout(window, () => logout());
   }, [logout, ownerId]);
+
+  const onDeskStatusUnavailable = useCallback(async () => {
+    setDeskLogout('signing-out');
+    try {
+      await onLogout();
+    } catch {
+      setDeskLogout('retry');
+    }
+  }, [onLogout]);
+
+  useEffect(() => {
+    if (ready && !authenticated) setDeskLogout(null);
+  }, [ready, authenticated]);
 
   useEffect(() => {
     if (!devAllowed) return undefined;
@@ -393,15 +407,16 @@ function AuthedShell() {
     );
   }
 
-  if (showSessionHold({ privyConfigured: true, ready })) {
+  if (!deskLogout && showSessionHold({ privyConfigured: true, ready })) {
     return <SessionHold />;
   }
 
-  if (signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
+  if (deskLogout || signInHold || showSignInGate({ privyConfigured: true, ready, authenticated })) {
     return (
       <SignInPage
-        disabled={signInHold || authenticated}
+        disabled={!ready || signInHold || authenticated}
         onLogin={login}
+        onRetrySignOut={deskLogout === 'retry' && authenticated ? onDeskStatusUnavailable : null}
         onDeveloperPreview={devAllowed ? enterDevPreview : null}
         onHoldChange={setSignInHold}
       />
@@ -418,6 +433,7 @@ function AuthedShell() {
         accountLabel={privyAccountLabel(user)}
         getAccessToken={getAccessToken}
         onSignOut={onLogout}
+        onStatusUnavailable={onDeskStatusUnavailable}
         onUnlock={until => {
           try { writeDeskSession(window.localStorage, deskOwner, until); } catch { /* this tab can still enter */ }
           setDeskEntry({ ownerId: deskOwner, until });
