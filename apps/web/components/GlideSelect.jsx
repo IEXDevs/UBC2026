@@ -51,7 +51,7 @@ export default function GlideSelect({
   ariaLabel = 'Select',
   className = '',
   menuAction = null,
-  closeSignal = 0,
+  menuActive = true,
   onOpenChange = null,
 }) {
   const items = options.map(norm);
@@ -59,6 +59,7 @@ export default function GlideSelect({
   const current = value ?? inner;
   const selected = items.findIndex((item) => item.value === current);
   const [phase, setPhase] = useState('closed');
+  const menuOpen = menuActive && phase === 'open';
   const [active, setActive] = useState(null);
   const [side, setSide] = useState(placement);
   const rootRef = useRef(null);
@@ -74,7 +75,7 @@ export default function GlideSelect({
   const popOut = Math.round((popDuration * 2) / 3);
 
   useLayoutEffect(() => {
-    if (phase !== 'open') return;
+    if (!menuOpen) return;
     const menu = menuRef.current;
     const root = rootRef.current;
     if (!menu || !root) return;
@@ -99,11 +100,11 @@ export default function GlideSelect({
       void pill.offsetHeight;
       pill.style.transition = '';
     }
-  }, [phase, placement, selected, step]);
+  }, [menuOpen, placement, selected, step]);
 
   useLayoutEffect(() => {
     const pill = pillRef.current;
-    if (!pill || phase !== 'open') return;
+    if (!pill || !menuOpen) return;
     if (active === null) {
       pill.style.opacity = '0';
       return;
@@ -113,7 +114,7 @@ export default function GlideSelect({
     pill.style.transform = `translateY(${active * step}px)`;
     pill.style.opacity = '1';
     instant.current = false;
-  }, [active, phase, step]);
+  }, [active, menuOpen, step]);
 
   const open = (viaKey) => {
     if (disabled) return;
@@ -157,7 +158,7 @@ export default function GlideSelect({
     const key = event.key;
     const count = items.length;
     const cursor = active ?? Math.max(0, selected);
-    if (phase !== 'open') {
+    if (!menuOpen) {
       if (key === 'Enter' || key === ' ' || key === 'ArrowDown' || key === 'ArrowUp') {
         event.preventDefault();
         open(true);
@@ -196,10 +197,12 @@ export default function GlideSelect({
   }, [disabled, phase]);
 
   useEffect(() => {
-    if (!closeSignal) return;
+    if (menuActive) return;
+    clearTimeout(closeTimer.current);
+    scrub.current = null;
     setActive(null);
     setPhase('closed');
-  }, [closeSignal]);
+  }, [menuActive]);
 
   useEffect(() => () => clearTimeout(closeTimer.current), []);
 
@@ -274,16 +277,16 @@ export default function GlideSelect({
         type="button"
         role="combobox"
         aria-haspopup="listbox"
-        aria-expanded={phase === 'open'}
+        aria-expanded={menuOpen}
         aria-controls={`${id}-list`}
-        aria-activedescendant={active !== null ? `${id}-${active}` : undefined}
+        aria-activedescendant={menuOpen && active !== null ? `${id}-${active}` : undefined}
         aria-label={ariaLabel}
         disabled={disabled}
         className="glide-select__trigger"
         onPointerDown={(event) => {
           if (event.button !== 0 || disabled) return;
           event.currentTarget.focus({ preventScroll: true });
-          if (phase === 'open') close('pop');
+          if (menuOpen) close('pop');
           else open(false);
         }}
         onKeyDown={onTriggerKey}
@@ -295,7 +298,7 @@ export default function GlideSelect({
           <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2.5} />
         </span>
       </button>
-      {phase !== 'closed' ? (
+      {menuActive && phase !== 'closed' ? (
         <div ref={menuRef} className="glide-select__menu" data-state="open" data-side={side} data-align={align}>
           <div
             id={`${id}-list`}
