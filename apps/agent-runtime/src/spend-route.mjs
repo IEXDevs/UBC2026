@@ -268,7 +268,7 @@ async function handleSpendRequest(request, env = {}) {
     }
     if (!parsed.confirmed && !autoSwap) {
       try {
-        const preview = await previewLiveSwap(env, context, parsed, approvalKey, now);
+        const preview = await previewLiveSwap(env, context, parsed, approvalKey, now, { allowReducedSolQuote: !loopSwap });
         return json({ state: 'approval-needed', signed: false, swapPreview: preview });
       } catch (error) {
         const failure = swapFailure({ error: error?.code || error?.message, simulationReason: error?.simulationReason });

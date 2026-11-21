@@ -382,7 +382,8 @@ export async function POST(request, context) {
         : auto
         ? { ...reply, text: auto, hold: null }
         : swapHold
-        ? { ...reply, text: swapHold.label, hold: swapHold }
+        ? { ...reply, text: swapHold.label, hold: swapHold,
+          ...(swapHold.args.amount !== reply.hold.args.amount ? { messages: [] } : {}) }
         : { ...reply, text: preview?.error === 'swap_requires_usd_budget'
           ? swapFailure({ error: 'swap_requires_usd_budget' }).message
           : swapFailure(preview).message, hold: null };

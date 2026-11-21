@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseSpendAuthorizationChallenge } from '@ubc2026/contracts';
+import { WRAPPED_SOL_MINT } from '@ubc2026/prices';
 import { spendFailureCode, spendFailureMessage, toolStep } from './chat-activity.mjs';
 import { matchingToolGrant, needsBoundSpend, withDefaultBotId } from './spend-permission.mjs';
 import { formatBaseUnits } from './money-views.mjs';
@@ -38,11 +39,17 @@ export function swapHoldFromPreview(hold, preview) {
   if (hold?.args?.action !== 'swap' || !preview || !units.test(hold.args.amount) || !units.test(preview.minOutput)
       || !units.test(preview.usdMicros) || !decimals(preview.inputDecimals) || !decimals(preview.outputDecimals)
       || !Number.isSafeInteger(preview.expiresAt) || typeof preview.ticket !== 'string' || preview.ticket.length > 5000) return null;
-  const input = formatBaseUnits(hold.args.amount, preview.inputDecimals);
+  const amount = preview.inputAmount ?? hold.args.amount;
+  if (typeof amount !== 'string' || !units.test(amount)) return null;
+  const adjusted = amount !== hold.args.amount;
+  if (adjusted && (!['SOL', WRAPPED_SOL_MINT].includes(hold.args.asset) || preview.inputDecimals !== 9
+      || hold.idempotencyKey?.startsWith('loop_swap_') || BigInt(amount) >= BigInt(hold.args.amount))) return null;
+  const input = formatBaseUnits(amount, preview.inputDecimals);
   const output = formatBaseUnits(preview.minOutput, preview.outputDecimals);
   const debit = formatBaseUnits(preview.usdMicros, 6);
-  const label = `Swap ${input} ${hold.args.asset} for at least ${output} ${hold.args.outputAsset} before fees and account setup. The budget charge includes those costs and totals $${debit}.`;
-  return { ...hold, label, prompt: `${label} Slide to confirm.`, expiresAt: preview.expiresAt, swapTicket: preview.ticket };
+  const adjustment = adjusted ? 'The wallet needs SOL for fees and account setup, so this quote uses a smaller amount. ' : '';
+  const label = `${adjustment}Swap ${input} ${adjusted ? 'SOL' : hold.args.asset} for at least ${output} ${hold.args.outputAsset} before fees and account setup. The budget charge includes those costs and totals $${debit}.`;
+  return { ...hold, args: { ...hold.args, amount }, label, prompt: `${label} Slide to confirm.`, expiresAt: preview.expiresAt, swapTicket: preview.ticket };
 }
 
 export async function resumeAssetSpend(hold, context, invokeTool, now = Date.now()) {

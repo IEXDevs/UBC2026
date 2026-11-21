@@ -1,7 +1,7 @@
 import { configuredSolanaRpc, SOLANA_CLUSTER, SOLANA_GENESIS_HASH, SOLANA_CAIP2, SOLANA_USDC_MINT } from '@ubc2026/contracts/solana';
 import { AddressLookupTableAccount, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { swapAccountSnapshot, verifySwapSimulation } from './swap-simulation.mjs';
-import { swapSimulationDetails } from './swap-diagnostics.mjs';
+import { SYSTEM_PROGRAM, swapSimulationDetails } from './swap-diagnostics.mjs';
 /**
  * Privy Solana wallet path for Maelstrom.
  * Login provisioning (main wallet at sign-up, additional wallets) and
@@ -33,10 +33,11 @@ export function simulationFailureReason(value) {
   return 'simulation_unavailable';
 }
 
-function failSimulation(value, { details, reason = simulationFailureReason(value) } = {}) {
+function failSimulation(value, { details, reason = simulationFailureReason(value), solWrapReached = false } = {}) {
   const error = new WalletError('Solana transfer simulation failed', 'simulation_failed');
   error.simulationReason = reason;
   if (details) error.simulationDetails = details;
+  if (solWrapReached) error.solWrapReached = true;
   throw error;
 }
 
@@ -1507,7 +1508,10 @@ export function createPrivyWalletClient({
         const instruction = Number.isInteger(index) ? parsed.message.compiledInstructions[index] : null;
         const details = swapSimulationDetails({ instructionProgram: addresses[instruction?.programIdIndex], logs: value?.logs });
         const reason = value?.err === 'BlockhashNotFound' ? 'swap_blockhash_not_found' : undefined;
-        failSimulation(value, { details, reason });
+        const solWrapReached = instruction && parsed.message.compiledInstructions.slice(0, index + 1)
+          .some(ix => addresses[ix.programIdIndex] === SYSTEM_PROGRAM && addresses[ix.accountKeyIndexes[0]] === walletAddress
+            && ix.data.length === 12 && Buffer.from(ix.data).readUInt32LE(0) === 2);
+        failSimulation(value, { details, reason, solWrapReached });
       }
       const createdAccounts = new Map();
       for (const ix of parsed.message.compiledInstructions) {
