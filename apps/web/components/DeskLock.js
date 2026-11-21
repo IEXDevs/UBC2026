@@ -17,7 +17,7 @@ function controlValue(form, name) {
   return node && typeof node.value === 'string' ? node.value : '';
 }
 
-export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose, onSignOut, onStatusUnavailable, getAccessToken }) {
+export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose, onSignOut, getAccessToken }) {
   const [status, setStatus] = useState('checking');
   const [attempt, setAttempt] = useState(0);
   const [password, setPassword] = useState('');
@@ -93,10 +93,6 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
       controller.abort();
     };
   }, [ownerId, attempt]);
-
-  useEffect(() => {
-    if (status === 'unavailable' && !pending) onStatusUnavailable?.();
-  }, [status, pending, onStatusUnavailable]);
 
   useEffect(() => {
     if (!onClose) return undefined;
@@ -281,8 +277,6 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
       if (active.current) setPending(false);
     }
   }
-
-  if (status === 'unavailable' && onStatusUnavailable) return null;
 
   return (
     <div className="backdrop is-center desk-lock no-copy" onMouseDown={onClose ? dismiss : undefined} onCopy={blockCopy} onCut={blockCopy}>

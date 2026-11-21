@@ -14,11 +14,46 @@ import {
   safeFetchErrorDetail,
 } from '../../../lib/wallets-cloudflare.mjs';
 import {
+  filterArchivedWallets,
+  needsArchivedReissue,
   publicWallet,
   requestOrigin,
   walletErrorFields,
   walletErrorStatus,
 } from '../../../lib/wallets-route.mjs';
+
+function supabaseOrigin() {
+  const url = readRootEnv('SUPABASE_URL');
+  const key = readRootEnv('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return null;
+    return { origin: parsed.origin, key };
+  } catch {
+    return null;
+  }
+}
+
+/** Ids the owner soft-deleted. Login must not resurrect them on a new device. */
+async function readDeletedWalletIds(ownerId) {
+  const db = supabaseOrigin();
+  if (!db) return new Set();
+  try {
+    const response = await fetch(
+      `${db.origin}/rest/v1/wallets?owner_id=eq.${encodeURIComponent(ownerId)}&select=id&deleted_at=not.is.null`,
+      {
+        headers: { apikey: db.key, authorization: `Bearer ${db.key}`, accept: 'application/json' },
+        redirect: 'manual',
+      },
+    );
+    const rows = await response.json().catch(() => null);
+    if (!response.ok || !Array.isArray(rows)) return new Set();
+    return new Set(rows.map(row => row?.id).filter(id => typeof id === 'string'));
+  } catch {
+    return new Set();
+  }
+}
 
 async function persistAccount(login, ownerId) {
   const url = readRootEnv('SUPABASE_URL');
@@ -234,7 +269,37 @@ export async function POST(request) {
     } catch {
       console.error('[api/wallets]', 'account_persist_failed');
     }
-    const wallets = [result.main, ...result.additional].filter(Boolean).map(publicWallet);
+    const deletedIds = await readDeletedWalletIds(ownerId);
+    let wallets = filterArchivedWallets([result.main, ...result.additional], deletedIds);
+    let created = result.created === true;
+    if (needsArchivedReissue(wallets, deletedIds)) {
+      // The owner archived everything. Privy still holds the old wallets, so
+      // acceptLogin reports created:false and no usable wallet exists. Issue
+      // a fresh wallet so agents have assets to access.
+      try {
+        const fresh = await client.createAdditional({
+          privyUserId: ownerId,
+          ownerId,
+          label: `Additional ${(result.additional || []).length + 1}`,
+          accessToken,
+        });
+        try {
+          await persistAccount(
+            { ...result, additional: [...(result.additional || []), fresh] },
+            ownerId,
+          );
+        } catch {
+          console.error('[api/wallets]', 'account_persist_failed');
+        }
+        const pub = publicWallet(fresh);
+        if (pub) {
+          wallets = [pub];
+          created = true;
+        }
+      } catch (error) {
+        console.error('[api/wallets]', 'archived_reissue_failed');
+      }
+    }
     const runtime = readRootEnv('NEXT_PUBLIC_AGENT_RUNTIME_URL');
     if (runtime && typeof runtime === 'string' && runtime.trim() && wallets.length) {
       try {
@@ -256,7 +321,7 @@ export async function POST(request) {
       }
     }
     return Response.json({
-      created: result.created === true,
+      created,
       wallets,
       loginMethods: result.loginMethods || [],
     }, { headers: { 'Cache-Control': 'no-store' } });

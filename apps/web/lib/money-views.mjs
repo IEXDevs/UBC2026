@@ -39,6 +39,21 @@ export function formatAmount(value, decimals = USDC_DECIMALS) {
   return fraction ? `${grouped}.${fraction}` : grouped;
 }
 
+/**
+ * Null-safe display formatter for render paths. Balances can be null while a
+ * read is pending or failed; throwing there crashes the whole sheet.
+ * Returns null when there is nothing safe to show.
+ */
+export function formatAmountSafe(value, decimals = USDC_DECIMALS) {
+  try {
+    if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(value)) return null;
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) return null;
+    return formatAmount(value, decimals);
+  } catch {
+    return null;
+  }
+}
+
 function botName(bots, botId) {
   return bots.find(bot => bot.id === botId)?.name ?? botId;
 }

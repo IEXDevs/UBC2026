@@ -16,6 +16,7 @@ export function requestOrigin(request) {
 }
 
 export function publicWallet(wallet) {
+  if (!wallet || typeof wallet !== 'object' || typeof wallet.id !== 'string') return null;
   return {
     id: wallet.id,
     ownerId: wallet.ownerId,
@@ -45,4 +46,33 @@ export function walletErrorStatus(code) {
   if (code === 'missing_config' || code === 'invalid_rpc' || code === 'missing_origin') return 503;
   if (code === 'worker_origin_forbidden') return 502;
   return 502;
+}
+
+function deletedIdSet(deletedIds) {
+  if (deletedIds instanceof Set) return deletedIds;
+  if (Array.isArray(deletedIds)) return new Set(deletedIds.filter(id => typeof id === 'string'));
+  return new Set();
+}
+
+/**
+ * Shape Privy login wallets for the response, dropping soft-deleted
+ * (archived) rows so a new device does not resurrect them.
+ */
+export function filterArchivedWallets(privyWallets, deletedIds) {
+  const gone = deletedIdSet(deletedIds);
+  return (Array.isArray(privyWallets) ? privyWallets : [])
+    .filter(Boolean)
+    .map(publicWallet)
+    .filter(Boolean)
+    .filter(wallet => !gone.has(wallet.id));
+}
+
+/**
+ * True when every Privy wallet is archived and no usable wallet remains.
+ * The login route issues one fresh wallet in that case so agents keep
+ * asset access instead of stranding the desk with zero wallets.
+ */
+export function needsArchivedReissue(liveWallets, deletedIds) {
+  const gone = deletedIdSet(deletedIds);
+  return (Array.isArray(liveWallets) ? liveWallets : []).length === 0 && gone.size > 0;
 }

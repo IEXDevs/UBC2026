@@ -1,7 +1,9 @@
 export const runtime = 'nodejs';
 
 import { accessTokenFromRequest } from '../../../../lib/privy-cookie-session.mjs';
+import { verifyPrivyAccessToken } from '../../../../lib/privy-access-token.mjs';
 import { readRootEnv } from '../../../../lib/root-env.mjs';
+import { resolvePrivyAppId } from '../../../../lib/wallet-provision.mjs';
 import { retireTarget } from '../../../../lib/wallet-retire.mjs';
 
 /**
@@ -13,12 +15,25 @@ export async function POST(request) {
   if (!accessToken) {
     return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
+  let ownerId;
+  try {
+    const appId = resolvePrivyAppId({
+      PRIVY_APP_ID: readRootEnv('PRIVY_APP_ID'),
+      NEXT_PUBLIC_PRIVY_APP_ID: readRootEnv('NEXT_PUBLIC_PRIVY_APP_ID'),
+    });
+    ({ sub: ownerId } = await verifyPrivyAccessToken(accessToken, { appId }));
+  } catch {
+    return Response.json({ error: 'login_required' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
   const ownerHeader = request.headers.get('x-owner-id');
+  if (ownerHeader !== null && ownerHeader !== ownerId) {
+    return Response.json({ error: 'owner_mismatch' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
+  }
   let body = {};
   try { body = await request.json(); } catch { body = {}; }
   const target = retireTarget({
     id: body?.id,
-    ownerId: typeof ownerHeader === 'string' ? ownerHeader : '',
+    ownerId,
   });
   if (target.error) {
     const status = target.error === 'owner_required' ? 401 : 400;
@@ -83,8 +98,11 @@ export async function POST(request) {
         rows = await addrRes.json().catch(() => null);
       }
     } catch {
-      // Continue to ok if absent from db
+      rows = null;
     }
+  }
+  if (!Array.isArray(rows) || rows.length < 1) {
+    return Response.json({ error: 'wallet_not_found' }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
   }
   return Response.json({ ok: true, id: target.id, deletedAt }, { headers: { 'Cache-Control': 'no-store' } });
 }
