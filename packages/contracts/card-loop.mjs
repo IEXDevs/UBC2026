@@ -12,6 +12,20 @@ const BOT_ID = /^[a-zA-Z0-9:_-]{1,128}$/;
 const MINUTES = /^[1-9][0-9]{0,4}$/;
 const BREAK_ASK = /\b(?:break|stop|cancel|end|kill|disable|remove|quit)\b(?:\s+\w+){0,5}\s+loops?\b|\bloops?\b(?:\s+\w+){0,4}\s+(?:off|stop|cancel)\b|\b(?:stop|quit)\s+looping\b|\bno more loops?\b/i;
 
+const LOOP_OUTCOMES = Object.freeze({
+  ran: 'Scheduled check completed.',
+  'no-trade-found': 'Scheduled check completed. No trade found.',
+  'swap-approval-required': 'Scheduled check has a swap waiting for review.',
+  'approval-needed': 'Scheduled check is waiting for approval.',
+  'spend-frozen': 'Scheduled check blocked by the agent or wallet settings.',
+  'use-permissioned-spend': 'Scheduled check found an action that requires a spend request.',
+  'verifier-blocked': 'Scheduled check stopped at verification.',
+  'research-failed': 'Scheduled check could not finish research.',
+  loop_payload_incomplete: 'Scheduled check could not load its agent or wallet.',
+  invalid_ledger: 'Scheduled check could not load a matching budget.',
+  loop_failed: 'Scheduled check stopped before it could finish.',
+});
+
 export class CardLoopError extends Error {
   constructor(code) {
     super(code);
@@ -80,16 +94,26 @@ export function setCardLoopCooldown(loop, cooldownMinutes, now) {
   };
 }
 
+export function cardLoopReport(loop) {
+  const at = loop?.lastWakeAt;
+  if (!Number.isSafeInteger(at) || at <= 0) return null;
+  const gate = typeof loop.lastGate === 'string' && Object.hasOwn(LOOP_OUTCOMES, loop.lastGate)
+    ? loop.lastGate : 'loop_failed';
+  return { at, gate, summary: LOOP_OUTCOMES[gate] };
+}
+
 export function publicCardLoop(loop) {
   if (!loop || loop.active !== true) return null;
   if (!Number.isSafeInteger(loop.cooldownMinutes) || loop.cooldownMinutes < MIN_LOOP_COOLDOWN_MINUTES) return null;
   if (typeof loop.purpose !== 'string' || !loop.purpose.trim() || loop.purpose.length > 500) return null;
+  const report = cardLoopReport(loop);
   return {
     active: true,
     purpose: loop.purpose,
     cooldownMinutes: loop.cooldownMinutes,
     cooldownLabel: formatCooldown(loop.cooldownMinutes),
     nextWakeAt: Number.isSafeInteger(loop.nextWakeAt) ? loop.nextWakeAt : null,
+    ...(report ? { lastWakeAt: report.at, lastGate: report.gate } : {}),
   };
 }
 

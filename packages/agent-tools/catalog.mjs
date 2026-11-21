@@ -226,7 +226,7 @@ export function sharedToolsInstruction() {
     'You have the following tools: web_search, web_scrape, browser_open, browser_navigate, browser_click, browser_live_view, browser_release, get_price, plus dashboard tools (list_bots, get_bot_status, get_wallets, get_overview, get_activity, what_happened_while_away, why_decision, get_payment_feed, pause_bot, resume_bot, wake_bot, start_task, create_loop, set_loop_cooldown, break_loop, list_browser_sessions, stop_all, prepare_shopping, laso_checkpoint, laso_status, request_spend, lookup_recipient, sns_send).',
     'create_loop stores a purpose and a cooldown of at least 15 minutes, then starts this bot again after that cooldown. set_loop_cooldown changes that cooldown. A shorter cooldown is rejected. A loop wake still goes through the decision gate before any spend.',
     'Call break_loop only when the owner explicitly asks to break, stop, or cancel the loop. Do not break a loop on your own.',
-    'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. It reads stored timeline events through GET /api/events. It does not spend, sign, or broadcast.',
+    'When the owner asks what happened while they were away, call what_happened_while_away and read briefing.spoken. Pass the current botId for questions about this agent. For a question about whether a loop ran, use get_bot_status and check cardLoop.lastWakeAt and lastGate. A saved schedule alone does not establish that a check ran.',
     `For a token price, call get_price. It reads DexScreener, then Jupiter Price API v3. The quote is paper PnL labeled ${EXECUTION_LABEL}. It does not sign, broadcast, or authorize a transaction. Execution stays on the configured Solana network.`,
     'Use get_price to research an exact mint. For a specific live trade call request_spend with action swap, the input amount in base units, and both asset identifiers. Use start_task when the owner asks you to find a trade. The desk quotes and confirms those real swaps with the owner. Report a swap as submitted only if the spend API returned a transaction signature.',
     'request_spend posts the shared spend route. A locked desk is not an approval hold and does not replace trust, verify, reserve, or the permission gate. Fully-automatic still runs those gates. 1000000 is 1 USDC in base units. For swaps the output goes to the assigned wallet. Do not pass a destination, handle, or price quote for a swap.',
@@ -354,6 +354,7 @@ export function spokenAwayBriefing(items, { since, source, botId, unavailable = 
   }
   const shown = kept.slice(0, AWAY_SHOWN);
   const lines = shown.map((event) => {
+    if (event.kind === 'run.checkpoint' && event.id.startsWith('evt_loop_') && event.summary) return event.summary;
     const lead = AWAY_KIND[event.kind] || 'An event was stored';
     const where = event.stream ? 'from Streams' : 'on the timeline';
     return event.summary ? `${lead} ${where}: ${event.summary}.` : `${lead} ${where}.`;

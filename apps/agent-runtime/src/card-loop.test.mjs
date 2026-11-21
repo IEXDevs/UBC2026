@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spokenAwayBriefing } from '@ubc2026/agent-tools';
 import { BotDurableObject, BotStateMachine, INTERNAL_CARD_LOOP_VALUE, INTERNAL_POSITION_HEADER } from './bot-do.mjs';
 import worker from './owner-auth.fixture.mjs';
 import { PLATFORM_PROMPT } from './platform-prompt.mjs';
@@ -176,13 +177,18 @@ test('an alarm loads the saved owner and wallet, runs the loop and arms the next
     setAlarm: at => alarms.push(at),
   };
   const reads = [];
+  const timeline = [];
   const models = [];
   const durable = new BotDurableObject({ storage }, {
     SUPABASE_URL: 'https://supabase.example',
     SUPABASE_SERVICE_ROLE_KEY: 'fixture-key',
     fetch: async (url, init) => {
-      assert.equal(init.method, 'GET');
       const { pathname, searchParams } = new URL(url);
+      if (pathname.endsWith('/timeline_events') && init.method === 'POST') {
+        timeline.push(JSON.parse(init.body));
+        return new Response(null, { status: 201 });
+      }
+      assert.equal(init.method, 'GET');
       reads.push(pathname);
       if (pathname.endsWith('/bots')) {
         assert.equal(searchParams.get('owner_id'), 'eq.' + bot.ownerId);
@@ -222,6 +228,27 @@ test('an alarm loads the saved owner and wallet, runs the loop and arms the next
   const loop = records.get('cardLoop');
   assert.equal(loop.nextWakeAt, loop.lastWakeAt + 15 * 60_000);
   assert.equal(alarms.at(-1), loop.nextWakeAt);
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].summary, 'Scheduled check completed. No trade found.');
+  assert.equal(timeline[0].owner_id, bot.ownerId);
+  assert.equal(timeline[0].at, new Date(loop.lastWakeAt).toISOString());
+
+  const ownerHeaders = { 'x-owner-id': bot.ownerId };
+  const status = await durable.fetch(new Request('https://bot/status', { headers: ownerHeaders }));
+  assert.equal((await status.json()).cardLoop.lastGate, 'no-trade-found');
+  async function readTimeline(headers) {
+    const response = await worker.fetch(new Request('https://runtime.example/api/events?botId=bot_1', { headers }), {
+      BOT: { idFromName: name => name, get: () => durable },
+    });
+    return response.json();
+  }
+  const saved = await readTimeline(ownerHeaders);
+  assert.equal(saved.items.length, 1);
+  assert.equal(saved.items[0].id, timeline[0].id);
+  assert.match(spokenAwayBriefing(saved.items, { botId: bot.id }).spoken, /Scheduled check completed\. No trade found\./);
+  records.delete('alerts');
+  assert.deepEqual((await readTimeline(ownerHeaders)).items, saved.items);
+  assert.deepEqual((await readTimeline({ 'x-owner-id': 'someone_else' })).items, []);
 });
 
 test('desk checks use server time and share a single wake with cron', async () => {
