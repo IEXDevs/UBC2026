@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { contextTone, formatTokens, meterWidth } from '../lib/context-usage.mjs';
 
 const OPEN_DELAY = 80;
@@ -49,45 +49,45 @@ function Ring({ percent, color, used }) {
   );
 }
 
-export default function ContextUsage({ usage, closeSignal = 0, onOpen, onClose }) {
-  const [open, setOpen] = useState(false);
+export default function ContextUsage({ usage, open = false, onOpen, onClose }) {
   const timer = useRef(0);
   const panelId = useId();
   const percent = Math.min(100, Math.max(0, Number(usage?.percent) || 0));
   const color = contextTone(percent);
 
+  function openNow() {
+    window.clearTimeout(timer.current);
+    onOpen?.();
+  }
+
+  function closeNow() {
+    window.clearTimeout(timer.current);
+    onClose?.();
+  }
+
   function show() {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      setOpen(true);
-      onOpen?.();
-    }, OPEN_DELAY);
+    timer.current = window.setTimeout(openNow, OPEN_DELAY);
   }
 
   function hide() {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      setOpen(false);
-      onClose?.();
-    }, CLOSE_DELAY);
+    timer.current = window.setTimeout(closeNow, CLOSE_DELAY);
   }
 
-  useEffect(() => {
-    if (!closeSignal) return;
-    window.clearTimeout(timer.current);
-    setOpen(false);
-  }, [closeSignal]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
 
   return (
-    <div className="context-hover" onPointerEnter={show} onPointerLeave={hide} onFocus={show} onBlur={hide}>
+    <div className="context-hover" onPointerEnter={show} onPointerLeave={hide} onFocus={show} onBlur={hide} onClick={(event) => event.stopPropagation()}>
       <button
         type="button"
         className="context-trigger"
         aria-expanded={open}
         aria-controls={panelId}
         aria-label={`${percent}% context`}
+        onClick={openNow}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') setOpen(false);
+          if (event.key === 'Escape') closeNow();
         }}
       >
         <Ring percent={percent} color={color} used={usage?.used} />
