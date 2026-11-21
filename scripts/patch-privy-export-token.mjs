@@ -47,3 +47,47 @@ export function patchPrivyExportAccessToken(source) {
   }
   return next;
 }
+
+// Privy's unified wallet iframe also uses the wallet authentication exchange
+// for browser signing and signer enrollment. Keep the SDK's normal credential
+// first. A rejected JWT can use a fresh identity token from the same account.
+async function maelstromSignWithUserSigner(client, proxy, request) {
+  const accessToken = await client.getAccessToken();
+  if (!accessToken) throw new Error('User must be authenticated');
+  try {
+    const { signature } = await proxy.signWithUserSigner({ accessToken, ...request });
+    return { signature };
+  } catch (error) {
+    const details = [error, error?.cause, error?.data, error?.cause?.data, error?.response?.data];
+    const rejectedJwt = details.some(detail => detail?.code === 'invalid_jwt'
+      || /invalid jwt token provided/i.test(typeof detail === 'string' ? detail : detail?.error ?? detail?.message ?? ''));
+    if (!String(client.apiUrl).endsWith('/api/privy-auth') || !rejectedJwt) throw error;
+
+    function claims(token) {
+      try {
+        return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      } catch { return null; }
+    }
+    let identity;
+    try {
+      await client.updateUserAndIdToken();
+      identity = client.maelstromIdentityToken;
+    } catch { throw error; }
+    const current = claims(accessToken);
+    const refreshed = claims(identity);
+    if (!current?.sub || refreshed?.sub !== current.sub || refreshed.iss !== current.iss
+        || !Number.isFinite(refreshed.exp) || refreshed.exp * 1000 <= Date.now() || identity === accessToken) throw error;
+    const { signature } = await proxy.signWithUserSigner({ accessToken: identity, ...request });
+    return { signature };
+  }
+}
+
+export function patchPrivyWalletSignerToken(source) {
+  const next = String(source).replace(
+    /let (\w+)=await (\w+)\.getAccessToken\(\);if\(!\1\)throw Error\("User must be authenticated"\);let\{signature:(\w+)\}=await (\w+)\.signWithUserSigner\(\{accessToken:\1,message:(\w+),targetAppId:(\w+)\}\);return\{signature:\3\}/g,
+    (_match, _token, client, _signature, proxy, message, targetAppId) =>
+      `return await maelstromSignWithUserSigner(${client},${proxy},{message:${message},targetAppId:${targetAppId}})`,
+  );
+  return next !== source && !next.includes('function maelstromSignWithUserSigner(')
+    ? `${next}\n${maelstromSignWithUserSigner.toString()}\n` : next;
+}

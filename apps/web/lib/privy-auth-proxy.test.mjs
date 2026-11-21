@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { PATCH } from '../app/api/privy-auth/[...path]/route.js';
 import {
   PRIVY_REFRESH_COOKIE,
   PRIVY_ACCESS_COOKIE,
@@ -14,6 +15,30 @@ import {
 const REFRESH = 'refresh-token-value';
 const NEXT = 'rotated-refresh-token';
 const ACCESS = 'header.payload.signature';
+
+test('the Next route forwards Privy’s signed wallet enrollment PATCH unchanged', async t => {
+  const walletId = 'wallet-123456';
+  const path = `/api/v1/wallets/${walletId}`;
+  const body = JSON.stringify({ additional_signers: [{ signer_id: 'app-signer-123' }] });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push(url);
+    assert.equal(url, `https://auth.privy.io${path}`);
+    assert.equal(init.method, 'PATCH');
+    assert.equal(init.body, body);
+    assert.equal(init.headers.get('authorization'), `Bearer ${ACCESS}`);
+    assert.equal(init.headers.get('privy-authorization-signature'), 'signed-update');
+    assert.equal(init.headers.get('privy-request-expiry'), '123');
+    return Response.json({ id: walletId });
+  });
+  const post = parts => PATCH(requestFor(`https://app.example/api/privy-auth${path}`, {
+    method: 'PATCH', body, cookie: `${PRIVY_ACCESS_COOKIE}=${ACCESS}`,
+    headers: { 'privy-authorization-signature': 'signed-update', 'privy-request-expiry': '123' },
+  }), { params: Promise.resolve({ path: parts }) });
+  assert.equal((await post(['api', 'v1', 'users', 'me'])).status, 404);
+  assert.deepEqual(await (await post(['api', 'v1', 'wallets', walletId])).json(), { id: walletId });
+  assert.equal(calls.length, 1);
+});
 
 test('wallet RPC preserves authorization signatures and uses Bearer or the HttpOnly access cookie', async () => {
   const path = '/api/v1/wallets/wallet-id/rpc';

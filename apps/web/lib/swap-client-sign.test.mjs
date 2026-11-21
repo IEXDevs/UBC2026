@@ -82,12 +82,26 @@ test('unavailable agent wallets never fall back to signing the Main wallet', asy
 });
 
 test('client signing rejection is a safe plain reason and never broadcasts', async () => {
-  const { run, calls } = setup({ signerError: new Error('private provider response') });
+  const { run, calls } = setup({ signerError: Object.assign(new Error('private provider response'), { code: 4001 }) });
   const result = await run();
   assert.equal(result.failure.code, 'client_sign_rejected');
   assert.match(result.reply, /Swap — client signing:.*\[client_sign_rejected\]/);
   assert.equal(JSON.stringify(result).includes('private provider'), false);
   assert.equal(calls.length, 1);
+});
+
+test('invalid wallet JWT and unknown provider failures are distinct from cancelling the swap', async () => {
+  const expired = setup({ signerError: Object.assign(new Error('Private error detail'), {
+    cause: { status: 400, data: { error: 'Invalid JWT token provided', code: 'invalid_data' } },
+  }) });
+  const denied = await expired.run();
+  assert.equal(denied.failure.code, 'client_sign_session_required');
+  assert.match(denied.reply, /HTTP 400/);
+  assert.doesNotMatch(JSON.stringify(denied), /Private error detail|Invalid JWT token provided/);
+  assert.equal(expired.calls.length, 1);
+  const unknown = setup({ signerError: new Error('some private error') });
+  assert.equal((await unknown.run()).failure.code, 'client_sign_failed');
+  assert.equal(unknown.calls.length, 1);
 });
 
 test('empty, failed, expired or malformed preparations never sign or broadcast', async () => {
