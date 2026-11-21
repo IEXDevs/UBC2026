@@ -47,7 +47,9 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       controller.abort();
+      console.error('[desk-lock] Timed out waiting for desk password status after 12s');
       setStatus('unavailable');
+      setNote('Timed out checking desk status.');
     }, 12000);
     setStatus('checking');
     setPassword('');
@@ -62,11 +64,26 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
     (async () => {
       try {
         const token = await tokenReader.current?.();
+        if (!token) {
+          console.error('[desk-lock] getAccessToken returned empty or null token for ownerId:', ownerId);
+        }
         if (controller.signal.aborted) return;
         const state = token ? await readDeskLockState(fetch, { ownerId, token, signal: controller.signal }) : null;
-        if (!controller.signal.aborted) setStatus(state?.ok ? (state.locked ? 'configured' : 'missing') : 'unavailable');
-      } catch {
-        if (!controller.signal.aborted) setStatus('unavailable');
+        if (!state?.ok) {
+          console.error('[desk-lock] Failed to read desk lock state:', { ownerId, hasToken: Boolean(token), state });
+        }
+        if (!controller.signal.aborted) {
+          setStatus(state?.ok ? (state.locked ? 'configured' : 'missing') : 'unavailable');
+          if (!state?.ok && state?.error) {
+            setNote(`Desk status unavailable: ${state.error}`);
+          }
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error('[desk-lock] Exception while loading desk password status:', err);
+          setStatus('unavailable');
+          setNote(`Error checking desk status: ${err?.message || 'unknown error'}`);
+        }
       } finally {
         window.clearTimeout(timeout);
       }
@@ -136,7 +153,8 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
       setGenerated(false);
       setCopied(false);
       setPending(false);
-    } catch {
+    } catch (err) {
+      console.error('[desk-lock] Seed verification error:', err);
       setNote('Could not check the seed. Check the connection and try again.');
       setPending(false);
     }
@@ -239,7 +257,8 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
       setConfirm('');
       setPending(false);
       onUnlock?.(accepted.until);
-    } catch {
+    } catch (err) {
+      console.error('[desk-lock] Password submit error:', err);
       if (!active.current) return;
       setNote('Could not unlock your desk. Try again.');
       setPending(false);
@@ -251,7 +270,8 @@ export default function DeskLock({ ownerId, accountLabel = '', onUnlock, onClose
     setPending(true);
     try {
       await onSignOut();
-    } catch {
+    } catch (err) {
+      console.error('[desk-lock] Sign out error:', err);
       if (active.current) setNote('Could not sign out. Try again.');
     } finally {
       if (active.current) setPending(false);

@@ -140,13 +140,6 @@ export default function WalletsSheet({
     }
   }, [ownerId, open]);
 
-  function savePrefs(next) {
-    const clean = normalizeTokenPrefs(next);
-    setPrefs(clean);
-    const key = tokenStorageKey(ownerId);
-    if (key) accountStorage.setItem(key, JSON.stringify(clean));
-  }
-
   function chooseTransfer(section) {
     const next = TRANSFER.findIndex(item => item.id === section);
     const current = TRANSFER.findIndex(item => item.id === transfer);
@@ -506,7 +499,20 @@ export default function WalletsSheet({
           <details className="wallet-fold wallet-settings phantom-fold" ref={settingsRef}>
             <summary>Wallet settings<ChevronDown size={16} aria-hidden="true" /></summary>
             <div className="wallet-fold-body wallet-settings-grid">
-              {signedIn && ownerId ? <AutoSignSwapSetting key={ownerId} open={open} ownerId={ownerId} /> : null}
+              <section aria-label="Sign-in and keys">
+                {signedIn && ownerId ? <AutoSignSwapSetting key={ownerId} open={open} ownerId={ownerId} /> : null}
+                <h3>Sign-in methods</h3>
+                {signedIn ? <LinkedLogins /> : <p className="quiet">Sign in to link email, Google, GitHub, or Discord.</p>}
+                <h3>Recovery &amp; keys</h3>
+                <PrivyKeyButton
+                  key={active?.id || 'empty'}
+                  signedIn={signedIn}
+                  address={active?.address || glance.address}
+                  walletId={exportWalletIdForSheet(activeRaw)}
+                  ownerId={ownerId}
+                  getAccessToken={getAccessToken}
+                />
+              </section>
               <section aria-label="Manage wallets">
                 <h3>Manage wallets</h3>
                 {signedIn ? (
@@ -534,23 +540,6 @@ export default function WalletsSheet({
                   }}
                 />
                 {retireNote ? <p className="quiet" role="status">{retireNote}</p> : null}
-              </section>
-              <section aria-label="Sign-in and keys">
-                <h3>Sign-in methods</h3>
-                {signedIn ? <LinkedLogins /> : <p className="quiet">Sign in to link email, Google, GitHub, or Discord.</p>}
-                <h3>Recovery &amp; keys</h3>
-                <PrivyKeyButton
-                  key={active?.id || 'empty'}
-                  signedIn={signedIn}
-                  address={active?.address || glance.address}
-                  walletId={exportWalletIdForSheet(activeRaw)}
-                  ownerId={ownerId}
-                  getAccessToken={getAccessToken}
-                />
-              </section>
-              <section className="wallet-token-settings" aria-label="Token preferences">
-                <h3>Token preferences</h3>
-                <TokenPane tokens={tokens} prefs={prefs} onSave={savePrefs} />
               </section>
             </div>
           </details>
@@ -587,7 +576,7 @@ function AutoSignSwapSetting({ open, ownerId }) {
   }
 
   return (
-    <section aria-label="Swap permissions">
+    <div className="wallet-auto-sign-setting" aria-label="Swap permissions">
       <label className="ai-model-toggle">
         <strong>Auto-sign swaps</strong>
         <input type="checkbox" role="switch" checked={enabled} disabled={saving}
@@ -596,7 +585,7 @@ function AutoSignSwapSetting({ open, ownerId }) {
       </label>
       <p className="quiet" id="wallet-auto-sign-description">Allow eligible Full-permission agents to sign swaps within your USD review limit while the desk is unlocked.</p>
       {error ? <p className="quiet" role="status">{error}</p> : null}
-    </section>
+    </div>
   );
 }
 
@@ -1255,93 +1244,6 @@ function ReceivePane({ active, handle }) {
       <p className="quiet phantom-network-note">
         This address can only receive Solana and SPL tokens.
       </p>
-    </div>
-  );
-}
-
-function TokenPane({ tokens, prefs, onSave }) {
-  const [symbol, setSymbol] = useState('');
-  const [mint, setMint] = useState('');
-  const [decimals, setDecimals] = useState('6');
-  const [note, setNote] = useState('');
-
-  function toggle(list, value) {
-    return list.includes(value) ? list.filter(item => item !== value) : [...list, value];
-  }
-
-  return (
-    <div className="wallet-form phantom-token-prefs">
-      <p className="quiet">Hidden tokens leave the asset list. Restricted tokens stay visible and cannot be sent here. USDC stays on both.</p>
-      <ul className="token-rows phantom-token-rows">
-        {tokens.map(token => (
-          <li key={token.symbol} className="token-settings phantom-pref-row">
-            <strong>{token.symbol}</strong>
-            <span>{token.amountLabel}</span>
-            {token.symbol === 'USDC' ? <small>Always listed</small> : (
-              <span className="wallet-switch">
-                <button
-                  type="button"
-                  className={token.hidden ? 'is-on' : ''}
-                  aria-pressed={token.hidden}
-                  onClick={() => onSave({ ...prefs, hidden: toggle(prefs.hidden, token.symbol) })}
-                >
-                  {token.hidden ? 'Hidden' : 'Hide'}
-                </button>
-                <button
-                  type="button"
-                  className={!token.tradeable ? 'is-on' : ''}
-                  aria-pressed={!token.tradeable}
-                  onClick={() => onSave({ ...prefs, restricted: toggle(prefs.restricted, token.symbol) })}
-                >
-                  {token.tradeable ? 'Tradeable' : 'Restricted'}
-                </button>
-                {token.core ? null : (
-                  <button
-                    type="button"
-                    onClick={() => onSave({ ...prefs, extra: prefs.extra.filter(row => row.symbol !== token.symbol) })}
-                  >
-                    Remove
-                  </button>
-                )}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-      <form
-        className="field"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const next = normalizeTokenPrefs({
-            ...prefs,
-            extra: [...prefs.extra, { symbol, mint, decimals: Number(decimals) }],
-          });
-          if (next.extra.length === prefs.extra.length) {
-            setNote('Use a new symbol, a Solana mint, and decimals from 0 to 9.');
-            return;
-          }
-          onSave(next);
-          setSymbol('');
-          setMint('');
-          setDecimals('6');
-          setNote('Added.');
-        }}
-      >
-        <label>
-          Symbol
-          <input value={symbol} maxLength={12} autoCapitalize="characters" onChange={event => setSymbol(event.target.value)} />
-        </label>
-        <label>
-          Mint
-          <input value={mint} spellCheck={false} autoCapitalize="none" onChange={event => setMint(event.target.value.trim())} />
-        </label>
-        <label>
-          Decimals
-          <input value={decimals} inputMode="numeric" onChange={event => setDecimals(event.target.value)} />
-        </label>
-        <button type="submit" className="ghost">Add token</button>
-      </form>
-      {note ? <p className="quiet" role="status">{note}</p> : null}
     </div>
   );
 }

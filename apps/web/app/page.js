@@ -206,7 +206,7 @@ function AuthedShell() {
         try {
           await attachSwapSigner({ address, signerId });
         } catch (error) {
-          console.warn('[wallets] server signer not added', serverSignerFailure(error));
+          console.error('[wallets] server signer not added', serverSignerFailure(error), error);
         }
       }
     })();
@@ -228,7 +228,9 @@ function AuthedShell() {
           ownerId: deskOwner,
           getAccessToken: () => deskToken.current(),
         });
-      } catch { /* require the desk password if this session cannot resume */ }
+      } catch (err) {
+        console.error('[desk] restoreDeskEntry error:', err);
+      }
       if (!stopped) setDeskEntry({ ownerId: deskOwner, until });
     })();
     return () => { stopped = true; };
@@ -236,8 +238,8 @@ function AuthedShell() {
 
   const onLogout = useCallback(async () => {
     if (ownerId) {
-      try { clearDeskSession(window.localStorage, ownerId); } catch { /* the in-memory desk still locks */ }
-      try { clearDeskGrant(window.sessionStorage, ownerId); } catch { /* the in-memory desk still locks */ }
+      try { clearDeskSession(window.localStorage, ownerId); } catch (err) { console.error('[desk] clearDeskSession error:', err); }
+      try { clearDeskGrant(window.sessionStorage, ownerId); } catch (err) { console.error('[desk] clearDeskGrant error:', err); }
       setDeskEntry({ ownerId, until: 0 });
     }
     await withPrivyLogout(window, () => logout());
@@ -351,7 +353,8 @@ function AuthedShell() {
         setLiveWallets(mergeObservedWallets(body.wallets, user, ownerIdFromPrivyUser(user, true)));
         setWalletNote(walletProvisionNote(body, { ok: true }));
         setWalletError('');
-      } catch {
+      } catch (error) {
+        console.error('[wallets] wallet setup/refresh error:', error);
         if (!stopped) {
           applyWalletFallback(user, {}, setLiveWallets, setWalletNote, setWalletError);
         }

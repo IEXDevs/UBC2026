@@ -109,8 +109,8 @@ export async function getPrivyAccessToken(getAccessToken, storage = globalThis.l
   try {
     const token = await getAccessToken();
     if (typeof token === 'string' && token.trim()) return token.trim();
-  } catch {
-    /* fall through to storage */
+  } catch (err) {
+    console.error('[privy-session] getAccessToken threw error:', err);
   }
   return readStoredAccessToken(storage) || stored;
 }
