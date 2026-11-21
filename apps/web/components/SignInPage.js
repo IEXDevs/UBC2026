@@ -10,6 +10,7 @@ import './SignInPage.css';
 export default function SignInPage({
   disabled = false,
   onLogin,
+  onRetrySignOut = null,
   onDeveloperPreview = null,
   onHoldChange = null,
 }) {
@@ -49,6 +50,11 @@ export default function SignInPage({
                 {configured ? 'More ways to continue' : 'Continue'}
               </SpecularButton>
             </div>
+            {onRetrySignOut ? (
+              <button type="button" className="sign-in-dev" onClick={onRetrySignOut}>
+                Retry sign-out
+              </button>
+            ) : null}
             {onDeveloperPreview ? (
               <button type="button" className="sign-in-dev" onClick={onDeveloperPreview}>
                 Developer preview
