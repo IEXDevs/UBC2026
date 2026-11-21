@@ -401,6 +401,7 @@ export async function POST(request, context) {
       ...(reply.clientSwap ? { clientSwap: reply.clientSwap } : {}),
       ...(moveAuthorization === 'prepare' && reply.moveAuthorization ? { moveAuthorization: reply.moveAuthorization } : {}),
       ...(assetConfirmation?.args?.action === 'x402' && reply.claimUrl ? { claimUrl: reply.claimUrl } : {}),
+      ...(assetConfirmation?.args?.action === 'x402' && reply.lasoCard ? { lasoCard: reply.lasoCard } : {}),
       ...(lasoPayment?.phase === 'prepare' && reply.lasoPayment ? { lasoPayment: reply.lasoPayment } : {}),
       ...(assetConfirmation && spendAuthorization === 'prepare' && reply.spendAuthorization
         ? { spendAuthorization: reply.spendAuthorization } : {}),

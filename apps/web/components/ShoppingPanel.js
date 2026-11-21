@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { sandboxSettleBody, shoppingComparisonView } from '../lib/shopping-comparison.mjs';
 import { ownerAuthHeaders } from '../lib/owner-auth-headers.mjs';
 import { shellRuntimeUrl } from '../lib/runtime-data.mjs';
+import { readLasoBilling, readLasoCards, rememberLasoCard, writeLasoBilling } from '../lib/laso-card-book.mjs';
+import LasoCard, { LasoBillingForm } from './LasoCard';
 import SlideCommit from './bits/SlideCommit';
 
 /**
@@ -17,10 +19,19 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
   const [error, setError] = useState(null);
   const [armed, setArmed] = useState(false);
   const [settled, setSettled] = useState(false);
+  const [billing, setBilling] = useState(null);
+  const [cards, setCards] = useState([]);
+  const [lasoAmount, setLasoAmount] = useState('5');
+
+  useEffect(() => {
+    if (!ownerId || typeof window === 'undefined') return;
+    setBilling(readLasoBilling(window.sessionStorage, ownerId));
+    setCards(readLasoCards(window.sessionStorage, ownerId));
+  }, [ownerId]);
 
   if (bot?.type !== 'shopping') return null;
 
-  async function prepare(provider) {
+  async function prepare(provider, lasoAction = 'setup') {
     setBusy(true);
     setError(null);
       setResult(null);
@@ -40,7 +51,9 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
       const body = provider === 'laso'
         ? {
           provider: 'laso',
-          amountUsd: 5,
+          lasoAction,
+          amountUsd: Number(lasoAmount) || 5,
+          ...(billing ? { billing } : {}),
           bot: {
             id: bot.id,
             ownerId,
@@ -86,6 +99,9 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
         return;
       }
       setResult(data);
+      if (data.provider === 'laso' && data.card && ownerId) {
+        setCards(rememberLasoCard(window.sessionStorage, ownerId, data.card));
+      }
       onEvent?.({
         kind: 'tool.call',
         summary: provider === 'laso'
@@ -151,9 +167,39 @@ export default function ShoppingPanel({ bot, ownerId = null, getAccessToken = nu
         <button className="cta" type="button" disabled={busy || SOLANA_CLUSTER === 'mainnet-beta'} onClick={() => prepare('sandbox')}>
           {busy ? 'Working…' : 'Compare catalog'}
         </button>
-        <button className="ghost" type="button" disabled={busy} onClick={() => prepare('laso')}>
-          Laso $5 card challenge
+        <button className="ghost" type="button" disabled={busy} onClick={() => prepare('laso', 'setup')}>
+          Set up Laso card
         </button>
+        <button className="ghost" type="button" disabled={busy} onClick={() => prepare('laso', 'modify')}>
+          Add card funds
+        </button>
+      </div>
+      <div className="laso-cards">
+        <h3>Laso cards</h3>
+        <p className="hint">One billing address is used on every card. Agents set up and add funds by following the x402 quote.</p>
+        <LasoBillingForm
+          key={`${ownerId || 'signed-out'}:${billing?.postalCode || ''}`}
+          value={billing}
+          onSave={(next) => {
+            if (!ownerId) return;
+            setBilling(writeLasoBilling(window.sessionStorage, ownerId, next));
+          }}
+        />
+        <label className="hint">
+          Quote amount (USD)
+          <input value={lasoAmount} onChange={event => setLasoAmount(event.target.value)} inputMode="decimal" />
+        </label>
+        {cards.map(card => (
+          <LasoCard
+            key={card.id}
+            card={card}
+            billing={billing}
+            onPay={(payment) => onEvent?.({
+              kind: 'tool.call',
+              summary: `Laso card $${payment.amountUsd} at ${payment.merchant}`,
+            })}
+          />
+        ))}
       </div>
       {error ? <p className="hint" role="alert">{error}</p> : null}
       {result ? (

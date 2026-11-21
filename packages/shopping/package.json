@@ -3,8 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./shopping.mjs",
-  "scripts": { "test": "node --test shopping.test.mjs" },
+  "exports": {
+    ".": "./shopping.mjs",
+    "./laso-card.mjs": "./laso-card.mjs"
+  },
+  "scripts": { "test": "node --test shopping.test.mjs laso-card.test.mjs" },
   "dependencies": {
     "@ubc2026/bot-policy": "0.1.0",
     "@ubc2026/x402": "0.1.0"

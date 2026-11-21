@@ -83,6 +83,10 @@ test('Laso preparation needs no slide; its ticket-bound purchase does, and retur
   }, 2000);
   assert.match(reply.text, /Laso card card_123: \$10, pending/);
   assert.equal(reply.claimUrl, claimUrl);
+  assert.equal(reply.lasoCard.id, 'card_123');
+  assert.equal(reply.lasoCard.number, '•••• •••• •••• ••••');
+  assert.equal(reply.lasoCard.cvv, '•••');
+  assert.equal(reply.lasoCard.revealed, false);
   assert.equal(JSON.stringify(reply.activity).includes('owner-only'), false);
   assert.equal(reply.text.includes('owner-only'), false);
   const failed = await resumeAssetSpend(hold, context, async () => ({ error: 'simulation_failed', signed: false, simulationReason: 'insufficient_funds' }), 2000);

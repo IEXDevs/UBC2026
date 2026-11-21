@@ -1,0 +1,129 @@
+.laso-cards {
+  display: grid;
+  gap: 14px;
+  max-width: 380px;
+}
+
+.laso-card {
+  display: grid;
+  gap: 10px;
+}
+
+.laso-card-face {
+  position: relative;
+  display: grid;
+  align-content: space-between;
+  min-height: 210px;
+  padding: 18px 18px 16px;
+  border-radius: 18px;
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(61, 214, 198, 0.35), transparent 42%),
+    linear-gradient(145deg, #10242c 0%, #071016 58%, #0c2a28 100%);
+  color: #f4f7f8;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.laso-card-top,
+.laso-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.laso-chip {
+  width: 42px;
+  height: 32px;
+  border-radius: 7px;
+  background:
+    linear-gradient(#d7c08a, #d7c08a) 0 10px / 100% 2px,
+    linear-gradient(#d7c08a, #d7c08a) 0 20px / 100% 2px,
+    linear-gradient(90deg, #e6d3a1, #b99758);
+  background-repeat: no-repeat;
+}
+
+.laso-brand {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.laso-card-face button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #f4f7f8;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.laso-card-face button:disabled {
+  opacity: 0.7;
+}
+
+.laso-number {
+  margin: 18px 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 22px;
+  letter-spacing: 0.12em;
+}
+
+.laso-card-bottom span {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.laso-card-bottom small {
+  color: rgba(244, 247, 248, 0.62);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.laso-billing,
+.laso-pay {
+  display: grid;
+  gap: 8px;
+}
+
+.laso-billing p,
+.laso-pay p {
+  margin: 0;
+}
+
+.laso-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.laso-fields label,
+.laso-pay label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.laso-fields label.wide,
+.laso-pay label {
+  grid-column: 1 / -1;
+}
+
+.laso-cards > label input,
+.laso-fields input,
+.laso-pay input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #141414;
+  color: var(--text);
+  font: inherit;
+}
