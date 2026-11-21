@@ -78,7 +78,7 @@ test('a tool round streams thinking, calls, results, and the follow-up reply', a
       return streamedCompletion([{ content: 'The transfer was not executed.' }]);
     },
   });
-  assert.deepEqual(order, ['reply_delta', 'reply_retract', 'reply_delta', 'reply_retract', 'think_delta', 'verify:tool', 'tool_call', 'invoke:request_spend', 'tool_result', 'reply_delta', 'verify:reply', 'publish:The transfer was not executed.']);
+  assert.deepEqual(order, ['reply_delta', 'reply_retract', 'reply_delta', 'reply_retract', 'think_delta', 'verify:tool', 'tool_call', 'tool_progress', 'invoke:request_spend', 'tool_result', 'tool_progress', 'reply_delta', 'verify:reply', 'publish:The transfer was not executed.']);
   assert.equal(result.text, 'The transfer was not executed.');
 });
 
@@ -99,7 +99,7 @@ test('non-fund tools retract the preamble but the next round can stream', async 
     },
   });
   assert.equal(result.text, 'No rate was found.');
-  assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract', 'think_delta', 'tool_call', 'tool_result', 'reply_delta']);
+  assert.deepEqual(events.map(event => event.type), ['reply_delta', 'reply_retract', 'think_delta', 'tool_call', 'tool_progress', 'tool_result', 'tool_progress', 'reply_delta']);
   assert.equal(events.at(-1).text, result.text);
 });
 
@@ -1629,4 +1629,60 @@ test('chat lookup_recipient and request_spend support raw addresses and .sol SNS
   assert.equal(seen[3][0], 'request_spend');
   assert.equal(seen[3][1].domain, 'alex.sol');
   assert.equal(result.text, 'Payments completed.');
+});
+
+test(`a dead Laso session plus a model outage still speaks a natural line`, async () => {
+  let calls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: `check my laso card`,
+    tools: [{ type: `function`, function: { name: `laso_status`, parameters: { type: `object` } } }],
+    invokeTool: async () => ({ error: `laso_session_expired` }),
+    fetcher: async (_url, options) => {
+      assert.equal(isTurnVerify(options), false);
+      if (++calls === 1) return Response.json({ choices: [{ finish_reason: `tool_calls`, message: { tool_calls: [{
+        id: `status`, type: `function`, function: { name: `laso_status`, arguments: `{"view":"card"}` },
+      }] } }] });
+      return Response.json({}, { status: 503 });
+    },
+  });
+  assert.match(reply.text, /session lapsed/);
+  assert.match(reply.text, /dashboard link/);
+  assert.doesNotMatch(reply.text, /https?:\/\//);
+  assert.equal(reply.hold, undefined);
+});
+
+test(`a goal-free first Laso direction ends with a one-tap goal proposal`, async () => {
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: `make me a laso card for dominos`,
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      return streamedCompletion([{ content: `On it.` }]);
+    },
+  });
+  assert.equal(reply.text, `On it.`);
+  assert.equal(reply.proposedGoal, `Handle Laso card purchases`);
+});
+
+test(`a kind-known amount-less ask gets a natural amount question plus goal`, async () => {
+  const spoken = [];
+  let calls = 0;
+  const reply = await completeTextChat({
+    modelApiKey: META_KEY, message: `get me a prepaid card for dominos`,
+    tools: [{ type: `function`, function: { name: `prepare_shopping`, parameters: { type: `object` } } }],
+    onMessage: text => spoken.push(text),
+    invokeTool: async () => ({ ok: false, error: `laso_amount_required` }),
+    fetcher: async (_url, options) => {
+      if (isTurnVerify(options)) return turnAllowed();
+      assert.equal(++calls, 1);
+      return Response.json({ choices: [{ finish_reason: `tool_calls`, message: { content: null, tool_calls: [{
+        id: `prepare`, type: `function`, function: { name: `prepare_shopping`, arguments: `{}` },
+      }] } }] });
+    },
+  });
+  assert.ok(spoken.length >= 1);
+  assert.match(spoken[0], /prepaid card for Dominos/);
+  assert.match(reply.text, /How much/);
+  assert.match(reply.text, /Dominos/);
+  assert.match(reply.text, /nothing moves until you confirm/);
+  assert.equal(reply.proposedGoal, `Handle Laso card purchases`);
 });

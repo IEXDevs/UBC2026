@@ -403,6 +403,7 @@ export async function POST(request, context) {
       ok: true,
       botId,
       reply: reply.text,
+      ...(prepared?.skillId ? { skillId: prepared.skillId } : {}),
       ...(reply.agentTask ? { agentTask: reply.agentTask } : {}),
       ...(reply.proposedGoal ? { proposedGoal: reply.proposedGoal } : {}),
       ...(reply.clientSwap ? { clientSwap: reply.clientSwap } : {}),

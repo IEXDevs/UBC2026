@@ -316,9 +316,11 @@ function chatResult(body) {
   const reported = Number(body.usage?.total);
   const tokens = Number.isSafeInteger(reported) && reported > 0 ? reported : 0;
   const activity = sanitizeActivity(body.activity);
+  const skillId = typeof body.skillId === 'string' && /^[a-z0-9-]{1,32}$/.test(body.skillId) ? body.skillId : '';
   return {
     ok: true,
     ...agent,
+    ...(skillId ? { skillId } : {}),
     reply: reply || replies.at(-1) || hold?.label || '',
     replies: replies.length > 0 ? replies : undefined,
     model: body.model || null,
@@ -362,6 +364,7 @@ async function readChatStream(response, onReply, onReplyEvent) {
       if (payload.type === 'think_delta' && typeof payload.text === 'string') onReplyEvent?.(payload);
       if (payload.type === 'tool_call' && typeof payload.name === 'string') onReplyEvent?.(payload);
       if (payload.type === 'tool_result' && typeof payload.name === 'string') onReplyEvent?.(payload);
+      if (payload.type === 'tool_progress' && typeof payload.name === 'string') onReplyEvent?.(payload);
       if (typeof payload.error === 'string' && payload.error) {
         onReplyEvent?.({ type: 'reply_retract' });
         if (replies.length > 0) return chatResult({ ...(meta || {}), reply: replies.at(-1), replies });

@@ -395,6 +395,29 @@ test('sendBotChat forwards reply deltas and retractions without turning them int
   assert.equal(result.reply, replies[0]);
 });
 
+test('sendBotChat forwards tool progress without turning it into a final reply', async t => {
+  const frames = [
+    { type: 'tool_call', name: 'prepare_shopping', args: {} },
+    { type: 'tool_progress', name: 'prepare_shopping', index: 1, total: 6, status: 'running' },
+    { type: 'tool_result', name: 'prepare_shopping', result: { ok: true } },
+    { type: 'tool_progress', name: 'prepare_shopping', index: 1, total: 6, status: 'done' },
+    { message: 'Working on it.' },
+    { done: true, reply: 'Working on it.' },
+  ];
+  t.mock.method(globalThis, 'fetch', async () => new Response(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(''), {
+    headers: { 'content-type': 'text/event-stream' },
+  }));
+  const events = [];
+  const replies = [];
+  const result = await sendBotChat({
+    ownerId: 'did:privy:abc', botId: 'bot_1', message: 'hello',
+    onReply: text => replies.push(text), onReplyEvent: event => events.push(event),
+  });
+  assert.deepEqual(events.map(event => event.type), ['tool_call', 'tool_progress', 'tool_result', 'tool_progress']);
+  assert.deepEqual(replies, ['Working on it.']);
+  assert.equal(result.reply, replies[0]);
+});
+
 test('sendBotChat delivers the card task and proposed general goal as separate fields', async t => {
   const done = { done: true, reply: 'I’ll check the rates.', agentTask: 'Check USDC rates.', proposedGoal: 'Track stablecoin yields.' };
   t.mock.method(globalThis, 'fetch', async () => new Response(`data: ${JSON.stringify(done)}\n\n`, {
@@ -454,4 +477,21 @@ test('upsertOwnerBot posts the shell bot to the runtime proxy', async () => {
   assert.equal(calls[0].body.id, 'bot_local');
   const missingWallet = await upsertOwnerBot('did:privy:abc', { id: 'bot_x', name: 'X' }, { fetcher: async () => ({}) });
   assert.equal(missingWallet.error, 'wallet_required');
+});
+
+test(`sendBotChat surfaces the attached skill id for the UI chip`, async t => {
+  let calls = 0;
+  t.mock.method(globalThis, `fetch`, async () => {
+    calls += 1;
+    const done = calls === 1
+      ? { done: true, reply: `Using /laso-cards for this.`, skillId: `laso-cards` }
+      : { done: true, reply: `Hi.`, skillId: `nota;skill!` };
+    return new Response(`data: ${JSON.stringify(done)}\n\n`, {
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  });
+  const result = await sendBotChat({ ownerId: `did:privy:abc`, botId: `bot_1`, message: `make me a card` });
+  assert.equal(result.skillId, `laso-cards`);
+  const resultBad = await sendBotChat({ ownerId: `did:privy:abc`, botId: `bot_1`, message: `hi` });
+  assert.equal(resultBad.skillId, undefined);
 });

@@ -655,6 +655,7 @@ export default function Composer({
     if (!spoken) return null;
     const line = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text: spoken };
     if (typeof extra?.mentionAddress === 'string' && extra.mentionAddress) line.mentionAddress = extra.mentionAddress;
+    if (typeof extra?.skill === 'string' && /^[a-z0-9-]{1,32}$/.test(extra.skill)) line.skill = extra.skill;
     if (extra?.subagent && typeof extra.subagent === 'object') {
       line.subagent = {
         task: typeof extra.subagent.task === 'string' ? extra.subagent.task.slice(0, 300) : '',
@@ -722,9 +723,10 @@ export default function Composer({
       ? result.replies
       : (result.reply && !result.hold ? [result.reply] : []);
     let anchor = firstLineId;
-    for (const text of lines) {
+    for (const [lineIndex, text] of lines.entries()) {
       if (!text || shown.includes(text) || text === holdLabel) continue;
-      const line = pushLine('agent', text);
+      const line = pushLine('agent', text, botIdRef.current, 0, [], null,
+        lineIndex === 0 && typeof result.skillId === 'string' ? { skill: result.skillId } : null);
       if (line && !anchor) anchor = line.id;
       shown.push(text);
       const aloud = replySpeechText(text);
@@ -865,6 +867,24 @@ export default function Composer({
                 command: detail ? `${event.name} ${detail}` : event.name,
                 status: 'running',
               }]);
+            } else if (event?.type === 'tool_progress' && typeof event.name === 'string') {
+              const step = Number.isSafeInteger(event.index) && Number.isSafeInteger(event.total)
+                ? ` · step ${event.index}/${event.total}` : '';
+              const label = `${String(event.name).replaceAll('_', ' ')}${step} · still working`;
+              setLiveTools(previous => {
+                const next = previous.slice();
+                for (let index = next.length - 1; index >= 0; index -= 1) {
+                  if (next[index]?.name === event.name && next[index]?.status === 'running') {
+                    next[index] = { ...next[index], label, detail: next[index].detail, status: event.status === 'done' ? 'done' : 'running' };
+                    return next.slice(-12);
+                  }
+                }
+                if (event.status === 'done') return next.slice(-12);
+                return [...next.slice(-11), {
+                  kind: 'tool', name: event.name, label,
+                  command: event.name, status: 'running',
+                }];
+              });
             } else if (event?.type === 'tool_result' && typeof event.name === 'string') {
               const output = typeof event.result === 'string' ? event.result.slice(0, 2000) : (() => { try { return JSON.stringify(event.result).slice(0, 2000); } catch { return ''; } })();
               setLiveTools(previous => {
@@ -1261,6 +1281,15 @@ export default function Composer({
 
   return (
     <div className={`talk-dock${hidden ? ' is-away' : ''}`} ref={dockRef}>
+      {thinking && (liveThink || liveText || liveTools.length > 0) ? (
+        <div className="live-trace is-top" aria-live="polite">
+          <AgentTrace steps={[
+            ...(liveThink ? [{ kind: 'think', text: liveThink.slice(0, 2000) }] : []),
+            ...liveTools.slice(-12),
+            ...(liveText ? [{ kind: 'tool', name: 'reply', label: 'Streaming reply', output: liveText.slice(0, 2000), status: 'running' }] : []),
+          ]} />
+        </div>
+      ) : null}
       {stageNode}
       {floatNode}
       {settingsNode}
@@ -1328,15 +1357,6 @@ export default function Composer({
         ) : null}
         <input ref={fileRef} className="sr-only" type="file" multiple aria-label="Attach files" />
         <MessageQueue items={queue} onEdit={editQueued} onSendNow={sendQueuedNow} />
-        {thinking && (liveThink || liveText || liveTools.length > 0) ? (
-          <div className="live-trace" aria-live="polite">
-            <AgentTrace steps={[
-              ...(liveThink ? [{ kind: 'think', text: liveThink.slice(0, 2000) }] : []),
-              ...liveTools.slice(-12),
-              ...(liveText ? [{ kind: 'tool', name: 'reply', label: 'Streaming reply', output: liveText.slice(0, 2000), status: 'running' }] : []),
-            ]} />
-          </div>
-        ) : null}
         <PromptBar
           placeholder={`Message ${botName}`}
           label={`Message ${botName}`}

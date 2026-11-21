@@ -105,6 +105,19 @@ test('card choice never guesses: reloadable, prepaid, top-up, or ask', () => {
   assert.ok(lasoCardChecklist('top-up').some((step) => /fund-card-balance/i.test(step)));
 });
 
+test('card choice tolerates misspellings, one-time inference, and explicit wins', () => {
+  assert.equal(chooseLasoCardKind('get me a reloadble card'), 'reloadable');
+  assert.equal(chooseLasoCardKind('get me a prepiad card for $10'), 'non-reloadable-usa');
+  assert.equal(chooseLasoCardKind('make me a card for $10 dominos pizza'), 'non-reloadable-usa');
+  assert.equal(chooseLasoCardKind('one time $25 checkout please'), 'non-reloadable-usa');
+  assert.equal(chooseLasoCardKind('reloadable for $10 dominos'), 'reloadable');
+  assert.equal(chooseLasoCardKind('i changed my mind, make it prepaid instead'), 'non-reloadable-usa');
+  assert.equal(chooseLasoCardKind('actually no, reloadable'), 'reloadable');
+  assert.equal(chooseLasoCardKind('something for subscriptions please'), 'reloadable');
+  assert.equal(chooseLasoCardKind('what about dominos'), 'undecided');
+  assert.equal(chooseLasoCardKind('dominos gift card'), 'gift');
+});
+
 test('intl and gift specs carry their routes, limits, and fee bounds', () => {
   const intl = lasoCardAction('intl', 250);
   assert.equal(intl.path, '/order-intl-card');
@@ -119,4 +132,24 @@ test('intl and gift specs carry their routes, limits, and fee bounds', () => {
   assert.throws(() => lasoCardAction('gift', 50, {}), /gift_product_required/);
   assert.throws(() => lasoCardAction('gift', 50, { laso_server_id: 'amazon', country: 'USA' }), /gift_country/);
   assert.throws(() => lasoCardAction('bogus', 5), /invalid_action/);
+});
+
+test(`intl and gift checklists name their own rails`, () => {
+  const intl = lasoCardChecklist(`intl`);
+  assert.ok(intl.some((step) => /order-intl-card/i.test(step)));
+  assert.ok(intl.some((step) => /cancel-intl-order/i.test(step)));
+  assert.ok(intl.some((step) => /same card id/i.test(step)));
+  const gift = lasoCardChecklist(`gift`);
+  assert.ok(gift.some((step) => /laso_server_id/i.test(step)));
+  assert.ok(gift.some((step) => /product currency/i.test(step)));
+  assert.ok(gift.some((step) => /404/i.test(step)));
+});
+
+test(`typo tolerance catches transpositions without catching real words`, () => {
+  for (const typo of [`relodbale`, `reloadble`, `relodable`, `realoadable`, `reloadabel`]) {
+    assert.equal(chooseLasoCardKind(`actually ${typo}, for dominos`), `reloadable`);
+  }
+  for (const real of [`reliable`, `relevant`, `relentless`, `remarkable`, `reality check`]) {
+    assert.equal(chooseLasoCardKind(`is this ${real}?`), `undecided`);
+  }
 });

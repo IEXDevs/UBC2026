@@ -250,20 +250,51 @@ export function cardCanPay(card) {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) && !id.startsWith('laso_');
 }
 
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Typo-tolerant reloadable mention: any relo-/rela- word within 3 edits of
+ * "reloadable" (reloadble, relodbale, relodable, realoadable). The prefix
+ * guard keeps reliable/relevant/remarkable out. Mirror in agent-tools
+ * skills.mjs skillForMessage — keep the two in sync.
+ */
+export function mentionsReloadable(message) {
+  const words = String(message ?? '').toLowerCase().match(/[a-z]+/g) || [];
+  return words.some(word =>
+    word.length >= 7 && word.length <= 11 && /^(relo|rela|rea)/.test(word) && editDistance(word, 'reloadable') <= 3
+  );
+}
+
 /**
  * Which Laso card the owner wants. Pure text match, no I/O.
+ * Tolerant of misspellings, one-time-merchant inference, and mid-flow
+ * changes of mind. Explicit kind words always win over inference.
  * Returns 'top-up' (add funds to the existing reloadable balance),
  * 'reloadable' (a new reusable card: subscriptions, ads, AI, anything kept on file),
  * 'non-reloadable-usa' (one USA prepaid card for a known one-time total), or
- * 'undecided' when the message does not say. Never guess: undecided must ask.
+ * 'undecided' when the message does not say. Undecided must ask.
  */
 export function chooseLasoCardKind(message) {
-  const text = typeof message === 'string' ? message : '';
-  if (/\bgift\s*cards?\b/i.test(text)) return 'gift';
-  if (/\b(top up|top-up|add funds|modify the card|fund (?:the|my) card balance|reload the card)\b/i.test(text)) return 'top-up';
-  if (/\bnon[\s-]?reloadable\b|\bprepaid\b/i.test(text)) return 'non-reloadable-usa';
-  if (/\breloadable\b/i.test(text)) return 'reloadable';
-  if (/\btopup\b/i.test(text)) return 'top-up';
+  const raw = typeof message === 'string' ? message : '';
+  const text = raw.toLowerCase();
+  if (/\bgift\b/.test(text)) return 'gift';
+  if (/\btop[\s-]?up\b|\btopup\b|\badd\s*funds\b|\bmodify\s*the\s*card\b|\bfund\s*(?:the|my)?\s*card\s*balance\b|\breload\s*(?:the|my)?\s*card\b/.test(text)) return 'top-up';
+  if (/\bnon[\s-]?rel?oad/.test(text) || /\bpre[\s-]?pai?d\b|\bprepiad\b/.test(text)) return 'non-reloadable-usa';
+  // Typo-tolerant (reloadble, relodbale, realoadable). Non-reloadable wins above.
+  if (mentionsReloadable(raw)) return 'reloadable';
+  if (/\bsubscriptions?\b|\brepeat\b|\bkeep\s*(?:it\s*)?on\s*file\b|\bkept\s*on\s*file\b/.test(text)) return 'reloadable';
+  const amount = /\$\s*\d+(?:\.\d+)?|\b\d+(?:\.\d+)?\s*(?:usdc|usd|dollars?)\b/.test(text);
+  if (amount && /\bdominos?\b|\bdomino'?s\b|\bone[\s-]?time\b|\bsingle[\s-]?use\b|\bdisposable\b|\bcheckout\b|\border\b|\bpay\s*(?:for|at)\b/.test(text)) return 'non-reloadable-usa';
   return 'undecided';
 }
 
@@ -290,6 +321,22 @@ export function lasoCardChecklist(kind) {
     return [
       'GET /fund-card-balance?amount=<5-10000> (x402, bridges Solana or Base to the card balance) or POST /fund-card-from-account-balance from the Laso account balance.',
       'Poll GET /list-card-transactions until the top-up is credited, then spend from the reloadable card.',
+    ];
+  }
+  if (kind === 'intl') {
+    return [
+      'GET /order-intl-card?amount=<whole dollars 100-1000> (x402, up to a 3.8% fee on top of the face value).',
+      'The order queues for about 24 hours under the same card id: poll GET /get-card-data?card_id=... with that id, never a new order.',
+      'Queued is not ready yet. Cancel any time before fulfillment with POST /cancel-intl-order — the charge credits back to the account balance.',
+      'Spend only once the status is ready.',
+    ];
+  }
+  if (kind === 'gift') {
+    return [
+      'Read GET /search-gift-cards facets, then search by brand. Copy laso_server_id exactly, never country-suffix it.',
+      'Amount is in the product currency and must convert to $5-$9000; the product fee is already inside the x402 total.',
+      'An unknown id answers 404 before any charge: fix the id from the catalog, do not retry blindly.',
+      'Open the redemption link or enter the code on the brand site, then reply done.',
     ];
   }
   return [

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AGENT_TASK_TOOL, GOAL_QUESTION, proposedGeneralGoal, reviewGeneralGoal, taskFromRequest } from './agent-task.mjs';
+import { AGENT_TASK_TOOL, GOAL_QUESTION, goalFromFirstMessage, proposedGeneralGoal, reviewGeneralGoal, taskFromRequest } from './agent-task.mjs';
 import { buildTextChatMessages, completeTextChat } from './text-chat.mjs';
 
 test('a concrete request changes the card task without interpreting confirmations as tasks', () => {
@@ -57,4 +57,28 @@ test('chat can return a new task and proposed goal without making a tool call ou
   assert.equal(result.proposedGoal, 'Track stablecoin yields');
   assert.equal(result.text, 'I’ll check the USDC rates.');
   assert.equal(result.activity, undefined);
+});
+
+test(`a goal-free first Laso direction proposes card handling without interrogating`, () => {
+  assert.equal(goalFromFirstMessage(`make me a laso card for $10`, ``), `Handle Laso card purchases`);
+  assert.equal(goalFromFirstMessage(`make me a laso card for $10`, `Waiting for a goal.`), `Handle Laso card purchases`);
+  assert.equal(goalFromFirstMessage(`make me a laso card for $10`, `Trade SOL`), ``);
+  assert.equal(goalFromFirstMessage(`hello`, ``), ``);
+  assert.equal(goalFromFirstMessage(``, ``), ``);
+  assert.equal(goalFromFirstMessage(null, ``), ``);
+});
+
+test(`any recognizable card ask proposes card handling, plain chat stays free`, () => {
+  assert.equal(goalFromFirstMessage(`get me a prepaid card for dominos`, ``), `Handle Laso card purchases`);
+  assert.equal(goalFromFirstMessage(`top up $50 please`, ``), `Handle Laso card purchases`);
+  assert.equal(goalFromFirstMessage(`buy a gift card`, ``), `Handle Laso card purchases`);
+  assert.equal(goalFromFirstMessage(`check the price of SOL`, ``), ``);
+  assert.equal(goalFromFirstMessage(`make me a laso card`, `Trade SOL`), ``);
+});
+
+test(`laso words with card context propose even before kind is known`, () => {
+  assert.equal(goalFromFirstMessage(`make me a laso card for dominos`, ``), `Handle Laso card purchases`);
+  assert.equal(goalFromFirstMessage(`laso kyc help`, ``), `Handle Laso card purchases`);
+  assert.equal(goalFromFirstMessage(`laso`, ``), ``);
+  assert.equal(goalFromFirstMessage(`hello`, `Trade SOL`), ``);
 });
