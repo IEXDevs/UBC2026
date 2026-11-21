@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { getDemoShellState } from './demo-state.mjs';
 import { walletGlance } from './money-views.mjs';
 import {
-  agentWireSegments, bookFrame, layoutPositionBook, placeWalletGroup, positionSceneKey,
+  agentWirePaths, bookFrame, layoutPositionBook, placeWalletGroup, positionSceneKey,
   stepBubbleFollow, translatedBounds, walletGroupBounds,
 } from './position-book.mjs';
 
@@ -127,22 +127,33 @@ test('short names get narrow cards while long names keep their full measured wid
     const agent = book.agents[index];
     assert.ok(agent.x - agent.width / 2 - previous.x - previous.width / 2 >= 14);
   }
-  const [stem, rail, ...branches] = agentWireSegments(book.links);
-  assert.equal(stem[0].x, stem[1].x);
-  assert.equal(rail[0].y, rail[1].y);
-  assert.deepEqual(branches.map(branch => branch[1]), book.links.map(link => link.to));
+  const [stem, ...branches] = agentWirePaths(book.links);
+  assert.equal(stem[0].x, stem[3].x);
+  assert.ok(branches.every(branch => branch[0] === stem[3]));
+  assert.deepEqual(branches.map(branch => branch[3]), book.links.map(link => link.to));
+  assert.ok(branches.every(branch => branch[1].y > branch[0].y && branch[2].y < branch[3].y));
+});
+
+test('a single centered agent still gets a curved branch', () => {
+  const book = layoutPositionBook([], [{ id: 'bot_1', name: 'A', walletId: 'main' }], [{ id: 'main', kind: 'main' }]);
+  const [, branch] = agentWirePaths(book.links);
+  assert.equal(branch[0].x, branch[3].x);
+  assert.notEqual(branch[1].x, branch[0].x);
 });
 
 test('a larger agent group uses a shared center line and enters cards at their inner edge', () => {
   const bots = Array.from({ length: 7 }, (_, index) => ({ id: `bot_${index}`, name: `Agent ${index}`, walletId: 'main' }));
   const book = layoutPositionBook([], bots, [{ id: 'main', kind: 'main' }]);
   const [wallet] = book.wallets;
-  const [trunk, ...branches] = agentWireSegments(book.links);
+  const [trunk, ...branches] = agentWirePaths(book.links);
   assert.equal(trunk[0].x, wallet.x);
-  assert.equal(trunk[1].x, wallet.x);
+  assert.equal(trunk[3].x, wallet.x);
   for (const [index, agent] of book.agents.entries()) {
-    const [center, edge] = branches[index];
-    assert.deepEqual(center, { x: wallet.x, y: agent.y });
+    const [center, firstControl, secondControl, edge] = branches[index];
+    assert.equal(center.x, wallet.x);
+    assert.ok(center.y < agent.y);
+    assert.equal(firstControl.x, center.x);
+    assert.equal(secondControl.y, edge.y);
     assert.ok(Math.abs(edge.x - wallet.x) >= 16);
     assert.equal(Math.abs(agent.x - edge.x), agent.width / 2);
     if (index >= 2) assert.ok(agent.y - book.agents[index - 2].y >= agent.height + 14);

@@ -104,7 +104,7 @@ function arrangeAgents(bots, measureName) {
     const width = nodes.reduce((sum, node) => sum + node.width, 0) + Math.max(0, nodes.length - 1) * AGENT_GAP;
     let left = -width / 2;
     for (const node of nodes) {
-      Object.assign(node, { x: left + node.width / 2, y: 28 + node.height / 2, attach: 'bottom' });
+      Object.assign(node, { x: left + node.width / 2, y: 40 + node.height / 2, attach: 'bottom' });
       left += node.width + AGENT_GAP;
     }
     return { nodes, width };
@@ -123,23 +123,28 @@ function arrangeAgents(bots, measureName) {
   return { nodes, width };
 }
 
-/** Shared branches run through the gaps between the wallet and its agent cards. */
-export function agentWireSegments(links) {
+/** Bézier control points for a shared stem and one branch per agent. */
+export function agentWirePaths(links) {
   if (links.length === 0) return [];
   const [{ from, to, attach }] = links;
+  const straight = end => [from, from, end, end];
   if (attach !== 'bottom') {
-    return [
-      [from, { x: from.x, y: Math.max(...links.map(link => link.to.y)) }],
-      ...links.map(link => [{ x: from.x, y: link.to.y }, link.to]),
-    ];
+    const branches = links.map(({ to }) => [
+      { x: from.x, y: to.y - 12 },
+      { x: from.x, y: to.y - 3 },
+      { x: (from.x + to.x) / 2, y: to.y },
+      to,
+    ]);
+    const top = Math.max(...branches.map(([start]) => start.y));
+    return [straight({ x: from.x, y: top }), ...branches];
   }
-  if (links.length === 1) return [[from, to]];
-  const y = (from.y + to.y) / 2;
-  return [
-    [from, { x: from.x, y }],
-    [{ x: to.x, y }, { x: links.at(-1).to.x, y }],
-    ...links.map(link => [{ x: link.to.x, y }, link.to]),
-  ];
+  const junction = { x: from.x, y: from.y + 8 };
+  const middle = (junction.y + to.y) / 2;
+  const branches = links.map(({ to }) => {
+    const bend = to.x === junction.x ? 10 : 0;
+    return [junction, { x: junction.x + bend, y: middle }, { x: to.x + bend, y: middle }, to];
+  });
+  return [straight(junction), ...branches];
 }
 
 export function walletGroupBounds(wallet, agents) {
