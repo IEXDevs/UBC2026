@@ -8,6 +8,7 @@ import { EXECUTION_LABEL } from '@ubc2026/contracts/solana';
  * an approval request because no transfer was signed.
  */
 import { EVENT_KINDS, validateTimelineEvent } from '@ubc2026/contracts';
+import { cardLoopReport } from '@ubc2026/contracts/card-loop';
 import { supabaseWrite } from './supabase-rest.mjs';
 
 const ALERTS = Object.freeze({
@@ -135,6 +136,34 @@ async function writeTimeline(env, event, fetcher) {
     fetcher,
   });
   return written.ok === true;
+}
+
+export function cardLoopEvent(loop, ownerId) {
+  const report = cardLoopReport(loop);
+  if (!report) return null;
+  const { at, summary } = report;
+  try {
+    return validateTimelineEvent({
+      id: 'evt_loop_' + at + '_' + loop.botId,
+      botId: loop.botId,
+      ownerId,
+      kind: 'run.checkpoint',
+      summary,
+      at,
+      prevHash: null,
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function rememberCardLoopRun(env, storage, loop, ownerId) {
+  const event = cardLoopEvent(loop, ownerId);
+  if (!event) return;
+  await Promise.allSettled([
+    saveOnBot(storage, event),
+    writeTimeline(env, event, env.fetch ?? fetch),
+  ]);
 }
 
 /**

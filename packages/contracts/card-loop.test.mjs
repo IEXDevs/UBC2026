@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   MIN_LOOP_COOLDOWN_MINUTES,
   cardLoopDue,
+  cardLoopReport,
   createCardLoop,
   formatCooldown,
   ownerAskedToBreakLoop,
@@ -35,6 +36,7 @@ test('create_loop stores the purpose and rejects a cooldown under 15 minutes', (
   assert.equal(loop.active, true);
   assert.equal(loop.nextWakeAt, NOW + 15 * 60_000);
   assert.equal(publicCardLoop(loop).cooldownLabel, '15m');
+  assert.equal(cardLoopReport(loop), null);
   assert.equal(formatCooldown(60), '1h');
   assert.equal(formatCooldown(1440), '1d');
   assert.equal(cardLoopDue(loop, NOW + 15 * 60_000 - 1), false);
@@ -45,6 +47,17 @@ test('create_loop stores the purpose and rejects a cooldown under 15 minutes', (
   assert.throws(() => parseCooldownMinutes('0'), (error) => error.code === 'cooldown_invalid');
   assert.throws(() => createCardLoop({ botId: 'bot_1', purpose: 'Check positions', cooldownMinutes: '14', now: NOW }), (error) => error.code === 'cooldown_too_short');
   assert.throws(() => createCardLoop({ botId: 'bot_1', purpose: '   ', cooldownMinutes: '15', now: NOW }), (error) => error.code === 'purpose_required');
+});
+
+test('loop status carries the latest run and hides unknown provider errors', () => {
+  const loop = createCardLoop({ botId: 'bot_1', purpose: 'Check positions', cooldownMinutes: 60, now: NOW });
+  const checked = publicCardLoop({ ...loop, lastWakeAt: NOW + 3600000, lastGate: 'no-trade-found' });
+  assert.deepEqual(cardLoopReport(checked), {
+    at: NOW + 3600000, gate: 'no-trade-found', summary: 'Scheduled check completed. No trade found.',
+  });
+  const failed = publicCardLoop({ ...loop, lastWakeAt: NOW, lastGate: 'provider failure https://rpc.example/secret' });
+  assert.equal(failed.lastGate, 'loop_failed');
+  assert.doesNotMatch(JSON.stringify(failed), /https:|secret/);
 });
 
 /**
