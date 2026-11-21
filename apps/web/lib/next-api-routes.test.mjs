@@ -106,7 +106,11 @@ test('chat returns Full swap receipts, keeps the Review browser path, and offers
     body: JSON.stringify({ message: 'yes', permission: 'full', grants: [hold] }),
   }), { params: { botId } });
   assert.match(await stream.text(), /"clientSwap":\{"spend":/);
-  const automatic = await post({ message: 'Review pending swap' });
+  const defaultOff = await post({ message: 'Review pending swap' });
+  assert.equal(defaultOff.clientSwap, undefined);
+  assert.equal(defaultOff.hold?.swapTicket, 'original-ticket');
+  assert.equal(calls.some(call => call.body?.autoSwap === true), false);
+  const automatic = await post({ message: 'Review pending swap', autoSignSwaps: true });
   assert.match(automatic.reply, /Submitted within your review limit: https:\/\/solscan\.io\/tx\/5+/);
   assert.equal(automatic.clientSwap, undefined);
   assert.equal(automatic.hold, undefined);
@@ -115,13 +119,13 @@ test('chat returns Full swap receipts, keeps the Review browser path, and offers
   assert.equal(review.clientSwap.spend.permission, 'review');
   assert.equal(review.clientSwap.swapTicket, 'original-ticket');
   fullResult = { signed: false, state: 'approval-needed', reason: 'swap_delegation_unavailable' };
-  const fallback = await post({ message: 'Review pending swap' });
+  const fallback = await post({ message: 'Review pending swap', autoSignSwaps: true });
   assert.equal(fallback.clientSwap, undefined);
   assert.equal(fallback.hold?.swapTicket, 'original-ticket');
   assert.match(fallback.hold.prompt, /unavailable for automatic signing/);
   const swapDelegation = { walletAddress: '11111111111111111111111111111111', signerId: 'test-privy-signer' };
   fullResult = { signed: false, state: 'approval-needed', reason: 'swap_signer_missing', swapDelegation };
-  const repair = await post({ message: 'Review pending swap' });
+  const repair = await post({ message: 'Review pending swap', autoSignSwaps: true });
   assert.equal(repair.clientSwap.spend.idempotencyKey, idempotencyKey);
   assert.equal(repair.clientSwap.swapTicket, 'original-ticket');
   const { expiresAt, ...enrollment } = repair.clientSwap.delegation;

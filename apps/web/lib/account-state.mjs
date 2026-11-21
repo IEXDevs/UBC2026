@@ -115,17 +115,18 @@ export function createAccountMirror({
   let deletedAgents = new Set();
   let timer = null;
   let retries = 0;
+  let lastWrite = null;
   let live = Boolean(storage) && entries.length > 0;
   // Nothing is pushed until the account copy was read. A browser that could not
   // read it must not overwrite what the account already holds.
   let open = false;
 
-  async function send(items, { keepalive = false } = {}) {
-    const url = shellRuntimeUrl('/api/state');
-    if (!url) return false;
-    const headers = await ownerAuthHeaders(ownerId, getAccessToken, { 'content-type': 'application/json' });
-    const body = JSON.stringify({ items });
-    try {
+  function send(items, { keepalive = false } = {}) {
+    async function post() {
+      const url = shellRuntimeUrl('/api/state');
+      if (!live || !url) return false;
+      const headers = await ownerAuthHeaders(ownerId, getAccessToken, { 'content-type': 'application/json' });
+      const body = JSON.stringify({ items });
       const response = await fetchImpl(url, {
         method: 'POST',
         headers,
@@ -134,9 +135,11 @@ export function createAccountMirror({
         ...(keepalive && body.length < KEEPALIVE_MAX ? { keepalive: true } : {}),
       });
       return response.ok;
-    } catch {
-      return false;
     }
+    const write = (lastWrite ? lastWrite.then(post) : post()).catch(() => false);
+    lastWrite = write;
+    void write.then(() => { if (lastWrite === write) lastWrite = null; });
+    return write;
   }
 
   async function flush({ keepalive = false } = {}) {
@@ -267,7 +270,16 @@ export function createAccountMirror({
     pending.clear();
   }
 
-  return { storage: mirrored, hydrate, flush, stop, entries };
+  async function savePermission(value) {
+    if (!live || !open || typeof value !== 'string' || !pushable(value)) return false;
+    await lastWrite;
+    if (!await flush()) return false;
+    if (!await send([{ name: 'permission', value }]) || !live) return false;
+    safeSet(storage, SPEND_PERMISSION_KEY, value);
+    return true;
+  }
+
+  return { ownerId, storage: mirrored, hydrate, flush, savePermission, stop, entries };
 }
 
 /* Singleton used by the desk. Components import `accountStorage` for mirrored writes. */
@@ -321,4 +333,8 @@ export function hydrateAccountState() {
 /** Push queued desk state now. A missing mirror is a no-op. */
 export function flushAccountState() {
   return current ? current.flush() : Promise.resolve(false);
+}
+
+export function saveAccountPermission(ownerId, value) {
+  return ownerId && current?.ownerId === ownerId ? current.savePermission(value) : Promise.resolve(false);
 }

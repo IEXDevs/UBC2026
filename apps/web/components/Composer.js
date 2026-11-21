@@ -42,12 +42,14 @@ import {
   parseVoiceSettings,
 } from '../lib/voice-settings.mjs';
 import {
-  SPEND_PERMISSION_KEY,
   parsePermission,
   permissionById,
+  readAutoSignSwaps,
   readReviewThreshold,
+  readStoredPermission,
   reviewCapToDollars,
   writeReviewCap,
+  writeStoredPermission,
 } from '../lib/spend-permission.mjs';
 import { fallbackThinkingCatalog } from '../lib/thinking-levels.mjs';
 import { fetchPendingSwap, sendBotChat } from '../lib/runtime-data.mjs';
@@ -325,7 +327,7 @@ export default function Composer({
       setSettings(DEFAULT_VOICE_SETTINGS);
     }
     setSettingsReady(true);
-    setPermission(parsePermission(localStorage.getItem(SPEND_PERMISSION_KEY)));
+    setPermission(readStoredPermission(localStorage));
     setReviewCap(readReviewThreshold(localStorage) || '');
   }, []);
 
@@ -794,6 +796,7 @@ export default function Composer({
           goal: botGoal,
           type: botType,
           permission: permissionRef.current,
+          autoSignSwaps: readAutoSignSwaps(accountStorage, ownerId),
           grants,
           spendAuthorization,
           lasoPayment,
@@ -1252,7 +1255,7 @@ export default function Composer({
             const mode = parsePermission(next);
             if (mode === permissionRef.current) return;
             setPermission(mode);
-            accountStorage.setItem(SPEND_PERMISSION_KEY, mode);
+            writeStoredPermission(accountStorage, ownerId, mode);
             window.dispatchEvent(new Event('storage'));
             pushLine('note', `Permissions set to ${permissionById(mode).label}`);
           }}

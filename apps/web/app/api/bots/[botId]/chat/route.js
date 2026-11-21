@@ -317,6 +317,7 @@ export async function POST(request, context) {
 
   async function tryAutoSwap(hold, swapHold, swapPreview) {
     if (swapHold.args.amount !== hold.args.amount) return null;
+    if (permissionMode === 'full' && body.autoSignSwaps !== true) return null;
     const queued = hold.idempotencyKey?.startsWith('loop_swap_');
     if (!queued && permissionMode !== 'full') return null;
     const approvalReason = (permissionMode !== 'full' && permissionMode !== 'review') ? 'owner_approval_required'

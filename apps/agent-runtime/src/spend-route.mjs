@@ -9,7 +9,7 @@ import { SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createSnsResolver, resolveSnsOwner } from '@ubc2026/sns';
 import {
-  parsePermissionedSpendBody, parsePrivySigningFailure, parseSpendAuthorizationSignature, spendApprovalMessage,
+  parsePermissionedSpendBody, parsePrivySigningFailure, parseSpendAuthorizationSignature, parseStoredSpendPreference, spendApprovalMessage,
 } from '@ubc2026/contracts';
 import { mainnetQuoteBlocksSpend, runPermissionedSpend } from '@ubc2026/agent-loop';
 import { proposalDigest } from '@ubc2026/bot-policy';
@@ -87,7 +87,9 @@ async function transferDestination(env, parsed) {
 async function savedFullSwapCap(env, ownerId) {
   const state = await supabaseGet(env,
     `owner_state?owner_id=eq.${encodeURIComponent(ownerId)}&name=in.(permission,reviewCap)&select=name,value`, env.fetch);
-  if (state.status !== 200 || state.rows?.find(row => row.name === 'permission')?.value !== 'full') return null;
+  if (state.status !== 200 || !state.rows) return null;
+  const { permission, autoSignSwaps } = parseStoredSpendPreference(state.rows.find(row => row.name === 'permission')?.value, ownerId);
+  if (permission !== 'full' || !autoSignSwaps) return null;
   const cap = state.rows.find(row => row.name === 'reviewCap');
   if (!cap) return '30000000'; // The existing $30 default review maximum.
   return typeof cap.value === 'string' && /^[1-9][0-9]{0,39}$/.test(cap.value) ? cap.value : null;

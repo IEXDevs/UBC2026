@@ -15,7 +15,7 @@ import { blockCopy } from '../lib/block-copy.mjs';
 const COPY = Object.freeze({
   ask: 'You approve every spend. Nothing moves until you confirm it.',
   review: 'You set a maximum. At or under that amount the spend can continue after the server check. Above it, you approve.',
-  full: 'Eligible swaps can use a delegated wallet without asking you again. The agent still needs an unlocked desk and must stay within your review maximum and spending limits.',
+  full: 'Agents can use Full permissions within your spending limits. Automatic swap signing is off by default. You can enable it in Wallet settings.',
 });
 
 function storedDraft(ownerId) {
