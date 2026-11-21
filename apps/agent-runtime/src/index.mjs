@@ -2,7 +2,7 @@ import { configuredSolanaRpc, SOLANA_CLUSTER } from '@ubc2026/contracts/solana';
 import { API_ROUTES, SECRET_NAMES, matchApiRoute } from '@ubc2026/contracts';
 import { handleSpend } from './spend-route.mjs';
 import { resolvePriceLookup } from './price-lookup.mjs';
-import { BotDurableObject, INTERNAL_POSITION_HEADER, INTERNAL_POSITION_VALUE } from './bot-do.mjs';
+import { BotDurableObject, INTERNAL_CARD_LOOP_VALUE, INTERNAL_POSITION_HEADER, INTERNAL_POSITION_VALUE } from './bot-do.mjs';
 import { persistPositionCheck } from './position-persist.mjs';
 import {
   processQuickNodeWebhook,
@@ -11,6 +11,7 @@ import {
 } from './quicknode-webhook.mjs';
 import {
   HOURLY_CRON,
+  STREAM_FALLBACK_CRON,
   assessPositions,
   listScheduledBotsFromSupabase,
   planScheduledWork,
@@ -42,6 +43,7 @@ const OWNER_BOT_ACTIONS = new Set([
   'decide',
   'loop',
   'card-loop',
+  'card-loop/check',
   'card-loop/cooldown',
   'card-loop/break',
   'laso/checkpoint',
@@ -381,6 +383,13 @@ async function runScheduled(controller, rawEnv, ctx) {
       return;
     }
 
+    if (cron === HOURLY_CRON || cron === STREAM_FALLBACK_CRON) {
+      for (const bot of bots) {
+        if (!bot?.ownerId || bot.enabled === false || bot.frozen === true) continue;
+        ctx.waitUntil(wakeScheduledCardLoop(env, bot));
+      }
+    }
+
     const health = typeof env.readStreamHealth === 'function'
       ? await env.readStreamHealth(now)
       : await readStreamHealthFromSupabase(env, env.fetch ?? fetch);
@@ -424,6 +433,20 @@ async function runScheduled(controller, rawEnv, ctx) {
       }));
     }
     logCron(env, ctx, { cron, bots: bots.map(bot => bot.id).slice(0, 50), streamDropped: true });
+}
+
+async function wakeScheduledCardLoop(env, bot) {
+  try {
+    await botStub(env, bot.id).fetch(new Request('https://bot/card-loop/tick', {
+      method: 'POST',
+      headers: {
+        [INTERNAL_POSITION_HEADER]: INTERNAL_CARD_LOOP_VALUE,
+        [OWNER_HEADER]: bot.ownerId,
+      },
+    }));
+  } catch {
+    // The agent's own alarm and the next scheduled check can retry.
+  }
 }
 
 const worker = {

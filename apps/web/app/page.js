@@ -65,6 +65,7 @@ import { browserCanSign, createOwnerAuthorizationSigner, waitForBrowserSigner, w
 import { executeClientSignedSwap } from '../lib/swap-client-sign.mjs';
 import { createAgentRemoval } from '../lib/agent-removal.mjs';
 import {
+  checkDueCardLoops,
   deleteOwnerBot,
   emptyMoneyState,
   fetchOwnerLists,
@@ -587,6 +588,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
   const currentOwner = useRef(ownerId);
   currentOwner.current = ownerId;
   const [loopOverrides, setLoopOverrides] = useState({});
+  const loopChecks = useRef(new Set());
   const [listsTick, setListsTick] = useState(0);
   const WALLET_REFRESH_MS = 5000;
   const [remoteLists, setRemoteLists] = useState(() => emptyMoneyState());
@@ -871,8 +873,14 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
 
   useEffect(() => {
     if (!ownerId) return undefined;
-    const id = window.setInterval(() => setListsTick((tick) => tick + 1), WALLET_REFRESH_MS);
-    return () => window.clearInterval(id);
+    const refresh = () => setListsTick(tick => tick + 1);
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    const id = window.setInterval(refresh, WALLET_REFRESH_MS);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [ownerId, WALLET_REFRESH_MS]);
 
   useEffect(() => {
@@ -890,6 +898,7 @@ function Shell({ ownerId, user = null, accountLabel, signedIn, initialDeskUntil 
         const lists = await fetchOwnerLists(ownerId, { accessToken });
         if (!stop && lists) {
           setRemoteLists(lists);
+          if (signedIn) void checkDueCardLoops(ownerId, lists.bots, accessToken, loopChecks.current);
           setLoopOverrides((current) => {
             const next = { ...current };
             for (const row of lists.bots || []) {

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   botChatUrl,
+  checkDueCardLoops,
   deleteBotUrl,
   emptyMoneyState,
   fetchOwnerLists,
@@ -122,6 +123,37 @@ test('shell runtime URLs stay on the same-origin proxy', () => {
 function jsonResponse(body, ok = true) {
   return { ok, json: async () => body };
 }
+
+test('the desk checks only due loops for signed-in enabled agents and skips overlapping requests', async () => {
+  const bot = { id: 'bot_due', loop: { active: true, nextWakeAt: 1000 } };
+  const bots = [
+    bot,
+    { ...bot, id: 'bot_frozen', frozen: true },
+    { ...bot, id: 'bot_paused', loopPaused: true },
+    { ...bot, id: 'bot_disabled', enabled: false },
+    { ...bot, id: 'bot_later', loop: { active: true, nextWakeAt: 2000 } },
+    { ...bot, id: 'bot_inactive', loop: null },
+  ];
+  const calls = [];
+  let resolve;
+  const waiting = new Promise(done => { resolve = done; });
+  const fetcher = async (url, init) => {
+    calls.push({ url, method: init.method, headers: init.headers });
+    return waiting;
+  };
+  const pending = new Set();
+  await checkDueCardLoops('did:privy:owner', bots, '', pending, fetcher, 1000);
+  assert.deepEqual(calls, []);
+  const request = checkDueCardLoops('did:privy:owner', bots, 'fixture-token', pending, fetcher, 1000);
+  await checkDueCardLoops('did:privy:owner', bots, 'fixture-token', pending, fetcher, 1000);
+  resolve(jsonResponse({ ok: true }));
+  await request;
+  assert.deepEqual(calls, [{
+    url: '/api/runtime/bots/bot_due/card-loop/check', method: 'POST',
+    headers: { 'x-owner-id': 'did:privy:owner', authorization: 'Bearer fixture-token' },
+  }]);
+  assert.equal(pending.size, 0);
+});
 
 /**
  * Achieves: verifies owner lists load live records and ignore historical paper positions.

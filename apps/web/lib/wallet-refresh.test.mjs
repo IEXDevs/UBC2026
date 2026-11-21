@@ -20,7 +20,8 @@ function source(path) {
 test('wallet balances refresh every 5 seconds', () => {
   const page = source('app/page.js');
   assert.match(page, /WALLET_REFRESH_MS = 5000/);
-  assert.match(page, /setInterval\(\(\) => setListsTick\(\(tick\) => tick \+ 1\), WALLET_REFRESH_MS\)/);
+  assert.match(page, /const refresh = \(\) => setListsTick\(tick => tick \+ 1\)/);
+  assert.match(page, /setInterval\(refresh, WALLET_REFRESH_MS\)/);
   assert.match(page, /walletsOpen, listsTick\]\)/);
 
   const accountValue = source('components/AccountValue.js');
